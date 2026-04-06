@@ -217,26 +217,80 @@ function inferWorkType(text = "") {
   return "Onsite";
 }
 
-function isFullTime(job) {
-  const text = [job.title, job.jobType, job.employmentType, job.description||""].join(" ").toLowerCase();
-  return !NON_FULLTIME_TERMS.some(t => text.includes(t));
-}
-
 function jobHash(job) {
   const key = `${(job.company||"").toLowerCase().trim()}|${(job.title||"").toLowerCase().trim()}`;
   return crypto.createHash("md5").update(key).digest("hex");
 }
 
-function ghostJobScore(job) {
+function normaliseItem(raw, source) {
+  const company =
+    raw.companyName ||
+    raw.company ||
+    raw.employer?.name ||
+    raw.employerName ||
+    "";
+
+  const title = raw.title || raw.jobTitle || "";
+
+  const description =
+    raw.descriptionText ||
+    raw.description?.text ||
+    (typeof raw.description === "string" ? raw.description : "") ||
+    "";
+
+  const location =
+    (raw.location?.city && raw.location?.state
+      ? `${raw.location.city}, ${raw.location.state}`
+      : raw.location?.city || raw.location?.state ||
+        (typeof raw.location === "string" ? raw.location : "")) ||
+    raw.jobLocation ||
+    "United States";
+
+  let workTypeHint = "";
+  if (Array.isArray(raw.workplaceTypes) && raw.workplaceTypes.length > 0) {
+    workTypeHint = raw.workplaceTypes[0].toLowerCase();
+  } else if (raw.workType) {
+    workTypeHint = String(raw.workType).toLowerCase();
+  }
+
+  const url =
+    raw.applyUrl ||
+    raw.externalApplyUrl ||
+    raw.jobUrl ||
+    raw.url ||
+    null;
+
+  const postedAt =
+    raw.listedAt ||
+    raw.postedAt ||
+    raw.datePosted ||
+    raw.date ||
+    null;
+
+  const jobType =
+    raw.jobType ||
+    raw.employmentType ||
+    raw.contractType ||
+    "";
+
+  return { _source:source, company, title, description, location, workTypeHint, url, postedAt, jobType };
+}
+
+function isFullTimeNorm(item) {
+  const text = [item.title, item.jobType, item.description].join(" ").toLowerCase();
+  return !NON_FULLTIME_TERMS.some(t => text.includes(t));
+}
+
+function ghostJobScoreNorm(item) {
   let score = 0;
-  const desc = (job.description||"").toLowerCase();
-  const url  = (job.url||job.applyUrl||job.jobUrl||"").toLowerCase();
+  const desc = item.description.toLowerCase();
+  const url  = (item.url || "").toLowerCase();
   if (!url || url === "#")                                                score += 3;
   if (url.includes("linkedin.com/jobs/view") && !url.includes("apply")) score += 1;
   if (desc.length < 150)                                                 score += 2;
-  if (!job.company || job.company === "Unknown")                         score += 2;
-  if ((job.title||"").toLowerCase().includes("multiple") ||
-      (job.title||"").toLowerCase().includes("various"))                 score += 2;
+  if (!item.company || item.company === "Unknown")                       score += 2;
+  if (item.title.toLowerCase().includes("multiple") ||
+      item.title.toLowerCase().includes("various"))                      score += 2;
   return score;
 }
 
@@ -389,66 +443,91 @@ async function scrapeJobs(query, apifyToken) {
     scrapeLinkedIn(query, apifyToken),
     scrapeIndeed(query, apifyToken),
   ]);
+
   const rawLi = liRes.status === "fulfilled" ? liRes.value : [];
   const rawIn = inRes.status === "fulfilled" ? inRes.value : [];
+
   if (liRes.status === "rejected") console.warn("[scrape] LinkedIn:", liRes.reason?.message);
   if (inRes.status === "rejected") console.warn("[scrape] Indeed:",   inRes.reason?.message);
 
+  console.log(`[scrape] raw: LinkedIn=${rawLi.length} Indeed=${rawIn.length}`);
+
+  const combined = [
+    ...rawLi.map(j => normaliseItem(j, "LinkedIn")),
+    ...rawIn.map(j => normaliseItem(j, "Indeed")),
+  ];
+
   const seenHashes = new Set();
-  const dbRows = db.prepare("SELECT jobs_json FROM job_cache ORDER BY scraped_at DESC LIMIT 5").all();
+  const dbRows = db.prepare(
+    "SELECT jobs_json FROM job_cache WHERE search_query=? ORDER BY scraped_at DESC LIMIT 3"
+  ).all(query);
   for (const row of dbRows) {
-    try { JSON.parse(row.jobs_json).forEach(j => seenHashes.add(j._hash || jobHash(j))); } catch {}
+    try {
+      const prev = JSON.parse(row.jobs_json);
+      if (Array.isArray(prev)) prev.forEach(j => { if (j._hash) seenHashes.add(j._hash); });
+    } catch {}
   }
 
-  const tag = (items, src) => items.map(j => ({ ...j, _source:src }));
-  const combined = [...tag(rawLi,"LinkedIn"), ...tag(rawIn,"Indeed")];
-
-  const filtered = combined.filter(j => {
-    if (!j.title || !(j.company||j.companyName)) return false;
-    if (!isFullTime(j) || isReposted(j) || ghostJobScore(j) >= 4) return false;
-    const h = jobHash(j);
+  const thisRunHashes = new Set();
+  const filtered = combined.filter(item => {
+    if (!item.title || !item.company) return false;
+    if (!isFullTimeNorm(item)) return false;
+    if (item.description.toLowerCase().includes("reposted")) return false;
+    if (ghostJobScoreNorm(item) >= 4) return false;
+    const h = jobHash(item);
+    if (thisRunHashes.has(h)) return false;
+    thisRunHashes.add(h);
     if (seenHashes.has(h)) return false;
-    seenHashes.add(h); return true;
+    return true;
   });
+
+  console.log(`[scrape] after filter: ${filtered.length} / ${combined.length}`);
 
   const classified = [];
   for (let i = 0; i < Math.min(filtered.length, MAX_JOBS_PER_REFRESH); i += 5) {
-    const batch = filtered.slice(i, i+5);
-    const cats  = await Promise.all(batch.map(j => classifyJob(j.title, j.description)));
-    batch.forEach((j,idx) => classified.push({ ...j, _category:cats[idx] }));
+    const batch = filtered.slice(i, i + 5);
+    const cats  = await Promise.all(
+      batch.map(item => classifyJob(item.title, item.description))
+    );
+    batch.forEach((item, idx) => classified.push({ ...item, _category: cats[idx] }));
   }
 
   const repostCounts = {};
   for (const row of dbRows) {
     try {
       JSON.parse(row.jobs_json).forEach(j => {
-        const h = j._hash||jobHash(j);
-        repostCounts[h] = (repostCounts[h]||0) + 1;
+        if (j._hash) repostCounts[j._hash] = (repostCounts[j._hash] || 0) + 1;
       });
     } catch {}
   }
 
   const now  = Date.now();
-  const jobs = classified.map((j, i) => {
-    const h = jobHash(j);
+  const jobs = classified.map((item, i) => {
+    const h = jobHash(item);
     return {
-      id:i+1, jobId:`scraped_${now}_${i}`, _hash:h,
-      company:j.company||j.companyName||"Unknown",
-      title:j.title, category:j._category,
-      location:j.location||"United States",
-      workType:inferWorkType((j.workType||"")+" "+(j.location||"")+" "+(j.description||"")),
-      source:j._source,
-      url:j.applyUrl||j.jobUrl||j.url||null,
-      postedAt:j.postedAt||j.listedAt||null,
-      description:(j.description||"").slice(0,500),
-      ghostScore:ghostJobScore(j),
-      isFrequentRepost:(repostCounts[h]||0) >= 2,
+      id:        i + 1,
+      jobId:     `scraped_${now}_${i}`,
+      _hash:     h,
+      company:   item.company,
+      title:     item.title,
+      category:  item._category,
+      location:  item.location || "United States",
+      workType:  inferWorkType(item.workTypeHint + " " + item.location + " " + item.description),
+      source:    item._source,
+      url:       item.url,
+      postedAt:  item.postedAt,
+      description: item.description.slice(0, 500),
+      ghostScore:  ghostJobScoreNorm(item),
+      isFrequentRepost: (repostCounts[h] || 0) >= 2,
     };
   });
 
-  db.prepare("INSERT INTO job_cache (search_query,source,scraped_at,jobs_json) VALUES (?,?,?,?)")
-    .run(query, "combined", now, JSON.stringify(jobs));
-  console.log(`[scrape] ✓ ${jobs.length} jobs`);
+  if (jobs.length > 0) {
+    db.prepare("INSERT INTO job_cache (search_query,source,scraped_at,jobs_json) VALUES (?,?,?,?)")
+      .run(query, "combined", now, JSON.stringify(jobs));
+  }
+
+  console.log(`[scrape] ✓ ${jobs.length} jobs saved`);
   return jobs;
 }
 
