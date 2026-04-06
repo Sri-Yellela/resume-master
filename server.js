@@ -587,18 +587,8 @@ ${resumeText}`;
 
 function buildFullPrompt(profile, job, resumeText, mode, employers) {
   const runtimeInputs = buildRuntimeInputs(profile, job, resumeText, mode, employers);
-  return MASTER_PROMPT_STATIC.replace(
-    /## RUNTIME INPUTS[\s\S]*?---\n\n## SECTION 0/,
-    runtimeInputs + "\n\n---\n\n## SECTION 0"
-  );
-}
-
-function buildATSPrompt(html, job) {
-  const text = html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,3000);
-  return `Score this resume against the job. Reply ONLY with valid JSON, no markdown:
-{"score":<0-100>,"tier1_matched":[...],"tier1_missing":[...],"strengths":[...],"improvements":[...],"verdict":"<one sentence>"}
-JOB: ${job.company} — ${job.title} (${job.category})
-RESUME: ${text}`;
+  const staticPart = MASTER_PROMPT_STATIC.split("## RUNTIME INPUTS")[0].trimEnd();
+  return { system: staticPart, user: runtimeInputs };
 }
 
 // ── PDF ───────────────────────────────────────────────────────
@@ -1035,16 +1025,22 @@ app.post("/api/generate", requireAuth, async (req, res) => {
 
   const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
   try {
-    const fullPrompt = buildFullPrompt(profile, job, resumeText, mode, employers);
-    const resumeMsg  = await anthropic.messages.create({
-      model:"claude-sonnet-4-20250514", max_tokens:4096,
-      messages:[{ role:"user", content:fullPrompt }],
+    const { system, user } = buildFullPrompt(profile, job, resumeText, mode, employers);
+    const resumeMsg = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4096,
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: user }],
     });
     const html = resumeMsg.content.map(b=>b.text||"").join("").replace(/```html|```/g,"").trim();
 
+    const atsStatic = `Score this resume against the job. Reply ONLY with valid JSON, no markdown:\n{"score":<0-100>,"tier1_matched":[...],"tier1_missing":[...],"strengths":[...],"improvements":[...],"verdict":"<one sentence>"}`;
+    const atsDynamic = `JOB: ${job.company} — ${job.title} (${job.category})\nRESUME: ${html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,3000)}`;
     const scoreMsg = await anthropic.messages.create({
-      model:"claude-haiku-4-5-20251001", max_tokens:600,
-      messages:[{ role:"user", content:buildATSPrompt(html,job) }],
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 600,
+      system: [{ type: "text", text: atsStatic, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: atsDynamic }],
     });
     let atsReport=null, atsScore=null;
     try {
