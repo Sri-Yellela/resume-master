@@ -734,7 +734,7 @@ app.post("/api/auth/login", (req, res, next) => {
 });
 
 app.post("/api/auth/register", (req, res) => {
-  const { username, password, profile={} } = req.body;
+  const { username, password, profile={}, apifyToken } = req.body;
   if (!username||!password) return res.status(400).json({ error:"username and password required" });
   if (password.length < 8)  return res.status(400).json({ error:"password must be at least 8 characters" });
   if (!profile.full_name)   return res.status(400).json({ error:"full name is required" });
@@ -761,6 +761,7 @@ app.post("/api/auth/register", (req, res) => {
         profile.requires_sponsorship?1:0, profile.has_clearance?1:0,
         profile.clearance_level||null, profile.visa_type||null, profile.work_auth||null
       );
+    db.prepare("UPDATE users SET apify_token=? WHERE id=?").run(apifyToken||null, newUser.id);
     res.json({ ok:true });
   } catch(e) {
     res.status(400).json({ error:e.message.includes("UNIQUE")?"Username already taken.":e.message });

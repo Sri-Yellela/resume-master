@@ -6,9 +6,12 @@ import { api }        from "../lib/api.js";
 import { AtomEmblem } from "./AuthScreen.jsx";
 
 const APPLY_MODES = [
-  { value:"SIMPLE",         label:"Simple Apply",   icon:"⚡", desc:"Job board only — no generation" },
-  { value:"TAILORED",       label:"Tailored Apply",  icon:"✦", desc:"Rewrite bullets, fixed employers" },
-  { value:"CUSTOM_SAMPLER", label:"Custom Sampler",  icon:"⚙", desc:"Full customisation, JD-driven companies" },
+  { value:"SIMPLE",         label:"Simple Apply",   icon:"⚡", desc:"Job board only — no generation",
+    info:"Job board link only. No resume generation. Use this if you want to apply manually or already have a resume ready." },
+  { value:"TAILORED",       label:"Tailored Apply",  icon:"✦", desc:"Rewrite bullets, fixed employers",
+    info:"Rewrites your resume bullets to match the job description. Uses fixed employer names from a predefined map based on job category." },
+  { value:"CUSTOM_SAMPLER", label:"Custom Sampler",  icon:"⚙", desc:"Full customisation, JD-driven companies",
+    info:"Full customisation — rewrites your entire resume driven by the job description. Company names are pulled directly from the JD. Best ATS scores." },
 ];
 
 // ── Viewport-aware dropdown wrapper ───────────────────────────
@@ -87,6 +90,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
   const [profileOpen,  setProfileOpen]  = useState(false);
   const [mode,         setMode]         = useState(user?.applyMode || "TAILORED");
   const [savingMode,   setSavingMode]   = useState(false);
+  const [modeInfo,     setModeInfo]     = useState(null); // { value, rect }
 
   const sandwichRef = useRef();
   const profileRef  = useRef();
@@ -171,8 +175,22 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
             <span style={{ fontSize:14, flexShrink:0 }}>{m.icon}</span>
             <div style={{ flex:1, minWidth:0, overflow:"hidden" }}>
               <div style={{ fontWeight:700, color:"#f8fafc", fontSize:12,
-                            whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                {m.label}
+                            display:"flex", alignItems:"center", gap:3 }}>
+                <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {m.label}
+                </span>
+                <span role="button" tabIndex={0}
+                  style={{ color:"#475569", cursor:"pointer", userSelect:"none",
+                           flexShrink:0, fontSize:11, lineHeight:1, fontWeight:400 }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setModeInfo(modeInfo?.value === m.value ? null : { value:m.value, rect });
+                  }}
+                  onKeyDown={e => { if (e.key==="Enter"||e.key===" ") e.currentTarget.click(); }}
+                  title="More info">
+                  ⓘ
+                </span>
               </div>
               <div style={{ fontSize:10, color:"#64748b", marginTop:1,
                             whiteSpace:"normal", wordBreak:"break-word" }}>
@@ -194,6 +212,15 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
             q.windowEnds ? `\nResets: ${new Date(q.windowEnds*1000).toLocaleString()}` : ""}`);
         }}/>
       </DropdownPortal>
+
+      {/* ── Mode info popover ── */}
+      {modeInfo && (
+        <ModeInfoPopover
+          rect={modeInfo.rect}
+          text={APPLY_MODES.find(m => m.value === modeInfo.value)?.info}
+          onClose={() => setModeInfo(null)}
+        />
+      )}
 
       {/* ── Avatar dropdown ── */}
       <DropdownPortal
@@ -340,6 +367,42 @@ function ApifyTokenRow() {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function ModeInfoPopover({ rect, text, onClose }) {
+  const popRef = useRef();
+  const maxWidth = 240;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let left = rect.right + 8;
+  if (left + maxWidth > vw - 8) left = Math.max(8, rect.left - maxWidth - 8);
+  let top = rect.top;
+  if (top + 120 > vh - 8) top = Math.max(8, vh - 128);
+
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    const onMD  = e => {
+      if (popRef.current?.contains(e.target)) return;
+      onClose();
+    };
+    document.addEventListener("keydown",   onKey);
+    document.addEventListener("mousedown", onMD);
+    return () => {
+      document.removeEventListener("keydown",   onKey);
+      document.removeEventListener("mousedown", onMD);
+    };
+  }, [onClose]);
+
+  return (
+    <div ref={popRef} style={{
+      position:"fixed", top, left, maxWidth,
+      background:"#1e293b", border:"1px solid #334155", borderRadius:8,
+      padding:"10px 12px", color:"#94a3b8", fontSize:10, lineHeight:1.6,
+      zIndex:10000, boxShadow:"0 8px 24px rgba(0,0,0,.6)", wordBreak:"break-word",
+    }}>
+      {text}
     </div>
   );
 }

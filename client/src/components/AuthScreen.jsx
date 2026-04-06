@@ -1,5 +1,5 @@
 // client/src/components/AuthScreen.jsx — v4
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "../lib/api.js";
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -191,6 +191,52 @@ function normaliseUrl(raw) {
   return t && !t.startsWith("http") ? "https://" + t : t;
 }
 
+// ── Viewport-aware info popover ───────────────────────────────
+function InfoPopover({ anchorRef, open, onClose, children, maxWidth = 280 }) {
+  const popRef = useRef();
+  const [pos,   setPos] = useState({ top:0, left:0 });
+
+  useEffect(() => {
+    if (!open || !anchorRef?.current) return;
+    const r  = anchorRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = r.right + 8;
+    if (left + maxWidth > vw - 8) left = Math.max(8, r.left - maxWidth - 8);
+    let top = r.top;
+    if (top + 180 > vh - 8) top = Math.max(8, vh - 188);
+    setPos({ top, left: Math.max(8, left) });
+  }, [open, anchorRef, maxWidth]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    const onMD  = e => {
+      if (anchorRef?.current?.contains(e.target)) return;
+      if (popRef.current?.contains(e.target)) return;
+      onClose();
+    };
+    document.addEventListener("keydown",   onKey);
+    document.addEventListener("mousedown", onMD);
+    return () => {
+      document.removeEventListener("keydown",   onKey);
+      document.removeEventListener("mousedown", onMD);
+    };
+  }, [open, onClose, anchorRef]);
+
+  if (!open) return null;
+  return (
+    <div ref={popRef} style={{
+      position:"fixed", top:pos.top, left:pos.left, maxWidth,
+      background:"#1e293b", border:"1px solid #334155", borderRadius:8,
+      padding:"10px 12px", color:"#94a3b8", fontSize:10, lineHeight:1.6,
+      zIndex:2000, boxShadow:"0 8px 24px rgba(0,0,0,.6)", wordBreak:"break-word",
+    }}>
+      {children}
+    </div>
+  );
+}
+
 // ── Auth modal ────────────────────────────────────────────────
 function AuthModal({ mode: initialMode, onLogin, onClose }) {
   const [mode,   setMode]   = useState(initialMode || "login");
@@ -212,6 +258,11 @@ function AuthModal({ mode: initialMode, onLogin, onClose }) {
     requires_sponsorship:false, has_clearance:false, clearance_level:"",
   });
   const sp = (k,v) => setProfile(p => ({ ...p, [k]:v }));
+
+  const [apifyToken,    setApifyToken]    = useState("");
+  const [apifyTokenErr, setApifyTokenErr] = useState("");
+  const [apifyInfoOpen, setApifyInfoOpen] = useState(false);
+  const apifyInfoRef = useRef();
 
   useEffect(() => {
     const h = e => { if (e.key==="Escape") onClose(); };
@@ -243,12 +294,13 @@ function AuthModal({ mode: initialMode, onLogin, onClose }) {
 
   const handleRegister = async e => {
     e.preventDefault();
-    if (!profile.full_name) { setErr("Full name is required."); return; }
-    if (!profile.email)     { setErr("Email is required."); return; }
-    setBusy(true); setErr("");
+    if (!profile.full_name)  { setErr("Full name is required."); return; }
+    if (!profile.email)      { setErr("Email is required."); return; }
+    if (!apifyToken.trim())  { setApifyTokenErr("Apify token is required"); return; }
+    setBusy(true); setErr(""); setApifyTokenErr("");
     try {
       const d = await api("/api/auth/register",{
-        method:"POST", body:JSON.stringify({ username, password, profile }),
+        method:"POST", body:JSON.stringify({ username, password, profile, apifyToken: apifyToken.trim() }),
       });
       if (d.ok) {
         setStatus("Account created! Signing you in…");
@@ -451,6 +503,41 @@ function AuthModal({ mode: initialMode, onLogin, onClose }) {
                   <option>I am not a protected veteran</option>
                 </select>
               </MField>
+            </MSec>
+
+            <MSec title="Job Search">
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:10, color:"#9ca3af", fontWeight:600,
+                              textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:3,
+                              display:"flex", alignItems:"center", gap:4 }}>
+                  Apify Token <span style={{ color:"#f87171" }}>*</span>
+                  <span ref={apifyInfoRef} role="button" tabIndex={0}
+                    style={{ color:"#6b7280", cursor:"pointer", userSelect:"none",
+                             textTransform:"none", fontSize:12, lineHeight:1 }}
+                    onClick={() => setApifyInfoOpen(o => !o)}
+                    onKeyDown={e => { if (e.key==="Enter"||e.key===" ") setApifyInfoOpen(o => !o); }}>
+                    ⓘ
+                  </span>
+                </div>
+                <input style={mo.inp} type="password" value={apifyToken}
+                  onChange={e => { setApifyToken(e.target.value); if (apifyTokenErr) setApifyTokenErr(""); }}
+                  placeholder="apify_api_…"/>
+                {apifyTokenErr && (
+                  <span style={{ ...mo.hint, color:"#f87171" }}>{apifyTokenErr}</span>
+                )}
+                <InfoPopover anchorRef={apifyInfoRef} open={apifyInfoOpen}
+                  onClose={() => setApifyInfoOpen(false)} maxWidth={280}>
+                  Required to search for jobs. Get a free token at{" "}
+                  <a href="https://console.apify.com" target="_blank" rel="noreferrer"
+                     style={{ color:"#e879f9", textDecoration:"none" }}>
+                    console.apify.com
+                  </a>{" "}→ Settings → Integrations.<br/><br/>
+                  Also subscribe to these two free actors:<br/>
+                  • curious_coder/linkedin-jobs-scraper<br/>
+                  • valig/indeed-jobs-scraper<br/><br/>
+                  Without this token, job search will not work.
+                </InfoPopover>
+              </div>
             </MSec>
 
             <div style={{ display:"flex", gap:8, paddingBottom:8, paddingTop:4 }}>
