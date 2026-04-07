@@ -281,6 +281,26 @@ function isFullTimeNorm(item) {
   return !NON_FULLTIME_TERMS.some(t => text.includes(t));
 }
 
+function extractYearsExperience(description = "") {
+  // Match patterns like "5+ years", "3-5 years", "minimum 2 years", "at least 7 years"
+  const patterns = [
+    /(\d+)\s*\+\s*years?\s+(?:of\s+)?experience/i,
+    /(\d+)\s*[-–]\s*(\d+)\s*years?\s+(?:of\s+)?experience/i,
+    /minimum\s+(\d+)\s*years?/i,
+    /at\s+least\s+(\d+)\s*years?/i,
+    /(\d+)\s*years?\s+(?:of\s+)?(?:relevant\s+)?experience/i,
+  ];
+  for (const p of patterns) {
+    const m = description.match(p);
+    if (m) {
+      // For range patterns, take the midpoint; for single, take the value
+      if (m[2]) return Math.round((Number(m[1]) + Number(m[2])) / 2);
+      return Number(m[1]);
+    }
+  }
+  return null; // null means unknown — do not filter these out
+}
+
 function ghostJobScoreNorm(item) {
   let score = 0;
   const desc = item.description.toLowerCase();
@@ -518,6 +538,7 @@ async function scrapeJobs(query, apifyToken) {
       postedAt:  item.postedAt,
       description: item.description.slice(0, 500),
       ghostScore:  ghostJobScoreNorm(item),
+      yearsExperience: extractYearsExperience(item.description),
       isFrequentRepost: (repostCounts[h] || 0) >= 2,
     };
   });
@@ -1034,8 +1055,94 @@ app.post("/api/generate", requireAuth, async (req, res) => {
     });
     const html = resumeMsg.content.map(b=>b.text||"").join("").replace(/```html|```/g,"").trim();
 
+    // ── Formatting pass — apply visual design template via Haiku ──
+    // The generation step produces content. This step applies the exact
+    // CSS/HTML template spec as a deterministic formatting layer.
+    let formattedHtml = html;
+    try {
+      const FORMATTING_SYSTEM = `You are a resume HTML formatter. You receive a resume in any HTML format and reformat it to exactly match the design specification below. You output ONLY the final HTML — no commentary, no markdown fences, no explanation.
+
+DESIGN SPECIFICATION:
+
+All CSS lives in a <style> block in <head>. No inline styles. No external fonts, CDN links, or JavaScript. Include @media print block.
+
+CSS variables (use these — no hardcoded hex):
+:root {
+  --color-bg: #ffffff;
+  --color-text: #1a1a1a;
+  --color-muted: #3d3d3d;
+  --color-rule: #6b6b6b;
+  --fs-body: 8.5pt;
+  --fs-name: 9pt;
+  --fs-section: 8pt;
+  --page-w: 8.5in;
+  --margin-x: 0.55in;
+  --margin-top: 0.45in;
+  --margin-bot: 0.45in;
+  --gap-section: 9pt;
+  --gap-entry: 6pt;
+  --gap-inline: 2pt;
+  --lh-body: 1.42;
+  --lh-bullets: 1.38;
+}
+
+Font: font-family: 'Garamond','EB Garamond',Georgia,serif — all text, no exceptions.
+
+body { background: var(--color-bg); color: var(--color-text); font-family: 'Garamond','EB Garamond',Georgia,serif; font-size: var(--fs-body); line-height: var(--lh-body); margin: var(--margin-top) var(--margin-x) var(--margin-bot); max-width: var(--page-w); }
+
+.header { text-align: center; margin-bottom: 6pt; }
+.header .name { font-size: var(--fs-name); font-weight: bold; text-transform: uppercase; letter-spacing: 0.22em; line-height: 1.1; }
+.header .tagline { color: var(--color-muted); letter-spacing: 0.04em; font-size: var(--fs-body); }
+.header .contact { font-size: var(--fs-body); }
+.header .contact a { color: inherit; text-decoration: none; }
+
+.section-title { font-size: var(--fs-section); font-weight: bold; text-transform: uppercase; letter-spacing: 0.18em; color: var(--color-text); border-bottom: 0.5pt solid var(--color-rule); padding-bottom: 1pt; margin-top: var(--gap-section); margin-bottom: 4pt; }
+
+.entry { margin-bottom: var(--gap-entry); page-break-inside: avoid; }
+.entry-header { display: flex; justify-content: space-between; align-items: baseline; }
+.entry-org { font-weight: bold; }
+.entry-meta { font-style: italic; color: var(--color-muted); font-weight: normal; }
+.sep { font-style: normal; font-weight: normal; color: var(--color-muted); }
+.entry-date { color: var(--color-muted); white-space: nowrap; margin-left: 8pt; flex-shrink: 0; font-size: var(--fs-body); }
+.entry-role { font-style: italic; color: var(--color-muted); margin-bottom: var(--gap-inline); }
+.tech-line { font-size: calc(var(--fs-body) - 0.4pt); color: var(--color-muted); margin-bottom: var(--gap-inline); }
+
+ul.bullets { list-style: none; padding-left: 0.9em; margin: var(--gap-inline) 0 0 0; }
+ul.bullets li { position: relative; font-size: var(--fs-body); line-height: var(--lh-bullets); margin-bottom: 1.6pt; text-align: justify; }
+ul.bullets li::before { content: "•"; position: absolute; left: -0.85em; }
+
+.skills-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
+.skill-label { font-weight: bold; white-space: nowrap; padding-right: 12pt; width: 1%; vertical-align: top; padding: 1.2pt 12pt 1.2pt 0; }
+.skill-values { color: var(--color-text); padding: 1.2pt 0; }
+
+@media print {
+  body { margin: var(--margin-top) var(--margin-x) var(--margin-bot); }
+  .entry { page-break-inside: avoid; }
+  .section-title { page-break-after: avoid; }
+}
+
+RULES:
+- Preserve ALL content exactly — every word, number, company name, date, bullet, skill
+- Only restructure the HTML and CSS — never change the text content
+- Apply the class names above to the correct elements
+- Entry headers must be a single flex row — company on left, date on right
+- Output only the complete HTML file, nothing else`;
+
+      const formatMsg = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 4096,
+        system: [{ type: "text", text: FORMATTING_SYSTEM, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: `Reformat this resume HTML to match the design specification exactly. Preserve all content:\n\n${html}` }],
+      });
+      const formatted = formatMsg.content.map(b=>b.text||"").join("").replace(/```html|```/g,"").trim();
+      if (formatted && formatted.includes("<html")) formattedHtml = formatted;
+    } catch(e) {
+      console.warn("[format] Formatting pass failed, using raw generation output:", e.message);
+      // formattedHtml stays as original html — graceful fallback
+    }
+
     const atsStatic = `Score this resume against the job. Reply ONLY with valid JSON, no markdown:\n{"score":<0-100>,"tier1_matched":[...],"tier1_missing":[...],"strengths":[...],"improvements":[...],"verdict":"<one sentence>"}`;
-    const atsDynamic = `JOB: ${job.company} — ${job.title} (${job.category})\nRESUME: ${html.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,3000)}`;
+    const atsDynamic = `JOB: ${job.company} — ${job.title} (${job.category})\nRESUME: ${formattedHtml.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,3000)}`;
     const scoreMsg = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 600,
@@ -1052,14 +1159,14 @@ app.post("/api/generate", requireAuth, async (req, res) => {
       ? (db.prepare("SELECT MAX(version) as v FROM resume_versions WHERE user_id=? AND job_id=?").get(req.user.id,String(jobId))?.v||0)+1
       : 1;
     db.prepare("INSERT INTO resume_versions (user_id,job_id,company,role,category,html,ats_score,ats_report,version) VALUES (?,?,?,?,?,?,?,?,?)")
-      .run(req.user.id,String(jobId),job.company,job.title,job.category,html,atsScore,JSON.stringify(atsReport),version);
+      .run(req.user.id,String(jobId),job.company,job.title,job.category,formattedHtml,atsScore,JSON.stringify(atsReport),version);
     db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
       ON CONFLICT(user_id,job_id) DO UPDATE SET html=excluded.html,role=excluded.role,category=excluded.category,
       apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,updated_at=excluded.updated_at`)
-      .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,html,atsScore,JSON.stringify(atsReport));
+      .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,formattedHtml,atsScore,JSON.stringify(atsReport));
 
-    res.json({ html, atsScore, atsReport, cached:false, version });
+    res.json({ html: formattedHtml, atsScore, atsReport, cached:false, version });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 

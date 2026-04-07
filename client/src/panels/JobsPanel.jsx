@@ -127,6 +127,7 @@ export default function JobsPanel({ user, onUserChange }) {
   const [typeFilter,  setTypeFilter]  = useState("");
   const [catFilter,   setCatFilter]   = useState("");
   const [srcFilter,   setSrcFilter]   = useState("");
+  const [expFilter,   setExpFilter]   = useState("");
   const [ageFilter,   setAgeFilter]   = useState("");
   const [applyJob,    setApplyJob]    = useState(null);
 
@@ -158,6 +159,11 @@ export default function JobsPanel({ user, onUserChange }) {
 
   // Search
   const handleSearch = useCallback(async () => {
+    if (!resumeText) {
+      alert("Please upload your base resume first. It is required for job search and resume generation.");
+      fileRef.current?.click();
+      return;
+    }
     const q=searchInput.trim(); if(!q) return;
     setScraping(true);
     try {
@@ -258,11 +264,25 @@ export default function JobsPanel({ user, onUserChange }) {
 
   // ── Derived values — all declared before JSX ─────────────────
   const sources  = [...new Set(jobs.map(j=>j.source).filter(Boolean))];
-  const filtered = jobs.filter(j =>
-    (!typeFilter||j.workType===typeFilter)&&
-    (!catFilter ||j.category===catFilter)&&
-    (!srcFilter ||j.source===srcFilter)
-  );
+  // Square root tolerance: user sets N years → tolerance = round(sqrt(N))
+  // If no expFilter set, fall back to base resume years if available, else show all
+  const expYears = expFilter !== "" ? Number(expFilter) : null;
+  const expTolerance = expYears !== null ? Math.round(Math.sqrt(expYears || 1)) : null;
+
+  const filtered = jobs.filter(j => {
+    if (!typeFilter || j.workType === typeFilter) {} else return false;
+    if (!catFilter  || j.category === catFilter)  {} else return false;
+    if (!srcFilter  || j.source === srcFilter)    {} else return false;
+    // Experience filter — only applied when slider is set
+    if (expYears !== null && expTolerance !== null) {
+      const jExp = j.yearsExperience;
+      if (jExp != null) {
+        if (jExp < expYears - expTolerance || jExp > expYears + expTolerance) return false;
+      }
+      // If job has no yearsExperience field, let it through (don't filter out unknowns)
+    }
+    return true;
+  });
   const genCount = Object.values(generated).filter(v=>v?.html&&v.html!=="__exists__").length;
 
   const normalisedPreview = ALIASES[searchInput.trim().toLowerCase()]
@@ -291,7 +311,8 @@ export default function JobsPanel({ user, onUserChange }) {
             </div>
           )}
         </div>
-        <Btn bg={scraping?"#475569":"#3b82f6"} disabled={scraping} onClick={handleSearch}>
+        <Btn bg={scraping?"#475569":!resumeText?"#64748b":"#3b82f6"} disabled={scraping} onClick={handleSearch}
+          title={!resumeText?"Upload your resume first to enable search":""}>
           {scraping?"⏳ Scraping…":"🔍 Search"}
         </Btn>
         <div style={s.divider}/>
@@ -313,6 +334,25 @@ export default function JobsPanel({ user, onUserChange }) {
           <option value="">All types</option>
           <option>Remote</option><option>Hybrid</option><option>Onsite</option>
         </select>
+        <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+          <span style={{fontSize:10,color:"#64748b",whiteSpace:"nowrap"}}>Exp:</span>
+          <input
+            type="range" min={0} max={30} step={1}
+            value={expFilter===""?15:Number(expFilter)}
+            onChange={e=>setExpFilter(e.target.value)}
+            style={{width:80,accentColor:"#38bdf8"}}
+            title={expFilter===""?"Not filtering by experience":`${expFilter} yrs ±${Math.round(Math.sqrt(Number(expFilter)||1))}`}
+          />
+          <span style={{fontSize:10,color:"#38bdf8",fontWeight:700,minWidth:32,whiteSpace:"nowrap"}}>
+            {expFilter===""?"Any":
+              `${expFilter}y ±${Math.round(Math.sqrt(Number(expFilter)||1))}`}
+          </span>
+          {expFilter!==""&&(
+            <button onClick={()=>setExpFilter("")}
+              style={{background:"none",border:"none",color:"#64748b",
+                cursor:"pointer",fontSize:11,padding:0}}>✕</button>
+          )}
+        </div>
         <div style={{flex:1}}/>
         <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
           onChange={handleFile} style={{display:"none"}}/>
@@ -356,12 +396,17 @@ export default function JobsPanel({ user, onUserChange }) {
                       <tr key={key} style={{background:i%2===0?"#0f172a":"#0a0f1a",borderBottom:"1px solid #1e293b"}}>
                         <td style={s.td}>
                           <div style={{display:"flex",alignItems:"center",gap:3}}>
-                            <button onClick={()=>job.url&&setApplyJob(job)}
-                              style={{background:"none",border:"none",color:"#38bdf8",
-                                fontWeight:700,fontSize:11,cursor:job.url?"pointer":"default",
-                                padding:0,textAlign:"left"}}>
-                              {job.company}
-                            </button>
+                            {job.url
+                            ? <a href={job.url} target="_blank" rel="noreferrer"
+                                style={{background:"none",border:"none",color:"#38bdf8",
+                                  fontWeight:700,fontSize:11,cursor:"pointer",
+                                  padding:0,textAlign:"left",textDecoration:"none"}}>
+                                {job.company}
+                              </a>
+                            : <span style={{color:"#94a3b8",fontWeight:700,fontSize:11}}>
+                                {job.company}
+                              </span>
+                          }
                             <AppliedFlag applied={job.alreadyApplied} companyBefore={job.companyAppliedBefore}/>
                           </div>
                         </td>
@@ -400,9 +445,6 @@ export default function JobsPanel({ user, onUserChange }) {
                               <Btn sm bg="#10b981"
                                 onClick={()=>exportAndTrack(job,generated[key].html,job.company)}
                                 title="Export PDF">📥</Btn>
-                            )}
-                            {job.url&&(
-                              <Btn sm bg="#6366f1" onClick={()=>setApplyJob(job)} title="Apply">Apply</Btn>
                             )}
                             {done&&<ATSBadge score={g.atsScore}/>}
                           </div>

@@ -520,9 +520,106 @@ Work experience and education must be listed most recent first.
 
 Use "Mon Year – Mon Year" throughout. Do not mix formats.
 
-### R5.4 — Output as clean HTML
+### R5.4 — Output format and visual design specification
 
-Produce the final resume as a single self-contained HTML file with embedded CSS. Use print-safe fonts (Arial or Georgia). Clean, scannable, printer-friendly. No tables for layout (skills table excepted). No icons, graphics, or colour accents other than black and dark grey.
+Produce the final resume as a single self-contained HTML file. All CSS lives 
+in a <style> block in <head>. No inline styles. No external fonts, CDN links, 
+or JavaScript. Print-safe: include an @media print block.
+
+COLOR PALETTE — use CSS variables, no hardcoded hex anywhere:
+  --color-bg:    #ffffff   ← page background, always white
+  --color-text:  #1a1a1a   ← all primary text
+  --color-muted: #3d3d3d   ← roles, dates, tagline, meta, separators
+  --color-rule:  #6b6b6b   ← hairline rule under section titles only
+No other colors. No borders except the section title rule. No backgrounds except white.
+
+FONT: font-family: 'Garamond', 'EB Garamond', Georgia, serif — all text, no exceptions.
+
+TYPE SCALE:
+  --fs-body:    8.5pt  ← bullets, descriptions, all default text
+  --fs-name:    9pt    ← candidate name only
+  --fs-section: 8pt    ← section titles only (tracking carries the weight, not size)
+All other elements use --fs-body.
+
+PAGE AND MARGINS:
+  --page-w:   8.5in
+  --margin-x: 0.55in  ← left and right
+  --margin-top: 0.45in
+  --margin-bot: 0.45in
+
+SPACING:
+  --gap-section: 9pt   ← space above each section title
+  --gap-entry:   6pt   ← space between entries within a section
+  --gap-inline:  2pt   ← space between header line and bullets
+  --lh-body:    1.42   ← line height for all prose
+  --lh-bullets: 1.38   ← line height for bullet lists
+
+SECTION TITLES (.section-title):
+  font-size: --fs-section, font-weight: bold, text-transform: uppercase,
+  letter-spacing: 0.18em, color: --color-text,
+  border-bottom: 0.5pt solid --color-rule, padding-bottom: 1pt,
+  margin-top: --gap-section, margin-bottom: 4pt.
+  Every section uses this class. No exceptions.
+
+CANDIDATE NAME (.header .name):
+  font-size: --fs-name, font-weight: bold, text-transform: uppercase,
+  letter-spacing: 0.22em, line-height: 1.1, text-align: center.
+
+HEADER BLOCK (.header) — three lines, all centered:
+  1. .name → candidate name
+  2. .tagline → Role · Specialization · Specialization
+     color: --color-muted, letter-spacing: 0.04em
+  3. .contact → items separated by " | "
+     links: color: inherit, text-decoration: none
+  margin-bottom: 6pt after header block.
+
+WORK EXPERIENCE ENTRY (.entry):
+  Header line — single flex row:
+    LEFT:  <span class="entry-org">Company <span class="sep"> · </span>
+             <span class="entry-meta">Title · Team, City</span></span>
+    RIGHT: <span class="entry-date">Mon YYYY – Mon YYYY</span>
+  .entry-org  → font-weight: bold
+  .entry-meta → font-style: italic, color: --color-muted, font-weight: normal
+  .sep        → font-style: normal, font-weight: normal, color: --color-muted
+  .entry-date → color: --color-muted, white-space: nowrap, margin-left: 8pt
+  All on ONE line. Role, team, city, and date never wrap to a second line.
+  Below header: <ul class="bullets"> directly, no intermediate line.
+
+ACADEMIC / PROJECT ENTRY:
+  Header: LEFT project name (.entry-org), RIGHT course/date (.entry-date)
+  Below: optional <div class="tech-line"> then <ul class="bullets">
+  .tech-line → font-size: calc(--fs-body - 0.4pt), color: --color-muted
+
+EDUCATION ENTRY:
+  Header: LEFT university (.entry-org), RIGHT dates (.entry-date)
+  Below: <div class="entry-role"> — degree, field
+  .entry-role → font-style: italic, color: --color-muted, margin-bottom: --gap-inline
+
+BULLETS (ul.bullets):
+  list-style: none, padding-left: 0.9em
+  li::before: content "•", position absolute, left -0.85em
+  font-size: --fs-body, line-height: --lh-bullets
+  margin-bottom: 1.6pt per item, text-align: justify
+
+SKILLS TABLE (.skills-table):
+  Two-column <table>
+  .skill-label → font-weight: bold, white-space: nowrap, padding-right: 12pt, width: 1%
+  .skill-values → color: --color-text
+  Items separated by " · "
+  padding: 1.2pt 0 per row
+
+CONTENT-LENGTH RULES (these never change):
+  Never add spacing to fill a page.
+  Never reduce font or spacing to force single page.
+  Never truncate bullets for page count.
+  If content overflows, let it flow to page 2 naturally.
+  page-break-inside: avoid on .entry blocks.
+  page-break-after: avoid on .section-title.
+
+WHAT NEVER APPEARS:
+  No bold except: candidate name, company names, skill labels, section titles.
+  No underlines. No color accents, highlights, icons, or decorative elements.
+  Background always #ffffff. Text always --color-text or --color-muted only.
 
 ---
 
