@@ -1,16 +1,7 @@
-// REVAMP v2 — ProfilePanel.jsx (shadcn UI integrated)
-// Changes: single full_name field, phone normaliser, URL normaliser, ZIP normaliser
+// client/src/panels/ProfilePanel.jsx — Design System v4
 import { useState, useEffect } from "react";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { Button } from "../components/ui/button";
-import { Separator } from "../components/ui/separator";
-import { Card, CardContent } from "../components/ui/card";
-import { Checkbox } from "../components/ui/checkbox";
-import { Switch } from "../components/ui/switch";
-import { SectionHeader } from "../components/SectionHeader";
 
 // ── Field normalisers ─────────────────────────────────────────
 function normalisePhone(raw) {
@@ -35,6 +26,38 @@ function normaliseState(raw) {
   if (!raw) return "";
   return raw.trim().toUpperCase().slice(0, 2);
 }
+
+// ── Sub-components ─────────────────────────────────────────────
+function PSec({ title, children, theme }) {
+  return (
+    <div style={{ marginBottom:20 }}>
+      <div className="rm-section-label">{title}</div>
+      <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                    borderRadius:16, padding:"20px 24px",
+                    boxShadow:theme.shadowSm }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const labelStyle = {
+  fontSize:11, fontWeight:600, textTransform:"uppercase",
+  letterSpacing:"0.05em", display:"block", marginBottom:4,
+};
+
+const PRow = ({ label, children, theme }) => (
+  <div style={{ display:"flex", flexDirection:"column", marginBottom:12 }}>
+    <span style={{ ...labelStyle, color:theme.textMuted }}>{label}</span>
+    {children}
+  </div>
+);
+
+const PHint = ({ children, theme }) => (
+  <span style={{ fontSize:10, color:theme.textDim, marginTop:3, lineHeight:1.4, display:"block" }}>
+    {children}
+  </span>
+);
 
 export function ProfilePanel() {
   const { theme } = useTheme();
@@ -98,103 +121,96 @@ export function ProfilePanel() {
   };
 
   const selStyle = {
-    width:"100%", padding:"7px 10px", borderRadius:"10px",
-    border:`1px solid ${theme.colorBorder}`, background:theme.colorSurface,
-    color:theme.colorText, fontSize:12, outline:"none", boxSizing:"border-box",
+    width:"100%", height:40, padding:"0 12px", borderRadius:10,
+    border:`1px solid ${theme.border}`, background:theme.surface,
+    color:theme.text, fontSize:13, outline:"none", boxSizing:"border-box",
   };
 
   return (
-    <div style={{ padding:"18px 24px", overflowY:"auto", height:"100%",
-                  boxSizing:"border-box", maxWidth:640, background:theme.gradBg }}>
-      <SectionHeader title="👤 Profile" divider/>
-      <form onSubmit={save} style={{ marginTop:16 }}>
+    <div style={{ maxWidth:680, margin:"0 auto", padding:"32px 24px",
+                  overflowY:"auto", height:"100%", boxSizing:"border-box" }}>
+      <div style={{ fontWeight:900, fontSize:22, color:theme.text,
+                    letterSpacing:"-0.5px", marginBottom:24 }}>
+        Profile
+      </div>
+      <form onSubmit={save}>
 
         {/* ── Personal ── */}
         <PSec title="Personal" theme={theme}>
-          <PRow label="Full Name">
-            <Input value={form.full_name || ""} onChange={e => set("full_name", e.target.value)}
-              placeholder="First Last (or First Middle Last)"
-              className="bg-background border-border text-foreground text-xs"/>
+          <PRow label="Full Name" theme={theme}>
+            <input className="rm-input" value={form.full_name || ""}
+              onChange={e => set("full_name", e.target.value)}
+              placeholder="First Last (or First Middle Last)"/>
             <PHint theme={theme}>Enter your name exactly as it should appear on your resume and applications.</PHint>
           </PRow>
-          <PRow label="Email">
-            <Input type="email" value={form.email || ""} onChange={e => set("email", e.target.value)}
-              placeholder="you@email.com"
-              className="bg-background border-border text-foreground text-xs"/>
+          <PRow label="Email" theme={theme}>
+            <input className="rm-input" type="email" value={form.email || ""}
+              onChange={e => set("email", e.target.value)}
+              placeholder="you@email.com"/>
           </PRow>
-          <PRow label="Phone">
-            <Input type="tel" value={form.phone || ""}
+          <PRow label="Phone" theme={theme}>
+            <input className="rm-input" type="tel" value={form.phone || ""}
               onChange={e => set("phone", e.target.value)}
               onBlur={blurPhone}
-              placeholder="+1 (555) 000-0000 or 5550001234"
-              className="bg-background border-border text-foreground text-xs"/>
+              placeholder="+1 (555) 000-0000 or 5550001234"/>
             <PHint theme={theme}>Any format accepted — normalised to +1 (XXX) XXX-XXXX on save.</PHint>
           </PRow>
-          <PRow label="LinkedIn URL">
-            <Input value={form.linkedin_url || ""}
+          <PRow label="LinkedIn URL" theme={theme}>
+            <input className="rm-input" value={form.linkedin_url || ""}
               onChange={e => set("linkedin_url", e.target.value)}
               onBlur={blurLinkedin}
-              placeholder="linkedin.com/in/yourhandle"
-              className="bg-background border-border text-foreground text-xs"/>
+              placeholder="linkedin.com/in/yourhandle"/>
           </PRow>
-          <PRow label="GitHub URL">
-            <Input value={form.github_url || ""}
+          <PRow label="GitHub URL" theme={theme}>
+            <input className="rm-input" value={form.github_url || ""}
               onChange={e => set("github_url", e.target.value)}
               onBlur={blurGithub}
-              placeholder="github.com/yourhandle"
-              className="bg-background border-border text-foreground text-xs"/>
+              placeholder="github.com/yourhandle"/>
           </PRow>
         </PSec>
 
         {/* ── Address ── */}
         <PSec title="Address (for autofill)" theme={theme}>
-          <PRow label="Street Address">
-            <Input value={form.address_line1 || ""} onChange={e => set("address_line1", e.target.value)}
-              placeholder="123 Main St"
-              className="bg-background border-border text-foreground text-xs"/>
+          <PRow label="Street Address" theme={theme}>
+            <input className="rm-input" value={form.address_line1 || ""}
+              onChange={e => set("address_line1", e.target.value)}
+              placeholder="123 Main St"/>
           </PRow>
-          <PRow label="Apt / Suite">
-            <Input value={form.address_line2 || ""} onChange={e => set("address_line2", e.target.value)}
-              placeholder="Apt 4B"
-              className="bg-background border-border text-foreground text-xs"/>
+          <PRow label="Apt / Suite" theme={theme}>
+            <input className="rm-input" value={form.address_line2 || ""}
+              onChange={e => set("address_line2", e.target.value)}
+              placeholder="Apt 4B"/>
           </PRow>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
-            <div>
-              <PL theme={theme}>City</PL>
-              <Input value={form.city || ""} onChange={e => set("city", e.target.value)}
-                onBlur={syncLocation} placeholder="Boston"
-                style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                         color:theme.colorText, fontSize:12 }}/>
-            </div>
-            <div>
-              <PL theme={theme}>State</PL>
-              <Input value={form.state || ""} onChange={e => set("state", e.target.value)}
-                onBlur={() => { blurState(); syncLocation(); }} placeholder="MA"
-                style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                         color:theme.colorText, fontSize:12 }}/>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+            <PRow label="City" theme={theme}>
+              <input className="rm-input" value={form.city || ""}
+                onChange={e => set("city", e.target.value)}
+                onBlur={syncLocation} placeholder="Boston"/>
+            </PRow>
+            <PRow label="State" theme={theme}>
+              <input className="rm-input" value={form.state || ""}
+                onChange={e => set("state", e.target.value)}
+                onBlur={() => { blurState(); syncLocation(); }} placeholder="MA"/>
               <PHint theme={theme}>2-letter code</PHint>
-            </div>
-            <div>
-              <PL theme={theme}>ZIP</PL>
-              <Input value={form.zip || ""} onChange={e => set("zip", e.target.value)}
-                onBlur={blurZip} placeholder="02101"
-                style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                         color:theme.colorText, fontSize:12 }}/>
-            </div>
+            </PRow>
+            <PRow label="ZIP" theme={theme}>
+              <input className="rm-input" value={form.zip || ""}
+                onChange={e => set("zip", e.target.value)}
+                onBlur={blurZip} placeholder="02101"/>
+            </PRow>
           </div>
-          <div style={{ marginTop:8 }}>
-            <PL theme={theme}>Country</PL>
+          <PRow label="Country" theme={theme}>
             <select style={selStyle} value={form.country}
               onChange={e => set("country", e.target.value)}>
               <option>United States</option><option>Canada</option>
               <option>United Kingdom</option><option>India</option><option>Other</option>
             </select>
-          </div>
+          </PRow>
         </PSec>
 
         {/* ── Work Auth ── */}
         <PSec title="Work Authorization" theme={theme}>
-          <PRow label="Visa / Immigration Status">
+          <PRow label="Visa / Immigration Status" theme={theme}>
             <select style={selStyle} value={form.visa_type}
               onChange={e => set("visa_type", e.target.value)}>
               <option value="">Select…</option>
@@ -203,7 +219,7 @@ export function ProfilePanel() {
               <option>TN Visa</option><option>O-1</option><option>Other</option>
             </select>
           </PRow>
-          <PRow label="Work Authorization">
+          <PRow label="Work Authorization" theme={theme}>
             <select style={selStyle} value={form.work_auth}
               onChange={e => set("work_auth", e.target.value)}>
               <option value="">Select…</option>
@@ -212,25 +228,23 @@ export function ProfilePanel() {
             </select>
           </PRow>
           <label style={{ display:"flex", alignItems:"center", gap:8,
-                          marginBottom:8, cursor:"pointer",
-                          fontSize:12, color:theme.colorText }}>
-            <Checkbox
-              checked={!!form.requires_sponsorship}
-              onCheckedChange={v => set("requires_sponsorship", !!v)}
-              className="border-primary data-[state=checked]:bg-primary"/>
+                          marginBottom:10, cursor:"pointer",
+                          fontSize:13, color:theme.text }}>
+            <input type="checkbox" checked={!!form.requires_sponsorship}
+              onChange={e => set("requires_sponsorship", e.target.checked)}
+              style={{ accentColor:theme.accent, width:16, height:16 }}/>
             Requires visa sponsorship
           </label>
           <label style={{ display:"flex", alignItems:"center", gap:8,
-                          marginBottom:8, cursor:"pointer",
-                          fontSize:12, color:theme.colorText }}>
-            <Checkbox
-              checked={!!form.has_clearance}
-              onCheckedChange={v => set("has_clearance", !!v)}
-              className="border-primary data-[state=checked]:bg-primary"/>
+                          marginBottom:10, cursor:"pointer",
+                          fontSize:13, color:theme.text }}>
+            <input type="checkbox" checked={!!form.has_clearance}
+              onChange={e => set("has_clearance", e.target.checked)}
+              style={{ accentColor:theme.accent, width:16, height:16 }}/>
             Active security clearance
           </label>
           {form.has_clearance && (
-            <PRow label="Clearance Level">
+            <PRow label="Clearance Level" theme={theme}>
               <select style={selStyle} value={form.clearance_level}
                 onChange={e => set("clearance_level", e.target.value)}>
                 <option value="">Select…</option>
@@ -244,11 +258,11 @@ export function ProfilePanel() {
 
         {/* ── EEO ── */}
         <PSec title="Voluntary Self-Identification (EEO)" theme={theme}>
-          <p style={{ fontSize:10, color:theme.colorMuted, lineHeight:1.6, marginBottom:10 }}>
+          <p style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6, marginBottom:14 }}>
             These fields are voluntary and used solely for EEO reporting autofill.
             They do not affect your resume or job search.
           </p>
-          <PRow label="Gender">
+          <PRow label="Gender" theme={theme}>
             <select style={selStyle} value={form.gender}
               onChange={e => set("gender", e.target.value)}>
               <option value="">Prefer not to say</option>
@@ -256,7 +270,7 @@ export function ProfilePanel() {
               <option>Non-binary / third gender</option>
             </select>
           </PRow>
-          <PRow label="Race / Ethnicity">
+          <PRow label="Race / Ethnicity" theme={theme}>
             <select style={selStyle} value={form.ethnicity}
               onChange={e => set("ethnicity", e.target.value)}>
               <option value="">Prefer not to say</option>
@@ -269,7 +283,7 @@ export function ProfilePanel() {
               <option>Two or more races</option>
             </select>
           </PRow>
-          <PRow label="Veteran Status">
+          <PRow label="Veteran Status" theme={theme}>
             <select style={selStyle} value={form.veteran_status}
               onChange={e => set("veteran_status", e.target.value)}>
               <option value="">Prefer not to say</option>
@@ -277,7 +291,7 @@ export function ProfilePanel() {
               <option>I am not a protected veteran</option>
             </select>
           </PRow>
-          <PRow label="Disability Status">
+          <PRow label="Disability Status" theme={theme}>
             <select style={selStyle} value={form.disability_status}
               onChange={e => set("disability_status", e.target.value)}>
               <option value="">Prefer not to say</option>
@@ -287,54 +301,20 @@ export function ProfilePanel() {
           </PRow>
         </PSec>
 
-        <div style={{ display:"flex", alignItems:"center", gap:12, marginTop:8 }}>
-          <Button type="submit"
-            className="bg-primary text-primary-foreground font-bold px-7 py-2 rounded-full hover:bg-primary/90">
-            Save Profile
-          </Button>
+        <div style={{ display:"flex", justifyContent:"flex-end", alignItems:"center",
+                      gap:14, marginTop:8 }}>
           {status && (
-            <span style={{ fontSize:11,
-              color:status.startsWith("✓") ? "#86efac" : "#fca5a5" }}>
+            <span style={{ fontSize:12,
+              color:status.startsWith("✓") ? theme.success : theme.danger }}>
               {status}
             </span>
           )}
+          <button type="submit" className="rm-btn rm-btn-primary"
+            style={{ padding:"10px 28px", fontSize:14 }}>
+            Save Profile
+          </button>
         </div>
       </form>
     </div>
   );
 }
-
-// ── Sub-components ─────────────────────────────────────────────
-const PSec = ({ title, children, theme }) => (
-  <div style={{ marginBottom:22, background:theme.colorCard || theme.colorSurface,
-                borderRadius:16, padding:"14px 16px",
-                border:`1px solid ${theme.colorBorder}` }}>
-    <div style={{ fontWeight:800, fontSize:12, color:theme.colorPrimary,
-                  textTransform:"uppercase", letterSpacing:"1px",
-                  marginBottom:10, paddingBottom:6,
-                  borderBottom:`1px solid ${theme.colorBorder}` }}>
-      {title}
-    </div>
-    {children}
-  </div>
-);
-
-const PRow = ({ label, children }) => (
-  <div style={{ display:"flex", flexDirection:"column", marginBottom:8 }}>
-    {children}
-  </div>
-);
-
-const PL = ({ children, theme }) => (
-  <span style={{ fontSize:10, color:theme.colorMuted, fontWeight:600,
-                 textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:3,
-                 display:"block" }}>
-    {children}
-  </span>
-);
-
-const PHint = ({ children, theme }) => (
-  <span style={{ fontSize:9, color:theme.colorDim, marginTop:2, lineHeight:1.4, display:"block" }}>
-    {children}
-  </span>
-);

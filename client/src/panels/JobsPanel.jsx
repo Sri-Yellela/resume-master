@@ -1,62 +1,18 @@
-// client/src/panels/JobsPanel.jsx (shadcn UI integrated)
+// client/src/panels/JobsPanel.jsx — Design System v4
 import { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, saveWithPicker } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import SandboxPanel from "./SandboxPanel.jsx";
 import { ATSPanel } from "./ATSPanel.jsx";
-import { Badge } from "../components/ui/badge";
-import { Skeleton } from "../components/ui/skeleton";
-import { ScrollArea } from "../components/ui/scroll-area";
-import { Button } from "../components/ui/button";
-import { CTAButton } from "../components/CTAButton";
-import { MetaChips } from "../components/MetaChips";
 
 // ── Helpers ───────────────────────────────────────────────────
-function hexToRgb(hex) {
-  const h = hex.replace("#","");
-  const n = parseInt(h.length===3 ? h.split("").map(c=>c+c).join("") : h, 16);
-  return `${(n>>16)&255},${(n>>8)&255},${n&255}`;
+function companyColor(name) {
+  const colors = ["#e85d04","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706","#9333ea","#0284c7"];
+  let hash = 0;
+  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
+  return colors[hash % colors.length];
 }
-
-// ── Badges ────────────────────────────────────────────────────
-const Chip = ({ label, bg, fg }) => (
-  <span style={{ background:bg, color:fg, padding:"3px 10px", borderRadius:"999px",
-                 fontSize:9, fontWeight:700, whiteSpace:"nowrap" }}>
-    {label}
-  </span>
-);
-
-function WorkBadge({ t }) {
-  const { theme } = useTheme();
-  const bg = t==="Remote" ? `rgba(${hexToRgb(theme.colorPrimary)},0.15)`
-           : t==="Hybrid"  ? `rgba(${hexToRgb(theme.colorAccent)},0.15)`
-           : t==="Onsite"  ? `rgba(${hexToRgb(theme.colorSecondary)},0.15)`
-           : "rgba(255,255,255,0.06)";
-  const fg = t==="Remote" ? theme.colorPrimary
-           : t==="Hybrid"  ? theme.colorAccent
-           : t==="Onsite"  ? theme.colorSecondary
-           : theme.colorMuted;
-  return <Chip label={t||"—"} bg={bg} fg={fg}/>;
-}
-
-function SrcBadge({ s }) {
-  const { theme } = useTheme();
-  const bg = s==="LinkedIn" ? "rgba(59,130,246,0.15)"
-           : s==="Indeed"   ? "rgba(234,179,8,0.15)"
-           : "rgba(255,255,255,0.06)";
-  const fg = s==="LinkedIn" ? "#60a5fa"
-           : s==="Indeed"   ? "#eab308"
-           : theme.colorMuted;
-  return <Chip label={s} bg={bg} fg={fg}/>;
-}
-
-const ATSBadge = ({ score }) => {
-  if (score==null) return null;
-  const bg = score>=80?"#dcfce7":score>=60?"#fef9c3":"#fee2e2";
-  const fg = score>=80?"#166534":score>=60?"#854d0e":"#991b1b";
-  return <Chip label={`ATS ${score}`} bg={bg} fg={fg}/>;
-};
 
 function ago(ts) {
   if (!ts) return "—";
@@ -69,11 +25,6 @@ function timeLeft(ms) {
   if (!ms||ms<=0) return "cache expired";
   return `${Math.floor(ms/3600000)}h ${Math.floor((ms%3600000)/60000)}m`;
 }
-
-const AppliedFlag = ({ applied, companyBefore }) => applied
-  ? <span title="Already applied to this job" style={{ fontSize:11 }}>🚩</span>
-  : companyBefore ? <span title="Applied to this company before" style={{ fontSize:11, opacity:.5 }}>🏳</span>
-  : null;
 
 // ── Client-side alias map (mirrors server normaliser) ─────────
 const ALIASES = {
@@ -90,20 +41,73 @@ const ALIASES = {
   "genai":"Generative AI Engineer","gen ai":"Generative AI Engineer","llm":"LLM Engineer",
 };
 
-// ── RotatingBadge — spinning SVG text for fresh jobs ─────────
-function RotatingBadge() {
+// ── Badges ────────────────────────────────────────────────────
+function WorkBadge({ t }) {
   const { theme } = useTheme();
+  const map = {
+    Remote: { bg:theme.accentMuted, fg:theme.accentText },
+    Hybrid: { bg:theme.infoMuted,   fg:theme.info },
+    Onsite: { bg:theme.surfaceHigh, fg:theme.textMuted },
+  };
+  const s = map[t] || { bg:theme.surfaceHigh, fg:theme.textMuted };
   return (
-    <svg width={40} height={40} viewBox="0 0 40 40" style={{ display:"block", flexShrink:0 }}>
-      <defs>
-        <path id="rbp-circle" d="M 20,20 m -14,0 a 14,14 0 1,1 28,0 a 14,14 0 1,1 -28,0"/>
-      </defs>
-      <g style={{ animation:"spin 20s linear infinite", transformOrigin:"20px 20px" }}>
-        <text style={{ fontSize:6, fontWeight:700, fill:theme.colorPrimary, letterSpacing:"0.05em" }}>
-          <textPath href="#rbp-circle">NEW · NEW · NEW · </textPath>
-        </text>
-      </g>
-    </svg>
+    <span className="rm-badge" style={{ background:s.bg, color:s.fg }}>
+      {t || "—"}
+    </span>
+  );
+}
+
+function SrcBadge({ s }) {
+  const map = {
+    LinkedIn: { bg:"rgba(59,130,246,0.12)", fg:"#3b82f6" },
+    Indeed:   { bg:"rgba(234,179,8,0.12)",  fg:"#ca8a04" },
+  };
+  const st = map[s] || { bg:"rgba(128,128,128,0.1)", fg:"#888" };
+  return (
+    <span className="rm-badge" style={{ background:st.bg, color:st.fg }}>
+      {s}
+    </span>
+  );
+}
+
+const ATSBadge = ({ score }) => {
+  if (score==null) return null;
+  const bg = score>=80 ? "#dcfce7" : score>=60 ? "#fef9c3" : "#fee2e2";
+  const fg = score>=80 ? "#166534" : score>=60 ? "#854d0e" : "#991b1b";
+  return (
+    <span className="rm-badge" style={{ background:bg, color:fg }}>
+      ATS {score}
+    </span>
+  );
+};
+
+const AppliedFlag = ({ applied, companyBefore }) => applied
+  ? <span title="Already applied to this job" style={{ fontSize:11 }}>🚩</span>
+  : companyBefore ? <span title="Applied to this company before" style={{ fontSize:11, opacity:.5 }}>🏳</span>
+  : null;
+
+// ── IconBtn ───────────────────────────────────────────────────
+function IconBtn({ bg, onClick, title, children, disabled=false, size=28 }) {
+  const { theme } = useTheme();
+  const [hov, setHov] = useState(false);
+  return (
+    <button title={title} disabled={disabled} onClick={onClick}
+      onMouseEnter={() => !disabled && setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        width:size, height:size, borderRadius:"999px",
+        background: disabled ? theme.surfaceHigh : hov ? bg : theme.surfaceHigh,
+        border:`1px solid ${disabled ? theme.border : hov ? bg+"44" : theme.border}`,
+        display:"flex", alignItems:"center", justifyContent:"center",
+        cursor: disabled ? "not-allowed" : "pointer",
+        fontSize:12, color: hov && !disabled ? "white" : theme.textMuted,
+        opacity: disabled ? 0.4 : 1,
+        transition:"all 0.15s ease",
+        flexShrink:0,
+        transform: hov && !disabled ? "scale(1.1)" : "scale(1)",
+      }}>
+      {children}
+    </button>
   );
 }
 
@@ -126,33 +130,34 @@ function ApplyPopup({ job, onClose }) {
       <motion.div
         initial={{ opacity:0, scale:0.95 }} animate={{ opacity:1, scale:1 }}
         exit={{ opacity:0, scale:0.95 }} transition={{ duration:0.18 }}
-        style={{ background:theme.gradPanel, borderRadius:16,
-                 padding:24, width:"100%", maxWidth:420,
+        style={{ background:theme.surface, borderRadius:24,
+                 padding:28, width:"100%", maxWidth:420,
                  maxHeight:"calc(100vh - 32px)", overflowY:"auto",
-                 boxShadow:"0 25px 60px rgba(0,0,0,.6)",
-                 border:`1px solid ${theme.colorBorder}` }}>
+                 boxShadow:theme.shadowXl,
+                 border:`1px solid ${theme.border}` }}>
         <div style={{ display:"flex", justifyContent:"space-between",
                       alignItems:"flex-start", marginBottom:14 }}>
           <div>
-            <div style={{ fontWeight:800, fontSize:15, color:theme.colorPrimary,
+            <div style={{ fontWeight:800, fontSize:15, color:theme.accent,
                           wordBreak:"break-word" }}>{job.company}</div>
-            <div style={{ fontSize:12, color:theme.colorMuted, marginTop:3,
+            <div style={{ fontSize:12, color:theme.textMuted, marginTop:3,
                           wordBreak:"break-word" }}>{job.title}</div>
           </div>
           <button onClick={onClose}
             style={{ background:"transparent", border:"none",
-                     color:theme.colorMuted, cursor:"pointer",
+                     color:theme.textMuted, cursor:"pointer",
                      fontSize:16, padding:4, flexShrink:0 }}>✕</button>
         </div>
-        <div style={{ fontSize:11, color:theme.colorMuted, lineHeight:1.7, marginBottom:18,
-                      background:"rgba(0,0,0,0.3)", padding:"10px 12px", borderRadius:7 }}>
+        <div style={{ fontSize:11, color:theme.textMuted, lineHeight:1.7, marginBottom:18,
+                      background:theme.surfaceHigh, padding:"10px 12px", borderRadius:10,
+                      border:`1px solid ${theme.border}` }}>
           The job portal will open in a new tab. The Chrome extension will autofill your profile.
           If you haven't installed it yet, use the bookmarklet from the extension popup.
         </div>
         <div style={{ display:"flex", justifyContent:"flex-end" }}>
           <a href={job.url} target="_blank" rel="noreferrer"
-            style={{ background:theme.gradAccent, color:"#000", padding:"9px 20px",
-                     borderRadius:7, textDecoration:"none", fontWeight:700,
+            style={{ background:theme.gradAccent, color:"white", padding:"10px 22px",
+                     borderRadius:999, textDecoration:"none", fontWeight:700,
                      fontSize:13, display:"inline-block" }}
             onClick={onClose}>
             Open Application →
@@ -165,7 +170,7 @@ function ApplyPopup({ job, onClose }) {
 
 // ── Main panel ────────────────────────────────────────────────
 export default function JobsPanel({ user, onUserChange }) {
-  const { theme } = useTheme();
+  const { theme, mode } = useTheme();
 
   const [jobs,        setJobs]        = useState([]);
   const [cacheInfo,   setCacheInfo]   = useState(null);
@@ -188,9 +193,10 @@ export default function JobsPanel({ user, onUserChange }) {
   const [expFilter,   setExpFilter]   = useState("");
   const [ageFilter,   setAgeFilter]   = useState("");
   const [applyJob,    setApplyJob]    = useState(null);
+  const [smartSearching, setSmartSearching] = useState(false);
 
   const fileRef = useRef();
-  const mode    = user?.applyMode || "TAILORED";
+  const applyMode = user?.applyMode || "TAILORED";
 
   // Boot
   useEffect(() => {
@@ -216,8 +222,6 @@ export default function JobsPanel({ user, onUserChange }) {
   }, [user]);
 
   // Search
-  const [smartSearching, setSmartSearching] = useState(false);
-
   const handleSearch = useCallback(async (overrideQuery) => {
     const q=(overrideQuery||searchInput).trim(); if(!q) return;
     setScraping(true);
@@ -238,7 +242,7 @@ export default function JobsPanel({ user, onUserChange }) {
     finally { setScraping(false); }
   }, [searchInput,ageFilter]);
 
-  // Smart search (AI extracts best query from resume)
+  // Smart search
   const handleSmartSearch = useCallback(async () => {
     if (!resumeText) {
       alert("Upload your base resume first — smart search extracts the best query from it.");
@@ -289,8 +293,8 @@ export default function JobsPanel({ user, onUserChange }) {
 
   // Generate
   const generate = useCallback(async (job,force=false) => {
-    if (mode==="SIMPLE") { alert("Generation is disabled in Simple Apply mode."); return; }
-    if (!resumeText)     { alert("Upload your base resume first."); return; }
+    if (applyMode==="SIMPLE") { alert("Generation is disabled in Simple Apply mode."); return; }
+    if (!resumeText)          { alert("Upload your base resume first."); return; }
     const key=job.jobId, existing=generated[key];
     if (existing?.html&&existing.html!=="__exists__"&&!force) {
       setSandbox({...existing,company:existing.company||job.company,title:existing.title||job.title});
@@ -309,7 +313,7 @@ export default function JobsPanel({ user, onUserChange }) {
       setRightTab("ats");
     } catch(e) { alert("Generation failed: "+e.message); }
     finally { setLoading(p=>{ const n={...p}; delete n[key]; return n; }); }
-  },[resumeText,generated,mode]);
+  },[resumeText,generated,applyMode]);
 
   const saveSandboxHtml = useCallback(async html => {
     if (!sandbox) return;
@@ -331,17 +335,15 @@ export default function JobsPanel({ user, onUserChange }) {
       await api("/api/applications",{method:"POST",body:JSON.stringify({
         jobId:job.jobId,company:job.company,role:job.title,
         jobUrl:job.url,source:job.source,location:job.location,
-        applyMode:mode,resumeFile:savedPath,
+        applyMode,resumeFile:savedPath,
       })}).catch(()=>{});
       const params=`query=${encodeURIComponent(searchInput)}&ageFilter=${ageFilter}&hideGhost=true&hideFlag=true`;
       const jr=await api(`/api/jobs?${params}`); setJobs(jr.jobs||[]);
     }
-  },[mode,searchInput,ageFilter]);
+  },[applyMode,searchInput,ageFilter]);
 
-  // ── Derived values — all declared before JSX ─────────────────
+  // ── Derived values ───────────────────────────────────────────
   const sources  = [...new Set(jobs.map(j=>j.source).filter(Boolean))];
-  // Square root tolerance: user sets N years → tolerance = round(sqrt(N))
-  // If no expFilter set, fall back to base resume years if available, else show all
   const expYears = expFilter !== "" ? Number(expFilter) : null;
   const expTolerance = expYears !== null ? Math.round(Math.sqrt(expYears || 1)) : null;
 
@@ -349,13 +351,11 @@ export default function JobsPanel({ user, onUserChange }) {
     if (!typeFilter || j.workType === typeFilter) {} else return false;
     if (!catFilter  || j.category === catFilter)  {} else return false;
     if (!srcFilter  || j.source === srcFilter)    {} else return false;
-    // Experience filter — only applied when slider is set
     if (expYears !== null && expTolerance !== null) {
       const jExp = j.yearsExperience;
       if (jExp != null) {
         if (jExp < expYears - expTolerance || jExp > expYears + expTolerance) return false;
       }
-      // If job has no yearsExperience field, let it through (don't filter out unknowns)
     }
     return true;
   });
@@ -366,60 +366,88 @@ export default function JobsPanel({ user, onUserChange }) {
   const showPreview = !!(normalisedPreview &&
     normalisedPreview.toLowerCase() !== searchInput.trim().toLowerCase());
 
-  // Inline styles using theme
   const selStyle = {
-    padding:"4px 7px", borderRadius:"10px", height:"34px",
-    border:`1px solid ${theme.colorBorder}`,
-    background:theme.colorSurface, color:theme.colorText,
-    fontSize:11, maxWidth:145, flex:"0 0 auto", outline:"none",
+    padding:"4px 10px", borderRadius:10, height:36,
+    border:`1px solid ${theme.border}`,
+    background:theme.surface, color:theme.text,
+    fontSize:12, maxWidth:145, flex:"0 0 auto", outline:"none",
   };
 
-  // ── Render ───────────────────────────────────────────────────
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
-                  background:theme.gradBg }}>
+                  background:theme.bg }}>
 
       <AnimatePresence>
         {applyJob && <ApplyPopup job={applyJob} onClose={()=>setApplyJob(null)}/>}
       </AnimatePresence>
 
-      {/* Filter bar */}
-      <div style={{ background:theme.gradPanel, padding:"8px 14px",
-                    display:"flex", alignItems:"center", gap:8, flexShrink:0,
-                    borderBottom:`1px solid ${theme.colorBorder}`,
-                    flexWrap:"wrap", minHeight:44 }}>
-
-        <div style={{ position:"relative", flex:"1 1 160px", minWidth:120 }}>
+      {/* ── Filter bar ── */}
+      <div style={{
+        background: mode==="light" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)",
+        backdropFilter:"blur(16px)", borderBottom:`1px solid ${theme.border}`,
+        padding:"10px 20px", display:"flex", alignItems:"center", gap:10,
+        flexShrink:0, flexWrap:"wrap", position:"sticky", top:56, zIndex:50,
+      }}>
+        {/* Search input */}
+        <div style={{ position:"relative", flex:1, minWidth:200 }}>
+          <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)",
+                         fontSize:14, color:theme.textDim, pointerEvents:"none" }}>🔍</span>
           <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
             onKeyDown={e=>e.key==="Enter"&&handleSearch()}
             placeholder="Search role — e.g. ML Engineer, SWE, Data Scientist…"
-            style={{ flex:"1 1 160px", minWidth:120, padding:"5px 14px", borderRadius:"12px", height:"36px",
-                     border:`1px solid ${theme.colorBorder}`, background:theme.colorSurface,
-                     color:theme.colorText, fontSize:11, outline:"none", width:"100%" }}/>
+            style={{ width:"100%", height:40, paddingLeft:38, paddingRight:14,
+                     borderRadius:999, border:`1px solid ${theme.border}`,
+                     background:theme.surface, color:theme.text,
+                     fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",
+                     boxSizing:"border-box", transition:"border-color 0.15s" }}/>
           {showPreview && (
-            <div style={{ position:"absolute", top:"100%", left:0, marginTop:3,
-              fontSize:10, color:theme.colorMuted,
-              background:theme.gradPanel, border:`1px solid ${theme.colorBorder}`,
-              borderRadius:5, padding:"3px 8px",
-              whiteSpace:"nowrap", zIndex:10 }}>
-              Will search as: <span style={{ color:theme.colorPrimary, fontWeight:700 }}>{normalisedPreview}</span>
+            <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0,
+              fontSize:10, color:theme.textMuted,
+              background:theme.surface, border:`1px solid ${theme.border}`,
+              borderRadius:8, padding:"4px 10px",
+              whiteSpace:"nowrap", zIndex:10, boxShadow:theme.shadowSm }}>
+              Will search as: <span style={{ color:theme.accent, fontWeight:700 }}>{normalisedPreview}</span>
             </div>
           )}
         </div>
 
-        <Btn bg={scraping ? theme.colorDim : theme.colorPrimary}
-          disabled={scraping} onClick={()=>handleSearch()}>
-          {scraping?"⏳ Scraping…":"🔍 Search"}
-        </Btn>
+        <button onClick={()=>handleSearch()} disabled={scraping} className="rm-btn rm-btn-primary"
+          style={{ flexShrink:0 }}>
+          {scraping ? "⏳ Searching…" : "Search"}
+        </button>
+        <button onClick={handleSmartSearch} disabled={smartSearching||scraping}
+          className="rm-btn rm-btn-ghost"
+          style={{ color:theme.accent, borderColor:theme.accent+"44", flexShrink:0 }}>
+          {smartSearching ? "⏳ Analysing…" : "✦ Best Match"}
+        </button>
 
-        <Btn bg={smartSearching ? theme.colorDim : theme.colorAccent}
-          disabled={smartSearching || scraping} onClick={handleSmartSearch}
-          title="AI extracts best search query from your resume">
-          {smartSearching?"⏳ Thinking…":"✨ Best Match"}
-        </Btn>
+        {/* divider */}
+        <div style={{ width:1, height:24, background:theme.border, flexShrink:0 }}/>
 
-        <div style={{ width:1, height:18, background:theme.colorBorder, flexShrink:0 }}/>
+        {/* Resume upload */}
+        <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
+          onChange={handleFile} style={{ display:"none" }}/>
+        <button onClick={()=>!uploading&&fileRef.current.click()}
+          className="rm-btn rm-btn-ghost"
+          style={{
+            flexShrink:0,
+            color: resumeText ? theme.success : uploading ? theme.warning : theme.textMuted,
+            borderColor: resumeText ? theme.success+"44" : theme.border,
+          }}>
+          {uploading ? "⏳ Parsing…"
+            : resumeText ? `✓ ${fileName.length>22 ? fileName.slice(0,22)+"…" : fileName}`
+            : "📄 Upload Resume"}
+        </button>
+        {resumeText&&!uploading&&(
+          <button className="rm-btn rm-btn-ghost rm-btn-sm"
+            style={{ color:theme.danger, borderColor:theme.danger+"33", flexShrink:0 }}
+            onClick={()=>{
+              setResumeText(""); setFileName("");
+              api("/api/base-resume",{method:"POST",body:JSON.stringify({content:"",name:""})});
+            }}>✕</button>
+        )}
 
+        {/* Filters */}
         <select value={ageFilter}  onChange={e=>setAgeFilter(e.target.value)}  style={selStyle}>
           <option value="">Any age</option>
           <option value="1d">Past 24h</option><option value="2d">2 days</option>
@@ -439,193 +467,198 @@ export default function JobsPanel({ user, onUserChange }) {
           <option>Remote</option><option>Hybrid</option><option>Onsite</option>
         </select>
 
+        {/* Exp slider */}
         <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
-          <span style={{ fontSize:10, color:theme.colorMuted, whiteSpace:"nowrap" }}>Exp:</span>
-          <input
-            type="range" min={0} max={30} step={1}
+          <span style={{ fontSize:10, color:theme.textMuted, whiteSpace:"nowrap" }}>Exp:</span>
+          <input type="range" min={0} max={30} step={1}
             value={expFilter===""?15:Number(expFilter)}
             onChange={e=>setExpFilter(e.target.value)}
-            style={{ width:80, accentColor:theme.colorPrimary }}
-            title={expFilter===""?"Not filtering by experience":`${expFilter} yrs ±${Math.round(Math.sqrt(Number(expFilter)||1))}`}
-          />
-          <span style={{ fontSize:10, color:theme.colorPrimary, fontWeight:700,
-                         minWidth:32, whiteSpace:"nowrap" }}>
+            style={{ width:80, accentColor:theme.accent }}
+            title={expFilter===""?"Not filtering by experience":`${expFilter} yrs ±${Math.round(Math.sqrt(Number(expFilter)||1))}`}/>
+          <span style={{ fontSize:10, color:theme.accent, fontWeight:700, minWidth:32, whiteSpace:"nowrap" }}>
             {expFilter===""?"Any":`${expFilter}y ±${Math.round(Math.sqrt(Number(expFilter)||1))}`}
           </span>
           {expFilter!==""&&(
             <button onClick={()=>setExpFilter("")}
-              style={{ background:"none", border:"none", color:theme.colorMuted,
-                       cursor:"pointer", fontSize:11, padding:0 }}>✕</button>
+              style={{ background:"none", border:"none", color:theme.textMuted, cursor:"pointer", fontSize:11, padding:0 }}>✕</button>
           )}
         </div>
 
         <div style={{ flex:1 }}/>
 
-        <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
-          onChange={handleFile} style={{ display:"none" }}/>
-        <Btn bg={resumeText?"#10b981":uploading?"#f59e0b":theme.colorPrimary}
-          onClick={()=>!uploading&&fileRef.current.click()}>
-          {uploading?"⏳ Parsing…":resumeText?`✓ ${fileName.length>22?fileName.slice(0,22)+"…":fileName}`:"📄 Upload Resume"}
-        </Btn>
-        {resumeText&&!uploading&&(
-          <Btn bg="#ef4444" onClick={()=>{
-            setResumeText(""); setFileName("");
-            api("/api/base-resume",{method:"POST",body:JSON.stringify({content:"",name:""})});
-          }}>✕</Btn>
-        )}
+        {/* Status chips */}
         {cacheInfo&&(
-          <span style={{ fontSize:10, color:theme.colorMuted, whiteSpace:"nowrap" }}>
+          <span style={{ fontSize:10, color:theme.textMuted, whiteSpace:"nowrap" }}>
             {timeLeft(cacheInfo.expiresIn)}
           </span>
         )}
         {quota&&(
-          <span style={{ fontSize:10, color:quota.remaining===0?"#ef4444":"#f59e0b",
+          <span style={{ fontSize:10, color:quota.remaining===0?theme.danger:theme.warning,
                          fontWeight:700, whiteSpace:"nowrap" }}>
-            {quota.remaining} refresh{quota.remaining!==1?"es":""} left today
+            {quota.remaining} refresh{quota.remaining!==1?"es":""} left
           </span>
         )}
-        <span style={{ fontSize:10, color:theme.colorDim, whiteSpace:"nowrap" }}>
+        <span style={{ fontSize:10, color:theme.textDim, whiteSpace:"nowrap" }}>
           {filtered.length}/{jobs.length}
         </span>
       </div>
 
-      {/* Three-column body */}
+      {/* ── Three-column body ── */}
       <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
 
-        {/* LEFT — job table */}
+        {/* LEFT — job cards */}
         <div style={{ display:"flex", flexDirection:"column", minWidth:0,
                       transition:"flex 0.2s",
                       flex:sandboxOpen?"0 0 36%":"0 0 58%",
-                      borderRight:`1px solid ${theme.colorBorder}` }}>
-          {jobs.length===0 ? <EmptyState/> : (
-            <div style={{ flex:1, overflowY:"auto" }}>
-              <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                <thead>
-                  <tr style={{ background:`rgba(0,0,0,0.4)`, position:"sticky", top:0, zIndex:5 }}>
-                    {["Company","Role","Cat","Src","Type","Loc","Age",""].map(h=>(
-                      <th key={h} style={{ padding:"8px 10px", textAlign:"left",
-                                          fontSize:10, fontWeight:700,
-                                          color:theme.colorMuted, whiteSpace:"nowrap",
-                                          borderBottom:`1px solid ${theme.colorBorder}`,
-                                          textTransform:"uppercase", letterSpacing:"0.08em" }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* Skeleton shimmer while scraping */}
-                  {scraping && Array.from({length:8}).map((_,i)=>(
-                    <tr key={`sk-${i}`} style={{ borderBottom:`1px solid ${theme.colorBorder}` }}>
-                      {[160,120,60,60,70,80,40,80].map((w,ci)=>(
-                        <td key={ci} style={{ padding:"8px 8px" }}>
-                          <div style={{
-                            height:12, width:w, borderRadius:4,
-                            background:`linear-gradient(90deg, ${theme.shimmer1} 25%, ${theme.shimmer2} 50%, ${theme.shimmer1} 75%)`,
-                            backgroundSize:"200% 100%",
-                            animation:"shimmer 1.4s ease infinite",
-                            animationDelay:`${i*0.1}s`,
-                          }}/>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
+                      borderRight:`1px solid ${theme.border}` }}>
 
-                  {!scraping && filtered.map((job,i)=>{
-                    const key=job.jobId, g=generated[key], done=!!g?.html, st=loading[key];
-                    const isNew = job.postedAt && Date.now()-new Date(job.postedAt).getTime() < 2*3600000;
-                    return (
-                      <tr key={key}
-                        style={{ background:i%2===0 ? theme.gradPanel : "rgba(0,0,0,0.2)",
-                                 borderBottom:`1px solid ${theme.colorBorder}`,
-                                 transition:"background 0.15s" }}
-                        onMouseEnter={e=>{ e.currentTarget.style.background=theme.gradHover; }}
-                        onMouseLeave={e=>{ e.currentTarget.style.background=i%2===0?theme.gradPanel:"rgba(0,0,0,0.2)"; }}>
+          {jobs.length===0 && !scraping ? <EmptyState/> : (
+            <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:8 }}>
 
-                        <td style={{ padding:"7px 10px", fontWeight:700, fontSize:11 }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:3 }}>
-                            {job.url
-                              ? <a href={job.url} target="_blank" rel="noreferrer"
-                                  style={{ background:"none", border:"none",
-                                           color:theme.colorPrimary, fontWeight:700,
-                                           fontSize:11, cursor:"pointer",
-                                           padding:0, textAlign:"left", textDecoration:"none" }}>
-                                  {job.company}
-                                </a>
-                              : <span style={{ color:theme.colorMuted, fontWeight:700, fontSize:11 }}>
-                                  {job.company}
-                                </span>
-                            }
-                            <AppliedFlag applied={job.alreadyApplied} companyBefore={job.companyAppliedBefore}/>
-                          </div>
-                        </td>
+              {/* Skeleton cards while scraping */}
+              {scraping && Array.from({length:8},(_,i)=>(
+                <div key={i} style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                                      borderRadius:16, padding:"14px 18px", margin:"0 16px 8px",
+                                      display:"flex", alignItems:"center", gap:14,
+                                      animationDelay:`${i*0.1}s` }}>
+                  <div className="rm-skeleton" style={{ width:40, height:40, borderRadius:"50%", flexShrink:0 }}/>
+                  <div style={{ flex:1, display:"flex", flexDirection:"column", gap:8 }}>
+                    <div className="rm-skeleton" style={{ height:14, width:"40%", animationDelay:`${i*0.1}s` }}/>
+                    <div className="rm-skeleton" style={{ height:11, width:"60%", animationDelay:`${i*0.1+0.05}s` }}/>
+                    <div className="rm-skeleton" style={{ height:10, width:"30%", animationDelay:`${i*0.1+0.1}s` }}/>
+                  </div>
+                </div>
+              ))}
 
-                        <td style={{ padding:"7px 10px", fontSize:10, color:theme.colorText,
-                                     maxWidth:160, whiteSpace:"normal" }}>{job.title}</td>
+              {/* Job cards */}
+              {!scraping && filtered.map((job) => {
+                const key=job.jobId, g=generated[key], done=!!g?.html, st=loading[key];
+                return (
+                  <div key={key}
+                    onClick={() => {
+                      if (done && g.html !== "__exists__") {
+                        setSandbox({...g,company:g.company||job.company,title:g.title||job.title});
+                        setSandboxOpen(true);
+                        setActiveAts({score:g.atsScore,report:g.atsReport,company:job.company,title:job.title});
+                        setRightTab("ats");
+                      } else if (job.url) {
+                        setApplyJob(job);
+                      }
+                    }}
+                    style={{
+                      background: theme.surface,
+                      border: `1px solid ${theme.border}`,
+                      borderRadius: 16, padding:"14px 18px",
+                      margin:"0 16px 8px",
+                      display:"flex", alignItems:"center", gap:14,
+                      cursor:"pointer",
+                      transition:"all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                      position:"relative",
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.transform = "translateY(-2px) scale(1.005)";
+                      e.currentTarget.style.boxShadow = theme.shadowLg;
+                      e.currentTarget.style.borderColor = theme.borderStrong;
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.transform = "translateY(0) scale(1)";
+                      e.currentTarget.style.boxShadow = "none";
+                      e.currentTarget.style.borderColor = theme.border;
+                    }}>
 
-                        <td style={{ padding:"5px 8px" }}>
-                          <span style={{ background:`rgba(${hexToRgb(theme.colorPrimary)},0.12)`,
-                                         color:theme.colorPrimary, padding:"2px 5px",
-                                         borderRadius:6, fontSize:9, fontWeight:600,
-                                         whiteSpace:"nowrap" }}>
-                            {(job.category||"Other").split(" / ")[0]}
+                    {/* Company avatar */}
+                    <div style={{
+                      width:40, height:40, borderRadius:"50%",
+                      background: companyColor(job.company),
+                      display:"flex", alignItems:"center", justifyContent:"center",
+                      fontWeight:800, fontSize:14, color:"white",
+                      flexShrink:0, letterSpacing:"-0.5px",
+                    }}>
+                      {job.company.slice(0,2).toUpperCase()}
+                    </div>
+
+                    {/* Center info */}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
+                        {job.url ? (
+                          <a href={job.url} target="_blank" rel="noreferrer"
+                            onClick={e=>e.stopPropagation()}
+                            style={{ fontWeight:700, fontSize:14, color:theme.text,
+                                     overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                                     textDecoration:"none", maxWidth:200 }}>
+                            {job.company}
+                          </a>
+                        ) : (
+                          <span style={{ fontWeight:700, fontSize:14, color:theme.text,
+                                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                            {job.company}
                           </span>
-                        </td>
+                        )}
+                        <AppliedFlag applied={job.alreadyApplied} companyBefore={job.companyAppliedBefore}/>
+                      </div>
+                      <div style={{ fontSize:12, color:theme.textMuted, marginBottom:6,
+                                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {job.title}
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+                        <WorkBadge t={job.workType}/>
+                        <SrcBadge s={job.source}/>
+                        {job.category && (
+                          <span className="rm-badge" style={{ background:theme.accentMuted, color:theme.accentText }}>
+                            {(job.category||"").split(" / ")[0]}
+                          </span>
+                        )}
+                        {job.location && (
+                          <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>
+                        )}
+                      </div>
+                    </div>
 
-                        <td style={{ padding:"7px 10px" }}><SrcBadge s={job.source}/></td>
-                        <td style={{ padding:"7px 10px" }}><WorkBadge t={job.workType}/></td>
-                        <td style={{ padding:"7px 10px", fontSize:9, color:theme.colorDim, maxWidth:80 }}>{job.location}</td>
-
-                        <td style={{ padding:"7px 10px", fontSize:9 }}>
-                          <div style={{ display:"flex", alignItems:"center", gap:3 }}>
-                            {isNew && <RotatingBadge/>}
-                            <span style={{ color:"#10b981", fontWeight:600 }}>{ago(job.postedAt)}</span>
-                          </div>
-                        </td>
-
-                        <td style={{ padding:"7px 10px" }}>
-                          <div style={{ display:"flex", gap:3, alignItems:"center" }}>
-                            {mode!=="SIMPLE"&&(
-                              st
-                                ?<span style={{ fontSize:10, color:"#f59e0b" }}>⏳</span>
-                                :<Btn sm bg={done?"#7c3aed":theme.colorPrimary}
-                                    onClick={()=>generate(job,done)}
-                                    title={done?"Regenerate":"Generate resume"}>
-                                  {done?"↻":"✦"}
-                                </Btn>
-                            )}
-                            {done&&!st&&(
-                              <Btn sm bg="#0891b2" onClick={()=>{
-                                const e=generated[key];
-                                setSandbox({...e,company:job.company,title:job.title});
-                                setSandboxOpen(true);
-                                setActiveAts({score:e.atsScore,report:e.atsReport,
-                                  company:job.company,title:job.title});
-                                setRightTab("ats");
-                              }} title="Open in sandbox">👁</Btn>
-                            )}
-                            {done&&!st&&(
-                              <Btn sm bg="#10b981"
-                                onClick={()=>exportAndTrack(job,generated[key].html,job.company)}
-                                title="Export PDF">📥</Btn>
-                            )}
-                            {done&&<ATSBadge score={g.atsScore}/>}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    {/* Right side */}
+                    <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+                      <span style={{ fontSize:11, color:theme.success, fontWeight:600 }}>{ago(job.postedAt)}</span>
+                      {g?.atsScore != null && <ATSBadge score={g.atsScore}/>}
+                      {/* Generate / Regen */}
+                      {applyMode !== "SIMPLE" && (
+                        <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
+                          disabled={!!st}
+                          onClick={e => { e.stopPropagation(); generate(job, done && g.html !== "__exists__"); }}>
+                          {st ? "⏳" : done ? "↻" : "✦"}
+                        </IconBtn>
+                      )}
+                      {/* Sandbox view */}
+                      {done && g.html !== "__exists__" && (
+                        <IconBtn bg={theme.info} title="View in sandbox"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setSandbox({...g,company:g.company||job.company,title:g.title||job.title});
+                            setSandboxOpen(true);
+                            setActiveAts({score:g.atsScore,report:g.atsReport,company:job.company,title:job.title});
+                            setRightTab("ats");
+                          }}>
+                          👁
+                        </IconBtn>
+                      )}
+                      {/* PDF */}
+                      {done && g.html !== "__exists__" && (
+                        <IconBtn bg={theme.success} title="Export PDF"
+                          onClick={e => { e.stopPropagation(); exportAndTrack(job,g.html,job.company); }}>
+                          📥
+                        </IconBtn>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
 
         {/* CENTRE — Sandbox */}
-        {sandboxOpen&&(
+        {sandboxOpen && (
           <div style={{ display:"flex", flexDirection:"column", minWidth:0, flex:1,
                         transition:"flex 0.2s",
-                        borderRight:`1px solid ${theme.colorBorder}` }}>
+                        borderRight:`1px solid ${theme.border}` }}>
             <SandboxPanel entry={sandbox} onClose={()=>setSandboxOpen(false)}
               onSave={saveSandboxHtml} onExport={exportAndTrack}/>
           </div>
@@ -634,31 +667,37 @@ export default function JobsPanel({ user, onUserChange }) {
         {/* RIGHT — ATS + History */}
         <div style={{ display:"flex", flexDirection:"column", minWidth:0, transition:"flex 0.2s",
                       flex:sandboxOpen?"0 0 22%":"0 0 42%" }}>
-          <div style={{ display:"flex", borderBottom:`1px solid ${theme.colorBorder}`,
-                        flexShrink:0, background:`rgba(0,0,0,0.3)` }}>
-            {[["ats","📊 ATS"],["history",`🕓 History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl])=>(
-              <button key={id}
-                style={{ position:"relative", background:"transparent",
-                         color:rightTab===id ? theme.colorPrimary : theme.colorMuted,
-                         border:"none", padding:"6px 14px", cursor:"pointer",
-                         fontSize:11, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden" }}
-                onClick={()=>setRightTab(id)}>
+          {/* Tabs */}
+          <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
+                        padding:"0 14px", flexShrink:0 }}>
+            {[
+              ["ats", "ATS Report"],
+              ["history", `History${genCount>0?` (${genCount})`:""}`],
+            ].map(([id,lbl]) => (
+              <button key={id} onClick={()=>setRightTab(id)}
+                style={{ padding:"10px 16px", border:"none", background:"transparent",
+                         fontWeight: rightTab===id ? 700 : 500, fontSize:12,
+                         color: rightTab===id ? theme.accent : theme.textMuted,
+                         cursor:"pointer", position:"relative",
+                         transition:"color 0.15s" }}>
                 {lbl}
                 {rightTab===id && (
-                  <motion.div layoutId="jobs-tab-indicator"
-                    style={{ position:"absolute", bottom:0, left:"10%", right:"10%",
-                             height:2, background:theme.colorPrimary, borderRadius:1 }}/>
+                  <motion.div layoutId="right-tab-underline"
+                    style={{ position:"absolute", bottom:-1, left:0, right:0,
+                             height:2, background:theme.accent, borderRadius:999 }}/>
                 )}
               </button>
             ))}
           </div>
           <div style={{ flex:1, overflowY:"auto" }}>
-            {rightTab==="ats"&&<ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
-            {rightTab==="history"&&(
+            {rightTab==="ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
+            {rightTab==="history" && (
               <HistoryList generated={generated}
-                onOpen={e=>{setSandbox(e);setSandboxOpen(true);
+                onOpen={e=>{
+                  setSandbox(e); setSandboxOpen(true);
                   setActiveAts({score:e.atsScore,report:e.atsReport,company:e.company,title:e.title||e.role});
-                  setRightTab("ats");}}
+                  setRightTab("ats");
+                }}
                 onExport={exportAndTrack}/>
             )}
           </div>
@@ -672,10 +711,10 @@ function EmptyState() {
   const { theme } = useTheme();
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
-                  justifyContent:"center", color:theme.colorDim, gap:12, padding:40 }}>
+                  justifyContent:"center", color:theme.textDim, gap:16, padding:40 }}>
       <div style={{ fontSize:56 }}>🔍</div>
-      <div style={{ fontWeight:800, color:theme.colorMuted, fontSize:16 }}>Search for a role above</div>
-      <div style={{ fontSize:11, textAlign:"center", color:theme.colorDim,
+      <div style={{ fontWeight:800, color:theme.textMuted, fontSize:16 }}>Search for a role above</div>
+      <div style={{ fontSize:12, textAlign:"center", color:theme.textDim,
                     maxWidth:320, lineHeight:1.8 }}>
         LinkedIn + Indeed · full-time only · deduplicated · ghost jobs filtered
       </div>
@@ -687,54 +726,40 @@ function HistoryList({ generated, onOpen, onExport }) {
   const { theme } = useTheme();
   const entries = Object.entries(generated).filter(([,v])=>v?.html&&v.html!=="__exists__");
   if (!entries.length) return (
-    <div style={{ padding:24, color:theme.colorDim, fontSize:12, textAlign:"center" }}>
+    <div style={{ padding:24, color:theme.textDim, fontSize:12, textAlign:"center" }}>
       No resumes generated yet.
     </div>
   );
-  return entries.map(([jid,v])=>(
-    <div key={jid} style={{ padding:"9px 12px", borderBottom:`1px solid ${theme.colorBorder}`,
-                             display:"flex", alignItems:"center", gap:7 }}>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontWeight:700, fontSize:12, color:theme.colorText,
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-          {v.company}
-        </div>
-        <div style={{ fontSize:10, color:theme.colorMuted, overflow:"hidden",
-                      textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:2 }}>
-          {v.title||v.role}
-        </div>
-        <ATSBadge score={v.atsScore}/>
-      </div>
-      <Btn sm bg="#0891b2" onClick={()=>onOpen(v)}>👁</Btn>
-      <Btn sm bg="#10b981" onClick={()=>onExport(null,v.html,v.company)}>📥</Btn>
-    </div>
-  ));
-}
-
-function Btn({ bg, disabled=false, sm=false, onClick, children, title }) {
-  const { theme } = useTheme();
-  const [hov, setHov] = useState(false);
   return (
-    <button
-      style={{ position:"relative", overflow:"hidden",
-               background: disabled ? theme.colorDim : (hov ? "transparent" : bg),
-               color: disabled ? theme.colorMuted : "#fff",
-               border: `1px solid ${disabled ? theme.colorDim : bg}`,
-               borderRadius: "999px",
-               padding: sm ? "3px 7px" : "5px 11px",
-               cursor: disabled ? "not-allowed" : "pointer",
-               fontSize: sm ? 10 : 11, fontWeight: 700,
-               whiteSpace: "nowrap", opacity: disabled ? 0.5 : 1,
-               transition: "color 0.2s" }}
-      disabled={disabled} onClick={onClick} title={title}
-      onMouseEnter={()=>!disabled&&setHov(true)}
-      onMouseLeave={()=>setHov(false)}>
-      <span style={{
-        position:"absolute", inset:0, background:bg,
-        transform: hov&&!disabled ? "translateY(0)" : "translateY(100%)",
-        transition: "transform 0.2s ease", zIndex:0,
-      }}/>
-      <span style={{ position:"relative", zIndex:1 }}>{children}</span>
-    </button>
+    <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
+      {entries.map(([jid,v]) => (
+        <div key={jid} style={{ padding:"12px 16px", borderBottom:`1px solid ${theme.border}`,
+                                 display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{
+            width:32, height:32, borderRadius:"50%",
+            background: companyColor(v.company||""),
+            display:"flex", alignItems:"center", justifyContent:"center",
+            fontWeight:800, fontSize:11, color:"white", flexShrink:0,
+          }}>
+            {(v.company||"?").slice(0,2).toUpperCase()}
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontWeight:700, fontSize:12, color:theme.text,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {v.company}
+            </div>
+            <div style={{ fontSize:10, color:theme.textMuted, overflow:"hidden",
+                          textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:3 }}>
+              {v.title||v.role}
+            </div>
+            <ATSBadge score={v.atsScore}/>
+          </div>
+          <div style={{ display:"flex", gap:5, flexShrink:0 }}>
+            <IconBtn bg={theme.info} size={26} title="Open in sandbox" onClick={()=>onOpen(v)}>👁</IconBtn>
+            <IconBtn bg={theme.success} size={26} title="Export PDF" onClick={()=>onExport(null,v.html,v.company)}>📥</IconBtn>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

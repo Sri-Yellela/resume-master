@@ -1,13 +1,8 @@
-// REVAMP v2 — DatabasePanel.jsx (shadcn UI integrated)
-// Added: date column, animated calendar picker, search, sort on all columns
+// client/src/panels/DatabasePanel.jsx — Design System v4
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Badge } from "../components/ui/badge";
-import { ScrollArea } from "../components/ui/scroll-area";
 
 // ── Calendar component ────────────────────────────────────────
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -59,26 +54,26 @@ function Calendar({ value, onChange, onClose, theme }) {
   };
 
   return (
-    <div style={{ background:theme.gradPanel, border:`1px solid ${theme.colorBorder}`,
-                  borderRadius:12, padding:16, width:260,
-                  boxShadow:"0 20px 60px rgba(0,0,0,.6)",
+    <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                  borderRadius:16, padding:16, width:260,
+                  boxShadow:theme.shadowLg,
                   position:"absolute", zIndex:300,
                   top:"calc(100% + 6px)", left:0,
                   maxHeight:"320px", overflowY:"auto" }}>
       <div style={{ display:"flex", alignItems:"center",
                     justifyContent:"space-between", marginBottom:12 }}>
         <button style={{ background:"transparent",
-                         border:`1px solid ${theme.colorBorder}`,
-                         color:theme.colorMuted, borderRadius:"999px", width:28, height:28,
+                         border:`1px solid ${theme.border}`,
+                         color:theme.textMuted, borderRadius:"999px", width:28, height:28,
                          cursor:"pointer", fontSize:16,
                          display:"flex", alignItems:"center", justifyContent:"center" }}
           onClick={prev}>‹</button>
-        <span style={{ fontWeight:700, fontSize:13, color:theme.colorText }}>
+        <span style={{ fontWeight:700, fontSize:13, color:theme.text }}>
           {MONTHS[view.month]} {view.year}
         </span>
         <button style={{ background:"transparent",
-                         border:`1px solid ${theme.colorBorder}`,
-                         color:theme.colorMuted, borderRadius:"999px", width:28, height:28,
+                         border:`1px solid ${theme.border}`,
+                         color:theme.textMuted, borderRadius:"999px", width:28, height:28,
                          cursor:"pointer", fontSize:16,
                          display:"flex", alignItems:"center", justifyContent:"center" }}
           onClick={next}>›</button>
@@ -86,7 +81,7 @@ function Calendar({ value, onChange, onClose, theme }) {
       <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
         {DAYS.map(d => (
           <div key={d} style={{ textAlign:"center", fontSize:9, fontWeight:700,
-                                color:theme.colorMuted, padding:"4px 0",
+                                color:theme.textMuted, padding:"4px 0",
                                 textTransform:"uppercase" }}>
             {d}
           </div>
@@ -99,9 +94,9 @@ function Calendar({ value, onChange, onClose, theme }) {
               style={{
                 textAlign:"center", fontSize:11, padding:"6px 2px", borderRadius:6,
                 cursor:day ? "pointer" : "default", userSelect:"none",
-                color:sel ? "#fff" : tod ? theme.colorPrimary : day ? theme.colorText : "transparent",
-                background:sel ? theme.colorPrimary : "transparent",
-                border:tod && !sel ? `1px solid ${theme.colorPrimary}` : "1px solid transparent",
+                color:sel ? "#fff" : tod ? theme.accent : day ? theme.text : "transparent",
+                background:sel ? theme.accent : "transparent",
+                border:tod && !sel ? `1px solid ${theme.accent}` : "1px solid transparent",
                 fontWeight:sel || tod ? 700 : 400,
                 position:"relative",
               }}
@@ -111,19 +106,19 @@ function Calendar({ value, onChange, onClose, theme }) {
                 <span style={{ position:"absolute", bottom:1, left:"50%",
                                transform:"translateX(-50%)",
                                width:3, height:3, borderRadius:"50%",
-                               background:theme.colorAccent, display:"block" }}/>
+                               background:theme.accent, display:"block" }}/>
               )}
             </div>
           );
         })}
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", marginTop:10,
-                    paddingTop:10, borderTop:`1px solid ${theme.colorBorder}` }}>
+                    paddingTop:10, borderTop:`1px solid ${theme.border}` }}>
         <button style={{ background:"transparent", border:"none",
-                         color:theme.colorMuted, fontSize:10, cursor:"pointer", fontWeight:600 }}
+                         color:theme.textMuted, fontSize:10, cursor:"pointer", fontWeight:600 }}
           onClick={() => { onChange(""); onClose(); }}>Clear date</button>
         <button style={{ background:"transparent", border:"none",
-                         color:theme.colorMuted, fontSize:10, cursor:"pointer", fontWeight:600 }}
+                         color:theme.textMuted, fontSize:10, cursor:"pointer", fontWeight:600 }}
           onClick={() => { onChange(new Date().toISOString().slice(0,10)); onClose(); }}>
           Today
         </button>
@@ -169,9 +164,16 @@ function isoToUnix(iso) {
   return Math.floor(new Date(iso).getTime() / 1000);
 }
 
+function hexToRgb(hex) {
+  const h = hex.replace("#","");
+  const n = parseInt(h.length === 3
+    ? h.split("").map(c => c+c).join("") : h, 16);
+  return `${(n>>16)&255},${(n>>8)&255},${n&255}`;
+}
+
 // ── Main panel ────────────────────────────────────────────────
 export function DatabasePanel({ user }) {
-  const { theme } = useTheme();
+  const { theme, mode } = useTheme();
   const [activeSheet,  setActiveSheet]  = useState("applications");
   const [apps,         setApps]         = useState([]);
   const [resumes,      setResumes]      = useState([]);
@@ -324,70 +326,76 @@ export function DatabasePanel({ user }) {
   const isApps      = activeSheet === "applications";
   const displayRows = filterRows(rows, cols);
 
-  const SHEETS = [["applications","📋 Job Applications"],["resumes","📄 Resume History"]];
+  const SHEETS = [["applications","Job Applications"],["resumes","Resume History"]];
 
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
-                  overflow:"hidden", background:theme.gradBg }}>
+                  overflow:"hidden", background:theme.bg }}>
 
       {/* ── Header ── */}
-      <div style={{ background:theme.gradPanel,
-                    borderBottom:`1px solid ${theme.colorBorder}`,
-                    display:"flex", alignItems:"stretch", flexShrink:0 }}>
+      <div style={{
+        background: mode==="light" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)",
+        backdropFilter:"blur(16px)",
+        borderBottom:`1px solid ${theme.border}`,
+        display:"flex", alignItems:"stretch", flexShrink:0,
+        padding:"0 14px",
+      }}>
+        {/* Tab switcher — underline style */}
         <div style={{ display:"flex" }}>
           {SHEETS.map(([id, lbl]) => (
             <button key={id}
-              style={{ background:activeSheet===id ? theme.colorPrimary : "transparent",
-                       color:activeSheet===id ? "#000" : theme.colorMuted,
-                       border:"none",
-                       borderRadius:"999px", margin:"6px 4px",
-                       padding:"6px 18px", cursor:"pointer", fontSize:12, fontWeight:700,
-                       display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap",
-                       transition:"background 0.2s, color 0.2s" }}
+              style={{ background:"transparent",
+                       color: activeSheet===id ? theme.accent : theme.textMuted,
+                       border:"none", padding:"12px 16px",
+                       cursor:"pointer", fontSize:13,
+                       fontWeight: activeSheet===id ? 700 : 500,
+                       position:"relative", transition:"color 0.15s",
+                       display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" }}
               onClick={() => { setActiveSheet(id); setSearch(""); setFilterDate(""); }}>
               {lbl}
-              <span style={{ background:activeSheet===id ? "rgba(0,0,0,0.2)" : theme.colorSurface,
-                             color:activeSheet===id ? "#000" : theme.colorMuted,
+              <span style={{ background:activeSheet===id ? theme.accentMuted : theme.surfaceHigh,
+                             color:activeSheet===id ? theme.accentText : theme.textMuted,
                              fontSize:10, fontWeight:700,
-                             padding:"1px 6px", borderRadius:8 }}>
+                             padding:"1px 7px", borderRadius:999 }}>
                 {id === "applications" ? apps.length : resumes.length}
               </span>
+              {activeSheet===id && (
+                <motion.div layoutId="db-tab-underline"
+                  style={{ position:"absolute", bottom:0, left:0, right:0,
+                           height:2, background:theme.accent, borderRadius:999 }}/>
+              )}
             </button>
           ))}
         </div>
         <div style={{ flex:1 }}/>
-        <button style={{ background:"transparent", color:theme.colorMuted, border:"none",
-                         padding:"8px 14px", cursor:"pointer", fontSize:11, fontWeight:700,
-                         borderLeft:`1px solid ${theme.colorBorder}`, borderRadius:0 }}
-          onClick={load} disabled={loading}>
-          {loading ? "⏳" : "↻"} Refresh
-        </button>
-        <button style={{ background:theme.colorPrimary, color:"#000", border:"none",
-                         padding:"8px 16px", cursor:"pointer", fontSize:11, fontWeight:700,
-                         borderLeft:`1px solid ${theme.colorBorder}`,
-                         margin:"4px 6px", borderRadius:"999px" }}
-          onClick={exportExcel}>
-          📥 Export Excel
-        </button>
+        <div style={{ display:"flex", alignItems:"center", gap:8, paddingRight:4 }}>
+          <button className="rm-btn rm-btn-ghost rm-btn-sm"
+            onClick={load} disabled={loading}>
+            {loading ? "⏳" : "↻"} Refresh
+          </button>
+          <button className="rm-btn rm-btn-primary rm-btn-sm" onClick={exportExcel}>
+            📥 Export Excel
+          </button>
+        </div>
       </div>
 
       {/* ── Toolbar ── */}
-      <div style={{ background:theme.gradPanel, padding:"8px 12px",
-                    display:"flex", alignItems:"center", gap:8,
-                    borderBottom:`1px solid ${theme.colorBorder}`,
+      <div style={{ background:theme.surface, padding:"10px 16px",
+                    display:"flex", alignItems:"center", gap:10,
+                    borderBottom:`1px solid ${theme.border}`,
                     flexShrink:0, flexWrap:"wrap" }}>
+        {/* Search */}
         <div style={{ position:"relative", display:"flex", alignItems:"center",
                       flex:"0 0 260px" }}>
-          <span style={{ position:"absolute", left:8, fontSize:12, pointerEvents:"none" }}>🔍</span>
+          <span style={{ position:"absolute", left:12, fontSize:13,
+                         pointerEvents:"none", color:theme.textDim }}>🔍</span>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder={`Search ${isApps ? "applications" : "resumes"}…`}
-            style={{ width:"100%", padding:"6px 28px",
-                     borderRadius:"999px", border:`1px solid ${theme.colorBorder}`,
-                     background:theme.colorSurface, color:theme.colorText,
-                     fontSize:11, outline:"none" }}/>
+            className="rm-input"
+            style={{ paddingLeft:36, borderRadius:999 }}/>
           {search && (
-            <button style={{ position:"absolute", right:8, background:"transparent",
-                             border:"none", color:theme.colorMuted, cursor:"pointer",
+            <button style={{ position:"absolute", right:12, background:"transparent",
+                             border:"none", color:theme.textMuted, cursor:"pointer",
                              fontSize:11 }}
               onClick={() => setSearch("")}>✕</button>
           )}
@@ -395,17 +403,17 @@ export function DatabasePanel({ user }) {
 
         {isApps && (
           <div ref={calRef} style={{ position:"relative" }}>
-            <button style={{ background:filterDate ? `rgba(${hexToRgb(theme.colorPrimary)},0.15)` : theme.colorSurface,
-                             color:filterDate ? theme.colorPrimary : theme.colorMuted,
-                             border:`1px solid ${filterDate ? theme.colorPrimary : theme.colorBorder}`,
-                             borderRadius:"999px", padding:"5px 12px", cursor:"pointer", fontSize:11,
-                             fontWeight:600, display:"flex", alignItems:"center",
-                             gap:6, whiteSpace:"nowrap" }}
+            <button
+              style={{ display:"flex", alignItems:"center", gap:6,
+                       background:filterDate ? theme.accentMuted : theme.surfaceHigh,
+                       color:filterDate ? theme.accentText : theme.textMuted,
+                       border:`1px solid ${filterDate ? theme.accent+"44" : theme.border}`,
+                       borderRadius:999, padding:"6px 14px", cursor:"pointer", fontSize:12,
+                       fontWeight:600, whiteSpace:"nowrap" }}
               onClick={() => setCalFilter(o => !o)}>
               📅 {filterDate ? `Date: ${fmtDate(filterDate)}` : "Filter by date"}
               {filterDate && (
-                <span style={{ marginLeft:4, color:theme.colorMuted,
-                               fontWeight:700, fontSize:10 }}
+                <span style={{ marginLeft:4, color:theme.textMuted, fontWeight:700, fontSize:10 }}
                   onClick={e => { e.stopPropagation(); setFilterDate(""); }}>✕</span>
               )}
             </button>
@@ -427,7 +435,7 @@ export function DatabasePanel({ user }) {
         )}
 
         <div style={{ flex:1 }}/>
-        <span style={{ fontSize:10, color:theme.colorMuted, whiteSpace:"nowrap" }}>
+        <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap" }}>
           {displayRows.length} of {rows.length} row{rows.length !== 1 ? "s" : ""}
         </span>
       </div>
@@ -435,7 +443,7 @@ export function DatabasePanel({ user }) {
       {/* ── Table ── */}
       {loading ? (
         <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
-                      color:theme.colorMuted, fontSize:13 }}>
+                      color:theme.textMuted, fontSize:13 }}>
           Loading data…
         </div>
       ) : displayRows.length === 0 ? (
@@ -444,39 +452,39 @@ export function DatabasePanel({ user }) {
         <div style={{ flex:1, overflow:"auto" }}>
           <table style={{ borderCollapse:"collapse", width:"100%", tableLayout:"fixed" }}>
             <thead>
-              <tr style={{ background:theme.gradPanel,
+              <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}`,
                            position:"sticky", top:0, zIndex:5 }}>
-                <th style={{ padding:"7px 10px", textAlign:"left", fontSize:10,
-                             fontWeight:700, color:theme.colorMuted,
-                             textTransform:"uppercase", letterSpacing:"0.06em",
-                             borderBottom:`1px solid ${theme.colorBorder}`,
+                <th style={{ padding:"10px 14px", textAlign:"left", fontSize:10,
+                             fontWeight:700, color:theme.textDim,
+                             textTransform:"uppercase", letterSpacing:"0.08em",
+                             borderBottom:`1px solid ${theme.border}`,
                              whiteSpace:"nowrap", overflow:"hidden",
                              userSelect:"none", width:36 }}>#</th>
                 {cols.map(c => (
                   <th key={c.key}
-                    style={{ padding:"7px 10px", textAlign:"left", fontSize:10,
-                             fontWeight:700, color:theme.colorMuted,
-                             textTransform:"uppercase", letterSpacing:"0.06em",
-                             borderBottom:`1px solid ${theme.colorBorder}`,
+                    style={{ padding:"10px 14px", textAlign:"left", fontSize:10,
+                             fontWeight:700, color:theme.textDim,
+                             textTransform:"uppercase", letterSpacing:"0.08em",
+                             borderBottom:`1px solid ${theme.border}`,
                              whiteSpace:"nowrap", overflow:"hidden",
                              userSelect:"none", width:c.width, minWidth:c.width,
                              cursor:c.sortable ? "pointer" : "default" }}
                     onClick={() => c.sortable && toggleSort(c.key)}>
                     <div style={{ display:"flex", alignItems:"center", gap:4 }}>
                       {c.label}
-                      {c.editable && <span style={{ fontSize:9, color:theme.colorDim }}>✎</span>}
+                      {c.editable && <span style={{ fontSize:9, color:theme.textDim }}>✎</span>}
                       {c.sortable && (
                         <span style={{ fontSize:9,
-                          color:sortCol===c.key ? theme.colorPrimary : theme.colorDim }}>
+                          color:sortCol===c.key ? theme.accent : theme.textDim }}>
                           {sortCol===c.key ? (sortDir==="asc" ? "▲" : "▼") : "⇅"}
                         </span>
                       )}
                     </div>
                   </th>
                 ))}
-                <th style={{ padding:"7px 10px", textAlign:"left", fontSize:10,
-                             fontWeight:700, color:theme.colorMuted,
-                             borderBottom:`1px solid ${theme.colorBorder}`,
+                <th style={{ padding:"10px 14px", textAlign:"left", fontSize:10,
+                             fontWeight:700, color:theme.textDim,
+                             borderBottom:`1px solid ${theme.border}`,
                              width:50 }}/>
               </tr>
             </thead>
@@ -487,18 +495,14 @@ export function DatabasePanel({ user }) {
                 const isSaving = saving[rowId];
                 return (
                   <tr key={rowId || i} id={`row-${rowId}`}
+                    className="rm-table-row"
                     style={{
-                      background:isFlash
-                        ? `rgba(${hexToRgb(theme.colorPrimary)},0.15)`
-                        : i%2===0 ? "transparent" : "rgba(0,0,0,0.15)",
-                      borderBottom:`1px solid ${theme.colorBorder}`,
-                      outline:isFlash ? `2px solid ${theme.colorPrimary}` : "none",
-                      transition:"background 0.3s, transform 0.15s",
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.01)"; e.currentTarget.style.zIndex = "1"; e.currentTarget.style.position = "relative"; }}
-                    onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.zIndex = ""; }}>
-                    <td style={{ padding:"5px 10px", fontSize:11,
-                                 color:theme.colorDim, width:36 }}>{i+1}</td>
+                      background:isFlash ? `${theme.accent}22` : "transparent",
+                      borderBottom:`1px solid ${theme.border}`,
+                      outline:isFlash ? `2px solid ${theme.accent}` : "none",
+                    }}>
+                    <td style={{ padding:"12px 14px", fontSize:11,
+                                 color:theme.textDim, width:36 }}>{i+1}</td>
 
                     {cols.map(c => {
                       const isEditing = editCell?.rowId===rowId && editCell?.col===c.key;
@@ -510,21 +514,21 @@ export function DatabasePanel({ user }) {
                           : (typeof raw === "string" && raw.length >= 10 ? raw.slice(0,10) : "");
                         const isCalOpen = calCell?.rowId === rowId;
                         return (
-                          <td key={c.key} style={{ padding:"5px 10px", fontSize:11,
+                          <td key={c.key} style={{ padding:"12px 14px", fontSize:12,
                                                    width:c.width, position:"relative",
-                                                   color:theme.colorText }}>
+                                                   color:theme.text }}>
                             <div ref={isCalOpen ? calRef : null} style={{ position:"relative" }}>
                               <button
                                 style={{ background:"transparent",
-                                         border:`1px ${isoVal ? "solid" : "dashed"} ${isoVal ? theme.colorPrimary : theme.colorBorder}`,
-                                         borderRadius:5, color:isoVal ? theme.colorAccent : theme.colorDim,
-                                         fontSize:11, padding:"3px 8px",
+                                         border:`1px ${isoVal ? "solid" : "dashed"} ${isoVal ? theme.accent+"66" : theme.border}`,
+                                         borderRadius:8, color:isoVal ? theme.accent : theme.textDim,
+                                         fontSize:11, padding:"3px 10px",
                                          cursor:"pointer", whiteSpace:"nowrap" }}
                                 onClick={() => setCalCell(isCalOpen ? null : { rowId })}>
                                 {isoVal ? fmtDate(isoVal) : (
-                                  <span style={{ color:theme.colorDim }}>+ Set date</span>
+                                  <span style={{ color:theme.textDim }}>+ Set date</span>
                                 )}
-                                {isSaving && <span style={{ color:"#f59e0b", marginLeft:4 }}>⏳</span>}
+                                {isSaving && <span style={{ color:theme.warning, marginLeft:4 }}>⏳</span>}
                               </button>
                               <AnimatePresence>
                                 {isCalOpen && (
@@ -546,11 +550,11 @@ export function DatabasePanel({ user }) {
                       }
 
                       if (c.key === "job_url") return (
-                        <td key={c.key} style={{ padding:"5px 10px", fontSize:11,
-                                                  width:c.width, color:theme.colorText }}>
+                        <td key={c.key} style={{ padding:"12px 14px", fontSize:12,
+                                                  width:c.width, color:theme.text }}>
                           {raw ? (
                             <a href={raw} target="_blank" rel="noreferrer"
-                              style={{ color:theme.colorPrimary, fontSize:10,
+                              style={{ color:theme.accent, fontSize:11,
                                        textDecoration:"none" }}>
                               ↗ Open
                             </a>
@@ -559,13 +563,12 @@ export function DatabasePanel({ user }) {
                       );
 
                       if (c.key === "ats_score") return (
-                        <td key={c.key} style={{ padding:"5px 10px", fontSize:11,
-                                                  width:c.width, color:theme.colorText }}>
+                        <td key={c.key} style={{ padding:"12px 14px", fontSize:12,
+                                                  width:c.width, color:theme.text }}>
                           {raw != null && raw !== "" ? (
-                            <span style={{
-                              background:raw>=80?"#dcfce7":raw>=60?"#fef9c3":"#fee2e2",
-                              color:raw>=80?"#166534":raw>=60?"#854d0e":"#991b1b",
-                              padding:"2px 7px", borderRadius:8, fontSize:10, fontWeight:700,
+                            <span className="rm-badge" style={{
+                              background:raw>=80 ? theme.successMuted : raw>=60 ? theme.warningMuted : theme.dangerMuted,
+                              color:raw>=80 ? theme.success : raw>=60 ? theme.warning : theme.danger,
                             }}>{raw}</span>
                           ) : "—"}
                         </td>
@@ -574,11 +577,11 @@ export function DatabasePanel({ user }) {
                       const display = c.key === "applied_at" ? fmtDate(raw) : raw;
                       return (
                         <td key={c.key}
-                          style={{ padding:"5px 10px", fontSize:11,
-                                   color:theme.colorText, width:c.width, maxWidth:c.width,
+                          style={{ padding:"12px 14px", fontSize:12,
+                                   color:theme.text, width:c.width, maxWidth:c.width,
                                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
                                    cursor:(c.editable && isApps) ? "pointer" : "default",
-                                   background:isEditing ? theme.colorSurface : undefined }}
+                                   background:isEditing ? theme.surfaceHigh : undefined }}
                           onClick={() => c.editable && !isEditing && isApps &&
                                         startEdit(rowId, c.key, raw)}>
                           {isEditing ? (
@@ -589,28 +592,31 @@ export function DatabasePanel({ user }) {
                                 if (e.key==="Enter")  commitEdit(row);
                                 if (e.key==="Escape") cancelEdit();
                               }}
-                              style={{ width:"100%", background:theme.colorSurface,
-                                       color:theme.colorText,
-                                       border:`1px solid ${theme.colorPrimary}`,
-                                       borderRadius:4, padding:"3px 6px",
-                                       fontSize:11, outline:"none", boxSizing:"border-box" }}/>
+                              style={{ width:"100%", background:theme.surface,
+                                       color:theme.text,
+                                       border:`1px solid ${theme.accent}`,
+                                       borderRadius:6, padding:"3px 8px",
+                                       fontSize:12, outline:"none", boxSizing:"border-box" }}/>
                           ) : (
                             <span style={{ display:"block", overflow:"hidden",
                                            textOverflow:"ellipsis", whiteSpace:"nowrap" }}
                               title={String(display || "")}>
-                              {display || <span style={{ color:theme.colorDim }}>—</span>}
-                              {isSaving && <span style={{ color:"#f59e0b", marginLeft:4 }}>⏳</span>}
+                              {display || <span style={{ color:theme.textDim }}>—</span>}
+                              {isSaving && <span style={{ color:theme.warning, marginLeft:4 }}>⏳</span>}
                             </span>
                           )}
                         </td>
                       );
                     })}
 
-                    <td style={{ padding:"5px 10px", fontSize:11,
-                                 color:theme.colorText, width:50 }}>
+                    <td style={{ padding:"12px 14px", fontSize:12,
+                                 color:theme.text, width:50 }}>
                       <button style={{ background:"transparent", border:"none",
-                                       color:theme.colorDim, cursor:"pointer",
-                                       fontSize:12, padding:"2px 6px", borderRadius:4 }}
+                                       color:theme.textDim, cursor:"pointer",
+                                       fontSize:12, padding:"2px 6px", borderRadius:4,
+                                       transition:"color 0.15s" }}
+                        onMouseEnter={e => { e.currentTarget.style.color = theme.danger; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = theme.textDim; }}
                         onClick={() => isApps ? deleteApp(rowId) : deleteResume(rowId)}
                         title="Delete row">✕</button>
                     </td>
@@ -625,24 +631,17 @@ export function DatabasePanel({ user }) {
   );
 }
 
-function hexToRgb(hex) {
-  const h = hex.replace("#","");
-  const n = parseInt(h.length === 3
-    ? h.split("").map(c => c+c).join("") : h, 16);
-  return `${(n>>16)&255},${(n>>8)&255},${n&255}`;
-}
-
 function EmptyState({ sheet, hasFilter, theme }) {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
                   alignItems:"center", justifyContent:"center",
-                  color:theme.colorDim, gap:12, padding:40 }}>
+                  color:theme.textDim, gap:12, padding:40 }}>
       <div style={{ fontSize:40 }}>{sheet === "applications" ? "📋" : "📄"}</div>
-      <div style={{ fontWeight:700, color:theme.colorMuted, fontSize:14 }}>
+      <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>
         {hasFilter ? "No rows match your filter" :
           sheet === "applications" ? "No applications tracked yet" : "No resumes generated yet"}
       </div>
-      <div style={{ fontSize:11, color:theme.colorDim,
+      <div style={{ fontSize:12, color:theme.textDim,
                     textAlign:"center", maxWidth:300, lineHeight:1.8 }}>
         {hasFilter ? "Try clearing the search or date filter." :
           sheet === "applications"

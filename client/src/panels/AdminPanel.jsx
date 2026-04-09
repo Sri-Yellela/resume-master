@@ -1,25 +1,8 @@
-// REVAMP v2 — AdminPanel.jsx (shadcn UI integrated)
-// Added: DB backup, restore, migration status
+// client/src/panels/AdminPanel.jsx — Design System v4
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { Badge } from "../components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Separator } from "../components/ui/separator";
-import { ScrollArea } from "../components/ui/scroll-area";
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel,
-  AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "../components/ui/alert-dialog";
-import {
-  Table, TableBody, TableCell, TableHead,
-  TableHeader, TableRow,
-} from "../components/ui/table";
 
 export function AdminPanel() {
   const { theme } = useTheme();
@@ -29,7 +12,7 @@ export function AdminPanel() {
   const [status,   setStatus]   = useState("");
   const [bStatus,  setBStatus]  = useState("");
   const [backing,  setBacking]  = useState(false);
-  const [section,  setSection]  = useState("users"); // users | backups
+  const [section,  setSection]  = useState("users");
 
   useEffect(() => { loadUsers(); loadBackups(); }, []);
 
@@ -86,28 +69,40 @@ export function AdminPanel() {
     ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : `${(bytes / 1024).toFixed(0)} KB`;
 
-  const SECTIONS = [["users","👥 Users"],["backups","💾 Backups"]];
+  const SECTIONS = [["users","Users"],["backups","Backups"]];
+
+  const thStyle = {
+    padding:"10px 14px", textAlign:"left", fontSize:10,
+    fontWeight:700, color:theme.textDim,
+    textTransform:"uppercase", letterSpacing:"0.08em",
+    borderBottom:`1px solid ${theme.border}`,
+    whiteSpace:"nowrap",
+  };
 
   return (
-    <div style={{ padding:"20px 24px", overflowY:"auto", height:"100%",
-                  boxSizing:"border-box", background:theme.gradBg }}>
-      <h2 style={{ fontWeight:800, fontSize:15, color:theme.colorPrimary, marginBottom:18 }}>
-        🛡 Admin Panel
-      </h2>
+    <div style={{ padding:"32px 24px", overflowY:"auto", height:"100%",
+                  boxSizing:"border-box", background:theme.bg, maxWidth:900 }}>
 
-      {/* ── Section tabs ── */}
-      <div style={{ display:"flex", gap:3, marginBottom:20,
-                    background:`rgba(0,0,0,0.3)`, borderRadius:8, padding:3 }}>
+      <div style={{ fontWeight:900, fontSize:22, color:theme.text,
+                    letterSpacing:"-0.5px", marginBottom:24 }}>
+        Admin Panel
+      </div>
+
+      {/* ── Section tabs — underline style ── */}
+      <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`, marginBottom:24 }}>
         {SECTIONS.map(([id, lbl]) => (
           <button key={id}
-            style={{ flex:1,
-                     background:section===id ? theme.colorPrimary : "transparent",
-                     color:section===id ? "#000" : theme.colorMuted,
-                     border:"none", borderRadius:"999px", padding:"7px 0",
-                     cursor:"pointer", fontSize:12, fontWeight:700,
-                     transition:"background 0.2s, color 0.2s" }}
+            style={{ padding:"10px 20px", border:"none", background:"transparent",
+                     fontWeight: section===id ? 700 : 500, fontSize:13,
+                     color: section===id ? theme.accent : theme.textMuted,
+                     cursor:"pointer", position:"relative", transition:"color 0.15s" }}
             onClick={() => setSection(id)}>
             {lbl}
+            {section===id && (
+              <motion.div layoutId="admin-tab-underline"
+                style={{ position:"absolute", bottom:-1, left:0, right:0,
+                         height:2, background:theme.accent, borderRadius:999 }}/>
+            )}
           </button>
         ))}
       </div>
@@ -118,98 +113,85 @@ export function AdminPanel() {
             initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }}
             exit={{ opacity:0, y:-6 }} transition={{ duration:0.18 }}>
 
-            {/* Create user */}
-            <Card className="bg-card border-border" style={{ marginBottom:22, maxWidth:440 }}>
-              <CardHeader>
-                <CardTitle className="text-foreground font-bold text-sm">
-                  Create User
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={createUser} style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  <Input value={newU.username}
-                    onChange={e => setNewU(u => ({ ...u, username:e.target.value }))}
-                    placeholder="Username"
-                    className="bg-background border-border text-foreground text-xs"/>
-                  <Input type="password" value={newU.password}
-                    onChange={e => setNewU(u => ({ ...u, password:e.target.value }))}
-                    placeholder="Password (min 8 chars)"
-                    className="bg-background border-border text-foreground text-xs"/>
-                  <label style={{ display:"flex", alignItems:"center", gap:6,
-                                  fontSize:12, color:theme.colorText }}>
-                    <input type="checkbox" checked={newU.isAdmin}
-                      onChange={e => setNewU(u => ({ ...u, isAdmin:e.target.checked }))}
-                      style={{ accentColor:theme.colorPrimary }}/>
-                    Admin user
-                  </label>
-                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                    <Button type="submit"
-                      className="bg-primary text-primary-foreground text-xs rounded-full px-4 h-auto py-1">
-                      Create
-                    </Button>
-                    {status && (
-                      <span style={{ fontSize:11,
-                        color:status.startsWith("✓") ? "#86efac" : "#fca5a5" }}>
-                        {status}
-                      </span>
-                    )}
-                  </div>
-                </form>
-              </CardContent>
-            </Card>
+            {/* Create user card */}
+            <div className="rm-card" style={{ marginBottom:24, maxWidth:440 }}>
+              <div style={{ fontWeight:700, fontSize:14, color:theme.text, marginBottom:16 }}>
+                Create User
+              </div>
+              <form onSubmit={createUser} style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <input className="rm-input" value={newU.username}
+                  onChange={e => setNewU(u => ({ ...u, username:e.target.value }))}
+                  placeholder="Username"/>
+                <input className="rm-input" type="password" value={newU.password}
+                  onChange={e => setNewU(u => ({ ...u, password:e.target.value }))}
+                  placeholder="Password (min 8 chars)"/>
+                <label style={{ display:"flex", alignItems:"center", gap:8,
+                                fontSize:13, color:theme.text, cursor:"pointer" }}>
+                  <input type="checkbox" checked={newU.isAdmin}
+                    onChange={e => setNewU(u => ({ ...u, isAdmin:e.target.checked }))}
+                    style={{ accentColor:theme.accent, width:16, height:16 }}/>
+                  Admin user
+                </label>
+                <div style={{ display:"flex", gap:10, alignItems:"center", marginTop:4 }}>
+                  <button type="submit" className="rm-btn rm-btn-primary rm-btn-sm">
+                    Create
+                  </button>
+                  {status && (
+                    <span style={{ fontSize:12,
+                      color:status.startsWith("✓") ? theme.success : theme.danger }}>
+                      {status}
+                    </span>
+                  )}
+                </div>
+              </form>
+            </div>
 
             {/* User table */}
-            <div style={{ background:theme.gradPanel, border:`1px solid ${theme.colorBorder}`,
-                          borderRadius:10, overflow:"hidden" }}>
+            <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                          borderRadius:16, overflow:"hidden" }}>
               <table style={{ width:"100%", borderCollapse:"collapse" }}>
                 <thead>
-                  <tr style={{ background:`rgba(0,0,0,0.3)` }}>
+                  <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}` }}>
                     {["Username","Role","Mode","Created","Actions"].map(h => (
-                      <th key={h} style={{ padding:"10px 14px", textAlign:"left",
-                                          fontSize:10, fontWeight:700,
-                                          color:theme.colorMuted, textTransform:"uppercase",
-                                          letterSpacing:"0.08em",
-                                          borderBottom:`1px solid ${theme.colorBorder}` }}>
-                        {h}
-                      </th>
+                      <th key={h} style={thStyle}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {users.map((u, i) => (
-                    <tr key={u.id}
-                      style={{ background:i%2===0 ? theme.gradPanel : "rgba(0,0,0,0.2)",
-                               borderBottom:`1px solid ${theme.colorBorder}`,
-                               transition:"transform 0.15s" }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.01)"; e.currentTarget.style.position = "relative"; e.currentTarget.style.zIndex = "1"; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.zIndex = ""; }}>
-                      <td style={{ padding:"7px 12px", fontSize:12,
-                                   color:theme.colorText, fontWeight:600 }}>
+                    <tr key={u.id} className="rm-table-row"
+                      style={{ borderBottom:`1px solid ${theme.border}` }}>
+                      <td style={{ padding:"12px 14px", fontSize:13,
+                                   color:theme.text, fontWeight:600 }}>
                         {u.username}
                       </td>
-                      <td style={{ padding:"7px 12px" }}>
-                        <Badge variant="outline"
-                          className={`text-[10px] font-bold rounded-full ${u.is_admin ? "bg-primary/20 text-primary border-primary" : "bg-white/5 text-muted-foreground border-border"}`}>
+                      <td style={{ padding:"12px 14px" }}>
+                        <span className="rm-badge" style={{
+                          background: u.is_admin ? "#f3e8ff" : theme.surfaceHigh,
+                          color: u.is_admin ? "#7c3aed" : theme.textMuted,
+                          border:`1px solid ${u.is_admin ? "#7c3aed33" : theme.border}`,
+                        }}>
                           {u.is_admin ? "Admin" : "User"}
-                        </Badge>
+                        </span>
                       </td>
-                      <td style={{ padding:"7px 12px", fontSize:11, color:theme.colorMuted }}>
+                      <td style={{ padding:"12px 14px", fontSize:12, color:theme.textMuted }}>
                         {u.apply_mode}
                       </td>
-                      <td style={{ padding:"7px 12px", fontSize:10, color:theme.colorDim }}>
+                      <td style={{ padding:"12px 14px", fontSize:11, color:theme.textDim }}>
                         {new Date(u.created_at * 1000).toLocaleDateString()}
                       </td>
-                      <td style={{ padding:"7px 12px" }}>
-                        <div style={{ display:"flex", gap:5 }}>
-                          <ABtn theme={theme} bg={theme.colorSecondary}
+                      <td style={{ padding:"12px 14px" }}>
+                        <div style={{ display:"flex", gap:6 }}>
+                          <button className="rm-btn rm-btn-ghost rm-btn-sm"
                             onClick={() => resetQuota(u.id)}>
                             Reset Quota
-                          </ABtn>
+                          </button>
                           {!u.is_admin && (
-                            <ABtn theme={theme} bg="#ef4444"
+                            <button className="rm-btn rm-btn-ghost rm-btn-sm"
+                              style={{ color:theme.danger, borderColor:theme.danger+"44" }}
                               onClick={() => deleteUser(u.id)}>
                               Delete
-                            </ABtn>
+                            </button>
                           )}
                         </div>
                       </td>
@@ -226,105 +208,97 @@ export function AdminPanel() {
             initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }}
             exit={{ opacity:0, y:-6 }} transition={{ duration:0.18 }}>
 
-            {/* Actions */}
-            <Card className="bg-card border-border" style={{ marginBottom:22, maxWidth:560 }}>
-              <CardHeader>
-                <CardTitle className="text-foreground font-bold text-sm">
-                  Database Backup
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div style={{ fontSize:11, color:theme.colorMuted,
-                              lineHeight:1.6, marginBottom:12 }}>
-                  Backups are saved to{" "}
-                  <code style={{ color:theme.colorAccent }}>data/backups/</code>{" "}
-                  and kept for the last 30 snapshots.
-                  An automatic backup runs daily at 2:00 AM. Restore creates a safety backup
-                  of the current DB before overwriting.
-                  After restoring, <strong style={{ color:theme.colorText }}>restart the server</strong> to apply.
-                </div>
-                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                  <Button
-                    disabled={backing} onClick={triggerBackup}
-                    className="bg-primary text-primary-foreground text-xs rounded-full px-5 h-auto py-2">
-                    {backing ? "Creating backup…" : "💾 Backup Now"}
-                  </Button>
-                  {bStatus && (
-                    <span style={{ fontSize:11,
-                      color:bStatus.startsWith("✓") ? "#86efac" : "#fca5a5" }}>
-                      {bStatus}
-                    </span>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            {/* Backup card */}
+            <div className="rm-card" style={{ marginBottom:24, maxWidth:560 }}>
+              <div style={{ fontWeight:700, fontSize:14, color:theme.text, marginBottom:10 }}>
+                Database Backup
+              </div>
+              <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6, marginBottom:14 }}>
+                Backups are saved to{" "}
+                <code style={{ color:theme.accentText, fontFamily:"monospace" }}>data/backups/</code>{" "}
+                and kept for the last 30 snapshots.
+                An automatic backup runs daily at 2:00 AM. Restore creates a safety backup
+                of the current DB before overwriting.
+                After restoring, <strong style={{ color:theme.text }}>restart the server</strong> to apply.
+              </div>
+              <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                <button className="rm-btn rm-btn-primary"
+                  disabled={backing} onClick={triggerBackup}>
+                  {backing ? "Creating backup…" : "💾 Backup Now"}
+                </button>
+                {bStatus && (
+                  <span style={{ fontSize:12,
+                    color:bStatus.startsWith("✓") ? theme.success : theme.danger }}>
+                    {bStatus}
+                  </span>
+                )}
+              </div>
+            </div>
 
             {/* Backup list */}
-            <div style={{ background:theme.gradPanel, border:`1px solid ${theme.colorBorder}`,
-                          borderRadius:10, overflow:"hidden", maxWidth:700 }}>
-              <div style={{ background:`rgba(0,0,0,0.3)`, padding:"8px 12px",
+            <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                          borderRadius:16, overflow:"hidden", maxWidth:700 }}>
+              <div style={{ background:theme.surfaceHigh, padding:"10px 16px",
                             display:"flex", alignItems:"center",
-                            justifyContent:"space-between" }}>
-                <span style={{ fontSize:10, fontWeight:700, color:theme.colorMuted,
-                               textTransform:"uppercase", letterSpacing:"0.8px" }}>
+                            justifyContent:"space-between",
+                            borderBottom:`1px solid ${theme.border}` }}>
+                <span style={{ fontSize:11, fontWeight:700, color:theme.textMuted }}>
                   Restore Points ({backups.length})
                 </span>
-                <button style={{ background:"transparent", border:"none",
-                                 color:theme.colorMuted, fontSize:10, cursor:"pointer" }}
+                <button className="rm-btn rm-btn-ghost rm-btn-sm"
                   onClick={loadBackups}>
                   ↻ Refresh
                 </button>
               </div>
               {backups.length === 0 ? (
-                <div style={{ padding:"24px", color:theme.colorDim,
-                              fontSize:12, textAlign:"center" }}>
+                <div style={{ padding:"32px", color:theme.textDim,
+                              fontSize:13, textAlign:"center" }}>
                   No backups yet — click "Backup Now" to create the first one.
                 </div>
               ) : (
                 <table style={{ width:"100%", borderCollapse:"collapse" }}>
                   <thead>
-                    <tr style={{ background:`rgba(0,0,0,0.3)` }}>
+                    <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}` }}>
                       {["File","Type","Created","Size",""].map(h => (
-                        <th key={h} style={{ padding:"7px 12px", textAlign:"left",
-                                            fontSize:10, fontWeight:700,
-                                            color:theme.colorMuted,
-                                            textTransform:"uppercase",
-                                            letterSpacing:"0.06em",
-                                            borderBottom:`1px solid ${theme.colorBorder}` }}>
-                          {h}
-                        </th>
+                        <th key={h} style={thStyle}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {backups.map((b, i) => (
-                      <tr key={i}
-                        style={{ borderBottom:`1px solid ${theme.colorBorder}`,
-                                 background:i%2===0 ? "transparent" : "rgba(0,0,0,0.15)" }}>
-                        <td style={{ padding:"7px 12px", fontSize:10,
-                                     color:theme.colorMuted, fontFamily:"monospace",
+                      <tr key={i} className="rm-table-row"
+                        style={{ borderBottom:`1px solid ${theme.border}` }}>
+                        <td style={{ padding:"10px 14px", fontSize:11,
+                                     color:theme.textMuted, fontFamily:"monospace",
                                      maxWidth:260, overflow:"hidden",
                                      textOverflow:"ellipsis", whiteSpace:"nowrap" }}
                           title={b.filename}>
                           {b.filename}
                         </td>
-                        <td style={{ padding:"7px 12px" }}>
-                          <Badge variant="outline"
-                            className={`text-[9px] font-bold rounded-full ${b.label==="auto-daily" ? "bg-primary/15 text-primary border-border" : b.label==="manual" ? "bg-white/8 text-muted-foreground border-border" : "bg-destructive/15 text-destructive border-border"}`}>
+                        <td style={{ padding:"10px 14px" }}>
+                          <span className="rm-badge" style={{
+                            background: b.label==="auto-daily" ? theme.infoMuted
+                                      : b.label==="manual"     ? theme.surfaceHigh
+                                      : theme.dangerMuted,
+                            color: b.label==="auto-daily" ? theme.info
+                                 : b.label==="manual"     ? theme.textMuted
+                                 : theme.danger,
+                          }}>
                             {b.label}
-                          </Badge>
+                          </span>
                         </td>
-                        <td style={{ padding:"7px 12px", fontSize:10, color:theme.colorMuted }}>
+                        <td style={{ padding:"10px 14px", fontSize:11, color:theme.textMuted }}>
                           {new Date(b.created).toLocaleString()}
                         </td>
-                        <td style={{ padding:"7px 12px", fontSize:10, color:theme.colorDim }}>
+                        <td style={{ padding:"10px 14px", fontSize:11, color:theme.textDim }}>
                           {b.size ? fmtSize(b.size) : "—"}
                         </td>
-                        <td style={{ padding:"7px 12px" }}>
-                          <ABtn theme={theme} bg="#10b981"
+                        <td style={{ padding:"10px 14px" }}>
+                          <button className="rm-btn rm-btn-ghost rm-btn-sm"
+                            style={{ color:theme.success, borderColor:theme.success+"44" }}
                             onClick={() => restoreBackup(b.filename)}>
                             Restore
-                          </ABtn>
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -336,39 +310,5 @@ export function AdminPanel() {
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function hexToRgb(hex) {
-  const h = hex.replace("#","");
-  const n = parseInt(h.length === 3
-    ? h.split("").map(c => c+c).join("") : h, 16);
-  return `${(n>>16)&255},${(n>>8)&255},${n&255}`;
-}
-
-function ABtn({ theme, bg, onClick, children, disabled, lg, type = "button" }) {
-  const [hov, setHov] = useState(false);
-  return (
-    <button type={type}
-      style={{ position:"relative", overflow:"hidden",
-               background:disabled ? theme.colorDim : (hov ? "transparent" : bg),
-               color:disabled ? theme.colorMuted : "#fff",
-               border:`1px solid ${disabled ? theme.colorDim : bg}`,
-               borderRadius:"999px",
-               padding:lg ? "7px 16px" : "3px 8px",
-               cursor:disabled ? "not-allowed" : "pointer",
-               fontSize:lg ? 12 : 10, fontWeight:700,
-               opacity:disabled ? 0.5 : 1, transition:"color 0.2s" }}
-      disabled={disabled}
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}>
-      <span style={{
-        position:"absolute", inset:0, background:bg,
-        transform:hov && !disabled ? "translateY(0)" : "translateY(100%)",
-        transition:"transform 0.2s ease", zIndex:0,
-      }}/>
-      <span style={{ position:"relative", zIndex:1 }}>{children}</span>
-    </button>
   );
 }

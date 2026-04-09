@@ -1,157 +1,138 @@
-// REVAMP v2 — ATSPanel.jsx (shadcn UI integrated)
+// client/src/panels/ATSPanel.jsx — Design System v4
 import { useTheme } from "../styles/theme.jsx";
-import { Badge } from "../components/ui/badge";
-import { Progress } from "../components/ui/progress";
-import { ScrollArea } from "../components/ui/scroll-area";
-import { Card, CardContent } from "../components/ui/card";
-import { Separator } from "../components/ui/separator";
 
 export function ATSPanel({ report, score }) {
   const { theme } = useTheme();
 
   if (!report) return (
-    <div style={{ padding:16, color:theme.colorMuted, fontSize:12 }}>
-      Generate a resume to see the ATS report.
+    <div style={{ padding:24, display:"flex", flexDirection:"column",
+                  alignItems:"center", justifyContent:"center", gap:12,
+                  height:"100%", color:theme.textMuted, fontSize:13, textAlign:"center" }}>
+      <div style={{ fontSize:40 }}>📊</div>
+      <div>Generate a resume to see the ATS report.</div>
     </div>
   );
 
-  // SVG arc ring
-  const R = 28, cx = 36, cy = 36, stroke = 6;
+  const R = 32, cx = 40, cy = 40, stroke = 7;
   const circumference = 2 * Math.PI * R;
   const pct = Math.max(0, Math.min(100, score ?? 0));
   const dashOffset = circumference * (1 - pct / 100);
+  const scoreColor = pct >= 80 ? theme.success : pct >= 60 ? theme.warning : theme.danger;
 
   return (
-    <ScrollArea className="h-full">
-      <div style={{ padding:"12px 14px", fontSize:12, display:"flex",
-                    flexDirection:"column", gap:10, boxSizing:"border-box" }}>
+    <div style={{ padding:"16px 16px", display:"flex", flexDirection:"column",
+                  gap:14, overflowY:"auto", height:"100%" }}>
 
-        {/* Score ring + verdict */}
-        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-          <div style={{ position:"relative", width:72, height:72, flexShrink:0 }}>
-            <svg width={72} height={72} viewBox="0 0 72 72">
-              {/* Track */}
-              <circle cx={cx} cy={cy} r={R}
-                fill="none" stroke={theme.colorSurface} strokeWidth={stroke}/>
-              {/* Progress arc */}
-              <circle cx={cx} cy={cy} r={R}
-                fill="none"
-                stroke={theme.colorPrimary}
-                strokeWidth={stroke}
-                strokeLinecap="round"
-                strokeDasharray={circumference}
-                strokeDashoffset={dashOffset}
-                transform={`rotate(-90 ${cx} ${cy})`}
-                style={{ transition:"stroke-dashoffset 0.6s ease" }}/>
-            </svg>
-            {/* Score text — gradient */}
-            <div style={{
-              position:"absolute", inset:0,
-              display:"flex", alignItems:"center", justifyContent:"center",
-              fontWeight:900, fontSize:18,
-              background:theme.gradAccent,
-              WebkitBackgroundClip:"text",
-              WebkitTextFillColor:"transparent",
-            }}>
-              {score ?? "—"}
-            </div>
-          </div>
-          <div style={{ flex:1 }}>
-            <div style={{ color:theme.colorMuted, fontStyle:"italic",
-                          lineHeight:1.5, fontSize:11, marginBottom:4 }}>
-              {report.verdict}
-            </div>
-            {report?.best_possible_score != null && (
-              <div style={{ fontSize:10, color:theme.colorDim,
-                            background:`rgba(0,0,0,0.3)`, borderRadius:6,
-                            padding:"4px 8px", lineHeight:1.5 }}>
-                <span style={{ fontWeight:700, color:theme.colorAccent }}>
-                  Best possible: {report.best_possible_score}
-                </span>
-                {report?.best_possible_reason && (
-                  <span style={{ color:theme.colorMuted }}> — {report.best_possible_reason}</span>
-                )}
-              </div>
-            )}
+      {/* Score card */}
+      <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                    borderRadius:16, padding:"16px", display:"flex", alignItems:"center", gap:16 }}>
+        {/* Ring */}
+        <div style={{ position:"relative", width:80, height:80, flexShrink:0 }}>
+          <svg width={80} height={80} viewBox="0 0 80 80">
+            <circle cx={cx} cy={cy} r={R} fill="none" stroke={theme.surfaceHigh} strokeWidth={stroke}/>
+            <circle cx={cx} cy={cy} r={R} fill="none" stroke={scoreColor} strokeWidth={stroke}
+              strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={dashOffset}
+              transform={`rotate(-90 ${cx} ${cy})`}
+              style={{ transition:"stroke-dashoffset 0.8s ease-out" }}/>
+          </svg>
+          <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center",
+                        justifyContent:"center", fontWeight:900, fontSize:22, color:scoreColor }}>
+            {score ?? "—"}
           </div>
         </div>
-
-        {report?.tier1_matched?.length > 0 && (
-          <TagSection title="✓ Matched" theme={theme}
-            bg={`rgba(${hexToRgb(theme.colorAccent)},0.15)`}
-            fg={theme.colorAccent}
-            items={report.tier1_matched}/>
-        )}
-        {report?.tier1_missing?.length > 0 && (
-          <TagSection title="✗ Missing" theme={theme}
-            bg="rgba(239,68,68,0.15)"
-            fg="#ef4444"
-            items={report.tier1_missing}/>
-        )}
-        {report?.action_verbs_matched?.length > 0 && (
-          <TagSection title="⚡ Action Verbs Matched" theme={theme}
-            bg={`rgba(${hexToRgb(theme.colorPrimary)},0.12)`}
-            fg={theme.colorPrimary}
-            items={report.action_verbs_matched}/>
-        )}
-        {report?.action_verbs_missing?.length > 0 && (
-          <TagSection title="⚠ Action Verbs Missing" theme={theme}
-            bg="rgba(245,158,11,0.12)"
-            fg="#f59e0b"
-            items={report.action_verbs_missing}/>
-        )}
-        {report?.strengths?.length > 0 && (
-          <ListSection title="💪 Strengths" theme={theme} items={report.strengths}/>
-        )}
-        {report?.improvements?.length > 0 && (
-          <ListSection title="🔧 Improvements" theme={theme} items={report.improvements}/>
-        )}
+        {/* Verdict */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:12, color:theme.textMuted, fontStyle:"italic",
+                        lineHeight:1.6, marginBottom:8 }}>
+            {report.verdict}
+          </div>
+          {report?.best_possible_score != null && (
+            <div style={{ fontSize:11, padding:"6px 10px", borderRadius:8,
+                          background: pct === report.best_possible_score ? theme.successMuted : theme.surfaceHigh,
+                          color: pct === report.best_possible_score ? theme.success : theme.textMuted,
+                          border:`1px solid ${pct === report.best_possible_score ? theme.success+"33" : theme.border}` }}>
+              {pct === report.best_possible_score
+                ? "✓ Max achievable score for your profile"
+                : <>
+                    <span style={{ fontWeight:700 }}>Best possible: {report.best_possible_score}</span>
+                    {report.best_possible_reason && <span> — {report.best_possible_reason}</span>}
+                  </>
+              }
+            </div>
+          )}
+        </div>
       </div>
-    </ScrollArea>
+
+      {/* Matched keywords */}
+      {report?.tier1_matched?.length > 0 && (
+        <TagSection title="✓ Matched Keywords"
+          bg={theme.successMuted} fg={theme.success} border={theme.success+"33"}
+          items={report.tier1_matched}/>
+      )}
+
+      {/* Missing keywords */}
+      {report?.tier1_missing?.length > 0 && (
+        <TagSection title="✗ Missing Keywords"
+          bg={theme.dangerMuted} fg={theme.danger} border={theme.danger+"33"}
+          items={report.tier1_missing}/>
+      )}
+
+      {/* Action verbs matched */}
+      {report?.action_verbs_matched?.length > 0 && (
+        <TagSection title="⚡ Action Verbs Found"
+          bg={theme.infoMuted} fg={theme.info} border={theme.info+"33"}
+          items={report.action_verbs_matched}/>
+      )}
+
+      {/* Action verbs missing */}
+      {report?.action_verbs_missing?.length > 0 && (
+        <TagSection title="⚠ Action Verbs Missing"
+          bg={theme.warningMuted} fg={theme.warning} border={theme.warning+"33"}
+          items={report.action_verbs_missing}/>
+      )}
+
+      {/* Strengths */}
+      {report?.strengths?.length > 0 && (
+        <ListSection title="💪 Strengths" items={report.strengths} color={theme.success} theme={theme}/>
+      )}
+
+      {/* Improvements */}
+      {report?.improvements?.length > 0 && (
+        <ListSection title="🔧 Improvements" items={report.improvements} color={theme.accent} theme={theme}/>
+      )}
+    </div>
   );
 }
 
-function hexToRgb(hex) {
-  const h = hex.replace("#","");
-  const n = parseInt(h.length === 3
-    ? h.split("").map(c => c+c).join("") : h, 16);
-  return `${(n>>16)&255},${(n>>8)&255},${n&255}`;
-}
-
-function TagSection({ title, bg, fg, items, theme }) {
+function TagSection({ title, bg, fg, border, items }) {
   return (
     <div>
-      <div style={{ fontWeight:700, color:fg, marginBottom:4, fontSize:11 }}>{title}</div>
-      <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+      <div className="rm-section-label" style={{ color:fg }}>{title}</div>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
         {items.map(k => (
-          <Badge key={k} variant="outline"
-            className="text-[10px] rounded-full"
-            style={{ background:bg, color:fg, borderColor:fg }}>
+          <span key={k} className="rm-badge"
+            style={{ background:bg, color:fg, border:`1px solid ${border}` }}>
             {k}
-          </Badge>
+          </span>
         ))}
       </div>
     </div>
   );
 }
 
-function ListSection({ title, items, theme }) {
+function ListSection({ title, items, color, theme }) {
   return (
     <div>
-      <div style={{ fontWeight:700, color:theme.colorPrimary,
-                    marginBottom:4, fontSize:11 }}>
-        {title}
-      </div>
-      <ul style={{ margin:0, paddingLeft:0, listStyle:"none",
-                   color:theme.colorText, lineHeight:1.7 }}>
-        {items.map((t, i) => (
-          <li key={i} style={{ paddingLeft:12,
-                                borderLeft:`3px solid ${theme.colorPrimary}`,
-                                marginBottom:4, fontSize:11 }}>
-            {t}
-          </li>
+      <div className="rm-section-label" style={{ color }}>{title}</div>
+      <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+        {items.map((t,i) => (
+          <div key={i} style={{ display:"flex", gap:8, fontSize:12,
+                                 color:theme.textMuted, lineHeight:1.6 }}>
+            <span style={{ color, flexShrink:0, fontWeight:700 }}>·</span>
+            <span>{t}</span>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

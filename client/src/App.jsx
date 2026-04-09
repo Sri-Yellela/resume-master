@@ -30,22 +30,22 @@ export default function App() {
   if (!authChecked) return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column",
                   alignItems:"center", justifyContent:"center",
-                  background:theme.gradBg, gap:14 }}>
+                  background:theme.bg, gap:14 }}>
       <div style={{ width:32, height:32,
-                    border:`3px solid ${theme.colorSurface}`,
-                    borderTop:`3px solid ${theme.colorPrimary}`,
+                    border:`3px solid ${theme.border}`,
+                    borderTop:`3px solid ${theme.accent}`,
                     borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
-      <span style={{ color:theme.colorMuted, fontSize:13 }}>Loading…</span>
+      <span style={{ color:theme.textMuted, fontSize:13 }}>Loading…</span>
     </div>
   );
 
   if (!authUser) return <AuthScreen onLogin={setAuthUser}/>;
 
   return (
-    <div style={{ fontFamily:"'Inter',Arial,sans-serif", fontSize:13,
-                  background:theme.gradBg, height:"100vh",
+    <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
+                  background:theme.bg, height:"100vh",
                   display:"flex", flexDirection:"column",
-                  overflow:"hidden", color:theme.colorText }}>
+                  overflow:"hidden", color:theme.text }}>
       <TopBar
         user={authUser}
         activeTab={activeTab}
