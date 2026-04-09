@@ -1,14 +1,20 @@
-// client/src/panels/DatabasePanel.jsx — v2
+// REVAMP v2 — DatabasePanel.jsx (shadcn UI integrated)
 // Added: date column, animated calendar picker, search, sort on all columns
 import { useState, useEffect, useCallback, useRef } from "react";
-import { api } from "../lib/api.js";
+import { motion, AnimatePresence } from "framer-motion";
+import { api }      from "../lib/api.js";
+import { useTheme } from "../styles/theme.jsx";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
+import { ScrollArea } from "../components/ui/scroll-area";
 
 // ── Calendar component ────────────────────────────────────────
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const MONTHS = ["January","February","March","April","May","June",
                 "July","August","September","October","November","December"];
 
-function Calendar({ value, onChange, onClose }) {
+function Calendar({ value, onChange, onClose, theme }) {
   const today = new Date();
   const init  = value ? new Date(value) : today;
   const [view, setView] = useState({ year: init.getFullYear(), month: init.getMonth() });
@@ -19,7 +25,6 @@ function Calendar({ value, onChange, onClose }) {
   const cells = Array(firstDay).fill(null).concat(
     Array.from({ length: daysInMonth }, (_, i) => i + 1)
   );
-  // Pad to full rows
   while (cells.length % 7 !== 0) cells.push(null);
 
   const prev = () => setView(v => {
@@ -33,21 +38,20 @@ function Calendar({ value, onChange, onClose }) {
     return { year: y, month: m };
   });
 
-  const pick = (day) => {
+  const pick = day => {
     if (!day) return;
     const d = new Date(view.year, view.month, day);
-    const iso = d.toISOString().slice(0, 10);
-    onChange(iso);
+    onChange(d.toISOString().slice(0, 10));
     onClose();
   };
 
-  const isSelected = (day) => {
+  const isSelected = day => {
     if (!day || !selected) return false;
     return selected.getFullYear() === view.year &&
            selected.getMonth()    === view.month &&
            selected.getDate()     === day;
   };
-  const isToday = (day) => {
+  const isToday = day => {
     if (!day) return false;
     return today.getFullYear() === view.year &&
            today.getMonth()    === view.month &&
@@ -55,76 +59,90 @@ function Calendar({ value, onChange, onClose }) {
   };
 
   return (
-    <div style={cal.wrap}>
-      {/* Header */}
-      <div style={cal.header}>
-        <button style={cal.navBtn} onClick={prev}>‹</button>
-        <span style={cal.monthLabel}>{MONTHS[view.month]} {view.year}</span>
-        <button style={cal.navBtn} onClick={next}>›</button>
+    <div style={{ background:theme.gradPanel, border:`1px solid ${theme.colorBorder}`,
+                  borderRadius:12, padding:16, width:260,
+                  boxShadow:"0 20px 60px rgba(0,0,0,.6)",
+                  position:"absolute", zIndex:300,
+                  top:"calc(100% + 6px)", left:0,
+                  maxHeight:"320px", overflowY:"auto" }}>
+      <div style={{ display:"flex", alignItems:"center",
+                    justifyContent:"space-between", marginBottom:12 }}>
+        <button style={{ background:"transparent",
+                         border:`1px solid ${theme.colorBorder}`,
+                         color:theme.colorMuted, borderRadius:6, width:28, height:28,
+                         cursor:"pointer", fontSize:16,
+                         display:"flex", alignItems:"center", justifyContent:"center" }}
+          onClick={prev}>‹</button>
+        <span style={{ fontWeight:700, fontSize:13, color:theme.colorText }}>
+          {MONTHS[view.month]} {view.year}
+        </span>
+        <button style={{ background:"transparent",
+                         border:`1px solid ${theme.colorBorder}`,
+                         color:theme.colorMuted, borderRadius:6, width:28, height:28,
+                         cursor:"pointer", fontSize:16,
+                         display:"flex", alignItems:"center", justifyContent:"center" }}
+          onClick={next}>›</button>
       </div>
-      {/* Day labels */}
-      <div style={cal.grid}>
-        {DAYS.map(d => <div key={d} style={cal.dayLabel}>{d}</div>)}
-        {cells.map((day, i) => (
-          <div key={i}
-            style={{
-              ...cal.cell,
-              ...(day ? cal.cellActive : {}),
-              ...(isToday(day)    ? cal.cellToday    : {}),
-              ...(isSelected(day) ? cal.cellSelected : {}),
-            }}
-            onClick={() => pick(day)}>
-            {day || ""}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+        {DAYS.map(d => (
+          <div key={d} style={{ textAlign:"center", fontSize:9, fontWeight:700,
+                                color:theme.colorMuted, padding:"4px 0",
+                                textTransform:"uppercase" }}>
+            {d}
           </div>
         ))}
+        {cells.map((day, i) => {
+          const sel = isSelected(day);
+          const tod = isToday(day);
+          return (
+            <div key={i}
+              style={{
+                textAlign:"center", fontSize:11, padding:"6px 2px", borderRadius:6,
+                cursor:day ? "pointer" : "default", userSelect:"none",
+                color:sel ? "#fff" : tod ? theme.colorPrimary : day ? theme.colorText : "transparent",
+                background:sel ? theme.colorPrimary : "transparent",
+                border:tod && !sel ? `1px solid ${theme.colorPrimary}` : "1px solid transparent",
+                fontWeight:sel || tod ? 700 : 400,
+                position:"relative",
+              }}
+              onClick={() => pick(day)}>
+              {day || ""}
+              {tod && !sel && (
+                <span style={{ position:"absolute", bottom:1, left:"50%",
+                               transform:"translateX(-50%)",
+                               width:3, height:3, borderRadius:"50%",
+                               background:theme.colorAccent, display:"block" }}/>
+              )}
+            </div>
+          );
+        })}
       </div>
-      {/* Clear */}
-      <div style={cal.footer}>
-        <button style={cal.clearBtn} onClick={() => { onChange(""); onClose(); }}>Clear date</button>
-        <button style={cal.clearBtn} onClick={() => { onChange(new Date().toISOString().slice(0,10)); onClose(); }}>Today</button>
+      <div style={{ display:"flex", justifyContent:"space-between", marginTop:10,
+                    paddingTop:10, borderTop:`1px solid ${theme.colorBorder}` }}>
+        <button style={{ background:"transparent", border:"none",
+                         color:theme.colorMuted, fontSize:10, cursor:"pointer", fontWeight:600 }}
+          onClick={() => { onChange(""); onClose(); }}>Clear date</button>
+        <button style={{ background:"transparent", border:"none",
+                         color:theme.colorMuted, fontSize:10, cursor:"pointer", fontWeight:600 }}
+          onClick={() => { onChange(new Date().toISOString().slice(0,10)); onClose(); }}>
+          Today
+        </button>
       </div>
     </div>
   );
 }
 
-const cal = {
-  wrap:         { background:"#1e293b", border:"1px solid #334155",
-                  borderRadius:12, padding:16, width:260,
-                  boxShadow:"0 20px 60px rgba(0,0,0,.6)",
-                  position:"absolute", zIndex:300,
-                  top:"calc(100% + 6px)", left:0,
-                  // If near bottom, flip upward
-                  maxHeight:"320px", overflowY:"auto" },
-  header:       { display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 },
-  navBtn:       { background:"transparent", border:"1px solid #334155", color:"#94a3b8",
-                  borderRadius:6, width:28, height:28, cursor:"pointer", fontSize:16,
-                  display:"flex", alignItems:"center", justifyContent:"center" },
-  monthLabel:   { fontWeight:700, fontSize:13, color:"#f8fafc" },
-  grid:         { display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 },
-  dayLabel:     { textAlign:"center", fontSize:9, fontWeight:700, color:"#475569",
-                  padding:"4px 0", textTransform:"uppercase" },
-  cell:         { textAlign:"center", fontSize:11, padding:"6px 2px", borderRadius:6,
-                  color:"#475569", userSelect:"none" },
-  cellActive:   { color:"#cbd5e1", cursor:"pointer" },
-  cellToday:    { color:"#38bdf8", fontWeight:700, border:"1px solid #38bdf8" },
-  cellSelected: { background:"#3b82f6", color:"#fff", fontWeight:700 },
-  footer:       { display:"flex", justifyContent:"space-between", marginTop:10, paddingTop:10,
-                  borderTop:"1px solid #1e293b" },
-  clearBtn:     { background:"transparent", border:"none", color:"#64748b", fontSize:10,
-                  cursor:"pointer", fontWeight:600 },
-};
-
 // ── Column definitions ─────────────────────────────────────────
 const APP_COLS = [
-  { key:"company",    label:"Company",     editable:true,  width:150, sortable:true  },
-  { key:"role",       label:"Role",        editable:true,  width:190, sortable:true  },
-  { key:"location",   label:"Location",    editable:true,  width:120, sortable:true  },
-  { key:"source",     label:"Source",      editable:false, width:85,  sortable:true  },
-  { key:"apply_mode", label:"Mode",        editable:false, width:105, sortable:true  },
-  { key:"applied_at", label:"Date Applied",editable:true,  width:130, sortable:true, isDate:true },
-  { key:"resume_file",label:"Resume File", editable:false, width:200, sortable:false },
-  { key:"job_url",    label:"Job URL",     editable:false, width:60,  sortable:false },
-  { key:"notes",      label:"Notes",       editable:true,  width:180, sortable:false },
+  { key:"company",    label:"Company",      editable:true,  width:150, sortable:true  },
+  { key:"role",       label:"Role",         editable:true,  width:190, sortable:true  },
+  { key:"location",   label:"Location",     editable:true,  width:120, sortable:true  },
+  { key:"source",     label:"Source",       editable:false, width:85,  sortable:true  },
+  { key:"apply_mode", label:"Mode",         editable:false, width:105, sortable:true  },
+  { key:"applied_at", label:"Date Applied", editable:true,  width:130, sortable:true, isDate:true },
+  { key:"resume_file",label:"Resume File",  editable:false, width:200, sortable:false },
+  { key:"job_url",    label:"Job URL",      editable:false, width:60,  sortable:false },
+  { key:"notes",      label:"Notes",        editable:true,  width:180, sortable:false },
 ];
 
 const RES_COLS = [
@@ -136,7 +154,6 @@ const RES_COLS = [
   { key:"updated_at", label:"Updated",  editable:false, width:100, sortable:true  },
 ];
 
-// ── Helpers ───────────────────────────────────────────────────
 function fmtDate(val) {
   if (!val) return "";
   if (typeof val === "number") return new Date(val * 1000).toLocaleDateString();
@@ -154,6 +171,7 @@ function isoToUnix(iso) {
 
 // ── Main panel ────────────────────────────────────────────────
 export function DatabasePanel({ user }) {
+  const { theme } = useTheme();
   const [activeSheet,  setActiveSheet]  = useState("applications");
   const [apps,         setApps]         = useState([]);
   const [resumes,      setResumes]      = useState([]);
@@ -161,16 +179,16 @@ export function DatabasePanel({ user }) {
   const [saving,       setSaving]       = useState({});
   const [editCell,     setEditCell]     = useState(null);
   const [editVal,      setEditVal]      = useState("");
-  const [calCell,      setCalCell]      = useState(null); // { rowId } — date picker open
+  const [calCell,      setCalCell]      = useState(null);
   const [flashRow,     setFlashRow]     = useState(null);
   const [search,       setSearch]       = useState("");
   const [sortCol,      setSortCol]      = useState("applied_at");
   const [sortDir,      setSortDir]      = useState("desc");
   const [filterDate,   setFilterDate]   = useState("");
-  const [calFilter,    setCalFilter]    = useState(false); // filter calendar open
+  const [calFilter,    setCalFilter]    = useState(false);
 
-  const inputRef   = useRef();
-  const calRef     = useRef();
+  const inputRef = useRef();
+  const calRef   = useRef();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -188,7 +206,6 @@ export function DatabasePanel({ user }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (editCell && inputRef.current) inputRef.current.focus(); }, [editCell]);
 
-  // Close calendar on outside click
   useEffect(() => {
     const h = e => {
       if (calRef.current && !calRef.current.contains(e.target)) {
@@ -199,13 +216,12 @@ export function DatabasePanel({ user }) {
     return () => document.removeEventListener("mousedown", h);
   }, []);
 
-  // ── Sorting ───────────────────────────────────────────────
-  const toggleSort = (key) => {
+  const toggleSort = key => {
     if (sortCol === key) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortCol(key); setSortDir("asc"); }
   };
 
-  const sortRows = (rows) => {
+  const sortRows = rows => {
     if (!sortCol) return rows;
     return [...rows].sort((a, b) => {
       let va = a[sortCol] ?? "";
@@ -221,7 +237,6 @@ export function DatabasePanel({ user }) {
     });
   };
 
-  // ── Filtering ─────────────────────────────────────────────
   const filterRows = (rows, cols) => {
     let r = rows;
     if (search.trim()) {
@@ -241,7 +256,6 @@ export function DatabasePanel({ user }) {
     return sortRows(r);
   };
 
-  // ── Cell editing ──────────────────────────────────────────
   const startEdit = (rowId, col, currentVal) => {
     setEditCell({ rowId, col }); setEditVal(currentVal || "");
   };
@@ -251,20 +265,16 @@ export function DatabasePanel({ user }) {
     if (!rowId || !col) return;
     const val = newValue !== undefined ? newValue : editVal;
     setEditCell(null);
-
-    // For date columns, store as unix timestamp
     const payload = col === "applied_at" && val
       ? { [col]: isoToUnix(val) }
       : { [col]: val };
-
     setApps(prev => prev.map(r => r.job_id === rowId
       ? { ...r, [col]: col === "applied_at" && val ? isoToUnix(val) : val }
       : r));
-
     setSaving(p => ({ ...p, [rowId]: true }));
     try {
       await api(`/api/applications/${encodeURIComponent(rowId)}`, {
-        method: "PATCH", body: JSON.stringify(payload),
+        method:"PATCH", body:JSON.stringify(payload),
       });
     } catch(e) { alert("Save failed: " + e.message); load(); }
     setSaving(p => { const n={...p}; delete n[rowId]; return n; });
@@ -272,7 +282,6 @@ export function DatabasePanel({ user }) {
 
   const cancelEdit = () => setEditCell(null);
 
-  // ── Date cell save ────────────────────────────────────────
   const handleDatePick = async (rowId, iso) => {
     setCalCell(null);
     const unix = iso ? isoToUnix(iso) : null;
@@ -280,211 +289,298 @@ export function DatabasePanel({ user }) {
     setSaving(p => ({ ...p, [rowId]: true }));
     try {
       await api(`/api/applications/${encodeURIComponent(rowId)}`, {
-        method: "PATCH", body: JSON.stringify({ applied_at: unix }),
+        method:"PATCH", body:JSON.stringify({ applied_at: unix }),
       });
     } catch(e) { alert("Save failed: " + e.message); load(); }
     setSaving(p => { const n={...p}; delete n[rowId]; return n; });
   };
 
-  // ── Delete ────────────────────────────────────────────────
-  const deleteApp = async (jobId) => {
+  const deleteApp = async jobId => {
     if (!confirm("Remove this application from tracking?")) return;
     await api(`/api/applications/${encodeURIComponent(jobId)}`, { method:"DELETE" });
     setApps(prev => prev.filter(r => r.job_id !== jobId));
   };
-  const deleteResume = async (jobId) => {
+  const deleteResume = async jobId => {
     if (!confirm("Delete this resume and all its versions?")) return;
     await api(`/api/resumes/${encodeURIComponent(jobId)}`, { method:"DELETE" });
     setResumes(prev => prev.filter(r => r.job_id !== jobId));
   };
 
-  // ── Excel export ──────────────────────────────────────────
   const exportExcel = async () => {
     try {
       const r = await api("/api/export/excel");
       const b = await r.blob();
       const u = URL.createObjectURL(b);
       Object.assign(document.createElement("a"), {
-        href: u, download: `ResuMaster_${user?.username}_${new Date().toISOString().slice(0,10)}.xlsx`,
+        href: u,
+        download:`ResuMaster_${user?.username}_${new Date().toISOString().slice(0,10)}.xlsx`,
       }).click();
       URL.revokeObjectURL(u);
     } catch(e) { alert("Export failed: " + e.message); }
   };
 
-  const rows   = activeSheet === "applications" ? apps : resumes;
-  const cols   = activeSheet === "applications" ? APP_COLS : RES_COLS;
-  const isApps = activeSheet === "applications";
+  const rows        = activeSheet === "applications" ? apps : resumes;
+  const cols        = activeSheet === "applications" ? APP_COLS : RES_COLS;
+  const isApps      = activeSheet === "applications";
   const displayRows = filterRows(rows, cols);
 
+  const SHEETS = [["applications","📋 Job Applications"],["resumes","📄 Resume History"]];
+
   return (
-    <div style={s.root}>
+    <div style={{ flex:1, display:"flex", flexDirection:"column",
+                  overflow:"hidden", background:theme.gradBg }}>
 
       {/* ── Header ── */}
-      <div style={s.header}>
-        <div style={s.sheetTabs}>
-          {[["applications","📋 Job Applications"],["resumes","📄 Resume History"]].map(([id,lbl]) => (
+      <div style={{ background:theme.gradPanel,
+                    borderBottom:`1px solid ${theme.colorBorder}`,
+                    display:"flex", alignItems:"stretch", flexShrink:0 }}>
+        <div style={{ display:"flex" }}>
+          {SHEETS.map(([id, lbl]) => (
             <button key={id}
-              style={{ ...s.sheetTab, ...(activeSheet===id ? s.sheetTabActive : {}) }}
+              style={{ position:"relative", background:"transparent",
+                       color:activeSheet===id ? theme.colorPrimary : theme.colorMuted,
+                       border:"none",
+                       borderBottom:`2px solid ${activeSheet===id ? theme.colorPrimary : "transparent"}`,
+                       padding:"12px 20px", cursor:"pointer", fontSize:12, fontWeight:700,
+                       display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" }}
               onClick={() => { setActiveSheet(id); setSearch(""); setFilterDate(""); }}>
               {lbl}
-              <span style={s.badge}>
-                {id==="applications" ? apps.length : resumes.length}
+              <span style={{ background:theme.colorSurface, color:theme.colorMuted,
+                             fontSize:10, fontWeight:700,
+                             padding:"1px 6px", borderRadius:8 }}>
+                {id === "applications" ? apps.length : resumes.length}
               </span>
+              {activeSheet === id && (
+                <motion.div layoutId="db-tab-indicator"
+                  style={{ position:"absolute", bottom:-1, left:"5%", right:"5%",
+                           height:2, background:theme.colorPrimary, borderRadius:1 }}/>
+              )}
             </button>
           ))}
         </div>
         <div style={{ flex:1 }}/>
-        <button style={s.refreshBtn} onClick={load} disabled={loading}>{loading?"⏳":"↻"} Refresh</button>
-        <button style={s.exportBtn}  onClick={exportExcel}>📥 Export Excel</button>
+        <button style={{ background:"transparent", color:theme.colorMuted, border:"none",
+                         padding:"8px 14px", cursor:"pointer", fontSize:11, fontWeight:700,
+                         borderLeft:`1px solid ${theme.colorBorder}` }}
+          onClick={load} disabled={loading}>
+          {loading ? "⏳" : "↻"} Refresh
+        </button>
+        <button style={{ background:theme.colorPrimary, color:"#fff", border:"none",
+                         padding:"8px 16px", cursor:"pointer", fontSize:11, fontWeight:700,
+                         borderLeft:`1px solid ${theme.colorBorder}` }}
+          onClick={exportExcel}>
+          📥 Export Excel
+        </button>
       </div>
 
-      {/* ── Toolbar: search + date filter ── */}
-      <div style={s.toolbar}>
-        {/* Search */}
-        <div style={s.searchWrap}>
-          <span style={s.searchIcon}>🔍</span>
-          <input
-            value={search} onChange={e => setSearch(e.target.value)}
+      {/* ── Toolbar ── */}
+      <div style={{ background:theme.gradPanel, padding:"8px 12px",
+                    display:"flex", alignItems:"center", gap:8,
+                    borderBottom:`1px solid ${theme.colorBorder}`,
+                    flexShrink:0, flexWrap:"wrap" }}>
+        <div style={{ position:"relative", display:"flex", alignItems:"center",
+                      flex:"0 0 260px" }}>
+          <span style={{ position:"absolute", left:8, fontSize:12, pointerEvents:"none" }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder={`Search ${isApps ? "applications" : "resumes"}…`}
-            style={s.searchInp}
-          />
+            style={{ width:"100%", padding:"6px 28px",
+                     borderRadius:6, border:`1px solid ${theme.colorBorder}`,
+                     background:theme.colorSurface, color:theme.colorText,
+                     fontSize:11, outline:"none" }}/>
           {search && (
-            <button style={s.clearSearch} onClick={() => setSearch("")}>✕</button>
+            <button style={{ position:"absolute", right:8, background:"transparent",
+                             border:"none", color:theme.colorMuted, cursor:"pointer",
+                             fontSize:11 }}
+              onClick={() => setSearch("")}>✕</button>
           )}
         </div>
 
-        {/* Date filter (applications only) */}
         {isApps && (
           <div ref={calRef} style={{ position:"relative" }}>
-            <button style={{ ...s.dateFilterBtn, ...(filterDate ? s.dateFilterBtnActive : {}) }}
+            <button style={{ background:filterDate ? `rgba(${hexToRgb(theme.colorPrimary)},0.15)` : theme.colorSurface,
+                             color:filterDate ? theme.colorPrimary : theme.colorMuted,
+                             border:`1px solid ${filterDate ? theme.colorPrimary : theme.colorBorder}`,
+                             borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11,
+                             fontWeight:600, display:"flex", alignItems:"center",
+                             gap:6, whiteSpace:"nowrap" }}
               onClick={() => setCalFilter(o => !o)}>
               📅 {filterDate ? `Date: ${fmtDate(filterDate)}` : "Filter by date"}
               {filterDate && (
-                <span style={s.clearDateX}
+                <span style={{ marginLeft:4, color:theme.colorMuted,
+                               fontWeight:700, fontSize:10 }}
                   onClick={e => { e.stopPropagation(); setFilterDate(""); }}>✕</span>
               )}
             </button>
-            {calFilter && (
-              <Calendar
-                value={filterDate}
-                onChange={setFilterDate}
-                onClose={() => setCalFilter(false)}
-              />
-            )}
+            <AnimatePresence>
+              {calFilter && (
+                <motion.div key="cal-filter"
+                  initial={{ opacity:0, scale:0.96, y:-4 }}
+                  animate={{ opacity:1, scale:1, y:0 }}
+                  exit={{ opacity:0, scale:0.96, y:-4 }}
+                  transition={{ duration:0.15 }}>
+                  <Calendar theme={theme}
+                    value={filterDate}
+                    onChange={setFilterDate}
+                    onClose={() => setCalFilter(false)}/>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
 
         <div style={{ flex:1 }}/>
-        <span style={s.rowCount}>
-          {displayRows.length} of {rows.length} row{rows.length!==1?"s":""}
+        <span style={{ fontSize:10, color:theme.colorMuted, whiteSpace:"nowrap" }}>
+          {displayRows.length} of {rows.length} row{rows.length !== 1 ? "s" : ""}
         </span>
       </div>
 
       {/* ── Table ── */}
       {loading ? (
-        <div style={s.loadingState}>Loading data…</div>
+        <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
+                      color:theme.colorMuted, fontSize:13 }}>
+          Loading data…
+        </div>
       ) : displayRows.length === 0 ? (
-        <EmptyState sheet={activeSheet} hasFilter={!!(search||filterDate)}/>
+        <EmptyState sheet={activeSheet} hasFilter={!!(search || filterDate)} theme={theme}/>
       ) : (
-        <div style={s.tableWrap}>
-          <table style={s.table}>
+        <div style={{ flex:1, overflow:"auto" }}>
+          <table style={{ borderCollapse:"collapse", width:"100%", tableLayout:"fixed" }}>
             <thead>
-              <tr style={s.thead}>
-                <th style={{ ...s.th, width:36 }}>#</th>
+              <tr style={{ background:theme.gradPanel,
+                           position:"sticky", top:0, zIndex:5 }}>
+                <th style={{ padding:"7px 10px", textAlign:"left", fontSize:10,
+                             fontWeight:700, color:theme.colorMuted,
+                             textTransform:"uppercase", letterSpacing:"0.06em",
+                             borderBottom:`1px solid ${theme.colorBorder}`,
+                             whiteSpace:"nowrap", overflow:"hidden",
+                             userSelect:"none", width:36 }}>#</th>
                 {cols.map(c => (
                   <th key={c.key}
-                    style={{ ...s.th, width:c.width, minWidth:c.width,
-                      cursor: c.sortable ? "pointer" : "default" }}
+                    style={{ padding:"7px 10px", textAlign:"left", fontSize:10,
+                             fontWeight:700, color:theme.colorMuted,
+                             textTransform:"uppercase", letterSpacing:"0.06em",
+                             borderBottom:`1px solid ${theme.colorBorder}`,
+                             whiteSpace:"nowrap", overflow:"hidden",
+                             userSelect:"none", width:c.width, minWidth:c.width,
+                             cursor:c.sortable ? "pointer" : "default" }}
                     onClick={() => c.sortable && toggleSort(c.key)}>
                     <div style={{ display:"flex", alignItems:"center", gap:4 }}>
                       {c.label}
-                      {c.editable && <span style={s.editHint}>✎</span>}
+                      {c.editable && <span style={{ fontSize:9, color:theme.colorDim }}>✎</span>}
                       {c.sortable && (
-                        <span style={{ fontSize:9, color: sortCol===c.key ? "#38bdf8" : "#334155" }}>
+                        <span style={{ fontSize:9,
+                          color:sortCol===c.key ? theme.colorPrimary : theme.colorDim }}>
                           {sortCol===c.key ? (sortDir==="asc" ? "▲" : "▼") : "⇅"}
                         </span>
                       )}
                     </div>
                   </th>
                 ))}
-                <th style={{ ...s.th, width:50 }}></th>
+                <th style={{ padding:"7px 10px", textAlign:"left", fontSize:10,
+                             fontWeight:700, color:theme.colorMuted,
+                             borderBottom:`1px solid ${theme.colorBorder}`,
+                             width:50 }}/>
               </tr>
             </thead>
             <tbody>
               {displayRows.map((row, i) => {
-                const rowId   = row.job_id;
-                const isFlash = flashRow === rowId;
+                const rowId    = row.job_id;
+                const isFlash  = flashRow === rowId;
                 const isSaving = saving[rowId];
                 return (
                   <tr key={rowId || i} id={`row-${rowId}`}
-                    style={{ ...s.tr,
-                      background: isFlash ? "#1e3a5f" : i%2===0 ? "#0f172a" : "#0a0f1a",
-                      outline: isFlash ? "2px solid #38bdf8" : "none",
+                    style={{
+                      background:isFlash
+                        ? `rgba(${hexToRgb(theme.colorPrimary)},0.15)`
+                        : i%2===0 ? "transparent" : "rgba(0,0,0,0.15)",
+                      borderBottom:`1px solid ${theme.colorBorder}`,
+                      outline:isFlash ? `2px solid ${theme.colorPrimary}` : "none",
+                      transition:"background 0.3s",
                     }}>
-                    <td style={{ ...s.td, color:"#475569", width:36 }}>{i+1}</td>
+                    <td style={{ padding:"5px 10px", fontSize:11,
+                                 color:theme.colorDim, width:36 }}>{i+1}</td>
 
                     {cols.map(c => {
                       const isEditing = editCell?.rowId===rowId && editCell?.col===c.key;
                       const raw = row[c.key] ?? "";
 
-                      // ── Date column ──
                       if (c.isDate) {
                         const isoVal = typeof raw === "number"
                           ? new Date(raw*1000).toISOString().slice(0,10)
                           : (typeof raw === "string" && raw.length >= 10 ? raw.slice(0,10) : "");
                         const isCalOpen = calCell?.rowId === rowId;
                         return (
-                          <td key={c.key} style={{ ...s.td, width:c.width, position:"relative" }}>
+                          <td key={c.key} style={{ padding:"5px 10px", fontSize:11,
+                                                   width:c.width, position:"relative",
+                                                   color:theme.colorText }}>
                             <div ref={isCalOpen ? calRef : null} style={{ position:"relative" }}>
                               <button
-                                style={{ ...s.dateCell, ...(isoVal ? s.dateCellFilled : {}) }}
+                                style={{ background:"transparent",
+                                         border:`1px ${isoVal ? "solid" : "dashed"} ${isoVal ? theme.colorPrimary : theme.colorBorder}`,
+                                         borderRadius:5, color:isoVal ? theme.colorAccent : theme.colorDim,
+                                         fontSize:11, padding:"3px 8px",
+                                         cursor:"pointer", whiteSpace:"nowrap" }}
                                 onClick={() => setCalCell(isCalOpen ? null : { rowId })}>
-                                {isoVal ? fmtDate(isoVal) : <span style={{ color:"#334155" }}>+ Set date</span>}
+                                {isoVal ? fmtDate(isoVal) : (
+                                  <span style={{ color:theme.colorDim }}>+ Set date</span>
+                                )}
                                 {isSaving && <span style={{ color:"#f59e0b", marginLeft:4 }}>⏳</span>}
                               </button>
-                              {isCalOpen && (
-                                <Calendar
-                                  value={isoVal}
-                                  onChange={(iso) => handleDatePick(rowId, iso)}
-                                  onClose={() => setCalCell(null)}
-                                />
-                              )}
+                              <AnimatePresence>
+                                {isCalOpen && (
+                                  <motion.div key="cal"
+                                    initial={{ opacity:0, scale:0.96, y:-4 }}
+                                    animate={{ opacity:1, scale:1, y:0 }}
+                                    exit={{ opacity:0, scale:0.96, y:-4 }}
+                                    transition={{ duration:0.15 }}>
+                                    <Calendar theme={theme}
+                                      value={isoVal}
+                                      onChange={iso => handleDatePick(rowId, iso)}
+                                      onClose={() => setCalCell(null)}/>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
                             </div>
                           </td>
                         );
                       }
 
-                      // ── URL column ──
                       if (c.key === "job_url") return (
-                        <td key={c.key} style={{ ...s.td, width:c.width }}>
+                        <td key={c.key} style={{ padding:"5px 10px", fontSize:11,
+                                                  width:c.width, color:theme.colorText }}>
                           {raw ? (
                             <a href={raw} target="_blank" rel="noreferrer"
-                              style={{ color:"#38bdf8", fontSize:10, textDecoration:"none" }}>↗ Open</a>
+                              style={{ color:theme.colorPrimary, fontSize:10,
+                                       textDecoration:"none" }}>
+                              ↗ Open
+                            </a>
                           ) : "—"}
                         </td>
                       );
 
-                      // ── ATS score ──
                       if (c.key === "ats_score") return (
-                        <td key={c.key} style={{ ...s.td, width:c.width }}>
+                        <td key={c.key} style={{ padding:"5px 10px", fontSize:11,
+                                                  width:c.width, color:theme.colorText }}>
                           {raw != null && raw !== "" ? (
                             <span style={{
-                              background: raw>=80?"#dcfce7":raw>=60?"#fef9c3":"#fee2e2",
-                              color:      raw>=80?"#166534":raw>=60?"#854d0e":"#991b1b",
+                              background:raw>=80?"#dcfce7":raw>=60?"#fef9c3":"#fee2e2",
+                              color:raw>=80?"#166534":raw>=60?"#854d0e":"#991b1b",
                               padding:"2px 7px", borderRadius:8, fontSize:10, fontWeight:700,
                             }}>{raw}</span>
                           ) : "—"}
                         </td>
                       );
 
-                      // ── Editable text cell ──
-                      const display = c.key==="applied_at" ? fmtDate(raw) : raw;
+                      const display = c.key === "applied_at" ? fmtDate(raw) : raw;
                       return (
                         <td key={c.key}
-                          style={{ ...s.td, width:c.width, maxWidth:c.width,
-                            cursor: (c.editable && isApps) ? "pointer" : "default",
-                            background: isEditing ? "#1e293b" : undefined }}
-                          onClick={() => c.editable && !isEditing && isApps && startEdit(rowId, c.key, raw)}>
+                          style={{ padding:"5px 10px", fontSize:11,
+                                   color:theme.colorText, width:c.width, maxWidth:c.width,
+                                   overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                                   cursor:(c.editable && isApps) ? "pointer" : "default",
+                                   background:isEditing ? theme.colorSurface : undefined }}
+                          onClick={() => c.editable && !isEditing && isApps &&
+                                        startEdit(rowId, c.key, raw)}>
                           {isEditing ? (
                             <input ref={inputRef} value={editVal}
                               onChange={e => setEditVal(e.target.value)}
@@ -493,10 +589,16 @@ export function DatabasePanel({ user }) {
                                 if (e.key==="Enter")  commitEdit(row);
                                 if (e.key==="Escape") cancelEdit();
                               }}
-                              style={s.cellInput}/>
+                              style={{ width:"100%", background:theme.colorSurface,
+                                       color:theme.colorText,
+                                       border:`1px solid ${theme.colorPrimary}`,
+                                       borderRadius:4, padding:"3px 6px",
+                                       fontSize:11, outline:"none", boxSizing:"border-box" }}/>
                           ) : (
-                            <span style={s.cellText} title={String(display||"")}>
-                              {display || <span style={{ color:"#334155" }}>—</span>}
+                            <span style={{ display:"block", overflow:"hidden",
+                                           textOverflow:"ellipsis", whiteSpace:"nowrap" }}
+                              title={String(display || "")}>
+                              {display || <span style={{ color:theme.colorDim }}>—</span>}
                               {isSaving && <span style={{ color:"#f59e0b", marginLeft:4 }}>⏳</span>}
                             </span>
                           )}
@@ -504,9 +606,11 @@ export function DatabasePanel({ user }) {
                       );
                     })}
 
-                    {/* Delete */}
-                    <td style={{ ...s.td, width:50 }}>
-                      <button style={s.delBtn}
+                    <td style={{ padding:"5px 10px", fontSize:11,
+                                 color:theme.colorText, width:50 }}>
+                      <button style={{ background:"transparent", border:"none",
+                                       color:theme.colorDim, cursor:"pointer",
+                                       fontSize:12, padding:"2px 6px", borderRadius:4 }}
                         onClick={() => isApps ? deleteApp(rowId) : deleteResume(rowId)}
                         title="Delete row">✕</button>
                     </td>
@@ -521,78 +625,30 @@ export function DatabasePanel({ user }) {
   );
 }
 
-function EmptyState({ sheet, hasFilter }) {
+function hexToRgb(hex) {
+  const h = hex.replace("#","");
+  const n = parseInt(h.length === 3
+    ? h.split("").map(c => c+c).join("") : h, 16);
+  return `${(n>>16)&255},${(n>>8)&255},${n&255}`;
+}
+
+function EmptyState({ sheet, hasFilter, theme }) {
   return (
-    <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
-      justifyContent:"center", color:"#334155", gap:12, padding:40 }}>
-      <div style={{ fontSize:40 }}>{sheet==="applications" ? "📋" : "📄"}</div>
-      <div style={{ fontWeight:700, color:"#475569", fontSize:14 }}>
+    <div style={{ flex:1, display:"flex", flexDirection:"column",
+                  alignItems:"center", justifyContent:"center",
+                  color:theme.colorDim, gap:12, padding:40 }}>
+      <div style={{ fontSize:40 }}>{sheet === "applications" ? "📋" : "📄"}</div>
+      <div style={{ fontWeight:700, color:theme.colorMuted, fontSize:14 }}>
         {hasFilter ? "No rows match your filter" :
-          sheet==="applications" ? "No applications tracked yet" : "No resumes generated yet"}
+          sheet === "applications" ? "No applications tracked yet" : "No resumes generated yet"}
       </div>
-      <div style={{ fontSize:11, color:"#334155", textAlign:"center", maxWidth:300, lineHeight:1.8 }}>
+      <div style={{ fontSize:11, color:theme.colorDim,
+                    textAlign:"center", maxWidth:300, lineHeight:1.8 }}>
         {hasFilter ? "Try clearing the search or date filter." :
-          sheet==="applications"
+          sheet === "applications"
             ? "When you export a PDF for a job, it's automatically logged here."
             : "Generate resumes from the Jobs tab — they appear here with ATS scores."}
       </div>
     </div>
   );
 }
-
-const s = {
-  root:            { flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:"#0f172a" },
-  header:          { background:"#0a0f1a", borderBottom:"1px solid #1e293b",
-                     display:"flex", alignItems:"stretch", flexShrink:0 },
-  sheetTabs:       { display:"flex" },
-  sheetTab:        { background:"transparent", color:"#64748b", border:"none",
-                     borderBottom:"2px solid transparent", padding:"12px 20px",
-                     cursor:"pointer", fontSize:12, fontWeight:700,
-                     display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" },
-  sheetTabActive:  { color:"#38bdf8", borderBottom:"2px solid #38bdf8", background:"#0f172a" },
-  badge:           { background:"#1e293b", color:"#94a3b8", fontSize:10,
-                     fontWeight:700, padding:"1px 6px", borderRadius:8 },
-  refreshBtn:      { background:"transparent", color:"#64748b", border:"none",
-                     padding:"8px 14px", cursor:"pointer", fontSize:11, fontWeight:700,
-                     borderLeft:"1px solid #1e293b" },
-  exportBtn:       { background:"#10b981", color:"#fff", border:"none",
-                     padding:"8px 16px", cursor:"pointer", fontSize:11, fontWeight:700,
-                     borderLeft:"1px solid #1e293b" },
-  toolbar:         { background:"#0a0f1a", padding:"8px 12px", display:"flex",
-                     alignItems:"center", gap:8, borderBottom:"1px solid #1e293b", flexShrink:0, flexWrap:"wrap" },
-  searchWrap:      { position:"relative", display:"flex", alignItems:"center", flex:"0 0 260px" },
-  searchIcon:      { position:"absolute", left:8, fontSize:12, pointerEvents:"none" },
-  searchInp:       { width:"100%", padding:"6px 28px 6px 28px", borderRadius:6,
-                     border:"1px solid #334155", background:"#0f172a", color:"#f8fafc",
-                     fontSize:11, outline:"none" },
-  clearSearch:     { position:"absolute", right:8, background:"transparent", border:"none",
-                     color:"#475569", cursor:"pointer", fontSize:11 },
-  dateFilterBtn:   { background:"#1e293b", color:"#94a3b8", border:"1px solid #334155",
-                     borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11,
-                     fontWeight:600, display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap" },
-  dateFilterBtnActive: { background:"#1e3a5f", color:"#38bdf8", borderColor:"#38bdf8" },
-  clearDateX:      { marginLeft:4, color:"#64748b", fontWeight:700, fontSize:10 },
-  rowCount:        { fontSize:10, color:"#475569", whiteSpace:"nowrap" },
-  tableWrap:       { flex:1, overflow:"auto" },
-  table:           { borderCollapse:"collapse", width:"100%", tableLayout:"fixed" },
-  thead:           { background:"#0a0f1a", position:"sticky", top:0, zIndex:5 },
-  th:              { padding:"7px 10px", textAlign:"left", fontSize:10, fontWeight:700,
-                     color:"#475569", borderBottom:"1px solid #1e293b",
-                     whiteSpace:"nowrap", overflow:"hidden", userSelect:"none" },
-  editHint:        { fontSize:9, color:"#334155" },
-  tr:              { borderBottom:"1px solid #0a0f1a", transition:"background 0.3s, outline 0.3s" },
-  td:              { padding:"5px 10px", fontSize:11, color:"#cbd5e1",
-                     overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  cellText:        { display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" },
-  cellInput:       { width:"100%", background:"#1e3a5f", color:"#f8fafc",
-                     border:"1px solid #38bdf8", borderRadius:4, padding:"3px 6px",
-                     fontSize:11, outline:"none", boxSizing:"border-box" },
-  dateCell:        { background:"transparent", border:"1px dashed #334155", borderRadius:5,
-                     color:"#64748b", fontSize:11, padding:"3px 8px", cursor:"pointer",
-                     whiteSpace:"nowrap" },
-  dateCellFilled:  { borderStyle:"solid", borderColor:"#3b82f6", color:"#93c5fd" },
-  delBtn:          { background:"transparent", border:"none", color:"#475569",
-                     cursor:"pointer", fontSize:12, padding:"2px 6px", borderRadius:4 },
-  loadingState:    { flex:1, display:"flex", alignItems:"center", justifyContent:"center",
-                     color:"#475569", fontSize:13 },
-};

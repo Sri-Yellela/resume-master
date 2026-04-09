@@ -1,8 +1,7 @@
-// client/src/App.jsx — v8
-// AuthScreen has its own full-page layout with no TopBar.
-// TopBar + panels only mount after successful login.
+// REVAMP v1 — App.jsx
 import { useState, useEffect } from "react";
 import { api }           from "./lib/api.js";
+import { useTheme }      from "./styles/theme.jsx";
 import AuthScreen        from "./components/AuthScreen.jsx";
 import TopBar            from "./components/TopBar.jsx";
 import JobsPanel         from "./panels/JobsPanel.jsx";
@@ -11,6 +10,7 @@ import { DatabasePanel } from "./panels/DatabasePanel.jsx";
 import { AdminPanel }    from "./panels/AdminPanel.jsx";
 
 export default function App() {
+  const { theme } = useTheme();
   const [authUser,    setAuthUser]    = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [activeTab,   setActiveTab]   = useState("jobs");
@@ -27,20 +27,25 @@ export default function App() {
     setAuthUser(null);
   };
 
-  // ── Loading splash ────────────────────────────────────────
   if (!authChecked) return (
-    <div style={s.loading}>
-      <div style={s.spinner}/>
-      <span style={{ color:"#475569", fontSize:13 }}>Loading…</span>
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column",
+                  alignItems:"center", justifyContent:"center",
+                  background:theme.gradBg, gap:14 }}>
+      <div style={{ width:32, height:32,
+                    border:`3px solid ${theme.colorSurface}`,
+                    borderTop:`3px solid ${theme.colorPrimary}`,
+                    borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+      <span style={{ color:theme.colorMuted, fontSize:13 }}>Loading…</span>
     </div>
   );
 
-  // ── Not logged in — full-page landing, NO TopBar ──────────
   if (!authUser) return <AuthScreen onLogin={setAuthUser}/>;
 
-  // ── Logged in — TopBar + panels ───────────────────────────
   return (
-    <div style={s.root}>
+    <div style={{ fontFamily:"'Inter',Arial,sans-serif", fontSize:13,
+                  background:theme.gradBg, height:"100vh",
+                  display:"flex", flexDirection:"column",
+                  overflow:"hidden", color:theme.colorText }}>
       <TopBar
         user={authUser}
         activeTab={activeTab}
@@ -48,7 +53,7 @@ export default function App() {
         onLogout={handleLogout}
         onUserChange={setAuthUser}
       />
-      <div style={s.body}>
+      <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
         {activeTab === "jobs"     && <JobsPanel     user={authUser} onUserChange={setAuthUser}/>}
         {activeTab === "database" && <DatabasePanel user={authUser}/>}
         {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
@@ -57,16 +62,3 @@ export default function App() {
     </div>
   );
 }
-
-const s = {
-  root:    { fontFamily:"'Inter',Arial,sans-serif", fontSize:13, background:"#0f172a",
-             height:"100vh", display:"flex", flexDirection:"column",
-             overflow:"hidden", color:"#f8fafc" },
-  body:    { flex:1, overflow:"hidden", display:"flex", flexDirection:"column" },
-  loading: { height:"100vh", display:"flex", flexDirection:"column",
-             alignItems:"center", justifyContent:"center",
-             background:"#0f172a", gap:14 },
-  spinner: { width:32, height:32, border:"3px solid #1e293b",
-             borderTop:"3px solid #e879f9", borderRadius:"50%",
-             animation:"spin 0.8s linear infinite" },
-};

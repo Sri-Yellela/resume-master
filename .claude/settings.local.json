@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(cp:*)",
+      "Bash(sed -i 's|from \"../styles/theme.js\"|from \"../styles/theme.jsx\"|g' App.jsx panels/AdminPanel.jsx panels/ATSPanel.jsx panels/DatabasePanel.jsx panels/JobsPanel.jsx panels/ProfilePanel.jsx panels/SandboxPanel.jsx)",
+      "Bash(sed -i 's|from \"./styles/theme.js\"|from \"./styles/theme.jsx\"|g' main.jsx)",
+      "Bash(sed -i 's|from \"../../styles/theme.js\"|from \"../../styles/theme.jsx\"|g' components/AuthScreen.jsx components/TopBar.jsx)",
+      "Bash(sed -i 's|from \"./styles/theme.js\"|from \"./styles/theme.jsx\"|g' App.jsx)",
+      "Bash(sed -i 's|from \"../styles/theme.js\"|from \"../styles/theme.jsx\"|g' components/AuthScreen.jsx components/TopBar.jsx)",
+      "Bash(rm:*)",
+      "Bash(ls /c/Users/sriye/WebstormProjects/resume-master/client/src/components/*.jsx)",
+      "Bash(claude config:*)",
+      "WebSearch"
+    ]
+  }
+}
