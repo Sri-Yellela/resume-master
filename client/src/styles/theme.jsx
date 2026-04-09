@@ -35,6 +35,11 @@ export const THEMES = {
     colorDim:       "#7a4020",
     shimmer1:       "#2a1200",
     shimmer2:       "#3d1f00",
+    radiusPill:  "999px",
+    radiusCard:  "20px",
+    radiusInput: "10px",
+    radiusBtn:   "999px",
+    radiusBadge: "999px",
   },
   aurora: {
     gradBg:      "linear-gradient(135deg, #05001a 0%, #0d0030 40%, #050015 100%)",
@@ -51,6 +56,11 @@ export const THEMES = {
     colorDim:       "#4a2880",
     shimmer1:       "#120030",
     shimmer2:       "#2d0060",
+    radiusPill:  "999px",
+    radiusCard:  "20px",
+    radiusInput: "10px",
+    radiusBtn:   "999px",
+    radiusBadge: "999px",
   },
   forest: {
     gradBg:      "linear-gradient(135deg, #001a05 0%, #003010 40%, #001508 100%)",
@@ -67,6 +77,11 @@ export const THEMES = {
     colorDim:       "#166534",
     shimmer1:       "#002a0a",
     shimmer2:       "#004d14",
+    radiusPill:  "999px",
+    radiusCard:  "20px",
+    radiusInput: "10px",
+    radiusBtn:   "999px",
+    radiusBadge: "999px",
   },
   studio: {
     gradBg:      "linear-gradient(135deg, #0a0f1a 0%, #0f172a 40%, #080d18 100%)",
@@ -83,6 +98,11 @@ export const THEMES = {
     colorDim:       "#334155",
     shimmer1:       "#1e293b",
     shimmer2:       "#334155",
+    radiusPill:  "999px",
+    radiusCard:  "20px",
+    radiusInput: "10px",
+    radiusBtn:   "999px",
+    radiusBadge: "999px",
   },
 };
 
@@ -104,6 +124,8 @@ export function ThemeProvider({ children }) {
   return (
     <ThemeContext.Provider value={{ theme, themeName, setTheme, THEMES }}>
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700;9..40,800&display=swap');
+
         :root {
           --background: ${hexToHsl(theme.colorSurface)};
           --foreground: ${hexToHsl(theme.colorText)};
@@ -125,6 +147,28 @@ export function ThemeProvider({ children }) {
           --destructive: 0 72% 51%;
           --destructive-foreground: 0 0% 100%;
           --radius: 0.5rem;
+        }
+
+        body { font-family: 'DM Sans', system-ui, sans-serif; }
+
+        .site-title {
+          font-size: clamp(16px, 2vw, 20px);
+          font-weight: 800;
+          letter-spacing: -0.5px;
+          background: ${theme.gradAccent};
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+
+        .pill-btn {
+          border-radius: 999px !important;
+          font-weight: 700 !important;
+        }
+
+        .glass-panel {
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
         }
       `}</style>
       {children}

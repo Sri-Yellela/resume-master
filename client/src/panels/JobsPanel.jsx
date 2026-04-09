@@ -21,7 +21,7 @@ function hexToRgb(hex) {
 
 // ── Badges ────────────────────────────────────────────────────
 const Chip = ({ label, bg, fg }) => (
-  <span style={{ background:bg, color:fg, padding:"2px 6px", borderRadius:8,
+  <span style={{ background:bg, color:fg, padding:"3px 10px", borderRadius:"999px",
                  fontSize:9, fontWeight:700, whiteSpace:"nowrap" }}>
     {label}
   </span>
@@ -348,7 +348,7 @@ export default function JobsPanel({ user, onUserChange }) {
 
   // Inline styles using theme
   const selStyle = {
-    padding:"4px 7px", borderRadius:4,
+    padding:"4px 7px", borderRadius:"10px", height:"34px",
     border:`1px solid ${theme.colorBorder}`,
     background:theme.colorSurface, color:theme.colorText,
     fontSize:11, maxWidth:145, flex:"0 0 auto", outline:"none",
@@ -364,8 +364,8 @@ export default function JobsPanel({ user, onUserChange }) {
       </AnimatePresence>
 
       {/* Filter bar */}
-      <div style={{ background:theme.gradPanel, padding:"6px 10px",
-                    display:"flex", alignItems:"center", gap:5, flexShrink:0,
+      <div style={{ background:theme.gradPanel, padding:"8px 14px",
+                    display:"flex", alignItems:"center", gap:8, flexShrink:0,
                     borderBottom:`1px solid ${theme.colorBorder}`,
                     flexWrap:"wrap", minHeight:44 }}>
 
@@ -373,7 +373,7 @@ export default function JobsPanel({ user, onUserChange }) {
           <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
             onKeyDown={e=>e.key==="Enter"&&handleSearch()}
             placeholder="Search role — e.g. ML Engineer, SWE, Data Scientist…"
-            style={{ flex:"1 1 160px", minWidth:120, padding:"5px 9px", borderRadius:5,
+            style={{ flex:"1 1 160px", minWidth:120, padding:"5px 14px", borderRadius:"12px", height:"36px",
                      border:`1px solid ${theme.colorBorder}`, background:theme.colorSurface,
                      color:theme.colorText, fontSize:11, outline:"none", width:"100%" }}/>
           {showPreview && (
@@ -478,11 +478,11 @@ export default function JobsPanel({ user, onUserChange }) {
                 <thead>
                   <tr style={{ background:`rgba(0,0,0,0.4)`, position:"sticky", top:0, zIndex:5 }}>
                     {["Company","Role","Cat","Src","Type","Loc","Age",""].map(h=>(
-                      <th key={h} style={{ padding:"6px 8px", textAlign:"left",
+                      <th key={h} style={{ padding:"8px 10px", textAlign:"left",
                                           fontSize:10, fontWeight:700,
                                           color:theme.colorMuted, whiteSpace:"nowrap",
                                           borderBottom:`1px solid ${theme.colorBorder}`,
-                                          textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                                          textTransform:"uppercase", letterSpacing:"0.08em" }}>
                         {h}
                       </th>
                     ))}
@@ -517,7 +517,7 @@ export default function JobsPanel({ user, onUserChange }) {
                         onMouseEnter={e=>{ e.currentTarget.style.background=theme.gradHover; }}
                         onMouseLeave={e=>{ e.currentTarget.style.background=i%2===0?theme.gradPanel:"rgba(0,0,0,0.2)"; }}>
 
-                        <td style={{ padding:"5px 8px", fontWeight:700, fontSize:11 }}>
+                        <td style={{ padding:"7px 10px", fontWeight:700, fontSize:11 }}>
                           <div style={{ display:"flex", alignItems:"center", gap:3 }}>
                             {job.url
                               ? <a href={job.url} target="_blank" rel="noreferrer"
@@ -535,7 +535,7 @@ export default function JobsPanel({ user, onUserChange }) {
                           </div>
                         </td>
 
-                        <td style={{ padding:"5px 8px", fontSize:10, color:theme.colorText,
+                        <td style={{ padding:"7px 10px", fontSize:10, color:theme.colorText,
                                      maxWidth:160, whiteSpace:"normal" }}>{job.title}</td>
 
                         <td style={{ padding:"5px 8px" }}>
@@ -547,18 +547,18 @@ export default function JobsPanel({ user, onUserChange }) {
                           </span>
                         </td>
 
-                        <td style={{ padding:"5px 8px" }}><SrcBadge s={job.source}/></td>
-                        <td style={{ padding:"5px 8px" }}><WorkBadge t={job.workType}/></td>
-                        <td style={{ padding:"5px 8px", fontSize:9, color:theme.colorDim, maxWidth:80 }}>{job.location}</td>
+                        <td style={{ padding:"7px 10px" }}><SrcBadge s={job.source}/></td>
+                        <td style={{ padding:"7px 10px" }}><WorkBadge t={job.workType}/></td>
+                        <td style={{ padding:"7px 10px", fontSize:9, color:theme.colorDim, maxWidth:80 }}>{job.location}</td>
 
-                        <td style={{ padding:"5px 8px", fontSize:9 }}>
+                        <td style={{ padding:"7px 10px", fontSize:9 }}>
                           <div style={{ display:"flex", alignItems:"center", gap:3 }}>
                             {isNew && <RotatingBadge/>}
                             <span style={{ color:"#10b981", fontWeight:600 }}>{ago(job.postedAt)}</span>
                           </div>
                         </td>
 
-                        <td style={{ padding:"5px 8px" }}>
+                        <td style={{ padding:"7px 10px" }}>
                           <div style={{ display:"flex", gap:3, alignItems:"center" }}>
                             {mode!=="SIMPLE"&&(
                               st
@@ -648,8 +648,8 @@ function EmptyState() {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
                   justifyContent:"center", color:theme.colorDim, gap:12, padding:40 }}>
-      <div style={{ fontSize:42 }}>🔍</div>
-      <div style={{ fontWeight:700, color:theme.colorMuted, fontSize:14 }}>Search for a role above</div>
+      <div style={{ fontSize:56 }}>🔍</div>
+      <div style={{ fontWeight:800, color:theme.colorMuted, fontSize:16 }}>Search for a role above</div>
       <div style={{ fontSize:11, textAlign:"center", color:theme.colorDim,
                     maxWidth:320, lineHeight:1.8 }}>
         LinkedIn + Indeed · full-time only · deduplicated · ghost jobs filtered
@@ -695,7 +695,7 @@ function Btn({ bg, disabled=false, sm=false, onClick, children, title }) {
                background: disabled ? theme.colorDim : (hov ? "transparent" : bg),
                color: disabled ? theme.colorMuted : "#fff",
                border: `1px solid ${disabled ? theme.colorDim : bg}`,
-               borderRadius: 5,
+               borderRadius: "999px",
                padding: sm ? "3px 7px" : "5px 11px",
                cursor: disabled ? "not-allowed" : "pointer",
                fontSize: sm ? 10 : 11, fontWeight: 700,

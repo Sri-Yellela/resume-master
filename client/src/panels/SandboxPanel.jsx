@@ -56,7 +56,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
             <button key={t}
               style={{ background:view===t ? theme.colorPrimary : "transparent",
                        color:view===t ? "#fff" : theme.colorMuted,
-                       border:"none", borderRadius:4, padding:"3px 10px",
+                       border:"none", borderRadius:"999px", padding:"3px 10px",
                        cursor:"pointer", fontSize:11, fontWeight:700 }}
               onClick={() => setView(t)}>
               {i} {t}
@@ -75,7 +75,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
         <button onClick={onClose}
           style={{ background:"transparent", color:theme.colorMuted,
                    border:`1px solid ${theme.colorBorder}`,
-                   borderRadius:4, padding:"3px 8px", cursor:"pointer", fontSize:11 }}>
+                   borderRadius:"999px", padding:"3px 8px", cursor:"pointer", fontSize:11 }}>
           ✕
         </button>
       </div>
@@ -146,7 +146,7 @@ function TB({ theme, bg, disabled, onClick, children }) {
                background:disabled ? theme.colorDim : (hov ? "transparent" : bg),
                color:disabled ? theme.colorMuted : "#fff",
                border:`1px solid ${disabled ? theme.colorDim : bg}`,
-               borderRadius:5, padding:"5px 11px",
+               borderRadius:"999px", padding:"5px 11px",
                cursor:disabled ? "not-allowed" : "pointer",
                fontSize:11, fontWeight:700, whiteSpace:"nowrap",
                opacity:disabled ? 0.5 : 1, transition:"color 0.2s" }}

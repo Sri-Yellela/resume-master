@@ -100,19 +100,14 @@ export function AdminPanel() {
                     background:`rgba(0,0,0,0.3)`, borderRadius:8, padding:3 }}>
         {SECTIONS.map(([id, lbl]) => (
           <button key={id}
-            style={{ position:"relative", flex:1,
-                     background:section===id ? theme.colorSurface : "transparent",
-                     color:section===id ? theme.colorText : theme.colorMuted,
-                     border:"none", borderRadius:6, padding:"7px 0",
+            style={{ flex:1,
+                     background:section===id ? theme.colorPrimary : "transparent",
+                     color:section===id ? "#000" : theme.colorMuted,
+                     border:"none", borderRadius:"999px", padding:"7px 0",
                      cursor:"pointer", fontSize:12, fontWeight:700,
-                     overflow:"hidden" }}
+                     transition:"background 0.2s, color 0.2s" }}
             onClick={() => setSection(id)}>
             {lbl}
-            {section === id && (
-              <motion.div layoutId="admin-tab-indicator"
-                style={{ position:"absolute", bottom:0, left:"10%", right:"10%",
-                         height:2, background:theme.colorPrimary, borderRadius:1 }}/>
-            )}
           </button>
         ))}
       </div>
@@ -124,25 +119,22 @@ export function AdminPanel() {
             exit={{ opacity:0, y:-6 }} transition={{ duration:0.18 }}>
 
             {/* Create user */}
-            <Card style={{ background:theme.gradPanel, borderColor:theme.colorBorder,
-                           marginBottom:22, maxWidth:440 }}>
-              <CardHeader style={{ padding:"16px 20px 8px" }}>
-                <CardTitle style={{ fontWeight:700, fontSize:12, color:theme.colorText }}>
+            <Card className="bg-card border-border" style={{ marginBottom:22, maxWidth:440 }}>
+              <CardHeader>
+                <CardTitle className="text-foreground font-bold text-sm">
                   Create User
                 </CardTitle>
               </CardHeader>
-              <CardContent style={{ padding:"0 20px 16px" }}>
+              <CardContent>
                 <form onSubmit={createUser} style={{ display:"flex", flexDirection:"column", gap:8 }}>
                   <Input value={newU.username}
                     onChange={e => setNewU(u => ({ ...u, username:e.target.value }))}
                     placeholder="Username"
-                    style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                             color:theme.colorText, fontSize:12 }}/>
+                    className="bg-background border-border text-foreground text-xs"/>
                   <Input type="password" value={newU.password}
                     onChange={e => setNewU(u => ({ ...u, password:e.target.value }))}
                     placeholder="Password (min 8 chars)"
-                    style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                             color:theme.colorText, fontSize:12 }}/>
+                    className="bg-background border-border text-foreground text-xs"/>
                   <label style={{ display:"flex", alignItems:"center", gap:6,
                                   fontSize:12, color:theme.colorText }}>
                     <input type="checkbox" checked={newU.isAdmin}
@@ -152,8 +144,7 @@ export function AdminPanel() {
                   </label>
                   <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                     <Button type="submit"
-                      style={{ background:theme.colorPrimary, color:"#000",
-                               fontSize:10, padding:"3px 8px", height:"auto" }}>
+                      className="bg-primary text-primary-foreground text-xs rounded-full px-4 h-auto py-1">
                       Create
                     </Button>
                     {status && (
@@ -174,10 +165,10 @@ export function AdminPanel() {
                 <thead>
                   <tr style={{ background:`rgba(0,0,0,0.3)` }}>
                     {["Username","Role","Mode","Created","Actions"].map(h => (
-                      <th key={h} style={{ padding:"8px 12px", textAlign:"left",
+                      <th key={h} style={{ padding:"10px 14px", textAlign:"left",
                                           fontSize:10, fontWeight:700,
                                           color:theme.colorMuted, textTransform:"uppercase",
-                                          letterSpacing:"0.06em",
+                                          letterSpacing:"0.08em",
                                           borderBottom:`1px solid ${theme.colorBorder}` }}>
                         {h}
                       </th>
@@ -195,14 +186,7 @@ export function AdminPanel() {
                       </td>
                       <td style={{ padding:"7px 12px" }}>
                         <Badge variant="outline"
-                          style={{
-                            fontSize:10, fontWeight:700,
-                            background:u.is_admin
-                              ? `rgba(${hexToRgb(theme.colorPrimary)},0.2)`
-                              : `rgba(255,255,255,0.06)`,
-                            color:u.is_admin ? theme.colorPrimary : theme.colorMuted,
-                            borderColor:u.is_admin ? theme.colorPrimary : theme.colorBorder,
-                          }}>
+                          className={`text-[10px] font-bold rounded-full ${u.is_admin ? "bg-primary/20 text-primary border-primary" : "bg-white/5 text-muted-foreground border-border"}`}>
                           {u.is_admin ? "Admin" : "User"}
                         </Badge>
                       </td>
@@ -240,14 +224,13 @@ export function AdminPanel() {
             exit={{ opacity:0, y:-6 }} transition={{ duration:0.18 }}>
 
             {/* Actions */}
-            <Card style={{ background:theme.gradPanel, borderColor:theme.colorBorder,
-                           marginBottom:22, maxWidth:560 }}>
-              <CardHeader style={{ padding:"16px 20px 8px" }}>
-                <CardTitle style={{ fontWeight:700, fontSize:12, color:theme.colorText }}>
+            <Card className="bg-card border-border" style={{ marginBottom:22, maxWidth:560 }}>
+              <CardHeader>
+                <CardTitle className="text-foreground font-bold text-sm">
                   Database Backup
                 </CardTitle>
               </CardHeader>
-              <CardContent style={{ padding:"0 20px 16px" }}>
+              <CardContent>
                 <div style={{ fontSize:11, color:theme.colorMuted,
                               lineHeight:1.6, marginBottom:12 }}>
                   Backups are saved to{" "}
@@ -260,8 +243,7 @@ export function AdminPanel() {
                 <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                   <Button
                     disabled={backing} onClick={triggerBackup}
-                    style={{ background:theme.colorPrimary, color:"#000",
-                             fontSize:12, padding:"7px 16px", height:"auto" }}>
+                    className="bg-primary text-primary-foreground text-xs rounded-full px-5 h-auto py-2">
                     {backing ? "Creating backup…" : "💾 Backup Now"}
                   </Button>
                   {bStatus && (
@@ -325,17 +307,7 @@ export function AdminPanel() {
                         </td>
                         <td style={{ padding:"7px 12px" }}>
                           <Badge variant="outline"
-                            style={{
-                              background:b.label==="auto-daily"
-                                ? `rgba(${hexToRgb(theme.colorPrimary)},0.15)`
-                                : b.label==="manual"
-                                  ? `rgba(255,255,255,0.08)`
-                                  : "rgba(239,68,68,0.15)",
-                              color:b.label==="auto-daily" ? theme.colorPrimary
-                                : b.label==="manual" ? theme.colorMuted : "#fca5a5",
-                              borderColor:theme.colorBorder,
-                              fontSize:9, fontWeight:700,
-                            }}>
+                            className={`text-[9px] font-bold rounded-full ${b.label==="auto-daily" ? "bg-primary/15 text-primary border-border" : b.label==="manual" ? "bg-white/8 text-muted-foreground border-border" : "bg-destructive/15 text-destructive border-border"}`}>
                             {b.label}
                           </Badge>
                         </td>
@@ -379,7 +351,7 @@ function ABtn({ theme, bg, onClick, children, disabled, lg, type = "button" }) {
                background:disabled ? theme.colorDim : (hov ? "transparent" : bg),
                color:disabled ? theme.colorMuted : "#fff",
                border:`1px solid ${disabled ? theme.colorDim : bg}`,
-               borderRadius:5,
+               borderRadius:"999px",
                padding:lg ? "7px 16px" : "3px 8px",
                cursor:disabled ? "not-allowed" : "pointer",
                fontSize:lg ? 12 : 10, fontWeight:700,

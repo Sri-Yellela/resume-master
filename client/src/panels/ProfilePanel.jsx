@@ -98,7 +98,7 @@ export function ProfilePanel() {
   };
 
   const selStyle = {
-    width:"100%", padding:"7px 10px", borderRadius:5,
+    width:"100%", padding:"7px 10px", borderRadius:"10px",
     border:`1px solid ${theme.colorBorder}`, background:theme.colorSurface,
     color:theme.colorText, fontSize:12, outline:"none", boxSizing:"border-box",
   };
@@ -114,23 +114,20 @@ export function ProfilePanel() {
           <PRow label="Full Name">
             <Input value={form.full_name || ""} onChange={e => set("full_name", e.target.value)}
               placeholder="First Last (or First Middle Last)"
-              style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                       color:theme.colorText, fontSize:12 }}/>
+              className="bg-background border-border text-foreground text-xs"/>
             <PHint theme={theme}>Enter your name exactly as it should appear on your resume and applications.</PHint>
           </PRow>
           <PRow label="Email">
             <Input type="email" value={form.email || ""} onChange={e => set("email", e.target.value)}
               placeholder="you@email.com"
-              style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                       color:theme.colorText, fontSize:12 }}/>
+              className="bg-background border-border text-foreground text-xs"/>
           </PRow>
           <PRow label="Phone">
             <Input type="tel" value={form.phone || ""}
               onChange={e => set("phone", e.target.value)}
               onBlur={blurPhone}
               placeholder="+1 (555) 000-0000 or 5550001234"
-              style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                       color:theme.colorText, fontSize:12 }}/>
+              className="bg-background border-border text-foreground text-xs"/>
             <PHint theme={theme}>Any format accepted — normalised to +1 (XXX) XXX-XXXX on save.</PHint>
           </PRow>
           <PRow label="LinkedIn URL">
@@ -138,16 +135,14 @@ export function ProfilePanel() {
               onChange={e => set("linkedin_url", e.target.value)}
               onBlur={blurLinkedin}
               placeholder="linkedin.com/in/yourhandle"
-              style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                       color:theme.colorText, fontSize:12 }}/>
+              className="bg-background border-border text-foreground text-xs"/>
           </PRow>
           <PRow label="GitHub URL">
             <Input value={form.github_url || ""}
               onChange={e => set("github_url", e.target.value)}
               onBlur={blurGithub}
               placeholder="github.com/yourhandle"
-              style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                       color:theme.colorText, fontSize:12 }}/>
+              className="bg-background border-border text-foreground text-xs"/>
           </PRow>
         </PSec>
 
@@ -156,14 +151,12 @@ export function ProfilePanel() {
           <PRow label="Street Address">
             <Input value={form.address_line1 || ""} onChange={e => set("address_line1", e.target.value)}
               placeholder="123 Main St"
-              style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                       color:theme.colorText, fontSize:12 }}/>
+              className="bg-background border-border text-foreground text-xs"/>
           </PRow>
           <PRow label="Apt / Suite">
             <Input value={form.address_line2 || ""} onChange={e => set("address_line2", e.target.value)}
               placeholder="Apt 4B"
-              style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                       color:theme.colorText, fontSize:12 }}/>
+              className="bg-background border-border text-foreground text-xs"/>
           </PRow>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
             <div>
@@ -224,7 +217,7 @@ export function ProfilePanel() {
             <Checkbox
               checked={!!form.requires_sponsorship}
               onCheckedChange={v => set("requires_sponsorship", !!v)}
-              style={{ accentColor:theme.colorPrimary }}/>
+              className="border-primary data-[state=checked]:bg-primary"/>
             Requires visa sponsorship
           </label>
           <label style={{ display:"flex", alignItems:"center", gap:8,
@@ -233,7 +226,7 @@ export function ProfilePanel() {
             <Checkbox
               checked={!!form.has_clearance}
               onCheckedChange={v => set("has_clearance", !!v)}
-              style={{ accentColor:theme.colorPrimary }}/>
+              className="border-primary data-[state=checked]:bg-primary"/>
             Active security clearance
           </label>
           {form.has_clearance && (
@@ -296,9 +289,7 @@ export function ProfilePanel() {
 
         <div style={{ display:"flex", alignItems:"center", gap:12, marginTop:8 }}>
           <Button type="submit"
-            style={{ background:theme.gradAccent, color:"#000", border:"none",
-                     borderRadius:6, padding:"8px 20px",
-                     fontWeight:700, fontSize:12 }}>
+            className="bg-primary text-primary-foreground font-bold px-7 py-2 rounded-full hover:bg-primary/90">
             Save Profile
           </Button>
           {status && (
@@ -316,8 +307,8 @@ export function ProfilePanel() {
 // ── Sub-components ─────────────────────────────────────────────
 const PSec = ({ title, children, theme }) => (
   <div style={{ marginBottom:22 }}>
-    <div style={{ fontWeight:700, fontSize:11, color:theme.colorPrimary,
-                  textTransform:"uppercase", letterSpacing:"0.8px",
+    <div style={{ fontWeight:800, fontSize:12, color:theme.colorPrimary,
+                  textTransform:"uppercase", letterSpacing:"1px",
                   marginBottom:10, paddingBottom:6,
                   borderBottom:`1px solid ${theme.colorBorder}` }}>
       {title}

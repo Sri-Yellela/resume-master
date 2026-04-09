@@ -69,7 +69,7 @@ function Calendar({ value, onChange, onClose, theme }) {
                     justifyContent:"space-between", marginBottom:12 }}>
         <button style={{ background:"transparent",
                          border:`1px solid ${theme.colorBorder}`,
-                         color:theme.colorMuted, borderRadius:6, width:28, height:28,
+                         color:theme.colorMuted, borderRadius:"999px", width:28, height:28,
                          cursor:"pointer", fontSize:16,
                          display:"flex", alignItems:"center", justifyContent:"center" }}
           onClick={prev}>‹</button>
@@ -78,7 +78,7 @@ function Calendar({ value, onChange, onClose, theme }) {
         </span>
         <button style={{ background:"transparent",
                          border:`1px solid ${theme.colorBorder}`,
-                         color:theme.colorMuted, borderRadius:6, width:28, height:28,
+                         color:theme.colorMuted, borderRadius:"999px", width:28, height:28,
                          cursor:"pointer", fontSize:16,
                          display:"flex", alignItems:"center", justifyContent:"center" }}
           onClick={next}>›</button>
@@ -337,37 +337,34 @@ export function DatabasePanel({ user }) {
         <div style={{ display:"flex" }}>
           {SHEETS.map(([id, lbl]) => (
             <button key={id}
-              style={{ position:"relative", background:"transparent",
-                       color:activeSheet===id ? theme.colorPrimary : theme.colorMuted,
+              style={{ background:activeSheet===id ? theme.colorPrimary : "transparent",
+                       color:activeSheet===id ? "#000" : theme.colorMuted,
                        border:"none",
-                       borderBottom:`2px solid ${activeSheet===id ? theme.colorPrimary : "transparent"}`,
-                       padding:"12px 20px", cursor:"pointer", fontSize:12, fontWeight:700,
-                       display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" }}
+                       borderRadius:"999px", margin:"6px 4px",
+                       padding:"6px 18px", cursor:"pointer", fontSize:12, fontWeight:700,
+                       display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap",
+                       transition:"background 0.2s, color 0.2s" }}
               onClick={() => { setActiveSheet(id); setSearch(""); setFilterDate(""); }}>
               {lbl}
-              <span style={{ background:theme.colorSurface, color:theme.colorMuted,
+              <span style={{ background:activeSheet===id ? "rgba(0,0,0,0.2)" : theme.colorSurface,
+                             color:activeSheet===id ? "#000" : theme.colorMuted,
                              fontSize:10, fontWeight:700,
                              padding:"1px 6px", borderRadius:8 }}>
                 {id === "applications" ? apps.length : resumes.length}
               </span>
-              {activeSheet === id && (
-                <motion.div layoutId="db-tab-indicator"
-                  style={{ position:"absolute", bottom:-1, left:"5%", right:"5%",
-                           height:2, background:theme.colorPrimary, borderRadius:1 }}/>
-              )}
             </button>
           ))}
         </div>
         <div style={{ flex:1 }}/>
         <button style={{ background:"transparent", color:theme.colorMuted, border:"none",
                          padding:"8px 14px", cursor:"pointer", fontSize:11, fontWeight:700,
-                         borderLeft:`1px solid ${theme.colorBorder}` }}
+                         borderLeft:`1px solid ${theme.colorBorder}`, borderRadius:0 }}
           onClick={load} disabled={loading}>
           {loading ? "⏳" : "↻"} Refresh
         </button>
-        <button style={{ background:theme.colorPrimary, color:"#fff", border:"none",
+        <button style={{ background:theme.colorPrimary, color:"#000", border:"none",
                          padding:"8px 16px", cursor:"pointer", fontSize:11, fontWeight:700,
-                         borderLeft:`1px solid ${theme.colorBorder}` }}
+                         borderLeft:`1px solid ${theme.colorBorder}`, borderRadius:"0 0 0 0" }}
           onClick={exportExcel}>
           📥 Export Excel
         </button>
@@ -384,7 +381,7 @@ export function DatabasePanel({ user }) {
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder={`Search ${isApps ? "applications" : "resumes"}…`}
             style={{ width:"100%", padding:"6px 28px",
-                     borderRadius:6, border:`1px solid ${theme.colorBorder}`,
+                     borderRadius:"10px", border:`1px solid ${theme.colorBorder}`,
                      background:theme.colorSurface, color:theme.colorText,
                      fontSize:11, outline:"none" }}/>
           {search && (
@@ -400,7 +397,7 @@ export function DatabasePanel({ user }) {
             <button style={{ background:filterDate ? `rgba(${hexToRgb(theme.colorPrimary)},0.15)` : theme.colorSurface,
                              color:filterDate ? theme.colorPrimary : theme.colorMuted,
                              border:`1px solid ${filterDate ? theme.colorPrimary : theme.colorBorder}`,
-                             borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11,
+                             borderRadius:"999px", padding:"5px 12px", cursor:"pointer", fontSize:11,
                              fontWeight:600, display:"flex", alignItems:"center",
                              gap:6, whiteSpace:"nowrap" }}
               onClick={() => setCalFilter(o => !o)}>

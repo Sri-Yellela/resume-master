@@ -22,7 +22,7 @@ export function ATSPanel({ report, score }) {
   const dashOffset = circumference * (1 - pct / 100);
 
   return (
-    <ScrollArea style={{ height:"100%" }}>
+    <ScrollArea className="h-full">
       <div style={{ padding:"12px 14px", fontSize:12, display:"flex",
                     flexDirection:"column", gap:10, boxSizing:"border-box" }}>
 
@@ -99,7 +99,8 @@ function TagSection({ title, bg, fg, items, theme }) {
       <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
         {items.map(k => (
           <Badge key={k} variant="outline"
-            style={{ background:bg, color:fg, borderColor:fg, fontSize:10 }}>
+            className="text-[10px] rounded-full"
+            style={{ background:bg, color:fg, borderColor:fg }}>
             {k}
           </Badge>
         ))}

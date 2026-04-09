@@ -362,7 +362,7 @@ function AuthModal({ mode: initialMode, onLogin, onClose, theme }) {
   };
 
   const inp = {
-    width:"100%", padding:"9px 11px", borderRadius:7,
+    width:"100%", padding:"9px 11px", borderRadius:"10px",
     border:`1px solid ${theme.colorBorder}`,
     background:`rgba(255,255,255,0.08)`,
     color:theme.colorText, fontSize:12, outline:"none", boxSizing:"border-box",
@@ -379,7 +379,7 @@ function AuthModal({ mode: initialMode, onLogin, onClose, theme }) {
         animate={{ opacity:1, scale:1 }}
         transition={{ duration:0.2 }}
         style={{ background:theme.gradPanel, border:`1px solid ${theme.colorBorder}`,
-                 borderRadius:18, padding:"28px 28px",
+                 borderRadius:"24px", padding:"28px 28px",
                  width:"100%", maxWidth:460, position:"relative",
                  boxShadow:"0 40px 80px rgba(0,0,0,.6)",
                  maxHeight:"calc(100vh - 32px)", overflowY:"auto" }}>
@@ -393,10 +393,11 @@ function AuthModal({ mode: initialMode, onLogin, onClose, theme }) {
           {[["login","Sign In"],["register","Create Account"]].map(([m, l]) => (
             <button key={m}
               style={{ flex:1,
-                       background:mode===m ? theme.colorSurface : "transparent",
-                       color:mode===m ? theme.colorText : theme.colorMuted,
-                       border:"none", borderRadius:6, padding:"7px 0",
-                       cursor:"pointer", fontSize:12, fontWeight:700 }}
+                       background:mode===m ? theme.colorPrimary : "transparent",
+                       color:mode===m ? "#000" : theme.colorMuted,
+                       border:"none", borderRadius:"999px", padding:"7px 0",
+                       cursor:"pointer", fontSize:12, fontWeight:700,
+                       transition:"background 0.2s, color 0.2s" }}
               onClick={() => { setMode(m); setStep(1); setErr(""); }}>
               {l}
             </button>
@@ -421,7 +422,7 @@ function AuthModal({ mode: initialMode, onLogin, onClose, theme }) {
                 onChange={e=>setPassword(e.target.value)} placeholder="Password"/>
             </MField>
             <button type="submit" disabled={busy}
-              style={{ width:"100%", padding:"11px", borderRadius:8, border:"none",
+              style={{ width:"100%", padding:"11px", borderRadius:"999px", border:"none",
                        background:theme.gradAccent, color:"#000", fontWeight:800,
                        fontSize:13, cursor:"pointer", marginTop:6 }}>
               {busy ? "Signing in…" : "Sign In →"}
@@ -449,7 +450,7 @@ function AuthModal({ mode: initialMode, onLogin, onClose, theme }) {
                 onChange={e=>setConfirm(e.target.value)} placeholder="Repeat password"/>
             </MField>
             <button type="submit"
-              style={{ width:"100%", padding:"11px", borderRadius:8, border:"none",
+              style={{ width:"100%", padding:"11px", borderRadius:"999px", border:"none",
                        background:theme.gradAccent, color:"#000", fontWeight:800,
                        fontSize:13, cursor:"pointer", marginTop:6 }}>
               Next →
@@ -648,14 +649,14 @@ function AuthModal({ mode: initialMode, onLogin, onClose, theme }) {
               <button type="button"
                 style={{ background:theme.colorSurface, color:theme.colorText,
                          border:`1px solid ${theme.colorBorder}`,
-                         borderRadius:8, padding:"10px 18px",
+                         borderRadius:"999px", padding:"10px 18px",
                          cursor:"pointer", fontWeight:700, fontSize:13,
                          flex:"0 0 auto" }}
                 onClick={() => { setStep(1); setErr(""); }}>
                 ← Back
               </button>
               <button type="submit" disabled={busy}
-                style={{ flex:1, padding:"11px", borderRadius:8, border:"none",
+                style={{ flex:1, padding:"11px", borderRadius:"999px", border:"none",
                          background:theme.gradAccent, color:"#000", fontWeight:800,
                          fontSize:13, cursor:"pointer" }}>
                 {busy ? "Creating account…" : "Create Account →"}
@@ -714,7 +715,7 @@ export default function AuthScreen({ onLogin }) {
         <button style={{ background:theme.colorSurface, color:theme.colorText,
                          border:`1px solid ${theme.colorBorder}`,
                          padding:"7px 18px", cursor:"pointer",
-                         fontSize:12, fontWeight:700, borderRadius:6 }}
+                         fontSize:12, fontWeight:700, borderRadius:"999px" }}
           onClick={() => setModal("login")}>
           Sign In
         </button>
@@ -730,29 +731,29 @@ export default function AuthScreen({ onLogin }) {
           {/* Tiles */}
           <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:32 }}>
             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              <div style={{ border:`1.5px solid ${theme.colorBorder}`, padding:"14px 24px",
-                            fontSize:"clamp(28px,4vw,48px)", fontWeight:800,
-                            lineHeight:1, letterSpacing:"-1px",
+              <div style={{ border:`1.5px solid ${theme.colorBorder}`, padding:"16px 28px",
+                            fontSize:"clamp(32px,5vw,56px)", fontWeight:800,
+                            lineHeight:1, letterSpacing:"-1px", borderRadius:"16px",
                             background:theme.colorSurface, color:theme.colorText }}>
                 Land
               </div>
-              <div style={{ padding:"14px 24px",
-                            fontSize:"clamp(28px,4vw,48px)", fontWeight:800,
+              <div style={{ padding:"16px 28px",
+                            fontSize:"clamp(32px,5vw,56px)", fontWeight:800,
                             lineHeight:1, letterSpacing:"-1px",
-                            background:theme.gradAccent, color:"#000", borderRadius:40 }}>
+                            background:theme.gradAccent, color:"#000", borderRadius:"999px" }}>
                 your next
               </div>
             </div>
             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              <div style={{ border:`1.5px solid ${theme.colorBorder}`, padding:"14px 24px",
-                            fontSize:"clamp(28px,4vw,48px)", fontWeight:800,
-                            lineHeight:1, letterSpacing:"-1px",
+              <div style={{ border:`1.5px solid ${theme.colorBorder}`, padding:"16px 28px",
+                            fontSize:"clamp(32px,5vw,56px)", fontWeight:800,
+                            lineHeight:1, letterSpacing:"-1px", borderRadius:"16px",
                             background:theme.colorSurface, color:theme.colorText }}>
                 role
               </div>
-              <div style={{ border:`1.5px solid ${theme.colorBorder}`, padding:"14px 24px",
-                            fontSize:"clamp(28px,4vw,48px)", fontWeight:800,
-                            lineHeight:1, letterSpacing:"-1px",
+              <div style={{ border:`1.5px solid ${theme.colorBorder}`, padding:"16px 28px",
+                            fontSize:"clamp(32px,5vw,56px)", fontWeight:800,
+                            lineHeight:1, letterSpacing:"-1px", borderRadius:"16px",
                             background:theme.colorSurface, color:theme.colorText }}>
                 smarter
               </div>
@@ -771,16 +772,16 @@ export default function AuthScreen({ onLogin }) {
 
           <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:32 }}>
             <button style={{ background:theme.colorText, color:"#000", border:"none",
-                             padding:"13px 28px", cursor:"pointer",
-                             fontSize:13, fontWeight:700, letterSpacing:"0.3px",
-                             borderRadius:4 }}
+                             padding:"14px 40px", cursor:"pointer",
+                             fontSize:14, fontWeight:800, letterSpacing:"0.3px",
+                             borderRadius:"999px" }}
               onClick={() => setModal("register")}>
               Get Started — it's free
             </button>
             <button style={{ background:"transparent", color:theme.colorText,
                              border:`1.5px solid ${theme.colorBorder}`,
-                             padding:"13px 28px", cursor:"pointer",
-                             fontSize:13, fontWeight:700, borderRadius:4 }}
+                             padding:"14px 28px", cursor:"pointer",
+                             fontSize:13, fontWeight:700, borderRadius:"999px" }}
               onClick={() => setModal("login")}>
               Sign In
             </button>

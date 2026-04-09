@@ -41,7 +41,7 @@ function ThemeSwitcher() {
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       title={themeName}>
-      <div style={{ width:14, height:14, borderRadius:"50%",
+      <div style={{ width:16, height:16, borderRadius:"50%",
                     background:theme.colorPrimary,
                     transition:"background 0.3s ease",
                     boxShadow:`0 0 6px ${theme.colorPrimary}80` }}/>
@@ -155,20 +155,15 @@ function ApifyTokenRow({ theme }) {
           onChange={e => setToken(e.target.value)}
           onKeyDown={e => e.key==="Enter" && save()}
           placeholder={hasToken ? "Paste new token to replace…" : "apify_api_…"}
-          className="flex-1 min-w-0 h-8 text-xs"
-          style={{ background:theme.colorSurface, borderColor:theme.colorBorder,
-                   color:theme.colorText }}/>
+          className="flex-1 min-w-0 h-8 text-xs bg-background border-border text-foreground"/>
         <Button size="sm" onClick={save} disabled={busy || !token.trim()}
-          style={{ flexShrink:0, background:saved ? "#10b981" : theme.colorPrimary,
-                   color:saved ? "#fff" : "#111", fontSize:11,
-                   opacity:(busy || !token.trim()) ? 0.5 : 1 }}>
+          className="h-8 text-xs bg-primary text-primary-foreground hover:bg-primary/90 shrink-0 rounded-full"
+          style={{ background:saved ? "#10b981" : undefined }}>
           {saved ? "✓" : busy ? "…" : "Save"}
         </Button>
         {hasToken && (
           <Button size="sm" variant="outline" onClick={clear} disabled={busy}
-            style={{ flexShrink:0, color:"#f87171", borderColor:"#f87171",
-                     background:"transparent", fontSize:11,
-                     opacity:busy ? 0.5 : 1 }}
+            className="h-8 text-xs shrink-0 rounded-full text-destructive border-destructive hover:bg-destructive/10"
             title="Remove saved token">✕</Button>
         )}
       </div>
@@ -358,6 +353,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
     <TooltipProvider>
       <>
         <header style={{ background:theme.gradPanel,
+                         backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)",
                          borderBottom:`1px solid ${theme.colorBorder}`,
                          padding:"0 12px", height:52,
                          display:"flex", alignItems:"center", gap:8,
@@ -375,17 +371,13 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
           <nav style={{ display:"flex", gap:2 }}>
             {tabs.map(t => (
               <button key={t.id}
-                style={{ position:"relative", background:"transparent",
-                         color:activeTab===t.id ? theme.colorText : theme.colorMuted,
-                         border:"none", padding:"4px 14px", borderRadius:5,
-                         cursor:"pointer", fontSize:12, fontWeight:600 }}
+                style={{ background:activeTab===t.id ? theme.colorPrimary : "transparent",
+                         color:activeTab===t.id ? "#000" : theme.colorMuted,
+                         border:"none", padding:"5px 16px", borderRadius:"999px",
+                         cursor:"pointer", fontSize:12, fontWeight:700,
+                         transition:"background 0.2s, color 0.2s" }}
                 onClick={() => onTabChange(t.id)}>
                 {t.label}
-                {activeTab === t.id && (
-                  <motion.div layoutId="tab-indicator"
-                    style={{ position:"absolute", bottom:0, left:"10%", right:"10%",
-                             height:2, background:theme.colorPrimary, borderRadius:1 }}/>
-                )}
               </button>
             ))}
           </nav>
@@ -397,7 +389,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
 
           {/* Mode badge */}
           <div style={{ background:theme.colorSurface, color:theme.colorMuted,
-                        fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:6,
+                        fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:"999px",
                         border:`1px solid ${theme.colorBorder}`,
                         whiteSpace:"nowrap", flexShrink:0 }}>
             {savingMode ? "⏳" : currentMode.icon} {currentMode.label}
@@ -406,7 +398,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
           {/* Sandwich */}
           <div ref={sandwichRef} style={{ position:"relative" }}>
             <button style={{ background:"transparent", border:"none", cursor:"pointer",
-                             padding:"6px 8px", borderRadius:6,
+                             padding:"6px 8px", borderRadius:"8px",
                              display:"flex", alignItems:"center" }}
               onClick={() => { setSandwichOpen(o => !o); setProfileOpen(false); }}
               title="Settings">
@@ -423,12 +415,10 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
 
           {/* Avatar */}
           <div ref={profileRef} style={{ position:"relative" }}>
-            <Avatar className="w-8 h-8 cursor-pointer"
-              style={{ background:theme.gradAccent }}
+            <Avatar className="w-9 h-9 cursor-pointer ring-2 ring-primary"
               onClick={() => { setProfileOpen(o => !o); setSandwichOpen(false); }}
               title={user?.username}>
-              <AvatarFallback style={{ background:theme.gradAccent, color:"#111",
-                                       fontWeight:800, fontSize:13 }}>
+              <AvatarFallback className="bg-primary text-primary-foreground font-black text-sm">
                 {(user?.username || "U")[0].toUpperCase()}
               </AvatarFallback>
             </Avatar>
