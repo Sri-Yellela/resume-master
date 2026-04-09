@@ -148,8 +148,6 @@ export function ThemeProvider({ children }) {
   return (
     <ThemeContext.Provider value={{ theme, themeName, setTheme, THEMES }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700;9..40,800&display=swap');
-
         :root {
           --background: ${hexToHsl(theme.colorSurface)};
           --foreground: ${hexToHsl(theme.colorText)};
