@@ -306,7 +306,9 @@ export function ProfilePanel() {
 
 // ── Sub-components ─────────────────────────────────────────────
 const PSec = ({ title, children, theme }) => (
-  <div style={{ marginBottom:22 }}>
+  <div style={{ marginBottom:22, background:theme.colorCard || theme.colorSurface,
+                borderRadius:16, padding:"14px 16px",
+                border:`1px solid ${theme.colorBorder}` }}>
     <div style={{ fontWeight:800, fontSize:12, color:theme.colorPrimary,
                   textTransform:"uppercase", letterSpacing:"1px",
                   marginBottom:10, paddingBottom:6,

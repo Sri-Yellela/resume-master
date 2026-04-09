@@ -305,7 +305,7 @@ function DropdownPortal({ anchorRef, open, onClose, align, children }) {
             maxHeight: pos.maxH,
             background: theme.gradPanel,
             border:`1px solid ${theme.colorBorder}`,
-            borderRadius:12,
+            borderRadius:16,
             boxShadow:"0 20px 60px rgba(0,0,0,.7)",
             zIndex:9999,
             overflowY:"auto",
@@ -355,7 +355,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
         <header style={{ background:theme.gradPanel,
                          backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)",
                          borderBottom:`1px solid ${theme.colorBorder}`,
-                         padding:"0 12px", height:52,
+                         padding:"0 12px", height:60,
                          display:"flex", alignItems:"center", gap:8,
                          flexShrink:0, zIndex:100 }}>
           {/* Brand */}

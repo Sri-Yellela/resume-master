@@ -12,7 +12,8 @@ import { Strategy as LocalStrategy } from "passport-local";
 import session        from "express-session";
 import SQLiteStoreFactory from "connect-sqlite3";
 import bcrypt         from "bcryptjs";
-import puppeteer      from "puppeteer";
+import chromium    from "@sparticuz/chromium";
+import puppeteer   from "puppeteer-core";
 import multer         from "multer";
 import ExcelJS        from "exceljs";
 import crypto         from "crypto";
@@ -33,6 +34,36 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const CACHE_TTL_MS        = 12 * 60 * 60 * 1000;
 const MAX_REFRESH_PER_DAY = 4;
 const MAX_JOBS_PER_REFRESH= 50;
+
+// ── Scaling notes ─────────────────────────────────────────────
+// Current: single Node.js process + SQLite + @sparticuz/chromium.
+// Appropriate for ~50-100 concurrent users.
+//
+// Migration order when scaling to SaaS:
+//
+// 1. PDF → Gotenberg (see htmlToPdf() comment block above)
+//    Add as Railway Docker sidecar: gotenberg/gotenberg:8
+//    Set GOTENBERG_URL env var. Zero per-call RAM overhead.
+//    Handles concurrent PDF exports natively.
+//
+// 2. SESSIONS → Redis (connect-redis replaces connect-sqlite3)
+//    npm install connect-redis ioredis
+//    store: new RedisStore({ client: new Redis(process.env.REDIS_URL) })
+//
+// 3. DATABASE → PostgreSQL (pg replaces better-sqlite3)
+//    npm install pg
+//    All db.prepare().get/all/run() become async pool.query()
+//    Railway: add PostgreSQL plugin, use DATABASE_URL env var
+//    Migration runner pattern stays the same
+//
+// 4. JOB SCRAPING → Queue (BullMQ + Redis)
+//    Move scrapeJobs() into a worker process
+//    API enqueues job, client polls for completion
+//    Prevents scrape timeouts on Railway's 30s request limit
+//
+// 5. STATIC FILES → CDN
+//    Push client/dist to Cloudflare R2 or S3
+//    Reduces Railway egress costs at scale
 
 const NON_FULLTIME_TERMS = [
   "intern","internship","co-op","coop","contract","contractor",
@@ -158,6 +189,60 @@ db.pragma("busy_timeout = 5000");
         );
       `,
     },
+    {
+      id: "002_scraped_jobs_pool",
+      sql: `
+        CREATE TABLE IF NOT EXISTS scraped_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          job_id TEXT NOT NULL UNIQUE,
+          search_query TEXT NOT NULL,
+          company TEXT NOT NULL,
+          title TEXT NOT NULL,
+          category TEXT,
+          location TEXT,
+          work_type TEXT,
+          source TEXT,
+          url TEXT,
+          posted_at TEXT,
+          description TEXT,
+          ghost_score INTEGER DEFAULT 0,
+          years_experience INTEGER,
+          is_frequent_repost INTEGER DEFAULT 0,
+          _hash TEXT NOT NULL,
+          scraped_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_query
+          ON scraped_jobs(search_query, scraped_at);
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_hash
+          ON scraped_jobs(_hash);
+      `,
+    },
+    {
+      id: "003_user_job_views",
+      sql: `
+        CREATE TABLE IF NOT EXISTS user_job_views (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          job_id TEXT NOT NULL,
+          viewed_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(user_id, job_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_job_views_user
+          ON user_job_views(user_id, job_id);
+      `,
+    },
+    {
+      id: "004_user_job_searches",
+      sql: `
+        CREATE TABLE IF NOT EXISTS user_job_searches (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          search_query TEXT NOT NULL,
+          last_scraped_at INTEGER,
+          UNIQUE(user_id, search_query)
+        );
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -198,6 +283,30 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
   preservePath: true,
 });
+
+// ── ATS scoring system prompt (module-level, defined once) ────
+const ATS_SYSTEM_PROMPT = `You are an ATS (Applicant Tracking System) scoring engine.
+
+Score the provided resume against the provided job description.
+Extract keywords ONLY from the job description text provided in this message.
+Do not use prior knowledge, assumptions, or memory of other calls.
+Every keyword in tier1_matched and tier1_missing must appear verbatim
+in the job description text provided below.
+
+Reply ONLY with valid JSON. No markdown fences, no explanation, no preamble.
+Use this exact schema:
+{
+  "score": <integer 0-100>,
+  "tier1_matched": [<keywords from JD that appear in resume>],
+  "tier1_missing": [<keywords from JD that do NOT appear in resume>],
+  "action_verbs_matched": [<strong action verbs from JD found in resume>],
+  "action_verbs_missing": [<strong action verbs from JD not in resume>],
+  "strengths": [<2-4 specific strengths as short sentences>],
+  "improvements": [<2-4 specific improvements as short sentences>],
+  "best_possible_score": <integer — highest score achievable given the candidate authentic background without fabrication. Account for: cloud provider mismatches GCP skills at AWS-native company, domain gaps, missing required certifications, seniority gaps, required domain experience the candidate lacks>,
+  "best_possible_reason": "<one sentence: name the specific gaps preventing a higher score — e.g. missing domain experience, cloud provider mismatch, seniority gap, required certification absent. Be specific about the constraint>",
+  "verdict": "<one sentence overall assessment>"
+}`;
 
 // ── Static master prompt (loaded once at startup) ─────────────
 const MASTER_PROMPT_PATH = path.join(__dirname, "resume_masterprompt.md");
@@ -479,13 +588,10 @@ async function scrapeJobs(query, apifyToken) {
 
   const seenHashes = new Set();
   const dbRows = db.prepare(
-    "SELECT jobs_json FROM job_cache WHERE search_query=? ORDER BY scraped_at DESC LIMIT 3"
-  ).all(query);
+    "SELECT _hash FROM scraped_jobs WHERE LOWER(search_query)=? ORDER BY scraped_at DESC LIMIT 200"
+  ).all(query.toLowerCase());
   for (const row of dbRows) {
-    try {
-      const prev = JSON.parse(row.jobs_json);
-      if (Array.isArray(prev)) prev.forEach(j => { if (j._hash) seenHashes.add(j._hash); });
-    } catch {}
+    if (row._hash) seenHashes.add(row._hash);
   }
 
   const thisRunHashes = new Set();
@@ -512,47 +618,85 @@ async function scrapeJobs(query, apifyToken) {
     batch.forEach((item, idx) => classified.push({ ...item, _category: cats[idx] }));
   }
 
-  const repostCounts = {};
-  for (const row of dbRows) {
-    try {
-      JSON.parse(row.jobs_json).forEach(j => {
-        if (j._hash) repostCounts[j._hash] = (repostCounts[j._hash] || 0) + 1;
-      });
-    } catch {}
-  }
+  const now = Date.now();
+  const nowUnix = Math.floor(now / 1000);
 
-  const now  = Date.now();
-  const jobs = classified.map((item, i) => {
-    const h = jobHash(item);
-    return {
-      id:        i + 1,
-      jobId:     `scraped_${now}_${i}`,
-      _hash:     h,
-      company:   item.company,
-      title:     item.title,
-      category:  item._category,
-      location:  item.location || "United States",
-      workType:  inferWorkType(item.workTypeHint + " " + item.location + " " + item.description),
-      source:    item._source,
-      url:       item.url,
-      postedAt:  item.postedAt,
-      description: item.description.slice(0, 500),
-      ghostScore:  ghostJobScoreNorm(item),
-      yearsExperience: extractYearsExperience(item.description),
-      isFrequentRepost: (repostCounts[h] || 0) >= 2,
-    };
+  const insertJob = db.prepare(`
+    INSERT OR IGNORE INTO scraped_jobs
+    (job_id, search_query, company, title, category, location,
+     work_type, source, url, posted_at, description,
+     ghost_score, years_experience, is_frequent_repost, _hash, scraped_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+
+  const insertMany = db.transaction((jobs) => {
+    let inserted = 0;
+    jobs.forEach((item, i) => {
+      const jobId = `scraped_${now}_${i}`;
+      const hash = jobHash(item);
+      const result = insertJob.run(
+        jobId,
+        query.toLowerCase(),
+        item.company,
+        item.title,
+        item._category || "Other",
+        item.location || "United States",
+        inferWorkType(
+          (item.workTypeHint || "") + " " + (item.location || "") + " " + (item.description || "")
+        ),
+        item._source,
+        item.url || null,
+        item.postedAt || null,
+        (item.description || "").slice(0, 500),
+        ghostJobScoreNorm(item),
+        extractYearsExperience(item.description),
+        item.isFrequentRepost ? 1 : 0,
+        hash,
+        nowUnix
+      );
+      if (result.changes > 0) inserted++;
+    });
+    return inserted;
   });
 
-  if (jobs.length > 0) {
-    db.prepare("INSERT INTO job_cache (search_query,source,scraped_at,jobs_json) VALUES (?,?,?,?)")
-      .run(query, "combined", now, JSON.stringify(jobs));
-  }
+  const inserted = insertMany(classified);
+  console.log(
+    `[scrape] ✓ ${inserted} new jobs inserted into pool (${classified.length} total)`
+  );
 
-  console.log(`[scrape] ✓ ${jobs.length} jobs saved`);
-  return jobs;
+  return classified.map((item, i) => ({
+    jobId: `scraped_${now}_${i}`,
+    _hash: jobHash(item),
+    company: item.company,
+    title: item.title,
+    category: item._category,
+    location: item.location || "United States",
+    workType: inferWorkType(
+      (item.workTypeHint || "") + " " + (item.location || "") + " " + (item.description || "")
+    ),
+    source: item._source,
+    url: item.url,
+    postedAt: item.postedAt,
+    description: (item.description || "").slice(0, 500),
+    ghostScore: ghostJobScoreNorm(item),
+    yearsExperience: extractYearsExperience(item.description),
+    isFrequentRepost: item.isFrequentRepost || false,
+  }));
 }
 
-// ── Cron: daily backup 02:00, re-scrape 07:00 ─────────────────
+// ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
+cron.schedule("0 3 * * *", () => {
+  const cutoff = Math.floor(Date.now()/1000) - 7*24*60*60;
+  const deleted = db.prepare(
+    "DELETE FROM scraped_jobs WHERE scraped_at < ?"
+  ).run(cutoff);
+  console.log(`[cleanup] Removed ${deleted.changes} expired scraped jobs`);
+  db.prepare(
+    "DELETE FROM user_job_views WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)"
+  ).run();
+  console.log("[cleanup] Pruned orphaned user_job_views");
+});
+
 cron.schedule("0 2 * * *", () => {
   try { createBackup("auto-daily"); }
   catch(e) { console.error("[backup-cron]", e.message); }
@@ -612,17 +756,82 @@ function buildFullPrompt(profile, job, resumeText, mode, employers) {
   return { system: staticPart, user: runtimeInputs };
 }
 
-// ── PDF ───────────────────────────────────────────────────────
+// ── PDF generation ─────────────────────────────────────────────
+//
+// CURRENT: @sparticuz/chromium + puppeteer-core
+// Lightweight Chromium binary, single Railway service.
+// Per-call RAM spike: ~70MB. Safe for low-to-medium traffic.
+//
+// ── FUTURE MIGRATION PATH → Gotenberg ─────────────────────────
+// When scaling to SaaS (concurrent PDF exports, 100+ users):
+// Gotenberg runs Chromium as a persistent Docker sidecar — zero
+// per-call RAM spike, handles concurrency natively.
+//
+// Migration steps (when ready):
+//   1. In Railway: "+ New Service" → Docker Image → gotenberg/gotenberg:8
+//   2. Add env var to main service: GOTENBERG_URL=<railway internal URL>
+//   3. npm uninstall @sparticuz/chromium puppeteer-core
+//   4. npm install  (form-data is built into Node 18+ via FormData global)
+//   5. Replace this entire function with:
+//
+//   async function htmlToPdf(html) {
+//     const GOTENBERG_URL = process.env.GOTENBERG_URL;
+//     if (!GOTENBERG_URL) throw new Error("GOTENBERG_URL not set");
+//     const fullHtml = html.includes("<html") ? html
+//       : `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
+//     const form = new FormData();
+//     form.append("files", new Blob([fullHtml], { type:"text/html" }),
+//       "index.html");
+//     form.append("paperWidth",      "8.5");
+//     form.append("paperHeight",     "11");
+//     form.append("marginTop",       "0.5");
+//     form.append("marginBottom",    "0.5");
+//     form.append("marginLeft",      "0.5");
+//     form.append("marginRight",     "0.5");
+//     form.append("printBackground", "true");
+//     const r = await fetch(
+//       `${GOTENBERG_URL}/forms/chromium/convert/html`,
+//       { method:"POST", body:form }
+//     );
+//     if (!r.ok) throw new Error(`Gotenberg: ${r.status} ${await r.text()}`);
+//     return Buffer.from(await r.arrayBuffer());
+//   }
+//
+//   6. Remove the chromium + puppeteer-core imports above
+//   7. Delete this comment block
+// ──────────────────────────────────────────────────────────────
+
 async function htmlToPdf(html) {
-  const browser = await puppeteer.launch({ args:["--no-sandbox","--disable-setuid-sandbox"] });
+  const executablePath = await chromium.executablePath();
+
+  const browser = await puppeteer.launch({
+    args:            chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath,
+    headless:        chromium.headless,
+  });
+
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil:"networkidle0" });
-    return await page.pdf({
-      format:"Letter", printBackground:true,
-      margin:{ top:"0.4in", bottom:"0.4in", left:"0.4in", right:"0.4in" },
+    await page.setViewport({ width:1240, height:1754 });
+    await page.setContent(html, { waitUntil:"domcontentloaded" });
+    // Wait for fonts to settle without relying on network idle
+    await new Promise(r => setTimeout(r, 800));
+    const pdf = await page.pdf({
+      format:           "Letter",
+      printBackground:  true,
+      preferCSSPageSize:false,
+      margin: {
+        top:    "0.5in",
+        bottom: "0.5in",
+        left:   "0.5in",
+        right:  "0.5in",
+      },
     });
-  } finally { await browser.close(); }
+    return pdf;
+  } finally {
+    await browser.close();
+  }
 }
 
 // ── Field normalisers (server-side, mirrors client normalisers) ──
@@ -925,50 +1134,101 @@ app.get("/api/extension/autofill", requireAuth, (req, res) => {
 // JOBS
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/jobs", requireAuth, (req, res) => {
-  const raw        = (req.query.query||"").trim();
-  const q          = normaliseSearchQuery(raw).toLowerCase();
+  const raw = (req.query.query || "").trim();
+  const q = (raw || "").toLowerCase();
   const ageFilter = req.query.ageFilter;
   const hideGhost = req.query.hideGhost === "true";
   const hideFlag  = req.query.hideFlag  === "true";
 
-  const row = q
-    ? db.prepare("SELECT * FROM job_cache WHERE LOWER(search_query)=? ORDER BY scraped_at DESC LIMIT 1").get(q)
-    : db.prepare("SELECT * FROM job_cache ORDER BY scraped_at DESC LIMIT 1").get();
-  if (!row) return res.json({ jobs:[], cacheValid:false, query:q });
+  const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
+  const ageLimits = {
+    "1d":86400,"2d":172800,"3d":259200,"1w":604800,"1m":2592000
+  };
+  const ageLimit = ageFilter && ageLimits[ageFilter]
+    ? Math.floor(Date.now() / 1000) - ageLimits[ageFilter]
+    : null;
 
-  let jobs = JSON.parse(row.jobs_json);
+  let sql = `
+    SELECT sj.* FROM scraped_jobs sj
+    WHERE sj.scraped_at > ?
+    AND sj.job_id NOT IN (
+      SELECT job_id FROM user_job_views WHERE user_id = ?
+    )
+  `;
+  const params = [sevenDaysAgo, req.user.id];
 
-  if (ageFilter) {
-    const limits = { "1d":86400000,"2d":172800000,"3d":259200000,"1w":604800000,"1m":2592000000 };
-    const limit  = limits[ageFilter];
-    if (limit) jobs = jobs.filter(j => !j.postedAt||(Date.now()-new Date(j.postedAt).getTime())<=limit);
-  }
-  if (hideGhost) jobs = jobs.filter(j => (j.ghostScore||0) < 4);
-  if (hideFlag)  jobs = jobs.filter(j => !j.isFrequentRepost);
+  if (q) { sql += ` AND LOWER(sj.search_query) = ?`; params.push(q); }
+  if (ageLimit) { sql += ` AND sj.scraped_at > ?`; params.push(ageLimit); }
+  if (hideGhost) { sql += ` AND sj.ghost_score < 4`; }
+  if (hideFlag)  { sql += ` AND sj.is_frequent_repost = 0`; }
+  sql += ` ORDER BY sj.scraped_at DESC LIMIT 100`;
 
-  const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
+  let jobs = db.prepare(sql).all(...params);
+
+  const profile = db.prepare(
+    "SELECT has_clearance FROM user_profile WHERE user_id=?"
+  ).get(req.user.id) || {};
   if (!profile.has_clearance) {
     jobs = jobs.filter(j => {
-      const d = (j.description||"").toLowerCase();
-      return !d.includes("security clearance required")&&!d.includes("ts/sci")&&!d.includes("secret clearance");
+      const d = (j.description || "").toLowerCase();
+      return !d.includes("security clearance required")
+        && !d.includes("ts/sci")
+        && !d.includes("secret clearance");
     });
   }
 
-  const appliedSet   = new Set(db.prepare("SELECT job_id FROM job_applications WHERE user_id=?").all(req.user.id).map(a=>a.job_id));
-  const appliedCoSet = new Set(db.prepare("SELECT LOWER(company) as co FROM job_applications WHERE user_id=?").all(req.user.id).map(a=>a.co));
-  jobs = jobs.map(j => ({
-    ...j,
-    alreadyApplied:       appliedSet.has(j.jobId),
-    companyAppliedBefore: appliedCoSet.has((j.company||"").toLowerCase()),
+  const appliedSet = new Set(
+    db.prepare("SELECT job_id FROM job_applications WHERE user_id=?")
+      .all(req.user.id).map(a => a.job_id)
+  );
+  const appliedCoSet = new Set(
+    db.prepare(
+      "SELECT LOWER(company) as co FROM job_applications WHERE user_id=?"
+    ).all(req.user.id).map(a => a.co)
+  );
+
+  const mapped = jobs.map(j => ({
+    jobId:               j.job_id,
+    company:             j.company,
+    title:               j.title,
+    category:            j.category,
+    location:            j.location,
+    workType:            j.work_type,
+    source:              j.source,
+    url:                 j.url,
+    postedAt:            j.posted_at,
+    description:         j.description,
+    ghostScore:          j.ghost_score,
+    yearsExperience:     j.years_experience,
+    isFrequentRepost:    !!j.is_frequent_repost,
+    alreadyApplied:      appliedSet.has(j.job_id),
+    companyAppliedBefore:appliedCoSet.has((j.company||"").toLowerCase()),
   }));
 
-  const age = Date.now() - row.scraped_at;
-  res.json({ jobs, scrapedAt:row.scraped_at, cacheValid:age<CACHE_TTL_MS, expiresIn:Math.max(0,CACHE_TTL_MS-age), query:row.search_query });
+  const oldestRow = q
+    ? db.prepare(
+        "SELECT MIN(scraped_at) as oldest FROM scraped_jobs " +
+        "WHERE LOWER(search_query)=? AND scraped_at > ?"
+      ).get(q, sevenDaysAgo)
+    : null;
+
+  const scrapedAt  = oldestRow?.oldest ? oldestRow.oldest * 1000 : null;
+  const expiresIn  = scrapedAt
+    ? Math.max(0, 7*24*60*60*1000 - (Date.now() - scrapedAt))
+    : 0;
+
+  res.json({
+    jobs: mapped,
+    cacheValid: mapped.length > 0,
+    scrapedAt,
+    expiresIn,
+    query: q,
+  });
 });
 
 app.post("/api/scrape", requireAuth, async (req, res) => {
-  const raw   = (req.body.query||"").trim();
-  const query = normaliseSearchQuery(raw);
+  const raw   = (req.body.query || "").trim();
+  const query = raw;
   if (!query) return res.status(400).json({ error:"query required" });
 
   const quota = checkRefreshQuota(req.user.id);
@@ -976,23 +1236,62 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     error:`Daily refresh limit reached (${MAX_REFRESH_PER_DAY}/day).`, quota,
   });
 
-  // Each user supplies their own Apify token — no server-level fallback
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
   const token = user?.apify_token;
   if (!token) return res.status(400).json({
-    error:"No Apify token set. Open ☰ → API Keys and paste your personal Apify token. Get one free at console.apify.com → Settings → Integrations.",
-    missingToken: true,
+    error:"No Apify token set. Open ☰ → API Keys and paste your token.",
+    missingToken:true,
   });
 
-  try {
-    const jobs = await scrapeJobs(query, token);
-    // Only charge a quota slot when the scrape actually returned results.
-    // This prevents wasting daily refreshes on transient scraper errors.
-    if (jobs.length > 0) {
-      db.prepare("INSERT INTO refresh_log (user_id,query) VALUES (?,?)").run(req.user.id, query);
+  const sevenDaysAgo = Math.floor(Date.now()/1000) - 7*24*60*60;
+
+  const available = db.prepare(`
+    SELECT COUNT(*) as cnt FROM scraped_jobs
+    WHERE LOWER(search_query) = ?
+    AND scraped_at > ?
+    AND job_id NOT IN (SELECT job_id FROM user_job_views WHERE user_id = ?)
+  `).get(query.toLowerCase(), sevenDaysAgo, req.user.id);
+
+  let fromCache = false;
+  let newJobCount = 0;
+
+  if (available.cnt >= 20) {
+    fromCache   = true;
+    newJobCount = available.cnt;
+    console.log(`[scrape] Serving ${newJobCount} cached jobs for "${query}"`);
+  } else {
+    try {
+      const jobs  = await scrapeJobs(query, token);
+      newJobCount = jobs.length;
+      if (newJobCount > 0) {
+        db.prepare("INSERT INTO refresh_log (user_id,query) VALUES (?,?)")
+          .run(req.user.id, query);
+      }
+    } catch(e) {
+      return res.status(500).json({ ok:false, error:e.message });
     }
-    res.json({ ok:true, count:jobs.length, scrapedAt:Date.now(), query, quota:checkRefreshQuota(req.user.id) });
-  } catch(e) { res.status(500).json({ ok:false, error:e.message }); }
+  }
+
+  db.prepare(`
+    INSERT INTO user_job_searches (user_id,search_query,last_scraped_at)
+    VALUES (?,?,unixepoch())
+    ON CONFLICT(user_id,search_query) DO UPDATE SET last_scraped_at=unixepoch()
+  `).run(req.user.id, query.toLowerCase());
+
+  db.prepare(`
+    INSERT OR IGNORE INTO user_job_views (user_id,job_id)
+    SELECT ?,job_id FROM scraped_jobs
+    WHERE LOWER(search_query) = ?
+    AND scraped_at > ?
+    AND job_id NOT IN (SELECT job_id FROM user_job_views WHERE user_id = ?)
+    LIMIT 100
+  `).run(req.user.id, query.toLowerCase(), sevenDaysAgo, req.user.id);
+
+  res.json({
+    ok:true, count:newJobCount, fromCache,
+    scrapedAt:Date.now(), query,
+    quota:checkRefreshQuota(req.user.id),
+  });
 });
 
 app.get("/api/scrape/quota", requireAuth, (req, res) => res.json(checkRefreshQuota(req.user.id)));
@@ -1041,8 +1340,55 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured on server." });
 
   const existing = db.prepare("SELECT * FROM resumes WHERE user_id=? AND job_id=?").get(req.user.id, String(jobId));
-  if (existing&&!forceRegen)
-    return res.json({ html:existing.html, atsScore:existing.ats_score, atsReport:JSON.parse(existing.ats_report||"null"), cached:true });
+  if (existing && !forceRegen) {
+    try {
+      const cachedResumeText = existing.html
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const jobDescription = job.description || job.title;
+      const freshAtsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
+Company: ${job.company}
+Title: ${job.title}
+Category: ${job.category || ""}
+Full description:
+${jobDescription}
+
+RESUME TEXT (check which JD keywords appear here):
+${cachedResumeText}`;
+
+      const freshScore = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 900,
+        system: ATS_SYSTEM_PROMPT,
+        messages: [{ role:"user", content:freshAtsDynamic }],
+      });
+      const rawFresh = freshScore.content.map(b=>b.text||"").join("")
+        .replace(/```json|```/g,"").trim();
+      let freshReport = null, freshScoreVal = existing.ats_score;
+      try {
+        freshReport   = JSON.parse(rawFresh);
+        freshScoreVal = freshReport.score;
+        db.prepare(
+          "UPDATE resumes SET ats_score=?,ats_report=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?"
+        ).run(freshScoreVal, JSON.stringify(freshReport), req.user.id, String(jobId));
+      } catch {}
+      return res.json({
+        html:existing.html,
+        atsScore:freshScoreVal,
+        atsReport:freshReport || JSON.parse(existing.ats_report||"null"),
+        cached:true,
+      });
+    } catch {
+      return res.json({
+        html:existing.html,
+        atsScore:existing.ats_score,
+        atsReport:JSON.parse(existing.ats_report||"null"),
+        cached:true,
+      });
+    }
+  }
 
   const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
   try {
@@ -1141,13 +1487,28 @@ RULES:
       // formattedHtml stays as original html — graceful fallback
     }
 
-    const atsStatic = `Score this resume against the job. Reply ONLY with valid JSON, no markdown:\n{"score":<0-100>,"tier1_matched":[...],"tier1_missing":[...],"strengths":[...],"improvements":[...],"verdict":"<one sentence>"}`;
-    const atsDynamic = `JOB: ${job.company} — ${job.title} (${job.category})\nRESUME: ${formattedHtml.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,3000)}`;
+    const jobDescription = job.description || job.title;
+    const resumeStripped = formattedHtml
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
+Company: ${job.company}
+Title: ${job.title}
+Category: ${job.category || ""}
+Full description:
+${jobDescription}
+
+RESUME TEXT (check which JD keywords appear here):
+${resumeStripped}`;
+
     const scoreMsg = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 600,
-      system: [{ type: "text", text: atsStatic, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: atsDynamic }],
+      max_tokens: 900,
+      system: ATS_SYSTEM_PROMPT,
+      messages: [{ role:"user", content:atsDynamic }],
     });
     let atsReport=null, atsScore=null;
     try {
@@ -1190,7 +1551,7 @@ app.post("/api/export-pdf", requireAuth, async (req, res) => {
       "Content-Disposition":`attachment; filename="${filename||"resume"}.pdf"`,
       "Content-Length":pdf.length,
     });
-    res.send(pdf);
+    res.end(pdf);
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 app.get("/api/resumes/:jobId/pdf", requireAuth, async (req, res) => {
@@ -1203,7 +1564,7 @@ app.get("/api/resumes/:jobId/pdf", requireAuth, async (req, res) => {
       "Content-Disposition":`attachment; filename="Resume_${row.company.replace(/\s+/g,"_")}.pdf"`,
       "Content-Length":pdf.length,
     });
-    res.send(pdf);
+    res.end(pdf);
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 
@@ -1341,6 +1702,48 @@ app.get("/api/extension/autofill", requireAuth, (req, res) => {
   db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
   const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
   res.json({ ok:true, mode:req.user.applyMode, ...buildAutofillPayload(profile, req.user.applyMode) });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// SMART SEARCH
+// ═══════════════════════════════════════════════════════════════
+app.post("/api/smart-search", requireAuth, async (req, res) => {
+  const { resumeText } = req.body;
+  if (!resumeText) return res.status(400).json({ error:"resumeText required" });
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured" });
+  try {
+    const extractMsg = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 400,
+      messages: [{
+        role:"user",
+        content:`Extract the top job search keywords from this resume.
+Return ONLY valid JSON, no markdown fences, no explanation:
+{
+  "role": "<most senior/recent job title, normalised to standard ATS title>",
+  "skills": ["<top 8 technical skills as short strings>"],
+  "action_verbs": ["<top 5 action verbs from bullet points>"],
+  "years_experience": <integer total years of experience or null>,
+  "domains": ["<top 2 industry domains>"],
+  "search_query": "<best single job search query string, 2-4 words, optimised for job boards>"
+}
+
+Resume:
+${resumeText.slice(0, 3000)}`
+      }]
+    });
+    const raw    = extractMsg.content.map(b=>b.text||"").join("")
+      .replace(/```json|```/g,"").trim();
+    const parsed = JSON.parse(raw);
+    res.json({
+      ok:           true,
+      searchQuery:  parsed.search_query || parsed.role || "",
+      skills:       parsed.skills       || [],
+      actionVerbs:  parsed.action_verbs || [],
+      yearsExperience: parsed.years_experience || null,
+      domains:      parsed.domains      || [],
+    });
+  } catch(e) { res.status(500).json({ error:e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════════

@@ -364,7 +364,8 @@ export function DatabasePanel({ user }) {
         </button>
         <button style={{ background:theme.colorPrimary, color:"#000", border:"none",
                          padding:"8px 16px", cursor:"pointer", fontSize:11, fontWeight:700,
-                         borderLeft:`1px solid ${theme.colorBorder}`, borderRadius:"0 0 0 0" }}
+                         borderLeft:`1px solid ${theme.colorBorder}`,
+                         margin:"4px 6px", borderRadius:"999px" }}
           onClick={exportExcel}>
           📥 Export Excel
         </button>
@@ -381,7 +382,7 @@ export function DatabasePanel({ user }) {
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder={`Search ${isApps ? "applications" : "resumes"}…`}
             style={{ width:"100%", padding:"6px 28px",
-                     borderRadius:"10px", border:`1px solid ${theme.colorBorder}`,
+                     borderRadius:"999px", border:`1px solid ${theme.colorBorder}`,
                      background:theme.colorSurface, color:theme.colorText,
                      fontSize:11, outline:"none" }}/>
           {search && (
@@ -492,8 +493,10 @@ export function DatabasePanel({ user }) {
                         : i%2===0 ? "transparent" : "rgba(0,0,0,0.15)",
                       borderBottom:`1px solid ${theme.colorBorder}`,
                       outline:isFlash ? `2px solid ${theme.colorPrimary}` : "none",
-                      transition:"background 0.3s",
-                    }}>
+                      transition:"background 0.3s, transform 0.15s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.01)"; e.currentTarget.style.zIndex = "1"; e.currentTarget.style.position = "relative"; }}
+                    onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.zIndex = ""; }}>
                     <td style={{ padding:"5px 10px", fontSize:11,
                                  color:theme.colorDim, width:36 }}>{i+1}</td>
 

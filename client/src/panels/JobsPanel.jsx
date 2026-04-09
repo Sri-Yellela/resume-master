@@ -216,13 +216,10 @@ export default function JobsPanel({ user, onUserChange }) {
   }, [user]);
 
   // Search
-  const handleSearch = useCallback(async () => {
-    if (!resumeText) {
-      alert("Please upload your base resume first. It is required for job search and resume generation.");
-      fileRef.current?.click();
-      return;
-    }
-    const q=searchInput.trim(); if(!q) return;
+  const [smartSearching, setSmartSearching] = useState(false);
+
+  const handleSearch = useCallback(async (overrideQuery) => {
+    const q=(overrideQuery||searchInput).trim(); if(!q) return;
     setScraping(true);
     try {
       const params=`query=${encodeURIComponent(q)}&ageFilter=${ageFilter}&hideGhost=true&hideFlag=true`;
@@ -240,6 +237,29 @@ export default function JobsPanel({ user, onUserChange }) {
     } catch(e) { alert("Scrape failed: "+e.message); }
     finally { setScraping(false); }
   }, [searchInput,ageFilter]);
+
+  // Smart search (AI extracts best query from resume)
+  const handleSmartSearch = useCallback(async () => {
+    if (!resumeText) {
+      alert("Upload your base resume first — smart search extracts the best query from it.");
+      fileRef.current?.click();
+      return;
+    }
+    setSmartSearching(true);
+    try {
+      const result = await api("/api/smart-search", {
+        method: "POST",
+        body: JSON.stringify({ resumeText }),
+      });
+      if (result.error) { alert(result.error); return; }
+      const q = result.searchQuery;
+      if (q) {
+        setSearchInput(q);
+        await handleSearch(q);
+      }
+    } catch(e) { alert("Smart search failed: " + e.message); }
+    finally { setSmartSearching(false); }
+  }, [resumeText, handleSearch]);
 
   // File upload
   const handleFile = useCallback(async e => {
@@ -387,10 +407,15 @@ export default function JobsPanel({ user, onUserChange }) {
           )}
         </div>
 
-        <Btn bg={scraping ? theme.colorDim : !resumeText ? theme.colorMuted : theme.colorPrimary}
-          disabled={scraping} onClick={handleSearch}
-          title={!resumeText?"Upload your resume first to enable search":""}>
+        <Btn bg={scraping ? theme.colorDim : theme.colorPrimary}
+          disabled={scraping} onClick={()=>handleSearch()}>
           {scraping?"⏳ Scraping…":"🔍 Search"}
+        </Btn>
+
+        <Btn bg={smartSearching ? theme.colorDim : theme.colorAccent}
+          disabled={smartSearching || scraping} onClick={handleSmartSearch}
+          title="AI extracts best search query from your resume">
+          {smartSearching?"⏳ Thinking…":"✨ Best Match"}
         </Btn>
 
         <div style={{ width:1, height:18, background:theme.colorBorder, flexShrink:0 }}/>

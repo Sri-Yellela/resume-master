@@ -111,8 +111,8 @@ export function AtomEmblem({ size = 120, textSize = 8.5, orbitSize = 28 }) {
   );
 }
 
-// ── POSTER_CARDS ─────────────────────────────────────────────
-const POSTER_CARDS = [
+// ── COMPANY_POSTERS ───────────────────────────────────────────
+const COMPANY_POSTERS = [
   { icon:"🧠", title:"AI Resume Tailoring",  desc:"Claude Sonnet rewrites bullets for every JD." },
   { icon:"📡", title:"Live Job Scraping",     desc:"LinkedIn + Indeed on demand, deduplicated." },
   { icon:"⚡", title:"One-Click Autofill",    desc:"Fills forms across all major ATS platforms." },
@@ -121,18 +121,28 @@ const POSTER_CARDS = [
   { icon:"🎯", title:"Role Normalisation",    desc:"SWE, MLE, DE — always matched correctly." },
   { icon:"💾", title:"Resume Sandbox",        desc:"Edit HTML live with real-time preview." },
   { icon:"🔍", title:"Ghost Job Filter",      desc:"Only real, fresh openings. No noise." },
+  { icon:"✨", title:"Smart Search",          desc:"AI extracts best query from your resume." },
+  { icon:"📈", title:"Best Possible Score",   desc:"Know your ceiling before you apply." },
 ];
 
-function PosterBanner({ theme }) {
-  const col1 = POSTER_CARDS.slice(0, 4);
-  const col2 = POSTER_CARDS.slice(4);
+function PosterCard({ card, theme }) {
+  return (
+    <div style={{ background:theme.gradPanel, border:`1px solid ${theme.colorBorder}`,
+                  borderRadius:12, padding:"14px 16px", marginBottom:12, flexShrink:0 }}>
+      <div style={{ fontSize:22, marginBottom:8 }}>{card.icon}</div>
+      <div style={{ fontWeight:800, fontSize:13, color:theme.colorText, marginBottom:4 }}>
+        {card.title}
+      </div>
+      <div style={{ fontSize:11, color:theme.colorMuted, lineHeight:1.6 }}>
+        {card.desc}
+      </div>
+    </div>
+  );
+}
 
-  const cardStyle = {
-    background:theme.gradPanel,
-    border:`1px solid ${theme.colorBorder}`,
-    borderRadius:12, padding:"14px 16px",
-    marginBottom:12, flexShrink:0,
-  };
+function PosterBanner({ theme }) {
+  const col1 = COMPANY_POSTERS.slice(0, 5);
+  const col2 = COMPANY_POSTERS.slice(5);
 
   return (
     <div style={{ display:"flex", gap:12, height:"100%", overflow:"hidden" }}>
@@ -147,15 +157,7 @@ function PosterBanner({ theme }) {
       <div style={{ flex:1, overflow:"hidden", maskImage:"linear-gradient(transparent,black 10%,black 90%,transparent)" }}>
         <div className="banner-col1">
           {[...col1, ...col1].map((c, i) => (
-            <div key={i} style={cardStyle}>
-              <div style={{ fontSize:22, marginBottom:8 }}>{c.icon}</div>
-              <div style={{ fontWeight:800, fontSize:13, color:theme.colorText, marginBottom:4 }}>
-                {c.title}
-              </div>
-              <div style={{ fontSize:11, color:theme.colorMuted, lineHeight:1.6 }}>
-                {c.desc}
-              </div>
-            </div>
+            <PosterCard key={i} card={c} theme={theme}/>
           ))}
         </div>
       </div>
@@ -163,15 +165,7 @@ function PosterBanner({ theme }) {
       <div style={{ flex:1, overflow:"hidden", maskImage:"linear-gradient(transparent,black 10%,black 90%,transparent)" }}>
         <div className="banner-col2" style={{ marginTop:40 }}>
           {[...col2, ...col2].map((c, i) => (
-            <div key={i} style={cardStyle}>
-              <div style={{ fontSize:22, marginBottom:8 }}>{c.icon}</div>
-              <div style={{ fontWeight:800, fontSize:13, color:theme.colorText, marginBottom:4 }}>
-                {c.title}
-              </div>
-              <div style={{ fontSize:11, color:theme.colorMuted, lineHeight:1.6 }}>
-                {c.desc}
-              </div>
-            </div>
+            <PosterCard key={i} card={c} theme={theme}/>
           ))}
         </div>
       </div>

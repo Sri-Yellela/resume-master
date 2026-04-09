@@ -179,7 +179,10 @@ export function AdminPanel() {
                   {users.map((u, i) => (
                     <tr key={u.id}
                       style={{ background:i%2===0 ? theme.gradPanel : "rgba(0,0,0,0.2)",
-                               borderBottom:`1px solid ${theme.colorBorder}` }}>
+                               borderBottom:`1px solid ${theme.colorBorder}`,
+                               transition:"transform 0.15s" }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.01)"; e.currentTarget.style.position = "relative"; e.currentTarget.style.zIndex = "1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.zIndex = ""; }}>
                       <td style={{ padding:"7px 12px", fontSize:12,
                                    color:theme.colorText, fontWeight:600 }}>
                         {u.username}

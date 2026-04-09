@@ -5,29 +5,32 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "dev":     "node --watch server.js",
-    "start":   "node server.js",
-    "build":   "cd client && npm install && npm run build",
-    "setup":   "npm install && npm run build",
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "build": "cd client && npm install && npm run build",
+    "setup": "npm install && npm run build",
     "migrate": "node scripts/migrate.js",
-    "backup":  "node scripts/backup.js",
+    "backup": "node scripts/backup.js",
     "restore": "node scripts/backup.js restore"
   },
   "dependencies": {
-    "@anthropic-ai/sdk":            "^0.39.0",
-    "bcryptjs":                     "^2.4.3",
-    "better-sqlite3":               "^11.5.0",
-    "connect-sqlite3":              "^0.9.13",
-    "cors":                         "^2.8.5",
-    "dotenv":                       "^16.4.0",
-    "exceljs":                      "^4.4.0",
-    "express":                      "^4.21.0",
-    "express-session":              "^1.18.1",
-    "multer":                       "^2.0.0",
-    "node-cron":                    "^3.0.3",
-    "passport":                     "^0.7.0",
-    "passport-local":               "^1.0.0",
-    "puppeteer":                    "^24.0.0"
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@sparticuz/chromium": "^143.0.4",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.5.0",
+    "connect-sqlite3": "^0.9.13",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.0",
+    "express-session": "^1.18.1",
+    "multer": "^2.0.0",
+    "node-cron": "^3.0.3",
+    "passport": "^0.7.0",
+    "passport-local": "^1.0.0",
+    "puppeteer-core": "^24.40.0"
   },
-  "engines": { "node": ">=20.0.0" }
+  "engines": {
+    "node": ">=20.0.0"
+  }
 }

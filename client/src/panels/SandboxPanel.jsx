@@ -1,34 +1,56 @@
-// REVAMP v2 — SandboxPanel.jsx (shadcn UI integrated)
-import { useState, useEffect } from "react";
+// REVAMP v3 — SandboxPanel.jsx — contentEditable preview
+import { useState, useEffect, useRef } from "react";
 import { useTheme } from "../styles/theme.jsx";
-import { Button } from "../components/ui/button";
-import { ScrollArea } from "../components/ui/scroll-area";
 
 export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const { theme } = useTheme();
-  const [code,      setCode]      = useState(entry?.html || "");
-  const [live,      setLive]      = useState(entry?.html || "");
-  const [view,      setView]      = useState("split");
   const [exporting, setExporting] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const frameRef = useRef(null);
 
   useEffect(() => {
-    if (entry?.html) { setCode(entry.html); setLive(entry.html); }
+    setDirty(false);
   }, [entry?.html]);
 
-  const apply      = () => setLive(code);
-  const save       = async () => { if (onSave) await onSave(code); };
+  const getCurrentHtml = () => {
+    if (!frameRef.current) return entry?.html || "";
+    const doc = frameRef.current.contentDocument;
+    return doc ? doc.documentElement.outerHTML : entry?.html || "";
+  };
+
+  const save = async () => {
+    const html = getCurrentHtml();
+    if (onSave) await onSave(html);
+    setDirty(false);
+  };
+
   const downloadHtml = () => {
+    const html = getCurrentHtml();
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([live], { type:"text/html" }));
+    a.href = URL.createObjectURL(new Blob([html], { type:"text/html" }));
     a.download = `Resume_${(entry?.company || "resume").replace(/\s+/g,"_")}.html`;
     a.click();
   };
+
   const exportPdf = async () => {
-    if (!live || exporting) return;
+    if (!entry?.html || exporting) return;
     setExporting(true);
-    try { await onExport?.(null, live, entry?.company); }
-    catch(e) { alert("PDF export failed: " + e.message); }
+    try {
+      const html = getCurrentHtml();
+      await onExport?.(null, html, entry?.company);
+    } catch(e) { alert("PDF export failed: " + e.message); }
     finally { setExporting(false); }
+  };
+
+  // Enable contentEditable on the iframe document after load
+  const handleFrameLoad = () => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    doc.body.contentEditable = "true";
+    doc.body.spellcheck = false;
+    doc.addEventListener("input", () => setDirty(true));
   };
 
   return (
@@ -47,29 +69,18 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
             {entry.company} — {entry.title}
           </span>
         )}
+        {dirty && (
+          <span style={{ fontSize:10, color:"#f59e0b", fontWeight:700 }}>● unsaved</span>
+        )}
         <div style={{ flex:1 }}/>
 
-        {/* View toggle */}
-        <div style={{ display:"flex", background:`rgba(0,0,0,0.3)`,
-                      borderRadius:6, padding:2, gap:1 }}>
-          {[["preview","👁"],["split","⊞"],["code","✏️"]].map(([t, i]) => (
-            <button key={t}
-              style={{ background:view===t ? theme.colorPrimary : "transparent",
-                       color:view===t ? "#fff" : theme.colorMuted,
-                       border:"none", borderRadius:"999px", padding:"3px 10px",
-                       cursor:"pointer", fontSize:11, fontWeight:700 }}
-              onClick={() => setView(t)}>
-              {i} {t}
-            </button>
-          ))}
-        </div>
-
-        {(view === "code" || view === "split") && (
-          <TB theme={theme} bg={theme.colorSecondary} onClick={apply}>▶ Apply</TB>
-        )}
-        <TB theme={theme} bg="#8b5cf6" disabled={!live} onClick={save}>💾 Save</TB>
-        <TB theme={theme} bg="#10b981" disabled={!live} onClick={downloadHtml}>⬇ HTML</TB>
-        <TB theme={theme} bg="#6366f1" disabled={!live || exporting} onClick={exportPdf}>
+        <TB theme={theme} bg="#8b5cf6" disabled={!entry?.html} onClick={save}>
+          💾 Save{dirty ? "*" : ""}
+        </TB>
+        <TB theme={theme} bg="#10b981" disabled={!entry?.html} onClick={downloadHtml}>
+          ⬇ HTML
+        </TB>
+        <TB theme={theme} bg="#6366f1" disabled={!entry?.html || exporting} onClick={exportPdf}>
           {exporting ? "⏳…" : "🖨 PDF"}
         </TB>
         <button onClick={onClose}
@@ -89,49 +100,26 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
           </div>
         </div>
       ) : (
-        <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
-          {(view === "code" || view === "split") && (
-            <div style={{ flex:view==="split" ? "0 0 44%" : 1, display:"flex",
-                          flexDirection:"column",
-                          borderRight:view==="split" ? `2px solid ${theme.colorBorder}` : "none" }}>
-              <div style={{ background:"rgba(0,0,0,0.4)", padding:"4px 10px",
-                            fontSize:10, color:theme.colorDim,
-                            borderBottom:`1px solid ${theme.colorBorder}`, flexShrink:0 }}>
-                HTML Editor · Ctrl+Enter to apply
-              </div>
-              <textarea value={code} onChange={e => setCode(e.target.value)}
-                onKeyDown={e => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                    e.preventDefault(); apply();
-                  }
-                }}
-                spellCheck={false}
-                style={{ flex:1, background:"rgba(0,0,0,0.5)",
-                         color:theme.colorText, border:"none", outline:"none",
-                         fontFamily:"'JetBrains Mono','Courier New',monospace",
-                         fontSize:11, lineHeight:1.6, padding:10,
-                         resize:"none", tabSize:2 }}/>
+        <div style={{ flex:1, display:"flex", flexDirection:"column",
+                      background:theme.colorDim, overflow:"auto" }}>
+          <div style={{ background:theme.colorSurface, padding:"4px 10px",
+                        fontSize:10, color:theme.colorMuted,
+                        borderBottom:`1px solid ${theme.colorBorder}`, flexShrink:0 }}>
+            Live Preview — click any text to edit directly
+          </div>
+          <div style={{ flex:1, padding:10, display:"flex",
+                        justifyContent:"center", overflow:"auto" }}>
+            <div style={{ width:"100%", maxWidth:800, background:"#fff",
+                          boxShadow:"0 2px 12px #0004", borderRadius:3 }}>
+              <iframe
+                ref={frameRef}
+                srcDoc={entry.html}
+                onLoad={handleFrameLoad}
+                style={{ width:"100%", minHeight:900, border:"none", display:"block" }}
+                title="preview"
+                sandbox="allow-same-origin allow-scripts"/>
             </div>
-          )}
-          {(view === "preview" || view === "split") && (
-            <div style={{ flex:1, display:"flex", flexDirection:"column",
-                          background:theme.colorDim, overflow:"auto" }}>
-              <div style={{ background:theme.colorSurface, padding:"4px 10px",
-                            fontSize:10, color:theme.colorMuted,
-                            borderBottom:`1px solid ${theme.colorBorder}`, flexShrink:0 }}>
-                Live Preview
-              </div>
-              <div style={{ flex:1, padding:10, display:"flex",
-                            justifyContent:"center", overflow:"auto" }}>
-                <div style={{ width:"100%", maxWidth:800, background:"#fff",
-                              boxShadow:"0 2px 12px #0004", borderRadius:3 }}>
-                  <iframe srcDoc={live}
-                    style={{ width:"100%", minHeight:900, border:"none", display:"block" }}
-                    title="preview" sandbox="allow-same-origin"/>
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       )}
     </div>

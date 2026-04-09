@@ -56,28 +56,54 @@ export function ATSPanel({ report, score }) {
               {score ?? "—"}
             </div>
           </div>
-          <div style={{ color:theme.colorMuted, fontStyle:"italic",
-                        lineHeight:1.5, fontSize:11 }}>
-            {report.verdict}
+          <div style={{ flex:1 }}>
+            <div style={{ color:theme.colorMuted, fontStyle:"italic",
+                          lineHeight:1.5, fontSize:11, marginBottom:4 }}>
+              {report.verdict}
+            </div>
+            {report?.best_possible_score != null && (
+              <div style={{ fontSize:10, color:theme.colorDim,
+                            background:`rgba(0,0,0,0.3)`, borderRadius:6,
+                            padding:"4px 8px", lineHeight:1.5 }}>
+                <span style={{ fontWeight:700, color:theme.colorAccent }}>
+                  Best possible: {report.best_possible_score}
+                </span>
+                {report?.best_possible_reason && (
+                  <span style={{ color:theme.colorMuted }}> — {report.best_possible_reason}</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
-        {report.tier1_matched?.length > 0 && (
+        {report?.tier1_matched?.length > 0 && (
           <TagSection title="✓ Matched" theme={theme}
             bg={`rgba(${hexToRgb(theme.colorAccent)},0.15)`}
             fg={theme.colorAccent}
             items={report.tier1_matched}/>
         )}
-        {report.tier1_missing?.length > 0 && (
+        {report?.tier1_missing?.length > 0 && (
           <TagSection title="✗ Missing" theme={theme}
             bg="rgba(239,68,68,0.15)"
             fg="#ef4444"
             items={report.tier1_missing}/>
         )}
-        {report.strengths?.length > 0 && (
+        {report?.action_verbs_matched?.length > 0 && (
+          <TagSection title="⚡ Action Verbs Matched" theme={theme}
+            bg={`rgba(${hexToRgb(theme.colorPrimary)},0.12)`}
+            fg={theme.colorPrimary}
+            items={report.action_verbs_matched}/>
+        )}
+        {report?.action_verbs_missing?.length > 0 && (
+          <TagSection title="⚠ Action Verbs Missing" theme={theme}
+            bg="rgba(245,158,11,0.12)"
+            fg="#f59e0b"
+            items={report.action_verbs_missing}/>
+        )}
+        {report?.strengths?.length > 0 && (
           <ListSection title="💪 Strengths" theme={theme} items={report.strengths}/>
         )}
-        {report.improvements?.length > 0 && (
+        {report?.improvements?.length > 0 && (
           <ListSection title="🔧 Improvements" theme={theme} items={report.improvements}/>
         )}
       </div>

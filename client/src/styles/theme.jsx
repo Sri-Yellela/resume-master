@@ -40,6 +40,12 @@ export const THEMES = {
     radiusInput: "10px",
     radiusBtn:   "999px",
     radiusBadge: "999px",
+    colorCard:      "#311400",
+    colorInputBg:   "#2a1200",
+    colorTag:       "#331500",
+    glowPrimary:    "0 0 0 3px #ff6b3544",
+    fontDisplay:    "'DM Sans', system-ui, sans-serif",
+    fontMono:       "'JetBrains Mono', monospace",
   },
   aurora: {
     gradBg:      "linear-gradient(135deg, #05001a 0%, #0d0030 40%, #050015 100%)",
@@ -61,6 +67,12 @@ export const THEMES = {
     radiusInput: "10px",
     radiusBtn:   "999px",
     radiusBadge: "999px",
+    colorCard:      "#160038",
+    colorInputBg:   "#120030",
+    colorTag:       "#1a003f",
+    glowPrimary:    "0 0 0 3px #7c3aed44",
+    fontDisplay:    "'DM Sans', system-ui, sans-serif",
+    fontMono:       "'JetBrains Mono', monospace",
   },
   forest: {
     gradBg:      "linear-gradient(135deg, #001a05 0%, #003010 40%, #001508 100%)",
@@ -82,6 +94,12 @@ export const THEMES = {
     radiusInput: "10px",
     radiusBtn:   "999px",
     radiusBadge: "999px",
+    colorCard:      "#002f0b",
+    colorInputBg:   "#002a0a",
+    colorTag:       "#003310",
+    glowPrimary:    "0 0 0 3px #22c55e44",
+    fontDisplay:    "'DM Sans', system-ui, sans-serif",
+    fontMono:       "'JetBrains Mono', monospace",
   },
   studio: {
     gradBg:      "linear-gradient(135deg, #0a0f1a 0%, #0f172a 40%, #080d18 100%)",
@@ -103,6 +121,12 @@ export const THEMES = {
     radiusInput: "10px",
     radiusBtn:   "999px",
     radiusBadge: "999px",
+    colorCard:      "#243044",
+    colorInputBg:   "#1e293b",
+    colorTag:       "#1e3a4a",
+    glowPrimary:    "0 0 0 3px #38bdf844",
+    fontDisplay:    "'DM Sans', system-ui, sans-serif",
+    fontMono:       "'JetBrains Mono', monospace",
   },
 };
 
@@ -149,7 +173,12 @@ export function ThemeProvider({ children }) {
           --radius: 0.5rem;
         }
 
-        body { font-family: 'DM Sans', system-ui, sans-serif; }
+        body { font-family: 'DM Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: ${theme.colorBorder}; border-radius: 999px; }
+        ::-webkit-scrollbar-thumb:hover { background: ${theme.colorMuted}; }
 
         .site-title {
           font-size: clamp(16px, 2vw, 20px);
