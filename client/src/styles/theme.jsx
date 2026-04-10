@@ -195,6 +195,7 @@ export function ThemeProvider({ children }) {
           letter-spacing: 0.08em;
           text-transform: uppercase;
           color: ${theme.text};
+          font-style: italic;
         }
         .rm-card {
           background: ${theme.surface};
@@ -218,25 +219,28 @@ export function ThemeProvider({ children }) {
           transform: translateY(-2px) scale(1.005);
           border-color: ${theme.borderStrong};
         }
-        /* Lucy tin button style: rectangular, pill on hover (1s transition) */
+        /* Lucy brand buttons: sharp black rectangle → accent pill on hover (1s) */
         .rm-btn {
           display: inline-flex; align-items: center; justify-content: center;
           gap: 6px; padding: 8px 20px; border-radius: 2px;
           font-family: 'Barlow Condensed', 'DM Sans', system-ui, sans-serif;
-          font-weight: 800; font-size: 13px; letter-spacing: 0.08em;
-          text-transform: uppercase; border: none; cursor: pointer;
-          transition: border-radius 1s ease, filter 0.15s ease, box-shadow 0.15s ease;
-          white-space: nowrap; text-decoration: none;
+          font-weight: 800; font-size: 13px; letter-spacing: 0.1em;
+          text-transform: uppercase; cursor: pointer;
+          border: 2.5px solid #0f0f0f;
+          background: transparent;
+          color: #0f0f0f;
+          transition: border-radius 1s ease, background 1s ease, border-color 1s ease;
+          white-space: nowrap; text-decoration: none; box-sizing: border-box;
         }
         .rm-btn:hover:not(:disabled) { border-radius: 999px; }
         .rm-btn:active { transform: scale(0.97); }
-        .rm-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-        .rm-btn-primary { background: ${theme.accent}; color: #0f0f0f; }
-        .rm-btn-primary:hover:not(:disabled) { filter: brightness(1.05); box-shadow: 0 0 0 4px ${theme.accent}44; }
-        .rm-btn-ghost { background: transparent; color: ${theme.text}; border: 1px solid ${theme.border}; }
-        .rm-btn-ghost:hover:not(:disabled) { background: ${theme.overlay}; border-color: ${theme.borderStrong}; }
+        .rm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .rm-btn-primary:hover:not(:disabled) { background: ${theme.accent}; border-color: ${theme.accent}; }
+        .rm-btn-secondary:hover:not(:disabled) { background: ${theme.surfaceHigh}; border-color: ${theme.borderStrong}; }
+        .rm-btn-ghost { border-color: ${theme.border}; color: ${theme.textMuted}; }
+        .rm-btn-ghost:hover:not(:disabled) { border-radius: 999px; background: ${theme.overlay}; border-color: ${theme.borderStrong}; color: ${theme.text}; }
         .rm-btn-sm { padding: 5px 14px; font-size: 11px; gap: 4px; }
-        .rm-btn-icon { padding: 0; width: 36px; height: 36px; border-radius: 999px; font-size: 16px; }
+        .rm-btn-icon { padding: 0; width: 36px; height: 36px; border-radius: 999px; font-size: 16px; border: none; }
         .rm-btn-icon.sm { width: 28px; height: 28px; font-size: 13px; }
         .rm-input {
           width: 100%; height: 40px; padding: 0 14px;

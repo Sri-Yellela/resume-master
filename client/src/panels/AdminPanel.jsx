@@ -80,7 +80,7 @@ export function AdminPanel() {
 
   return (
     <div style={{ padding:"32px 24px", overflowY:"auto", height:"100%",
-                  boxSizing:"border-box", background:"#ffffff", maxWidth:900,
+                  boxSizing:"border-box", background:theme.bg, maxWidth:900,
                   borderTop:`4px solid ${ADMIN_ACCENT}` }}>
 
       {/* Lucy admin header — yellow accent */}

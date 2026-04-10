@@ -116,7 +116,7 @@ function ATSBadge({ score }) {
 
 // ── Lucy button (rectangular → pill on hover, 1s) ─────────────
 function LucyBtn({ children, onClick, disabled, accent = USER_ACCENT,
-                    textColor = USER_TEXT, style = {}, title }) {
+                    style = {}, title }) {
   const [hov, setHov] = useState(false);
   return (
     <button
@@ -124,15 +124,18 @@ function LucyBtn({ children, onClick, disabled, accent = USER_ACCENT,
       onMouseEnter={() => !disabled && setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background: disabled ? "#e5e5e5" : accent,
-        color: disabled ? "#aaa" : textColor,
-        border: "none", cursor: disabled ? "not-allowed" : "pointer",
+        background: hov && !disabled ? accent : "transparent",
+        color: "#0f0f0f",
+        border: `2.5px solid ${hov && !disabled ? accent : "#0f0f0f"}`,
+        cursor: disabled ? "not-allowed" : "pointer",
         padding: "7px 18px", fontWeight: 800, fontSize: 12,
         fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
-        letterSpacing: "0.08em", textTransform: "uppercase",
+        letterSpacing: "0.1em", textTransform: "uppercase",
         borderRadius: hov && !disabled ? 999 : 2,
-        transition: "border-radius 1s ease",
+        transition: "border-radius 1s ease, background 1s ease, border-color 1s ease",
         whiteSpace: "nowrap", flexShrink: 0,
+        opacity: disabled ? 0.4 : 1,
+        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4,
         ...style,
       }}>
       {children}
@@ -184,7 +187,7 @@ function FiltersPanel({
   const selStyle = {
     width:"100%", height:36, padding:"0 10px",
     border:`1px solid ${theme.border}`, borderRadius:4,
-    background:"#fff", color:theme.text, fontSize:12, outline:"none",
+    background:theme.surface, color:theme.text, fontSize:12, outline:"none",
   };
   const labelStyle = { fontSize:11, fontWeight:700, color:theme.textMuted,
                         textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 };
@@ -198,7 +201,7 @@ function FiltersPanel({
         initial={{ x:360 }} animate={{ x:0 }} exit={{ x:360 }}
         transition={{ type:"tween", duration:0.22 }}
         style={{
-          width:320, height:"100%", background:"#fff",
+          width:320, height:"100%", background:theme.surface,
           borderLeft:`3px solid ${USER_ACCENT}`,
           padding:"24px 20px", overflowY:"auto",
           display:"flex", flexDirection:"column", gap:16,
@@ -307,60 +310,6 @@ function FiltersPanel({
   );
 }
 
-// ── Apply popup (portal open + visited marker) ────────────────
-function ApplyPopup({ job, onClose, onVisited }) {
-  useEffect(() => {
-    const h = e => { if (e.key==="Escape") onClose(); };
-    document.addEventListener("keydown", h);
-    return () => document.removeEventListener("keydown", h);
-  }, [onClose]);
-
-  const handleOpen = async () => {
-    // Mark visited via API before opening URL
-    try { await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }); }
-    catch {}
-    onVisited(job.jobId);
-    onClose();
-    window.open(job.url, "_blank", "noreferrer");
-  };
-
-  return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.65)",
-                  backdropFilter:"blur(8px)", zIndex:1000,
-                  display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
-         onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
-      <motion.div
-        initial={{ opacity:0, scale:0.95 }} animate={{ opacity:1, scale:1 }}
-        exit={{ opacity:0, scale:0.95 }} transition={{ duration:0.15 }}
-        style={{ background:"#fff", borderRadius:4, padding:28, width:"100%", maxWidth:400,
-                 boxShadow:"0 24px 64px rgba(0,0,0,0.2)",
-                 border:`3px solid ${USER_ACCENT}` }}>
-        <div style={{ display:"flex", justifyContent:"space-between",
-                      alignItems:"flex-start", marginBottom:14 }}>
-          <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                          fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase" }}>
-              {job.company}
-            </div>
-            <div style={{ fontSize:12, color:"#6b6b6b", marginTop:3 }}>{job.title}</div>
-          </div>
-          <button onClick={onClose}
-            style={{ background:"transparent", border:"none", color:"#888",
-                     cursor:"pointer", fontSize:16, padding:4, flexShrink:0 }}>✕</button>
-        </div>
-        <div style={{ fontSize:11, color:"#6b6b6b", lineHeight:1.7, marginBottom:18,
-                      background:"#f5f5f3", padding:"10px 12px", borderRadius:4,
-                      border:"1px solid #e5e5e5" }}>
-          The job portal will open in a new tab. The Chrome extension will autofill your profile.
-        </div>
-        <div style={{ display:"flex", justifyContent:"flex-end" }}>
-          <LucyBtn onClick={handleOpen}>Open Application →</LucyBtn>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
 // ── Aliases (mirrors server normaliser) ───────────────────────
 const ALIASES = {
   "swe":"Software Engineer","software dev":"Software Engineer",
@@ -397,7 +346,6 @@ export default function JobsPanel({ user, onUserChange }) {
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [rightTab,    setRightTab]    = useState("ats");
   const [activeAts,   setActiveAts]   = useState(null);
-  const [applyJob,    setApplyJob]    = useState(null);
   const [smartSearching, setSmartSearching] = useState(false);
 
   // Board tabs
@@ -499,16 +447,36 @@ export default function JobsPanel({ user, onUserChange }) {
   const handleSearch = useCallback(async (overrideQuery) => {
     const q = (overrideQuery || searchInput).trim();
     if (!q) return;
+    // Only scrape when board is empty; otherwise just set the role filter
+    if (jobs.length > 0) {
+      setRoleFilter(q.toLowerCase());
+      return;
+    }
     setScraping(true);
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
       if (result.missingToken) {
-        alert("⚠ No Apify token set.\n\nTo search for jobs:\n1. Go to console.apify.com\n2. Sign up free\n3. Settings → Integrations → copy your API token\n4. In this app: ☰ menu → API Keys → paste and Save");
+        alert("⚠ No Apify token set.\n\nTo search for jobs:\n1. Go to console.apify.com\n2. Sign up free\n3. Settings → Integrations → copy your API token\n4. In this app: avatar → paste and Save");
         return;
       }
       if (result.error) { alert(result.error); return; }
       await fetchJobs(1);
     } catch(e) { alert("Scrape failed: " + e.message); }
+    finally { setScraping(false); }
+  }, [searchInput, fetchJobs, jobs.length]);
+
+  // ── Refresh: scrape fresh + hide visited ──────────────────────
+  const handleRefresh = useCallback(async () => {
+    const q = searchInput.trim();
+    if (!q) { alert("Enter a search query first."); return; }
+    setScraping(true);
+    try {
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
+      if (result.missingToken) { alert("⚠ No Apify token set."); return; }
+      if (result.error) { alert(result.error); return; }
+      setVisitedFilter("0"); // hide visited, show fresh
+      await fetchJobs(1);
+    } catch(e) { alert("Refresh failed: " + e.message); }
     finally { setScraping(false); }
   }, [searchInput, fetchJobs]);
 
@@ -617,6 +585,14 @@ export default function JobsPanel({ user, onUserChange }) {
     setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, visited:true} : j));
   }, []);
 
+  // ── Direct URL open (no dialog) ──────────────────────────────
+  const visitUrl = useCallback(async (job) => {
+    if (!job.url) return;
+    try { await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }); } catch {}
+    markVisited(job.jobId);
+    window.open(job.url, "_blank", "noreferrer");
+  }, [markVisited]);
+
   // ── Pagination ────────────────────────────────────────────
   const goPage = async (p) => { await fetchJobs(p); window.scrollTo(0,0); };
 
@@ -635,12 +611,9 @@ export default function JobsPanel({ user, onUserChange }) {
   const isLastPage = currentPage >= totalPages;
 
   return (
-    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:"#fff" }}>
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:theme.bg }}>
 
       <AnimatePresence>
-        {applyJob && (
-          <ApplyPopup job={applyJob} onClose={() => setApplyJob(null)} onVisited={markVisited}/>
-        )}
         {filtersOpen && (
           <FiltersPanel
             open={filtersOpen} onClose={() => setFiltersOpen(false)}
@@ -662,7 +635,7 @@ export default function JobsPanel({ user, onUserChange }) {
 
       {/* ── Scrape bar ────────────────────────────────────── */}
       <div style={{
-        background:"#fff", borderBottom:`1px solid #e5e5e5`,
+        background:theme.surface, borderBottom:`1px solid #e5e5e5`,
         padding:"10px 20px", display:"flex", alignItems:"center", gap:10,
         flexShrink:0, flexWrap:"wrap", position:"sticky", top:56, zIndex:50,
       }}>
@@ -676,7 +649,7 @@ export default function JobsPanel({ user, onUserChange }) {
             placeholder="Search role — e.g. ML Engineer, SWE…"
             style={{ width:"100%", height:40, paddingLeft:38, paddingRight:14,
                      borderRadius:2, border:"1px solid #e5e5e5",
-                     background:"#fff", color:"#0f0f0f",
+                     background:theme.surface, color:"#0f0f0f",
                      fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",
                      boxSizing:"border-box" }}/>
           {showPreview && (
@@ -731,7 +704,7 @@ export default function JobsPanel({ user, onUserChange }) {
 
       {/* ── Board header: local search + filters + sort ───── */}
       <div style={{
-        background:"#fff", borderBottom:`1px solid #e5e5e5`,
+        background:theme.surface, borderBottom:`1px solid #e5e5e5`,
         padding:"8px 20px", display:"flex", alignItems:"center", gap:8,
         flexShrink:0, flexWrap:"wrap",
       }}>
@@ -758,13 +731,13 @@ export default function JobsPanel({ user, onUserChange }) {
           placeholder="Filter by company, location, role…"
           style={{ flex:1, minWidth:160, height:32, padding:"0 12px",
                    borderRadius:2, border:"1px solid #e5e5e5",
-                   background:"#fff", color:"#0f0f0f",
+                   background:theme.surface, color:"#0f0f0f",
                    fontFamily:"'DM Sans',system-ui", fontSize:12, outline:"none" }}/>
 
         {/* Sort */}
         <select value={sortBy} onChange={e => setSortBy(e.target.value)}
           style={{ height:32, padding:"0 8px", borderRadius:2,
-                   border:"1px solid #e5e5e5", background:"#fff",
+                   border:"1px solid #e5e5e5", background:theme.surface,
                    fontSize:12, color:"#0f0f0f", outline:"none" }}>
           <option value="dateDesc">Date: Newest first</option>
           <option value="dateAsc">Date: Oldest first</option>
@@ -823,7 +796,7 @@ export default function JobsPanel({ user, onUserChange }) {
                       setRightTab("ats");
                     }}
                     onExport={() => exportAndTrack(job, g.html, job.company)}
-                    onApply={() => job.url && setApplyJob(job)}
+                    onVisit={() => visitUrl(job)}
                     onStar={() => toggleStar(key)}
                     onCardClick={() => {
                       if (done && g.html !== "__exists__") {
@@ -832,7 +805,7 @@ export default function JobsPanel({ user, onUserChange }) {
                         setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
                         setRightTab("ats");
                       } else if (job.url) {
-                        setApplyJob(job);
+                        visitUrl(job);
                       }
                     }}
                   />
@@ -857,13 +830,14 @@ export default function JobsPanel({ user, onUserChange }) {
                 </div>
               )}
 
-              {/* Load More / Refresh — only on last page, after all results */}
+              {/* Refresh — scrapes fresh jobs and hides visited */}
               {jobs.length > 0 && isLastPage && (
-                <div style={{ padding:"16px 20px", display:"flex", justifyContent:"center" }}>
-                  <LucyBtn onClick={() => handleSearch()} disabled={scraping}
+                <div style={{ padding:"16px 20px", display:"flex", justifyContent:"center", flexDirection:"column", alignItems:"center", gap:6 }}>
+                  <LucyBtn onClick={handleRefresh} disabled={scraping}
                             style={{ width:"100%", maxWidth:320, justifyContent:"center" }}>
-                    {scraping ? "Loading…" : "Load More / Refresh"}
+                    {scraping ? "Scraping…" : "↻ Refresh New Jobs"}
                   </LucyBtn>
+                  <span style={{ fontSize:10, color:"#aaa" }}>Scrapes fresh listings · hides visited</span>
                 </div>
               )}
             </div>
@@ -917,7 +891,7 @@ export default function JobsPanel({ user, onUserChange }) {
 
 // ── Job card ──────────────────────────────────────────────────
 function JobCard({ job, g, done, st, applyMode, theme,
-                   onGenerate, onViewSandbox, onExport, onApply, onStar, onCardClick }) {
+                   onGenerate, onViewSandbox, onExport, onVisit, onStar, onCardClick }) {
   const [hov, setHov] = useState(false);
   return (
     <div
@@ -925,7 +899,7 @@ function JobCard({ job, g, done, st, applyMode, theme,
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background:"#fff",
+        background:theme.surface,
         border: hov ? `1px solid ${USER_ACCENT}` : "1px solid #e5e5e5",
         borderRadius:4, padding:"14px 18px", margin:"0 16px 8px",
         display:"flex", alignItems:"center", gap:14, cursor:"pointer",
@@ -985,12 +959,21 @@ function JobCard({ job, g, done, st, applyMode, theme,
         {g?.atsScore != null && <ATSBadge score={g.atsScore}/>}
 
         {/* Star / bookmark */}
-        <IconBtn
-          bg={job.starred ? "#f59e0b" : "#888"}
+        <button
           title={job.starred ? "Remove from saved" : "Save job"}
-          onClick={e => { e.stopPropagation(); onStar(); }}>
+          onClick={e => { e.stopPropagation(); onStar(); }}
+          style={{
+            width:30, height:30, borderRadius:"50%",
+            background: job.starred ? "#f59e0b22" : "transparent",
+            border: job.starred ? "2px solid #f59e0b" : "2px solid #e5e5e5",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            cursor:"pointer", fontSize:14,
+            color: job.starred ? "#f59e0b" : "#ccc",
+            transition:"all 0.2s", flexShrink:0,
+            transform: job.starred ? "scale(1.15)" : "scale(1)",
+          }}>
           {job.starred ? "★" : "☆"}
-        </IconBtn>
+        </button>
 
         {/* Generate */}
         {applyMode !== "SIMPLE" && (
@@ -1017,13 +1000,6 @@ function JobCard({ job, g, done, st, applyMode, theme,
           </IconBtn>
         )}
 
-        {/* Open portal (visited trigger is inside ApplyPopup) */}
-        {job.url && (
-          <IconBtn bg={USER_ACCENT} title="Open application portal"
-            onClick={e => { e.stopPropagation(); onApply(); }}>
-            →
-          </IconBtn>
-        )}
       </div>
     </div>
   );

@@ -235,7 +235,6 @@ export default function AuthScreen({ onLogin }) {
                     overflowY:"auto" }}>
         {/* Logo */}
         <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:48 }}>
-          <AtomEmblem size={36} textSize={5} orbitSize={12}/>
           <span className="site-title" style={{ fontSize:22 }}>Resume Master</span>
         </div>
 

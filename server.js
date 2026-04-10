@@ -437,6 +437,14 @@ function isFullTimeNorm(item) {
   return !NON_FULLTIME_TERMS.some(t => text.includes(t));
 }
 
+function isTitleRelevant(title, query) {
+  const t = title.toLowerCase();
+  const terms = query.toLowerCase()
+    .split(/[\s,/\-]+/)
+    .filter(w => w.length > 2 && !["the","and","for","with","ing"].includes(w));
+  return terms.some(term => t.includes(term));
+}
+
 function extractYearsExperience(description = "") {
   // Match patterns like "5+ years", "3-5 years", "minimum 2 years", "at least 7 years"
   const patterns = [
@@ -644,6 +652,7 @@ async function scrapeJobs(query, apifyToken) {
   const filtered = combined.filter(item => {
     if (!item.title || !item.company) return false;
     if (!isFullTimeNorm(item)) return false;
+    if (!isTitleRelevant(item.title, query)) return false;
     if (item.description.toLowerCase().includes("reposted")) return false;
     if (ghostJobScoreNorm(item) >= 4) return false;
     const h = jobHash(item);
