@@ -1433,7 +1433,6 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   }
 
   // Sync new jobs into user_jobs for this user
-  const sevenDaysAgo = Math.floor(Date.now()/1000) - 7*24*60*60;
   db.prepare(`
     INSERT OR IGNORE INTO user_jobs (user_id, job_id)
     SELECT ?, sj.job_id FROM scraped_jobs sj
