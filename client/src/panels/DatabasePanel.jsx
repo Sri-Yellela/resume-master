@@ -190,62 +190,143 @@ function AtsReportDisplay({ report, score, theme }) {
 
 // ── Detail modal (resume preview or ATS report) ───────────────
 function DetailModal({ modal, onClose, theme }) {
-  if (!modal) return null;
-  const isResume = modal.type === "resume";
+  const [view,      setView]      = useState(null); // "resume" | "ats"
+  const [exporting, setExporting] = useState(false);
 
-  const atsColors = (s) => ({
-    bg: s>=80 ? theme.successMuted : s>=60 ? theme.warningMuted : theme.dangerMuted,
-    fg: s>=80 ? theme.success      : s>=60 ? theme.warning      : theme.danger,
-  });
+  // Sync view to modal.type when modal changes
+  useEffect(() => { if (modal) setView(modal.type); }, [modal?.type, modal?.company]);
+
+  if (!modal) return null;
+
+  const isResume   = view === "resume";
+  const hasResume  = !!modal.html;
+  const hasAts     = !!(modal.atsReport || modal.atsScore != null);
+
+  const atsBg = modal.atsScore != null
+    ? (modal.atsScore >= 80 ? theme.successMuted : modal.atsScore >= 60 ? theme.warningMuted : theme.dangerMuted)
+    : theme.surfaceHigh;
+  const atsFg = modal.atsScore != null
+    ? (modal.atsScore >= 80 ? theme.success : modal.atsScore >= 60 ? theme.warning : theme.danger)
+    : theme.textMuted;
+
+  const exportPdf = async () => {
+    if (!modal.html || exporting) return;
+    setExporting(true);
+    try {
+      const filename = `Resume_${(modal.company || "resume").replace(/\s+/g, "_")}.pdf`;
+      const r = await fetch("/api/export-pdf", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: modal.html, filename }),
+      });
+      if (!r.ok) { alert("PDF export failed"); return; }
+      const blob = await r.blob();
+      const url  = URL.createObjectURL(blob);
+      Object.assign(document.createElement("a"), { href: url, download: filename }).click();
+      URL.revokeObjectURL(url);
+    } catch(e) { alert("Export failed: " + e.message); }
+    finally { setExporting(false); }
+  };
 
   return (
     <div onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position:"fixed", inset:0, zIndex:1000,
-        background:"rgba(0,0,0,0.5)",
+        background:"rgba(0,0,0,0.55)",
         display:"flex", alignItems:"center", justifyContent:"center",
         padding:24,
       }}>
       <div style={{
         background:theme.surface, borderRadius:16,
-        width:"90%", maxWidth:900, height:"85vh",
+        width:"90%", maxWidth:960, height:"88vh",
         display:"flex", flexDirection:"column",
         boxShadow:theme.shadowLg, overflow:"hidden",
       }}>
-        {/* Header */}
-        <div style={{ padding:"16px 24px", borderBottom:`1px solid ${theme.border}`,
-                      display:"flex", alignItems:"center", justifyContent:"space-between",
-                      flexShrink:0 }}>
-          <div>
+        {/* ── Header ───────────────────────────── */}
+        <div style={{
+          padding:"14px 20px", borderBottom:`1px solid ${theme.border}`,
+          display:"flex", alignItems:"center", gap:12, flexShrink:0, flexWrap:"wrap",
+        }}>
+          {/* Title */}
+          <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                          fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase",
-                          color:theme.text }}>
-              {isResume ? "📄 Resume" : "📊 ATS Report"} — {modal.company}
+                          fontSize:17, letterSpacing:"0.06em", textTransform:"uppercase",
+                          color:theme.text, overflow:"hidden", textOverflow:"ellipsis",
+                          whiteSpace:"nowrap" }}>
+              {modal.company}
             </div>
-            <div style={{ fontSize:11, color:theme.textMuted, marginTop:2 }}>{modal.role}</div>
+            <div style={{ fontSize:11, color:theme.textMuted }}>{modal.role}</div>
           </div>
-          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-            {modal.atsScore != null && (
-              <span style={{
-                padding:"4px 12px", borderRadius:999, fontSize:12, fontWeight:700,
-                background: atsColors(modal.atsScore).bg, color: atsColors(modal.atsScore).fg,
+
+          {/* View tabs (Resume / ATS) */}
+          <div style={{ display:"flex", gap:0, border:`1px solid ${theme.borderStrong}`,
+                        borderRadius:6, overflow:"hidden", flexShrink:0 }}>
+            {[["resume","📄 Resume"],["ats","📊 ATS"]].map(([id, lbl]) => (
+              <button key={id} onClick={() => setView(id)}
+                disabled={id === "resume" ? !hasResume : !hasAts}
+                style={{
+                  padding:"5px 14px", border:"none", cursor: (id==="resume"?hasResume:hasAts) ? "pointer" : "not-allowed",
+                  background: view===id ? theme.accent : theme.surface,
+                  color: view===id ? "#0f0f0f" : (id==="resume"?hasResume:hasAts) ? theme.text : theme.textDim,
+                  fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                  fontSize:12, letterSpacing:"0.06em", textTransform:"uppercase",
+                  transition:"background 0.15s",
+                  borderRight: id==="resume" ? `1px solid ${theme.borderStrong}` : "none",
+                }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          {/* ATS score chip */}
+          {modal.atsScore != null && (
+            <span style={{ padding:"4px 12px", borderRadius:999, fontSize:12,
+                           fontWeight:700, background:atsBg, color:atsFg, flexShrink:0 }}>
+              ATS {modal.atsScore}
+            </span>
+          )}
+
+          {/* Export PDF button — only when viewing resume */}
+          {isResume && hasResume && (
+            <button onClick={exportPdf} disabled={exporting}
+              style={{
+                display:"inline-flex", alignItems:"center", gap:5, flexShrink:0,
+                padding:"6px 16px", borderRadius:2,
+                fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                fontSize:12, letterSpacing:"0.08em", textTransform:"uppercase",
+                background:"transparent", border:`2px solid ${theme.borderStrong}`,
+                color:theme.text, cursor: exporting ? "not-allowed" : "pointer",
+                opacity: exporting ? 0.6 : 1, transition:"border-radius 0.4s ease",
+              }}
+              onMouseEnter={e => {
+                if (!exporting) {
+                  e.currentTarget.style.borderRadius = "999px";
+                  e.currentTarget.style.background   = theme.accent;
+                  e.currentTarget.style.borderColor  = theme.accent;
+                }
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderRadius = "2px";
+                e.currentTarget.style.background   = "transparent";
+                e.currentTarget.style.borderColor  = theme.borderStrong;
               }}>
-                ATS {modal.atsScore}
-              </span>
-            )}
-            <button onClick={onClose}
-              style={{ background:"none", border:"none", color:theme.textMuted,
-                       cursor:"pointer", fontSize:20, lineHeight:1 }}>✕</button>
-          </div>
+              {exporting ? "⏳ Exporting…" : "↓ Export PDF"}
+            </button>
+          )}
+
+          {/* Close */}
+          <button onClick={onClose}
+            style={{ background:"none", border:"none", color:theme.textMuted,
+                     cursor:"pointer", fontSize:20, lineHeight:1, flexShrink:0,
+                     padding:"0 4px" }}>✕</button>
         </div>
 
-        {/* Content */}
+        {/* ── Content ──────────────────────────── */}
         <div style={{ flex:1, overflow:"hidden", display:"flex" }}>
           {isResume ? (
             <iframe
-              srcDoc={modal.html || "<p style='padding:40px;color:#888'>No resume HTML found.</p>"}
-              style={{ width:"100%", height:"100%", border:"none",
-                       background:"#ffffff" }}
+              srcDoc={modal.html || "<p style='padding:40px;font-family:sans-serif;color:#888'>No resume HTML stored.</p>"}
+              style={{ width:"100%", height:"100%", border:"none", background:"#ffffff" }}
               title="Resume Preview"
               sandbox="allow-same-origin"/>
           ) : (
@@ -253,7 +334,7 @@ function DetailModal({ modal, onClose, theme }) {
               {modal.atsReport ? (
                 <AtsReportDisplay report={modal.atsReport} score={modal.atsScore} theme={theme}/>
               ) : (
-                <p style={{ color:theme.textMuted, fontSize:13 }}>No ATS report available.</p>
+                <p style={{ color:theme.textMuted, fontSize:13 }}>No ATS report available for this application.</p>
               )}
             </div>
           )}
