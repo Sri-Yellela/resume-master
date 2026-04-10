@@ -660,21 +660,21 @@ export default function JobsPanel({ user, onUserChange }) {
 
       {/* ── Scrape bar ────────────────────────────────────── */}
       <div style={{
-        background:theme.surface, borderBottom:`1px solid #e5e5e5`,
+        background:theme.surface, borderBottom:`1px solid ${theme.border}`,
         padding:"10px 20px", display:"flex", alignItems:"center", gap:10,
         flexShrink:0, flexWrap:"wrap", position:"sticky", top:56, zIndex:50,
       }}>
         {/* Scrape query input */}
         <div style={{ position:"relative", flex:1, minWidth:200 }}>
           <span style={{ position:"absolute", left:12, top:"50%",
-                         transform:"translateY(-50%)", fontSize:14, color:"#aaa",
+                         transform:"translateY(-50%)", fontSize:14, color:theme.textDim,
                          pointerEvents:"none" }}>🔍</span>
           <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
             onKeyDown={e => e.key==="Enter" && handleSearch()}
             placeholder="Search role — e.g. ML Engineer, SWE…"
             style={{ width:"100%", height:40, paddingLeft:38, paddingRight:14,
-                     borderRadius:2, border:"1px solid #e5e5e5",
-                     background:theme.surface, color:"#0f0f0f",
+                     borderRadius:2, border:`1px solid ${theme.border}`,
+                     background:theme.surface, color:theme.text,
                      fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",
                      boxSizing:"border-box" }}/>
           {showPreview && (
@@ -729,13 +729,13 @@ export default function JobsPanel({ user, onUserChange }) {
 
       {/* ── Board header: tabs + filters left, search + sort right ─ */}
       <div style={{
-        background:theme.surface, borderBottom:`1px solid #e5e5e5`,
+        background:theme.surface, borderBottom:`1px solid ${theme.border}`,
         padding:"8px 20px", display:"flex", alignItems:"center", gap:8,
         flexShrink:0, flexWrap:"nowrap", overflowX:"auto",
       }}>
         {/* Board tabs */}
         <div style={{ display:"flex", gap:0, flexShrink:0,
-                      border:"2px solid #0f0f0f", borderRadius:2, overflow:"hidden" }}>
+                      border:`2px solid ${theme.borderStrong}`, borderRadius:2, overflow:"hidden" }}>
           {[["all","All Jobs"],["saved","Saved ★"]].map(([id,lbl]) => (
             <button key={id} onClick={() => setBoardTab(id)}
               style={{
@@ -743,9 +743,9 @@ export default function JobsPanel({ user, onUserChange }) {
                 fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
                 fontSize:12, letterSpacing:"0.08em", textTransform:"uppercase",
                 background: boardTab===id ? USER_ACCENT : theme.surface,
-                color: "#0f0f0f",
+                color: boardTab===id ? "#0f0f0f" : theme.text,
                 transition:"background 0.15s",
-                borderRight: "2px solid #0f0f0f",
+                borderRight: `2px solid ${theme.borderStrong}`,
               }}>
               {lbl}
             </button>
@@ -754,15 +754,15 @@ export default function JobsPanel({ user, onUserChange }) {
 
         {/* Filters toggle — prominent, always visible */}
         <button
-          onClick={() => setFiltersOpen(true)}
+          onClick={() => setFiltersOpen(o => !o)}
           style={{
             display:"flex", alignItems:"center", gap:5, flexShrink:0,
-            background: "transparent",
-            border: "2.5px solid #0f0f0f",
+            background: filtersOpen ? theme.accentMuted : "transparent",
+            border: `2px solid ${filtersOpen ? USER_ACCENT : theme.borderStrong}`,
             borderRadius:2, padding:"5px 14px",
             fontFamily:"'Barlow Condensed',sans-serif",
             fontWeight:800, fontSize:12, letterSpacing:"0.08em", textTransform:"uppercase",
-            cursor:"pointer", color:"#0f0f0f",
+            cursor:"pointer", color: filtersOpen ? theme.accentText : theme.text,
           }}>
           ▤ Filters
         </button>
@@ -770,8 +770,8 @@ export default function JobsPanel({ user, onUserChange }) {
         {/* Sort */}
         <select value={sortBy} onChange={e => setSortBy(e.target.value)}
           style={{ height:32, padding:"0 8px", borderRadius:2, flexShrink:0,
-                   border:"1px solid #e5e5e5", background:theme.surface,
-                   fontSize:12, color:"#0f0f0f", outline:"none" }}>
+                   border:`1px solid ${theme.border}`, background:theme.surface,
+                   fontSize:12, color:theme.text, outline:"none" }}>
           <option value="dateDesc">Newest</option>
           <option value="dateAsc">Oldest</option>
           <option value="compHigh">Pay ↓</option>
@@ -784,8 +784,8 @@ export default function JobsPanel({ user, onUserChange }) {
         <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
           placeholder="Filter visible jobs…"
           style={{ flex:1, minWidth:120, height:32, padding:"0 12px",
-                   borderRadius:2, border:"1px solid #e5e5e5",
-                   background:theme.surface, color:"#0f0f0f",
+                   borderRadius:2, border:`1px solid ${theme.border}`,
+                   background:theme.surface, color:theme.text,
                    fontFamily:"'DM Sans',system-ui", fontSize:12, outline:"none" }}/>
       </div>
 
