@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import { useViewport } from "../hooks/useViewport.js";
 
 // ── AtomEmblem — keep this exported, TopBar imports it ────────
 function tiltedEllipsePath(cx, cy, rx, ry, angleDeg) {
@@ -222,24 +223,29 @@ function AuthModal({ onLogin }) {
 // ── Main AuthScreen ───────────────────────────────────────────
 export default function AuthScreen({ onLogin }) {
   const { theme, mode } = useTheme();
+  const { mode: vpMode } = useViewport();
+  const isMobile = vpMode === "mobile" || vpMode === "tablet";
   const col1 = COMPANY_POSTERS.slice(0, 8);
   const col2 = COMPANY_POSTERS.slice(8);
 
   return (
-    <div style={{ display:"flex", height:"100vh", overflow:"hidden",
+    <div style={{ display:"flex", flexDirection: isMobile ? "column" : "row",
+                  height:"100vh", overflow: isMobile ? "auto" : "hidden",
                   background:theme.bg, fontFamily:"'DM Sans',system-ui,sans-serif" }}>
 
-      {/* LEFT — Hero */}
-      <div style={{ flex:"0 0 55%", display:"flex", flexDirection:"column",
-                    justifyContent:"center", padding:"60px 64px",
-                    overflowY:"auto" }}>
+      {/* LEFT/TOP — Hero */}
+      <div style={{ flex: isMobile ? "none" : "0 0 55%",
+                    display:"flex", flexDirection:"column",
+                    justifyContent:"center",
+                    padding: isMobile ? "40px 24px 48px" : "60px 64px",
+                    overflowY: isMobile ? "visible" : "auto" }}>
         {/* Logo */}
-        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:48 }}>
-          <span className="site-title" style={{ fontSize:22 }}>Resume Master</span>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: isMobile ? 28 : 48 }}>
+          <span className="site-title" style={{ fontSize: isMobile ? 20 : 22 }}>Resume Master</span>
         </div>
 
         {/* Hero tiles — editorial style */}
-        <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:32 }}>
+        <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom: isMobile ? 20 : 32 }}>
           {/* Row 1 */}
           <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
             <div style={{
@@ -273,8 +279,8 @@ export default function AuthScreen({ onLogin }) {
         </div>
 
         {/* Subtitle */}
-        <p style={{ fontSize:15, color:theme.textMuted, lineHeight:1.6,
-                    marginBottom:36, maxWidth:420 }}>
+        <p style={{ fontSize: isMobile ? 13 : 15, color:theme.textMuted, lineHeight:1.6,
+                    marginBottom: isMobile ? 24 : 36, maxWidth:420 }}>
           AI-tailored resumes, real-time job scraping, one-click autofill.<br/>
           Match every job description with a perfectly tailored resume.
         </p>
@@ -283,8 +289,8 @@ export default function AuthScreen({ onLogin }) {
         <AuthModal onLogin={onLogin}/>
       </div>
 
-      {/* RIGHT — Scrolling poster cards */}
-      <div style={{
+      {/* RIGHT — Scrolling poster cards — hidden on mobile */}
+      {!isMobile && <div style={{
         flex:"0 0 45%", overflow:"hidden", position:"relative",
         background: theme.surfaceHigh,
       }}>
@@ -311,7 +317,7 @@ export default function AuthScreen({ onLogin }) {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

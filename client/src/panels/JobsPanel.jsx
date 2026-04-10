@@ -8,7 +8,6 @@ import { useViewport } from "../hooks/useViewport.js";
 import SandboxPanel from "./SandboxPanel.jsx";
 import { ATSPanel } from "./ATSPanel.jsx";
 
-const USER_ACCENT = "#A8D8EA";   // soft sky blue — user board
 const USER_TEXT   = "#0f0f0f";   // black text on accent
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -142,10 +141,11 @@ function ResumeBadge({ onClick, loading }) {
 }
 
 // ── Lucy button (rectangular → pill on hover, 1s) ─────────────
-function LucyBtn({ children, onClick, disabled, accent = USER_ACCENT,
+function LucyBtn({ children, onClick, disabled, accent: accentProp,
                     style = {}, title }) {
   const [hov, setHov] = useState(false);
   const { theme } = useTheme();
+  const accent = accentProp || theme.accent;
   return (
     <button
       onClick={onClick} disabled={disabled} title={title}
@@ -236,7 +236,7 @@ function FiltersPanel({
         transition={{ type:"tween", duration:0.22 }}
         style={{
           width:320, height:"100%", background:theme.surface,
-          borderLeft:`3px solid ${USER_ACCENT}`,
+          borderLeft:`3px solid ${theme.accent}`,
           padding:"24px 20px", overflowY:"auto",
           display:"flex", flexDirection:"column", gap:16,
         }}>
@@ -441,6 +441,7 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 // ── Resize divider ────────────────────────────────────────────
 function ResizeDivider({ onDrag }) {
   const [hov, setHov] = useState(false);
+  const { theme } = useTheme();
   const startRef = useRef(null);
 
   const onMouseDown = (e) => {
@@ -475,8 +476,8 @@ function ResizeDivider({ onDrag }) {
         userSelect: "none",
       }}>
       <div style={{
-        width: 2, background: hov ? USER_ACCENT : "transparent",
-        borderLeft: `1px solid ${hov ? USER_ACCENT : "transparent"}`,
+        width: 2, background: hov ? theme.accent : "transparent",
+        borderLeft: `1px solid ${hov ? theme.accent : "transparent"}`,
         transition: "background 0.15s, border-color 0.15s",
         pointerEvents: "none",
       }}/>
@@ -490,7 +491,7 @@ const DEFAULT_SIZES_SANDBOX = { left: 36, center: 32, right: 22 };
 
 // ── Main panel ────────────────────────────────────────────────
 export default function JobsPanel({ user, onUserChange }) {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const { mode: vpMode } = useViewport();
   const isWide     = vpMode === "wide";
   const isMobile   = vpMode === "mobile" || vpMode === "tablet";
@@ -935,7 +936,7 @@ export default function JobsPanel({ user, onUserChange }) {
                 padding:"6px 16px", border:"none", cursor:"pointer",
                 fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
                 fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
-                background: boardTab===id ? USER_ACCENT : theme.surface,
+                background: boardTab===id ? theme.accent : theme.surface,
                 color: boardTab===id ? "#0f0f0f" : theme.text,
                 transition:"background 0.15s",
                 borderRight: `2px solid ${theme.borderStrong}`,
@@ -950,7 +951,7 @@ export default function JobsPanel({ user, onUserChange }) {
           onClick={() => setFiltersOpen(o => !o)}
           style={{
             display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
-            background: filtersOpen ? USER_ACCENT : theme.surface,
+            background: filtersOpen ? theme.accent : theme.surface,
             border: `2px solid ${theme.borderStrong}`,
             borderRadius:2, padding:"6px 16px",
             fontFamily:"'Barlow Condensed',sans-serif",
@@ -1072,7 +1073,7 @@ export default function JobsPanel({ user, onUserChange }) {
             {mobilePane === "jobs" && (
               <JobsColumn
                 jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
-                applyMode={applyMode} theme={theme}
+                applyMode={applyMode} theme={theme} isDark={isDark}
                 totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
                 generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
                 visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
@@ -1096,7 +1097,7 @@ export default function JobsPanel({ user, onUserChange }) {
                         fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
                         color: rightTab===id ? theme.text : theme.textDim,
                         cursor:"pointer", position:"relative",
-                        borderBottom: rightTab===id ? `2px solid ${USER_ACCENT}` : "2px solid transparent",
+                        borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
                       }}>
                       {lbl}
                     </button>
@@ -1129,7 +1130,7 @@ export default function JobsPanel({ user, onUserChange }) {
                   flex:1, padding:"10px 0", border:"none", cursor:"pointer",
                   background:"transparent", display:"flex", flexDirection:"column",
                   alignItems:"center", gap:2,
-                  color: mobilePane===id ? USER_ACCENT : theme.textMuted,
+                  color: mobilePane===id ? theme.accent : theme.textMuted,
                   fontSize:10, fontWeight:700,
                 }}>
                 <span style={{ fontSize:18 }}>{icon}</span>
@@ -1148,7 +1149,7 @@ export default function JobsPanel({ user, onUserChange }) {
                         borderRight:`1px solid ${theme.border}` }}>
             <JobsColumn
               jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
-              applyMode={applyMode} theme={theme}
+              applyMode={applyMode} theme={theme} isDark={isDark}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
@@ -1168,7 +1169,7 @@ export default function JobsPanel({ user, onUserChange }) {
                     fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
                     color: rightTab===id ? theme.text : theme.textDim,
                     cursor:"pointer", position:"relative",
-                    borderBottom: rightTab===id ? `2px solid ${USER_ACCENT}` : "2px solid transparent",
+                    borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
                   }}>
                   {lbl}
                 </button>
@@ -1222,7 +1223,7 @@ export default function JobsPanel({ user, onUserChange }) {
           }}>
             <JobsColumn
               jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
-              applyMode={applyMode} theme={theme}
+              applyMode={applyMode} theme={theme} isDark={isDark}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
@@ -1279,7 +1280,7 @@ export default function JobsPanel({ user, onUserChange }) {
                     fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
                     color: rightTab===id ? theme.text : theme.textDim,
                     cursor:"pointer", position:"relative",
-                    borderBottom: rightTab===id ? `2px solid ${USER_ACCENT}` : "2px solid transparent",
+                    borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
                   }}>
                   {lbl}
                 </button>
@@ -1306,14 +1307,17 @@ export default function JobsPanel({ user, onUserChange }) {
 }
 
 // ── Jobs column (shared across layout modes) ──────────────────
-function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
+function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme, isDark,
                       totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, setActiveAts, setRightTab,
                       goPage, handleRefresh, onPullRefresh,
                       setMobilePane, isMobile }) {
   return (
-    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
+                  background: isDark
+                    ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
+                    : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
       {jobs.length === 0 && !scraping ? <EmptyState theme={theme}/> : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
@@ -1338,7 +1342,7 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
               <JobCard
                 key={key} job={job} g={g} done={done} st={st}
                 applyMode={applyMode}
-                theme={theme}
+                theme={theme} isDark={isDark}
                 onGenerate={force => generate(job, force)}
                 onViewSandbox={() => {
                   const entry = {...g, company:g.company||job.company, title:g.title||job.title};
@@ -1396,24 +1400,29 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
 }
 
 // ── Job card ──────────────────────────────────────────────────
-function JobCard({ job, g, done, st, applyMode, theme,
+function JobCard({ job, g, done, st, applyMode, theme, isDark,
                    onGenerate, onViewSandbox, onExport, onVisit, onStar, onCardClick,
                    onAts, onResume }) {
   const [hov, setHov] = useState(false);
+  const frostedBg = isDark
+    ? (hov ? "rgba(28,28,28,0.92)" : "rgba(17,17,17,0.6)")
+    : (hov ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.68)");
+  const frostedBlur = hov ? "blur(20px) saturate(2)" : "blur(12px) saturate(1.6)";
   return (
     <div
       onClick={onCardClick}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background:theme.surface,
-        border: hov ? `1px solid ${USER_ACCENT}` : `1px solid ${theme.border}`,
+        background: frostedBg,
+        backdropFilter: frostedBlur,
+        WebkitBackdropFilter: frostedBlur,
+        border: `1px solid ${hov ? theme.borderStrong : theme.border + "88"}`,
         borderRadius:4, padding:"14px 18px", margin:"0 16px 8px",
         display:"flex", alignItems:"center", gap:14, cursor:"pointer",
-        boxShadow: hov ? theme.shadowMd : "none",
-        transform: hov ? "translateY(-3px)" : "translateY(0)",
+        boxShadow: hov ? theme.shadowLg : theme.shadowSm,
+        transform: hov ? "translateY(-3px) scale(1.008)" : "translateY(0) scale(1)",
         transition:"all 0.2s ease", position:"relative",
-        // Visited: slightly desaturated
         opacity: job.visited ? 0.75 : 1,
       }}>
 
@@ -1489,7 +1498,7 @@ function JobCard({ job, g, done, st, applyMode, theme,
 
         {/* Generate */}
         {applyMode !== "SIMPLE" && (
-          <IconBtn bg={USER_ACCENT} title={done ? "Regenerate" : "Generate resume"}
+          <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
             disabled={!!st}
             onClick={e => { e.stopPropagation(); onGenerate(done && g.html !== "__exists__"); }}>
             {st ? "⏳" : done ? "↻" : "✦"}

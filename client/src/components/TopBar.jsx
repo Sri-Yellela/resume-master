@@ -13,7 +13,45 @@ const APPLY_MODES = [
   { value:"CUSTOM_SAMPLER", label:"Custom Sampler",  icon:"⚙", desc:"Full customisation, JD-driven companies" },
 ];
 
-const USER_ACCENT = "#A8D8EA";
+// ── Lucy nested-box logo ──────────────────────────────────────
+function LucyLogo({ theme, mini = false }) {
+  if (mini) {
+    return (
+      <div style={{ position:"relative", width:38, height:28, display:"flex",
+                    alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+        <div style={{ position:"absolute", inset:0, background:theme.accent,
+                      transform:"rotate(-3deg)", borderRadius:2 }}/>
+        <div style={{ position:"relative", zIndex:1, padding:"2px 6px",
+                      background:"#ffffff", border:"2px solid #0f0f0f",
+                      transform:"rotate(-2deg)", borderRadius:2,
+                      display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <span style={{ fontFamily:"'Barlow Condensed','DM Sans',system-ui,sans-serif",
+                          fontWeight:800, fontSize:13, letterSpacing:"0.06em",
+                          textTransform:"uppercase", color:"#0f0f0f", fontStyle:"italic",
+                          lineHeight:1, whiteSpace:"nowrap" }}>RM</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ position:"relative", display:"inline-flex", alignItems:"center",
+                  justifyContent:"center", flexShrink:0, height:38, width:166 }}>
+      {/* Outer box — accent fill, slightly more tilted */}
+      <div style={{ position:"absolute", inset:0, background:theme.accent,
+                    transform:"rotate(-3deg)", borderRadius:2 }}/>
+      {/* Inner box — white fill, thick black border */}
+      <div style={{ position:"relative", zIndex:1, padding:"3px 10px",
+                    background:"#ffffff", border:"2.5px solid #0f0f0f",
+                    transform:"rotate(-2deg)", borderRadius:2,
+                    display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <span style={{ fontFamily:"'Barlow Condensed','DM Sans',system-ui,sans-serif",
+                        fontWeight:800, fontSize:17, letterSpacing:"0.06em",
+                        textTransform:"uppercase", color:"#0f0f0f", fontStyle:"italic",
+                        lineHeight:1, whiteSpace:"nowrap" }}>Resume Master</span>
+      </div>
+    </div>
+  );
+}
 
 // ── Generic close-on-outside-click hook ───────────────────────
 function useClickOutside(ref, onClose) {
@@ -46,7 +84,7 @@ function ThemeToggle() {
     <button onClick={toggleMode} title={`Switch to ${mode === "light" ? "dark" : "light"} mode`}
       style={{
         width: 52, height: 28, borderRadius: 999,
-        background: mode === "dark" ? USER_ACCENT : theme.border,
+        background: mode === "dark" ? theme.accent : theme.border,
         border: "none", cursor: "pointer", position: "relative",
         transition: "background 0.3s ease", flexShrink: 0,
         display: "flex", alignItems: "center",
@@ -73,7 +111,7 @@ const TABS = [
 ];
 
 export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange }) {
-  const { theme } = useTheme();
+  const { theme, accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
   const { mode: vpMode } = useViewport();
   const isMobile = vpMode === "mobile" || vpMode === "tablet";
 
@@ -128,19 +166,16 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
     <div style={{
       height: 56,
       background: theme.surface,
-      borderBottom: `3px solid ${USER_ACCENT}`,
+      borderBottom: `3px solid ${theme.accent}`,
       display: "flex", alignItems: "center",
       padding: isMobile ? "0 12px" : "0 20px",
       gap: isMobile ? 8 : 24,
       position: "sticky", top: 0, zIndex: 100,
       flexShrink: 0,
     }}>
-      {/* Brand wordmark */}
+      {/* Brand logo */}
       <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
-        {isMobile
-          ? <span style={{ fontWeight:900, fontSize:16, letterSpacing:"-0.5px", color:theme.text }}>RM</span>
-          : <span className="site-title">Resume Master</span>
-        }
+        <LucyLogo theme={theme} mini={isMobile}/>
       </div>
 
       {/* Nav tabs */}
@@ -164,7 +199,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                   position: "absolute", bottom: -1, left: "50%",
                   transform: "translateX(-50%)",
                   width: 16, height: 2, borderRadius: 999,
-                  background: USER_ACCENT,
+                  background: theme.accent,
                 }}/>
             )}
           </button>
@@ -172,8 +207,26 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
       </nav>
 
       {/* Right side controls */}
-      <div style={{ display:"flex", alignItems:"center", gap:isMobile?6:10, flexShrink:0 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:isMobile?4:8, flexShrink:0 }}>
         <ThemeToggle/>
+
+        {/* Accent color swatches */}
+        <div style={{ display:"flex", alignItems:"center", gap:3 }}>
+          {ACCENT_OPTIONS.map(opt => (
+            <button key={opt.id} title={opt.label} onClick={() => setAccentId(opt.id)}
+              style={{
+                width:14, height:14, borderRadius:"50%",
+                background: opt.color,
+                border: accentId === opt.id ? `2px solid ${theme.text}` : "2px solid transparent",
+                outline: accentId === opt.id ? `1.5px solid ${opt.color}` : "none",
+                outlineOffset: "1px",
+                cursor:"pointer", flexShrink:0,
+                transform: accentId === opt.id ? "scale(1.3)" : "scale(1)",
+                transition:"transform 0.15s, border-color 0.15s",
+                padding:0,
+              }}/>
+          ))}
+        </div>
 
         {/* Mode chip — hidden on mobile to save space */}
         {!isMobile && (
@@ -182,8 +235,8 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
               onClick={() => setModeOpen(o => !o)}
               style={{
                 display:"flex", alignItems:"center", gap:5,
-                background: "#e8f6fb", color: "#1a6a8a",
-                border: "1px solid #A8D8EA55",
+                background: theme.accentMuted, color: theme.accentText,
+                border: `1px solid ${theme.accent}55`,
                 borderRadius: 999, padding:"4px 12px",
                 fontSize: 11, fontWeight: 700, cursor:"pointer",
                 transition: "border-radius 1s ease",
@@ -204,12 +257,12 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                     onMouseLeave={e => e.currentTarget.style.background=m.value===currentMode?"#e8f6fb":"transparent"}
                     style={{
                       ...menuItemStyle,
-                      background: m.value === currentMode ? "#e8f6fb" : "transparent",
+                      background: m.value === currentMode ? theme.accentMuted : "transparent",
                       display:"flex", alignItems:"center", gap:10,
                     }}>
                     <span style={{ fontWeight:700 }}>{m.icon} {m.label}</span>
                     <span style={{ fontSize:10, color:theme.textDim, flex:1 }}>{m.desc}</span>
-                    {m.value === currentMode && <span style={{ color:USER_ACCENT, fontWeight:700 }}>✓</span>}
+                    {m.value === currentMode && <span style={{ color:theme.accent, fontWeight:700 }}>✓</span>}
                   </button>
                 ))}
               </Panel>
@@ -222,9 +275,9 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
           <Avatar
             onClick={() => setUserOpen(o => !o)}
             style={{ width:36, height:36, cursor:"pointer",
-                     border:`2px solid ${userOpen ? USER_ACCENT : theme.border}`,
+                     border:`2px solid ${userOpen ? theme.accent : theme.border}`,
                      borderRadius:"50%", transition:"border-color 0.15s" }}>
-            <AvatarFallback style={{ background:USER_ACCENT, color:"#0f0f0f",
+            <AvatarFallback style={{ background:theme.accent, color:"#0f0f0f",
                                       fontWeight:800, fontSize:13 }}>
               {(user?.username||"U")[0].toUpperCase()}
             </AvatarFallback>
@@ -260,7 +313,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                         background: "transparent",
                       }}>
                       <span style={{ fontWeight:700 }}>{m.icon} {m.label}</span>
-                      {m.value === currentMode && <span style={{ color:USER_ACCENT, fontWeight:700 }}>✓</span>}
+                      {m.value === currentMode && <span style={{ color:theme.accent, fontWeight:700 }}>✓</span>}
                     </button>
                   ))}
                 </div>
@@ -285,7 +338,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                     }}/>
                   <button onClick={saveToken} disabled={tokenSaving}
                     style={{
-                      background: tokenSaving ? theme.border : USER_ACCENT,
+                      background: tokenSaving ? theme.border : theme.accent,
                       color:"#0f0f0f", border:"none", borderRadius:4,
                       padding:"0 12px", cursor:"pointer", fontSize:11,
                       fontWeight:700, flexShrink:0,

@@ -8,6 +8,13 @@ import { useState, createContext, useContext } from "react";
 export const LUCY_USER_ACCENT  = "#A8D8EA";
 export const LUCY_ADMIN_ACCENT = "#F5E642";
 
+export const ACCENT_OPTIONS = [
+  { id:"sky",    label:"Sky Blue",      color:"#A8D8EA", mutedLight:"#e8f6fb", mutedDark:"#0a1f2a", textLight:"#1a6a8a", textDark:"#A8D8EA" },
+  { id:"lemon",  label:"Lemon Yellow",  color:"#F0EF8A", mutedLight:"#fafad0", mutedDark:"#2a2800", textLight:"#5a5000", textDark:"#F0EF8A" },
+  { id:"green",  label:"Celtic Green",  color:"#88C87A", mutedLight:"#e4f5e0", mutedDark:"#0a200a", textLight:"#1a5a14", textDark:"#88C87A" },
+  { id:"sunset", label:"Sunset Orange", color:"#FFB07A", mutedLight:"#fff0e2", mutedDark:"#2a1400", textLight:"#8a3600", textDark:"#FFB07A" },
+];
+
 export const THEMES = {
   light: {
     bg:           "#ffffff",
@@ -137,7 +144,29 @@ export function ThemeProvider({ children }) {
     return LEGACY_MAP[legacySaved] || "light";
   });
 
-  const theme = THEMES[mode] || THEMES.light;
+  const [accentId, setAccentIdRaw] = useState(() => {
+    return localStorage.getItem("rm_accent_id") || "sky";
+  });
+
+  const setAccentId = (id) => {
+    setAccentIdRaw(id);
+    localStorage.setItem("rm_accent_id", id);
+  };
+
+  const accentOpt = ACCENT_OPTIONS.find(a => a.id === accentId) || ACCENT_OPTIONS[0];
+  const baseTheme = THEMES[mode] || THEMES.light;
+  const theme = {
+    ...baseTheme,
+    accent:      accentOpt.color,
+    accentMuted: mode === "dark" ? accentOpt.mutedDark : accentOpt.mutedLight,
+    accentText:  mode === "dark" ? accentOpt.textDark  : accentOpt.textLight,
+    gradAccent:  accentOpt.color,
+    glowPrimary: `0 0 0 3px ${accentOpt.color}44`,
+    colorPrimary:   accentOpt.color,
+    colorSecondary: mode === "dark" ? accentOpt.textDark : accentOpt.textLight,
+    colorAccent:    mode === "dark" ? accentOpt.textDark : accentOpt.textLight,
+    colorTag:       mode === "dark" ? accentOpt.mutedDark : accentOpt.mutedLight,
+  };
 
   const toggleMode = () => {
     const next = mode === "light" ? "dark" : "light";
@@ -163,6 +192,9 @@ export function ThemeProvider({ children }) {
       setTheme,
       themeName: mode,
       THEMES,
+      accentId,
+      setAccentId,
+      ACCENT_OPTIONS,
     }}>
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
