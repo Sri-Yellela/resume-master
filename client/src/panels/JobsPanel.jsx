@@ -124,7 +124,12 @@ function LucyBtn({ children, onClick, disabled, accent = USER_ACCENT,
       onMouseEnter={() => !disabled && setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background: hov && !disabled ? accent : "transparent",
+        // Water-fill: gradient fills upward from bottom over 1s
+        backgroundImage: `linear-gradient(to top, ${accent}, ${accent})`,
+        backgroundSize: hov && !disabled ? "100% 100%" : "100% 0%",
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "bottom",
+        backgroundColor: "transparent",
         color: "#0f0f0f",
         border: `2.5px solid ${hov && !disabled ? accent : "#0f0f0f"}`,
         cursor: disabled ? "not-allowed" : "pointer",
@@ -132,7 +137,7 @@ function LucyBtn({ children, onClick, disabled, accent = USER_ACCENT,
         fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
         letterSpacing: "0.1em", textTransform: "uppercase",
         borderRadius: hov && !disabled ? 999 : 2,
-        transition: "border-radius 1s ease, background 1s ease, border-color 1s ease",
+        transition: "background-size 1s ease, border-radius 1s ease, border-color 1s ease",
         whiteSpace: "nowrap", flexShrink: 0,
         opacity: disabled ? 0.4 : 1,
         display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4,
@@ -702,55 +707,66 @@ export default function JobsPanel({ user, onUserChange }) {
         </span>
       </div>
 
-      {/* ── Board header: local search + filters + sort ───── */}
+      {/* ── Board header: tabs + filters left, search + sort right ─ */}
       <div style={{
         background:theme.surface, borderBottom:`1px solid #e5e5e5`,
         padding:"8px 20px", display:"flex", alignItems:"center", gap:8,
-        flexShrink:0, flexWrap:"wrap",
+        flexShrink:0, flexWrap:"nowrap", overflowX:"auto",
       }}>
         {/* Board tabs */}
-        <div style={{ display:"flex", gap:0, borderRadius:2, overflow:"hidden",
-                      border:"1px solid #e5e5e5", flexShrink:0 }}>
+        <div style={{ display:"flex", gap:0, flexShrink:0,
+                      border:"2px solid #0f0f0f", borderRadius:2, overflow:"hidden" }}>
           {[["all","All Jobs"],["saved","Saved ★"]].map(([id,lbl]) => (
             <button key={id} onClick={() => setBoardTab(id)}
               style={{
-                padding:"6px 16px", border:"none", cursor:"pointer",
+                padding:"5px 14px", border:"none", cursor:"pointer",
                 fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                fontSize:12, letterSpacing:"0.06em", textTransform:"uppercase",
-                background: boardTab===id ? USER_ACCENT : "#fff",
-                color: boardTab===id ? USER_TEXT : "#888",
-                transition:"all 0.15s",
+                fontSize:12, letterSpacing:"0.08em", textTransform:"uppercase",
+                background: boardTab===id ? USER_ACCENT : theme.surface,
+                color: "#0f0f0f",
+                transition:"background 0.15s",
+                borderRight: "2px solid #0f0f0f",
               }}>
               {lbl}
             </button>
           ))}
         </div>
 
-        {/* Local search */}
-        <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
-          placeholder="Filter by company, location, role…"
-          style={{ flex:1, minWidth:160, height:32, padding:"0 12px",
-                   borderRadius:2, border:"1px solid #e5e5e5",
-                   background:theme.surface, color:"#0f0f0f",
-                   fontFamily:"'DM Sans',system-ui", fontSize:12, outline:"none" }}/>
+        {/* Filters toggle — prominent, always visible */}
+        <button
+          onClick={() => setFiltersOpen(true)}
+          style={{
+            display:"flex", alignItems:"center", gap:5, flexShrink:0,
+            background: "transparent",
+            border: "2.5px solid #0f0f0f",
+            borderRadius:2, padding:"5px 14px",
+            fontFamily:"'Barlow Condensed',sans-serif",
+            fontWeight:800, fontSize:12, letterSpacing:"0.08em", textTransform:"uppercase",
+            cursor:"pointer", color:"#0f0f0f",
+          }}>
+          ▤ Filters
+        </button>
 
         {/* Sort */}
         <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-          style={{ height:32, padding:"0 8px", borderRadius:2,
+          style={{ height:32, padding:"0 8px", borderRadius:2, flexShrink:0,
                    border:"1px solid #e5e5e5", background:theme.surface,
                    fontSize:12, color:"#0f0f0f", outline:"none" }}>
-          <option value="dateDesc">Date: Newest first</option>
-          <option value="dateAsc">Date: Oldest first</option>
-          <option value="compHigh">Compensation: High → Low</option>
-          <option value="compLow">Compensation: Low → High</option>
-          <option value="yoeLow">Experience: Low → High</option>
-          <option value="yoeHigh">Experience: High → Low</option>
+          <option value="dateDesc">Newest</option>
+          <option value="dateAsc">Oldest</option>
+          <option value="compHigh">Pay ↓</option>
+          <option value="compLow">Pay ↑</option>
+          <option value="yoeLow">Exp ↑</option>
+          <option value="yoeHigh">Exp ↓</option>
         </select>
 
-        {/* Filters button */}
-        <LucyBtn onClick={() => setFiltersOpen(true)} accent="#f0f0f0" textColor="#0f0f0f">
-          ⚙ Filters
-        </LucyBtn>
+        {/* Local search */}
+        <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
+          placeholder="Filter visible jobs…"
+          style={{ flex:1, minWidth:120, height:32, padding:"0 12px",
+                   borderRadius:2, border:"1px solid #e5e5e5",
+                   background:theme.surface, color:"#0f0f0f",
+                   fontFamily:"'DM Sans',system-ui", fontSize:12, outline:"none" }}/>
       </div>
 
       {/* ── Three-column body ─────────────────────────────── */}

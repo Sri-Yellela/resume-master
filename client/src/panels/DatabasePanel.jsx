@@ -189,6 +189,12 @@ export function DatabasePanel({ user }) {
   const [filterDate,   setFilterDate]   = useState("");
   const [calFilter,    setCalFilter]    = useState(false);
 
+  // ── Saved Jobs tab state ──────────────────────────────────────
+  const [savedJobs,    setSavedJobs]    = useState([]);
+  const [savedGen,     setSavedGen]     = useState({}); // jobId→{html,atsScore}
+  const [baseResume,   setBaseResume]   = useState("");
+  const [genLoading,   setGenLoading]   = useState({});
+
   const inputRef = useRef();
   const calRef   = useRef();
 
@@ -205,7 +211,60 @@ export function DatabasePanel({ user }) {
     finally { setLoading(false); }
   }, []);
 
+  const loadSaved = useCallback(async () => {
+    try {
+      const [jr, rr, br] = await Promise.all([
+        api("/api/jobs?starred=1&hideGhost=true&pageSize=100"),
+        api("/api/resumes"),
+        api("/api/base-resume"),
+      ]);
+      setSavedJobs(jr.jobs || []);
+      if (br?.content) setBaseResume(br.content);
+      if (rr?.length) {
+        const map = {};
+        rr.forEach(r => { map[r.job_id] = { html:"__exists__", atsScore:r.ats_score }; });
+        setSavedGen(map);
+      }
+    } catch {}
+  }, []);
+
+  const generateForSaved = useCallback(async (job, force = false) => {
+    const applyMode = user?.applyMode || "TAILORED";
+    if (applyMode === "SIMPLE") { alert("Generation disabled in Simple mode."); return; }
+    if (!baseResume) { alert("Upload your base resume in the Jobs tab first."); return; }
+    setGenLoading(p => ({...p, [job.jobId]: true}));
+    try {
+      const d = await api("/api/generate", { method:"POST",
+        body:JSON.stringify({ jobId:job.jobId, job, resumeText:baseResume, forceRegen:force }) });
+      if (d.error) throw new Error(d.error);
+      setSavedGen(p => ({...p, [job.jobId]:{ html:d.html, atsScore:d.atsScore }}));
+    } catch(e) { alert("Generation failed: " + e.message); }
+    setGenLoading(p => { const n={...p}; delete n[job.jobId]; return n; });
+  }, [baseResume, user]);
+
+  const exportSavedPdf = useCallback(async (job, html) => {
+    const filename = `Resume_${(job.company||"").replace(/\s+/g,"_")}.pdf`;
+    const r = await fetch("/api/export-pdf", { method:"POST", credentials:"include",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify({ html, filename }) });
+    if (!r.ok) { alert("PDF export failed"); return; }
+    const blob = await r.blob();
+    const u = URL.createObjectURL(blob);
+    Object.assign(document.createElement("a"), { href:u, download:filename }).click();
+    URL.revokeObjectURL(u);
+    await api("/api/applications", { method:"POST", body:JSON.stringify({
+      jobId:job.jobId, company:job.company, role:job.title,
+      jobUrl:job.url, source:job.source, location:job.location,
+      applyMode:user?.applyMode||"TAILORED", resumeFile:filename,
+    }) }).catch(()=>{});
+  }, [user]);
+
+  const unsaveJob = useCallback(async (jobId) => {
+    await api(`/api/jobs/${jobId}/starred`, { method:"PATCH" });
+    setSavedJobs(prev => prev.filter(j => j.jobId !== jobId));
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (activeSheet === "saved") loadSaved(); }, [activeSheet, loadSaved]);
   useEffect(() => { if (editCell && inputRef.current) inputRef.current.focus(); }, [editCell]);
 
   useEffect(() => {
@@ -326,7 +385,7 @@ export function DatabasePanel({ user }) {
   const isApps      = activeSheet === "applications";
   const displayRows = filterRows(rows, cols);
 
-  const SHEETS = [["applications","Job Applications"],["resumes","Resume History"]];
+  const SHEETS = [["applications","Applications"],["resumes","Resumes"],["saved","Saved Jobs"]];
 
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
@@ -357,7 +416,7 @@ export function DatabasePanel({ user }) {
                              color:activeSheet===id ? theme.accentText : theme.textMuted,
                              fontSize:10, fontWeight:700,
                              padding:"1px 7px", borderRadius:999 }}>
-                {id === "applications" ? apps.length : resumes.length}
+                {id === "applications" ? apps.length : id === "resumes" ? resumes.length : savedJobs.length}
               </span>
               {activeSheet===id && (
                 <motion.div layoutId="db-tab-underline"
@@ -379,8 +438,8 @@ export function DatabasePanel({ user }) {
         </div>
       </div>
 
-      {/* ── Toolbar ── */}
-      <div style={{ background:theme.surface, padding:"10px 16px",
+      {/* ── Toolbar (hidden for saved tab — it has its own toolbar) ── */}
+      {activeSheet !== "saved" && <div style={{ background:theme.surface, padding:"10px 16px",
                     display:"flex", alignItems:"center", gap:10,
                     borderBottom:`1px solid ${theme.border}`,
                     flexShrink:0, flexWrap:"wrap" }}>
@@ -438,17 +497,30 @@ export function DatabasePanel({ user }) {
         <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap" }}>
           {displayRows.length} of {rows.length} row{rows.length !== 1 ? "s" : ""}
         </span>
-      </div>
+      </div>}
 
-      {/* ── Table ── */}
-      {loading ? (
+      {/* ── Saved Jobs pane (replaces table entirely when on saved tab) ── */}
+      {activeSheet === "saved" && (
+        <SavedJobsPane
+          jobs={savedJobs} generated={savedGen} genLoading={genLoading}
+          applyMode={user?.applyMode || "TAILORED"} hasResume={!!baseResume}
+          theme={theme} mode={mode}
+          onGenerate={(job, force) => generateForSaved(job, force)}
+          onExport={(job, html) => exportSavedPdf(job, html)}
+          onUnsave={unsaveJob}
+          onRefresh={loadSaved}
+        />
+      )}
+
+      {/* ── Table (applications / resumes) ── */}
+      {activeSheet !== "saved" && loading ? (
         <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
                       color:theme.textMuted, fontSize:13 }}>
           Loading data…
         </div>
-      ) : displayRows.length === 0 ? (
+      ) : activeSheet !== "saved" && displayRows.length === 0 ? (
         <EmptyState sheet={activeSheet} hasFilter={!!(search || filterDate)} theme={theme}/>
-      ) : (
+      ) : activeSheet !== "saved" ? (
         <div style={{ flex:1, overflow:"auto" }}>
           <table style={{ borderCollapse:"collapse", width:"100%", tableLayout:"fixed" }}>
             <thead>
@@ -626,7 +698,190 @@ export function DatabasePanel({ user }) {
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
+    </div>
+  );
+}
+
+// ── Saved Jobs pane ───────────────────────────────────────────
+function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
+                          theme, mode, onGenerate, onExport, onUnsave, onRefresh }) {
+  const USER_ACCENT = "#A8D8EA";
+
+  if (jobs.length === 0) return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column",
+                  alignItems:"center", justifyContent:"center", gap:12, padding:40 }}>
+      <div style={{ fontSize:40 }}>★</div>
+      <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No saved jobs yet</div>
+      <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:300, lineHeight:1.8 }}>
+        Star jobs on the Jobs board to save them here. You can generate tailored resumes and export PDFs from this panel.
+      </div>
+      <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
+    </div>
+  );
+
+  const thS = {
+    padding:"10px 14px", textAlign:"left", fontSize:10, fontWeight:700,
+    color:theme.textDim, textTransform:"uppercase", letterSpacing:"0.08em",
+    borderBottom:`1px solid ${theme.border}`, whiteSpace:"nowrap",
+    background:theme.surfaceHigh,
+  };
+  const tdS = { padding:"11px 14px", fontSize:12, color:theme.text, verticalAlign:"middle" };
+
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+      {/* toolbar */}
+      <div style={{ padding:"8px 16px", display:"flex", alignItems:"center", gap:8,
+                    borderBottom:`1px solid ${theme.border}`, flexShrink:0,
+                    background:theme.surface }}>
+        <span style={{ fontSize:12, color:theme.textMuted }}>
+          {jobs.length} saved job{jobs.length !== 1 ? "s" : ""}
+        </span>
+        {!hasResume && (
+          <span style={{ fontSize:11, color:theme.warning, background:theme.warningMuted,
+                         border:`1px solid ${theme.warning}33`, borderRadius:4,
+                         padding:"2px 10px" }}>
+            Upload base resume in Jobs tab to enable generation
+          </span>
+        )}
+        <div style={{ flex:1 }}/>
+        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
+      </div>
+
+      {/* table */}
+      <div style={{ flex:1, overflowY:"auto" }}>
+        <table style={{ borderCollapse:"collapse", width:"100%", tableLayout:"fixed" }}>
+          <thead>
+            <tr style={{ position:"sticky", top:0, zIndex:5 }}>
+              {["Company","Title","Location","Source","ATS","Actions"].map(h => (
+                <th key={h} style={{ ...thS,
+                  width: h==="Actions" ? 180 : h==="ATS" ? 60 : h==="Source" ? 90 : "auto" }}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {jobs.map(job => {
+              const g = generated[job.jobId];
+              const done = !!g?.html;
+              const busy = !!genLoading[job.jobId];
+              // Monogram colors
+              const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706"];
+              let hash = 0;
+              for (const c of job.company||"") hash = (hash*31+c.charCodeAt(0))&0xffff;
+              const iconBg = colors[hash % colors.length];
+
+              return (
+                <tr key={job.jobId} className="rm-table-row"
+                  style={{ borderBottom:`1px solid ${theme.border}` }}>
+                  {/* Company */}
+                  <td style={{ ...tdS }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      {job.companyIconUrl ? (
+                        <img src={job.companyIconUrl} alt={job.company}
+                          style={{ width:28, height:28, borderRadius:6, objectFit:"contain",
+                                   border:`1px solid ${theme.border}`, background:"#fff", flexShrink:0 }}
+                          onError={e => { e.currentTarget.style.display="none"; }}/>
+                      ) : (
+                        <div style={{ width:28, height:28, borderRadius:6, background:iconBg,
+                                      display:"flex", alignItems:"center", justifyContent:"center",
+                                      fontSize:11, fontWeight:800, color:"#fff", flexShrink:0 }}>
+                          {(job.company||"?")[0].toUpperCase()}
+                        </div>
+                      )}
+                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                                     fontWeight:600 }}>
+                        {job.company}
+                      </span>
+                    </div>
+                  </td>
+                  {/* Title */}
+                  <td style={{ ...tdS, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                                color:theme.textMuted }}>
+                    {job.title}
+                  </td>
+                  {/* Location */}
+                  <td style={{ ...tdS, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                                color:theme.textDim, fontSize:11 }}>
+                    {job.location || "—"}
+                  </td>
+                  {/* Source */}
+                  <td style={{ ...tdS }}>
+                    <span style={{ background:theme.surfaceHigh, color:theme.textMuted,
+                                   padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700 }}>
+                      {(job.source||job.sourcePlatform||"—").slice(0,8)}
+                    </span>
+                  </td>
+                  {/* ATS */}
+                  <td style={{ ...tdS }}>
+                    {g?.atsScore != null ? (
+                      <span style={{
+                        background: g.atsScore>=80 ? "#dcfce7" : g.atsScore>=60 ? "#fef9c3" : "#fee2e2",
+                        color: g.atsScore>=80 ? "#166534" : g.atsScore>=60 ? "#854d0e" : "#991b1b",
+                        padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700,
+                      }}>{g.atsScore}</span>
+                    ) : <span style={{ color:theme.textDim, fontSize:11 }}>—</span>}
+                  </td>
+                  {/* Actions */}
+                  <td style={{ ...tdS }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"nowrap" }}>
+                      {/* Generate / Regen — hidden in SIMPLE mode */}
+                      {applyMode !== "SIMPLE" && (
+                        <button title={done ? "Regenerate resume" : "Generate resume"}
+                          disabled={busy || !hasResume}
+                          onClick={() => onGenerate(job, done && g.html !== "__exists__")}
+                          style={{
+                            padding:"3px 10px", fontSize:11, fontWeight:700,
+                            fontFamily:"'Barlow Condensed',sans-serif",
+                            border:`1.5px solid ${busy||!hasResume ? theme.border : "#0f0f0f"}`,
+                            borderRadius:2, cursor:busy||!hasResume ? "not-allowed":"pointer",
+                            background:"transparent", color:busy||!hasResume ? theme.textDim:"#0f0f0f",
+                            opacity:busy||!hasResume ? 0.5 : 1, whiteSpace:"nowrap",
+                          }}>
+                          {busy ? "⏳" : done ? "↻ Regen" : "✦ Generate"}
+                        </button>
+                      )}
+                      {/* Export PDF — only if html is fully generated */}
+                      {done && g.html !== "__exists__" && (
+                        <button title="Export PDF"
+                          onClick={() => onExport(job, g.html)}
+                          style={{
+                            padding:"3px 10px", fontSize:11, fontWeight:700,
+                            fontFamily:"'Barlow Condensed',sans-serif",
+                            border:"1.5px solid #16a34a", borderRadius:2,
+                            cursor:"pointer", background:"transparent", color:"#16a34a",
+                            whiteSpace:"nowrap",
+                          }}>
+                          📥 PDF
+                        </button>
+                      )}
+                      {/* Open URL */}
+                      {job.url && (
+                        <button title="Open job listing"
+                          onClick={() => window.open(job.url, "_blank", "noreferrer")}
+                          style={{
+                            padding:"3px 8px", fontSize:11, border:"1.5px solid #e5e5e5",
+                            borderRadius:2, cursor:"pointer", background:"transparent",
+                            color:theme.textMuted,
+                          }}>↗</button>
+                      )}
+                      {/* Unsave */}
+                      <button title="Remove from saved"
+                        onClick={() => onUnsave(job.jobId)}
+                        style={{
+                          padding:"3px 8px", fontSize:11, border:"1.5px solid #e5e5e5",
+                          borderRadius:2, cursor:"pointer", background:"transparent",
+                          color:"#f59e0b",
+                        }}>★</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -219,7 +219,7 @@ export function ThemeProvider({ children }) {
           transform: translateY(-2px) scale(1.005);
           border-color: ${theme.borderStrong};
         }
-        /* Lucy brand buttons: sharp black rectangle → accent pill on hover (1s) */
+        /* Lucy brand buttons: sharp black rectangle → water-fill + pill on hover (1s) */
         .rm-btn {
           display: inline-flex; align-items: center; justify-content: center;
           gap: 6px; padding: 8px 20px; border-radius: 2px;
@@ -227,18 +227,32 @@ export function ThemeProvider({ children }) {
           font-weight: 800; font-size: 13px; letter-spacing: 0.1em;
           text-transform: uppercase; cursor: pointer;
           border: 2.5px solid #0f0f0f;
-          background: transparent;
+          background-color: transparent;
+          background-image: linear-gradient(to top, transparent, transparent);
+          background-size: 100% 0%;
+          background-repeat: no-repeat;
+          background-position: bottom;
           color: #0f0f0f;
-          transition: border-radius 1s ease, background 1s ease, border-color 1s ease;
+          transition: background-size 1s ease, border-radius 1s ease, border-color 1s ease;
           white-space: nowrap; text-decoration: none; box-sizing: border-box;
         }
         .rm-btn:hover:not(:disabled) { border-radius: 999px; }
         .rm-btn:active { transform: scale(0.97); }
         .rm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-        .rm-btn-primary:hover:not(:disabled) { background: ${theme.accent}; border-color: ${theme.accent}; }
-        .rm-btn-secondary:hover:not(:disabled) { background: ${theme.surfaceHigh}; border-color: ${theme.borderStrong}; }
+        .rm-btn-primary:hover:not(:disabled) {
+          background-image: linear-gradient(to top, ${theme.accent}, ${theme.accent});
+          background-size: 100% 100%; border-color: ${theme.accent};
+        }
+        .rm-btn-secondary:hover:not(:disabled) {
+          background-image: linear-gradient(to top, ${theme.surfaceHigh}, ${theme.surfaceHigh});
+          background-size: 100% 100%; border-color: ${theme.borderStrong};
+        }
         .rm-btn-ghost { border-color: ${theme.border}; color: ${theme.textMuted}; }
-        .rm-btn-ghost:hover:not(:disabled) { border-radius: 999px; background: ${theme.overlay}; border-color: ${theme.borderStrong}; color: ${theme.text}; }
+        .rm-btn-ghost:hover:not(:disabled) {
+          border-radius: 999px;
+          background-image: linear-gradient(to top, ${theme.overlay}, ${theme.overlay});
+          background-size: 100% 100%; border-color: ${theme.borderStrong}; color: ${theme.text};
+        }
         .rm-btn-sm { padding: 5px 14px; font-size: 11px; gap: 4px; }
         .rm-btn-icon { padding: 0; width: 36px; height: 36px; border-radius: 999px; font-size: 16px; border: none; }
         .rm-btn-icon.sm { width: 28px; height: 28px; font-size: 13px; }
