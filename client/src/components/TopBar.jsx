@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import { useViewport } from "../hooks/useViewport.js";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 
 const APPLY_MODES = [
@@ -24,12 +25,12 @@ function useClickOutside(ref, onClose) {
 }
 
 // ── Inline dropdown panel (no Portal, no CSS vars) ────────────
-function Panel({ children, style = {} }) {
+function Panel({ children, style = {}, theme }) {
   return (
     <div style={{
       position: "absolute", top: "calc(100% + 8px)", right: 0,
-      background: "#ffffff", border: "1px solid #e5e5e5",
-      borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.14)",
+      background: theme.surface, border: `1px solid ${theme.border}`,
+      borderRadius: 12, boxShadow: theme.shadowMd,
       zIndex: 9999, minWidth: 260, padding: "8px 0",
       ...style,
     }}>
@@ -45,7 +46,7 @@ function ThemeToggle() {
     <button onClick={toggleMode} title={`Switch to ${mode === "light" ? "dark" : "light"} mode`}
       style={{
         width: 52, height: 28, borderRadius: 999,
-        background: mode === "dark" ? USER_ACCENT : "#e5e5e5",
+        background: mode === "dark" ? USER_ACCENT : theme.border,
         border: "none", cursor: "pointer", position: "relative",
         transition: "background 0.3s ease", flexShrink: 0,
         display: "flex", alignItems: "center",
@@ -66,13 +67,15 @@ function ThemeToggle() {
 }
 
 const TABS = [
-  { id:"jobs",     label:"Jobs"     },
-  { id:"database", label:"Database" },
-  { id:"profile",  label:"Profile"  },
+  { id:"jobs",     label:"Jobs",     icon:"💼" },
+  { id:"database", label:"Database", icon:"🗃" },
+  { id:"profile",  label:"Profile",  icon:"👤" },
 ];
 
 export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange }) {
   const { theme } = useTheme();
+  const { mode: vpMode } = useViewport();
+  const isMobile = vpMode === "mobile" || vpMode === "tablet";
 
   // Mode picker
   const [modeOpen,    setModeOpen]    = useState(false);
@@ -112,11 +115,11 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
     setTimeout(() => setTokenMsg(""), 3000);
   };
 
-  const tabs = [...TABS, ...(user?.isAdmin ? [{ id:"admin", label:"Admin" }] : [])];
+  const tabs = [...TABS, ...(user?.isAdmin ? [{ id:"admin", label:"Admin", icon:"⚙" }] : [])];
 
   const menuItemStyle = {
     padding: "10px 16px", cursor: "pointer", fontSize: 13,
-    color: "#0f0f0f", background: "transparent", border: "none",
+    color: theme.text, background: "transparent", border: "none",
     display: "block", width: "100%", textAlign: "left",
     transition: "background 0.1s",
   };
@@ -124,33 +127,37 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
   return (
     <div style={{
       height: 56,
-      background: "#ffffff",
+      background: theme.surface,
       borderBottom: `3px solid ${USER_ACCENT}`,
       display: "flex", alignItems: "center",
-      padding: "0 20px", gap: 24,
+      padding: isMobile ? "0 12px" : "0 20px",
+      gap: isMobile ? 8 : 24,
       position: "sticky", top: 0, zIndex: 100,
       flexShrink: 0,
     }}>
-      {/* Brand wordmark — Lucy tin style */}
+      {/* Brand wordmark */}
       <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
-        <span className="site-title">Resume Master</span>
+        {isMobile
+          ? <span style={{ fontWeight:900, fontSize:16, letterSpacing:"-0.5px", color:theme.text }}>RM</span>
+          : <span className="site-title">Resume Master</span>
+        }
       </div>
 
       {/* Nav tabs */}
-      <nav style={{ display:"flex", alignItems:"center", gap:4, flex:1 }}>
+      <nav style={{ display:"flex", alignItems:"center", gap:isMobile?0:4, flex:1 }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => onTabChange(t.id)}
             style={{
               background: "transparent", border: "none",
-              padding: "6px 14px", borderRadius: 4,
+              padding: isMobile ? "6px 8px" : "6px 14px", borderRadius: 4,
               fontFamily: "'Barlow Condensed', 'DM Sans', sans-serif",
               fontWeight: activeTab === t.id ? 800 : 600,
               fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
-              color: activeTab === t.id ? "#0f0f0f" : "#888888",
+              color: activeTab === t.id ? theme.text : theme.textMuted,
               cursor: "pointer", position: "relative",
               transition: "color 0.15s",
             }}>
-            {t.label}
+            {isMobile ? t.icon : t.label}
             {activeTab === t.id && (
               <motion.div layoutId="tab-underline"
                 style={{
@@ -165,55 +172,57 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
       </nav>
 
       {/* Right side controls */}
-      <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:isMobile?6:10, flexShrink:0 }}>
         <ThemeToggle/>
 
-        {/* Mode chip — custom dropdown */}
-        <div ref={modeRef} style={{ position:"relative" }}>
-          <button
-            onClick={() => setModeOpen(o => !o)}
-            style={{
-              display:"flex", alignItems:"center", gap:5,
-              background: "#e8f6fb", color: "#1a6a8a",
-              border: "1px solid #A8D8EA55",
-              borderRadius: 999, padding:"4px 12px",
-              fontSize: 11, fontWeight: 700, cursor:"pointer",
-              transition: "border-radius 1s ease",
-            }}>
-            <span>{modeObj.icon}</span>
-            <span>{modeObj.label}</span>
-          </button>
-          {modeOpen && (
-            <Panel style={{ minWidth:220 }}>
-              <div style={{ fontSize:10, letterSpacing:"0.1em", textTransform:"uppercase",
-                             padding:"8px 16px 6px", color:"#aaa", fontWeight:700 }}>
-                Apply Mode
-              </div>
-              {APPLY_MODES.map(m => (
-                <button key={m.value}
-                  onClick={() => selectMode(m.value)}
-                  onMouseEnter={e => e.currentTarget.style.background="#f5f5f3"}
-                  onMouseLeave={e => e.currentTarget.style.background=m.value===currentMode?"#e8f6fb":"transparent"}
-                  style={{
-                    ...menuItemStyle,
-                    background: m.value === currentMode ? "#e8f6fb" : "transparent",
-                    display:"flex", alignItems:"center", gap:10,
-                  }}>
-                  <span style={{ fontWeight:700 }}>{m.icon} {m.label}</span>
-                  <span style={{ fontSize:10, color:"#aaa", flex:1 }}>{m.desc}</span>
-                  {m.value === currentMode && <span style={{ color:USER_ACCENT, fontWeight:700 }}>✓</span>}
-                </button>
-              ))}
-            </Panel>
-          )}
-        </div>
+        {/* Mode chip — hidden on mobile to save space */}
+        {!isMobile && (
+          <div ref={modeRef} style={{ position:"relative" }}>
+            <button
+              onClick={() => setModeOpen(o => !o)}
+              style={{
+                display:"flex", alignItems:"center", gap:5,
+                background: "#e8f6fb", color: "#1a6a8a",
+                border: "1px solid #A8D8EA55",
+                borderRadius: 999, padding:"4px 12px",
+                fontSize: 11, fontWeight: 700, cursor:"pointer",
+                transition: "border-radius 1s ease",
+              }}>
+              <span>{modeObj.icon}</span>
+              <span>{modeObj.label}</span>
+            </button>
+            {modeOpen && (
+              <Panel theme={theme} style={{ minWidth:220 }}>
+                <div style={{ fontSize:10, letterSpacing:"0.1em", textTransform:"uppercase",
+                               padding:"8px 16px 6px", color:theme.textDim, fontWeight:700 }}>
+                  Apply Mode
+                </div>
+                {APPLY_MODES.map(m => (
+                  <button key={m.value}
+                    onClick={() => selectMode(m.value)}
+                    onMouseEnter={e => e.currentTarget.style.background=theme.surfaceHigh}
+                    onMouseLeave={e => e.currentTarget.style.background=m.value===currentMode?"#e8f6fb":"transparent"}
+                    style={{
+                      ...menuItemStyle,
+                      background: m.value === currentMode ? "#e8f6fb" : "transparent",
+                      display:"flex", alignItems:"center", gap:10,
+                    }}>
+                    <span style={{ fontWeight:700 }}>{m.icon} {m.label}</span>
+                    <span style={{ fontSize:10, color:theme.textDim, flex:1 }}>{m.desc}</span>
+                    {m.value === currentMode && <span style={{ color:USER_ACCENT, fontWeight:700 }}>✓</span>}
+                  </button>
+                ))}
+              </Panel>
+            )}
+          </div>
+        )}
 
         {/* Avatar — opens user menu with API key + sign out */}
         <div ref={userRef} style={{ position:"relative" }}>
           <Avatar
             onClick={() => setUserOpen(o => !o)}
             style={{ width:36, height:36, cursor:"pointer",
-                     border:`2px solid ${userOpen ? USER_ACCENT : "#e5e5e5"}`,
+                     border:`2px solid ${userOpen ? USER_ACCENT : theme.border}`,
                      borderRadius:"50%", transition:"border-color 0.15s" }}>
             <AvatarFallback style={{ background:USER_ACCENT, color:"#0f0f0f",
                                       fontWeight:800, fontSize:13 }}>
@@ -222,21 +231,45 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
           </Avatar>
 
           {userOpen && (
-            <Panel style={{ minWidth:280 }}>
+            <Panel theme={theme} style={{ minWidth:280 }}>
               {/* User info */}
-              <div style={{ padding:"10px 16px 8px", borderBottom:"1px solid #f0f0f0" }}>
-                <div style={{ fontSize:12, fontWeight:700, color:"#0f0f0f" }}>
+              <div style={{ padding:"10px 16px 8px", borderBottom:`1px solid ${theme.border}` }}>
+                <div style={{ fontSize:12, fontWeight:700, color:theme.text }}>
                   {user?.username}
                 </div>
-                <div style={{ fontSize:10, color:"#aaa", marginTop:2 }}>
+                <div style={{ fontSize:10, color:theme.textDim, marginTop:2 }}>
                   {user?.isAdmin ? "Administrator" : "Member"}
                 </div>
               </div>
 
+              {/* Mode chip in mobile user menu */}
+              {isMobile && (
+                <div style={{ padding:"8px 16px 0", borderBottom:`1px solid ${theme.border}` }}>
+                  <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
+                                 letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
+                    Apply Mode
+                  </div>
+                  {APPLY_MODES.map(m => (
+                    <button key={m.value}
+                      onClick={() => selectMode(m.value)}
+                      onMouseEnter={e => e.currentTarget.style.background=theme.surfaceHigh}
+                      onMouseLeave={e => e.currentTarget.style.background="transparent"}
+                      style={{
+                        ...menuItemStyle,
+                        display:"flex", alignItems:"center", gap:8, padding:"6px 0",
+                        background: "transparent",
+                      }}>
+                      <span style={{ fontWeight:700 }}>{m.icon} {m.label}</span>
+                      {m.value === currentMode && <span style={{ color:USER_ACCENT, fontWeight:700 }}>✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* API key */}
-              <div style={{ padding:"10px 16px 12px", borderBottom:"1px solid #f0f0f0" }}>
+              <div style={{ padding:"10px 16px 12px", borderBottom:`1px solid ${theme.border}` }}>
                 <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
-                               letterSpacing:"0.08em", color:"#aaa", marginBottom:6 }}>
+                               letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
                   Apify Token
                 </div>
                 <div style={{ display:"flex", gap:6 }}>
@@ -246,13 +279,13 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                     placeholder="apify_api_…" type="password"
                     style={{
                       flex:1, height:32, padding:"0 10px",
-                      border:"1px solid #e5e5e5", borderRadius:4,
-                      background:"#fff", color:"#0f0f0f",
+                      border:`1px solid ${theme.border}`, borderRadius:4,
+                      background:theme.surface, color:theme.text,
                       fontSize:11, outline:"none",
                     }}/>
                   <button onClick={saveToken} disabled={tokenSaving}
                     style={{
-                      background: tokenSaving ? "#e5e5e5" : USER_ACCENT,
+                      background: tokenSaving ? theme.border : USER_ACCENT,
                       color:"#0f0f0f", border:"none", borderRadius:4,
                       padding:"0 12px", cursor:"pointer", fontSize:11,
                       fontWeight:700, flexShrink:0,
@@ -274,7 +307,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
               {/* Sign out */}
               <button
                 onClick={() => { setUserOpen(false); onLogout(); }}
-                onMouseEnter={e => e.currentTarget.style.background="#fef2f2"}
+                onMouseEnter={e => e.currentTarget.style.background=theme.dangerMuted||"#fef2f2"}
                 onMouseLeave={e => e.currentTarget.style.background="transparent"}
                 style={{ ...menuItemStyle, color:"#dc2626", fontWeight:600 }}>
                 Sign Out

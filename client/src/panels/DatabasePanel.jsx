@@ -393,7 +393,7 @@ export function DatabasePanel({ user }) {
 
       {/* ── Header ── */}
       <div style={{
-        background: mode==="light" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)",
+        background: mode==="light" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)",  /* intentional translucent surface */
         backdropFilter:"blur(16px)",
         borderBottom:`1px solid ${theme.border}`,
         display:"flex", alignItems:"stretch", flexShrink:0,
@@ -781,7 +781,7 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
                       {job.companyIconUrl ? (
                         <img src={job.companyIconUrl} alt={job.company}
                           style={{ width:28, height:28, borderRadius:6, objectFit:"contain",
-                                   border:`1px solid ${theme.border}`, background:"#fff", flexShrink:0 }}
+                                   border:`1px solid ${theme.border}`, background:"transparent", flexShrink:0 }}
                           onError={e => { e.currentTarget.style.display="none"; }}/>
                       ) : (
                         <div style={{ width:28, height:28, borderRadius:6, background:iconBg,
@@ -816,9 +816,9 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
                   {/* ATS */}
                   <td style={{ ...tdS }}>
                     {g?.atsScore != null ? (
-                      <span style={{
-                        background: g.atsScore>=80 ? "#dcfce7" : g.atsScore>=60 ? "#fef9c3" : "#fee2e2",
-                        color: g.atsScore>=80 ? "#166534" : g.atsScore>=60 ? "#854d0e" : "#991b1b",
+                      <span className="rm-badge" style={{
+                        background: g.atsScore>=80 ? theme.successMuted : g.atsScore>=60 ? theme.warningMuted : theme.dangerMuted,
+                        color: g.atsScore>=80 ? theme.success : g.atsScore>=60 ? theme.warning : theme.danger,
                         padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700,
                       }}>{g.atsScore}</span>
                     ) : <span style={{ color:theme.textDim, fontSize:11 }}>—</span>}
@@ -834,9 +834,9 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
                           style={{
                             padding:"3px 10px", fontSize:11, fontWeight:700,
                             fontFamily:"'Barlow Condensed',sans-serif",
-                            border:`1.5px solid ${busy||!hasResume ? theme.border : "#0f0f0f"}`,
+                            border:`1.5px solid ${busy||!hasResume ? theme.border : theme.borderStrong}`,
                             borderRadius:2, cursor:busy||!hasResume ? "not-allowed":"pointer",
-                            background:"transparent", color:busy||!hasResume ? theme.textDim:"#0f0f0f",
+                            background:"transparent", color:busy||!hasResume ? theme.textDim:theme.text,
                             opacity:busy||!hasResume ? 0.5 : 1, whiteSpace:"nowrap",
                           }}>
                           {busy ? "⏳" : done ? "↻ Regen" : "✦ Generate"}
@@ -861,7 +861,7 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
                         <button title="Open job listing"
                           onClick={() => window.open(job.url, "_blank", "noreferrer")}
                           style={{
-                            padding:"3px 8px", fontSize:11, border:"1.5px solid #e5e5e5",
+                            padding:"3px 8px", fontSize:11, border:`1.5px solid ${theme.border}`,
                             borderRadius:2, cursor:"pointer", background:"transparent",
                             color:theme.textMuted,
                           }}>↗</button>
@@ -870,7 +870,7 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
                       <button title="Remove from saved"
                         onClick={() => onUnsave(job.jobId)}
                         style={{
-                          padding:"3px 8px", fontSize:11, border:"1.5px solid #e5e5e5",
+                          padding:"3px 8px", fontSize:11, border:`1.5px solid ${theme.border}`,
                           borderRadius:2, cursor:"pointer", background:"transparent",
                           color:"#f59e0b",
                         }}>★</button>

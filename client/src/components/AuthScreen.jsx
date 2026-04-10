@@ -286,15 +286,15 @@ export default function AuthScreen({ onLogin }) {
       {/* RIGHT — Scrolling poster cards */}
       <div style={{
         flex:"0 0 45%", overflow:"hidden", position:"relative",
-        background: mode === "dark" ? "#0f0f0f" : "#f5f5f3",
+        background: theme.surfaceHigh,
       }}>
         {/* Top fade */}
         <div style={{ position:"absolute", top:0, left:0, right:0, height:80,
-                      background:`linear-gradient(to bottom, ${mode==="dark"?"#0f0f0f":"#f5f5f3"}, transparent)`,
+                      background:`linear-gradient(to bottom, ${theme.surfaceHigh}, transparent)`,
                       zIndex:10 }}/>
         {/* Bottom fade */}
         <div style={{ position:"absolute", bottom:0, left:0, right:0, height:80,
-                      background:`linear-gradient(to top, ${mode==="dark"?"#0f0f0f":"#f5f5f3"}, transparent)`,
+                      background:`linear-gradient(to top, ${theme.surfaceHigh}, transparent)`,
                       zIndex:10 }}/>
 
         <div style={{ display:"flex", gap:12, height:"100%", padding:"0 16px" }}>

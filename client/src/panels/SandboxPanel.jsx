@@ -104,10 +104,10 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
         </div>
       ) : (
         <div style={{ flex:1, overflow:"auto",
-                      background:mode==="dark" ? "#050505" : "#e8e8e8",
+                      background:mode==="dark" ? theme.bg : theme.surfaceHigh,
                       padding:32, display:"flex", justifyContent:"center" }}>
           <div style={{ width:"100%", maxWidth:760,
-                        background:"#ffffff", borderRadius:4,
+                        background:theme.surface, borderRadius:4,
                         boxShadow:theme.shadowXl }}>
             <iframe ref={frameRef} srcDoc={entry.html}
               onLoad={handleFrameLoad}

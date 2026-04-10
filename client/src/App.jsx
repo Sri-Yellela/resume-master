@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { api }           from "./lib/api.js";
 import { useTheme }      from "./styles/theme.jsx";
+import { useViewport }   from "./hooks/useViewport.js";
 import AuthScreen        from "./components/AuthScreen.jsx";
 import TopBar            from "./components/TopBar.jsx";
 import JobsPanel         from "./panels/JobsPanel.jsx";
@@ -11,6 +12,7 @@ import { AdminPanel }    from "./panels/AdminPanel.jsx";
 
 export default function App() {
   const { theme } = useTheme();
+  const { mode: vpMode } = useViewport();
   const [authUser,    setAuthUser]    = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [activeTab,   setActiveTab]   = useState("jobs");

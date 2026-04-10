@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, saveWithPicker } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import { useViewport } from "../hooks/useViewport.js";
 import SandboxPanel from "./SandboxPanel.jsx";
 import { ATSPanel } from "./ATSPanel.jsx";
 
@@ -41,11 +42,11 @@ function IndeedLogo({ size = 20 }) {
 }
 
 // ── Platform logo dispatcher ───────────────────────────────────
-function PlatformLogo({ platform, size = 20 }) {
+function PlatformLogo({ platform, size = 20, theme }) {
   const p = (platform || "").toLowerCase();
   if (p === "linkedin") return <LinkedInLogo size={size}/>;
   if (p === "indeed")   return <IndeedLogo size={size}/>;
-  return <span style={{ fontSize:size*0.5, color:"#888" }}>◆</span>;
+  return <span style={{ fontSize:size*0.5, color:theme?.textMuted||"#888" }}>◆</span>;
 }
 
 // ── Company icon with monogram fallback ───────────────────────
@@ -66,8 +67,8 @@ function CompanyIcon({ company, iconUrl, size = 48 }) {
         onError={() => setFailed(true)}
         style={{
           width:size, height:size, borderRadius:10,
-          objectFit:"contain", border:"1px solid #e5e5e5",
-          background:"#fff", flexShrink:0,
+          objectFit:"contain", border:"1px solid transparent",
+          background:"transparent", flexShrink:0,
         }}
       />
     );
@@ -86,15 +87,23 @@ function CompanyIcon({ company, iconUrl, size = 48 }) {
 }
 
 // ── Work type badge ────────────────────────────────────────────
-function WorkBadge({ t }) {
+function WorkBadge({ t, theme }) {
+  // Use semantic colors that work in both light/dark — the fg/bg are theme tokens
   const map = {
     Remote: { bg:"#e8f6fb", fg:"#1a6a8a" },
     Hybrid: { bg:"#f0f9ff", fg:"#0284c7" },
-    Onsite: { bg:"#f5f5f3", fg:"#6b6b6b" },
   };
-  const s = map[t] || { bg:"#f5f5f3", fg:"#6b6b6b" };
+  const s = map[t] || null;
+  if (s) {
+    return (
+      <span style={{ background:s.bg, color:s.fg, padding:"2px 8px",
+                     borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+        {t}
+      </span>
+    );
+  }
   return (
-    <span style={{ background:s.bg, color:s.fg, padding:"2px 8px",
+    <span style={{ background:theme?.surfaceHigh, color:theme?.textMuted, padding:"2px 8px",
                    borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
       {t || "—"}
     </span>
@@ -118,6 +127,7 @@ function ATSBadge({ score }) {
 function LucyBtn({ children, onClick, disabled, accent = USER_ACCENT,
                     style = {}, title }) {
   const [hov, setHov] = useState(false);
+  const { theme } = useTheme();
   return (
     <button
       onClick={onClick} disabled={disabled} title={title}
@@ -130,8 +140,8 @@ function LucyBtn({ children, onClick, disabled, accent = USER_ACCENT,
         backgroundRepeat: "no-repeat",
         backgroundPosition: "bottom",
         backgroundColor: "transparent",
-        color: "#0f0f0f",
-        border: `2.5px solid ${hov && !disabled ? accent : "#0f0f0f"}`,
+        color: theme.text,
+        border: `2.5px solid ${hov && !disabled ? accent : theme.borderStrong}`,
         cursor: disabled ? "not-allowed" : "pointer",
         padding: "7px 18px", fontWeight: 800, fontSize: 12,
         fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
@@ -151,17 +161,18 @@ function LucyBtn({ children, onClick, disabled, accent = USER_ACCENT,
 // ── Icon button ───────────────────────────────────────────────
 function IconBtn({ bg, onClick, title, children, disabled = false, size = 28 }) {
   const [hov, setHov] = useState(false);
+  const { theme } = useTheme();
   return (
     <button title={title} disabled={disabled} onClick={onClick}
       onMouseEnter={() => !disabled && setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
         width:size, height:size, borderRadius:999,
-        background: disabled ? "#f0f0f0" : hov ? bg : "#f0f0f0",
-        border:`1px solid ${disabled ? "#e5e5e5" : hov ? bg+"44" : "#e5e5e5"}`,
+        background: disabled ? theme.surfaceHigh : hov ? bg : theme.surfaceHigh,
+        border:`1px solid ${disabled ? theme.border : hov ? bg+"44" : theme.border}`,
         display:"flex", alignItems:"center", justifyContent:"center",
         cursor: disabled ? "not-allowed" : "pointer",
-        fontSize:12, color: hov && !disabled ? "white" : "#888",
+        fontSize:12, color: hov && !disabled ? "white" : theme.textMuted,
         opacity: disabled ? 0.4 : 1,
         transition:"all 0.15s ease", flexShrink:0,
         transform: hov && !disabled ? "scale(1.1)" : "scale(1)",
@@ -217,7 +228,7 @@ function FiltersPanel({
             Filters
           </span>
           <button onClick={onClose} style={{ background:"none", border:"none",
-                                             cursor:"pointer", fontSize:18, color:"#888" }}>✕</button>
+                                             cursor:"pointer", fontSize:18, color:theme.textMuted }}>✕</button>
         </div>
 
         <div>
@@ -279,7 +290,7 @@ function FiltersPanel({
             <input type="number" min={0} max={30} placeholder="Min"
               value={minYoe} onChange={e=>setMinYoe(e.target.value)}
               style={{...selStyle, width:70}}/>
-            <span style={{ fontSize:12, color:"#888" }}>to</span>
+            <span style={{ fontSize:12, color:theme.textMuted }}>to</span>
             <input type="number" min={0} max={30} placeholder="Max"
               value={maxYoe} onChange={e=>setMaxYoe(e.target.value)}
               style={{...selStyle, width:70}}/>
@@ -303,7 +314,7 @@ function FiltersPanel({
         </div>
 
         <div style={{ display:"flex", gap:8, paddingTop:8 }}>
-          <LucyBtn onClick={onReset} accent="#f0f0f0" textColor="#0f0f0f" style={{ flex:1 }}>
+          <LucyBtn onClick={onReset} accent={theme.surfaceHigh} style={{ flex:1 }}>
             Reset All
           </LucyBtn>
           <LucyBtn onClick={onClose} style={{ flex:1 }}>
@@ -329,9 +340,80 @@ const ALIASES = {
   "genai":"Generative AI Engineer","gen ai":"Generative AI Engineer","llm":"LLM Engineer",
 };
 
+// ── Resize divider ────────────────────────────────────────────
+function ResizeDivider({ onDrag }) {
+  const [hov, setHov] = useState(false);
+  const startRef = useRef(null);
+
+  const onMouseDown = (e) => {
+    e.preventDefault();
+    startRef.current = e.clientX;
+
+    const onMove = (ev) => {
+      if (startRef.current === null) return;
+      const delta = ev.clientX - startRef.current;
+      startRef.current = ev.clientX;
+      const container = document.getElementById("jobs-columns");
+      if (container) onDrag(delta, container.offsetWidth);
+    };
+    const onUp = () => {
+      startRef.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        width: 8, flexShrink: 0, cursor: "col-resize",
+        display: "flex", alignItems: "stretch", justifyContent: "center",
+        position: "relative", zIndex: 2,
+        userSelect: "none",
+      }}>
+      <div style={{
+        width: 2, background: hov ? USER_ACCENT : "transparent",
+        borderLeft: `1px solid ${hov ? USER_ACCENT : "transparent"}`,
+        transition: "background 0.15s, border-color 0.15s",
+        pointerEvents: "none",
+      }}/>
+    </div>
+  );
+}
+
+const PANEL_SIZE_KEY = "rm_panel_sizes";
+const DEFAULT_SIZES = { left: 58, right: 42 };
+const DEFAULT_SIZES_SANDBOX = { left: 36, center: 32, right: 22 };
+
 // ── Main panel ────────────────────────────────────────────────
 export default function JobsPanel({ user, onUserChange }) {
   const { theme } = useTheme();
+  const { mode: vpMode } = useViewport();
+  const isWide     = vpMode === "wide";
+  const isMobile   = vpMode === "mobile" || vpMode === "tablet";
+  const isPortrait = vpMode === "portrait" || vpMode === "laptop";
+
+  // Mobile pane state
+  const [mobilePane, setMobilePane] = useState("jobs"); // "jobs" | "editor" | "ats"
+
+  // Panel sizes (percentages) — only for wide mode
+  const [panelSizes, setPanelSizes] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PANEL_SIZE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return DEFAULT_SIZES;
+  });
+
+  // Persist panel sizes
+  useEffect(() => {
+    try { localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify(panelSizes)); } catch {}
+  }, [panelSizes]);
 
   // Job data
   const [jobs,        setJobs]        = useState([]);
@@ -350,6 +432,32 @@ export default function JobsPanel({ user, onUserChange }) {
   const [sandbox,     setSandbox]     = useState(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [rightTab,    setRightTab]    = useState("ats");
+
+  // Open sandbox and rebalance panel sizes for wide mode
+  const openSandbox = useCallback((entry) => {
+    setSandbox(entry);
+    setSandboxOpen(true);
+    if (isWide) {
+      setPanelSizes(prev => {
+        const total = prev.left + prev.right;
+        return { left: Math.max(20, Math.round(total * 0.52)), center: 30, right: Math.max(15, Math.round(total * 0.28)) };
+      });
+    }
+    if (isMobile) setMobilePane("editor");
+  }, [isWide, isMobile]);
+
+  const closeSandbox = useCallback(() => {
+    setSandboxOpen(false);
+    if (isWide) {
+      setPanelSizes(prev => {
+        const leftPct  = prev.left || 36;
+        const rightPct = prev.right || 22;
+        const total = leftPct + rightPct;
+        return { left: Math.round(total * 0.58), right: Math.round(total * 0.42) };
+      });
+    }
+    if (isMobile) setMobilePane("jobs");
+  }, [isWide, isMobile]);
   const [activeAts,   setActiveAts]   = useState(null);
   const [smartSearching, setSmartSearching] = useState(false);
 
@@ -551,8 +659,8 @@ export default function JobsPanel({ user, onUserChange }) {
     if (!resumeText)            { alert("Upload your base resume first."); return; }
     const key = job.jobId, existing = generated[key];
     if (existing?.html && existing.html !== "__exists__" && !force) {
-      setSandbox({...existing, company:existing.company||job.company, title:existing.title||job.title});
-      setSandboxOpen(true);
+      const entry = {...existing, company:existing.company||job.company, title:existing.title||job.title};
+      openSandbox(entry);
       setActiveAts({ score:existing.atsScore, report:existing.atsReport, company:job.company, title:job.title });
       setRightTab("ats"); return;
     }
@@ -563,8 +671,7 @@ export default function JobsPanel({ user, onUserChange }) {
       if (d.error) throw new Error(d.error);
       setGenerated(p => ({ ...p, [key]:{ html:d.html, atsScore:d.atsScore, atsReport:d.atsReport,
         company:job.company, title:job.title } }));
-      setSandbox({ html:d.html, company:job.company, title:job.title });
-      setSandboxOpen(true);
+      openSandbox({ html:d.html, company:job.company, title:job.title });
       setActiveAts({ score:d.atsScore, report:d.atsReport, company:job.company, title:job.title });
       setRightTab("ats");
     } catch(e) { alert("Generation failed: " + e.message); }
@@ -761,7 +868,7 @@ export default function JobsPanel({ user, onUserChange }) {
           {scraping ? "Searching…" : "Search"}
         </LucyBtn>
         <LucyBtn onClick={handleSmartSearch} disabled={smartSearching || scraping}
-                  accent="#f0f0f0" textColor="#0f0f0f">
+                  accent={theme.surfaceHigh}>
           {smartSearching ? "Analysing…" : "✦ Best Match"}
         </LucyBtn>
 
@@ -792,138 +899,334 @@ export default function JobsPanel({ user, onUserChange }) {
         )}
       </div>
 
-      {/* ── Three-column body ─────────────────────────────── */}
-      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+      {/* ── Body: responsive layout ─────────────────────────── */}
 
-        {/* LEFT — job cards */}
-        <div style={{
-          display:"flex", flexDirection:"column", minWidth:0,
-          transition:"flex 0.2s",
-          flex: sandboxOpen ? "0 0 36%" : "0 0 58%",
-          borderRight:"1px solid #e5e5e5",
-        }}>
-          {jobs.length === 0 && !scraping ? <EmptyState/> : (
-            <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:8 }}>
-
-              {/* Skeleton cards while scraping */}
-              {scraping && Array.from({length:6},(_,i) => (
-                <div key={i} style={{ border:"1px solid #e5e5e5",
-                  borderRadius:4, padding:"14px 18px", margin:"0 16px 8px",
-                  display:"flex", alignItems:"center", gap:14 }}>
-                  <div style={{ width:48, height:48, borderRadius:10, background:"#f0f0f0", flexShrink:0 }}/>
-                  <div style={{ flex:1, display:"flex", flexDirection:"column", gap:8 }}>
-                    <div style={{ height:14, width:"40%", borderRadius:4, background:"#f0f0f0" }}/>
-                    <div style={{ height:11, width:"60%", borderRadius:4, background:"#f0f0f0" }}/>
-                  </div>
+      {/* ── MOBILE / TABLET: single-pane + bottom nav ── */}
+      {isMobile && (
+        <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+          {/* Active pane */}
+          <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+            {mobilePane === "jobs" && (
+              <JobsColumn
+                jobs={jobs} scraping={scraping} generated={generated} loading={loading}
+                applyMode={applyMode} theme={theme}
+                totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+                generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+                visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
+                setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh}
+              />
+            )}
+            {mobilePane === "editor" && (
+              <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+            )}
+            {mobilePane === "ats" && (
+              <div style={{ flex:1, overflowY:"auto" }}>
+                <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
+                              padding:"0 14px", flexShrink:0 }}>
+                  {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
+                    <button key={id} onClick={() => setRightTab(id)}
+                      style={{
+                        padding:"10px 16px", border:"none", background:"transparent",
+                        fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                        fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
+                        color: rightTab===id ? theme.text : theme.textDim,
+                        cursor:"pointer", position:"relative",
+                        borderBottom: rightTab===id ? `2px solid ${USER_ACCENT}` : "2px solid transparent",
+                      }}>
+                      {lbl}
+                    </button>
+                  ))}
                 </div>
-              ))}
-
-              {/* Job cards */}
-              {!scraping && jobs.map(job => {
-                const key = job.jobId, g = generated[key],
-                      done = !!g?.html, st = loading[key];
-                return (
-                  <JobCard
-                    key={key} job={job} g={g} done={done} st={st}
-                    applyMode={applyMode}
+                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
+                {rightTab === "history" && (
+                  <HistoryList generated={generated}
                     theme={theme}
-                    onGenerate={force => generate(job, force)}
-                    onViewSandbox={() => {
-                      setSandbox({...g, company:g.company||job.company, title:g.title||job.title});
-                      setSandboxOpen(true);
-                      setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
+                    onOpen={e => {
+                      openSandbox(e);
+                      setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
                       setRightTab("ats");
                     }}
-                    onExport={() => exportAndTrack(job, g.html, job.company)}
-                    onVisit={() => visitUrl(job)}
-                    onStar={() => toggleStar(key)}
-                    onCardClick={() => {
-                      if (done && g.html !== "__exists__") {
-                        setSandbox({...g, company:g.company||job.company, title:g.title||job.title});
-                        setSandboxOpen(true);
-                        setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
-                        setRightTab("ats");
-                      } else if (job.url) {
-                        visitUrl(job);
-                      }
-                    }}
-                  />
-                );
-              })}
-
-              {/* Pagination controls */}
-              {totalPages > 1 && (
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
-                               gap:8, padding:"16px 20px", borderTop:"1px solid #e5e5e5" }}>
-                  <LucyBtn onClick={() => goPage(currentPage-1)}
-                            disabled={currentPage <= 1} accent="#f0f0f0" textColor="#0f0f0f">
-                    ← Prev
-                  </LucyBtn>
-                  <span style={{ fontSize:12, color:"#6b6b6b" }}>
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <LucyBtn onClick={() => goPage(currentPage+1)}
-                            disabled={currentPage >= totalPages} accent="#f0f0f0" textColor="#0f0f0f">
-                    Next →
-                  </LucyBtn>
-                </div>
-              )}
-
-              {/* Refresh — scrapes fresh jobs and hides visited */}
-              {jobs.length > 0 && isLastPage && (
-                <div style={{ padding:"16px 20px", display:"flex", justifyContent:"center", flexDirection:"column", alignItems:"center", gap:6 }}>
-                  <LucyBtn onClick={handleRefresh} disabled={scraping}
-                            style={{ width:"100%", maxWidth:320, justifyContent:"center" }}>
-                    {scraping ? "Scraping…" : "↻ Refresh New Jobs"}
-                  </LucyBtn>
-                  <span style={{ fontSize:10, color:"#aaa" }}>Scrapes fresh listings · hides visited</span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* CENTRE — Sandbox */}
-        {sandboxOpen && (
-          <div style={{ display:"flex", flexDirection:"column", minWidth:0, flex:1,
-                        borderRight:"1px solid #e5e5e5" }}>
-            <SandboxPanel entry={sandbox} onClose={() => setSandboxOpen(false)}
-              onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+                    onExport={exportAndTrack}/>
+                )}
+              </div>
+            )}
           </div>
-        )}
-
-        {/* RIGHT — ATS + History */}
-        <div style={{ display:"flex", flexDirection:"column", minWidth:0,
-                      flex: sandboxOpen ? "0 0 22%" : "0 0 42%" }}>
-          <div style={{ display:"flex", borderBottom:"1px solid #e5e5e5",
-                        padding:"0 14px", flexShrink:0 }}>
-            {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
-              <button key={id} onClick={() => setRightTab(id)}
+          {/* Bottom nav */}
+          <div style={{ display:"flex", borderTop:`1px solid ${theme.border}`,
+                        background:theme.surface, flexShrink:0 }}>
+            {[
+              { id:"jobs",   label:"Jobs",   icon:"💼" },
+              { id:"editor", label:"Resume", icon:"✏" },
+              { id:"ats",    label:"ATS",    icon:"📊" },
+            ].map(({ id, label, icon }) => (
+              <button key={id} onClick={() => setMobilePane(id)}
                 style={{
-                  padding:"10px 16px", border:"none", background:"transparent",
-                  fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                  fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
-                  color: rightTab===id ? "#0f0f0f" : "#aaa",
-                  cursor:"pointer", position:"relative", borderBottom: rightTab===id ? `2px solid ${USER_ACCENT}` : "2px solid transparent",
+                  flex:1, padding:"10px 0", border:"none", cursor:"pointer",
+                  background:"transparent", display:"flex", flexDirection:"column",
+                  alignItems:"center", gap:2,
+                  color: mobilePane===id ? USER_ACCENT : theme.textMuted,
+                  fontSize:10, fontWeight:700,
                 }}>
-                {lbl}
+                <span style={{ fontSize:18 }}>{icon}</span>
+                {label}
               </button>
             ))}
           </div>
-          <div style={{ flex:1, overflowY:"auto" }}>
-            {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
-            {rightTab === "history" && (
-              <HistoryList generated={generated}
-                onOpen={e => {
-                  setSandbox(e); setSandboxOpen(true);
-                  setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
-                  setRightTab("ats");
-                }}
-                onExport={exportAndTrack}/>
-            )}
+        </div>
+      )}
+
+      {/* ── PORTRAIT / LAPTOP: two columns, sandbox as overlay ── */}
+      {isPortrait && !isMobile && (
+        <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+          {/* LEFT jobs */}
+          <div style={{ display:"flex", flexDirection:"column", minWidth:0, flex:"0 0 58%",
+                        borderRight:`1px solid ${theme.border}` }}>
+            <JobsColumn
+              jobs={jobs} scraping={scraping} generated={generated} loading={loading}
+              applyMode={applyMode} theme={theme}
+              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+              visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
+              setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh}
+            />
+          </div>
+          {/* RIGHT ATS */}
+          <div style={{ display:"flex", flexDirection:"column", minWidth:0, flex:1 }}>
+            <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
+                          padding:"0 14px", flexShrink:0 }}>
+              {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
+                <button key={id} onClick={() => setRightTab(id)}
+                  style={{
+                    padding:"10px 16px", border:"none", background:"transparent",
+                    fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                    fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
+                    color: rightTab===id ? theme.text : theme.textDim,
+                    cursor:"pointer", position:"relative",
+                    borderBottom: rightTab===id ? `2px solid ${USER_ACCENT}` : "2px solid transparent",
+                  }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            <div style={{ flex:1, overflowY:"auto" }}>
+              {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
+              {rightTab === "history" && (
+                <HistoryList generated={generated}
+                  theme={theme}
+                  onOpen={e => {
+                    openSandbox(e);
+                    setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
+                    setRightTab("ats");
+                  }}
+                  onExport={exportAndTrack}/>
+              )}
+            </div>
+          </div>
+          {/* Sandbox overlay for portrait/laptop */}
+          {sandboxOpen && (
+            <div style={{
+              position:"absolute", inset:0, zIndex:50,
+              display:"flex", flexDirection:"column",
+              background:theme.bg,
+            }}>
+              <div style={{ background:theme.surface, borderBottom:`1px solid ${theme.border}`,
+                            padding:"8px 14px", display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                <button onClick={closeSandbox}
+                  style={{ background:"none", border:"none", cursor:"pointer",
+                            color:theme.textMuted, fontSize:13, fontWeight:700,
+                            display:"flex", alignItems:"center", gap:4 }}>
+                  ← Back
+                </button>
+              </div>
+              <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── WIDE: three-column resizable ── */}
+      {isWide && (
+        <div id="jobs-columns" style={{ flex:1, display:"flex", overflow:"hidden" }}>
+
+          {/* LEFT — job cards */}
+          <div style={{
+            display:"flex", flexDirection:"column", minWidth:0,
+            flex: `0 0 ${sandboxOpen ? panelSizes.left : panelSizes.left}%`,
+          }}>
+            <JobsColumn
+              jobs={jobs} scraping={scraping} generated={generated} loading={loading}
+              applyMode={applyMode} theme={theme}
+              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+              visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
+              setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh}
+            />
+          </div>
+
+          {/* LEFT↔CENTRE or LEFT↔RIGHT divider */}
+          <ResizeDivider onDrag={(delta, containerW) => {
+            const deltaPct = (delta / containerW) * 100;
+            setPanelSizes(prev => {
+              if (sandboxOpen) {
+                const newLeft = Math.min(Math.max(20, prev.left + deltaPct), 100 - prev.right - 20);
+                return { ...prev, left: newLeft };
+              } else {
+                const newLeft = Math.min(Math.max(20, prev.left + deltaPct), 100 - 15);
+                const newRight = 100 - newLeft;
+                return { left: newLeft, right: Math.max(15, newRight) };
+              }
+            });
+          }}/>
+
+          {/* CENTRE — Sandbox */}
+          {sandboxOpen && (
+            <>
+              <div style={{ display:"flex", flexDirection:"column", minWidth:0,
+                            flex: `0 0 ${panelSizes.center}%` }}>
+                <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                  onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+              </div>
+              {/* CENTRE↔RIGHT divider */}
+              <ResizeDivider onDrag={(delta, containerW) => {
+                const deltaPct = (delta / containerW) * 100;
+                setPanelSizes(prev => {
+                  const newCenter = Math.min(Math.max(20, (prev.center||30) + deltaPct), 100 - prev.left - 15);
+                  const newRight  = Math.max(15, 100 - prev.left - newCenter);
+                  return { ...prev, center: newCenter, right: newRight };
+                });
+              }}/>
+            </>
+          )}
+
+          {/* RIGHT — ATS + History */}
+          <div style={{ display:"flex", flexDirection:"column", minWidth:0,
+                        flex: sandboxOpen ? `0 0 ${panelSizes.right}%` : `0 0 ${panelSizes.right}%` }}>
+            <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
+                          padding:"0 14px", flexShrink:0 }}>
+              {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
+                <button key={id} onClick={() => setRightTab(id)}
+                  style={{
+                    padding:"10px 16px", border:"none", background:"transparent",
+                    fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                    fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
+                    color: rightTab===id ? theme.text : theme.textDim,
+                    cursor:"pointer", position:"relative",
+                    borderBottom: rightTab===id ? `2px solid ${USER_ACCENT}` : "2px solid transparent",
+                  }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            <div style={{ flex:1, overflowY:"auto" }}>
+              {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
+              {rightTab === "history" && (
+                <HistoryList generated={generated}
+                  theme={theme}
+                  onOpen={e => {
+                    openSandbox(e);
+                    setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
+                    setRightTab("ats");
+                  }}
+                  onExport={exportAndTrack}/>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
+    </div>
+  );
+}
+
+// ── Jobs column (shared across layout modes) ──────────────────
+function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
+                      totalPages, currentPage, isLastPage,
+                      generate, openSandbox, exportAndTrack,
+                      visitUrl, toggleStar, setActiveAts, setRightTab,
+                      goPage, handleRefresh }) {
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+      {jobs.length === 0 && !scraping ? <EmptyState theme={theme}/> : (
+        <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:8 }}>
+
+          {/* Skeleton cards while scraping */}
+          {scraping && Array.from({length:6},(_,i) => (
+            <div key={i} style={{ border:`1px solid ${theme.border}`,
+              borderRadius:4, padding:"14px 18px", margin:"0 16px 8px",
+              display:"flex", alignItems:"center", gap:14 }}>
+              <div style={{ width:48, height:48, borderRadius:10, background:theme.surfaceHigh, flexShrink:0 }}/>
+              <div style={{ flex:1, display:"flex", flexDirection:"column", gap:8 }}>
+                <div style={{ height:14, width:"40%", borderRadius:4, background:theme.surfaceHigh }}/>
+                <div style={{ height:11, width:"60%", borderRadius:4, background:theme.surfaceHigh }}/>
+              </div>
+            </div>
+          ))}
+
+          {/* Job cards */}
+          {!scraping && jobs.map(job => {
+            const key = job.jobId, g = generated[key],
+                  done = !!g?.html, st = loading[key];
+            return (
+              <JobCard
+                key={key} job={job} g={g} done={done} st={st}
+                applyMode={applyMode}
+                theme={theme}
+                onGenerate={force => generate(job, force)}
+                onViewSandbox={() => {
+                  const entry = {...g, company:g.company||job.company, title:g.title||job.title};
+                  openSandbox(entry);
+                  setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
+                  setRightTab("ats");
+                }}
+                onExport={() => exportAndTrack(job, g.html, job.company)}
+                onVisit={() => visitUrl(job)}
+                onStar={() => toggleStar(key)}
+                onCardClick={() => {
+                  if (done && g.html !== "__exists__") {
+                    const entry = {...g, company:g.company||job.company, title:g.title||job.title};
+                    openSandbox(entry);
+                    setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
+                    setRightTab("ats");
+                  } else if (job.url) {
+                    visitUrl(job);
+                  }
+                }}
+              />
+            );
+          })}
+
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+                           gap:8, padding:"16px 20px", borderTop:`1px solid ${theme.border}` }}>
+              <LucyBtn onClick={() => goPage(currentPage-1)}
+                        disabled={currentPage <= 1} accent={theme.surfaceHigh}>
+                ← Prev
+              </LucyBtn>
+              <span style={{ fontSize:12, color:theme.textMuted }}>
+                Page {currentPage} of {totalPages}
+              </span>
+              <LucyBtn onClick={() => goPage(currentPage+1)}
+                        disabled={currentPage >= totalPages} accent={theme.surfaceHigh}>
+                Next →
+              </LucyBtn>
+            </div>
+          )}
+
+          {/* Refresh */}
+          {jobs.length > 0 && isLastPage && (
+            <div style={{ padding:"16px 20px", display:"flex", justifyContent:"center",
+                          flexDirection:"column", alignItems:"center", gap:6 }}>
+              <LucyBtn onClick={handleRefresh} disabled={scraping}
+                        style={{ width:"100%", maxWidth:320, justifyContent:"center" }}>
+                {scraping ? "Scraping…" : "↻ Refresh New Jobs"}
+              </LucyBtn>
+              <span style={{ fontSize:10, color:theme.textDim }}>Scrapes fresh listings · hides visited</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -939,10 +1242,10 @@ function JobCard({ job, g, done, st, applyMode, theme,
       onMouseLeave={() => setHov(false)}
       style={{
         background:theme.surface,
-        border: hov ? `1px solid ${USER_ACCENT}` : "1px solid #e5e5e5",
+        border: hov ? `1px solid ${USER_ACCENT}` : `1px solid ${theme.border}`,
         borderRadius:4, padding:"14px 18px", margin:"0 16px 8px",
         display:"flex", alignItems:"center", gap:14, cursor:"pointer",
-        boxShadow: hov ? "0 8px 24px rgba(0,0,0,0.12)" : "none",
+        boxShadow: hov ? theme.shadowMd : "none",
         transform: hov ? "translateY(-3px)" : "translateY(0)",
         transition:"all 0.2s ease", position:"relative",
         // Visited: slightly desaturated
@@ -955,7 +1258,7 @@ function JobCard({ job, g, done, st, applyMode, theme,
       {/* Center info */}
       <div style={{ flex:1, minWidth:0 }}>
         <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-          <span style={{ fontWeight:700, fontSize:14, color:"#0f0f0f",
+          <span style={{ fontWeight:700, fontSize:14, color:theme.text,
                           overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             {job.company}
           </span>
@@ -966,25 +1269,25 @@ function JobCard({ job, g, done, st, applyMode, theme,
             <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>↩prev</span>
           )}
           {job.visited && (
-            <span style={{ fontSize:9, color:"#aaa", background:"#f0f0f0",
+            <span style={{ fontSize:9, color:theme.textDim, background:theme.surfaceHigh,
                             padding:"1px 6px", borderRadius:999 }}>visited</span>
           )}
         </div>
-        <div style={{ fontSize:12, color:"#6b6b6b", marginBottom:6,
+        <div style={{ fontSize:12, color:theme.textMuted, marginBottom:6,
                       overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
           {job.title}
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
-          <WorkBadge t={job.workType}/>
+          <WorkBadge t={job.workType} theme={theme}/>
           {/* Platform logo */}
           <span style={{ display:"flex", alignItems:"center", gap:4 }}>
-            <PlatformLogo platform={job.sourcePlatform || job.source} size={16}/>
+            <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>
           </span>
           {job.location && (
-            <span style={{ fontSize:10, color:"#aaa" }}>{job.location}</span>
+            <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>
           )}
           {job.yearsExperience != null && (
-            <span style={{ fontSize:10, color:"#aaa" }}>{job.yearsExperience}y exp</span>
+            <span style={{ fontSize:10, color:theme.textDim }}>{job.yearsExperience}y exp</span>
           )}
           {job.compensation && (
             <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>
@@ -1004,10 +1307,10 @@ function JobCard({ job, g, done, st, applyMode, theme,
           style={{
             width:30, height:30, borderRadius:"50%",
             background: job.starred ? "#f59e0b22" : "transparent",
-            border: job.starred ? "2px solid #f59e0b" : "2px solid #e5e5e5",
+            border: job.starred ? "2px solid #f59e0b" : `2px solid ${theme.border}`,
             display:"flex", alignItems:"center", justifyContent:"center",
             cursor:"pointer", fontSize:14,
-            color: job.starred ? "#f59e0b" : "#ccc",
+            color: job.starred ? "#f59e0b" : theme.textDim,
             transition:"all 0.2s", flexShrink:0,
             transform: job.starred ? "scale(1.15)" : "scale(1)",
           }}>
@@ -1045,16 +1348,18 @@ function JobCard({ job, g, done, st, applyMode, theme,
 }
 
 // ── Empty state ───────────────────────────────────────────────
-function EmptyState() {
+function EmptyState({ theme }) {
+  const { theme: t } = useTheme();
+  const th = theme || t;
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
-                  justifyContent:"center", gap:16, padding:40, color:"#aaa" }}>
+                  justifyContent:"center", gap:16, padding:40, color:th.textDim }}>
       <div style={{ fontSize:56 }}>🔍</div>
       <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                    fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase", color:"#0f0f0f" }}>
+                    fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase", color:th.text }}>
         Search for a role above
       </div>
-      <div style={{ fontSize:12, textAlign:"center", color:"#aaa", maxWidth:320, lineHeight:1.8 }}>
+      <div style={{ fontSize:12, textAlign:"center", color:th.textDim, maxWidth:320, lineHeight:1.8 }}>
         LinkedIn + Indeed · full-time only · deduplicated · ghost jobs filtered
       </div>
     </div>
@@ -1062,10 +1367,12 @@ function EmptyState() {
 }
 
 // ── History list ──────────────────────────────────────────────
-function HistoryList({ generated, onOpen, onExport }) {
+function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
+  const { theme: t } = useTheme();
+  const theme = themeProp || t;
   const entries = Object.entries(generated).filter(([,v]) => v?.html && v.html !== "__exists__");
   if (!entries.length) return (
-    <div style={{ padding:24, color:"#aaa", fontSize:12, textAlign:"center" }}>
+    <div style={{ padding:24, color:theme.textDim, fontSize:12, textAlign:"center" }}>
       No resumes generated yet.
     </div>
   );
@@ -1078,7 +1385,7 @@ function HistoryList({ generated, onOpen, onExport }) {
         for (const c of v.company||"") hash = (hash*31+c.charCodeAt(0))&0xffff;
         const bg = colors[hash%colors.length];
         return (
-          <div key={jid} style={{ padding:"12px 16px", borderBottom:"1px solid #e5e5e5",
+          <div key={jid} style={{ padding:"12px 16px", borderBottom:`1px solid ${theme.border}`,
                                    display:"flex", alignItems:"center", gap:10 }}>
             <div style={{ width:32, height:32, borderRadius:8, background:bg,
                            display:"flex", alignItems:"center", justifyContent:"center",
@@ -1086,11 +1393,11 @@ function HistoryList({ generated, onOpen, onExport }) {
               {letter}
             </div>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:700, fontSize:12, color:"#0f0f0f",
+              <div style={{ fontWeight:700, fontSize:12, color:theme.text,
                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                 {v.company}
               </div>
-              <div style={{ fontSize:10, color:"#aaa", overflow:"hidden",
+              <div style={{ fontSize:10, color:theme.textDim, overflow:"hidden",
                              textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:3 }}>
                 {v.title||v.role}
               </div>
