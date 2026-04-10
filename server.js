@@ -32,7 +32,6 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
 const ADMIN_USER     = process.env.ADMIN_USER     || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const CACHE_TTL_MS        = 12 * 60 * 60 * 1000;
-const MAX_REFRESH_PER_DAY = 4;
 const MAX_JOBS_PER_REFRESH= 50;
 
 // ── Scaling notes ─────────────────────────────────────────────
@@ -243,6 +242,35 @@ db.pragma("busy_timeout = 5000");
         );
       `,
     },
+    {
+      id: "005_scraped_jobs_new_columns",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN compensation TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN company_icon_url TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN source_platform TEXT;
+        UPDATE scraped_jobs SET source_platform = LOWER(source) WHERE source IS NOT NULL;
+      `,
+    },
+    {
+      id: "006_user_jobs",
+      sql: `
+        CREATE TABLE IF NOT EXISTS user_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          job_id TEXT NOT NULL,
+          visited INTEGER NOT NULL DEFAULT 0,
+          applied INTEGER NOT NULL DEFAULT 0,
+          starred INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(user_id, job_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_jobs_user ON user_jobs(user_id);
+        CREATE INDEX IF NOT EXISTS idx_user_jobs_job ON user_jobs(job_id);
+        INSERT OR IGNORE INTO user_jobs (user_id, job_id, applied)
+          SELECT user_id, job_id, 1 FROM job_applications;
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -316,6 +344,25 @@ try {
   console.log(`[prompt] Loaded — ${MASTER_PROMPT_STATIC.length} chars`);
 } catch(e) {
   console.error("[prompt] WARNING: Could not load master prompt:", e.message);
+}
+
+// ── Mode-specific prompts (loaded at startup) ──────────────────
+const TAILORED_PROMPT_PATH = path.join(__dirname, "tailored_system_prompt.md");
+let TAILORED_PROMPT_STATIC = "";
+try {
+  TAILORED_PROMPT_STATIC = fs.readFileSync(TAILORED_PROMPT_PATH, "utf8");
+  console.log(`[prompt] TAILORED loaded — ${TAILORED_PROMPT_STATIC.length} chars`);
+} catch(e) {
+  console.warn("[prompt] WARNING: Could not load tailored prompt:", e.message);
+}
+
+const CUSTOM_SAMPLER_PROMPT_PATH = path.join(__dirname, "custom_sampler_system_prompt.md");
+let CUSTOM_SAMPLER_PROMPT_STATIC = "";
+try {
+  CUSTOM_SAMPLER_PROMPT_STATIC = fs.readFileSync(CUSTOM_SAMPLER_PROMPT_PATH, "utf8");
+  console.log(`[prompt] CUSTOM_SAMPLER loaded — ${CUSTOM_SAMPLER_PROMPT_STATIC.length} chars`);
+} catch(e) {
+  console.warn("[prompt] WARNING: Could not load custom sampler prompt:", e.message);
 }
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -499,23 +546,22 @@ function normaliseSearchQuery(raw) {
   return trimmed.replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function checkRefreshQuota(userId) {
-  const first = db.prepare(
-    "SELECT MIN(refreshed_at) as first FROM refresh_log WHERE user_id=?"
-  ).get(userId);
-  if (!first?.first) return { allowed:true, used:0, remaining:MAX_REFRESH_PER_DAY };
-  const windowStart = first.first;
-  const windowEnd   = windowStart + 24 * 60 * 60;
-  const now         = Math.floor(Date.now() / 1000);
-  if (now > windowEnd) {
-    db.prepare("DELETE FROM refresh_log WHERE user_id=?").run(userId);
-    return { allowed:true, used:0, remaining:MAX_REFRESH_PER_DAY };
-  }
-  const count = db.prepare(
-    "SELECT COUNT(*) as cnt FROM refresh_log WHERE user_id=? AND refreshed_at >= ?"
-  ).get(userId, windowStart);
-  const used = count?.cnt || 0;
-  return { allowed:used < MAX_REFRESH_PER_DAY, used, remaining:MAX_REFRESH_PER_DAY - used, windowEnds:windowEnd };
+// ── Company icon helpers ──────────────────────────────────────
+function extractDomain(url) {
+  if (!url) return null;
+  try { return new URL(url).hostname.replace(/^www\./, ""); }
+  catch { return null; }
+}
+
+async function fetchCompanyIcon(domain) {
+  if (!domain) return null;
+  const clearbitUrl = `https://logo.clearbit.com/${domain}`;
+  try {
+    const r = await fetch(clearbitUrl, { method:"HEAD", signal:AbortSignal.timeout(3000) });
+    if (r.ok) return clearbitUrl;
+  } catch {}
+  // Fallback: Google S2 favicon (always returns an image)
+  return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
 }
 
 // ── Scraping ──────────────────────────────────────────────────
@@ -625,8 +671,9 @@ async function scrapeJobs(query, apifyToken) {
     INSERT OR IGNORE INTO scraped_jobs
     (job_id, search_query, company, title, category, location,
      work_type, source, url, posted_at, description,
-     ghost_score, years_experience, is_frequent_repost, _hash, scraped_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ghost_score, years_experience, is_frequent_repost, _hash, scraped_at,
+     source_platform)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   const insertMany = db.transaction((jobs) => {
@@ -652,7 +699,8 @@ async function scrapeJobs(query, apifyToken) {
         extractYearsExperience(item.description),
         item.isFrequentRepost ? 1 : 0,
         hash,
-        nowUnix
+        nowUnix,
+        (item._source || "").toLowerCase()
       );
       if (result.changes > 0) inserted++;
     });
@@ -660,6 +708,20 @@ async function scrapeJobs(query, apifyToken) {
   });
 
   const inserted = insertMany(classified);
+
+  // ── Async company icon fetch (non-blocking) ────────────────
+  setImmediate(async () => {
+    const updateIcon = db.prepare(
+      "UPDATE scraped_jobs SET company_icon_url=? WHERE _hash=? AND company_icon_url IS NULL"
+    );
+    for (const item of classified) {
+      try {
+        const domain  = extractDomain(item.url);
+        const iconUrl = await fetchCompanyIcon(domain);
+        if (iconUrl) updateIcon.run(iconUrl, jobHash(item));
+      } catch {}
+    }
+  });
   console.log(
     `[scrape] ✓ ${inserted} new jobs inserted into pool (${classified.length} total)`
   );
@@ -694,7 +756,10 @@ cron.schedule("0 3 * * *", () => {
   db.prepare(
     "DELETE FROM user_job_views WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)"
   ).run();
-  console.log("[cleanup] Pruned orphaned user_job_views");
+  db.prepare(
+    "DELETE FROM user_jobs WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)"
+  ).run();
+  console.log("[cleanup] Pruned orphaned user_job_views and user_jobs");
 });
 
 cron.schedule("0 2 * * *", () => {
@@ -703,11 +768,11 @@ cron.schedule("0 2 * * *", () => {
 });
 
 cron.schedule("0 7 * * *", async () => {
-  const last = db.prepare("SELECT search_query FROM job_cache ORDER BY scraped_at DESC LIMIT 1").get();
+  const last = db.prepare("SELECT search_query FROM user_job_searches ORDER BY last_scraped_at DESC LIMIT 1").get();
   if (!last) return;
-  // Borrow the most recently active user's token for the daily background refresh
+  // Borrow any user's Apify token for the daily background refresh
   const recent = db.prepare(
-    "SELECT u.apify_token FROM refresh_log rl JOIN users u ON u.id=rl.user_id WHERE u.apify_token IS NOT NULL ORDER BY rl.refreshed_at DESC LIMIT 1"
+    "SELECT apify_token FROM users WHERE apify_token IS NOT NULL LIMIT 1"
   ).get();
   if (!recent?.apify_token) {
     console.log("[cron] Skipping daily re-scrape — no user Apify token available");
@@ -752,7 +817,11 @@ ${resumeText}`;
 
 function buildFullPrompt(profile, job, resumeText, mode, employers) {
   const runtimeInputs = buildRuntimeInputs(profile, job, resumeText, mode, employers);
-  const staticPart = MASTER_PROMPT_STATIC.split("## RUNTIME INPUTS")[0].trimEnd();
+  // Use mode-specific prompt if available, fall back to master prompt
+  let raw = MASTER_PROMPT_STATIC;
+  if (mode === "TAILORED"       && TAILORED_PROMPT_STATIC)       raw = TAILORED_PROMPT_STATIC;
+  if (mode === "CUSTOM_SAMPLER" && CUSTOM_SAMPLER_PROMPT_STATIC) raw = CUSTOM_SAMPLER_PROMPT_STATIC;
+  const staticPart = raw.split("## RUNTIME INPUTS")[0].trimEnd();
   return { system: staticPart, user: runtimeInputs };
 }
 
@@ -1053,16 +1122,7 @@ app.get("/api/admin/users/:id/profile", requireAdmin, (req, res) => {
 app.get("/api/admin/users/:id/applications", requireAdmin, (req, res) => {
   res.json(db.prepare("SELECT * FROM job_applications WHERE user_id=? ORDER BY applied_at DESC").all(parseInt(req.params.id)));
 });
-// Reset quota for any user by ID (admin only)
-app.delete("/api/admin/users/:id/refresh-quota", requireAdmin, (req, res) => {
-  db.prepare("DELETE FROM refresh_log WHERE user_id=?").run(parseInt(req.params.id));
-  res.json({ ok:true });
-});
-// Admin self-service quota reset (resets own quota without needing to know own ID)
-app.delete("/api/admin/refresh-quota/reset", requireAdmin, (req, res) => {
-  db.prepare("DELETE FROM refresh_log WHERE user_id=?").run(req.user.id);
-  res.json({ ok:true });
-});
+// (quota reset routes removed — no refresh cap)
 
 // ═══════════════════════════════════════════════════════════════
 // SETTINGS
@@ -1131,110 +1191,160 @@ app.get("/api/extension/autofill", requireAuth, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// JOBS
+// JOBS — shared pool with pagination, filters, sort
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/jobs", requireAuth, (req, res) => {
-  const raw = (req.query.query || "").trim();
-  const q = (raw || "").toLowerCase();
+  const userId   = req.user.id;
+  const page     = Math.max(1, parseInt(req.query.page     || "1"));
+  const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize || "25")));
+  const offset   = (page - 1) * pageSize;
+  const sort     = req.query.sort || "dateDesc";
+  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+
+  // ── Session sync: populate user_jobs from central pool for all user's roles ──
+  db.prepare(`
+    INSERT OR IGNORE INTO user_jobs (user_id, job_id)
+    SELECT ?, sj.job_id FROM scraped_jobs sj
+    WHERE LOWER(sj.search_query) IN (
+      SELECT LOWER(search_query) FROM user_job_searches WHERE user_id = ?
+    ) AND sj.scraped_at > ?
+  `).run(userId, userId, sevenDaysAgo);
+
+  // Keep applied flag in sync with job_applications
+  db.prepare(`
+    UPDATE user_jobs SET applied = 1, updated_at = unixepoch()
+    WHERE user_id = ? AND applied = 0
+    AND job_id IN (SELECT job_id FROM job_applications WHERE user_id = ?)
+  `).run(userId, userId);
+
+  // ── Filter conditions ──
+  const conditions = [`sj.scraped_at > ${sevenDaysAgo}`];
+  const filterParams = [];
+
+  const role = (req.query.role || "").trim().toLowerCase();
+  if (role) { conditions.push(`LOWER(sj.search_query) = ?`); filterParams.push(role); }
+
+  const src = (req.query.source || "").trim().toLowerCase();
+  if (src) { conditions.push(`LOWER(sj.source) = ?`); filterParams.push(src); }
+
+  const workType = (req.query.workType || "").trim();
+  if (workType) { conditions.push(`sj.work_type = ?`); filterParams.push(workType); }
+
+  const cat = (req.query.category || "").trim();
+  if (cat) { conditions.push(`sj.category = ?`); filterParams.push(cat); }
+
+  const loc = (req.query.location || "").trim().toLowerCase();
+  if (loc) { conditions.push(`LOWER(sj.location) LIKE ?`); filterParams.push(`%${loc}%`); }
+
+  const ageLimits = { "1d":86400,"2d":172800,"3d":259200,"1w":604800,"1m":2592000 };
   const ageFilter = req.query.ageFilter;
-  const hideGhost = req.query.hideGhost === "true";
-  const hideFlag  = req.query.hideFlag  === "true";
+  if (ageFilter && ageLimits[ageFilter]) {
+    conditions.push(`sj.scraped_at > ?`);
+    filterParams.push(Math.floor(Date.now()/1000) - ageLimits[ageFilter]);
+  }
 
-  const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
-  const ageLimits = {
-    "1d":86400,"2d":172800,"3d":259200,"1w":604800,"1m":2592000
+  const minYoe = req.query.minYoe !== undefined && req.query.minYoe !== "" ? parseInt(req.query.minYoe) : null;
+  const maxYoe = req.query.maxYoe !== undefined && req.query.maxYoe !== "" ? parseInt(req.query.maxYoe) : null;
+  if (minYoe !== null && !isNaN(minYoe)) {
+    conditions.push(`(sj.years_experience IS NULL OR sj.years_experience >= ?)`);
+    filterParams.push(minYoe);
+  }
+  if (maxYoe !== null && !isNaN(maxYoe)) {
+    conditions.push(`(sj.years_experience IS NULL OR sj.years_experience <= ?)`);
+    filterParams.push(maxYoe);
+  }
+
+  const visitedF = req.query.visited;
+  if (visitedF === "1")  { conditions.push(`uj.visited = 1`); }
+  if (visitedF === "0")  { conditions.push(`uj.visited = 0`); }
+
+  const appliedF = req.query.applied;
+  if (appliedF === "1")  { conditions.push(`uj.applied = 1`); }
+  if (appliedF === "0")  { conditions.push(`uj.applied = 0`); }
+
+  if (req.query.starred === "1") { conditions.push(`uj.starred = 1`); }
+
+  if (req.query.hideGhost === "true") { conditions.push(`sj.ghost_score < 4`); }
+  if (req.query.hideFlag  === "true") { conditions.push(`sj.is_frequent_repost = 0`); }
+
+  const localSearch = (req.query.localSearch || "").trim().toLowerCase();
+  if (localSearch) {
+    conditions.push(`(LOWER(sj.company) LIKE ? OR LOWER(sj.location) LIKE ? OR LOWER(sj.category) LIKE ? OR LOWER(sj.search_query) LIKE ?)`);
+    const pat = `%${localSearch}%`;
+    filterParams.push(pat, pat, pat, pat);
+  }
+
+  const sortMap = {
+    dateDesc: "sj.scraped_at DESC",
+    dateAsc:  "sj.scraped_at ASC",
+    compHigh: "CAST(sj.compensation AS REAL) DESC",
+    compLow:  "CAST(sj.compensation AS REAL) ASC",
+    yoeHigh:  "sj.years_experience DESC",
+    yoeLow:   "sj.years_experience ASC",
   };
-  const ageLimit = ageFilter && ageLimits[ageFilter]
-    ? Math.floor(Date.now() / 1000) - ageLimits[ageFilter]
-    : null;
+  const orderBy = sortMap[sort] || sortMap.dateDesc;
 
-  let sql = `
-    SELECT sj.* FROM scraped_jobs sj
-    WHERE sj.scraped_at > ?
-    AND sj.job_id NOT IN (
-      SELECT job_id FROM user_job_views WHERE user_id = ?
-    )
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const baseJoin = `
+    FROM scraped_jobs sj
+    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
   `;
-  const params = [sevenDaysAgo, req.user.id];
 
-  if (q) { sql += ` AND LOWER(sj.search_query) = ?`; params.push(q); }
-  if (ageLimit) { sql += ` AND sj.scraped_at > ?`; params.push(ageLimit); }
-  if (hideGhost) { sql += ` AND sj.ghost_score < 4`; }
-  if (hideFlag)  { sql += ` AND sj.is_frequent_repost = 0`; }
-  sql += ` ORDER BY sj.scraped_at DESC LIMIT 100`;
+  const countRow = db.prepare(
+    `SELECT COUNT(*) as cnt ${baseJoin} ${where}`
+  ).get(userId, ...filterParams);
+  const total = countRow?.cnt || 0;
 
-  let jobs = db.prepare(sql).all(...params);
+  let rows = db.prepare(
+    `SELECT sj.*, uj.visited, uj.applied, uj.starred
+     ${baseJoin} ${where}
+     ORDER BY ${orderBy}
+     LIMIT ? OFFSET ?`
+  ).all(userId, ...filterParams, pageSize, offset);
 
-  const profile = db.prepare(
-    "SELECT has_clearance FROM user_profile WHERE user_id=?"
-  ).get(req.user.id) || {};
+  // Filter clearance-required jobs for non-cleared users
+  const profile = db.prepare("SELECT has_clearance FROM user_profile WHERE user_id=?").get(userId) || {};
   if (!profile.has_clearance) {
-    jobs = jobs.filter(j => {
+    rows = rows.filter(j => {
       const d = (j.description || "").toLowerCase();
-      return !d.includes("security clearance required")
-        && !d.includes("ts/sci")
-        && !d.includes("secret clearance");
+      return !d.includes("security clearance required") && !d.includes("ts/sci") && !d.includes("secret clearance");
     });
   }
 
-  const appliedSet = new Set(
-    db.prepare("SELECT job_id FROM job_applications WHERE user_id=?")
-      .all(req.user.id).map(a => a.job_id)
-  );
   const appliedCoSet = new Set(
-    db.prepare(
-      "SELECT LOWER(company) as co FROM job_applications WHERE user_id=?"
-    ).all(req.user.id).map(a => a.co)
+    db.prepare("SELECT LOWER(company) as co FROM job_applications WHERE user_id=?")
+      .all(userId).map(a => a.co)
   );
 
-  const mapped = jobs.map(j => ({
-    jobId:               j.job_id,
-    company:             j.company,
-    title:               j.title,
-    category:            j.category,
-    location:            j.location,
-    workType:            j.work_type,
-    source:              j.source,
-    url:                 j.url,
-    postedAt:            j.posted_at,
-    description:         j.description,
-    ghostScore:          j.ghost_score,
-    yearsExperience:     j.years_experience,
-    isFrequentRepost:    !!j.is_frequent_repost,
-    alreadyApplied:      appliedSet.has(j.job_id),
-    companyAppliedBefore:appliedCoSet.has((j.company||"").toLowerCase()),
+  const jobs = rows.map(j => ({
+    jobId:                j.job_id,
+    company:              j.company,
+    title:                j.title,
+    category:             j.category,
+    location:             j.location,
+    workType:             j.work_type,
+    source:               j.source,
+    sourcePlatform:       j.source_platform || (j.source || "").toLowerCase(),
+    url:                  j.url,
+    postedAt:             j.posted_at,
+    description:          j.description,
+    ghostScore:           j.ghost_score,
+    yearsExperience:      j.years_experience,
+    compensation:         j.compensation,
+    companyIconUrl:       j.company_icon_url,
+    isFrequentRepost:     !!j.is_frequent_repost,
+    visited:              !!j.visited,
+    alreadyApplied:       !!j.applied,
+    starred:              !!j.starred,
+    companyAppliedBefore: appliedCoSet.has((j.company || "").toLowerCase()),
   }));
 
-  const oldestRow = q
-    ? db.prepare(
-        "SELECT MIN(scraped_at) as oldest FROM scraped_jobs " +
-        "WHERE LOWER(search_query)=? AND scraped_at > ?"
-      ).get(q, sevenDaysAgo)
-    : null;
-
-  const scrapedAt  = oldestRow?.oldest ? oldestRow.oldest * 1000 : null;
-  const expiresIn  = scrapedAt
-    ? Math.max(0, 7*24*60*60*1000 - (Date.now() - scrapedAt))
-    : 0;
-
-  res.json({
-    jobs: mapped,
-    cacheValid: mapped.length > 0,
-    scrapedAt,
-    expiresIn,
-    query: q,
-  });
+  res.json({ jobs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
 });
 
 app.post("/api/scrape", requireAuth, async (req, res) => {
-  const raw   = (req.body.query || "").trim();
-  const query = raw;
+  const query = (req.body.query || "").trim();
   if (!query) return res.status(400).json({ error:"query required" });
-
-  const quota = checkRefreshQuota(req.user.id);
-  if (!quota.allowed) return res.status(429).json({
-    error:`Daily refresh limit reached (${MAX_REFRESH_PER_DAY}/day).`, quota,
-  });
 
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
   const token = user?.apify_token;
@@ -1243,59 +1353,58 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     missingToken:true,
   });
 
-  const sevenDaysAgo = Math.floor(Date.now()/1000) - 7*24*60*60;
-
-  const available = db.prepare(`
-    SELECT COUNT(*) as cnt FROM scraped_jobs
-    WHERE LOWER(search_query) = ?
-    AND scraped_at > ?
-    AND job_id NOT IN (SELECT job_id FROM user_job_views WHERE user_id = ?)
-  `).get(query.toLowerCase(), sevenDaysAgo, req.user.id);
-
-  let fromCache = false;
-  let newJobCount = 0;
-
-  if (available.cnt >= 20) {
-    fromCache   = true;
-    newJobCount = available.cnt;
-    console.log(`[scrape] Serving ${newJobCount} cached jobs for "${query}"`);
-  } else {
-    try {
-      const jobs  = await scrapeJobs(query, token);
-      newJobCount = jobs.length;
-      if (newJobCount > 0) {
-        db.prepare("INSERT INTO refresh_log (user_id,query) VALUES (?,?)")
-          .run(req.user.id, query);
-      }
-    } catch(e) {
-      return res.status(500).json({ ok:false, error:e.message });
-    }
-  }
-
+  // Log search intent (enables pool inheritance for this user)
   db.prepare(`
     INSERT INTO user_job_searches (user_id,search_query,last_scraped_at)
     VALUES (?,?,unixepoch())
     ON CONFLICT(user_id,search_query) DO UPDATE SET last_scraped_at=unixepoch()
   `).run(req.user.id, query.toLowerCase());
 
-  db.prepare(`
-    INSERT OR IGNORE INTO user_job_views (user_id,job_id)
-    SELECT ?,job_id FROM scraped_jobs
-    WHERE LOWER(search_query) = ?
-    AND scraped_at > ?
-    AND job_id NOT IN (SELECT job_id FROM user_job_views WHERE user_id = ?)
-    LIMIT 100
-  `).run(req.user.id, query.toLowerCase(), sevenDaysAgo, req.user.id);
+  let newJobCount = 0;
+  try {
+    const jobs  = await scrapeJobs(query, token);
+    newJobCount = jobs.length;
+  } catch(e) {
+    return res.status(500).json({ ok:false, error:e.message });
+  }
 
-  res.json({
-    ok:true, count:newJobCount, fromCache,
-    scrapedAt:Date.now(), query,
-    quota:checkRefreshQuota(req.user.id),
-  });
+  // Sync new jobs into user_jobs for this user
+  const sevenDaysAgo = Math.floor(Date.now()/1000) - 7*24*60*60;
+  db.prepare(`
+    INSERT OR IGNORE INTO user_jobs (user_id, job_id)
+    SELECT ?, sj.job_id FROM scraped_jobs sj
+    WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
+  `).run(req.user.id, query.toLowerCase(), sevenDaysAgo);
+
+  res.json({ ok:true, count:newJobCount, scrapedAt:Date.now(), query });
 });
 
-app.get("/api/scrape/quota", requireAuth, (req, res) => res.json(checkRefreshQuota(req.user.id)));
-app.get("/api/categories",   requireAuth, (_req,res) => res.json(INDUSTRY_CATEGORIES));
+// ── Visited / Starred flags ────────────────────────────────────
+app.patch("/api/jobs/:id/visited", requireAuth, (req, res) => {
+  const jobId = req.params.id;
+  db.prepare(`
+    INSERT INTO user_jobs (user_id, job_id, visited, updated_at)
+    VALUES (?, ?, 1, unixepoch())
+    ON CONFLICT(user_id, job_id) DO UPDATE SET visited = 1, updated_at = unixepoch()
+  `).run(req.user.id, jobId);
+  res.json({ ok:true });
+});
+
+app.patch("/api/jobs/:id/starred", requireAuth, (req, res) => {
+  const jobId = req.params.id;
+  const current = db.prepare(
+    "SELECT starred FROM user_jobs WHERE user_id = ? AND job_id = ?"
+  ).get(req.user.id, jobId);
+  const newStarred = current ? (current.starred ? 0 : 1) : 1;
+  db.prepare(`
+    INSERT INTO user_jobs (user_id, job_id, starred, updated_at)
+    VALUES (?, ?, ?, unixepoch())
+    ON CONFLICT(user_id, job_id) DO UPDATE SET starred = ?, updated_at = unixepoch()
+  `).run(req.user.id, jobId, newStarred, newStarred);
+  res.json({ ok:true, starred: !!newStarred });
+});
+
+app.get("/api/categories", requireAuth, (_req,res) => res.json(INDUSTRY_CATEGORIES));
 
 // ═══════════════════════════════════════════════════════════════
 // BASE RESUME
@@ -1612,6 +1721,12 @@ app.post("/api/applications", requireAuth, (req, res) => {
         notes=COALESCE(excluded.notes,notes),
         applied_at=excluded.applied_at`)
       .run(req.user.id,jobId,company,role,jobUrl||null,source||null,location||null,applyMode||null,resumeFile||null,notes||null);
+    // Sync applied flag to user_jobs
+    db.prepare(`
+      INSERT INTO user_jobs (user_id, job_id, applied, updated_at)
+      VALUES (?, ?, 1, unixepoch())
+      ON CONFLICT(user_id, job_id) DO UPDATE SET applied = 1, updated_at = unixepoch()
+    `).run(req.user.id, jobId);
     res.json({ ok:true });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });

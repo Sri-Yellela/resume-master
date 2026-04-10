@@ -1,9 +1,8 @@
-// client/src/components/TopBar.jsx — Design System v4
-import { useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+// client/src/components/TopBar.jsx — Lucy Brand
+import { useState } from "react";
+import { motion } from "framer-motion";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
-import { AtomEmblem } from "./AuthScreen.jsx";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel,
@@ -83,19 +82,16 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
   return (
     <div style={{
       height: 56,
-      background: mode === "light" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)",
-      backdropFilter: "blur(20px) saturate(180%)",
-      WebkitBackdropFilter: "blur(20px) saturate(180%)",
-      borderBottom: `1px solid ${theme.border}`,
+      background: "#ffffff",
+      borderBottom: `3px solid ${theme.accent}`,
       display: "flex", alignItems: "center",
       padding: "0 20px", gap: 24,
       position: "sticky", top: 0, zIndex: 100,
       flexShrink: 0,
     }}>
-      {/* Brand */}
-      <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-        <AtomEmblem size={28} textSize={4} orbitSize={9}/>
-        <span className="site-title">Resume Master</span>
+      {/* Brand wordmark — Lucy tin style */}
+      <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
+        <span className="site-title" style={{ color:"#0f0f0f" }}>Resume Master</span>
       </div>
 
       {/* Nav tabs */}
@@ -104,10 +100,11 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
           <button key={t.id} onClick={() => onTabChange(t.id)}
             style={{
               background: "transparent", border: "none",
-              padding: "6px 14px", borderRadius: 8,
-              fontWeight: activeTab === t.id ? 700 : 500,
-              fontSize: 13,
-              color: activeTab === t.id ? theme.accent : theme.textMuted,
+              padding: "6px 14px", borderRadius: 4,
+              fontFamily: "'Barlow Condensed', 'DM Sans', sans-serif",
+              fontWeight: activeTab === t.id ? 800 : 600,
+              fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
+              color: activeTab === t.id ? "#0f0f0f" : "#888888",
               cursor: "pointer", position: "relative",
               transition: "color 0.15s",
             }}>

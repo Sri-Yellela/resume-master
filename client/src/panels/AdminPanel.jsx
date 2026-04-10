@@ -1,8 +1,12 @@
-// client/src/panels/AdminPanel.jsx — Design System v4
+// client/src/panels/AdminPanel.jsx — Lucy Brand (yellow accent)
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+
+// Lucy admin yellow accent — consistent across this panel
+const ADMIN_ACCENT = "#F5E642";
+const ADMIN_TEXT   = "#0f0f0f";
 
 export function AdminPanel() {
   const { theme } = useTheme();
@@ -34,11 +38,6 @@ export function AdminPanel() {
     if (!confirm("Delete this user and all their data?")) return;
     await api(`/api/admin/users/${id}`, { method:"DELETE" });
     setUsers(u => u.filter(x => x.id !== id));
-  };
-
-  const resetQuota = async id => {
-    await api(`/api/admin/users/${id}/refresh-quota`, { method:"DELETE" });
-    alert("Quota reset.");
   };
 
   const triggerBackup = async () => {
@@ -81,28 +80,38 @@ export function AdminPanel() {
 
   return (
     <div style={{ padding:"32px 24px", overflowY:"auto", height:"100%",
-                  boxSizing:"border-box", background:theme.bg, maxWidth:900 }}>
+                  boxSizing:"border-box", background:"#ffffff", maxWidth:900,
+                  borderTop:`4px solid ${ADMIN_ACCENT}` }}>
 
-      <div style={{ fontWeight:900, fontSize:22, color:theme.text,
-                    letterSpacing:"-0.5px", marginBottom:24 }}>
-        Admin Panel
+      {/* Lucy admin header — yellow accent */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:24 }}>
+        <span style={{
+          fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
+          fontWeight:800, fontSize:28, letterSpacing:"0.08em",
+          textTransform:"uppercase", color:ADMIN_TEXT,
+          background:ADMIN_ACCENT, padding:"4px 16px", borderRadius:2,
+        }}>Admin</span>
+        <span style={{
+          fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
+          fontWeight:800, fontSize:28, letterSpacing:"0.08em",
+          textTransform:"uppercase", color:theme.text,
+        }}>Panel</span>
       </div>
 
-      {/* ── Section tabs — underline style ── */}
-      <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`, marginBottom:24 }}>
+      {/* ── Section tabs — Lucy style ── */}
+      <div style={{ display:"flex", borderBottom:`2px solid ${ADMIN_ACCENT}`, marginBottom:24 }}>
         {SECTIONS.map(([id, lbl]) => (
           <button key={id}
-            style={{ padding:"10px 20px", border:"none", background:"transparent",
-                     fontWeight: section===id ? 700 : 500, fontSize:13,
-                     color: section===id ? theme.accent : theme.textMuted,
-                     cursor:"pointer", position:"relative", transition:"color 0.15s" }}
+            style={{
+              padding:"10px 20px", border:"none", cursor:"pointer",
+              fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
+              fontWeight:800, fontSize:14, letterSpacing:"0.06em", textTransform:"uppercase",
+              background: section===id ? ADMIN_ACCENT : "transparent",
+              color: section===id ? ADMIN_TEXT : theme.textMuted,
+              transition:"all 0.15s", borderRadius:"2px 2px 0 0",
+            }}
             onClick={() => setSection(id)}>
             {lbl}
-            {section===id && (
-              <motion.div layoutId="admin-tab-underline"
-                style={{ position:"absolute", bottom:-1, left:0, right:0,
-                         height:2, background:theme.accent, borderRadius:999 }}/>
-            )}
           </button>
         ))}
       </div>
@@ -182,10 +191,6 @@ export function AdminPanel() {
                       </td>
                       <td style={{ padding:"12px 14px" }}>
                         <div style={{ display:"flex", gap:6 }}>
-                          <button className="rm-btn rm-btn-ghost rm-btn-sm"
-                            onClick={() => resetQuota(u.id)}>
-                            Reset Quota
-                          </button>
                           {!u.is_admin && (
                             <button className="rm-btn rm-btn-ghost rm-btn-sm"
                               style={{ color:theme.danger, borderColor:theme.danger+"44" }}
@@ -222,9 +227,20 @@ export function AdminPanel() {
                 After restoring, <strong style={{ color:theme.text }}>restart the server</strong> to apply.
               </div>
               <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-                <button className="rm-btn rm-btn-primary"
-                  disabled={backing} onClick={triggerBackup}>
-                  {backing ? "Creating backup…" : "💾 Backup Now"}
+                <button
+                  disabled={backing} onClick={triggerBackup}
+                  style={{
+                    background: backing ? theme.border : ADMIN_ACCENT,
+                    color: ADMIN_TEXT, border:"none", borderRadius:2,
+                    padding:"8px 20px", cursor:"pointer",
+                    fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
+                    fontWeight:800, fontSize:13, letterSpacing:"0.08em",
+                    textTransform:"uppercase",
+                    transition:"border-radius 1s ease",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderRadius="999px"}
+                  onMouseLeave={e => e.currentTarget.style.borderRadius="2px"}>
+                  {backing ? "Creating…" : "Backup Now"}
                 </button>
                 {bStatus && (
                   <span style={{ fontSize:12,

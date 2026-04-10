@@ -1,20 +1,28 @@
 // client/src/styles/theme.jsx — Design System v4
 import { useState, createContext, useContext } from "react";
 
+// Lucy brand accent colors:
+//   User board (JobsPanel, main UI) = soft sky blue #A8D8EA
+//   Admin panel                     = citrus yellow #F5E642
+// These are defined per-screen; the global theme uses the user accent.
+export const LUCY_USER_ACCENT  = "#A8D8EA";
+export const LUCY_ADMIN_ACCENT = "#F5E642";
+
 export const THEMES = {
   light: {
-    bg:           "#fafaf8",
+    bg:           "#ffffff",
     surface:      "#ffffff",
     surfaceHigh:  "#f5f5f3",
     overlay:      "rgba(0,0,0,0.04)",
     border:       "#e5e5e5",
-    borderStrong: "#d0d0d0",
+    borderStrong: "#c0c0c0",
     text:         "#0f0f0f",
     textMuted:    "#6b6b6b",
     textDim:      "#a3a3a3",
-    accent:       "#e85d04",
-    accentMuted:  "#fff1e6",
-    accentText:   "#c2410c",
+    // Lucy sky-blue accent (user board)
+    accent:       "#A8D8EA",
+    accentMuted:  "#e8f6fb",
+    accentText:   "#1a6a8a",
     success:      "#16a34a",
     successMuted: "#f0fdf4",
     danger:       "#dc2626",
@@ -27,15 +35,19 @@ export const THEMES = {
     shadowMd:     "0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04)",
     shadowLg:     "0 20px 40px rgba(0,0,0,0.10), 0 8px 16px rgba(0,0,0,0.06)",
     shadowXl:     "0 40px 80px rgba(0,0,0,0.12), 0 16px 32px rgba(0,0,0,0.08)",
-    gradAccent:   "linear-gradient(135deg, #e85d04 0%, #f97316 100%)",
-    gradSubtle:   "linear-gradient(135deg, #fafaf8 0%, #f0ede8 100%)",
-    fontDisplay:  "'DM Sans', system-ui, sans-serif",
+    gradAccent:   "#A8D8EA",
+    gradSubtle:   "linear-gradient(135deg, #ffffff 0%, #f0f8fb 100%)",
+    fontDisplay:  "'Barlow Condensed', 'DM Sans', system-ui, sans-serif",
     fontBody:     "'DM Sans', system-ui, sans-serif",
     fontMono:     "'JetBrains Mono', monospace",
+    // Lucy admin yellow (used in AdminPanel)
+    adminAccent:      "#F5E642",
+    adminAccentText:  "#5a5000",
+    adminAccentMuted: "#fdfbca",
     // Legacy compat
-    colorPrimary:   "#e85d04",
-    colorSecondary: "#c2410c",
-    colorAccent:    "#c2410c",
+    colorPrimary:   "#A8D8EA",
+    colorSecondary: "#1a6a8a",
+    colorAccent:    "#1a6a8a",
     colorSurface:   "#ffffff",
     colorBorder:    "#e5e5e5",
     colorText:      "#0f0f0f",
@@ -43,11 +55,11 @@ export const THEMES = {
     colorDim:       "#a3a3a3",
     colorCard:      "#f5f5f3",
     colorInputBg:   "#ffffff",
-    colorTag:       "#fff1e6",
-    gradBg:         "#fafaf8",
+    colorTag:       "#e8f6fb",
+    gradBg:         "#ffffff",
     gradPanel:      "#ffffff",
     gradHover:      "rgba(0,0,0,0.04)",
-    glowPrimary:    "0 0 0 3px #e85d0433",
+    glowPrimary:    "0 0 0 3px #A8D8EA44",
     shimmer1:       "#ffffff",
     shimmer2:       "#f5f5f3",
     radiusPill:     "999px",
@@ -64,9 +76,9 @@ export const THEMES = {
     text:         "#f5f5f5",
     textMuted:    "#888888",
     textDim:      "#555555",
-    accent:       "#f97316",
-    accentMuted:  "#1a0f00",
-    accentText:   "#fb923c",
+    accent:       "#A8D8EA",
+    accentMuted:  "#0a1f2a",
+    accentText:   "#A8D8EA",
     success:      "#22c55e",
     successMuted: "#0a1f0a",
     danger:       "#ef4444",
@@ -79,15 +91,18 @@ export const THEMES = {
     shadowMd:     "0 4px 12px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.3)",
     shadowLg:     "0 20px 40px rgba(0,0,0,0.6), 0 8px 16px rgba(0,0,0,0.4)",
     shadowXl:     "0 40px 80px rgba(0,0,0,0.7), 0 16px 32px rgba(0,0,0,0.5)",
-    gradAccent:   "linear-gradient(135deg, #f97316 0%, #fb923c 100%)",
+    gradAccent:   "#A8D8EA",
     gradSubtle:   "linear-gradient(135deg, #111111 0%, #1a1a1a 100%)",
-    fontDisplay:  "'DM Sans', system-ui, sans-serif",
+    fontDisplay:  "'Barlow Condensed', 'DM Sans', system-ui, sans-serif",
     fontBody:     "'DM Sans', system-ui, sans-serif",
     fontMono:     "'JetBrains Mono', monospace",
+    adminAccent:      "#F5E642",
+    adminAccentText:  "#5a5000",
+    adminAccentMuted: "#2a2800",
     // Legacy compat
-    colorPrimary:   "#f97316",
-    colorSecondary: "#fb923c",
-    colorAccent:    "#fb923c",
+    colorPrimary:   "#A8D8EA",
+    colorSecondary: "#A8D8EA",
+    colorAccent:    "#A8D8EA",
     colorSurface:   "#111111",
     colorBorder:    "#2a2a2a",
     colorText:      "#f5f5f5",
@@ -95,11 +110,11 @@ export const THEMES = {
     colorDim:       "#555555",
     colorCard:      "#1a1a1a",
     colorInputBg:   "#111111",
-    colorTag:       "#1a0f00",
+    colorTag:       "#0a1f2a",
     gradBg:         "#0a0a0a",
     gradPanel:      "#111111",
     gradHover:      "rgba(255,255,255,0.04)",
-    glowPrimary:    "0 0 0 3px #f9731633",
+    glowPrimary:    "0 0 0 3px #A8D8EA33",
     shimmer1:       "#111111",
     shimmer2:       "#1a1a1a",
     radiusPill:     "999px",
@@ -174,14 +189,12 @@ export function ThemeProvider({ children }) {
         @keyframes scrollUp { 0% { transform: translateY(0); } 100% { transform: translateY(-50%); } }
         @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
         .site-title {
-          font-family: 'DM Sans', system-ui, sans-serif;
+          font-family: 'Barlow Condensed', 'DM Sans', system-ui, sans-serif;
           font-weight: 800;
-          font-size: 20px;
-          letter-spacing: -0.5px;
-          background: ${theme.gradAccent};
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
+          font-size: 28px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: ${theme.text};
         }
         .rm-card {
           background: ${theme.surface};
@@ -205,17 +218,21 @@ export function ThemeProvider({ children }) {
           transform: translateY(-2px) scale(1.005);
           border-color: ${theme.borderStrong};
         }
+        /* Lucy tin button style: rectangular, pill on hover (1s transition) */
         .rm-btn {
           display: inline-flex; align-items: center; justify-content: center;
-          gap: 6px; padding: 8px 20px; border-radius: 999px;
-          font-family: 'DM Sans', system-ui, sans-serif; font-weight: 600;
-          font-size: 13px; border: none; cursor: pointer;
-          transition: all 0.15s ease; white-space: nowrap; text-decoration: none;
+          gap: 6px; padding: 8px 20px; border-radius: 2px;
+          font-family: 'Barlow Condensed', 'DM Sans', system-ui, sans-serif;
+          font-weight: 800; font-size: 13px; letter-spacing: 0.08em;
+          text-transform: uppercase; border: none; cursor: pointer;
+          transition: border-radius 1s ease, filter 0.15s ease, box-shadow 0.15s ease;
+          white-space: nowrap; text-decoration: none;
         }
+        .rm-btn:hover:not(:disabled) { border-radius: 999px; }
         .rm-btn:active { transform: scale(0.97); }
         .rm-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-        .rm-btn-primary { background: ${theme.accent}; color: #ffffff; }
-        .rm-btn-primary:hover:not(:disabled) { filter: brightness(1.1); box-shadow: 0 0 0 4px ${theme.accent}22; }
+        .rm-btn-primary { background: ${theme.accent}; color: #0f0f0f; }
+        .rm-btn-primary:hover:not(:disabled) { filter: brightness(1.05); box-shadow: 0 0 0 4px ${theme.accent}44; }
         .rm-btn-ghost { background: transparent; color: ${theme.text}; border: 1px solid ${theme.border}; }
         .rm-btn-ghost:hover:not(:disabled) { background: ${theme.overlay}; border-color: ${theme.borderStrong}; }
         .rm-btn-sm { padding: 5px 14px; font-size: 11px; gap: 4px; }
