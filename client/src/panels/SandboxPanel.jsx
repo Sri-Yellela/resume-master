@@ -6,6 +6,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const { theme, mode } = useTheme();
   const [exporting, setExporting] = useState(false);
   const [dirty,     setDirty]     = useState(false);
+  const [saveMsg,   setSaveMsg]   = useState("");
   const frameRef = useRef(null);
 
   useEffect(() => { setDirty(false); }, [entry?.html]);
@@ -18,8 +19,14 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
 
   const save = async () => {
     const html = getCurrentHtml();
-    if (onSave) await onSave(html);
-    setDirty(false);
+    try {
+      if (onSave) await onSave(html);
+      setDirty(false);
+      setSaveMsg("✓ Saved");
+    } catch(e) {
+      setSaveMsg("✗ Save failed");
+    }
+    setTimeout(() => setSaveMsg(""), 2500);
   };
 
   const downloadHtml = () => {
@@ -76,6 +83,8 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
           </span>
         )}
         {dirty && <span style={{ fontSize:10, color:theme.warning, fontWeight:700 }}>● unsaved</span>}
+        {saveMsg && <span style={{ fontSize:10, fontWeight:700,
+          color: saveMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>{saveMsg}</span>}
         <div style={{ flex:1 }}/>
         <button style={btnStyle()} onClick={save} disabled={!entry?.html}>💾 Save{dirty?"*":""}</button>
         <button style={btnStyle()} onClick={downloadHtml} disabled={!entry?.html}>⬇ HTML</button>

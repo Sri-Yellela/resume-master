@@ -439,10 +439,24 @@ function isFullTimeNorm(item) {
 
 function isTitleRelevant(title, query) {
   const t = title.toLowerCase();
+  const stopWords = new Set(["the","and","for","with","ing","senior","junior","lead","staff","principal"]);
   const terms = query.toLowerCase()
     .split(/[\s,/\-]+/)
-    .filter(w => w.length > 2 && !["the","and","for","with","ing"].includes(w));
-  return terms.some(term => t.includes(term));
+    .filter(w => w.length > 2 && !stopWords.has(w));
+  if (terms.length === 0) return true;
+  // For single-term queries (e.g. "engineer"), any match is fine
+  if (terms.length === 1) return t.includes(terms[0]);
+  // For multi-term queries, ALL core terms must appear OR the title must contain
+  // at least one core role keyword at a high similarity
+  const roleKeywords = ["engineer","developer","scientist","analyst","manager","designer",
+    "architect","researcher","specialist","consultant","director","coordinator"];
+  const coreTerms = terms.filter(w => !roleKeywords.includes(w));
+  const roleTerms = terms.filter(w =>  roleKeywords.includes(w));
+  // Core specialty terms (e.g. "machine","learning","software","data") must all match
+  const coreMatch = coreTerms.length === 0 || coreTerms.every(w => t.includes(w));
+  // At least one role type term must match (or none required if query has no role terms)
+  const roleMatch = roleTerms.length === 0 || roleTerms.some(w => t.includes(w));
+  return coreMatch && roleMatch;
 }
 
 function extractYearsExperience(description = "") {
@@ -494,7 +508,7 @@ If no category fits well, reply with exactly: Other
 Categories: ${INDUSTRY_CATEGORIES.join(", ")}
 
 Title: ${title}
-Description: ${description.slice(0,400)}
+Description: ${description.slice(0,600)}
 
 Reply with the category name only. No explanation.` }],
     });
@@ -579,11 +593,13 @@ function buildLinkedInUrl(query) {
 
 async function scrapeLinkedIn(query, token) {
   if (!token) throw new Error("No Apify token");
-  const urls = [buildLinkedInUrl(query), buildLinkedInUrl(`${query} engineer`)];
+  // Use only the exact query — appending "engineer" creates duplicate noise for
+  // roles that already contain "engineer" and causes off-topic results for others
+  const urls = [buildLinkedInUrl(query)];
   const res = await fetch(
     `https://api.apify.com/v2/acts/curious_coder~linkedin-jobs-scraper/runs?token=${token}`,
     { method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ urls, count:MAX_JOBS_PER_REFRESH, scrapeCompany:false }) }
+      body:JSON.stringify({ urls, count:MAX_JOBS_PER_REFRESH * 2, scrapeCompany:false }) }
   );
   if (!res.ok) throw new Error(`Apify LinkedIn: ${res.status}`);
   const { data } = await res.json();
@@ -596,7 +612,7 @@ async function scrapeIndeed(query, token) {
   const res = await fetch(
     `https://api.apify.com/v2/acts/valig~indeed-jobs-scraper/runs?token=${token}`,
     { method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ query, country:"us", location:"United States", postedWithinDays:"1", count:MAX_JOBS_PER_REFRESH }) }
+      body:JSON.stringify({ query, country:"us", location:"United States", postedWithinDays:"1", count:MAX_JOBS_PER_REFRESH * 2 }) }
   );
   if (!res.ok) throw new Error(`Apify Indeed: ${res.status}`);
   const { data } = await res.json();
@@ -703,7 +719,7 @@ async function scrapeJobs(query, apifyToken) {
         item._source,
         item.url || null,
         item.postedAt || null,
-        (item.description || "").slice(0, 500),
+        (item.description || "").slice(0, 2000),
         ghostJobScoreNorm(item),
         extractYearsExperience(item.description),
         item.isFrequentRepost ? 1 : 0,
@@ -748,7 +764,7 @@ async function scrapeJobs(query, apifyToken) {
     source: item._source,
     url: item.url,
     postedAt: item.postedAt,
-    description: (item.description || "").slice(0, 500),
+    description: (item.description || "").slice(0, 2000),
     ghostScore: ghostJobScoreNorm(item),
     yearsExperience: extractYearsExperience(item.description),
     isFrequentRepost: item.isFrequentRepost || false,
@@ -880,13 +896,31 @@ function buildFullPrompt(profile, job, resumeText, mode, employers) {
 // ──────────────────────────────────────────────────────────────
 
 async function htmlToPdf(html) {
-  const executablePath = await chromium.executablePath();
+  // On Windows, @sparticuz/chromium provides a Linux ELF binary that cannot run.
+  // Detect Windows and use the system Chrome installation instead.
+  const isWindows = process.platform === "win32";
+  let executablePath, launchArgs;
+
+  if (isWindows) {
+    const winPaths = [
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      process.env.LOCALAPPDATA + "\\Google\\Chrome\\Application\\chrome.exe",
+    ];
+    const fs = await import("fs");
+    executablePath = winPaths.find(p => { try { return fs.existsSync(p); } catch { return false; } });
+    if (!executablePath) throw new Error("Chrome not found on Windows. Install Chrome to enable PDF export.");
+    launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+  } else {
+    executablePath = await chromium.executablePath();
+    launchArgs = chromium.args;
+  }
 
   const browser = await puppeteer.launch({
-    args:            chromium.args,
-    defaultViewport: chromium.defaultViewport,
+    args:            launchArgs,
+    defaultViewport: isWindows ? { width:1240, height:1754 } : chromium.defaultViewport,
     executablePath,
-    headless:        chromium.headless,
+    headless:        true,
   });
 
   try {
@@ -1369,12 +1403,33 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     ON CONFLICT(user_id,search_query) DO UPDATE SET last_scraped_at=unixepoch()
   `).run(req.user.id, query.toLowerCase());
 
+  // DB-first: count existing fresh, unvisited, quality jobs for this role
+  const sevenDaysAgo = Math.floor(Date.now()/1000) - 7*24*60*60;
+  const existingCount = db.prepare(`
+    SELECT COUNT(*) as cnt
+    FROM scraped_jobs sj
+    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    WHERE LOWER(sj.search_query) = ?
+      AND sj.scraped_at > ?
+      AND uj.visited = 0
+      AND uj.applied = 0
+      AND sj.ghost_score < 4
+      AND sj.is_frequent_repost = 0
+  `).get(req.user.id, query.toLowerCase(), sevenDaysAgo);
+
+  const THRESHOLD = 20; // minimum unvisited quality jobs before triggering scrape
   let newJobCount = 0;
-  try {
-    const jobs  = await scrapeJobs(query, token);
-    newJobCount = jobs.length;
-  } catch(e) {
-    return res.status(500).json({ ok:false, error:e.message });
+
+  if ((existingCount?.cnt || 0) >= THRESHOLD) {
+    console.log(`[scrape] DB-first: ${existingCount.cnt} existing jobs for "${query}" — skipping Apify scrape`);
+  } else {
+    console.log(`[scrape] DB-first: only ${existingCount?.cnt || 0} jobs for "${query}" — triggering Apify scrape`);
+    try {
+      const jobs  = await scrapeJobs(query, token);
+      newJobCount = jobs.length;
+    } catch(e) {
+      return res.status(500).json({ ok:false, error:e.message });
+    }
   }
 
   // Sync new jobs into user_jobs for this user
@@ -1456,6 +1511,16 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   const mode = req.user.applyMode;
   if (mode==="SIMPLE") return res.status(400).json({ error:"Generate not available in SIMPLE mode" });
   if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured on server." });
+
+  // Guard: reject obviously empty or template-placeholder resume content
+  const resumeTrimmed = resumeText.trim();
+  if (resumeTrimmed.length < 100) {
+    return res.status(400).json({ error:"Base resume is too short or empty. Please re-upload your resume and try again." });
+  }
+  const PLACEHOLDER_PATTERNS = [/your name/i, /your\.email@example/i, /\[your name\]/i, /YOUR NAME/];
+  if (PLACEHOLDER_PATTERNS.some(p => p.test(resumeTrimmed.slice(0, 300)))) {
+    return res.status(400).json({ error:"Base resume data failed to load — placeholder text detected. Please re-upload your resume and try again." });
+  }
 
   const existing = db.prepare("SELECT * FROM resumes WHERE user_id=? AND job_id=?").get(req.user.id, String(jobId));
   if (existing && !forceRegen) {

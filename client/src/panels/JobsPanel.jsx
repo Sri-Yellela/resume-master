@@ -452,9 +452,10 @@ export default function JobsPanel({ user, onUserChange }) {
   const handleSearch = useCallback(async (overrideQuery) => {
     const q = (overrideQuery || searchInput).trim();
     if (!q) return;
-    // Only scrape when board is empty; otherwise just set the role filter
+    // If board already has jobs, just filter to this role — no scrape
     if (jobs.length > 0) {
       setRoleFilter(q.toLowerCase());
+      setSearchInput(q);
       return;
     }
     setScraping(true);
@@ -465,10 +466,19 @@ export default function JobsPanel({ user, onUserChange }) {
         return;
       }
       if (result.error) { alert(result.error); return; }
-      await fetchJobs(1);
+      // Fetch with explicit role so results are scoped to the searched role
+      const qs = new URLSearchParams();
+      qs.set("page","1"); qs.set("pageSize","25"); qs.set("sort", sortBy);
+      qs.set("role", q.toLowerCase()); qs.set("hideGhost","true"); qs.set("hideFlag","true");
+      const d = await api(`/api/jobs?${qs.toString()}`);
+      setJobs(d.jobs || []);
+      setTotalJobs(d.total || 0);
+      setTotalPages(d.totalPages || 0);
+      setCurrentPage(1);
+      setRoleFilter(q.toLowerCase());
     } catch(e) { alert("Scrape failed: " + e.message); }
     finally { setScraping(false); }
-  }, [searchInput, fetchJobs, jobs.length]);
+  }, [searchInput, fetchJobs, jobs.length, sortBy]);
 
   // ── Refresh: scrape fresh + hide visited ──────────────────────
   const handleRefresh = useCallback(async () => {
@@ -479,11 +489,21 @@ export default function JobsPanel({ user, onUserChange }) {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
       if (result.missingToken) { alert("⚠ No Apify token set."); return; }
       if (result.error) { alert(result.error); return; }
-      setVisitedFilter("0"); // hide visited, show fresh
-      await fetchJobs(1);
+      // Fetch fresh, unvisited, scoped to this role
+      const qs = new URLSearchParams();
+      qs.set("page","1"); qs.set("pageSize","25"); qs.set("sort", sortBy);
+      qs.set("role", q.toLowerCase()); qs.set("visited","0");
+      qs.set("hideGhost","true"); qs.set("hideFlag","true");
+      const d = await api(`/api/jobs?${qs.toString()}`);
+      setJobs(d.jobs || []);
+      setTotalJobs(d.total || 0);
+      setTotalPages(d.totalPages || 0);
+      setCurrentPage(1);
+      setVisitedFilter("0");
+      setRoleFilter(q.toLowerCase());
     } catch(e) { alert("Refresh failed: " + e.message); }
     finally { setScraping(false); }
-  }, [searchInput, fetchJobs]);
+  }, [searchInput, sortBy]);
 
   // ── Smart search ──────────────────────────────────────────
   const handleSmartSearch = useCallback(async () => {
