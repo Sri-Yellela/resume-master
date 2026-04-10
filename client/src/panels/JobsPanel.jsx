@@ -340,6 +340,86 @@ const ALIASES = {
   "genai":"Generative AI Engineer","gen ai":"Generative AI Engineer","llm":"LLM Engineer",
 };
 
+// ── Pull-to-refresh ───────────────────────────────────────────
+function PullToRefresh({ onRefresh, refreshing, theme, children }) {
+  const scrollRef = useRef(null);
+  const [pullY,   setPullY]   = useState(0);
+  const [ready,   setReady]   = useState(false);
+  const startY = useRef(null);
+  const THRESHOLD = 56;
+
+  // Touch: pull-down gesture when already at the top
+  const onTouchStart = (e) => {
+    if ((scrollRef.current?.scrollTop ?? 1) === 0)
+      startY.current = e.touches[0].clientY;
+  };
+  const onTouchMove = (e) => {
+    if (startY.current === null) return;
+    const dy = e.touches[0].clientY - startY.current;
+    if (dy > 0) {
+      setPullY(Math.min(dy * 0.55, THRESHOLD + 20));
+      setReady(dy * 0.55 >= THRESHOLD);
+    }
+  };
+  const onTouchEnd = () => {
+    if (ready) onRefresh();
+    setPullY(0); setReady(false); startY.current = null;
+  };
+
+  // Desktop: expose the scrollRef so parent can detect wheel-at-top if needed
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+      {/* Pull indicator — animates down then snaps back */}
+      <div style={{
+        height: pullY, flexShrink:0, overflow:"hidden",
+        display:"flex", alignItems:"center", justifyContent:"center",
+        background: theme.accentMuted,
+        transition: pullY === 0 ? "height 0.22s ease" : "none",
+      }}>
+        {pullY > 12 && (
+          <span style={{ fontSize:11, fontWeight:700, color:theme.accentText }}>
+            {ready ? "↑ Release to refresh" : "↓ Keep pulling…"}
+          </span>
+        )}
+      </div>
+
+      {/* Desktop "check for new" strip — visible at very top, compact */}
+      {!refreshing && pullY === 0 && (
+        <div onClick={onRefresh} style={{
+          flexShrink:0, padding:"4px 20px",
+          display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+          background:theme.accentMuted, borderBottom:`1px solid ${theme.accent}22`,
+          cursor:"pointer", fontSize:10, fontWeight:700,
+          color:theme.accentText, letterSpacing:"0.06em", textTransform:"uppercase",
+        }}>
+          ↻ Check for new jobs
+        </div>
+      )}
+      {refreshing && (
+        <div style={{
+          flexShrink:0, padding:"4px 20px",
+          display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+          background:theme.accentMuted, borderBottom:`1px solid ${theme.accent}22`,
+          fontSize:10, fontWeight:700, color:theme.accentText,
+          letterSpacing:"0.06em", textTransform:"uppercase",
+        }}>
+          <span style={{ display:"inline-block", animation:"spin 0.8s linear infinite" }}>↻</span>
+          Checking…
+        </div>
+      )}
+
+      <div
+        ref={scrollRef}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{ flex:1, overflowY:"auto", paddingTop:4, paddingBottom:8 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // ── Resize divider ────────────────────────────────────────────
 function ResizeDivider({ onDrag }) {
   const [hov, setHov] = useState(false);
@@ -422,7 +502,8 @@ export default function JobsPanel({ user, onUserChange }) {
   const [currentPage, setCurrentPage] = useState(1);
 
   // UI state
-  const [scraping,    setScraping]    = useState(false);
+  const [scraping,    setScraping]    = useState(false);  // Apify live scrape
+  const [bgLoading,   setBgLoading]   = useState(false);  // background DB fetch
   const [categories,  setCategories]  = useState([]);
   const [resumeText,  setResumeText]  = useState("");
   const [fileName,    setFileName]    = useState("");
@@ -508,22 +589,35 @@ export default function JobsPanel({ user, onUserChange }) {
     if (visitedFilter)        p.set("visited",  visitedFilter);
     if (appliedFilter)        p.set("applied",  appliedFilter);
     if (ageFilter)            p.set("ageFilter",ageFilter);
-    if (localSearch.trim())   p.set("localSearch", localSearch.trim().toLowerCase());
     if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
     p.set("hideGhost","true");
     p.set("hideFlag","true");
     return p.toString();
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
-      minYoe, maxYoe, visitedFilter, appliedFilter, ageFilter, localSearch, boardTab]);
+      minYoe, maxYoe, visitedFilter, appliedFilter, ageFilter, boardTab]);
 
-  // ── Fetch jobs ────────────────────────────────────────────
-  const fetchJobs = useCallback(async (page = 1) => {
-    const qs = buildParams(page);
-    const d = await api(`/api/jobs?${qs}`);
-    setJobs(d.jobs || []);
-    setTotalJobs(d.total || 0);
-    setTotalPages(d.totalPages || 0);
-    setCurrentPage(page);
+  // ── Fetch jobs — never clears board before data arrives ──────
+  const fetchJobs = useCallback(async (page = 1, mergeMode = false) => {
+    setBgLoading(true);
+    try {
+      const qs = buildParams(page);
+      const d = await api(`/api/jobs?${qs}`);
+      const incoming = d.jobs || [];
+      if (mergeMode) {
+        setJobs(prev => {
+          const map = new Map(prev.map(j => [j.jobId, j]));
+          incoming.forEach(j => map.set(j.jobId, j));
+          return [...map.values()];
+        });
+      } else {
+        setJobs(incoming);
+      }
+      setTotalJobs(d.total || 0);
+      setTotalPages(d.totalPages || 0);
+      setCurrentPage(page);
+    } finally {
+      setBgLoading(false);
+    }
   }, [buildParams]);
 
   // ── Boot ──────────────────────────────────────────────────
@@ -549,12 +643,12 @@ export default function JobsPanel({ user, onUserChange }) {
     }).catch(console.error);
   }, [user]);
 
-  // Re-fetch when filters/sort/page/tab change
+  // Re-fetch when server-side filters/sort/tab change (background — board stays visible)
   useEffect(() => {
     if (!user) return;
     fetchJobs(1);
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
-      minYoe, maxYoe, visitedFilter, appliedFilter, ageFilter, localSearch, boardTab]);
+      minYoe, maxYoe, visitedFilter, appliedFilter, ageFilter, boardTab]);
 
   // ── Scrape / search ───────────────────────────────────────
   const handleSearch = useCallback(async (overrideQuery) => {
@@ -588,30 +682,43 @@ export default function JobsPanel({ user, onUserChange }) {
     finally { setScraping(false); }
   }, [searchInput, fetchJobs, jobs.length, sortBy]);
 
-  // ── Refresh: scrape fresh + hide visited ──────────────────────
-  const handleRefresh = useCallback(async () => {
-    const q = searchInput.trim();
-    if (!q) { alert("Enter a search query first."); return; }
+  // ── Pull / Check-for-new: DB-first, then scrape if quota unmet ─
+  // Merges new jobs into the board; removes visited entries.
+  const handlePullRefresh = useCallback(async () => {
+    const q = (searchInput || roleFilter).trim();
+    if (!q) return; // nothing to search yet
+    if (scraping || bgLoading) return;
     setScraping(true);
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
-      if (result.missingToken) { alert("⚠ No Apify token set."); return; }
+      if (result.missingToken) {
+        alert("⚠ No Apify token — add it in avatar → Apify Token.");
+        return;
+      }
       if (result.error) { alert(result.error); return; }
-      // Fetch fresh, unvisited, scoped to this role
+      // Fetch fresh jobs (unvisited) and MERGE into current board
       const qs = new URLSearchParams();
-      qs.set("page","1"); qs.set("pageSize","25"); qs.set("sort", sortBy);
-      qs.set("role", q.toLowerCase()); qs.set("visited","0");
-      qs.set("hideGhost","true"); qs.set("hideFlag","true");
+      qs.set("page","1"); qs.set("pageSize","50"); qs.set("sort", sortBy);
+      qs.set("role", q.toLowerCase());
+      qs.set("visited","0"); qs.set("hideGhost","true"); qs.set("hideFlag","true");
       const d = await api(`/api/jobs?${qs.toString()}`);
-      setJobs(d.jobs || []);
+      const incoming = d.jobs || [];
+      setJobs(prev => {
+        // Remove visited from current display, then merge incoming
+        const map = new Map(prev.filter(j => !j.visited).map(j => [j.jobId, j]));
+        incoming.forEach(j => map.set(j.jobId, j));
+        return [...map.values()].sort((a, b) =>
+          new Date(b.postedAt || 0) - new Date(a.postedAt || 0)
+        );
+      });
       setTotalJobs(d.total || 0);
-      setTotalPages(d.totalPages || 0);
-      setCurrentPage(1);
-      setVisitedFilter("0");
       setRoleFilter(q.toLowerCase());
     } catch(e) { alert("Refresh failed: " + e.message); }
     finally { setScraping(false); }
-  }, [searchInput, sortBy]);
+  }, [searchInput, roleFilter, sortBy, scraping, bgLoading]);
+
+  // ── Legacy Refresh button (end-of-list) ───────────────────────
+  const handleRefresh = handlePullRefresh;
 
   // ── Smart search ──────────────────────────────────────────
   const handleSmartSearch = useCallback(async () => {
@@ -735,6 +842,18 @@ export default function JobsPanel({ user, onUserChange }) {
     setAppliedFilter(""); setAgeFilter(""); setLocalSearch("");
   };
 
+  // ── Live client-side filter (instant, no API call) ───────────
+  const displayJobs = useMemo(() => {
+    if (!localSearch.trim()) return jobs;
+    const q = localSearch.trim().toLowerCase();
+    return jobs.filter(j =>
+      j.company?.toLowerCase().includes(q) ||
+      j.title?.toLowerCase().includes(q)   ||
+      j.location?.toLowerCase().includes(q) ||
+      j.category?.toLowerCase().includes(q)
+    );
+  }, [jobs, localSearch]);
+
   const genCount = Object.values(generated).filter(v=>v?.html && v.html !== "__exists__").length;
   const normalisedPreview = ALIASES[searchInput.trim().toLowerCase()]
     || (searchInput.trim() ? searchInput.trim().replace(/\b\w/g, c=>c.toUpperCase()) : "");
@@ -824,17 +943,29 @@ export default function JobsPanel({ user, onUserChange }) {
           <option value="yoeHigh">Exp ↓</option>
         </select>
 
-        {/* Local search */}
+        {/* Local search — live client-side, every keystroke */}
         <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
           placeholder="Filter visible jobs…"
           style={{ flex:1, minWidth:140, height:34, padding:"0 12px",
                    borderRadius:2, border:`1px solid ${theme.border}`,
                    background:theme.surface, color:theme.text,
                    fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none" }}/>
+        {localSearch && (
+          <button onClick={() => setLocalSearch("")}
+            style={{ background:"none", border:"none", color:theme.textDim,
+                     cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>✕</button>
+        )}
 
-        {/* Job count */}
-        <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0 }}>
-          {totalJobs} job{totalJobs !== 1 ? "s" : ""}
+        {/* Background loading indicator + job count */}
+        <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0,
+                       display:"flex", alignItems:"center", gap:5 }}>
+          {bgLoading && (
+            <span style={{ display:"inline-block", width:10, height:10,
+                           border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
+                           borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/>
+          )}
+          {localSearch ? `${displayJobs.length} of ${totalJobs}` : `${totalJobs}`} job{totalJobs !== 1 ? "s" : ""}
         </span>
 
         {/* ── Row B (wraps to next line) ──────────────── */}
@@ -864,8 +995,8 @@ export default function JobsPanel({ user, onUserChange }) {
           )}
         </div>
 
-        <LucyBtn onClick={() => handleSearch()} disabled={scraping}>
-          {scraping ? "Searching…" : "Search"}
+        <LucyBtn onClick={() => handleSearch()} disabled={scraping || bgLoading}>
+          {scraping ? "Searching…" : jobs.length === 0 ? "Search" : "Set Role"}
         </LucyBtn>
         <LucyBtn onClick={handleSmartSearch} disabled={smartSearching || scraping}
                   accent={theme.surfaceHigh}>
@@ -908,12 +1039,12 @@ export default function JobsPanel({ user, onUserChange }) {
           <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
             {mobilePane === "jobs" && (
               <JobsColumn
-                jobs={jobs} scraping={scraping} generated={generated} loading={loading}
+                jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
                 applyMode={applyMode} theme={theme}
                 totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
                 generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
                 visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
-                setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh}
+                setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
               />
             )}
             {mobilePane === "editor" && (
@@ -983,12 +1114,12 @@ export default function JobsPanel({ user, onUserChange }) {
           <div style={{ display:"flex", flexDirection:"column", minWidth:0, flex:"0 0 58%",
                         borderRight:`1px solid ${theme.border}` }}>
             <JobsColumn
-              jobs={jobs} scraping={scraping} generated={generated} loading={loading}
+              jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
               applyMode={applyMode} theme={theme}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
-              setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh}
+              setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
             />
           </div>
           {/* RIGHT ATS */}
@@ -1056,12 +1187,12 @@ export default function JobsPanel({ user, onUserChange }) {
             flex: `0 0 ${sandboxOpen ? panelSizes.left : panelSizes.left}%`,
           }}>
             <JobsColumn
-              jobs={jobs} scraping={scraping} generated={generated} loading={loading}
+              jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
               applyMode={applyMode} theme={theme}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
-              setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh}
+              setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
             />
           </div>
 
@@ -1144,11 +1275,11 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
                       totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, setActiveAts, setRightTab,
-                      goPage, handleRefresh }) {
+                      goPage, handleRefresh, onPullRefresh }) {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
       {jobs.length === 0 && !scraping ? <EmptyState theme={theme}/> : (
-        <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:8 }}>
+        <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
           {/* Skeleton cards while scraping */}
           {scraping && Array.from({length:6},(_,i) => (
@@ -1214,18 +1345,7 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
             </div>
           )}
 
-          {/* Refresh */}
-          {jobs.length > 0 && isLastPage && (
-            <div style={{ padding:"16px 20px", display:"flex", justifyContent:"center",
-                          flexDirection:"column", alignItems:"center", gap:6 }}>
-              <LucyBtn onClick={handleRefresh} disabled={scraping}
-                        style={{ width:"100%", maxWidth:320, justifyContent:"center" }}>
-                {scraping ? "Scraping…" : "↻ Refresh New Jobs"}
-              </LucyBtn>
-              <span style={{ fontSize:10, color:theme.textDim }}>Scrapes fresh listings · hides visited</span>
-            </div>
-          )}
-        </div>
+        </PullToRefresh>
       )}
     </div>
   );

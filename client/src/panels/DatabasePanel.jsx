@@ -449,6 +449,7 @@ export function DatabasePanel({ user }) {
           <span style={{ position:"absolute", left:12, fontSize:13,
                          pointerEvents:"none", color:theme.textDim }}>🔍</span>
           <input value={search} onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === "Escape") setSearch(""); }}
             placeholder={`Search ${isApps ? "applications" : "resumes"}…`}
             className="rm-input"
             style={{ paddingLeft:36, borderRadius:999 }}/>
