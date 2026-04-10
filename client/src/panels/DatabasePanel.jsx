@@ -171,12 +171,106 @@ function hexToRgb(hex) {
   return `${(n>>16)&255},${(n>>8)&255},${n&255}`;
 }
 
+// ── ATS report display ────────────────────────────────────────
+function AtsReportDisplay({ report, score, theme }) {
+  if (!report) return <p style={{ color:theme.textMuted }}>No report.</p>;
+  const sections = Array.isArray(report) ? report : (report.sections || []);
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      {sections.map((s, i) => (
+        <div key={i} style={{ background:theme.surfaceHigh, borderRadius:12, padding:16 }}>
+          <div style={{ fontWeight:700, fontSize:13, color:theme.text, marginBottom:8 }}>{s.section || s.name || s.title || "Section"}</div>
+          <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.7 }}>{s.feedback || s.comment || s.description || JSON.stringify(s)}</div>
+          {s.score != null && <div style={{ fontSize:11, color:theme.accent, marginTop:4, fontWeight:700 }}>Score: {s.score}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Detail modal (resume preview or ATS report) ───────────────
+function DetailModal({ modal, onClose, theme }) {
+  if (!modal) return null;
+  const isResume = modal.type === "resume";
+
+  const atsColors = (s) => ({
+    bg: s>=80 ? theme.successMuted : s>=60 ? theme.warningMuted : theme.dangerMuted,
+    fg: s>=80 ? theme.success      : s>=60 ? theme.warning      : theme.danger,
+  });
+
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position:"fixed", inset:0, zIndex:1000,
+        background:"rgba(0,0,0,0.5)",
+        display:"flex", alignItems:"center", justifyContent:"center",
+        padding:24,
+      }}>
+      <div style={{
+        background:theme.surface, borderRadius:16,
+        width:"90%", maxWidth:900, height:"85vh",
+        display:"flex", flexDirection:"column",
+        boxShadow:theme.shadowLg, overflow:"hidden",
+      }}>
+        {/* Header */}
+        <div style={{ padding:"16px 24px", borderBottom:`1px solid ${theme.border}`,
+                      display:"flex", alignItems:"center", justifyContent:"space-between",
+                      flexShrink:0 }}>
+          <div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                          fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase",
+                          color:theme.text }}>
+              {isResume ? "📄 Resume" : "📊 ATS Report"} — {modal.company}
+            </div>
+            <div style={{ fontSize:11, color:theme.textMuted, marginTop:2 }}>{modal.role}</div>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            {modal.atsScore != null && (
+              <span style={{
+                padding:"4px 12px", borderRadius:999, fontSize:12, fontWeight:700,
+                background: atsColors(modal.atsScore).bg, color: atsColors(modal.atsScore).fg,
+              }}>
+                ATS {modal.atsScore}
+              </span>
+            )}
+            <button onClick={onClose}
+              style={{ background:"none", border:"none", color:theme.textMuted,
+                       cursor:"pointer", fontSize:20, lineHeight:1 }}>✕</button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex:1, overflow:"hidden", display:"flex" }}>
+          {isResume ? (
+            <iframe
+              srcDoc={modal.html || "<p style='padding:40px;color:#888'>No resume HTML found.</p>"}
+              style={{ width:"100%", height:"100%", border:"none",
+                       background:"#ffffff" }}
+              title="Resume Preview"
+              sandbox="allow-same-origin"/>
+          ) : (
+            <div style={{ flex:1, overflowY:"auto", padding:24 }}>
+              {modal.atsReport ? (
+                <AtsReportDisplay report={modal.atsReport} score={modal.atsScore} theme={theme}/>
+              ) : (
+                <p style={{ color:theme.textMuted, fontSize:13 }}>No ATS report available.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main panel ────────────────────────────────────────────────
 export function DatabasePanel({ user }) {
   const { theme, mode } = useTheme();
   const [activeSheet,  setActiveSheet]  = useState("applications");
   const [apps,         setApps]         = useState([]);
   const [resumes,      setResumes]      = useState([]);
+  const [detailModal,  setDetailModal]  = useState(null);
+  const [detailLoading,setDetailLoading]= useState(false);
   const [loading,      setLoading]      = useState(false);
   const [saving,       setSaving]       = useState({});
   const [editCell,     setEditCell]     = useState(null);
@@ -367,6 +461,29 @@ export function DatabasePanel({ user }) {
     setResumes(prev => prev.filter(r => r.job_id !== jobId));
   };
 
+  const openDetail = async (jobId, type, existingData = null) => {
+    if (existingData) {
+      setDetailModal({ ...existingData, type });
+      return;
+    }
+    setDetailLoading(true);
+    try {
+      const d = await api(`/api/resumes/${jobId}`);
+      setDetailModal({
+        type,
+        html: d.html,
+        atsReport: d.atsReport,
+        atsScore: d.ats_score,
+        company: d.company,
+        role: d.role,
+      });
+    } catch(e) {
+      alert("Failed to load: " + e.message);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   const exportExcel = async () => {
     try {
       const r = await api("/api/export/excel");
@@ -390,6 +507,8 @@ export function DatabasePanel({ user }) {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
                   overflow:"hidden", background:theme.bg }}>
+
+      <DetailModal modal={detailModal} onClose={() => setDetailModal(null)} theme={theme}/>
 
       {/* ── Header ── */}
       <div style={{
@@ -558,7 +677,7 @@ export function DatabasePanel({ user }) {
                 <th style={{ padding:"10px 14px", textAlign:"left", fontSize:10,
                              fontWeight:700, color:theme.textDim,
                              borderBottom:`1px solid ${theme.border}`,
-                             width:50 }}/>
+                             width:120 }}/>
               </tr>
             </thead>
             <tbody>
@@ -639,10 +758,13 @@ export function DatabasePanel({ user }) {
                         <td key={c.key} style={{ padding:"12px 14px", fontSize:12,
                                                   width:c.width, color:theme.text }}>
                           {raw != null && raw !== "" ? (
-                            <span className="rm-badge" style={{
-                              background:raw>=80 ? theme.successMuted : raw>=60 ? theme.warningMuted : theme.dangerMuted,
-                              color:raw>=80 ? theme.success : raw>=60 ? theme.warning : theme.danger,
-                            }}>{raw}</span>
+                            <span className="rm-badge"
+                              onClick={() => openDetail(rowId, "ats")}
+                              style={{
+                                background:raw>=80 ? theme.successMuted : raw>=60 ? theme.warningMuted : theme.dangerMuted,
+                                color:raw>=80 ? theme.success : raw>=60 ? theme.warning : theme.danger,
+                                cursor:"pointer",
+                              }}>{raw}</span>
                           ) : "—"}
                         </td>
                       );
@@ -682,16 +804,40 @@ export function DatabasePanel({ user }) {
                       );
                     })}
 
-                    <td style={{ padding:"12px 14px", fontSize:12,
-                                 color:theme.text, width:50 }}>
-                      <button style={{ background:"transparent", border:"none",
-                                       color:theme.textDim, cursor:"pointer",
-                                       fontSize:12, padding:"2px 6px", borderRadius:4,
-                                       transition:"color 0.15s" }}
-                        onMouseEnter={e => { e.currentTarget.style.color = theme.danger; }}
-                        onMouseLeave={e => { e.currentTarget.style.color = theme.textDim; }}
-                        onClick={() => isApps ? deleteApp(rowId) : deleteResume(rowId)}
-                        title="Delete row">✕</button>
+                    <td style={{ padding:"8px 14px", fontSize:12, color:theme.text, width:120, whiteSpace:"nowrap" }}>
+                      <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                        {/* View ATS */}
+                        <button
+                          onClick={() => openDetail(rowId, "ats")}
+                          disabled={detailLoading}
+                          title="View ATS Report"
+                          style={{ background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
+                                   color:theme.textMuted, cursor:"pointer",
+                                   fontSize:10, padding:"3px 8px", borderRadius:4,
+                                   fontWeight:700, letterSpacing:"0.04em" }}>
+                          ATS
+                        </button>
+                        {/* View Resume */}
+                        <button
+                          onClick={() => openDetail(rowId, "resume")}
+                          disabled={detailLoading}
+                          title="View Resume"
+                          style={{ background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
+                                   color:theme.textMuted, cursor:"pointer",
+                                   fontSize:10, padding:"3px 8px", borderRadius:4,
+                                   fontWeight:700, letterSpacing:"0.04em" }}>
+                          CV
+                        </button>
+                        {/* Delete */}
+                        <button
+                          style={{ background:"transparent", border:"none",
+                                   color:theme.textDim, cursor:"pointer",
+                                   fontSize:12, padding:"2px 6px", borderRadius:4 }}
+                          onMouseEnter={e => { e.currentTarget.style.color = theme.danger; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = theme.textDim; }}
+                          onClick={() => isApps ? deleteApp(rowId) : deleteResume(rowId)}
+                          title="Delete row">✕</button>
+                      </div>
                     </td>
                   </tr>
                 );

@@ -111,14 +111,32 @@ function WorkBadge({ t, theme }) {
 }
 
 // ── ATS badge ─────────────────────────────────────────────────
-function ATSBadge({ score }) {
+function ATSBadge({ score, onClick }) {
   if (score == null) return null;
   const bg = score>=80 ? "#dcfce7" : score>=60 ? "#fef9c3" : "#fee2e2";
   const fg = score>=80 ? "#166534" : score>=60 ? "#854d0e" : "#991b1b";
   return (
-    <span style={{ background:bg, color:fg, padding:"2px 8px",
-                   borderRadius:999, fontSize:10, fontWeight:700 }}>
+    <span
+      onClick={onClick ? e => { e.stopPropagation(); onClick(); } : undefined}
+      style={{ background:bg, color:fg, padding:"2px 8px",
+               borderRadius:999, fontSize:10, fontWeight:700,
+               cursor: onClick ? "pointer" : "default",
+               border: onClick ? `1px solid ${fg}33` : "none" }}>
       ATS {score}
+    </span>
+  );
+}
+
+// ── Resume badge ──────────────────────────────────────────────
+function ResumeBadge({ onClick, loading }) {
+  return (
+    <span
+      onClick={onClick ? e => { e.stopPropagation(); onClick(); } : undefined}
+      style={{ background:"#e8f6fb", color:"#1a6a8a", padding:"2px 8px",
+               borderRadius:999, fontSize:10, fontWeight:700,
+               cursor:"pointer", border:"1px solid #A8D8EA44",
+               display:"inline-flex", alignItems:"center", gap:3 }}>
+      {loading ? "⏳" : "📄"} Resume
     </span>
   );
 }
@@ -771,6 +789,20 @@ export default function JobsPanel({ user, onUserChange }) {
       setActiveAts({ score:existing.atsScore, report:existing.atsReport, company:job.company, title:job.title });
       setRightTab("ats"); return;
     }
+    if (existing?.html === "__exists__" && !force) {
+      // Resume exists in DB but not in memory — fetch on demand
+      setLoading(p => ({ ...p, [key]: "loading" }));
+      try {
+        const d = await api(`/api/resumes/${key}`);
+        const entry = { html: d.html, atsScore: d.ats_score, atsReport: d.atsReport, company: d.company, title: d.role };
+        setGenerated(p => ({ ...p, [key]: entry }));
+        openSandbox({ ...entry, company: entry.company, title: entry.title });
+        setActiveAts({ score: d.ats_score, report: d.atsReport, company: d.company, title: d.role });
+        setRightTab("ats");
+      } catch(e) { alert("Failed to load resume: " + e.message); }
+      finally { setLoading(p => { const n = {...p}; delete n[key]; return n; }); }
+      return;
+    }
     setLoading(p => ({ ...p, [key]:"generating" }));
     try {
       const d = await api("/api/generate", { method:"POST",
@@ -1045,6 +1077,7 @@ export default function JobsPanel({ user, onUserChange }) {
                 generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
                 visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
                 setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+                setMobilePane={setMobilePane} isMobile={isMobile}
               />
             )}
             {mobilePane === "editor" && (
@@ -1120,6 +1153,7 @@ export default function JobsPanel({ user, onUserChange }) {
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
               setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+              setMobilePane={setMobilePane} isMobile={isMobile}
             />
           </div>
           {/* RIGHT ATS */}
@@ -1193,6 +1227,7 @@ export default function JobsPanel({ user, onUserChange }) {
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
               setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+              setMobilePane={setMobilePane} isMobile={isMobile}
             />
           </div>
 
@@ -1275,7 +1310,8 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
                       totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, setActiveAts, setRightTab,
-                      goPage, handleRefresh, onPullRefresh }) {
+                      goPage, handleRefresh, onPullRefresh,
+                      setMobilePane, isMobile }) {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
       {jobs.length === 0 && !scraping ? <EmptyState theme={theme}/> : (
@@ -1323,6 +1359,14 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
                     visitUrl(job);
                   }
                 }}
+                onAts={() => {
+                  if (g?.atsReport || g?.atsScore != null) {
+                    setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
+                    setRightTab("ats");
+                    if (isMobile) setMobilePane("ats");
+                  }
+                }}
+                onResume={() => generate(job, false)}
               />
             );
           })}
@@ -1353,7 +1397,8 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme,
 
 // ── Job card ──────────────────────────────────────────────────
 function JobCard({ job, g, done, st, applyMode, theme,
-                   onGenerate, onViewSandbox, onExport, onVisit, onStar, onCardClick }) {
+                   onGenerate, onViewSandbox, onExport, onVisit, onStar, onCardClick,
+                   onAts, onResume }) {
   const [hov, setHov] = useState(false);
   return (
     <div
@@ -1418,7 +1463,12 @@ function JobCard({ job, g, done, st, applyMode, theme,
       {/* Right side */}
       <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
         <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
-        {g?.atsScore != null && <ATSBadge score={g.atsScore}/>}
+        {g?.atsScore != null && (
+          <ATSBadge score={g.atsScore} onClick={onAts}/>
+        )}
+        {done && (
+          <ResumeBadge onClick={onResume} loading={st === "loading"}/>
+        )}
 
         {/* Star / bookmark */}
         <button

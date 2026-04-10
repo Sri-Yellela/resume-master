@@ -1754,15 +1754,26 @@ app.get("/api/resumes/:jobId/pdf", requireAuth, async (req, res) => {
 // RESUME HISTORY
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/resumes", requireAuth, (req, res) => {
-  const rows = db.prepare(`SELECT r.*,COUNT(v.id) as versions FROM resumes r
+  const rows = db.prepare(`
+    SELECT r.id, r.user_id, r.job_id, r.company, r.role, r.category,
+           r.apply_mode, r.ats_score, r.ats_report, r.created_at, r.updated_at,
+           COUNT(v.id) as versions
+    FROM resumes r
     LEFT JOIN resume_versions v ON v.user_id=r.user_id AND v.job_id=r.job_id
-    WHERE r.user_id=? GROUP BY r.id ORDER BY r.updated_at DESC`).all(req.user.id);
-  res.json(rows.map(r=>({...r,atsReport:JSON.parse(r.ats_report||"null")})));
+    WHERE r.user_id=? GROUP BY r.id ORDER BY r.updated_at DESC
+  `).all(req.user.id);
+  res.json(rows.map(r => ({ ...r, atsReport: JSON.parse(r.ats_report || "null"), html: undefined })));
 });
 app.get("/api/resumes/:jobId", requireAuth, (req, res) => {
-  const row = db.prepare("SELECT * FROM resumes WHERE user_id=? AND job_id=?").get(req.user.id, req.params.jobId);
-  if (!row) return res.status(404).json({ error:"Not found" });
-  res.json({...row,atsReport:JSON.parse(row.ats_report||"null")});
+  const row = db.prepare(`
+    SELECT r.*, COUNT(v.id) as versions
+    FROM resumes r
+    LEFT JOIN resume_versions v ON v.user_id=r.user_id AND v.job_id=r.job_id
+    WHERE r.user_id=? AND r.job_id=?
+    GROUP BY r.id
+  `).get(req.user.id, req.params.jobId);
+  if (!row) return res.status(404).json({ error: "Resume not found" });
+  res.json({ ...row, atsReport: JSON.parse(row.ats_report || "null") });
 });
 app.get("/api/resumes/:jobId/versions", requireAuth, (req, res) => {
   const rows = db.prepare("SELECT * FROM resume_versions WHERE user_id=? AND job_id=? ORDER BY version DESC").all(req.user.id, req.params.jobId);
