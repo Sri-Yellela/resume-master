@@ -107,7 +107,6 @@ function ThemeToggle() {
 const TABS = [
   { id:"jobs",     label:"Jobs",     icon:"💼" },
   { id:"database", label:"Database", icon:"🗃" },
-  { id:"profile",  label:"Profile",  icon:"👤" },
 ];
 
 export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange }) {
@@ -210,24 +209,6 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
       <div style={{ display:"flex", alignItems:"center", gap:isMobile?4:8, flexShrink:0 }}>
         <ThemeToggle/>
 
-        {/* Accent color swatches */}
-        <div style={{ display:"flex", alignItems:"center", gap:3 }}>
-          {ACCENT_OPTIONS.map(opt => (
-            <button key={opt.id} title={opt.label} onClick={() => setAccentId(opt.id)}
-              style={{
-                width:14, height:14, borderRadius:"50%",
-                background: opt.color,
-                border: accentId === opt.id ? `2px solid ${theme.text}` : "2px solid transparent",
-                outline: accentId === opt.id ? `1.5px solid ${opt.color}` : "none",
-                outlineOffset: "1px",
-                cursor:"pointer", flexShrink:0,
-                transform: accentId === opt.id ? "scale(1.3)" : "scale(1)",
-                transition:"transform 0.15s, border-color 0.15s",
-                padding:0,
-              }}/>
-          ))}
-        </div>
-
         {/* Mode chip — hidden on mobile to save space */}
         {!isMobile && (
           <div ref={modeRef} style={{ position:"relative" }}>
@@ -285,13 +266,52 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
 
           {userOpen && (
             <Panel theme={theme} style={{ minWidth:280 }}>
-              {/* User info */}
+              {/* PROFILE nav button + user info */}
               <div style={{ padding:"10px 16px 8px", borderBottom:`1px solid ${theme.border}` }}>
-                <div style={{ fontSize:12, fontWeight:700, color:theme.text }}>
-                  {user?.username}
-                </div>
+                <button
+                  onClick={() => { setUserOpen(false); onTabChange("profile"); }}
+                  style={{
+                    background:"transparent", border:"none", padding:0, cursor:"pointer",
+                    fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
+                    fontWeight:800, fontSize:14, letterSpacing:"0.06em",
+                    textTransform:"uppercase", color:theme.text,
+                    display:"block", width:"100%", textAlign:"left",
+                    transition:"color 0.15s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color=theme.accent}
+                  onMouseLeave={e => e.currentTarget.style.color=theme.text}>
+                  PROFILE
+                </button>
                 <div style={{ fontSize:10, color:theme.textDim, marginTop:2 }}>
-                  {user?.isAdmin ? "Administrator" : "Member"}
+                  {user?.username} · {user?.isAdmin ? "Administrator" : "Member"}
+                </div>
+              </div>
+
+              {/* Accent color */}
+              <div style={{ padding:"10px 16px 8px", borderBottom:`1px solid ${theme.border}` }}>
+                <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
+                               letterSpacing:"0.08em", color:theme.textDim, marginBottom:8 }}>
+                  Accent Color
+                </div>
+                <div style={{
+                  display:"flex", alignItems:"center", gap:8,
+                  overflowX:"auto", paddingBottom:2,
+                  /* touch-scroll */ WebkitOverflowScrolling:"touch",
+                }}>
+                  {ACCENT_OPTIONS.map(opt => (
+                    <button key={opt.id} title={opt.label} onClick={() => setAccentId(opt.id)}
+                      style={{
+                        width:22, height:22, borderRadius:"50%", flexShrink:0,
+                        background: opt.color,
+                        border: accentId === opt.id ? `2px solid ${theme.text}` : "2px solid transparent",
+                        outline: accentId === opt.id ? `1.5px solid ${opt.color}` : "none",
+                        outlineOffset:"1px",
+                        cursor:"pointer",
+                        transform: accentId === opt.id ? "scale(1.25)" : "scale(1)",
+                        transition:"transform 0.15s, border-color 0.15s",
+                        padding:0,
+                      }}/>
+                  ))}
                 </div>
               </div>
 

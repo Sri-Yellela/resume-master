@@ -145,12 +145,16 @@ export function ThemeProvider({ children }) {
   });
 
   const [accentId, setAccentIdRaw] = useState(() => {
-    return localStorage.getItem("rm_accent_id") || "sky";
+    const saved = sessionStorage.getItem("rm_session_accent");
+    if (saved && ACCENT_OPTIONS.find(a => a.id === saved)) return saved;
+    const random = ACCENT_OPTIONS[Math.floor(Math.random() * ACCENT_OPTIONS.length)].id;
+    sessionStorage.setItem("rm_session_accent", random);
+    return random;
   });
 
   const setAccentId = (id) => {
     setAccentIdRaw(id);
-    localStorage.setItem("rm_accent_id", id);
+    sessionStorage.setItem("rm_session_accent", id);
   };
 
   const accentOpt = ACCENT_OPTIONS.find(a => a.id === accentId) || ACCENT_OPTIONS[0];

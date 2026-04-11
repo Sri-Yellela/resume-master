@@ -722,11 +722,12 @@ async function scrapeJobs(query, apifyToken) {
 
   const filtered = combined.filter(item => {
     if (!item.title || !item.company || !item.jobId) { cntNoTitle++;  return false; }
-    // Hard-drop #1: no external apply URL
-    if (!item.applyUrl)                              { cntNoApply++;  return false; }
-    // Hard-drop #2: applyUrl is a LinkedIn-internal apply link (not an external ATS)
-    const applyDomain = extractDomain(item.applyUrl);
-    if (applyDomain && applyDomain.includes("linkedin.com")) { cntNoApply++; return false; }
+    // Hard-drop: applyUrl is a LinkedIn-internal apply link (not an external ATS)
+    // noExternalApplyUrl (Easy Apply) is counted but NOT dropped — many valid roles (PM, etc.) use Easy Apply
+    if (item.applyUrl) {
+      const applyDomain = extractDomain(item.applyUrl);
+      if (applyDomain && applyDomain.includes("linkedin.com")) { cntNoApply++; return false; }
+    }
     if (!isFullTimeNorm(item))                 { cntNotFT++;      return false; }
     if (!isTitleRelevant(item.title, query))   { cntIrrelevant++; return false; }
     if (isReposted(item))                      { cntRepost++;     return false; }
@@ -953,6 +954,11 @@ function buildFullPrompt(profile, job, resumeText, mode, employers) {
 // ──────────────────────────────────────────────────────────────
 
 async function htmlToPdf(html) {
+  // Ensure doctype for correct browser rendering
+  if (!html.trimStart().toLowerCase().startsWith("<!doctype")) {
+    html = "<!DOCTYPE html>" + html;
+  }
+
   // On Windows, @sparticuz/chromium provides a Linux ELF binary that cannot run.
   // Detect Windows and use the system Chrome installation instead.
   const isWindows = process.platform === "win32";
@@ -967,7 +973,7 @@ async function htmlToPdf(html) {
     const fs = await import("fs");
     executablePath = winPaths.find(p => { try { return fs.existsSync(p); } catch { return false; } });
     if (!executablePath) throw new Error("Chrome not found on Windows. Install Chrome to enable PDF export.");
-    launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+    launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
   } else {
     executablePath = await chromium.executablePath();
     launchArgs = chromium.args;
@@ -977,13 +983,13 @@ async function htmlToPdf(html) {
     args:            launchArgs,
     defaultViewport: isWindows ? { width:1240, height:1754 } : chromium.defaultViewport,
     executablePath,
-    headless:        true,
+    headless:        isWindows ? true : chromium.headless,
   });
 
   try {
     const page = await browser.newPage();
     await page.setViewport({ width:1240, height:1754 });
-    await page.setContent(html, { waitUntil:"domcontentloaded" });
+    await page.setContent(html, { waitUntil:"load" });
     // Wait for fonts to settle without relying on network idle
     await new Promise(r => setTimeout(r, 800));
     const pdf = await page.pdf({
@@ -997,7 +1003,8 @@ async function htmlToPdf(html) {
         right:  "0.5in",
       },
     });
-    return pdf;
+    if (!pdf || pdf.length === 0) throw new Error("PDF generation produced empty output");
+    return Buffer.from(pdf);
   } finally {
     await browser.close();
   }
