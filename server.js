@@ -310,6 +310,16 @@ db.pragma("busy_timeout = 5000");
         );
       `,
     },
+    {
+      id: "009_profile_name_split_and_pending",
+      sql: `
+        ALTER TABLE user_profile ADD COLUMN first_name TEXT;
+        ALTER TABLE user_profile ADD COLUMN middle_name TEXT;
+        ALTER TABLE user_profile ADD COLUMN last_name TEXT;
+        ALTER TABLE user_profile ADD COLUMN name_suffix TEXT;
+        ALTER TABLE user_jobs ADD COLUMN resume_generated INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -326,6 +336,23 @@ db.pragma("busy_timeout = 5000");
       console.error(`[migrate] ✗ FAILED ${m.id}:`, e.message);
       process.exit(1);
     }
+  }
+}
+
+// ── Backfill: split full_name into first_name / last_name ─────
+{
+  const rows = db.prepare("SELECT user_id, full_name FROM user_profile WHERE full_name IS NOT NULL AND first_name IS NULL").all();
+  if (rows.length > 0) {
+    const upd = db.prepare("UPDATE user_profile SET first_name=?, last_name=? WHERE user_id=?");
+    db.transaction(() => {
+      rows.forEach(r => {
+        const parts = (r.full_name || "").trim().split(/\s+/);
+        const first = parts[0] || "";
+        const last  = parts.length > 1 ? parts[parts.length - 1] : "";
+        upd.run(first, last, r.user_id);
+      });
+    })();
+    console.log(`[backfill] Split full_name for ${rows.length} profiles`);
   }
 }
 
@@ -360,18 +387,34 @@ Do not use prior knowledge, assumptions, or memory of other calls.
 Every keyword in tier1_matched and tier1_missing must appear verbatim
 in the job description text provided below.
 
+ACTION VERB RULES — critical:
+Only include STRONG, SPECIFIC action verbs in action_verbs_matched and action_verbs_missing.
+Strong action verbs are domain-specific and demonstrate concrete capability:
+  Examples of STRONG verbs to include: Architecting, Designing, Implementing, Developing,
+  Deploying, Collaborating, Optimizing, Scaling, Migrating, Integrating, Automating,
+  Mentoring, Leading, Building, Launching, Refactoring, Debugging, Analyzing, Modelling,
+  Orchestrating, Coordinating, Delivering, Executing, Driving, Governing, Auditing.
+
+WEAK generic verbs to EXCLUDE from action verb lists (do not count these):
+  Utilize, Use, Apply, Employ, Bring, Demonstrate, Perform, Do, Make, Have, Get,
+  Ensure, Support, Help, Assist, Provide, Enable, Allow, Work, Handle, Manage (when vague),
+  Involve, Include, Require, Need, Want, Like, Know, Understand, Able, Capable.
+
+If a verb appears in the JD but is weak/generic, omit it from both action_verbs_matched
+and action_verbs_missing entirely. Do not penalize the candidate for missing weak verbs.
+
 Reply ONLY with valid JSON. No markdown fences, no explanation, no preamble.
 Use this exact schema:
 {
   "score": <integer 0-100>,
-  "tier1_matched": [<keywords from JD that appear in resume>],
-  "tier1_missing": [<keywords from JD that do NOT appear in resume>],
-  "action_verbs_matched": [<strong action verbs from JD found in resume>],
-  "action_verbs_missing": [<strong action verbs from JD not in resume>],
+  "tier1_matched": [<specific technical keywords, tools, skills from JD that appear in resume>],
+  "tier1_missing": [<specific technical keywords, tools, skills from JD NOT in resume>],
+  "action_verbs_matched": [<STRONG domain-specific action verbs from JD found in resume>],
+  "action_verbs_missing": [<STRONG domain-specific action verbs from JD NOT in resume>],
   "strengths": [<2-4 specific strengths as short sentences>],
   "improvements": [<2-4 specific improvements as short sentences>],
-  "best_possible_score": <integer — highest score achievable given the candidate authentic background without fabrication. Account for: cloud provider mismatches GCP skills at AWS-native company, domain gaps, missing required certifications, seniority gaps, required domain experience the candidate lacks>,
-  "best_possible_reason": "<one sentence: name the specific gaps preventing a higher score — e.g. missing domain experience, cloud provider mismatch, seniority gap, required certification absent. Be specific about the constraint>",
+  "best_possible_score": <integer — highest achievable score given candidate background. Account for: cloud provider mismatches, domain gaps, missing certifications, seniority gaps>,
+  "best_possible_reason": "<one sentence: specific gaps preventing higher score>",
   "verdict": "<one sentence overall assessment>"
 }`;
 
@@ -392,7 +435,7 @@ try {
   TAILORED_PROMPT_STATIC = fs.readFileSync(TAILORED_PROMPT_PATH, "utf8");
   console.log(`[prompt] TAILORED loaded — ${TAILORED_PROMPT_STATIC.length} chars`);
 } catch(e) {
-  console.warn("[prompt] WARNING: Could not load tailored prompt:", e.message);
+  console.log(`[prompt] tailored_system_prompt.md not found — using master prompt for TAILORED mode`);
 }
 
 const CUSTOM_SAMPLER_PROMPT_PATH = path.join(__dirname, "custom_sampler_system_prompt.md");
@@ -401,7 +444,11 @@ try {
   CUSTOM_SAMPLER_PROMPT_STATIC = fs.readFileSync(CUSTOM_SAMPLER_PROMPT_PATH, "utf8");
   console.log(`[prompt] CUSTOM_SAMPLER loaded — ${CUSTOM_SAMPLER_PROMPT_STATIC.length} chars`);
 } catch(e) {
-  console.warn("[prompt] WARNING: Could not load custom sampler prompt:", e.message);
+  console.log(`[prompt] custom_sampler_system_prompt.md not found — using master prompt for CUSTOM_SAMPLER mode`);
+}
+
+if (!TAILORED_PROMPT_STATIC || !CUSTOM_SAMPLER_PROMPT_STATIC) {
+  console.log("[startup] One or more mode-specific prompts missing — affected modes will use master prompt as fallback. CUSTOM_SAMPLER rules (one-FAANG limit, company scale ordering) will NOT apply.");
 }
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -889,10 +936,13 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers) {
   if (mode === "TAILORED" && employers?.length >= 2)
     employerBlock = `**Employer 1 (fixed):** ${employers[0]}\n**Employer 2 (fixed):** ${employers[1]}\n`;
 
+  const candidateName = profile?.full_name ||
+    [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "";
+
   return `## RUNTIME INPUTS
 
 **Mode:** ${mode}
-**Candidate full name:** ${profile?.full_name||""}
+**Candidate full name:** ${candidateName}
 **Phone:** ${profile?.phone||""}
 **Email:** ${profile?.email||""}
 **LinkedIn URL:** ${profile?.linkedin_url||""}
@@ -1053,10 +1103,11 @@ function buildAutofillPayload(profile, mode) {
   const linkedinUrl = normaliseUrl(profile?.linkedin_url||"");
   const githubUrl   = normaliseUrl(profile?.github_url||"");
 
-  const nameParts = (profile?.full_name||"").trim().split(/\s+/).filter(Boolean);
-  const firstName  = nameParts[0]  || "";
-  const lastName   = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
-  const middleName = nameParts.length > 2 ? nameParts.slice(1, -1).join(" ") : "";
+  const nameParts  = (profile?.full_name||"").trim().split(/\s+/).filter(Boolean);
+  const firstName  = profile?.first_name  || nameParts[0] || "";
+  const lastName   = profile?.last_name   || (nameParts.length > 1 ? nameParts[nameParts.length - 1] : "");
+  const middleName = profile?.middle_name || (nameParts.length > 2 ? nameParts.slice(1, -1).join(" ") : "");
+  const suffix     = profile?.name_suffix || "";
 
   return {
     full_name:profile?.full_name||"", email:profile?.email||"", phone,
@@ -1069,6 +1120,7 @@ function buildAutofillPayload(profile, mode) {
       first_name:firstName, firstName, fname:firstName, given_name:firstName,
       last_name:lastName,   lastName,  lname:lastName,  family_name:lastName, surname:lastName,
       middle_name:middleName, middleName, middle:middleName,
+      suffix, name_suffix:suffix, nameSuffix:suffix,
       name:profile?.full_name||"", fullName:profile?.full_name||"", full_name:profile?.full_name||"",
       email:profile?.email||"", email_address:profile?.email||"", emailAddress:profile?.email||"",
       phone, phone_number:phone, phoneNumber:phone, mobile:phone, telephone:phone,
@@ -1153,21 +1205,35 @@ app.post("/api/auth/register", (req, res) => {
   const { username, password, profile={}, apifyToken } = req.body;
   if (!username||!password) return res.status(400).json({ error:"username and password required" });
   if (password.length < 8)  return res.status(400).json({ error:"password must be at least 8 characters" });
-  if (!profile.full_name)   return res.status(400).json({ error:"full name is required" });
   if (!profile.email)       return res.status(400).json({ error:"email is required" });
+  if (!profile.first_name)  return res.status(400).json({ error:"first name is required" });
+  if (!profile.last_name)   return res.status(400).json({ error:"last name is required" });
+
+  // Build full_name from parts for backwards compat
+  const fullName = [
+    profile.first_name?.trim(),
+    profile.middle_name?.trim() || null,
+    profile.last_name?.trim(),
+    profile.name_suffix?.trim() || null,
+  ].filter(Boolean).join(" ");
+
   try {
     db.prepare("INSERT INTO users (username,password_hash,is_admin,apply_mode) VALUES (?,?,0,'TAILORED')")
       .run(username, bcrypt.hashSync(password, 10));
     const newUser = db.prepare("SELECT id FROM users WHERE username=?").get(username);
     db.prepare(`INSERT INTO user_profile
-      (user_id,full_name,email,phone,linkedin_url,github_url,location,
+      (user_id,full_name,first_name,middle_name,last_name,name_suffix,
+       email,phone,linkedin_url,github_url,location,
        address_line1,address_line2,city,state,zip,country,
        gender,ethnicity,veteran_status,disability_status,
        requires_sponsorship,has_clearance,clearance_level,visa_type,work_auth)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
         newUser.id,
-        profile.full_name||null, profile.email||null, profile.phone||null,
+        fullName||null,
+        profile.first_name||null, profile.middle_name||null,
+        profile.last_name||null,  profile.name_suffix||null,
+        profile.email||null, profile.phone||null,
         profile.linkedin_url||null, profile.github_url||null,
         profile.city&&profile.state ? `${profile.city}, ${profile.state}` : (profile.location||null),
         profile.address_line1||null, profile.address_line2||null,
@@ -1346,7 +1412,13 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   `).run(userId, userId);
 
   // ── Filter conditions ──
-  const conditions = [`sj.scraped_at > ${sevenDaysAgo}`, `(uj.disliked IS NULL OR uj.disliked = 0)`, `(uj.applied IS NULL OR uj.applied = 0)`];
+  const conditions = [
+    `sj.scraped_at > ${sevenDaysAgo}`,
+    `(uj.disliked IS NULL OR uj.disliked = 0)`,
+    `(uj.applied IS NULL OR uj.applied = 0)`,
+    `(uj.visited IS NULL OR uj.visited = 0)`,
+    `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
+  ];
   const filterParams = [];
 
   const role = (req.query.role || "").trim().toLowerCase();
@@ -1388,10 +1460,6 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     conditions.push(`(sj.applicant_count IS NULL OR sj.applicant_count <= ?)`);
     filterParams.push(maxApplicants);
   }
-
-  const visitedF = req.query.visited;
-  if (visitedF === "1")  { conditions.push(`uj.visited = 1`); }
-  if (visitedF === "0")  { conditions.push(`uj.visited = 0`); }
 
   if (req.query.starred === "1") { conditions.push(`uj.starred = 1`); }
 
@@ -1599,6 +1667,23 @@ app.get("/api/jobs/:id/recruiter", requireAuth, (_req, res) => {
   res.json({ comingSoon: true, available: false });
 });
 
+// ── Pending jobs (resume generated but not yet applied or disliked) ──
+app.get("/api/jobs/pending", requireAuth, (req, res) => {
+  const userId = req.user.id;
+  const rows = db.prepare(`
+    SELECT sj.*, uj.starred, uj.applied, uj.disliked, uj.visited, uj.resume_generated,
+           r.ats_score, r.apply_mode
+    FROM scraped_jobs sj
+    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
+    WHERE uj.resume_generated = 1
+      AND (uj.applied IS NULL OR uj.applied = 0)
+      AND (uj.disliked IS NULL OR uj.disliked = 0)
+    ORDER BY uj.updated_at DESC
+  `).all(userId, userId);
+  res.json(rows);
+});
+
 app.get("/api/categories", requireAuth, (_req,res) => res.json(INDUSTRY_CATEGORIES));
 
 // ═══════════════════════════════════════════════════════════════
@@ -1705,8 +1790,11 @@ ${cachedResumeText}`;
   }
 
   const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
+  // Phase 4A: always use stored base resume as authoritative source
+  const storedResume = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
+  const authoritativeResumeText = storedResume?.content || resumeText;
   try {
-    const { system, user } = buildFullPrompt(profile, job, resumeText, mode, employers);
+    const { system, user } = buildFullPrompt(profile, job, authoritativeResumeText, mode, employers);
     const resumeMsg = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 4096,
@@ -1841,6 +1929,14 @@ ${resumeStripped}`;
       apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,updated_at=excluded.updated_at`)
       .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,formattedHtml,atsScore,JSON.stringify(atsReport));
 
+    // Phase 1C: mark resume_generated in user_jobs
+    db.prepare(`
+      INSERT INTO user_jobs (user_id, job_id, resume_generated, updated_at)
+      VALUES (?, ?, 1, unixepoch())
+      ON CONFLICT(user_id, job_id) DO UPDATE SET
+        resume_generated = 1, updated_at = unixepoch()
+    `).run(req.user.id, String(jobId));
+
     res.json({ html: formattedHtml, atsScore, atsReport, cached:false, version });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
@@ -1855,45 +1951,11 @@ app.post("/api/resumes/:jobId/html", requireAuth, (req, res) => {
     .run(html, req.user.id, req.params.jobId);
   res.json({ ok:true });
 });
-app.post("/api/export-pdf", requireAuth, async (req, res) => {
-  const { html, filename } = req.body;
-  if (!html) return res.status(400).json({ error:"html required" });
-  try {
-    console.log(`[pdf] generating, html length: ${html.length}`);
-    const pdf = await htmlToPdf(html);
-    console.log(`[pdf] done, buffer size: ${pdf.length}`);
-    if (pdf.length < 1000) {
-      console.error("[pdf] suspiciously small output:", pdf.length);
-      return res.status(500).json({ error:"PDF generation produced empty output" });
-    }
-    res.set({
-      "Content-Type":"application/pdf",
-      "Content-Disposition":`attachment; filename="${filename||"resume"}.pdf"`,
-      "Content-Length":pdf.length,
-    });
-    res.end(pdf);
-  } catch(e) {
-    console.error("[pdf] export failed:", e.message, e.stack);
-    res.status(500).json({ error:e.message });
-  }
+app.post("/api/export-pdf", requireAuth, (_req, res) => {
+  res.status(503).json({ error: "Server-side PDF export is not available. Use client-side print instead.", useClientSide: true });
 });
-app.get("/api/resumes/:jobId/pdf", requireAuth, async (req, res) => {
-  const row = db.prepare("SELECT * FROM resumes WHERE user_id=? AND job_id=?").get(req.user.id, req.params.jobId);
-  if (!row) return res.status(404).json({ error:"Not found" });
-  try {
-    console.log(`[pdf] generating for ${row.company}, html length: ${row.html?.length||0}`);
-    const pdf = await htmlToPdf(row.html);
-    console.log(`[pdf] done, buffer size: ${pdf.length}`);
-    res.set({
-      "Content-Type":"application/pdf",
-      "Content-Disposition":`attachment; filename="Resume_${row.company.replace(/\s+/g,"_")}.pdf"`,
-      "Content-Length":pdf.length,
-    });
-    res.end(pdf);
-  } catch(e) {
-    console.error("[pdf] export failed:", e.message, e.stack);
-    res.status(500).json({ error:e.message });
-  }
+app.get("/api/resumes/:jobId/pdf", requireAuth, (_req, res) => {
+  res.status(503).json({ error: "Server-side PDF export is not available. Use client-side print instead.", useClientSide: true });
 });
 
 // ═══════════════════════════════════════════════════════════════

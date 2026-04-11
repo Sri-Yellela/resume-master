@@ -1,7 +1,7 @@
 // client/src/panels/JobsPanel.jsx — Lucy Brand, shared job pool
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { api, saveWithPicker, dislikeJob } from "../lib/api.js";
+import { api, printResume, dislikeJob } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
 import JobCard from "../components/JobCard.jsx";
@@ -592,7 +592,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // Split view
   const [selectedJob, setSelectedJob] = useState(null);
   const [splitWidth,  setSplitWidth]  = useState(340);
-  const isDraggingRef = useRef(false);
+  const isDraggingRef     = useRef(false);
+  const splitContainerRef = useRef(null);
 
   // Open sandbox and rebalance panel sizes for wide mode
   const openSandbox = useCallback((entry) => {
@@ -707,12 +708,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const handleDividerMouseDown = useCallback((e) => {
     e.preventDefault();
     isDraggingRef.current = true;
-    const startX = e.clientX;
-    const startW = splitWidth;
     const onMove = (me) => {
-      if (!isDraggingRef.current) return;
-      const delta = startX - me.clientX; // dragging left = expand detail panel
-      setSplitWidth(Math.max(260, Math.min(600, startW + delta)));
+      if (!isDraggingRef.current || !splitContainerRef.current) return;
+      const containerRect = splitContainerRef.current.getBoundingClientRect();
+      const newWidth = containerRect.right - me.clientX;
+      setSplitWidth(Math.max(260, Math.min(600, newWidth)));
     };
     const onUp = () => {
       isDraggingRef.current = false;
@@ -721,7 +721,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [splitWidth]);
+  }, []);
 
   // Skills extracted from the base resume — used for keyword highlighting in expanded cards
   const baseResumeSkills = useMemo(() => {
@@ -1034,23 +1034,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [sandbox, generated]);
 
   const exportAndTrack = useCallback(async (job, html, company) => {
-    const filename = `Resume_${(company||"").replace(/\s+/g,"_")}.pdf`;
-    const r = await fetch("/api/export-pdf", { method:"POST", credentials:"include",
-      headers:{"Content-Type":"application/json"}, body:JSON.stringify({ html, filename }) });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({ error:"PDF export failed" }));
-      alert(`PDF export failed: ${err.error || "Unknown error"}`);
-      return;
-    }
-    const blob = await r.blob();
-    let savedPath = filename;
-    try { savedPath = await saveWithPicker(blob, filename, "application/pdf"); }
-    catch(e) { if (e.name === "AbortError") return; }
+    const filename = `Resume_${(company||"").replace(/\s+/g,"_")}`;
+    printResume(html, filename);
     if (job) {
       await api("/api/applications", { method:"POST", body:JSON.stringify({
         jobId:job.jobId, company:job.company, role:job.title,
         jobUrl:job.url, source:job.source, location:job.location,
-        applyMode, resumeFile:savedPath,
+        applyMode, resumeFile:filename + ".pdf",
       }) }).catch(()=>{});
       await fetchJobs(currentPage);
     }
@@ -1373,7 +1363,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       {isPortrait && !isMobile && (
         <div style={{ flex:1, display:"flex", overflow:"hidden", position:"relative" }}>
           {/* LEFT jobs */}
-          <div style={{ display:"flex", flexDirection:"row", minWidth:0, flex:"0 0 58%",
+          <div ref={splitContainerRef} style={{ display:"flex", flexDirection:"row", minWidth:0, flex:"0 0 58%",
                         borderRight:`1px solid ${theme.border}` }}>
             <div style={{ flex:1, minWidth:220, display:"flex", flexDirection:"column", overflow:"hidden" }}>
               <JobsColumn
@@ -1476,7 +1466,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         <div id="jobs-columns" style={{ flex:1, display:"flex", overflow:"hidden" }}>
 
           {/* LEFT — job cards (+ optional split detail panel) */}
-          <div style={{
+          <div ref={splitContainerRef} style={{
             display:"flex", flexDirection:"row", minWidth:0,
             flex: `0 0 ${panelSizes.left}%`,
           }}>

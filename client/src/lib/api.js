@@ -31,6 +31,17 @@ export const deleteLinkedInCookies = ()        =>
 
 // Chromium File System Access API — shows Save As dialog, returns chosen filename.
 // Falls back to standard download on unsupported browsers.
+export function printResume(html, filename) {
+  const win = window.open("", "_blank");
+  if (!win) { alert("Pop-up blocked — please allow pop-ups for this site and try again."); return; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  // Set title so the browser suggests the right filename in the print dialog
+  try { win.document.title = filename || "Resume"; } catch {}
+  win.print();
+}
+
 export async function saveWithPicker(blob, suggestedName, mimeType) {
   try {
     if (window.showSaveFilePicker) {

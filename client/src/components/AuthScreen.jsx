@@ -115,31 +115,66 @@ function PosterCard({ company, index }) {
 // ── Auth modal ────────────────────────────────────────────────
 function AuthModal({ onLogin }) {
   const { theme, mode } = useTheme();
-  const [tab,      setTab]      = useState("login");
-  const [step,     setStep]     = useState(1);
-  const [form,     setForm]     = useState({ username:"", password:"", apify_token:"" });
-  const [error,    setError]    = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const [tab,     setTab]     = useState("login");
+  const [regStep, setRegStep] = useState(1);
+  // Login form
+  const [login,   setLoginF]  = useState({ username:"", password:"" });
+  // Registration step 1 — only in React state, never sent until step 2 completes
+  const [step1,   setStep1]   = useState({ username:"", password:"", confirmPassword:"", apify_token:"" });
+  // Registration step 2
+  const [step2,   setStep2]   = useState({ first_name:"", middle_name:"", last_name:"", name_suffix:"", email:"", phone:"" });
+  const [error,   setError]   = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const set = (k,v) => setForm(f => ({ ...f, [k]:v }));
+  const setL  = (k,v) => setLoginF(f => ({ ...f, [k]:v }));
+  const setS1 = (k,v) => setStep1(f => ({ ...f, [k]:v }));
+  const setS2 = (k,v) => setStep2(f => ({ ...f, [k]:v }));
+
+  // Warn before tab close while on step 2 (data would be lost)
+  useEffect(() => {
+    if (tab !== "register" || regStep !== 2) return;
+    const handler = e => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [tab, regStep]);
 
   const handleLogin = async e => {
     e.preventDefault(); setError(""); setLoading(true);
     try {
-      const d = await api("/api/auth/login", { method:"POST", body:JSON.stringify({ username:form.username, password:form.password }) });
+      const d = await api("/api/auth/login", { method:"POST", body:JSON.stringify({ username:login.username, password:login.password }) });
       if (d.user) onLogin(d.user);
-      else if (d.ok) onLogin(d.user);
       else setError(d.error || "Login failed");
     } catch(err) { setError(err.message); }
     setLoading(false);
   };
 
+  const handleStep1 = e => {
+    e.preventDefault(); setError("");
+    if (!step1.username.trim() || !step1.password) return setError("Username and password are required");
+    if (step1.password.length < 8) return setError("Password must be at least 8 characters");
+    if (step1.password !== step1.confirmPassword) return setError("Passwords do not match");
+    if (step1.apify_token && !step1.apify_token.startsWith("apify_api_"))
+      return setError("Apify token should start with apify_api_");
+    setRegStep(2);
+  };
+
   const handleRegister = async e => {
     e.preventDefault(); setError(""); setLoading(true);
     try {
-      const d = await api("/api/auth/register", { method:"POST", body:JSON.stringify(form) });
+      const d = await api("/api/auth/register", { method:"POST", body:JSON.stringify({
+        username: step1.username.trim(),
+        password: step1.password,
+        apifyToken: step1.apify_token.trim() || undefined,
+        profile: {
+          first_name:  step2.first_name.trim(),
+          middle_name: step2.middle_name.trim() || undefined,
+          last_name:   step2.last_name.trim(),
+          name_suffix: step2.name_suffix.trim() || undefined,
+          email:       step2.email.trim(),
+          phone:       step2.phone.trim() || undefined,
+        },
+      }) });
       if (d.user) onLogin(d.user);
-      else if (d.ok) onLogin(d.user);
       else setError(d.error || "Registration failed");
     } catch(err) { setError(err.message); }
     setLoading(false);
@@ -153,6 +188,7 @@ function AuthModal({ onLogin }) {
     outline:"none", boxSizing:"border-box",
     transition:"border-color 0.15s",
   };
+  const halfInput = { ...inputStyle, flex:1 };
 
   return (
     <motion.div initial={{ opacity:0, scale:0.95 }} animate={{ opacity:1, scale:1 }}
@@ -166,7 +202,7 @@ function AuthModal({ onLogin }) {
                     background:mode==="dark"?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",
                     borderRadius:999, padding:4 }}>
         {["login","register"].map(t => (
-          <button key={t} onClick={() => { setTab(t); setStep(1); setError(""); }}
+          <button key={t} onClick={() => { setTab(t); setRegStep(1); setError(""); }}
             style={{ flex:1, padding:"7px 0", borderRadius:999, border:"none",
                      fontWeight:700, fontSize:12, cursor:"pointer",
                      background: tab===t ? theme.accent : "transparent",
@@ -179,10 +215,10 @@ function AuthModal({ onLogin }) {
 
       {tab === "login" ? (
         <form onSubmit={handleLogin} style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          <input style={inputStyle} placeholder="Username" value={form.username}
-            onChange={e=>set("username",e.target.value)} autoFocus/>
-          <input style={inputStyle} placeholder="Password" type="password" value={form.password}
-            onChange={e=>set("password",e.target.value)}/>
+          <input style={inputStyle} placeholder="Username" value={login.username}
+            onChange={e=>setL("username",e.target.value)} autoFocus/>
+          <input style={inputStyle} placeholder="Password" type="password" value={login.password}
+            onChange={e=>setL("password",e.target.value)}/>
           {error && <div style={{ color:theme.danger, fontSize:12 }}>{error}</div>}
           <button type="submit" disabled={loading}
             style={{ width:"100%", padding:"12px 0", borderRadius:999, border:"none",
@@ -192,40 +228,79 @@ function AuthModal({ onLogin }) {
             {loading ? "Signing in…" : "Sign In →"}
           </button>
         </form>
-      ) : (
-        <form onSubmit={handleRegister} style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          <input style={inputStyle} placeholder="Username" value={form.username}
-            onChange={e=>set("username",e.target.value)} autoFocus/>
-          <input style={inputStyle} placeholder="Password" type="password" value={form.password}
-            onChange={e=>set("password",e.target.value)}/>
+
+      ) : regStep === 1 ? (
+        /* ── Register step 1: credentials ── */
+        <form onSubmit={handleStep1} style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          <div style={{ fontSize:11, color:theme.textDim, fontWeight:600,
+                        textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:2 }}>
+            Step 1 of 2 — Account credentials
+          </div>
+          <input style={inputStyle} placeholder="Username" value={step1.username}
+            onChange={e=>setS1("username",e.target.value)} autoFocus/>
+          <input style={inputStyle} placeholder="Password (min 8 chars)" type="password" value={step1.password}
+            onChange={e=>setS1("password",e.target.value)}/>
+          <input style={inputStyle} placeholder="Confirm password" type="password" value={step1.confirmPassword}
+            onChange={e=>setS1("confirmPassword",e.target.value)}/>
           <div style={{ fontSize:11, color:theme.textMuted, lineHeight:1.6,
                         padding:"10px 12px", background:theme.surfaceHigh,
                         borderRadius:10, border:`1px solid ${theme.border}` }}>
-            <strong>Apify token</strong> powers job search via the{" "}
-            <code style={{ fontSize:10, background:theme.surface, padding:"1px 4px", borderRadius:3 }}>
-              harvestapi/linkedin-job-search
-            </code>{" "}actor.<br/>
+            <strong>Apify token</strong> powers job search.{" "}
             Get a free token at{" "}
             <a href="https://apify.com" target="_blank" rel="noreferrer"
               style={{ color:theme.accentText, fontWeight:700 }}>apify.com</a>
-            {" "}→ Settings → Integrations. You can also add it later via the avatar menu.
+            {" "}→ Settings → Integrations. You can add it later too.
           </div>
           <input style={inputStyle} placeholder="Apify token (optional, starts with apify_api_…)"
-            value={form.apify_token} onChange={e=>set("apify_token",e.target.value)}
-            onBlur={e => {
-              const v = e.target.value.trim();
-              if (v && !v.startsWith("apify_api_")) {
-                setError("⚠ That doesn't look like a valid Apify token (should start with apify_api_)");
-              } else { setError(""); }
-            }}/>
+            value={step1.apify_token} onChange={e=>setS1("apify_token",e.target.value)}/>
           {error && <div style={{ color:theme.danger, fontSize:12 }}>{error}</div>}
-          <button type="submit" disabled={loading}
+          <button type="submit"
             style={{ width:"100%", padding:"12px 0", borderRadius:999, border:"none",
                      background:theme.gradAccent, color:"white", fontWeight:800,
-                     fontSize:14, cursor:"pointer", marginTop:4,
-                     opacity:loading?0.7:1, transition:"opacity 0.2s" }}>
-            {loading ? "Creating account…" : "Create Account →"}
+                     fontSize:14, cursor:"pointer", marginTop:4 }}>
+            Continue →
           </button>
+        </form>
+
+      ) : (
+        /* ── Register step 2: name + contact ── */
+        <form onSubmit={handleRegister} style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          <div style={{ fontSize:11, color:theme.textDim, fontWeight:600,
+                        textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:2 }}>
+            Step 2 of 2 — Your information
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <input style={halfInput} placeholder="First name *" value={step2.first_name}
+              onChange={e=>setS2("first_name",e.target.value)} autoFocus/>
+            <input style={{ ...inputStyle, width:72, flex:"none" }} placeholder="M.I."
+              value={step2.middle_name} onChange={e=>setS2("middle_name",e.target.value)}/>
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <input style={halfInput} placeholder="Last name *" value={step2.last_name}
+              onChange={e=>setS2("last_name",e.target.value)}/>
+            <input style={{ ...inputStyle, width:72, flex:"none" }} placeholder="Jr./Sr."
+              value={step2.name_suffix} onChange={e=>setS2("name_suffix",e.target.value)}/>
+          </div>
+          <input style={inputStyle} placeholder="Email *" type="email" value={step2.email}
+            onChange={e=>setS2("email",e.target.value)}/>
+          <input style={inputStyle} placeholder="Phone (optional)" type="tel" value={step2.phone}
+            onChange={e=>setS2("phone",e.target.value)}/>
+          {error && <div style={{ color:theme.danger, fontSize:12 }}>{error}</div>}
+          <div style={{ display:"flex", gap:8, marginTop:4 }}>
+            <button type="button" onClick={() => { setRegStep(1); setError(""); }}
+              style={{ padding:"12px 20px", borderRadius:999, border:`1px solid ${theme.border}`,
+                       background:"transparent", color:theme.textMuted, fontWeight:700,
+                       fontSize:13, cursor:"pointer" }}>
+              ← Back
+            </button>
+            <button type="submit" disabled={loading}
+              style={{ flex:1, padding:"12px 0", borderRadius:999, border:"none",
+                       background:theme.gradAccent, color:"white", fontWeight:800,
+                       fontSize:14, cursor:"pointer",
+                       opacity:loading?0.7:1, transition:"opacity 0.2s" }}>
+              {loading ? "Creating account…" : "Create Account →"}
+            </button>
+          </div>
         </form>
       )}
     </motion.div>

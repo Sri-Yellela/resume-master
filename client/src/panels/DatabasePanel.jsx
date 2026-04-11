@@ -1,7 +1,7 @@
 // client/src/panels/DatabasePanel.jsx — Design System v4
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { api }      from "../lib/api.js";
+import { api, printResume } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import JobCard      from "../components/JobCard.jsx";
 
@@ -192,7 +192,7 @@ function AtsReportDisplay({ report, score, theme }) {
 // ── Detail modal (resume preview or ATS report) ───────────────
 function DetailModal({ modal, onClose, theme }) {
   const [view,      setView]      = useState(null); // "resume" | "ats"
-  const [exporting, setExporting] = useState(false);
+  const exporting = false;
 
   // Sync view to modal.type when modal changes
   useEffect(() => { if (modal) setView(modal.type); }, [modal?.type, modal?.company]);
@@ -210,27 +210,10 @@ function DetailModal({ modal, onClose, theme }) {
     ? (modal.atsScore >= 80 ? theme.success : modal.atsScore >= 60 ? theme.warning : theme.danger)
     : theme.textMuted;
 
-  const exportPdf = async () => {
+  const exportPdf = () => {
     if (!modal.html || exporting) return;
-    setExporting(true);
-    try {
-      const filename = `Resume_${(modal.company || "resume").replace(/\s+/g, "_")}.pdf`;
-      const r = await fetch("/api/export-pdf", {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: modal.html, filename }),
-      });
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({ error:"PDF export failed" }));
-        alert(`PDF export failed: ${err.error || "Unknown error"}`);
-        return;
-      }
-      const blob = await r.blob();
-      const url  = URL.createObjectURL(blob);
-      Object.assign(document.createElement("a"), { href: url, download: filename }).click();
-      URL.revokeObjectURL(url);
-    } catch(e) { alert("Export failed: " + e.message); }
-    finally { setExporting(false); }
+    const filename = `Resume_${(modal.company || "resume").replace(/\s+/g, "_")}`;
+    printResume(modal.html, filename);
   };
 
   return (
@@ -375,6 +358,9 @@ export function DatabasePanel({ user }) {
   const [baseResume,   setBaseResume]   = useState("");
   const [genLoading,   setGenLoading]   = useState({});
 
+  // ── Pending Apply tab state ───────────────────────────────────
+  const [pendingJobs,  setPendingJobs]  = useState([]);
+
   const inputRef = useRef();
   const calRef   = useRef();
 
@@ -408,6 +394,13 @@ export function DatabasePanel({ user }) {
     } catch {}
   }, []);
 
+  const loadPending = useCallback(async () => {
+    try {
+      const rows = await api("/api/jobs/pending");
+      setPendingJobs(Array.isArray(rows) ? rows : []);
+    } catch {}
+  }, []);
+
   const generateForSaved = useCallback(async (job, force = false) => {
     const applyMode = user?.applyMode || "TAILORED";
     if (applyMode === "SIMPLE") { alert("Generation disabled in Simple mode."); return; }
@@ -423,18 +416,12 @@ export function DatabasePanel({ user }) {
   }, [baseResume, user]);
 
   const exportSavedPdf = useCallback(async (job, html) => {
-    const filename = `Resume_${(job.company||"").replace(/\s+/g,"_")}.pdf`;
-    const r = await fetch("/api/export-pdf", { method:"POST", credentials:"include",
-      headers:{"Content-Type":"application/json"}, body:JSON.stringify({ html, filename }) });
-    if (!r.ok) { alert("PDF export failed"); return; }
-    const blob = await r.blob();
-    const u = URL.createObjectURL(blob);
-    Object.assign(document.createElement("a"), { href:u, download:filename }).click();
-    URL.revokeObjectURL(u);
+    const filename = `Resume_${(job.company||"").replace(/\s+/g,"_")}`;
+    printResume(html, filename);
     await api("/api/applications", { method:"POST", body:JSON.stringify({
       jobId:job.jobId, company:job.company, role:job.title,
       jobUrl:job.url, source:job.source, location:job.location,
-      applyMode:user?.applyMode||"TAILORED", resumeFile:filename,
+      applyMode:user?.applyMode||"TAILORED", resumeFile:filename + ".pdf",
     }) }).catch(()=>{});
   }, [user]);
 
@@ -445,6 +432,7 @@ export function DatabasePanel({ user }) {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (activeSheet === "saved") loadSaved(); }, [activeSheet, loadSaved]);
+  useEffect(() => { if (activeSheet === "pending") loadPending(); }, [activeSheet, loadPending]);
   useEffect(() => { if (editCell && inputRef.current) inputRef.current.focus(); }, [editCell]);
 
   useEffect(() => {
@@ -588,7 +576,7 @@ export function DatabasePanel({ user }) {
   const isApps      = activeSheet === "applications";
   const displayRows = filterRows(rows, cols);
 
-  const SHEETS = [["applications","Applications"],["resumes","Resumes"],["saved","Saved Jobs"]];
+  const SHEETS = [["applications","Applications"],["resumes","Resumes"],["saved","Saved Jobs"],["pending","Pending Apply"]];
 
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
@@ -621,7 +609,7 @@ export function DatabasePanel({ user }) {
                              color:activeSheet===id ? theme.accentText : theme.textMuted,
                              fontSize:10, fontWeight:700,
                              padding:"1px 7px", borderRadius:999 }}>
-                {id === "applications" ? apps.length : id === "resumes" ? resumes.length : savedJobs.length}
+                {id === "applications" ? apps.length : id === "resumes" ? resumes.length : id === "pending" ? pendingJobs.length : null}
               </span>
               {activeSheet===id && (
                 <motion.div layoutId="db-tab-underline"
@@ -643,8 +631,8 @@ export function DatabasePanel({ user }) {
         </div>
       </div>
 
-      {/* ── Toolbar (hidden for saved tab — it has its own toolbar) ── */}
-      {activeSheet !== "saved" && <div style={{ background:theme.surface, padding:"10px 16px",
+      {/* ── Toolbar (hidden for saved/pending tab — they have their own toolbars) ── */}
+      {activeSheet !== "saved" && activeSheet !== "pending" && <div style={{ background:theme.surface, padding:"10px 16px",
                     display:"flex", alignItems:"center", gap:10,
                     borderBottom:`1px solid ${theme.border}`,
                     flexShrink:0, flexWrap:"wrap" }}>
@@ -718,15 +706,28 @@ export function DatabasePanel({ user }) {
         />
       )}
 
+      {/* ── Pending Apply pane ── */}
+      {activeSheet === "pending" && (
+        <PendingJobsPane
+          jobs={pendingJobs}
+          theme={theme} mode={mode}
+          onRefresh={loadPending}
+          onDislike={async (jobId) => {
+            await api(`/api/jobs/${jobId}/disliked`, { method:"PATCH" }).catch(()=>{});
+            setPendingJobs(prev => prev.filter(j => j.job_id !== jobId && j.jobId !== jobId));
+          }}
+        />
+      )}
+
       {/* ── Table (applications / resumes) ── */}
-      {activeSheet !== "saved" && loading ? (
+      {activeSheet !== "saved" && activeSheet !== "pending" && loading ? (
         <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
                       color:theme.textMuted, fontSize:13 }}>
           Loading data…
         </div>
-      ) : activeSheet !== "saved" && displayRows.length === 0 ? (
+      ) : activeSheet !== "saved" && activeSheet !== "pending" && displayRows.length === 0 ? (
         <EmptyState sheet={activeSheet} hasFilter={!!(search || filterDate)} theme={theme}/>
-      ) : activeSheet !== "saved" ? (
+      ) : activeSheet !== "saved" && activeSheet !== "pending" ? (
         <div style={{ flex:1, overflow:"auto" }}>
           <table style={{ borderCollapse:"collapse", width:"100%", tableLayout:"fixed" }}>
             <thead>
@@ -932,6 +933,53 @@ export function DatabasePanel({ user }) {
           </table>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// ── Pending Apply pane ────────────────────────────────────────
+function PendingJobsPane({ jobs, theme, mode, onRefresh, onDislike }) {
+  const isDark = mode === "dark";
+  if (jobs.length === 0) return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column",
+                  alignItems:"center", justifyContent:"center", gap:12, padding:40 }}>
+      <div style={{ fontSize:40 }}>📋</div>
+      <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No pending applications</div>
+      <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:320, lineHeight:1.8 }}>
+        When you generate a resume for a job it moves here until you apply or pass on it.
+      </div>
+      <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
+    </div>
+  );
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+      <div style={{ padding:"8px 16px", display:"flex", alignItems:"center", gap:8,
+                    borderBottom:`1px solid ${theme.border}`, flexShrink:0, background:theme.surface }}>
+        <span style={{ fontSize:12, color:theme.textMuted }}>
+          {jobs.length} pending job{jobs.length !== 1 ? "s" : ""} — resume ready, not yet applied
+        </span>
+        <div style={{ flex:1 }}/>
+        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
+      </div>
+      <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:16 }}>
+        {jobs.map(job => {
+          const jid = job.job_id || job.jobId;
+          return (
+            <JobCard
+              key={jid}
+              job={{ ...job, jobId: jid }}
+              theme={theme}
+              isDark={isDark}
+              showDislike={true}
+              showApplyButton={true}
+              applyMode="SIMPLE"
+              onVisit={() => job.url && window.open(job.url, "_blank", "noreferrer")}
+              onDislike={() => onDislike?.(jid)}
+              onCardClick={() => job.url && window.open(job.url, "_blank", "noreferrer")}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
