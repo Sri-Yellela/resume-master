@@ -22,6 +22,7 @@ import { fileURLToPath } from "url";
 import path           from "path";
 import fs             from "fs";
 import { createBackup, listBackups, restoreBackup } from "./scripts/backup.js";
+import applyRoutes from "./routes/apply.js";
 
 // ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
@@ -318,6 +319,13 @@ db.pragma("busy_timeout = 5000");
         ALTER TABLE user_profile ADD COLUMN last_name TEXT;
         ALTER TABLE user_profile ADD COLUMN name_suffix TEXT;
         ALTER TABLE user_jobs ADD COLUMN resume_generated INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
+    {
+      id: "010_apply_automation",
+      sql: `
+        ALTER TABLE job_applications ADD COLUMN auto_status TEXT;
+        ALTER TABLE job_applications ADD COLUMN screenshot_path TEXT;
       `,
     },
     // Add future migrations here — never edit existing ones
@@ -2220,6 +2228,11 @@ app.delete("/api/linkedin/cookies", requireAuth, (req, res) => {
   db.prepare("DELETE FROM user_linkedin_sessions WHERE user_id=?").run(req.user.id);
   res.json({ ok:true });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// APPLY AUTOMATION (Playwright)
+// ═══════════════════════════════════════════════════════════════
+applyRoutes(app, db, requireAuth);
 
 // ═══════════════════════════════════════════════════════════════
 // HEALTH + SPA

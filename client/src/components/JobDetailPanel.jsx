@@ -1,6 +1,7 @@
 // client/src/components/JobDetailPanel.jsx — right-panel job detail in split view
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { HighlightedDescription } from "./HighlightedDescription.jsx";
+import { api } from "../lib/api.js";
 
 function ago(ts) {
   if (!ts) return "—";
@@ -72,6 +73,38 @@ export default function JobDetailPanel({
   onResume,
 }) {
   if (!job) return null;
+
+  // ── Apply automation state ───────────────────────────────────
+  const [applyLoading,  setApplyLoading]  = useState(false);
+  const [applyResult,   setApplyResult]   = useState(null); // { status, message, error }
+  const [semiActive,    setSemiActive]    = useState(false);
+
+  const handleAutoApply = useCallback(async (mode = "semi") => {
+    setApplyLoading(true); setApplyResult(null);
+    try {
+      const d = await api("/api/apply", { method:"POST", body:JSON.stringify({
+        jobId: job.jobId, jobUrl: job.url, mode,
+      }) });
+      if (mode === "semi" && d.status === "semi_launched") {
+        setSemiActive(true);
+        setApplyResult({ status:"semi", message: d.message });
+      } else if (d.status === "submitted") {
+        setApplyResult({ status:"success", message:"Application submitted!" });
+      } else if (d.status === "filled_not_submitted") {
+        setApplyResult({ status:"warn", message:"Form filled — submit button not found." });
+      } else if (d.status === "error") {
+        setApplyResult({ status:"error", message: d.error || "Automation failed" });
+      } else {
+        setApplyResult({ status:"info", message: d.message || "Done" });
+      }
+    } catch(e) { setApplyResult({ status:"error", message: e.message }); }
+    finally { setApplyLoading(false); }
+  }, [job]);
+
+  const closeSemi = useCallback(async () => {
+    await api(`/api/apply/close/${job.jobId}`, { method:"POST" }).catch(()=>{});
+    setSemiActive(false); setApplyResult(null);
+  }, [job]);
 
   const hasSalary = job.salaryMin != null || job.salaryMax != null;
   const salaryStr = hasSalary
@@ -160,9 +193,20 @@ export default function JobDetailPanel({
             📥 PDF
           </ActionBtn>
         )}
-        {job.url && (
-          <ActionBtn onClick={() => onVisit?.()} title="Open job listing" accent={theme.accent} theme={theme}>
-            ↗ Apply
+        {job.url && !semiActive && (
+          <ActionBtn onClick={() => handleAutoApply("semi")} title="Open pre-filled form in browser"
+            accent={theme.accent} theme={theme} active={applyLoading}>
+            {applyLoading ? "⏳" : "↗ Apply"}
+          </ActionBtn>
+        )}
+        {job.url && !semiActive && (
+          <ActionBtn onClick={() => onVisit?.()} title="Open job listing (manual)" accent={theme.accentText || "#1a6a8a"} theme={theme}>
+            ✎ Manual
+          </ActionBtn>
+        )}
+        {semiActive && (
+          <ActionBtn onClick={closeSemi} title="Close automation browser" accent="#dc2626" theme={theme}>
+            ⏹ Close Browser
           </ActionBtn>
         )}
         {onStar && (
@@ -180,6 +224,42 @@ export default function JobDetailPanel({
           </ActionBtn>
         )}
       </div>
+
+      {/* Apply result toast */}
+      {applyResult && (
+        <div style={{
+          margin:"0 14px 0", padding:"8px 12px",
+          background: applyResult.status === "success" ? "#dcfce7"
+                    : applyResult.status === "error"   ? "#fee2e2"
+                    : applyResult.status === "semi"    ? theme.accentMuted
+                    : "#fef9c3",
+          color: applyResult.status === "success" ? "#166534"
+               : applyResult.status === "error"   ? "#991b1b"
+               : applyResult.status === "semi"    ? theme.accentText
+               : "#854d0e",
+          borderRadius:6, fontSize:11, fontWeight:600,
+          display:"flex", alignItems:"center", justifyContent:"space-between",
+          flexShrink:0,
+        }}>
+          <span>
+            {applyResult.status === "success" ? "✓ " : applyResult.status === "error" ? "✗ " : "ℹ "}
+            {applyResult.message}
+          </span>
+          <button onClick={() => setApplyResult(null)}
+            style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, opacity:0.6, padding:"0 2px" }}>
+            ✕
+          </button>
+        </div>
+      )}
+      {semiActive && (
+        <div style={{ margin:"6px 14px 0", padding:"6px 12px", background:theme.accentMuted,
+                      color:theme.accentText, borderRadius:6, fontSize:11,
+                      display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+          <span style={{ display:"inline-block", width:7, height:7, borderRadius:"50%",
+                          background:theme.accent, animation:"pulse 1.5s infinite" }}/>
+          Automation browser is open — fill remaining fields and submit
+        </div>
+      )}
 
       {/* Description */}
       <div style={{ flex:1, overflowY:"auto", padding:"14px 14px" }}>

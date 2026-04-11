@@ -186,9 +186,12 @@ export default function JobCard({
   const [expanded, setExpanded] = useState(false);
 
   const frostedBg = isDark
-    ? (hov ? "rgba(28,28,28,0.92)" : "rgba(17,17,17,0.6)")
-    : (hov ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.68)");
+    ? (hov ? "rgba(28,28,28,0.88)" : "rgba(17,17,17,0.55)")
+    : (hov ? "rgba(255,255,255,0.94)" : "rgba(255,255,255,0.62)");
   const frostedBlur = hov ? "blur(20px) saturate(2)" : "blur(12px) saturate(1.6)";
+  const frostedOverlay = isDark
+    ? "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(200,200,200,0.02) 100%)"
+    : "linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(200,200,200,0.06) 100%)";
 
   const hasDesc    = !!(job.description || job.descriptionHtml);
   const hasSalary  = job.salaryMin != null || job.salaryMax != null;
@@ -219,18 +222,32 @@ export default function JobCard({
         background: frostedBg,
         backdropFilter: frostedBlur,
         WebkitBackdropFilter: frostedBlur,
-        border: `1px solid ${selected ? theme.accent : (hov ? theme.borderStrong : theme.border + "88")}`,
+        border: `1px solid ${selected ? theme.accent : (hov ? theme.accent + "66" : theme.border + "88")}`,
         borderRadius: 4, margin: "0 16px 8px",
-        boxShadow: hov ? theme.shadowLg : theme.shadowSm,
+        boxShadow: hov
+          ? `0 0 0 3px ${theme.accent}22, 0 8px 24px ${theme.accent}18, ${theme.shadowLg}`
+          : theme.shadowSm,
         transform: hov ? "translateY(-3px) scale(1.008)" : "translateY(0) scale(1)",
         transition: "all 0.2s ease", position: "relative",
         opacity: job.visited ? 0.75 : 1,
         overflow: "hidden",
       }}>
 
+      {/* ── Frosted glass overlay (gradient + noise texture) ── */}
+      <div aria-hidden style={{
+        position:"absolute", inset:0, pointerEvents:"none", borderRadius:"inherit", zIndex:0,
+        background: frostedOverlay,
+      }}/>
+      <div aria-hidden style={{
+        position:"absolute", inset:0, pointerEvents:"none", borderRadius:"inherit", zIndex:0,
+        opacity: isDark ? 0.055 : 0.04, mixBlendMode:"overlay",
+        backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E")`,
+        backgroundSize:"160px 160px",
+      }}/>
+
       {/* ── Collapsed row ────────────────────────────────────── */}
       <div onClick={handleCardClick}
-        style={{ padding: compact ? "10px 14px" : "14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer" }}>
+        style={{ padding: compact ? "10px 14px" : "14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer", position:"relative", zIndex:1 }}>
 
         {/* Company icon */}
         <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={48}/>

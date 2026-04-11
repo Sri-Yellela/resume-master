@@ -586,7 +586,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [loading,     setLoading]     = useState({});
   const [sandbox,     setSandbox]     = useState(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
-  const [rightTab,    setRightTab]    = useState("ats");
+  const [rightTab,    setRightTab]    = useState("history");
   const [atsExpanded, setAtsExpanded] = useState(false);
 
   // Split view
@@ -624,7 +624,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [smartSearching, setSmartSearching] = useState(false);
 
   // Board tabs
-  const [boardTab,    setBoardTab]    = useState("all");  // "all" | "saved"
+  const [boardTab,    setBoardTab]    = useState("all");  // "all" | "saved" | "pending"
+  const [pendingJobs, setPendingJobs] = useState([]);
 
   // Filter panel
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -752,8 +753,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab]);
 
+  // ── Fetch pending jobs ────────────────────────────────────────
+  const fetchPending = useCallback(async () => {
+    try {
+      const rows = await api("/api/jobs/pending");
+      setPendingJobs(Array.isArray(rows) ? rows : []);
+    } catch {}
+  }, []);
+
   // ── Fetch jobs — never clears board before data arrives ──────
   const fetchJobs = useCallback(async (page = 1, mergeMode = false) => {
+    if (boardTab === "pending") { fetchPending(); return; }
     setBgLoading(true);
     try {
       const qs = buildParams(page);
@@ -774,7 +784,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     } finally {
       setBgLoading(false);
     }
-  }, [buildParams]);
+  }, [buildParams, boardTab, fetchPending]);
 
   // ── Boot ──────────────────────────────────────────────────
   useEffect(() => {
@@ -1092,15 +1102,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // ── Live client-side filter (instant, no API call) ───────────
   const displayJobs = useMemo(() => {
-    if (!localSearch.trim()) return jobs;
+    const src = boardTab === "pending" ? pendingJobs : jobs;
+    if (!localSearch.trim()) return src;
     const q = localSearch.trim().toLowerCase();
-    return jobs.filter(j =>
+    return src.filter(j =>
       j.company?.toLowerCase().includes(q) ||
       j.title?.toLowerCase().includes(q)   ||
       j.location?.toLowerCase().includes(q) ||
       j.category?.toLowerCase().includes(q)
     );
-  }, [jobs, localSearch]);
+  }, [jobs, pendingJobs, boardTab, localSearch]);
   displayJobsRef.current = displayJobs;
 
   const genCount = Object.values(generated).filter(v=>v?.html && v.html !== "__exists__").length;
@@ -1146,7 +1157,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         {/* Board tabs */}
         <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
                       border:`2px solid ${theme.borderStrong}`, borderRadius:2 }}>
-          {[["all","All Jobs"],["saved","Saved ★"]].map(([id,lbl]) => (
+          {[["all","All Jobs"],["saved","Saved ★"],["pending","Pending"]].map(([id,lbl]) => (
             <button key={id} onClick={() => setBoardTab(id)}
               style={{
                 padding:"6px 16px", border:"none", cursor:"pointer",
@@ -1214,7 +1225,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                            border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
                            borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/>
           )}
-          {localSearch ? `${displayJobs.length} of ${totalJobs}` : `${totalJobs}`} job{totalJobs !== 1 ? "s" : ""}
+          {boardTab === "pending"
+            ? `${displayJobs.length}`
+            : localSearch ? `${displayJobs.length} of ${totalJobs}` : `${totalJobs}`
+          } job{displayJobs.length !== 1 ? "s" : ""}
         </span>
 
         {/* ── Row B (wraps to next line) ──────────────── */}
@@ -1321,7 +1335,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     </button>
                   ))}
                 </div>
-                {rightTab === "ats" && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
+                {rightTab === "ats" && activeAts?.report && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
                 {rightTab === "history" && (
                   <HistoryList generated={generated}
                     theme={theme}
@@ -1425,7 +1439,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               ))}
             </div>
             <div style={{ flex:1, overflowY:"auto" }}>
-              {rightTab === "ats" && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
+              {rightTab === "ats" && activeAts?.report && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
               {rightTab === "history" && (
                 <HistoryList generated={generated}
                   theme={theme}
@@ -1566,7 +1580,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               ))}
             </div>
             <div style={{ flex:1, overflowY:"auto" }}>
-              {rightTab === "ats" && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
+              {rightTab === "ats" && activeAts?.report && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
               {rightTab === "history" && (
                 <HistoryList generated={generated}
                   theme={theme}
