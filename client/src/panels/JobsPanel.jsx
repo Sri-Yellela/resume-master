@@ -213,7 +213,6 @@ function FiltersPanel({
   maxYoe, setMaxYoe,
   maxApplicants, setMaxApplicants,
   visitedFilter, setVisitedFilter,
-  appliedFilter, setAppliedFilter,
   ageFilter, setAgeFilter,
   onReset,
 }) {
@@ -333,11 +332,6 @@ function FiltersPanel({
               <option value="">Visited & unvisited</option>
               <option value="0">Unvisited only</option>
               <option value="1">Visited only</option>
-            </select>
-            <select value={appliedFilter} onChange={e=>setAppliedFilter(e.target.value)} style={selStyle}>
-              <option value="">Applied & not applied</option>
-              <option value="0">Not yet applied</option>
-              <option value="1">Applied only</option>
             </select>
           </div>
         </div>
@@ -611,10 +605,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
   const [maxYoe,        setMaxYoe]        = useState("");
   const [maxApplicants, setMaxApplicants] = useState("");
   const [visitedFilter, setVisitedFilter] = useState("");
-  const [appliedFilter, setAppliedFilter] = useState("");
   const [ageFilter,     setAgeFilter]     = useState("");
 
-  const fileRef   = useRef();
+  const fileRef      = useRef();
+  const jobCountRef  = useRef(0);
+  jobCountRef.current = jobs.length;
   const applyMode = user?.applyMode || "TAILORED";
   const PAGE_SIZE = 25;
 
@@ -641,12 +636,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
     if (maxYoe !== "")        p.set("maxYoe",        maxYoe);
     if (maxApplicants !== "") p.set("maxApplicants", maxApplicants);
     if (visitedFilter)        p.set("visited",       visitedFilter);
-    if (appliedFilter)        p.set("applied",       appliedFilter);
     if (ageFilter)            p.set("ageFilter",     ageFilter);
     if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
     return p.toString();
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
-      minYoe, maxYoe, maxApplicants, visitedFilter, appliedFilter, ageFilter, boardTab]);
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab]);
 
   // ── Fetch jobs — never clears board before data arrives ──────
   const fetchJobs = useCallback(async (page = 1, mergeMode = false) => {
@@ -700,7 +694,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
     if (!user) return;
     fetchJobs(1);
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
-      minYoe, maxYoe, maxApplicants, visitedFilter, appliedFilter, ageFilter, boardTab, refreshKey]);
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey]);
 
   // ── Scrape / search ───────────────────────────────────────
   const handleSearch = useCallback(async (overrideQuery) => {
@@ -713,6 +707,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
       return;
     }
     setScraping(true);
+    let managedByPoller = false;
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
       if (result.missingToken) {
@@ -720,27 +715,63 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
         return;
       }
       if (result.error) { alert(result.error); return; }
-      // Fetch with explicit role so results are scoped to the searched role
+
+      // Server normalises the query (pm → Product Manager); use it for role filter
+      const roleQ = (result.query || q).toLowerCase();
+
+      if (result.scraping) {
+        // Background scrape in progress — poll every 8s until jobs arrive (up to ~160s)
+        managedByPoller = true;
+        let pollCount = 0;
+        const prevCount = { current: 0 };
+        const poll = setInterval(async () => {
+          pollCount++;
+          try {
+            const qs = new URLSearchParams();
+            qs.set("page","1"); qs.set("pageSize","25"); qs.set("sort", sortBy);
+            qs.set("role", roleQ);
+            const d = await api(`/api/jobs?${qs.toString()}`);
+            const newCount = (d.jobs || []).length;
+            if (newCount > prevCount.current || pollCount >= 20) {
+              setJobs(d.jobs || []);
+              setTotalJobs(d.total || 0);
+              setTotalPages(d.totalPages || 0);
+              setCurrentPage(1);
+              setRoleFilter(roleQ);
+              clearInterval(poll);
+              setScraping(false);
+            }
+            prevCount.current = newCount;
+          } catch {
+            clearInterval(poll);
+            setScraping(false);
+          }
+        }, 8000);
+        return;
+      }
+
+      // Cache hit — jobs already in DB
       const qs = new URLSearchParams();
       qs.set("page","1"); qs.set("pageSize","25"); qs.set("sort", sortBy);
-      qs.set("role", q.toLowerCase());
+      qs.set("role", roleQ);
       const d = await api(`/api/jobs?${qs.toString()}`);
       setJobs(d.jobs || []);
       setTotalJobs(d.total || 0);
       setTotalPages(d.totalPages || 0);
       setCurrentPage(1);
-      setRoleFilter(q.toLowerCase());
+      setRoleFilter(roleQ);
     } catch(e) { alert("Scrape failed: " + e.message); }
-    finally { setScraping(false); }
+    finally { if (!managedByPoller) setScraping(false); }
   }, [searchInput, fetchJobs, jobs.length, sortBy]);
 
   // ── Pull / Check-for-new: DB-first, then scrape if quota unmet ─
   // Merges new jobs into the board; removes visited entries.
   const handlePullRefresh = useCallback(async () => {
     const q = (searchInput || roleFilter).trim();
-    if (!q) return; // nothing to search yet
+    if (!q) return;
     if (scraping || bgLoading) return;
     setScraping(true);
+    let managedByPoller = false;
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
       if (result.missingToken) {
@@ -748,15 +779,49 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
         return;
       }
       if (result.error) { alert(result.error); return; }
-      // Fetch fresh jobs (unvisited) and MERGE into current board
+
+      const roleQ = (result.query || q).toLowerCase();
+
+      if (result.scraping) {
+        // Background scrape — poll every 8s for up to ~160s, merge new jobs in
+        managedByPoller = true;
+        let pollCount = 0;
+        const poll = setInterval(async () => {
+          pollCount++;
+          try {
+            const qs = new URLSearchParams();
+            qs.set("page","1"); qs.set("pageSize","50"); qs.set("sort", sortBy);
+            qs.set("role", roleQ); qs.set("visited","0");
+            const d = await api(`/api/jobs?${qs.toString()}`);
+            const incoming = d.jobs || [];
+            if (incoming.length > 0 || pollCount >= 20) {
+              setJobs(prev => {
+                const map = new Map(prev.filter(j => !j.visited).map(j => [j.jobId, j]));
+                incoming.forEach(j => map.set(j.jobId, j));
+                return [...map.values()].sort((a, b) =>
+                  new Date(b.postedAt || 0) - new Date(a.postedAt || 0)
+                );
+              });
+              setTotalJobs(d.total || 0);
+              setRoleFilter(roleQ);
+              clearInterval(poll);
+              setScraping(false);
+            }
+          } catch {
+            clearInterval(poll);
+            setScraping(false);
+          }
+        }, 8000);
+        return;
+      }
+
+      // Cache hit — merge immediately
       const qs = new URLSearchParams();
       qs.set("page","1"); qs.set("pageSize","50"); qs.set("sort", sortBy);
-      qs.set("role", q.toLowerCase());
-      qs.set("visited","0");
+      qs.set("role", roleQ); qs.set("visited","0");
       const d = await api(`/api/jobs?${qs.toString()}`);
       const incoming = d.jobs || [];
       setJobs(prev => {
-        // Remove visited from current display, then merge incoming
         const map = new Map(prev.filter(j => !j.visited).map(j => [j.jobId, j]));
         incoming.forEach(j => map.set(j.jobId, j));
         return [...map.values()].sort((a, b) =>
@@ -764,9 +829,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
         );
       });
       setTotalJobs(d.total || 0);
-      setRoleFilter(q.toLowerCase());
+      setRoleFilter(roleQ);
     } catch(e) { alert("Refresh failed: " + e.message); }
-    finally { setScraping(false); }
+    finally { if (!managedByPoller) setScraping(false); }
   }, [searchInput, roleFilter, sortBy, scraping, bgLoading]);
 
   // ── Legacy Refresh button (end-of-list) ───────────────────────
@@ -862,7 +927,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
     const filename = `Resume_${(company||"").replace(/\s+/g,"_")}.pdf`;
     const r = await fetch("/api/export-pdf", { method:"POST", credentials:"include",
       headers:{"Content-Type":"application/json"}, body:JSON.stringify({ html, filename }) });
-    if (!r.ok) { alert("PDF export failed"); return; }
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error:"PDF export failed" }));
+      alert(`PDF export failed: ${err.error || "Unknown error"}`);
+      return;
+    }
     const blob = await r.blob();
     let savedPath = filename;
     try { savedPath = await saveWithPicker(blob, filename, "application/pdf"); }
@@ -957,7 +1026,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
             maxYoe={maxYoe}           setMaxYoe={setMaxYoe}
             maxApplicants={maxApplicants} setMaxApplicants={setMaxApplicants}
             visitedFilter={visitedFilter} setVisitedFilter={setVisitedFilter}
-            appliedFilter={appliedFilter} setAppliedFilter={setAppliedFilter}
             ageFilter={ageFilter}     setAgeFilter={setAgeFilter}
             onReset={resetFilters}
           />

@@ -517,7 +517,8 @@ const TYPO_MAP = {
   "enginere":"engineer","enigneer":"engineer","enginer":"engineer",
   "sofware":"software","softwar":"software",
   "developr":"developer","devloper":"developer",
-  "maneger":"manager","mangager":"manager",
+  "maneger":"manager","mangager":"manager","manger":"manager",
+  "progam":"program","proejct":"project",
   "analist":"analyst","analst":"analyst",
   "maching":"machine","machien":"machine",
   "lerning":"learning","learnig":"learning",
@@ -526,7 +527,7 @@ const TYPO_MAP = {
 
 function isTitleRelevant(title, query) {
   const t = title.toLowerCase();
-  const stopWords = new Set(["the","and","for","with","ing","senior","junior","lead","staff","principal"]);
+  const stopWords = new Set(["the","and","for","with","ing","senior","junior","staff","principal"]);
   const normTerm = w => TYPO_MAP[w] || w;
   const terms = query.toLowerCase()
     .split(/[\s,/\-]+/)
@@ -534,8 +535,22 @@ function isTitleRelevant(title, query) {
     .map(normTerm);
   if (terms.length === 0) return true;
   if (terms.length === 1) return t.includes(terms[0]);
-  const roleKeywords = ["engineer","developer","scientist","analyst","manager","designer",
-    "architect","researcher","specialist","consultant","director","coordinator"];
+  const roleKeywords = [
+    // Engineering
+    "engineer","developer","scientist","architect","programmer","coder",
+    // Management / Leadership
+    "manager","director","lead","head","president","officer","executive",
+    // Analysis / Strategy
+    "analyst","consultant","advisor","strategist","specialist",
+    // Design / Research
+    "designer","researcher",
+    // Operations / Coordination
+    "coordinator","administrator","associate","representative","agent","planner","operator",
+    // Product / Program / Project
+    "product","program","project",
+    // Other
+    "technician","support","writer","editor",
+  ];
   const coreTerms = terms.filter(w => !roleKeywords.includes(w));
   const roleTerms = terms.filter(w =>  roleKeywords.includes(w));
   const coreMatch = coreTerms.length === 0 || coreTerms.every(w => t.includes(w));
@@ -643,6 +658,8 @@ const ROLE_ALIASES = {
   "site reliability":         "Site Reliability Engineer",
   "pm":                       "Product Manager",
   "tpm":                      "Technical Program Manager",
+  "pjm":                      "Project Manager",
+  "apm":                      "Associate Product Manager",
   "em":                       "Engineering Manager",
   "de":                       "Data Engineer",
   "data eng":                 "Data Engineer",
@@ -731,7 +748,7 @@ async function scrapeJobs(query, apifyToken) {
     if (!isFullTimeNorm(item))                 { cntNotFT++;      return false; }
     if (!isTitleRelevant(item.title, query))   { cntIrrelevant++; return false; }
     if (isReposted(item))                      { cntRepost++;     return false; }
-    if (ghostJobScoreNorm(item) >= 4)          { cntGhost++;      return false; }
+    if (ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }) >= 4) { cntGhost++; return false; }
     if (thisRunIds.has(item.jobId))            { cntDup++;        return false; }
     thisRunIds.add(item.jobId);
     const h = jobHash(item);
@@ -788,7 +805,7 @@ async function scrapeJobs(query, apifyToken) {
         item.postedAt   || null,
         item.description || null,
         item.descriptionHtml || null,
-        ghostJobScoreNorm(item),
+        ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }),
         yoe.min,          // years_experience (compat col — use min)
         yoe.min,
         yoe.max,
@@ -883,7 +900,7 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers) {
 **User location (City, State):** ${userLocation}
 ${employerBlock}
 **Target role / job title:** ${job.title}
-**Target industry / domain:** ${job.category||"Software Engineering"}
+**Target industry / domain:** ${job.category && job.category !== "Other" ? job.category : job.title || "Technology"}
 **Target company:** ${job.company}
 **Known tech stack of target company:** ${job.stack||"unknown"}
 
@@ -976,7 +993,8 @@ async function htmlToPdf(html) {
     launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
   } else {
     executablePath = await chromium.executablePath();
-    launchArgs = chromium.args;
+    console.log(`[pdf] chromium path: ${executablePath}`);
+    launchArgs = [...chromium.args, "--single-process"];
   }
 
   const browser = await puppeteer.launch({
@@ -989,9 +1007,9 @@ async function htmlToPdf(html) {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width:1240, height:1754 });
-    await page.setContent(html, { waitUntil:"load" });
-    // Wait for fonts to settle without relying on network idle
-    await new Promise(r => setTimeout(r, 800));
+    await page.setContent(html, { waitUntil:"networkidle0", timeout:30000 });
+    // Wait for fonts to settle
+    await new Promise(r => setTimeout(r, 1500));
     const pdf = await page.pdf({
       format:           "Letter",
       printBackground:  true,
@@ -1328,7 +1346,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   `).run(userId, userId);
 
   // ── Filter conditions ──
-  const conditions = [`sj.scraped_at > ${sevenDaysAgo}`, `(uj.disliked IS NULL OR uj.disliked = 0)`];
+  const conditions = [`sj.scraped_at > ${sevenDaysAgo}`, `(uj.disliked IS NULL OR uj.disliked = 0)`, `(uj.applied IS NULL OR uj.applied = 0)`];
   const filterParams = [];
 
   const role = (req.query.role || "").trim().toLowerCase();
@@ -1374,10 +1392,6 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const visitedF = req.query.visited;
   if (visitedF === "1")  { conditions.push(`uj.visited = 1`); }
   if (visitedF === "0")  { conditions.push(`uj.visited = 0`); }
-
-  const appliedF = req.query.applied;
-  if (appliedF === "1")  { conditions.push(`uj.applied = 1`); }
-  if (appliedF === "0")  { conditions.push(`uj.applied = 0`); }
 
   if (req.query.starred === "1") { conditions.push(`uj.starred = 1`); }
 
@@ -1469,8 +1483,9 @@ app.get("/api/jobs", requireAuth, (req, res) => {
 });
 
 app.post("/api/scrape", requireAuth, async (req, res) => {
-  const query = (req.body.query || "").trim();
-  if (!query) return res.status(400).json({ error:"query required" });
+  const rawQuery = (req.body.query || "").trim();
+  if (!rawQuery) return res.status(400).json({ error:"query required" });
+  const query = normaliseSearchQuery(rawQuery);
 
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
   const token = user?.apify_token;
@@ -1481,48 +1496,64 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
 
   // Log search intent (enables pool inheritance for this user)
   db.prepare(`
-    INSERT INTO user_job_searches (user_id,search_query,last_scraped_at)
-    VALUES (?,?,unixepoch())
-    ON CONFLICT(user_id,search_query) DO UPDATE SET last_scraped_at=unixepoch()
+    INSERT INTO user_job_searches (user_id, search_query, last_scraped_at)
+    VALUES (?, ?, unixepoch())
+    ON CONFLICT(user_id, search_query) DO UPDATE SET last_scraped_at = unixepoch()
   `).run(req.user.id, query.toLowerCase());
 
-  // DB-first: count existing fresh, unvisited, quality jobs for this role
-  const sevenDaysAgo = Math.floor(Date.now()/1000) - 7*24*60*60;
+  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+
+  // DB-first: count fresh unvisited quality jobs for this role
   const existingCount = db.prepare(`
-    SELECT COUNT(*) as cnt
-    FROM scraped_jobs sj
+    SELECT COUNT(*) as cnt FROM scraped_jobs sj
     JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     WHERE LOWER(sj.search_query) = ?
       AND sj.scraped_at > ?
       AND uj.visited = 0
-      AND uj.applied = 0
+      AND (uj.applied IS NULL OR uj.applied = 0)
+      AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND sj.ghost_score < 4
-      AND sj.is_frequent_repost = 0
   `).get(req.user.id, query.toLowerCase(), sevenDaysAgo);
 
-  const THRESHOLD = 20; // minimum unvisited quality jobs before triggering scrape
-  let newJobCount = 0;
+  const THRESHOLD = 15;
+  const hasEnough = (existingCount?.cnt || 0) >= THRESHOLD;
 
-  if ((existingCount?.cnt || 0) >= THRESHOLD) {
-    console.log(`[scrape] DB-first: ${existingCount.cnt} existing jobs for "${query}" — skipping Apify scrape`);
-  } else {
-    console.log(`[scrape] DB-first: only ${existingCount?.cnt || 0} jobs for "${query}" — triggering Apify scrape`);
-    try {
-      const jobs  = await scrapeJobs(query, token);
-      newJobCount = jobs.length;
-    } catch(e) {
-      return res.status(500).json({ ok:false, error:e.message });
-    }
+  if (hasEnough) {
+    console.log(`[scrape] DB-first: ${existingCount.cnt} jobs for "${query}" — skipping scrape`);
+    // Sync pool jobs not yet in user_jobs
+    db.prepare(`
+      INSERT OR IGNORE INTO user_jobs (user_id, job_id)
+      SELECT ?, sj.job_id FROM scraped_jobs sj
+      WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
+      AND sj.job_id NOT IN (
+        SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
+      )
+    `).run(req.user.id, query.toLowerCase(), sevenDaysAgo, req.user.id);
+    return res.json({ ok:true, count:0, scrapedAt:Date.now(), query, fromCache:true });
   }
 
-  // Sync new jobs into user_jobs for this user
-  db.prepare(`
-    INSERT OR IGNORE INTO user_jobs (user_id, job_id)
-    SELECT ?, sj.job_id FROM scraped_jobs sj
-    WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
-  `).run(req.user.id, query.toLowerCase(), sevenDaysAgo);
+  console.log(`[scrape] DB-first: only ${existingCount?.cnt||0} jobs for "${query}" — triggering background scrape`);
 
-  res.json({ ok:true, count:newJobCount, scrapedAt:Date.now(), query });
+  // Respond immediately — HarvestAPI takes 2–5 min; Railway timeout is 30s
+  res.json({ ok:true, count:0, scrapedAt:Date.now(), query, scraping:true });
+
+  // Background scrape — runs after response is flushed
+  setImmediate(async () => {
+    try {
+      await scrapeJobs(query, token);
+      db.prepare(`
+        INSERT OR IGNORE INTO user_jobs (user_id, job_id)
+        SELECT ?, sj.job_id FROM scraped_jobs sj
+        WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
+        AND sj.job_id NOT IN (
+          SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
+        )
+      `).run(req.user.id, query.toLowerCase(), sevenDaysAgo, req.user.id);
+      console.log(`[scrape] Background scrape complete for "${query}"`);
+    } catch(e) {
+      console.error(`[scrape] Background scrape failed for "${query}":`, e.message);
+    }
+  });
 });
 
 // ── Visited / Starred flags ────────────────────────────────────
@@ -1828,27 +1859,41 @@ app.post("/api/export-pdf", requireAuth, async (req, res) => {
   const { html, filename } = req.body;
   if (!html) return res.status(400).json({ error:"html required" });
   try {
+    console.log(`[pdf] generating, html length: ${html.length}`);
     const pdf = await htmlToPdf(html);
+    console.log(`[pdf] done, buffer size: ${pdf.length}`);
+    if (pdf.length < 1000) {
+      console.error("[pdf] suspiciously small output:", pdf.length);
+      return res.status(500).json({ error:"PDF generation produced empty output" });
+    }
     res.set({
       "Content-Type":"application/pdf",
       "Content-Disposition":`attachment; filename="${filename||"resume"}.pdf"`,
       "Content-Length":pdf.length,
     });
     res.end(pdf);
-  } catch(e) { res.status(500).json({ error:e.message }); }
+  } catch(e) {
+    console.error("[pdf] export failed:", e.message, e.stack);
+    res.status(500).json({ error:e.message });
+  }
 });
 app.get("/api/resumes/:jobId/pdf", requireAuth, async (req, res) => {
   const row = db.prepare("SELECT * FROM resumes WHERE user_id=? AND job_id=?").get(req.user.id, req.params.jobId);
   if (!row) return res.status(404).json({ error:"Not found" });
   try {
+    console.log(`[pdf] generating for ${row.company}, html length: ${row.html?.length||0}`);
     const pdf = await htmlToPdf(row.html);
+    console.log(`[pdf] done, buffer size: ${pdf.length}`);
     res.set({
       "Content-Type":"application/pdf",
       "Content-Disposition":`attachment; filename="Resume_${row.company.replace(/\s+/g,"_")}.pdf"`,
       "Content-Length":pdf.length,
     });
     res.end(pdf);
-  } catch(e) { res.status(500).json({ error:e.message }); }
+  } catch(e) {
+    console.error("[pdf] export failed:", e.message, e.stack);
+    res.status(500).json({ error:e.message });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════

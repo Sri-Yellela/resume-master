@@ -220,7 +220,11 @@ function DetailModal({ modal, onClose, theme }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ html: modal.html, filename }),
       });
-      if (!r.ok) { alert("PDF export failed"); return; }
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error:"PDF export failed" }));
+        alert(`PDF export failed: ${err.error || "Unknown error"}`);
+        return;
+      }
       const blob = await r.blob();
       const url  = URL.createObjectURL(blob);
       Object.assign(document.createElement("a"), { href: url, download: filename }).click();
