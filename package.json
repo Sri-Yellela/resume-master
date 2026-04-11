@@ -16,6 +16,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@sparticuz/chromium": "^143.0.4",
+    "apify-client": "^2.22.3",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.5.0",
     "connect-sqlite3": "^0.9.13",

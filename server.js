@@ -7,6 +7,7 @@ import cors           from "cors";
 import cron           from "node-cron";
 import Database       from "better-sqlite3";
 import Anthropic      from "@anthropic-ai/sdk";
+import ApifyClient    from "apify-client";
 import passport       from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import session        from "express-session";
@@ -33,6 +34,14 @@ const ADMIN_USER     = process.env.ADMIN_USER     || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const CACHE_TTL_MS        = 12 * 60 * 60 * 1000;
 const MAX_JOBS_PER_REFRESH= 50;
+// 64-char hex → 32-byte AES-256 key.  Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+// If not set, a random key is generated at startup (LinkedIn sessions won't survive restarts — acceptable for dev).
+const COOKIE_ENCRYPTION_KEY = Buffer.from(
+  process.env.COOKIE_ENCRYPTION_KEY
+    ? process.env.COOKIE_ENCRYPTION_KEY.replace(/\s/g,"").slice(0,64)
+    : crypto.randomBytes(32).toString("hex"),
+  "hex"
+);
 
 // ── Scaling notes ─────────────────────────────────────────────
 // Current: single Node.js process + SQLite + @sparticuz/chromium.
@@ -271,6 +280,36 @@ db.pragma("busy_timeout = 5000");
           SELECT user_id, job_id, 1 FROM job_applications;
       `,
     },
+    {
+      id: "007_scraped_jobs_v5_columns",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN apply_url TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN salary_min REAL;
+        ALTER TABLE scraped_jobs ADD COLUMN salary_max REAL;
+        ALTER TABLE scraped_jobs ADD COLUMN salary_currency TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN description_html TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN applicant_count INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN min_years_exp REAL;
+        ALTER TABLE scraped_jobs ADD COLUMN max_years_exp REAL;
+        ALTER TABLE scraped_jobs ADD COLUMN exp_raw TEXT;
+      `,
+    },
+    {
+      id: "008_disliked_and_linkedin_sessions",
+      sql: `
+        ALTER TABLE user_jobs ADD COLUMN disliked INTEGER NOT NULL DEFAULT 0;
+        CREATE INDEX IF NOT EXISTS idx_user_jobs_disliked ON user_jobs(user_id, disliked);
+        CREATE TABLE IF NOT EXISTS user_linkedin_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+          cookies_enc TEXT NOT NULL,
+          iv TEXT NOT NULL,
+          auth_tag TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -378,58 +417,95 @@ function jobHash(job) {
   return crypto.createHash("md5").update(key).digest("hex");
 }
 
-function normaliseItem(raw, source) {
+// Maps a single HarvestAPI LinkedIn item to our internal schema.
+// Real LinkedIn job IDs are used as primary keys (INSERT OR IGNORE — first write wins).
+function normaliseItem(raw) {
   const company =
-    raw.companyName ||
-    raw.company ||
+    raw.company?.name ||
+    raw.companyName   ||
     raw.employer?.name ||
-    raw.employerName ||
     "";
 
   const title = raw.title || raw.jobTitle || "";
 
   const description =
-    raw.descriptionText ||
     raw.description?.text ||
+    raw.descriptionText   ||
     (typeof raw.description === "string" ? raw.description : "") ||
     "";
 
+  const descriptionHtml =
+    raw.description?.html ||
+    raw.descriptionHtml   ||
+    null;
+
   const location =
+    (typeof raw.location === "string" ? raw.location : "") ||
     (raw.location?.city && raw.location?.state
       ? `${raw.location.city}, ${raw.location.state}`
-      : raw.location?.city || raw.location?.state ||
-        (typeof raw.location === "string" ? raw.location : "")) ||
-    raw.jobLocation ||
+      : raw.location?.city || raw.location?.state || "") ||
     "United States";
 
   let workTypeHint = "";
-  if (Array.isArray(raw.workplaceTypes) && raw.workplaceTypes.length > 0) {
-    workTypeHint = raw.workplaceTypes[0].toLowerCase();
-  } else if (raw.workType) {
-    workTypeHint = String(raw.workType).toLowerCase();
-  }
+  if (raw.workplaceType)                                              workTypeHint = String(raw.workplaceType).toLowerCase();
+  else if (Array.isArray(raw.workplaceTypes) && raw.workplaceTypes.length) workTypeHint = raw.workplaceTypes[0].toLowerCase();
+  else if (raw.remoteAllowed)                                         workTypeHint = "remote";
 
-  const url =
-    raw.applyUrl ||
-    raw.externalApplyUrl ||
-    raw.jobUrl ||
-    raw.url ||
+  const applyUrl =
+    raw.applyMethod?.companyApplyUrl ||
+    raw.applyUrl      ||
+    raw.apply_url     ||
+    raw.jobPostingUrl ||
     null;
 
+  const url = raw.linkedinUrl || raw.url || raw.jobUrl || null;
+
   const postedAt =
-    raw.listedAt ||
-    raw.postedAt ||
-    raw.datePosted ||
-    raw.date ||
+    raw.listingDate ||
+    raw.listedAt    ||
+    raw.postedAt    ||
+    raw.datePosted  ||
     null;
 
   const jobType =
-    raw.jobType ||
-    raw.employmentType ||
-    raw.contractType ||
+    raw.contractType    ||
+    raw.employmentType  ||
+    raw.jobType         ||
     "";
 
-  return { _source:source, company, title, description, location, workTypeHint, url, postedAt, jobType };
+  // Salary — HarvestAPI provides nested object or null
+  const salaryMin      = raw.salary?.min      ?? null;
+  const salaryMax      = raw.salary?.max      ?? null;
+  const salaryCurrency = raw.salary?.currency || null;
+
+  // Applicant count
+  const applicantCount = raw.applicants ?? raw.applies ?? raw.applicantCount ?? null;
+
+  // Company logo (use from HarvestAPI if available, otherwise clearbit fallback later)
+  const companyLogoUrl = raw.company?.logo || raw.companyLogo || null;
+
+  // Real LinkedIn job ID (string)
+  const jobId = raw.id != null ? String(raw.id) : (raw.jobId != null ? String(raw.jobId) : null);
+
+  return {
+    _source: "LinkedIn",
+    jobId,
+    company,
+    title,
+    description,
+    descriptionHtml,
+    location,
+    workTypeHint,
+    applyUrl,
+    url,
+    postedAt,
+    jobType,
+    salaryMin,
+    salaryMax,
+    salaryCurrency,
+    applicantCount,
+    companyLogoUrl,
+  };
 }
 
 function isFullTimeNorm(item) {
@@ -437,46 +513,53 @@ function isFullTimeNorm(item) {
   return !NON_FULLTIME_TERMS.some(t => text.includes(t));
 }
 
+const TYPO_MAP = {
+  "enginere":"engineer","enigneer":"engineer","enginer":"engineer",
+  "sofware":"software","softwar":"software",
+  "developr":"developer","devloper":"developer",
+  "maneger":"manager","mangager":"manager",
+  "analist":"analyst","analst":"analyst",
+  "maching":"machine","machien":"machine",
+  "lerning":"learning","learnig":"learning",
+  "scienist":"scientist","sceintist":"scientist",
+};
+
 function isTitleRelevant(title, query) {
   const t = title.toLowerCase();
   const stopWords = new Set(["the","and","for","with","ing","senior","junior","lead","staff","principal"]);
+  const normTerm = w => TYPO_MAP[w] || w;
   const terms = query.toLowerCase()
     .split(/[\s,/\-]+/)
-    .filter(w => w.length > 2 && !stopWords.has(w));
+    .filter(w => w.length > 2 && !stopWords.has(w))
+    .map(normTerm);
   if (terms.length === 0) return true;
-  // For single-term queries (e.g. "engineer"), any match is fine
   if (terms.length === 1) return t.includes(terms[0]);
-  // For multi-term queries, ALL core terms must appear OR the title must contain
-  // at least one core role keyword at a high similarity
   const roleKeywords = ["engineer","developer","scientist","analyst","manager","designer",
     "architect","researcher","specialist","consultant","director","coordinator"];
   const coreTerms = terms.filter(w => !roleKeywords.includes(w));
   const roleTerms = terms.filter(w =>  roleKeywords.includes(w));
-  // Core specialty terms (e.g. "machine","learning","software","data") must all match
   const coreMatch = coreTerms.length === 0 || coreTerms.every(w => t.includes(w));
-  // At least one role type term must match (or none required if query has no role terms)
   const roleMatch = roleTerms.length === 0 || roleTerms.some(w => t.includes(w));
   return coreMatch && roleMatch;
 }
 
-function extractYearsExperience(description = "") {
-  // Match patterns like "5+ years", "3-5 years", "minimum 2 years", "at least 7 years"
+function parseYearsExperience(description = "") {
   const patterns = [
-    /(\d+)\s*\+\s*years?\s+(?:of\s+)?experience/i,
-    /(\d+)\s*[-–]\s*(\d+)\s*years?\s+(?:of\s+)?experience/i,
-    /minimum\s+(\d+)\s*years?/i,
-    /at\s+least\s+(\d+)\s*years?/i,
-    /(\d+)\s*years?\s+(?:of\s+)?(?:relevant\s+)?experience/i,
+    { re:/(\d+)\s*\+\s*years?\s+(?:of\s+)?experience/i,              type:"plus"  },
+    { re:/(\d+)\s*[-–]\s*(\d+)\s*years?\s+(?:of\s+)?experience/i,   type:"range" },
+    { re:/minimum\s+(\d+)\s*years?/i,                                type:"min"   },
+    { re:/at\s+least\s+(\d+)\s*years?/i,                            type:"min"   },
+    { re:/(\d+)\s*years?\s+(?:of\s+)?(?:relevant\s+)?experience/i,  type:"exact" },
   ];
-  for (const p of patterns) {
-    const m = description.match(p);
+  for (const { re, type } of patterns) {
+    const m = description.match(re);
     if (m) {
-      // For range patterns, take the midpoint; for single, take the value
-      if (m[2]) return Math.round((Number(m[1]) + Number(m[2])) / 2);
-      return Number(m[1]);
+      if (type === "range") return { min: Number(m[1]), max: Number(m[2]), raw: m[0] };
+      if (type === "plus")  return { min: Number(m[1]), max: null,         raw: m[0] };
+      return { min: Number(m[1]), max: Number(m[1]), raw: m[0] };
     }
   }
-  return null; // null means unknown — do not filter these out
+  return { min: null, max: null, raw: null };
 }
 
 function ghostJobScoreNorm(item) {
@@ -494,6 +577,19 @@ function ghostJobScoreNorm(item) {
 
 function isReposted(job) {
   return ((job.title||"")+" "+(job.description||"")).toLowerCase().includes("reposted");
+}
+
+function encryptCookies(plaintext) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", COOKIE_ENCRYPTION_KEY, iv);
+  const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return { enc: enc.toString("base64"), iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64") };
+}
+
+function decryptCookies(enc, iv, tag) {
+  const decipher = crypto.createDecipheriv("aes-256-gcm", COOKIE_ENCRYPTION_KEY, Buffer.from(iv, "base64"));
+  decipher.setAuthTag(Buffer.from(tag, "base64"));
+  return Buffer.concat([decipher.update(Buffer.from(enc, "base64")), decipher.final()]).toString("utf8");
 }
 
 async function classifyJob(title, description = "") {
@@ -587,145 +683,124 @@ async function fetchCompanyIcon(domain) {
 }
 
 // ── Scraping ──────────────────────────────────────────────────
-function buildLinkedInUrl(query) {
-  return `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(query)}&location=United%20States&f_TPR=r86400&f_JT=F&sortBy=DD`;
-}
-
-async function scrapeLinkedIn(query, token) {
+// Actor: harvestapi/linkedin-job-search
+// Returns real LinkedIn job IDs — INSERT OR IGNORE keeps first-write wins.
+async function scrapeHarvestAPI(query, token) {
   if (!token) throw new Error("No Apify token");
-  // Use only the exact query — appending "engineer" creates duplicate noise for
-  // roles that already contain "engineer" and causes off-topic results for others
-  const urls = [buildLinkedInUrl(query)];
-  const res = await fetch(
-    `https://api.apify.com/v2/acts/curious_coder~linkedin-jobs-scraper/runs?token=${token}`,
-    { method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ urls, count:MAX_JOBS_PER_REFRESH * 2, scrapeCompany:false }) }
-  );
-  if (!res.ok) throw new Error(`Apify LinkedIn: ${res.status}`);
-  const { data } = await res.json();
-  return pollApify(data?.id, data?.defaultDatasetId, token);
-}
-
-async function scrapeIndeed(query, token) {
-  if (!token) throw new Error("No Apify token");
-  // Actor: valig~indeed-jobs-scraper (correct slug — curious_coder/indeed-scraper does not exist)
-  const res = await fetch(
-    `https://api.apify.com/v2/acts/valig~indeed-jobs-scraper/runs?token=${token}`,
-    { method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ query, country:"us", location:"United States", postedWithinDays:"1", count:MAX_JOBS_PER_REFRESH * 2 }) }
-  );
-  if (!res.ok) throw new Error(`Apify Indeed: ${res.status}`);
-  const { data } = await res.json();
-  return pollApify(data?.id, data?.defaultDatasetId, token);
-}
-
-async function pollApify(runId, datasetId, token) {
-  if (!runId) throw new Error("No run ID");
-  let status = "RUNNING", tries = 0;
-  while (["RUNNING","READY"].includes(status)) {
-    await new Promise(r => setTimeout(r, 6000));
-    tries++;
-    const poll = await (await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`)).json();
-    status = poll.data?.status;
-    if (tries > 70) throw new Error("Apify timeout");
-  }
-  if (status !== "SUCCEEDED") throw new Error(`Apify ended: ${status}`);
-  const items = await (await fetch(
-    `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&limit=${MAX_JOBS_PER_REFRESH}&format=json`
-  )).json();
-  return Array.isArray(items) ? items : [];
+  const client = new ApifyClient({ token });
+  const input = {
+    jobTitles:      [query],
+    locations:      ["United States"],
+    workplaceType:  ["Remote", "Hybrid", "On-site"],
+    employmentType: ["Full-time"],
+    postedLimit:    "24h",
+    maxItems:       MAX_JOBS_PER_REFRESH * 3,
+  };
+  const run = await client.actor("harvestapi/linkedin-job-search").call(input, { waitSecs: 300 });
+  const dataset = await client.dataset(run.defaultDatasetId).listItems({ limit: MAX_JOBS_PER_REFRESH * 3 });
+  const items = Array.isArray(dataset.items) ? dataset.items : [];
+  console.log(`[scrape] HarvestAPI returned ${items.length} raw items`);
+  return items;
 }
 
 async function scrapeJobs(query, apifyToken) {
-  console.log(`[scrape] "${query}"`);
-  const [liRes, inRes] = await Promise.allSettled([
-    scrapeLinkedIn(query, apifyToken),
-    scrapeIndeed(query, apifyToken),
-  ]);
-
-  const rawLi = liRes.status === "fulfilled" ? liRes.value : [];
-  const rawIn = inRes.status === "fulfilled" ? inRes.value : [];
-
-  if (liRes.status === "rejected") console.warn("[scrape] LinkedIn:", liRes.reason?.message);
-  if (inRes.status === "rejected") console.warn("[scrape] Indeed:",   inRes.reason?.message);
-
-  console.log(`[scrape] raw: LinkedIn=${rawLi.length} Indeed=${rawIn.length}`);
-
-  const combined = [
-    ...rawLi.map(j => normaliseItem(j, "LinkedIn")),
-    ...rawIn.map(j => normaliseItem(j, "Indeed")),
-  ];
-
-  const seenHashes = new Set();
-  const dbRows = db.prepare(
-    "SELECT _hash FROM scraped_jobs WHERE LOWER(search_query)=? ORDER BY scraped_at DESC LIMIT 200"
-  ).all(query.toLowerCase());
-  for (const row of dbRows) {
-    if (row._hash) seenHashes.add(row._hash);
+  console.log(`[scrape] "${query}" — HarvestAPI`);
+  let rawItems = [];
+  try {
+    rawItems = await scrapeHarvestAPI(query, apifyToken);
+    console.log(`[scrape] HarvestAPI: ${rawItems.length} raw items`);
+  } catch(e) {
+    console.warn("[scrape] HarvestAPI failed:", e.message);
+    throw e;
   }
 
+  const combined = rawItems.map(j => normaliseItem(j));
+
+  let cntNoTitle = 0, cntNoApply = 0, cntNotFT = 0, cntIrrelevant = 0, cntRepost = 0, cntGhost = 0, cntDup = 0;
+  const thisRunIds    = new Set();
   const thisRunHashes = new Set();
+
   const filtered = combined.filter(item => {
-    if (!item.title || !item.company) return false;
-    if (!isFullTimeNorm(item)) return false;
-    if (!isTitleRelevant(item.title, query)) return false;
-    if (item.description.toLowerCase().includes("reposted")) return false;
-    if (ghostJobScoreNorm(item) >= 4) return false;
+    if (!item.title || !item.company || !item.jobId) { cntNoTitle++;  return false; }
+    // Hard-drop #1: no external apply URL
+    if (!item.applyUrl)                              { cntNoApply++;  return false; }
+    // Hard-drop #2: applyUrl is a LinkedIn-internal apply link (not an external ATS)
+    const applyDomain = extractDomain(item.applyUrl);
+    if (applyDomain && applyDomain.includes("linkedin.com")) { cntNoApply++; return false; }
+    if (!isFullTimeNorm(item))                 { cntNotFT++;      return false; }
+    if (!isTitleRelevant(item.title, query))   { cntIrrelevant++; return false; }
+    if (isReposted(item))                      { cntRepost++;     return false; }
+    if (ghostJobScoreNorm(item) >= 4)          { cntGhost++;      return false; }
+    if (thisRunIds.has(item.jobId))            { cntDup++;        return false; }
+    thisRunIds.add(item.jobId);
     const h = jobHash(item);
-    if (thisRunHashes.has(h)) return false;
+    if (thisRunHashes.has(h))                  { cntDup++;        return false; }
     thisRunHashes.add(h);
-    if (seenHashes.has(h)) return false;
     return true;
   });
 
-  console.log(`[scrape] after filter: ${filtered.length} / ${combined.length}`);
+  console.log(
+    `[scrape] filtered: ${filtered.length}/${combined.length}` +
+    ` (missingTitleOrCompany:${cntNoTitle} noExternalApplyUrl:${cntNoApply} notFullTime:${cntNotFT}` +
+    ` titleIrrelevant:${cntIrrelevant} repost:${cntRepost} ghostScore:${cntGhost} duplicate:${cntDup})`
+  );
 
   const classified = [];
   for (let i = 0; i < Math.min(filtered.length, MAX_JOBS_PER_REFRESH); i += 5) {
     const batch = filtered.slice(i, i + 5);
-    const cats  = await Promise.all(
-      batch.map(item => classifyJob(item.title, item.description))
-    );
+    const cats  = await Promise.all(batch.map(item => classifyJob(item.title, item.description)));
     batch.forEach((item, idx) => classified.push({ ...item, _category: cats[idx] }));
   }
 
-  const now = Date.now();
-  const nowUnix = Math.floor(now / 1000);
+  const nowUnix = Math.floor(Date.now() / 1000);
 
   const insertJob = db.prepare(`
     INSERT OR IGNORE INTO scraped_jobs
     (job_id, search_query, company, title, category, location,
-     work_type, source, url, posted_at, description,
-     ghost_score, years_experience, is_frequent_repost, _hash, scraped_at,
-     source_platform)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     work_type, source, url, apply_url, posted_at, description, description_html,
+     ghost_score, years_experience, min_years_exp, max_years_exp, exp_raw,
+     is_frequent_repost, _hash, scraped_at, source_platform,
+     salary_min, salary_max, salary_currency, applicant_count, company_icon_url)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   const insertMany = db.transaction((jobs) => {
     let inserted = 0;
-    jobs.forEach((item, i) => {
-      const jobId = `scraped_${now}_${i}`;
-      const hash = jobHash(item);
+    jobs.forEach(item => {
+      const jobId = item.jobId; // always a real LinkedIn job ID — synthetic IDs were removed
+      const hash  = jobHash(item);
+      const yoe   = parseYearsExperience(item.description);
+      const wt    = inferWorkType(
+        (item.workTypeHint || "") + " " + (item.location || "") + " " + (item.description || "")
+      );
       const result = insertJob.run(
         jobId,
         query.toLowerCase(),
         item.company,
         item.title,
         item._category || "Other",
-        item.location || "United States",
-        inferWorkType(
-          (item.workTypeHint || "") + " " + (item.location || "") + " " + (item.description || "")
-        ),
-        item._source,
-        item.url || null,
-        item.postedAt || null,
-        (item.description || "").slice(0, 2000),
+        item.location  || "United States",
+        wt,
+        "LinkedIn",
+        item.url        || null,
+        item.applyUrl   || null,
+        item.postedAt   || null,
+        item.description || null,
+        item.descriptionHtml || null,
         ghostJobScoreNorm(item),
-        extractYearsExperience(item.description),
-        item.isFrequentRepost ? 1 : 0,
+        yoe.min,          // years_experience (compat col — use min)
+        yoe.min,
+        yoe.max,
+        yoe.raw,
+        isReposted(item) ? 1 : 0,
         hash,
         nowUnix,
-        (item._source || "").toLowerCase()
+        "linkedin",
+        item.salaryMin      || null,
+        item.salaryMax      || null,
+        item.salaryCurrency || null,
+        item.applicantCount || null,
+        item.companyLogoUrl || null,
       );
       if (result.changes > 0) inserted++;
     });
@@ -734,12 +809,13 @@ async function scrapeJobs(query, apifyToken) {
 
   const inserted = insertMany(classified);
 
-  // ── Async company icon fetch (non-blocking) ────────────────
+  // ── Async clearbit icon fallback (non-blocking, only for jobs without a logo) ──
   setImmediate(async () => {
     const updateIcon = db.prepare(
       "UPDATE scraped_jobs SET company_icon_url=? WHERE _hash=? AND company_icon_url IS NULL"
     );
     for (const item of classified) {
+      if (item.companyLogoUrl) continue; // HarvestAPI already provided a logo
       try {
         const domain  = extractDomain(item.url);
         const iconUrl = await fetchCompanyIcon(domain);
@@ -747,28 +823,9 @@ async function scrapeJobs(query, apifyToken) {
       } catch {}
     }
   });
-  console.log(
-    `[scrape] ✓ ${inserted} new jobs inserted into pool (${classified.length} total)`
-  );
 
-  return classified.map((item, i) => ({
-    jobId: `scraped_${now}_${i}`,
-    _hash: jobHash(item),
-    company: item.company,
-    title: item.title,
-    category: item._category,
-    location: item.location || "United States",
-    workType: inferWorkType(
-      (item.workTypeHint || "") + " " + (item.location || "") + " " + (item.description || "")
-    ),
-    source: item._source,
-    url: item.url,
-    postedAt: item.postedAt,
-    description: (item.description || "").slice(0, 2000),
-    ghostScore: ghostJobScoreNorm(item),
-    yearsExperience: extractYearsExperience(item.description),
-    isFrequentRepost: item.isFrequentRepost || false,
-  }));
+  console.log(`[scrape] ✓ ${inserted} new jobs inserted (${classified.length} classified)`);
+  return classified;
 }
 
 // ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
@@ -1043,6 +1100,8 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(cors({ origin:true, credentials:true }));
 app.use(express.json({ limit:"4mb" }));
+// TODO: reduce cookie maxAge to 30 min + implement sliding renewal
+// once useInactivityLogout (30-min idle) is deployed on the client.
 app.use(session({
   store: SStore,
   secret:SESSION_SECRET, resave:false, saveUninitialized:false,
@@ -1244,14 +1303,15 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const sort     = req.query.sort || "dateDesc";
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
 
-  // ── Session sync: populate user_jobs from central pool for all user's roles ──
+  // ── Session sync: populate user_jobs from central pool (skip already-disliked) ──
   db.prepare(`
     INSERT OR IGNORE INTO user_jobs (user_id, job_id)
     SELECT ?, sj.job_id FROM scraped_jobs sj
     WHERE LOWER(sj.search_query) IN (
       SELECT LOWER(search_query) FROM user_job_searches WHERE user_id = ?
     ) AND sj.scraped_at > ?
-  `).run(userId, userId, sevenDaysAgo);
+    AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
+  `).run(userId, userId, sevenDaysAgo, userId);
 
   // Keep applied flag in sync with job_applications
   db.prepare(`
@@ -1261,7 +1321,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   `).run(userId, userId);
 
   // ── Filter conditions ──
-  const conditions = [`sj.scraped_at > ${sevenDaysAgo}`];
+  const conditions = [`sj.scraped_at > ${sevenDaysAgo}`, `(uj.disliked IS NULL OR uj.disliked = 0)`];
   const filterParams = [];
 
   const role = (req.query.role || "").trim().toLowerCase();
@@ -1289,12 +1349,19 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const minYoe = req.query.minYoe !== undefined && req.query.minYoe !== "" ? parseInt(req.query.minYoe) : null;
   const maxYoe = req.query.maxYoe !== undefined && req.query.maxYoe !== "" ? parseInt(req.query.maxYoe) : null;
   if (minYoe !== null && !isNaN(minYoe)) {
-    conditions.push(`(sj.years_experience IS NULL OR sj.years_experience >= ?)`);
+    conditions.push(`(sj.min_years_exp IS NULL OR sj.min_years_exp >= ?)`);
     filterParams.push(minYoe);
   }
   if (maxYoe !== null && !isNaN(maxYoe)) {
-    conditions.push(`(sj.years_experience IS NULL OR sj.years_experience <= ?)`);
+    conditions.push(`(sj.max_years_exp IS NULL OR sj.max_years_exp <= ?)`);
     filterParams.push(maxYoe);
+  }
+
+  const maxApplicants = req.query.maxApplicants !== undefined && req.query.maxApplicants !== ""
+    ? parseInt(req.query.maxApplicants) : null;
+  if (maxApplicants !== null && !isNaN(maxApplicants)) {
+    conditions.push(`(sj.applicant_count IS NULL OR sj.applicant_count <= ?)`);
+    filterParams.push(maxApplicants);
   }
 
   const visitedF = req.query.visited;
@@ -1306,9 +1373,6 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   if (appliedF === "0")  { conditions.push(`uj.applied = 0`); }
 
   if (req.query.starred === "1") { conditions.push(`uj.starred = 1`); }
-
-  if (req.query.hideGhost === "true") { conditions.push(`sj.ghost_score < 4`); }
-  if (req.query.hideFlag  === "true") { conditions.push(`sj.is_frequent_repost = 0`); }
 
   const localSearch = (req.query.localSearch || "").trim().toLowerCase();
   if (localSearch) {
@@ -1339,7 +1403,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const total = countRow?.cnt || 0;
 
   let rows = db.prepare(
-    `SELECT sj.*, uj.visited, uj.applied, uj.starred
+    `SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked
      ${baseJoin} ${where}
      ORDER BY ${orderBy}
      LIMIT ? OFFSET ?`
@@ -1367,19 +1431,31 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     location:             j.location,
     workType:             j.work_type,
     source:               j.source,
-    sourcePlatform:       j.source_platform || (j.source || "").toLowerCase(),
+    sourcePlatform:       "linkedin",
     url:                  j.url,
+    applyUrl:             j.apply_url,
     postedAt:             j.posted_at,
     description:          j.description,
+    descriptionHtml:      j.description_html,
     ghostScore:           j.ghost_score,
     yearsExperience:      j.years_experience,
+    minYearsExp:          j.min_years_exp,
+    maxYearsExp:          j.max_years_exp,
+    expRaw:               j.exp_raw,
+    salaryMin:            j.salary_min,
+    salaryMax:            j.salary_max,
+    salaryCurrency:       j.salary_currency,
+    applicantCount:       j.applicant_count,
     compensation:         j.compensation,
     companyIconUrl:       j.company_icon_url,
     isFrequentRepost:     !!j.is_frequent_repost,
     visited:              !!j.visited,
     alreadyApplied:       !!j.applied,
     starred:              !!j.starred,
+    disliked:             !!j.disliked,
     companyAppliedBefore: appliedCoSet.has((j.company || "").toLowerCase()),
+    recruiterData:        null,
+    enrichmentAvailable:  false,
   }));
 
   res.json({ jobs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
@@ -1460,11 +1536,29 @@ app.patch("/api/jobs/:id/starred", requireAuth, (req, res) => {
   ).get(req.user.id, jobId);
   const newStarred = current ? (current.starred ? 0 : 1) : 1;
   db.prepare(`
-    INSERT INTO user_jobs (user_id, job_id, starred, updated_at)
-    VALUES (?, ?, ?, unixepoch())
-    ON CONFLICT(user_id, job_id) DO UPDATE SET starred = ?, updated_at = unixepoch()
+    INSERT INTO user_jobs (user_id, job_id, starred, disliked, updated_at)
+    VALUES (?, ?, ?, 0, unixepoch())
+    ON CONFLICT(user_id, job_id) DO UPDATE SET starred = ?, disliked = 0, updated_at = unixepoch()
   `).run(req.user.id, jobId, newStarred, newStarred);
   res.json({ ok:true, starred: !!newStarred });
+});
+
+app.patch("/api/jobs/:id/disliked", requireAuth, (req, res) => {
+  const jobId = req.params.id;
+  const current = db.prepare(
+    "SELECT disliked FROM user_jobs WHERE user_id = ? AND job_id = ?"
+  ).get(req.user.id, jobId);
+  const newDisliked = current ? (current.disliked ? 0 : 1) : 1;
+  db.prepare(`
+    INSERT INTO user_jobs (user_id, job_id, disliked, starred, updated_at)
+    VALUES (?, ?, ?, 0, unixepoch())
+    ON CONFLICT(user_id, job_id) DO UPDATE SET disliked = ?, starred = 0, updated_at = unixepoch()
+  `).run(req.user.id, jobId, newDisliked, newDisliked);
+  res.json({ ok:true, disliked: !!newDisliked });
+});
+
+app.get("/api/jobs/:id/recruiter", requireAuth, (_req, res) => {
+  res.json({ comingSoon: true, available: false });
 });
 
 app.get("/api/categories", requireAuth, (_req,res) => res.json(INDUSTRY_CATEGORIES));
@@ -1815,7 +1909,44 @@ app.post("/api/applications", requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 app.get("/api/applications", requireAuth, (req, res) => {
-  res.json(db.prepare("SELECT * FROM job_applications WHERE user_id=? ORDER BY applied_at DESC").all(req.user.id));
+  const rows = db.prepare(`
+    SELECT ja.*,
+      sj.description      AS sj_description,
+      sj.description_html AS sj_description_html,
+      sj.url              AS sj_url,
+      sj.apply_url        AS sj_apply_url,
+      sj.salary_min       AS sj_salary_min,
+      sj.salary_max       AS sj_salary_max,
+      sj.salary_currency  AS sj_salary_currency,
+      sj.applicant_count  AS sj_applicant_count,
+      sj.min_years_exp    AS sj_min_years_exp,
+      sj.max_years_exp    AS sj_max_years_exp,
+      sj.exp_raw          AS sj_exp_raw,
+      sj.category         AS sj_category,
+      sj.work_type        AS sj_work_type,
+      sj.company_icon_url AS sj_company_icon_url
+    FROM job_applications ja
+    LEFT JOIN scraped_jobs sj ON sj.job_id = ja.job_id
+    WHERE ja.user_id = ?
+    ORDER BY ja.applied_at DESC
+  `).all(req.user.id);
+  res.json(rows.map(r => ({
+    ...r,
+    description:     r.sj_description     || null,
+    descriptionHtml: r.sj_description_html || null,
+    url:             r.sj_url             || null,
+    applyUrl:        r.sj_apply_url        || r.job_url || null,
+    salaryMin:       r.sj_salary_min       || null,
+    salaryMax:       r.sj_salary_max       || null,
+    salaryCurrency:  r.sj_salary_currency  || null,
+    applicantCount:  r.sj_applicant_count  || null,
+    minYearsExp:     r.sj_min_years_exp    || null,
+    maxYearsExp:     r.sj_max_years_exp    || null,
+    expRaw:          r.sj_exp_raw          || null,
+    category:        r.sj_category         || r.category || null,
+    workType:        r.sj_work_type        || null,
+    companyIconUrl:  r.sj_company_icon_url || null,
+  })));
 });
 app.patch("/api/applications/:jobId", requireAuth, (req, res) => {
   const allowed = ["company","role","location","notes","applied_at"];
@@ -1943,6 +2074,37 @@ ${resumeText.slice(0, 3000)}`
       domains:      parsed.domains      || [],
     });
   } catch(e) { res.status(500).json({ error:e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// LINKEDIN SESSION COOKIES (AES-256-GCM encrypted at rest)
+// Future: use stored cookies to skip re-auth in HarvestAPI actor
+// ═══════════════════════════════════════════════════════════════
+app.post("/api/linkedin/cookies", requireAuth, (req, res) => {
+  const { cookies } = req.body;
+  if (!cookies || typeof cookies !== "string") return res.status(400).json({ error:"cookies string required" });
+  try {
+    const { enc, iv, tag } = encryptCookies(cookies);
+    db.prepare(`
+      INSERT INTO user_linkedin_sessions (user_id, cookies_enc, iv, auth_tag, updated_at)
+      VALUES (?, ?, ?, ?, unixepoch())
+      ON CONFLICT(user_id) DO UPDATE SET cookies_enc=excluded.cookies_enc, iv=excluded.iv,
+        auth_tag=excluded.auth_tag, updated_at=excluded.updated_at
+    `).run(req.user.id, enc, iv, tag);
+    res.json({ ok:true });
+  } catch(e) { res.status(500).json({ error:e.message }); }
+});
+
+app.get("/api/linkedin/status", requireAuth, (req, res) => {
+  const row = db.prepare(
+    "SELECT updated_at FROM user_linkedin_sessions WHERE user_id=?"
+  ).get(req.user.id);
+  res.json({ connected: !!row, updatedAt: row?.updated_at || null });
+});
+
+app.delete("/api/linkedin/cookies", requireAuth, (req, res) => {
+  db.prepare("DELETE FROM user_linkedin_sessions WHERE user_id=?").run(req.user.id);
+  res.json({ ok:true });
 });
 
 // ═══════════════════════════════════════════════════════════════

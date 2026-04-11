@@ -1,10 +1,10 @@
 // client/src/panels/JobsPanel.jsx — Lucy Brand, shared job pool
-// User board accent = soft sky blue (#A8D8EA)
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { api, saveWithPicker } from "../lib/api.js";
+import { api, saveWithPicker, dislikeJob } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
+import JobCard from "../components/JobCard.jsx";
 import SandboxPanel from "./SandboxPanel.jsx";
 import { ATSPanel } from "./ATSPanel.jsx";
 
@@ -211,6 +211,7 @@ function FiltersPanel({
   srcFilter, setSrcFilter,
   minYoe, setMinYoe,
   maxYoe, setMaxYoe,
+  maxApplicants, setMaxApplicants,
   visitedFilter, setVisitedFilter,
   appliedFilter, setAppliedFilter,
   ageFilter, setAgeFilter,
@@ -316,6 +317,16 @@ function FiltersPanel({
         </div>
 
         <div>
+          <div style={labelStyle}>Max Applicants</div>
+          <input type="number" min={0} placeholder="e.g. 100"
+            value={maxApplicants} onChange={e=>setMaxApplicants(e.target.value)}
+            style={{...selStyle, width:"100%"}}/>
+          <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
+            Hide jobs with more applicants than this
+          </div>
+        </div>
+
+        <div>
           <div style={labelStyle}>Status</div>
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
             <select value={visitedFilter} onChange={e=>setVisitedFilter(e.target.value)} style={selStyle}>
@@ -328,6 +339,20 @@ function FiltersPanel({
               <option value="0">Not yet applied</option>
               <option value="1">Applied only</option>
             </select>
+          </div>
+        </div>
+
+        {/* Coming soon: Salary range filter */}
+        <div style={{ padding:"10px 12px", background:theme.surfaceHigh, borderRadius:4,
+                      border:`1px dashed ${theme.border}`, opacity:0.7 }}>
+          <div style={{ ...labelStyle, marginBottom:6 }}>Salary Range
+            <span style={{ marginLeft:6, fontSize:9, padding:"1px 6px", borderRadius:999,
+                           background:"#f3f4f6", color:"#9ca3af", border:"1px dashed #d1d5db",
+                           fontWeight:700, letterSpacing:"0.04em" }}>soon</span>
+          </div>
+          <div style={{ display:"flex", gap:6 }}>
+            <input disabled placeholder="$60k" style={{...selStyle, flex:1, opacity:0.5, cursor:"not-allowed"}}/>
+            <input disabled placeholder="$200k" style={{...selStyle, flex:1, opacity:0.5, cursor:"not-allowed"}}/>
           </div>
         </div>
 
@@ -490,7 +515,7 @@ const DEFAULT_SIZES = { left: 58, right: 42 };
 const DEFAULT_SIZES_SANDBOX = { left: 36, center: 32, right: 22 };
 
 // ── Main panel ────────────────────────────────────────────────
-export default function JobsPanel({ user, onUserChange }) {
+export default function JobsPanel({ user, onUserChange, refreshKey = 0 }) {
   const { theme, isDark } = useTheme();
   const { mode: vpMode } = useViewport();
   const isWide     = vpMode === "wide";
@@ -584,6 +609,7 @@ export default function JobsPanel({ user, onUserChange }) {
   const [srcFilter,     setSrcFilter]     = useState("");
   const [minYoe,        setMinYoe]        = useState("");
   const [maxYoe,        setMaxYoe]        = useState("");
+  const [maxApplicants, setMaxApplicants] = useState("");
   const [visitedFilter, setVisitedFilter] = useState("");
   const [appliedFilter, setAppliedFilter] = useState("");
   const [ageFilter,     setAgeFilter]     = useState("");
@@ -591,6 +617,14 @@ export default function JobsPanel({ user, onUserChange }) {
   const fileRef   = useRef();
   const applyMode = user?.applyMode || "TAILORED";
   const PAGE_SIZE = 25;
+
+  // Skills extracted from the base resume — used for keyword highlighting in expanded cards
+  const baseResumeSkills = useMemo(() => {
+    if (!resumeText) return new Set();
+    const re = /\b(python|javascript|typescript|java|golang|go|rust|c\+\+|c#|react|vue|angular|node\.?js|django|flask|fastapi|spring|docker|kubernetes|k8s|aws|gcp|azure|terraform|postgresql|mysql|mongodb|redis|kafka|spark|tensorflow|pytorch|sklearn|sql|git|linux|bash|rest|graphql|ml|ai|llm|nlp|cuda|hadoop|airflow|dbt|snowflake|bigquery|pandas|numpy|scipy|scikit|jupyter|tableau|looker|powerbi|figma|jira|scrum|agile|ci\/cd|jenkins|github|gitlab|bitbucket|microservices|grpc|oauth|jwt|html|css|sass|webpack|vite|next\.?js|nuxt|svelte|flutter|swift|kotlin)\b/gi;
+    const matches = resumeText.match(re) || [];
+    return new Set(matches.map(m => m.toLowerCase()));
+  }, [resumeText]);
 
   // ── Build query params from current filter state ──────────
   const buildParams = useCallback((page = 1, overrideStarred = null) => {
@@ -603,17 +637,16 @@ export default function JobsPanel({ user, onUserChange }) {
     if (workType)             p.set("workType", workType);
     if (catFilter)            p.set("category", catFilter);
     if (srcFilter)            p.set("source",   srcFilter);
-    if (minYoe !== "")        p.set("minYoe",   minYoe);
-    if (maxYoe !== "")        p.set("maxYoe",   maxYoe);
-    if (visitedFilter)        p.set("visited",  visitedFilter);
-    if (appliedFilter)        p.set("applied",  appliedFilter);
-    if (ageFilter)            p.set("ageFilter",ageFilter);
+    if (minYoe !== "")        p.set("minYoe",        minYoe);
+    if (maxYoe !== "")        p.set("maxYoe",        maxYoe);
+    if (maxApplicants !== "") p.set("maxApplicants", maxApplicants);
+    if (visitedFilter)        p.set("visited",       visitedFilter);
+    if (appliedFilter)        p.set("applied",       appliedFilter);
+    if (ageFilter)            p.set("ageFilter",     ageFilter);
     if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
-    p.set("hideGhost","true");
-    p.set("hideFlag","true");
     return p.toString();
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
-      minYoe, maxYoe, visitedFilter, appliedFilter, ageFilter, boardTab]);
+      minYoe, maxYoe, maxApplicants, visitedFilter, appliedFilter, ageFilter, boardTab]);
 
   // ── Fetch jobs — never clears board before data arrives ──────
   const fetchJobs = useCallback(async (page = 1, mergeMode = false) => {
@@ -643,7 +676,7 @@ export default function JobsPanel({ user, onUserChange }) {
   useEffect(() => {
     if (!user) return;
     Promise.all([
-      api("/api/jobs?page=1&pageSize=25&sort=dateDesc&hideGhost=true&hideFlag=true"),
+      api("/api/jobs?page=1&pageSize=25&sort=dateDesc"),
       api("/api/categories"),
       api("/api/base-resume"),
       api("/api/resumes"),
@@ -667,7 +700,7 @@ export default function JobsPanel({ user, onUserChange }) {
     if (!user) return;
     fetchJobs(1);
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
-      minYoe, maxYoe, visitedFilter, appliedFilter, ageFilter, boardTab]);
+      minYoe, maxYoe, maxApplicants, visitedFilter, appliedFilter, ageFilter, boardTab, refreshKey]);
 
   // ── Scrape / search ───────────────────────────────────────
   const handleSearch = useCallback(async (overrideQuery) => {
@@ -690,7 +723,7 @@ export default function JobsPanel({ user, onUserChange }) {
       // Fetch with explicit role so results are scoped to the searched role
       const qs = new URLSearchParams();
       qs.set("page","1"); qs.set("pageSize","25"); qs.set("sort", sortBy);
-      qs.set("role", q.toLowerCase()); qs.set("hideGhost","true"); qs.set("hideFlag","true");
+      qs.set("role", q.toLowerCase());
       const d = await api(`/api/jobs?${qs.toString()}`);
       setJobs(d.jobs || []);
       setTotalJobs(d.total || 0);
@@ -719,7 +752,7 @@ export default function JobsPanel({ user, onUserChange }) {
       const qs = new URLSearchParams();
       qs.set("page","1"); qs.set("pageSize","50"); qs.set("sort", sortBy);
       qs.set("role", q.toLowerCase());
-      qs.set("visited","0"); qs.set("hideGhost","true"); qs.set("hideFlag","true");
+      qs.set("visited","0");
       const d = await api(`/api/jobs?${qs.toString()}`);
       const incoming = d.jobs || [];
       setJobs(prev => {
@@ -848,7 +881,20 @@ export default function JobsPanel({ user, onUserChange }) {
   const toggleStar = useCallback(async (jobId) => {
     try {
       const d = await api(`/api/jobs/${jobId}/starred`, { method:"PATCH" });
-      setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, starred: d.starred} : j));
+      setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, starred: d.starred, disliked: false} : j));
+    } catch {}
+  }, []);
+
+  // ── Dislike toggle (removes from board) ──────────────────
+  const toggleDislike = useCallback(async (jobId) => {
+    try {
+      const d = await dislikeJob(jobId);
+      if (d.disliked) {
+        // Remove from board immediately
+        setJobs(prev => prev.filter(j => j.jobId !== jobId));
+      } else {
+        setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, disliked: false} : j));
+      }
     } catch {}
   }, []);
 
@@ -871,7 +917,7 @@ export default function JobsPanel({ user, onUserChange }) {
   // ── Filter reset ──────────────────────────────────────────
   const resetFilters = () => {
     setRoleFilter(""); setLocationFilter(""); setWorkType(""); setCatFilter("");
-    setSrcFilter(""); setMinYoe(""); setMaxYoe(""); setVisitedFilter("");
+    setSrcFilter(""); setMinYoe(""); setMaxYoe(""); setMaxApplicants(""); setVisitedFilter("");
     setAppliedFilter(""); setAgeFilter(""); setLocalSearch("");
   };
 
@@ -909,6 +955,7 @@ export default function JobsPanel({ user, onUserChange }) {
             srcFilter={srcFilter}     setSrcFilter={setSrcFilter}
             minYoe={minYoe}           setMinYoe={setMinYoe}
             maxYoe={maxYoe}           setMaxYoe={setMaxYoe}
+            maxApplicants={maxApplicants} setMaxApplicants={setMaxApplicants}
             visitedFilter={visitedFilter} setVisitedFilter={setVisitedFilter}
             appliedFilter={appliedFilter} setAppliedFilter={setAppliedFilter}
             ageFilter={ageFilter}     setAgeFilter={setAgeFilter}
@@ -1150,9 +1197,10 @@ export default function JobsPanel({ user, onUserChange }) {
             <JobsColumn
               jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
               applyMode={applyMode} theme={theme} isDark={isDark}
+              baseResumeSkills={baseResumeSkills}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-              visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
+              visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike} setActiveAts={setActiveAts}
               setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
               setMobilePane={setMobilePane} isMobile={isMobile}
             />
@@ -1224,9 +1272,10 @@ export default function JobsPanel({ user, onUserChange }) {
             <JobsColumn
               jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
               applyMode={applyMode} theme={theme} isDark={isDark}
+              baseResumeSkills={baseResumeSkills}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-              visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
+              visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike} setActiveAts={setActiveAts}
               setRightTab={setRightTab} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
               setMobilePane={setMobilePane} isMobile={isMobile}
             />
@@ -1308,9 +1357,9 @@ export default function JobsPanel({ user, onUserChange }) {
 
 // ── Jobs column (shared across layout modes) ──────────────────
 function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme, isDark,
-                      totalPages, currentPage, isLastPage,
+                      baseResumeSkills, totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
-                      visitUrl, toggleStar, setActiveAts, setRightTab,
+                      visitUrl, toggleStar, toggleDislike, setActiveAts, setRightTab,
                       goPage, handleRefresh, onPullRefresh,
                       setMobilePane, isMobile }) {
   return (
@@ -1343,6 +1392,9 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme, isDa
                 key={key} job={job} g={g} done={done} st={st}
                 applyMode={applyMode}
                 theme={theme} isDark={isDark}
+                baseResumeSkills={baseResumeSkills}
+                showDislike={true}
+                showApplyButton={true}
                 onGenerate={force => generate(job, force)}
                 onViewSandbox={() => {
                   const entry = {...g, company:g.company||job.company, title:g.title||job.title};
@@ -1353,6 +1405,7 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme, isDa
                 onExport={() => exportAndTrack(job, g.html, job.company)}
                 onVisit={() => visitUrl(job)}
                 onStar={() => toggleStar(key)}
+                onDislike={() => toggleDislike?.(key)}
                 onCardClick={() => {
                   if (done && g.html !== "__exists__") {
                     const entry = {...g, company:g.company||job.company, title:g.title||job.title};
@@ -1399,132 +1452,7 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme, isDa
   );
 }
 
-// ── Job card ──────────────────────────────────────────────────
-function JobCard({ job, g, done, st, applyMode, theme, isDark,
-                   onGenerate, onViewSandbox, onExport, onVisit, onStar, onCardClick,
-                   onAts, onResume }) {
-  const [hov, setHov] = useState(false);
-  const frostedBg = isDark
-    ? (hov ? "rgba(28,28,28,0.92)" : "rgba(17,17,17,0.6)")
-    : (hov ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.68)");
-  const frostedBlur = hov ? "blur(20px) saturate(2)" : "blur(12px) saturate(1.6)";
-  return (
-    <div
-      onClick={onCardClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        background: frostedBg,
-        backdropFilter: frostedBlur,
-        WebkitBackdropFilter: frostedBlur,
-        border: `1px solid ${hov ? theme.borderStrong : theme.border + "88"}`,
-        borderRadius:4, padding:"14px 18px", margin:"0 16px 8px",
-        display:"flex", alignItems:"center", gap:14, cursor:"pointer",
-        boxShadow: hov ? theme.shadowLg : theme.shadowSm,
-        transform: hov ? "translateY(-3px) scale(1.008)" : "translateY(0) scale(1)",
-        transition:"all 0.2s ease", position:"relative",
-        opacity: job.visited ? 0.75 : 1,
-      }}>
-
-      {/* Company icon — 48×48 rounded square */}
-      <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={48}/>
-
-      {/* Center info */}
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-          <span style={{ fontWeight:700, fontSize:14, color:theme.text,
-                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-            {job.company}
-          </span>
-          {job.alreadyApplied && (
-            <span title="Applied" style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>✓APPLIED</span>
-          )}
-          {!job.alreadyApplied && job.companyAppliedBefore && (
-            <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>↩prev</span>
-          )}
-          {job.visited && (
-            <span style={{ fontSize:9, color:theme.textDim, background:theme.surfaceHigh,
-                            padding:"1px 6px", borderRadius:999 }}>visited</span>
-          )}
-        </div>
-        <div style={{ fontSize:12, color:theme.textMuted, marginBottom:6,
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-          {job.title}
-        </div>
-        <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
-          <WorkBadge t={job.workType} theme={theme}/>
-          {/* Platform logo */}
-          <span style={{ display:"flex", alignItems:"center", gap:4 }}>
-            <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>
-          </span>
-          {job.location && (
-            <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>
-          )}
-          {job.yearsExperience != null && (
-            <span style={{ fontSize:10, color:theme.textDim }}>{job.yearsExperience}y exp</span>
-          )}
-          {job.compensation && (
-            <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>
-          )}
-        </div>
-      </div>
-
-      {/* Right side */}
-      <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
-        <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
-        {g?.atsScore != null && (
-          <ATSBadge score={g.atsScore} onClick={onAts}/>
-        )}
-        {done && (
-          <ResumeBadge onClick={onResume} loading={st === "loading"}/>
-        )}
-
-        {/* Star / bookmark */}
-        <button
-          title={job.starred ? "Remove from saved" : "Save job"}
-          onClick={e => { e.stopPropagation(); onStar(); }}
-          style={{
-            width:30, height:30, borderRadius:"50%",
-            background: job.starred ? "#f59e0b22" : "transparent",
-            border: job.starred ? "2px solid #f59e0b" : `2px solid ${theme.border}`,
-            display:"flex", alignItems:"center", justifyContent:"center",
-            cursor:"pointer", fontSize:14,
-            color: job.starred ? "#f59e0b" : theme.textDim,
-            transition:"all 0.2s", flexShrink:0,
-            transform: job.starred ? "scale(1.15)" : "scale(1)",
-          }}>
-          {job.starred ? "★" : "☆"}
-        </button>
-
-        {/* Generate */}
-        {applyMode !== "SIMPLE" && (
-          <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
-            disabled={!!st}
-            onClick={e => { e.stopPropagation(); onGenerate(done && g.html !== "__exists__"); }}>
-            {st ? "⏳" : done ? "↻" : "✦"}
-          </IconBtn>
-        )}
-
-        {/* View in sandbox */}
-        {done && g.html !== "__exists__" && (
-          <IconBtn bg="#0284c7" title="View in sandbox"
-            onClick={e => { e.stopPropagation(); onViewSandbox(); }}>
-            👁
-          </IconBtn>
-        )}
-
-        {/* Export PDF */}
-        {done && g.html !== "__exists__" && (
-          <IconBtn bg="#16a34a" title="Export PDF"
-            onClick={e => { e.stopPropagation(); onExport(); }}>
-            📥
-          </IconBtn>
-        )}
-
-      </div>
-    </div>
-  );
-}
+// JobCard is imported from ../components/JobCard.jsx
 
 // ── Empty state ───────────────────────────────────────────────
 function EmptyState({ theme }) {

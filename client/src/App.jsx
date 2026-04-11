@@ -1,21 +1,23 @@
 // REVAMP v1 — App.jsx
-import { useState, useEffect } from "react";
-import { api }           from "./lib/api.js";
-import { useTheme }      from "./styles/theme.jsx";
-import { useViewport }   from "./hooks/useViewport.js";
-import AuthScreen        from "./components/AuthScreen.jsx";
-import TopBar            from "./components/TopBar.jsx";
-import JobsPanel         from "./panels/JobsPanel.jsx";
-import { ProfilePanel }  from "./panels/ProfilePanel.jsx";
-import { DatabasePanel } from "./panels/DatabasePanel.jsx";
-import { AdminPanel }    from "./panels/AdminPanel.jsx";
+import { useState, useEffect, useCallback } from "react";
+import { api }                   from "./lib/api.js";
+import { useTheme }              from "./styles/theme.jsx";
+import { useViewport }           from "./hooks/useViewport.js";
+import { useInactivityLogout }   from "./hooks/useInactivityLogout.js";
+import AuthScreen                from "./components/AuthScreen.jsx";
+import TopBar                    from "./components/TopBar.jsx";
+import JobsPanel                 from "./panels/JobsPanel.jsx";
+import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
+import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
+import { AdminPanel }            from "./panels/AdminPanel.jsx";
 
 export default function App() {
   const { theme } = useTheme();
   const { mode: vpMode } = useViewport();
-  const [authUser,    setAuthUser]    = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab,   setActiveTab]   = useState("jobs");
+  const [authUser,           setAuthUser]           = useState(null);
+  const [authChecked,        setAuthChecked]        = useState(false);
+  const [activeTab,          setActiveTab]          = useState("jobs");
+  const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
 
   useEffect(() => {
     api("/api/auth/me")
@@ -24,10 +26,33 @@ export default function App() {
       .finally(() => setAuthChecked(true));
   }, []);
 
-  const handleLogout = async () => {
-    await api("/api/auth/logout", { method:"POST" });
+  const handleLogout = useCallback(async () => {
+    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
     setAuthUser(null);
-  };
+  }, []);
+
+  // Navigate between panels; switching back to Jobs triggers a board refresh
+  const handlePanelChange = useCallback((tab) => {
+    if (tab === "jobs" && activeTab !== "jobs") {
+      setJobBoardRefreshKey(k => k + 1);
+    }
+    setActiveTab(tab);
+  }, [activeTab]);
+
+  useInactivityLogout(handleLogout, !!authUser);
+
+  // Re-check auth on tab focus — handles session expiry while tab was hidden
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState !== "visible" || !authUser) return;
+      try {
+        const d = await api("/api/auth/me");
+        if (!d.authenticated) handleLogout();
+      } catch {}
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [authUser, handleLogout]);
 
   if (!authChecked) return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column",
@@ -51,12 +76,12 @@ export default function App() {
       <TopBar
         user={authUser}
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handlePanelChange}
         onLogout={handleLogout}
         onUserChange={setAuthUser}
       />
       <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-        {activeTab === "jobs"     && <JobsPanel     user={authUser} onUserChange={setAuthUser}/>}
+        {activeTab === "jobs"     && <JobsPanel     user={authUser} onUserChange={setAuthUser} refreshKey={jobBoardRefreshKey}/>}
         {activeTab === "database" && <DatabasePanel user={authUser}/>}
         {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
         {activeTab === "admin"    && authUser.isAdmin && <AdminPanel/>}

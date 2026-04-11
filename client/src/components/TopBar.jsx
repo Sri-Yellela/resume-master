@@ -322,8 +322,14 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
               {/* API key */}
               <div style={{ padding:"10px 16px 12px", borderBottom:`1px solid ${theme.border}` }}>
                 <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
-                               letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
+                               letterSpacing:"0.08em", color:theme.textDim, marginBottom:4 }}>
                   Apify Token
+                </div>
+                <div style={{ fontSize:10, color:theme.textDim, marginBottom:6, lineHeight:1.5 }}>
+                  Used by{" "}
+                  <code style={{ fontSize:9, background:theme.surfaceHigh, padding:"1px 3px", borderRadius:2 }}>
+                    harvestapi/linkedin-job-search
+                  </code>{" "}to fetch jobs.
                 </div>
                 <div style={{ display:"flex", gap:6 }}>
                   <input
@@ -332,7 +338,8 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                     placeholder="apify_api_…" type="password"
                     style={{
                       flex:1, height:32, padding:"0 10px",
-                      border:`1px solid ${theme.border}`, borderRadius:4,
+                      border:`1px solid ${tokenInput && !tokenInput.startsWith("apify_api_") ? "#dc2626" : theme.border}`,
+                      borderRadius:4,
                       background:theme.surface, color:theme.text,
                       fontSize:11, outline:"none",
                     }}/>
@@ -349,6 +356,11 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                     {tokenSaving ? "…" : "Save"}
                   </button>
                 </div>
+                {tokenInput && !tokenInput.startsWith("apify_api_") && (
+                  <div style={{ fontSize:10, marginTop:4, color:"#d97706" }}>
+                    ⚠ Token should start with apify_api_
+                  </div>
+                )}
                 {tokenMsg && (
                   <div style={{ fontSize:10, marginTop:4,
                                  color: tokenMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>

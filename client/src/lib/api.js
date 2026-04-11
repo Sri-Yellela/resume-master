@@ -19,6 +19,16 @@ export async function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+export const dislikeJob = (jobId) =>
+  api(`/api/jobs/${jobId}/disliked`, { method:"PATCH" });
+
+export const postLinkedInCookies  = (cookies) =>
+  api("/api/linkedin/cookies", { method:"POST",   body:JSON.stringify({ cookies }) });
+export const getLinkedInStatus    = ()         =>
+  api("/api/linkedin/status");
+export const deleteLinkedInCookies = ()        =>
+  api("/api/linkedin/cookies", { method:"DELETE" });
+
 // Chromium File System Access API — shows Save As dialog, returns chosen filename.
 // Falls back to standard download on unsupported browsers.
 export async function saveWithPicker(blob, suggestedName, mimeType) {

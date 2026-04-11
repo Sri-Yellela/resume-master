@@ -198,14 +198,26 @@ function AuthModal({ onLogin }) {
             onChange={e=>set("username",e.target.value)} autoFocus/>
           <input style={inputStyle} placeholder="Password" type="password" value={form.password}
             onChange={e=>set("password",e.target.value)}/>
-          <div style={{ fontSize:11, color:theme.textMuted, lineHeight:1.5,
+          <div style={{ fontSize:11, color:theme.textMuted, lineHeight:1.6,
                         padding:"10px 12px", background:theme.surfaceHigh,
                         borderRadius:10, border:`1px solid ${theme.border}` }}>
-            Optional: Paste your <strong>Apify token</strong> now for job scraping.<br/>
-            (You can also add it later via ☰ menu)
+            <strong>Apify token</strong> powers job search via the{" "}
+            <code style={{ fontSize:10, background:theme.surface, padding:"1px 4px", borderRadius:3 }}>
+              harvestapi/linkedin-job-search
+            </code>{" "}actor.<br/>
+            Get a free token at{" "}
+            <a href="https://apify.com" target="_blank" rel="noreferrer"
+              style={{ color:theme.accentText, fontWeight:700 }}>apify.com</a>
+            {" "}→ Settings → Integrations. You can also add it later via the avatar menu.
           </div>
-          <input style={inputStyle} placeholder="Apify token (optional)" value={form.apify_token}
-            onChange={e=>set("apify_token",e.target.value)}/>
+          <input style={inputStyle} placeholder="Apify token (optional, starts with apify_api_…)"
+            value={form.apify_token} onChange={e=>set("apify_token",e.target.value)}
+            onBlur={e => {
+              const v = e.target.value.trim();
+              if (v && !v.startsWith("apify_api_")) {
+                setError("⚠ That doesn't look like a valid Apify token (should start with apify_api_)");
+              } else { setError(""); }
+            }}/>
           {error && <div style={{ color:theme.danger, fontSize:12 }}>{error}</div>}
           <button type="submit" disabled={loading}
             style={{ width:"100%", padding:"12px 0", borderRadius:999, border:"none",

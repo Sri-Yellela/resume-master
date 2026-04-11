@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import JobCard      from "../components/JobCard.jsx";
 
 // ── Calendar component ────────────────────────────────────────
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -389,7 +390,7 @@ export function DatabasePanel({ user }) {
   const loadSaved = useCallback(async () => {
     try {
       const [jr, rr, br] = await Promise.all([
-        api("/api/jobs?starred=1&hideGhost=true&pageSize=100"),
+        api("/api/jobs?starred=1&pageSize=100"),
         api("/api/resumes"),
         api("/api/base-resume"),
       ]);
@@ -934,7 +935,7 @@ export function DatabasePanel({ user }) {
 // ── Saved Jobs pane ───────────────────────────────────────────
 function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
                           theme, mode, onGenerate, onExport, onUnsave, onRefresh }) {
-  const USER_ACCENT = "#A8D8EA";
+  const isDark = mode === "dark";
 
   if (jobs.length === 0) return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
@@ -948,16 +949,11 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
     </div>
   );
 
-  const thS = {
-    padding:"10px 14px", textAlign:"left", fontSize:10, fontWeight:700,
-    color:theme.textDim, textTransform:"uppercase", letterSpacing:"0.08em",
-    borderBottom:`1px solid ${theme.border}`, whiteSpace:"nowrap",
-    background:theme.surfaceHigh,
-  };
-  const tdS = { padding:"11px 14px", fontSize:12, color:theme.text, verticalAlign:"middle" };
-
   return (
-    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
+                  background: isDark
+                    ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
+                    : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
       {/* toolbar */}
       <div style={{ padding:"8px 16px", display:"flex", alignItems:"center", gap:8,
                     borderBottom:`1px solid ${theme.border}`, flexShrink:0,
@@ -976,139 +972,32 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
         <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
       </div>
 
-      {/* table */}
-      <div style={{ flex:1, overflowY:"auto" }}>
-        <table style={{ borderCollapse:"collapse", width:"100%", tableLayout:"fixed" }}>
-          <thead>
-            <tr style={{ position:"sticky", top:0, zIndex:5 }}>
-              {["Company","Title","Location","Source","ATS","Actions"].map(h => (
-                <th key={h} style={{ ...thS,
-                  width: h==="Actions" ? 180 : h==="ATS" ? 60 : h==="Source" ? 90 : "auto" }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {jobs.map(job => {
-              const g = generated[job.jobId];
-              const done = !!g?.html;
-              const busy = !!genLoading[job.jobId];
-              // Monogram colors
-              const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706"];
-              let hash = 0;
-              for (const c of job.company||"") hash = (hash*31+c.charCodeAt(0))&0xffff;
-              const iconBg = colors[hash % colors.length];
-
-              return (
-                <tr key={job.jobId} className="rm-table-row"
-                  style={{ borderBottom:`1px solid ${theme.border}` }}>
-                  {/* Company */}
-                  <td style={{ ...tdS }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      {job.companyIconUrl ? (
-                        <img src={job.companyIconUrl} alt={job.company}
-                          style={{ width:28, height:28, borderRadius:6, objectFit:"contain",
-                                   border:`1px solid ${theme.border}`, background:"transparent", flexShrink:0 }}
-                          onError={e => { e.currentTarget.style.display="none"; }}/>
-                      ) : (
-                        <div style={{ width:28, height:28, borderRadius:6, background:iconBg,
-                                      display:"flex", alignItems:"center", justifyContent:"center",
-                                      fontSize:11, fontWeight:800, color:"#fff", flexShrink:0 }}>
-                          {(job.company||"?")[0].toUpperCase()}
-                        </div>
-                      )}
-                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                                     fontWeight:600 }}>
-                        {job.company}
-                      </span>
-                    </div>
-                  </td>
-                  {/* Title */}
-                  <td style={{ ...tdS, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                                color:theme.textMuted }}>
-                    {job.title}
-                  </td>
-                  {/* Location */}
-                  <td style={{ ...tdS, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                                color:theme.textDim, fontSize:11 }}>
-                    {job.location || "—"}
-                  </td>
-                  {/* Source */}
-                  <td style={{ ...tdS }}>
-                    <span style={{ background:theme.surfaceHigh, color:theme.textMuted,
-                                   padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700 }}>
-                      {(job.source||job.sourcePlatform||"—").slice(0,8)}
-                    </span>
-                  </td>
-                  {/* ATS */}
-                  <td style={{ ...tdS }}>
-                    {g?.atsScore != null ? (
-                      <span className="rm-badge" style={{
-                        background: g.atsScore>=80 ? theme.successMuted : g.atsScore>=60 ? theme.warningMuted : theme.dangerMuted,
-                        color: g.atsScore>=80 ? theme.success : g.atsScore>=60 ? theme.warning : theme.danger,
-                        padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700,
-                      }}>{g.atsScore}</span>
-                    ) : <span style={{ color:theme.textDim, fontSize:11 }}>—</span>}
-                  </td>
-                  {/* Actions */}
-                  <td style={{ ...tdS }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"nowrap" }}>
-                      {/* Generate / Regen — hidden in SIMPLE mode */}
-                      {applyMode !== "SIMPLE" && (
-                        <button title={done ? "Regenerate resume" : "Generate resume"}
-                          disabled={busy || !hasResume}
-                          onClick={() => onGenerate(job, done && g.html !== "__exists__")}
-                          style={{
-                            padding:"3px 10px", fontSize:11, fontWeight:700,
-                            fontFamily:"'Barlow Condensed',sans-serif",
-                            border:`1.5px solid ${busy||!hasResume ? theme.border : theme.borderStrong}`,
-                            borderRadius:2, cursor:busy||!hasResume ? "not-allowed":"pointer",
-                            background:"transparent", color:busy||!hasResume ? theme.textDim:theme.text,
-                            opacity:busy||!hasResume ? 0.5 : 1, whiteSpace:"nowrap",
-                          }}>
-                          {busy ? "⏳" : done ? "↻ Regen" : "✦ Generate"}
-                        </button>
-                      )}
-                      {/* Export PDF — only if html is fully generated */}
-                      {done && g.html !== "__exists__" && (
-                        <button title="Export PDF"
-                          onClick={() => onExport(job, g.html)}
-                          style={{
-                            padding:"3px 10px", fontSize:11, fontWeight:700,
-                            fontFamily:"'Barlow Condensed',sans-serif",
-                            border:"1.5px solid #16a34a", borderRadius:2,
-                            cursor:"pointer", background:"transparent", color:"#16a34a",
-                            whiteSpace:"nowrap",
-                          }}>
-                          📥 PDF
-                        </button>
-                      )}
-                      {/* Open URL */}
-                      {job.url && (
-                        <button title="Open job listing"
-                          onClick={() => window.open(job.url, "_blank", "noreferrer")}
-                          style={{
-                            padding:"3px 8px", fontSize:11, border:`1.5px solid ${theme.border}`,
-                            borderRadius:2, cursor:"pointer", background:"transparent",
-                            color:theme.textMuted,
-                          }}>↗</button>
-                      )}
-                      {/* Unsave */}
-                      <button title="Remove from saved"
-                        onClick={() => onUnsave(job.jobId)}
-                        style={{
-                          padding:"3px 8px", fontSize:11, border:`1.5px solid ${theme.border}`,
-                          borderRadius:2, cursor:"pointer", background:"transparent",
-                          color:"#f59e0b",
-                        }}>★</button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {/* card list */}
+      <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:16 }}>
+        {jobs.map(job => {
+          const g    = generated[job.jobId];
+          const done = !!g?.html;
+          const st   = genLoading[job.jobId] ? "generating" : null;
+          return (
+            <JobCard
+              key={job.jobId}
+              job={{ ...job, starred: true }}
+              theme={theme}
+              isDark={isDark}
+              showDislike={false}
+              showApplyButton={true}
+              g={g}
+              done={done}
+              st={st}
+              applyMode={applyMode}
+              onGenerate={() => onGenerate(job, done && g?.html !== "__exists__")}
+              onExport={() => done && g?.html !== "__exists__" && onExport(job, g.html)}
+              onVisit={() => job.url && window.open(job.url, "_blank", "noreferrer")}
+              onStar={() => onUnsave(job.jobId)}
+              onCardClick={() => job.url && window.open(job.url, "_blank", "noreferrer")}
+            />
+          );
+        })}
       </div>
     </div>
   );

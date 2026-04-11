@@ -1,0 +1,456 @@
+// client/src/components/JobCard.jsx — shared expandable job card
+import { useState } from "react";
+
+// ── Helpers ─────────────────────────────────────────────────────
+function ago(ts) {
+  if (!ts) return "—";
+  const d = Date.now() - new Date(ts).getTime();
+  if (d < 3600000)  return `${Math.floor(d / 60000)}m`;
+  if (d < 86400000) return `${Math.floor(d / 3600000)}h`;
+  return `${Math.floor(d / 86400000)}d`;
+}
+
+// ── LinkedIn "in" logo ──────────────────────────────────────────
+function LinkedInLogo({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-label="LinkedIn" role="img">
+      <rect width="20" height="20" rx="3" fill="#0A66C2"/>
+      <text x="4" y="15" fontFamily="Georgia,serif" fontWeight="900" fontSize="13" fill="#fff">in</text>
+    </svg>
+  );
+}
+
+function PlatformLogo({ platform, size = 16, theme }) {
+  const p = (platform || "").toLowerCase();
+  if (p === "linkedin") return <LinkedInLogo size={size}/>;
+  return <span style={{ fontSize: size * 0.6, color: theme?.textMuted || "#888" }}>◆</span>;
+}
+
+// ── Company icon ────────────────────────────────────────────────
+function CompanyIcon({ company, iconUrl, size = 48 }) {
+  const [failed, setFailed] = useState(false);
+  const letter = (company || "?")[0].toUpperCase();
+  const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706","#9333ea"];
+  let hash = 0;
+  for (const c of company || "") hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
+  const bg = colors[hash % colors.length];
+  if (iconUrl && !failed) {
+    return (
+      <img src={iconUrl} alt={company} onError={() => setFailed(true)}
+        style={{ width:size, height:size, borderRadius:10, objectFit:"contain",
+                 border:"1px solid transparent", background:"transparent", flexShrink:0 }}/>
+    );
+  }
+  return (
+    <div style={{ width:size, height:size, borderRadius:10, background:bg, color:"#fff",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontWeight:800, fontSize:Math.round(size*0.38), flexShrink:0, letterSpacing:"-0.5px" }}>
+      {letter}
+    </div>
+  );
+}
+
+// ── Work badge ──────────────────────────────────────────────────
+function WorkBadge({ t, theme }) {
+  const map = {
+    Remote: { bg:"#e8f6fb", fg:"#1a6a8a" },
+    Hybrid: { bg:"#f0f9ff", fg:"#0284c7" },
+  };
+  const s = map[t] || null;
+  if (s) {
+    return (
+      <span style={{ background:s.bg, color:s.fg, padding:"2px 8px",
+                     borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+        {t}
+      </span>
+    );
+  }
+  return (
+    <span style={{ background:theme?.surfaceHigh, color:theme?.textMuted, padding:"2px 8px",
+                   borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+      {t || "Onsite"}
+    </span>
+  );
+}
+
+// ── ATS badge ───────────────────────────────────────────────────
+function ATSBadge({ score, onClick }) {
+  if (score == null) return null;
+  const bg = score >= 80 ? "#dcfce7" : score >= 60 ? "#fef9c3" : "#fee2e2";
+  const fg = score >= 80 ? "#166534" : score >= 60 ? "#854d0e" : "#991b1b";
+  return (
+    <span onClick={onClick ? e => { e.stopPropagation(); onClick(); } : undefined}
+      style={{ background:bg, color:fg, padding:"2px 8px", borderRadius:999,
+               fontSize:10, fontWeight:700, cursor:onClick?"pointer":"default",
+               border:onClick?`1px solid ${fg}33`:"none" }}>
+      ATS {score}
+    </span>
+  );
+}
+
+// ── Keyword highlight ────────────────────────────────────────────
+// Highlights tech keywords in description text.
+// Green = found in user's base resume; Red = present in JD but missing from resume.
+const TECH_RE = /\b(python|javascript|typescript|java|golang|go|rust|c\+\+|c#|react|vue|angular|node\.?js|django|flask|fastapi|spring|docker|kubernetes|k8s|aws|gcp|azure|terraform|postgresql|mysql|mongodb|redis|kafka|spark|tensorflow|pytorch|sklearn|sql|git|linux|bash|rest|graphql|ml|ai|llm|nlp|cuda|hadoop|airflow|dbt|snowflake|bigquery|pandas|numpy|scipy|scikit|jupyter|excel|tableau|looker|powerbi|figma|jira|scrum|agile|ci\/cd|jenkins|github|gitlab|bitbucket|microservices|grpc|oauth|jwt|html|css|sass|webpack|vite|next\.?js|nuxt|svelte|flutter|swift|kotlin|ios|android|unity|unreal)\b/gi;
+
+function HighlightedDescription({ text, baseResumeSkills, theme }) {
+  if (!text) return null;
+  const trimmed = text.slice(0, 1200);
+  const parts = [];
+  let last = 0;
+  let match;
+  TECH_RE.lastIndex = 0;
+  while ((match = TECH_RE.exec(trimmed)) !== null) {
+    if (match.index > last) parts.push({ type:"text", content: trimmed.slice(last, match.index) });
+    const word = match[0];
+    const hasSkill = baseResumeSkills && baseResumeSkills.has(word.toLowerCase());
+    parts.push({ type:"kw", content: word, has: hasSkill });
+    last = match.index + word.length;
+  }
+  if (last < trimmed.length) parts.push({ type:"text", content: trimmed.slice(last) });
+  return (
+    <p style={{ fontSize:11, color:theme.textMuted, lineHeight:1.7, margin:0, whiteSpace:"pre-wrap" }}>
+      {parts.map((p, i) =>
+        p.type === "text" ? p.content :
+        <mark key={i} style={{
+          background: p.has ? "#dcfce7" : "#fee2e2",
+          color: p.has ? "#166534" : "#991b1b",
+          padding:"0 2px", borderRadius:2, fontWeight:600,
+        }}>{p.content}</mark>
+      )}
+      {text.length > 1200 && <span style={{ color:theme.textDim }}> … (truncated)</span>}
+    </p>
+  );
+}
+
+// ── Coming-soon pill ────────────────────────────────────────────
+function ComingSoon({ label }) {
+  return (
+    <span style={{ fontSize:9, padding:"1px 6px", borderRadius:999, fontWeight:700,
+                   background:"#f3f4f6", color:"#9ca3af", border:"1px dashed #d1d5db",
+                   whiteSpace:"nowrap", letterSpacing:"0.04em" }}>
+      {label} · soon
+    </span>
+  );
+}
+
+// ── Icon button ─────────────────────────────────────────────────
+function IconBtn({ bg, onClick, title, children, disabled = false, size = 28, theme }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button title={title} disabled={disabled} onClick={onClick}
+      onMouseEnter={() => !disabled && setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        width:size, height:size, borderRadius:999,
+        background: disabled ? (theme?.surfaceHigh||"#f3f4f6") : hov ? bg : (theme?.surfaceHigh||"#f3f4f6"),
+        border:`1px solid ${disabled ? (theme?.border||"#e5e7eb") : hov ? bg+"44" : (theme?.border||"#e5e7eb")}`,
+        display:"flex", alignItems:"center", justifyContent:"center",
+        cursor: disabled ? "not-allowed" : "pointer",
+        fontSize:12, color: hov && !disabled ? "white" : (theme?.textMuted||"#6b7280"),
+        opacity: disabled ? 0.4 : 1,
+        transition:"all 0.15s ease", flexShrink:0,
+        transform: hov && !disabled ? "scale(1.1)" : "scale(1)",
+      }}>
+      {children}
+    </button>
+  );
+}
+
+// ── Main JobCard ─────────────────────────────────────────────────
+export default function JobCard({
+  job,
+  theme,
+  isDark,
+  baseResumeSkills,   // Set<string> from base resume, for keyword highlighting
+  showDislike = true,
+  showApplyButton = true,
+  g,                  // generated resume entry
+  done,               // has generated resume
+  st,                 // loading state string
+  applyMode,
+  onGenerate,
+  onViewSandbox,
+  onExport,
+  onVisit,
+  onStar,
+  onDislike,
+  onCardClick,
+  onAts,
+  onResume,
+}) {
+  const [hov,      setHov]      = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const frostedBg = isDark
+    ? (hov ? "rgba(28,28,28,0.92)" : "rgba(17,17,17,0.6)")
+    : (hov ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.68)");
+  const frostedBlur = hov ? "blur(20px) saturate(2)" : "blur(12px) saturate(1.6)";
+
+  const hasDesc    = !!(job.description || job.descriptionHtml);
+  const hasSalary  = job.salaryMin != null || job.salaryMax != null;
+  const salaryStr  = hasSalary
+    ? [job.salaryMin, job.salaryMax].filter(Boolean).map(v =>
+        `${job.salaryCurrency || "$"}${(v/1000).toFixed(0)}k`
+      ).join("–")
+    : null;
+
+  const yoeStr = job.expRaw
+    ? job.expRaw
+    : job.minYearsExp != null
+      ? (job.maxYearsExp != null ? `${job.minYearsExp}–${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
+      : null;
+
+  const toggleExpand = (e) => {
+    e.stopPropagation();
+    setExpanded(x => !x);
+  };
+
+  return (
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background: frostedBg,
+        backdropFilter: frostedBlur,
+        WebkitBackdropFilter: frostedBlur,
+        border: `1px solid ${hov ? theme.borderStrong : theme.border + "88"}`,
+        borderRadius: 4, margin: "0 16px 8px",
+        boxShadow: hov ? theme.shadowLg : theme.shadowSm,
+        transform: hov ? "translateY(-3px) scale(1.008)" : "translateY(0) scale(1)",
+        transition: "all 0.2s ease", position: "relative",
+        opacity: job.visited ? 0.75 : 1,
+        overflow: "hidden",
+      }}>
+
+      {/* ── Collapsed row ────────────────────────────────────── */}
+      <div onClick={onCardClick || toggleExpand}
+        style={{ padding:"14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer" }}>
+
+        {/* Company icon */}
+        <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={48}/>
+
+        {/* Center info */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
+            <span style={{ fontWeight:700, fontSize:14, color:theme.text,
+                            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {job.company}
+            </span>
+            {job.alreadyApplied && (
+              <span title="Applied" style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>✓APPLIED</span>
+            )}
+            {!job.alreadyApplied && job.companyAppliedBefore && (
+              <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>↩prev</span>
+            )}
+            {job.visited && (
+              <span style={{ fontSize:9, color:theme.textDim, background:theme.surfaceHigh,
+                              padding:"1px 6px", borderRadius:999 }}>visited</span>
+            )}
+          </div>
+          <div style={{ fontSize:12, color:theme.textMuted, marginBottom:6,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {job.title}
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+            <WorkBadge t={job.workType} theme={theme}/>
+            <span style={{ display:"flex", alignItems:"center", gap:4 }}>
+              <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>
+            </span>
+            {job.location && (
+              <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>
+            )}
+            {yoeStr && (
+              <span style={{ fontSize:10, color:theme.textDim }}>{yoeStr} exp</span>
+            )}
+            {salaryStr && (
+              <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>
+            )}
+            {!salaryStr && job.compensation && (
+              <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>
+            )}
+            {job.applicantCount != null && (
+              <span style={{ fontSize:10, color:theme.textDim }}>
+                {job.applicantCount > 200 ? "200+ applicants" : `${job.applicantCount} applicants`}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Right side */}
+        <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
+          <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
+
+          {g?.atsScore != null && (
+            <ATSBadge score={g.atsScore} onClick={onAts}/>
+          )}
+          {done && (
+            <span onClick={onResume ? e => { e.stopPropagation(); onResume(); } : undefined}
+              style={{ background:"#e8f6fb", color:"#1a6a8a", padding:"2px 8px",
+                       borderRadius:999, fontSize:10, fontWeight:700, cursor:"pointer",
+                       border:"1px solid #A8D8EA44", display:"inline-flex", alignItems:"center", gap:3 }}>
+              {st==="loading" ? "⏳" : "📄"} Resume
+            </span>
+          )}
+
+          {/* Expand/collapse toggle */}
+          {hasDesc && (
+            <button onClick={toggleExpand}
+              title={expanded ? "Collapse" : "Expand description"}
+              style={{
+                width:24, height:24, borderRadius:"50%",
+                background:"transparent", border:`1px solid ${theme.border}`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                cursor:"pointer", fontSize:11, color:theme.textMuted,
+                transition:"transform 0.2s", transform: expanded ? "rotate(180deg)" : "none",
+                flexShrink:0,
+              }}>
+              ▾
+            </button>
+          )}
+
+          {/* Star */}
+          {onStar && (
+            <button title={job.starred ? "Remove from saved" : "Save job"}
+              onClick={e => { e.stopPropagation(); onStar(); }}
+              style={{
+                width:30, height:30, borderRadius:"50%",
+                background: job.starred ? "#f59e0b22" : "transparent",
+                border: job.starred ? "2px solid #f59e0b" : `2px solid ${theme.border}`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                cursor:"pointer", fontSize:14,
+                color: job.starred ? "#f59e0b" : theme.textDim,
+                transition:"all 0.2s", flexShrink:0,
+                transform: job.starred ? "scale(1.15)" : "scale(1)",
+              }}>
+              {job.starred ? "★" : "☆"}
+            </button>
+          )}
+
+          {/* Dislike */}
+          {showDislike && onDislike && (
+            <button title="Not interested"
+              onClick={e => { e.stopPropagation(); onDislike(); }}
+              style={{
+                width:28, height:28, borderRadius:"50%",
+                background: job.disliked ? "#fef2f2" : "transparent",
+                border: job.disliked ? "2px solid #dc2626" : `2px solid ${theme.border}`,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                cursor:"pointer", fontSize:13,
+                color: job.disliked ? "#dc2626" : theme.textDim,
+                transition:"all 0.2s", flexShrink:0,
+              }}>
+              👎
+            </button>
+          )}
+
+          {/* Generate */}
+          {applyMode !== "SIMPLE" && onGenerate && showApplyButton && (
+            <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
+              disabled={!!st} theme={theme}
+              onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
+              {st ? "⏳" : done ? "↻" : "✦"}
+            </IconBtn>
+          )}
+
+          {/* View sandbox */}
+          {done && g?.html !== "__exists__" && showApplyButton && (
+            <IconBtn bg="#0284c7" title="View in sandbox" theme={theme}
+              onClick={e => { e.stopPropagation(); onViewSandbox?.(); }}>
+              👁
+            </IconBtn>
+          )}
+
+          {/* Export PDF */}
+          {done && g?.html !== "__exists__" && showApplyButton && (
+            <IconBtn bg="#16a34a" title="Export PDF" theme={theme}
+              onClick={e => { e.stopPropagation(); onExport?.(); }}>
+              📥
+            </IconBtn>
+          )}
+
+          {/* Visit URL */}
+          {onVisit && showApplyButton && job.url && (
+            <IconBtn bg={theme.accent} title="Open job listing" theme={theme}
+              onClick={e => { e.stopPropagation(); onVisit(); }}>
+              ↗
+            </IconBtn>
+          )}
+        </div>
+      </div>
+
+      {/* ── Expanded section ──────────────────────────────────── */}
+      {expanded && (
+        <div style={{
+          borderTop: `1px solid ${theme.border}44`,
+          padding: "12px 18px 16px",
+          display: "flex", flexDirection: "column", gap: 10,
+        }}>
+          {/* Keyword legend */}
+          {baseResumeSkills && baseResumeSkills.size > 0 && (
+            <div style={{ display:"flex", gap:10, alignItems:"center", fontSize:10, color:theme.textDim }}>
+              <span style={{ background:"#dcfce7", color:"#166534", padding:"1px 5px", borderRadius:2, fontWeight:600 }}>green</span>
+              = you have this skill ·
+              <span style={{ background:"#fee2e2", color:"#991b1b", padding:"1px 5px", borderRadius:2, fontWeight:600 }}>red</span>
+              = skill gap
+            </div>
+          )}
+
+          {/* Description */}
+          {job.description && (
+            <HighlightedDescription
+              text={job.description}
+              baseResumeSkills={baseResumeSkills}
+              theme={theme}
+            />
+          )}
+
+          {/* Extra meta row */}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center", paddingTop:4 }}>
+            {salaryStr && (
+              <span style={{ fontSize:11, color:"#16a34a", fontWeight:700, background:"#dcfce733",
+                              padding:"2px 8px", borderRadius:4 }}>
+                💰 {salaryStr}
+              </span>
+            )}
+            {yoeStr && (
+              <span style={{ fontSize:11, color:theme.textMuted, background:theme.surfaceHigh,
+                              padding:"2px 8px", borderRadius:4 }}>
+                🎓 {yoeStr} exp required
+              </span>
+            )}
+            {job.applicantCount != null && (
+              <span style={{ fontSize:11, color:theme.textMuted, background:theme.surfaceHigh,
+                              padding:"2px 8px", borderRadius:4 }}>
+                👥 {job.applicantCount > 200 ? "200+" : job.applicantCount} applicants
+              </span>
+            )}
+            {showApplyButton !== false && (job.applyUrl || job.url) && (
+              <a href={job.applyUrl || job.url} target="_blank" rel="noreferrer"
+                onClick={e => e.stopPropagation()}
+                style={{ fontSize:11, color:theme.accentText, fontWeight:700,
+                          textDecoration:"underline", background:theme.accentMuted,
+                          padding:"2px 8px", borderRadius:4 }}>
+                Apply directly ↗
+              </a>
+            )}
+          </div>
+
+          {/* Recruiter section — coming soon */}
+          <div style={{
+            borderTop: `1px dashed ${theme.border}`,
+            paddingTop: 8, marginTop: 4,
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <span style={{ fontSize:10, color:theme.textDim, fontWeight:700,
+                            textTransform:"uppercase", letterSpacing:"0.06em" }}>
+              Recruiter
+            </span>
+            <ComingSoon label="auto-contact"/>
+            <ComingSoon label="LinkedIn reach-out"/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
