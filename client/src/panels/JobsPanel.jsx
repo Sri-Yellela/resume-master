@@ -1064,16 +1064,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     } catch {}
   }, []);
 
-  // ── Dislike toggle (removes from board) ──────────────────
+  // ── Dislike toggle — deferred removal (job stays visible until next fetch) ──
   const toggleDislike = useCallback(async (jobId) => {
     try {
       const d = await dislikeJob(jobId);
-      if (d.disliked) {
-        // Remove from board immediately
-        setJobs(prev => prev.filter(j => j.jobId !== jobId));
-      } else {
-        setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, disliked: false} : j));
-      }
+      const updateFn = j => j.jobId === jobId
+        ? { ...j, disliked: !!d.disliked, starred: d.disliked ? false : j.starred }
+        : j;
+      setJobs(prev => prev.map(updateFn));
+      setPendingJobs(prev => prev.map(updateFn));
     } catch {}
   }, []);
 

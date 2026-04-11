@@ -229,7 +229,8 @@ export default function JobCard({
           : theme.shadowSm,
         transform: hov ? "translateY(-3px) scale(1.008)" : "translateY(0) scale(1)",
         transition: "all 0.2s ease", position: "relative",
-        opacity: job.visited ? 0.75 : 1,
+        opacity: job.disliked ? 0.3 : job.visited ? 0.75 : 1,
+        filter: job.disliked ? "grayscale(0.7)" : "none",
         overflow: "hidden",
       }}>
 

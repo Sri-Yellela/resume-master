@@ -328,6 +328,22 @@ db.pragma("busy_timeout = 5000");
         ALTER TABLE job_applications ADD COLUMN screenshot_path TEXT;
       `,
     },
+    {
+      id: "011_cleanup_log",
+      sql: `
+        CREATE TABLE IF NOT EXISTS cleanup_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          jobs_deleted INTEGER NOT NULL DEFAULT 0,
+          orphans_cleaned INTEGER NOT NULL DEFAULT 0,
+          details TEXT
+        );
+      `,
+    },
+    {
+      id: "012_clear_all_dislikes",
+      sql: `UPDATE user_jobs SET disliked = 0 WHERE disliked = 1;`,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -904,17 +920,54 @@ async function scrapeJobs(query, apifyToken) {
 // ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
 cron.schedule("0 3 * * *", () => {
   const cutoff = Math.floor(Date.now()/1000) - 7*24*60*60;
-  const deleted = db.prepare(
-    "DELETE FROM scraped_jobs WHERE scraped_at < ?"
-  ).run(cutoff);
-  console.log(`[cleanup] Removed ${deleted.changes} expired scraped jobs`);
-  db.prepare(
+  // Delete jobs older than 7 days based on original posting date (scraped_at as fallback).
+  // Applied jobs are permanently exempt from expiry.
+  const deletedJobs = db.prepare(`
+    DELETE FROM scraped_jobs
+    WHERE (
+      (posted_at IS NOT NULL AND posted_at != ''
+        AND CAST(strftime('%s', posted_at) AS INTEGER) < ?)
+      OR ((posted_at IS NULL OR posted_at = '') AND scraped_at < ?)
+    )
+    AND job_id NOT IN (
+      SELECT DISTINCT job_id FROM user_jobs WHERE applied = 1
+    )
+  `).run(cutoff, cutoff);
+
+  // Cascade: remove orphaned user records for expired jobs (exempt applied rows)
+  const deletedViews = db.prepare(
     "DELETE FROM user_job_views WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)"
   ).run();
-  db.prepare(
-    "DELETE FROM user_jobs WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)"
+  const deletedUserJobs = db.prepare(
+    "DELETE FROM user_jobs WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs) AND applied != 1"
   ).run();
-  console.log("[cleanup] Pruned orphaned user_job_views and user_jobs");
+
+  // Clean orphaned resumes/versions for expired jobs (preserve applied-job data)
+  const deletedResumes = db.prepare(`
+    DELETE FROM resumes
+    WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)
+    AND job_id NOT IN (SELECT DISTINCT job_id FROM user_jobs WHERE applied = 1)
+  `).run();
+  const deletedVersions = db.prepare(`
+    DELETE FROM resume_versions
+    WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)
+    AND job_id NOT IN (SELECT DISTINCT job_id FROM user_jobs WHERE applied = 1)
+  `).run();
+
+  const orphans = deletedViews.changes + deletedUserJobs.changes
+                + deletedResumes.changes + deletedVersions.changes;
+
+  const details = JSON.stringify({
+    resumes: deletedResumes.changes,
+    resumeVersions: deletedVersions.changes,
+    userJobs: deletedUserJobs.changes,
+    userJobViews: deletedViews.changes,
+  });
+  db.prepare(
+    "INSERT INTO cleanup_log (jobs_deleted, orphans_cleaned, details) VALUES (?,?,?)"
+  ).run(deletedJobs.changes, orphans, details);
+
+  console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by posting date), pruned ${orphans} orphaned rows`);
 });
 
 cron.schedule("0 2 * * *", () => {
@@ -1408,9 +1461,13 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     SELECT ?, sj.job_id FROM scraped_jobs sj
     WHERE LOWER(sj.search_query) IN (
       SELECT LOWER(search_query) FROM user_job_searches WHERE user_id = ?
-    ) AND sj.scraped_at > ?
+    ) AND (
+      (sj.posted_at IS NOT NULL AND sj.posted_at != ''
+        AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
+      OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
+    )
     AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
-  `).run(userId, userId, sevenDaysAgo, userId);
+  `).run(userId, userId, userId);
 
   // Keep applied flag in sync with job_applications
   db.prepare(`
@@ -1421,7 +1478,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
 
   // ── Filter conditions ──
   const conditions = [
-    `sj.scraped_at > ${sevenDaysAgo}`,
+    `((sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo}) OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))`,
     `(uj.disliked IS NULL OR uj.disliked = 0)`,
     `(uj.applied IS NULL OR uj.applied = 0)`,
     `(uj.visited IS NULL OR uj.visited = 0)`,
@@ -1447,8 +1504,12 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const ageLimits = { "1d":86400,"2d":172800,"3d":259200,"1w":604800,"1m":2592000 };
   const ageFilter = req.query.ageFilter;
   if (ageFilter && ageLimits[ageFilter]) {
-    conditions.push(`sj.scraped_at > ?`);
-    filterParams.push(Math.floor(Date.now()/1000) - ageLimits[ageFilter]);
+    const ageTs = Math.floor(Date.now()/1000) - ageLimits[ageFilter];
+    conditions.push(`(
+      (sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
+      OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?)
+    )`);
+    filterParams.push(ageTs, ageTs);
   }
 
   const minYoe = req.query.minYoe !== undefined && req.query.minYoe !== "" ? parseInt(req.query.minYoe) : null;
