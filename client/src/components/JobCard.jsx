@@ -178,6 +178,9 @@ export default function JobCard({
   onCardClick,
   onAts,
   onResume,
+  onSelect,           // split-view: select this card (replaces expand)
+  selected,           // split-view: this card is selected
+  compact,            // split-view: tighter layout
 }) {
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -201,9 +204,11 @@ export default function JobCard({
       ? (job.maxYearsExp != null ? `${job.minYearsExp}–${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
       : null;
 
-  const toggleExpand = (e) => {
-    e.stopPropagation();
-    setExpanded(x => !x);
+  const handleCardClick = (e) => {
+    if (e.target.closest("a") || e.target.closest("button")) return;
+    if (onSelect) { onSelect(); return; }
+    if (onCardClick) { onCardClick(); return; }
+    setExpanded(prev => !prev);
   };
 
   return (
@@ -214,7 +219,7 @@ export default function JobCard({
         background: frostedBg,
         backdropFilter: frostedBlur,
         WebkitBackdropFilter: frostedBlur,
-        border: `1px solid ${hov ? theme.borderStrong : theme.border + "88"}`,
+        border: `1px solid ${selected ? theme.accent : (hov ? theme.borderStrong : theme.border + "88")}`,
         borderRadius: 4, margin: "0 16px 8px",
         boxShadow: hov ? theme.shadowLg : theme.shadowSm,
         transform: hov ? "translateY(-3px) scale(1.008)" : "translateY(0) scale(1)",
@@ -224,8 +229,8 @@ export default function JobCard({
       }}>
 
       {/* ── Collapsed row ────────────────────────────────────── */}
-      <div onClick={onCardClick || toggleExpand}
-        style={{ padding:"14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer" }}>
+      <div onClick={handleCardClick}
+        style={{ padding: compact ? "10px 14px" : "14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer" }}>
 
         {/* Company icon */}
         <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={48}/>
@@ -293,22 +298,6 @@ export default function JobCard({
             </span>
           )}
 
-          {/* Expand/collapse toggle */}
-          {hasDesc && (
-            <button onClick={toggleExpand}
-              title={expanded ? "Collapse" : "Expand description"}
-              style={{
-                width:24, height:24, borderRadius:"50%",
-                background:"transparent", border:`1px solid ${theme.border}`,
-                display:"flex", alignItems:"center", justifyContent:"center",
-                cursor:"pointer", fontSize:11, color:theme.textMuted,
-                transition:"transform 0.2s", transform: expanded ? "rotate(180deg)" : "none",
-                flexShrink:0,
-              }}>
-              ▾
-            </button>
-          )}
-
           {/* Star */}
           {onStar && (
             <button title={job.starred ? "Remove from saved" : "Save job"}
@@ -336,11 +325,15 @@ export default function JobCard({
                 background: job.disliked ? "#fef2f2" : "transparent",
                 border: job.disliked ? "2px solid #dc2626" : `2px solid ${theme.border}`,
                 display:"flex", alignItems:"center", justifyContent:"center",
-                cursor:"pointer", fontSize:13,
+                cursor:"pointer",
                 color: job.disliked ? "#dc2626" : theme.textDim,
                 transition:"all 0.2s", flexShrink:0,
               }}>
-              👎
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z"/>
+                <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+              </svg>
             </button>
           )}
 

@@ -18,6 +18,7 @@ export default function App() {
   const [authChecked,        setAuthChecked]        = useState(false);
   const [activeTab,          setActiveTab]          = useState("jobs");
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
+  const [resumeWidget,       setResumeWidget]       = useState(null);
 
   useEffect(() => {
     api("/api/auth/me")
@@ -79,9 +80,10 @@ export default function App() {
         onTabChange={handlePanelChange}
         onLogout={handleLogout}
         onUserChange={setAuthUser}
+        resumeWidget={resumeWidget}
       />
       <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-        {activeTab === "jobs"     && <JobsPanel     user={authUser} onUserChange={setAuthUser} refreshKey={jobBoardRefreshKey}/>}
+        {activeTab === "jobs"     && <JobsPanel     user={authUser} onUserChange={setAuthUser} refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}/>}
         {activeTab === "database" && <DatabasePanel user={authUser}/>}
         {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
         {activeTab === "admin"    && authUser.isAdmin && <AdminPanel/>}

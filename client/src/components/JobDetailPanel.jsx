@@ -1,0 +1,227 @@
+// client/src/components/JobDetailPanel.jsx — right-panel job detail in split view
+import { useState } from "react";
+import { HighlightedDescription } from "./HighlightedDescription.jsx";
+
+function ago(ts) {
+  if (!ts) return "—";
+  const d = Date.now() - new Date(ts).getTime();
+  if (d < 3600000)  return `${Math.floor(d / 60000)}m`;
+  if (d < 86400000) return `${Math.floor(d / 3600000)}h`;
+  return `${Math.floor(d / 86400000)}d`;
+}
+
+function WorkBadge({ t, theme }) {
+  const map = { Remote:{ bg:"#e8f6fb", fg:"#1a6a8a" }, Hybrid:{ bg:"#f0f9ff", fg:"#0284c7" } };
+  const s = map[t] || null;
+  if (s) return <span style={{ background:s.bg, color:s.fg, padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700 }}>{t}</span>;
+  return <span style={{ background:theme.surfaceHigh, color:theme.textMuted, padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700 }}>{t || "Onsite"}</span>;
+}
+
+function CompanyIcon({ company, iconUrl, size = 44 }) {
+  const [failed, setFailed] = useState(false);
+  const letter = (company || "?")[0].toUpperCase();
+  const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706","#9333ea"];
+  let hash = 0;
+  for (const c of company || "") hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
+  const bg = colors[hash % colors.length];
+  if (iconUrl && !failed) {
+    return <img src={iconUrl} alt={company} onError={() => setFailed(true)}
+      style={{ width:size, height:size, borderRadius:8, objectFit:"contain", flexShrink:0 }}/>;
+  }
+  return (
+    <div style={{ width:size, height:size, borderRadius:8, background:bg, color:"#fff",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontWeight:800, fontSize:Math.round(size*0.38), flexShrink:0, letterSpacing:"-0.5px" }}>
+      {letter}
+    </div>
+  );
+}
+
+function ActionBtn({ onClick, title, children, accent = "#0284c7", theme, active }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button title={title} onClick={onClick}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{
+        display:"flex", alignItems:"center", gap:5,
+        padding:"6px 12px", borderRadius:4, border:`1px solid ${active || hov ? accent : theme.border}`,
+        background: active ? accent+"22" : hov ? accent+"11" : "transparent",
+        color: active || hov ? accent : theme.textMuted,
+        cursor:"pointer", fontSize:11, fontWeight:600,
+        transition:"all 0.15s", flexShrink:0,
+      }}>
+      {children}
+    </button>
+  );
+}
+
+export default function JobDetailPanel({
+  job,
+  theme, isDark,
+  baseResumeSkills,
+  g, done, st,
+  applyMode,
+  onClose,
+  onGenerate,
+  onViewSandbox,
+  onExport,
+  onVisit,
+  onStar,
+  onDislike,
+  onAts,
+  onResume,
+}) {
+  if (!job) return null;
+
+  const hasSalary = job.salaryMin != null || job.salaryMax != null;
+  const salaryStr = hasSalary
+    ? [job.salaryMin, job.salaryMax].filter(Boolean)
+        .map(v => `${job.salaryCurrency || "$"}${(v/1000).toFixed(0)}k`).join("–")
+    : null;
+  const yoeStr = job.expRaw
+    ? job.expRaw
+    : job.minYearsExp != null
+      ? (job.maxYearsExp != null ? `${job.minYearsExp}–${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
+      : null;
+  const atsScore = g?.atsScore;
+  const atsBg = atsScore >= 80 ? "#dcfce7" : atsScore >= 60 ? "#fef9c3" : "#fee2e2";
+  const atsFg = atsScore >= 80 ? "#166534" : atsScore >= 60 ? "#854d0e" : "#991b1b";
+
+  return (
+    <div style={{
+      display:"flex", flexDirection:"column", height:"100%", overflow:"hidden",
+      background: isDark ? "rgba(17,17,17,0.95)" : "rgba(255,255,255,0.97)",
+    }}>
+      {/* Header */}
+      <div style={{
+        display:"flex", alignItems:"flex-start", gap:10,
+        padding:"12px 14px 10px", borderBottom:`1px solid ${theme.border}`,
+        flexShrink:0, background:theme.surface,
+      }}>
+        <CompanyIcon company={job.company} iconUrl={job.companyIconUrl}/>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontWeight:700, fontSize:14, color:theme.text,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {job.company}
+          </div>
+          <div style={{ fontSize:12, color:theme.textMuted, marginTop:2,
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {job.title}
+          </div>
+          <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:5, marginTop:5 }}>
+            <WorkBadge t={job.workType} theme={theme}/>
+            {job.location && <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>}
+            {yoeStr && <span style={{ fontSize:10, color:theme.textDim }}>{yoeStr} exp</span>}
+            {salaryStr && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>}
+            {!salaryStr && job.compensation && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>}
+            <span style={{ fontSize:10, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
+            {atsScore != null && (
+              <span onClick={() => onAts?.()}
+                style={{ background:atsBg, color:atsFg, padding:"2px 8px", borderRadius:999,
+                          fontSize:10, fontWeight:700, cursor:"pointer", border:`1px solid ${atsFg}33` }}>
+                ATS {atsScore}
+              </span>
+            )}
+            {done && (
+              <span onClick={() => onResume?.()} style={{ background:"#e8f6fb", color:"#1a6a8a",
+                padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700, cursor:"pointer" }}>
+                {st==="loading" ? "⏳" : "📄"} Resume
+              </span>
+            )}
+          </div>
+        </div>
+        {/* Close button */}
+        <button onClick={onClose}
+          style={{ background:"none", border:"none", cursor:"pointer", color:theme.textMuted,
+                   fontSize:16, padding:"0 2px", flexShrink:0, lineHeight:1 }}>
+          ✕
+        </button>
+      </div>
+
+      {/* Action bar */}
+      <div style={{
+        display:"flex", alignItems:"center", gap:6, flexWrap:"wrap",
+        padding:"8px 14px", borderBottom:`1px solid ${theme.border}`,
+        flexShrink:0, background:theme.surface,
+      }}>
+        {applyMode !== "SIMPLE" && onGenerate && (
+          <ActionBtn onClick={() => onGenerate(done && g?.html !== "__exists__")}
+            title={done ? "Regenerate resume" : "Generate resume"} accent={theme.accent} theme={theme}>
+            {st ? "⏳" : done ? "↻ Regen" : "✦ Generate"}
+          </ActionBtn>
+        )}
+        {done && g?.html !== "__exists__" && (
+          <ActionBtn onClick={() => onViewSandbox?.()} title="View in sandbox" accent="#0284c7" theme={theme}>
+            👁 Preview
+          </ActionBtn>
+        )}
+        {done && g?.html !== "__exists__" && (
+          <ActionBtn onClick={() => onExport?.()} title="Export PDF" accent="#16a34a" theme={theme}>
+            📥 PDF
+          </ActionBtn>
+        )}
+        {job.url && (
+          <ActionBtn onClick={() => onVisit?.()} title="Open job listing" accent={theme.accent} theme={theme}>
+            ↗ Apply
+          </ActionBtn>
+        )}
+        {onStar && (
+          <ActionBtn onClick={() => onStar?.()} title={job.starred ? "Remove saved" : "Save"} accent="#f59e0b" theme={theme} active={job.starred}>
+            {job.starred ? "★ Saved" : "☆ Save"}
+          </ActionBtn>
+        )}
+        {onDislike && (
+          <ActionBtn onClick={() => onDislike?.()} title="Not interested" accent="#dc2626" theme={theme} active={job.disliked}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z"/>
+              <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+            </svg>
+            Pass
+          </ActionBtn>
+        )}
+      </div>
+
+      {/* Description */}
+      <div style={{ flex:1, overflowY:"auto", padding:"14px 14px" }}>
+        {job.applicantCount != null && (
+          <div style={{ fontSize:11, color:theme.textDim, marginBottom:10 }}>
+            👥 {job.applicantCount > 200 ? "200+" : job.applicantCount} applicants
+          </div>
+        )}
+
+        {/* Keyword legend */}
+        {baseResumeSkills && baseResumeSkills.size > 0 && (
+          <div style={{ display:"flex", gap:8, alignItems:"center", fontSize:10, color:theme.textDim, marginBottom:10 }}>
+            <span style={{ background:"#dcfce7", color:"#166534", padding:"1px 5px", borderRadius:2, fontWeight:600 }}>green</span>
+            = you have ·
+            <span style={{ background:"#fee2e2", color:"#991b1b", padding:"1px 5px", borderRadius:2, fontWeight:600 }}>red</span>
+            = gap
+          </div>
+        )}
+
+        {job.description ? (
+          <HighlightedDescription
+            text={job.description}
+            baseResumeSkills={baseResumeSkills}
+            theme={theme}
+            maxChars={3000}
+          />
+        ) : (
+          <p style={{ fontSize:12, color:theme.textDim, fontStyle:"italic" }}>No description available.</p>
+        )}
+
+        {/* Direct apply link */}
+        {(job.applyUrl || job.url) && (
+          <div style={{ marginTop:16, paddingTop:12, borderTop:`1px solid ${theme.border}44` }}>
+            <a href={job.applyUrl || job.url} target="_blank" rel="noreferrer"
+              style={{ fontSize:12, color:theme.accentText, fontWeight:700,
+                        textDecoration:"underline", background:theme.accentMuted,
+                        padding:"6px 14px", borderRadius:4, display:"inline-block" }}>
+              Apply directly ↗
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

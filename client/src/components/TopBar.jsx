@@ -109,7 +109,7 @@ const TABS = [
   { id:"database", label:"Database", icon:"🗃" },
 ];
 
-export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange }) {
+export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange, resumeWidget }) {
   const { theme, accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
   const { mode: vpMode } = useViewport();
   const isMobile = vpMode === "mobile" || vpMode === "tablet";
@@ -246,6 +246,39 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                     {m.value === currentMode && <span style={{ color:theme.accent, fontWeight:700 }}>✓</span>}
                   </button>
                 ))}
+                {/* Base Resume */}
+                {resumeWidget && (
+                  <div style={{ borderTop:`1px solid ${theme.border}`, padding:"10px 16px 8px" }}>
+                    <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
+                                   letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
+                      Base Resume
+                    </div>
+                    <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                      <button
+                        onClick={() => !resumeWidget.uploading && resumeWidget.onUploadClick?.()}
+                        style={{
+                          background:"transparent",
+                          border:`1px solid ${resumeWidget.text ? "#16a34a44" : theme.border}`,
+                          borderRadius:2, padding:"6px 10px", cursor:"pointer",
+                          fontSize:11, flex:1,
+                          color: resumeWidget.uploading ? "#d97706" : resumeWidget.text ? "#16a34a" : theme.textMuted,
+                          fontFamily:"'DM Sans',system-ui",
+                        }}>
+                        {resumeWidget.uploading ? "⏳ Parsing…"
+                          : resumeWidget.text
+                            ? `✓ ${(resumeWidget.fileName||"").length>24 ? (resumeWidget.fileName||"").slice(0,24)+"…" : resumeWidget.fileName}`
+                          : "📄 Upload Resume"}
+                      </button>
+                      {resumeWidget.text && !resumeWidget.uploading && (
+                        <button onClick={() => resumeWidget.onClear?.()}
+                          style={{ background:"none", border:"none", color:"#dc2626",
+                                   cursor:"pointer", fontSize:12, padding:"4px 6px", flexShrink:0 }}>
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </Panel>
             )}
           </div>
@@ -336,6 +369,38 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                       {m.value === currentMode && <span style={{ color:theme.accent, fontWeight:700 }}>✓</span>}
                     </button>
                   ))}
+                  {resumeWidget && (
+                    <div style={{ paddingTop:8 }}>
+                      <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
+                                     letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
+                        Base Resume
+                      </div>
+                      <div style={{ display:"flex", gap:6, alignItems:"center", paddingBottom:8 }}>
+                        <button
+                          onClick={() => !resumeWidget.uploading && resumeWidget.onUploadClick?.()}
+                          style={{
+                            background:"transparent",
+                            border:`1px solid ${resumeWidget.text ? "#16a34a44" : theme.border}`,
+                            borderRadius:2, padding:"6px 10px", cursor:"pointer",
+                            fontSize:11, flex:1,
+                            color: resumeWidget.uploading ? "#d97706" : resumeWidget.text ? "#16a34a" : theme.textMuted,
+                            fontFamily:"'DM Sans',system-ui",
+                          }}>
+                          {resumeWidget.uploading ? "⏳ Parsing…"
+                            : resumeWidget.text
+                              ? `✓ ${(resumeWidget.fileName||"").length>24 ? (resumeWidget.fileName||"").slice(0,24)+"…" : resumeWidget.fileName}`
+                            : "📄 Upload Resume"}
+                        </button>
+                        {resumeWidget.text && !resumeWidget.uploading && (
+                          <button onClick={() => resumeWidget.onClear?.()}
+                            style={{ background:"none", border:"none", color:"#dc2626",
+                                     cursor:"pointer", fontSize:12, padding:"4px 6px", flexShrink:0 }}>
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
