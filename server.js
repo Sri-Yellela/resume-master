@@ -1489,7 +1489,6 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     `((sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo}) OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))`,
     `(uj.disliked IS NULL OR uj.disliked = 0)`,
     `(uj.applied IS NULL OR uj.applied = 0)`,
-    `(uj.visited IS NULL OR uj.visited = 0)`,
     `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
   ];
   const filterParams = [];
@@ -1540,6 +1539,14 @@ app.get("/api/jobs", requireAuth, (req, res) => {
 
   if (req.query.starred === "1") { conditions.push(`uj.starred = 1`); }
 
+  const visitedParam = (req.query.visited || "").trim();
+  if (visitedParam === "0") {
+    conditions.push("(uj.visited IS NULL OR uj.visited = 0)");
+  } else if (visitedParam === "1") {
+    conditions.push("uj.visited = 1");
+  }
+  // else default: include all, visited sorted to end via ORDER BY
+
   const localSearch = (req.query.localSearch || "").trim().toLowerCase();
   if (localSearch) {
     conditions.push(`(LOWER(sj.company) LIKE ? OR LOWER(sj.location) LIKE ? OR LOWER(sj.category) LIKE ? OR LOWER(sj.search_query) LIKE ?)`);
@@ -1571,7 +1578,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   let rows = db.prepare(
     `SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked
      ${baseJoin} ${where}
-     ORDER BY ${orderBy}
+     ORDER BY CASE WHEN (uj.visited IS NOT NULL AND uj.visited = 1) THEN 1 ELSE 0 END ASC, ${orderBy}
      LIMIT ? OFFSET ?`
   ).all(userId, ...filterParams, pageSize, offset);
 

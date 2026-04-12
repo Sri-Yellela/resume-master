@@ -594,9 +594,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [atsExpanded,   setAtsExpanded]   = useState(false);
 
-  // Split view
+  // Split view — splitWidth is the COLLAPSED LIST width (detail gets flex:1)
   const [selectedJob, setSelectedJob] = useState(null);
-  const [splitWidth,  setSplitWidth]  = useState(340);
+  const [splitWidth,  setSplitWidth]  = useState(240);
   const isDraggingRef     = useRef(false);
   const splitContainerRef = useRef(null);
 
@@ -717,15 +717,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     return () => window.removeEventListener("keydown", handler);
   }, [selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Resizable split divider
+  // Resizable split divider — drag controls the COLLAPSED LIST width
   const handleDividerMouseDown = useCallback((e) => {
     e.preventDefault();
     isDraggingRef.current = true;
     const onMove = (me) => {
       if (!isDraggingRef.current || !splitContainerRef.current) return;
       const containerRect = splitContainerRef.current.getBoundingClientRect();
-      const newWidth = containerRect.right - me.clientX;
-      setSplitWidth(Math.max(260, Math.min(600, newWidth)));
+      const newWidth = me.clientX - containerRect.left;
+      setSplitWidth(Math.max(160, Math.min(420, newWidth)));
     };
     const onUp = () => {
       isDraggingRef.current = false;
@@ -1435,7 +1435,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                         flex: rightPanelOpen ? "0 0 50%" : "1",
                         borderRight: rightPanelOpen ? `1px solid ${theme.border}` : "none",
                         transition: "flex 0.2s ease" }}>
-            <div style={{ flex:1, minWidth:220, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+            {/* List column: full-width when no job selected; narrows to give detail more room */}
+            <div style={{
+              ...(selectedJob
+                ? { width:splitWidth, flexShrink:0, minWidth:0 }
+                : { flex:1, minWidth:220 }),
+              display:"flex", flexDirection:"column", overflow:"hidden"
+            }}>
               <JobsColumn
                 jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
                 applyMode={applyMode} theme={theme} isDark={isDark}
@@ -1456,7 +1462,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                             transition:"background 0.15s" }}
                   onMouseEnter={e => e.currentTarget.style.background=theme.accent}
                   onMouseLeave={e => e.currentTarget.style.background=theme.border}/>
-                <div style={{ width:splitWidth, flexShrink:0, display:"flex", flexDirection:"column",
+                <div style={{ flex:1, minWidth:260, display:"flex", flexDirection:"column",
                               overflow:"hidden", borderLeft:`1px solid ${theme.border}` }}>
                   <JobDetailPanel
                     job={selectedJob} theme={theme} isDark={isDark}
@@ -1543,7 +1549,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             flex: rightPanelOpen ? `0 0 ${panelSizes.left}%` : "1",
             transition: "flex 0.2s ease",
           }}>
-            <div style={{ flex:1, minWidth:220, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+            {/* List column: full-width when no job selected; narrows to give detail more room */}
+            <div style={{
+              ...(selectedJob
+                ? { width:splitWidth, flexShrink:0, minWidth:0 }
+                : { flex:1, minWidth:220 }),
+              display:"flex", flexDirection:"column", overflow:"hidden"
+            }}>
               <JobsColumn
                 jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
                 applyMode={applyMode} theme={theme} isDark={isDark}
@@ -1563,7 +1575,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                   style={{ width:4, background:theme.border, cursor:"col-resize", flexShrink:0 }}
                   onMouseEnter={e => e.currentTarget.style.background=theme.accent}
                   onMouseLeave={e => e.currentTarget.style.background=theme.border}/>
-                <div style={{ width:splitWidth, flexShrink:0, display:"flex", flexDirection:"column",
+                <div style={{ flex:1, minWidth:260, display:"flex", flexDirection:"column",
                               overflow:"hidden", borderLeft:`1px solid ${theme.border}` }}>
                   <JobDetailPanel
                     job={selectedJob} theme={theme} isDark={isDark}
