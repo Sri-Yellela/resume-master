@@ -83,7 +83,15 @@ export default function App() {
         resumeWidget={resumeWidget}
       />
       <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-        {activeTab === "jobs"     && <JobsPanel     user={authUser} onUserChange={setAuthUser} refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}/>}
+        {/* JobsPanel stays mounted across tab switches so state is preserved.
+            display:none hides it without unmounting — scroll, selected job,
+            ATS panel, and sandbox all survive navigation away and back. */}
+        <div style={{ display: activeTab === "jobs" ? "flex" : "none",
+                      flex: 1, flexDirection: "column", overflow: "hidden" }}>
+          <JobsPanel user={authUser} onUserChange={setAuthUser}
+            refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
+            isActive={activeTab === "jobs"}/>
+        </div>
         {activeTab === "database" && <DatabasePanel user={authUser}/>}
         {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
         {activeTab === "admin"    && authUser.isAdmin && <AdminPanel/>}

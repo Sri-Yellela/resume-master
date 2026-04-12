@@ -442,37 +442,45 @@ Use this exact schema:
   "verdict": "<one sentence overall assessment>"
 }`;
 
+// ── Prompt file loader ──────────────────────────────────────────
+// Tries __dirname (git-deployed next to server.js) first,
+// then __dirname/data (Railway volume mount at /app/data) as fallback.
+// This handles both local dev and Railway deployments where prompt files
+// may reside on a persistent volume rather than in the git-deployed tree.
+function loadPromptFile(filename) {
+  const candidates = [
+    path.join(__dirname, filename),
+    path.join(__dirname, "data", filename),
+  ];
+  for (const p of candidates) {
+    try {
+      const content = fs.readFileSync(p, "utf8");
+      console.log(`[prompt] ${filename} loaded from ${p} (${content.length} chars)`);
+      return content;
+    } catch {}
+  }
+  return null;
+}
+
 // ── Static master prompt (loaded once at startup) ─────────────
-const MASTER_PROMPT_PATH = path.join(__dirname, "resume_masterprompt.md");
-let MASTER_PROMPT_STATIC = "";
-try {
-  MASTER_PROMPT_STATIC = fs.readFileSync(MASTER_PROMPT_PATH, "utf8");
-  console.log(`[prompt] Loaded — ${MASTER_PROMPT_STATIC.length} chars`);
-} catch(e) {
-  console.error("[prompt] WARNING: Could not load master prompt:", e.message);
+const MASTER_PROMPT_STATIC = loadPromptFile("resume_masterprompt.md") || "";
+if (!MASTER_PROMPT_STATIC) {
+  console.error("[prompt] WARNING: resume_masterprompt.md not found in __dirname or __dirname/data — resume generation will fail");
 }
 
 // ── Mode-specific prompts (loaded at startup) ──────────────────
-const TAILORED_PROMPT_PATH = path.join(__dirname, "tailored_system_prompt.md");
-let TAILORED_PROMPT_STATIC = "";
-try {
-  TAILORED_PROMPT_STATIC = fs.readFileSync(TAILORED_PROMPT_PATH, "utf8");
-  console.log(`[prompt] TAILORED loaded — ${TAILORED_PROMPT_STATIC.length} chars`);
-} catch(e) {
-  console.log(`[prompt] tailored_system_prompt.md not found — using master prompt for TAILORED mode`);
+const TAILORED_PROMPT_STATIC = loadPromptFile("tailored_system_prompt.md") || "";
+if (!TAILORED_PROMPT_STATIC) {
+  console.log("[prompt] tailored_system_prompt.md not found — TAILORED mode will use master prompt");
 }
 
-const CUSTOM_SAMPLER_PROMPT_PATH = path.join(__dirname, "custom_sampler_system_prompt.md");
-let CUSTOM_SAMPLER_PROMPT_STATIC = "";
-try {
-  CUSTOM_SAMPLER_PROMPT_STATIC = fs.readFileSync(CUSTOM_SAMPLER_PROMPT_PATH, "utf8");
-  console.log(`[prompt] CUSTOM_SAMPLER loaded — ${CUSTOM_SAMPLER_PROMPT_STATIC.length} chars`);
-} catch(e) {
-  console.log(`[prompt] custom_sampler_system_prompt.md not found — using master prompt for CUSTOM_SAMPLER mode`);
+const CUSTOM_SAMPLER_PROMPT_STATIC = loadPromptFile("custom_sampler_system_prompt.md") || "";
+if (!CUSTOM_SAMPLER_PROMPT_STATIC) {
+  console.log("[prompt] custom_sampler_system_prompt.md not found — CUSTOM_SAMPLER mode will use master prompt");
 }
 
 if (!TAILORED_PROMPT_STATIC || !CUSTOM_SAMPLER_PROMPT_STATIC) {
-  console.log("[startup] One or more mode-specific prompts missing — affected modes will use master prompt as fallback. CUSTOM_SAMPLER rules (one-FAANG limit, company scale ordering) will NOT apply.");
+  console.log("[startup] One or more mode-specific prompts missing — affected modes will fall back to master prompt. CUSTOM_SAMPLER rules (one-FAANG limit, company scale ordering) will NOT apply.");
 }
 
 // ── Helpers ───────────────────────────────────────────────────

@@ -506,8 +506,8 @@ function ResizeDivider({ onDrag }) {
 }
 
 const PANEL_SIZE_KEY = "rm_panel_sizes";
-const DEFAULT_SIZES = { left: 58, right: 42 };
-const DEFAULT_SIZES_SANDBOX = { left: 36, center: 32, right: 22 };
+const DEFAULT_SIZES = { left: 50, right: 50 };
+const DEFAULT_SIZES_3 = { left: 33.33, center: 33.34, right: 33.33 };
 
 // ── Collapsible ATS wrapper ───────────────────────────────────
 function CollapsibleATS({ report, score, expanded, onToggle, theme }) {
@@ -545,7 +545,7 @@ function CollapsibleATS({ report, score, expanded, onToggle, theme }) {
 }
 
 // ── Main panel ────────────────────────────────────────────────
-export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResumeStateChange }) {
+export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResumeStateChange, isActive = true }) {
   const { theme, isDark } = useTheme();
   const { mode: vpMode } = useViewport();
   const isWide     = vpMode === "wide";
@@ -600,31 +600,35 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const isDraggingRef     = useRef(false);
   const splitContainerRef = useRef(null);
 
-  // Open sandbox and rebalance panel sizes for wide mode
+  // Open / close sandbox — panel size rebalancing handled by useEffect below
   const openSandbox = useCallback((entry) => {
     setSandbox(entry);
     setSandboxOpen(true);
-    if (isWide) {
-      setPanelSizes(prev => {
-        const total = prev.left + prev.right;
-        return { left: Math.max(20, Math.round(total * 0.52)), center: 30, right: Math.max(15, Math.round(total * 0.28)) };
-      });
-    }
     if (isMobile) setMobilePane("editor");
-  }, [isWide, isMobile]);
+  }, [isMobile]);
 
   const closeSandbox = useCallback(() => {
     setSandboxOpen(false);
-    if (isWide) {
-      setPanelSizes(prev => {
-        const leftPct  = prev.left || 36;
-        const rightPct = prev.right || 22;
-        const total = leftPct + rightPct;
-        return { left: Math.round(total * 0.58), right: Math.round(total * 0.42) };
-      });
-    }
     if (isMobile) setMobilePane("jobs");
-  }, [isWide, isMobile]);
+  }, [isMobile]);
+
+  // Equal panel splitting whenever panel count changes
+  useEffect(() => {
+    if (!isWide) return;
+    const has3 = sandboxOpen && rightPanelOpen;
+    const has2sandbox = sandboxOpen && !rightPanelOpen;
+    const has2right = !sandboxOpen && rightPanelOpen;
+    if (has3) {
+      setPanelSizes(DEFAULT_SIZES_3);
+    } else if (has2sandbox) {
+      setPanelSizes({ left: 50, center: 50, right: 0 });
+    } else if (has2right) {
+      setPanelSizes({ left: 50, center: 0, right: 50 });
+    } else {
+      setPanelSizes({ left: 100, center: 0, right: 0 });
+    }
+  }, [sandboxOpen, rightPanelOpen, isWide]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [activeAts,   setActiveAts]   = useState(null);
   const [smartSearching, setSmartSearching] = useState(false);
 
@@ -678,7 +682,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // ── Split-view: job selection ─────────────────────────────────
   const handleJobSelect = useCallback((job) => {
-    setSelectedJob(job);
+    setSelectedJob(prev => {
+      if (prev?.jobId === job.jobId) return null; // toggle off
+      return job;
+    });
     markVisited(job.jobId);
     if (!job.visited) {
       api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }).catch(()=>{});
@@ -1425,8 +1432,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         <div style={{ flex:1, display:"flex", overflow:"hidden", position:"relative" }}>
           {/* LEFT jobs */}
           <div ref={splitContainerRef} style={{ display:"flex", flexDirection:"row", minWidth:0,
-                        flex: rightPanelOpen ? "0 0 58%" : "1",
-                        borderRight: rightPanelOpen ? `1px solid ${theme.border}` : "none" }}>
+                        flex: rightPanelOpen ? "0 0 50%" : "1",
+                        borderRight: rightPanelOpen ? `1px solid ${theme.border}` : "none",
+                        transition: "flex 0.2s ease" }}>
             <div style={{ flex:1, minWidth:220, display:"flex", flexDirection:"column", overflow:"hidden" }}>
               <JobsColumn
                 jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
@@ -1533,6 +1541,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           <div ref={splitContainerRef} style={{
             display:"flex", flexDirection:"row", minWidth:0,
             flex: rightPanelOpen ? `0 0 ${panelSizes.left}%` : "1",
+            transition: "flex 0.2s ease",
           }}>
             <div style={{ flex:1, minWidth:220, display:"flex", flexDirection:"column", overflow:"hidden" }}>
               <JobsColumn
@@ -1596,7 +1605,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           {sandboxOpen && (
             <>
               <div style={{ display:"flex", flexDirection:"column", minWidth:0,
-                            flex: `0 0 ${panelSizes.center}%` }}>
+                            flex: `0 0 ${panelSizes.center}%`, transition:"flex 0.2s ease" }}>
                 <SandboxPanel entry={sandbox} onClose={closeSandbox}
                   onSave={saveSandboxHtml} onExport={exportAndTrack}/>
               </div>
@@ -1617,7 +1626,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           {/* RIGHT — ATS + History — only when open */}
           {rightPanelOpen && (
             <div style={{ display:"flex", flexDirection:"column", minWidth:0,
-                          flex: `0 0 ${panelSizes.right}%` }}>
+                          flex: `0 0 ${panelSizes.right}%`, transition:"flex 0.2s ease" }}>
               <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
                             padding:"0 14px", flexShrink:0 }}>
                 {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
