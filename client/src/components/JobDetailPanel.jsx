@@ -83,7 +83,7 @@ export default function JobDetailPanel({
     setApplyLoading(true); setApplyResult(null);
     try {
       const d = await api("/api/apply", { method:"POST", body:JSON.stringify({
-        jobId: job.jobId, jobUrl: job.url, mode,
+        jobId: job.jobId, jobUrl: job.applyUrl || job.url, mode,
       }) });
       if (mode === "semi" && d.status === "semi_launched") {
         setSemiActive(true);
@@ -193,13 +193,13 @@ export default function JobDetailPanel({
             📥 PDF
           </ActionBtn>
         )}
-        {job.url && !semiActive && (
+        {(job.applyUrl || job.url) && !semiActive && (
           <ActionBtn onClick={() => handleAutoApply("semi")} title="Open pre-filled form in browser"
             accent={theme.accent} theme={theme} active={applyLoading}>
             {applyLoading ? "⏳" : "↗ Apply"}
           </ActionBtn>
         )}
-        {job.url && !semiActive && (
+        {(job.applyUrl || job.url) && !semiActive && (
           <ActionBtn onClick={() => onVisit?.()} title="Open job listing (manual)" accent={theme.accentText || "#1a6a8a"} theme={theme}>
             ✎ Manual
           </ActionBtn>

@@ -2301,7 +2301,7 @@ app.delete("/api/linkedin/cookies", requireAuth, (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 // APPLY AUTOMATION (Playwright)
 // ═══════════════════════════════════════════════════════════════
-applyRoutes(app, db, requireAuth);
+applyRoutes(app, db, requireAuth, buildAutofillPayload);
 
 // ═══════════════════════════════════════════════════════════════
 // HEALTH + SPA

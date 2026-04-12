@@ -20,50 +20,19 @@ function sessionPath(userId, domain) {
   return path.join(SESSION_DIR, `${userId}_${safe}.json`);
 }
 
-export default function applyRoutes(app, db, requireAuth) {
+export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) {
 
   // ── POST /api/apply ───────────────────────────────────────────
   app.post("/api/apply", requireAuth, async (req, res) => {
     const { jobId, jobUrl, mode = "semi", resumeFile } = req.body;
     if (!jobUrl) return res.status(400).json({ error: "jobUrl required" });
 
-    // Build autofill payload from stored profile
+    // Build autofill payload from stored profile using shared server-side builder.
+    // This gives full field coverage (40+ variants), phone/URL normalization,
+    // CUSTOM_SAMPLER location stripping, and EEO dropdown fields.
     db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
     const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id) || {};
-
-    const nameParts  = (profile.full_name || "").trim().split(/\s+/).filter(Boolean);
-    const firstName  = profile.first_name  || nameParts[0] || "";
-    const lastName   = profile.last_name   || (nameParts.length > 1 ? nameParts[nameParts.length-1] : "");
-    const middleName = profile.middle_name || (nameParts.length > 2 ? nameParts.slice(1,-1).join(" ") : "");
-    const suffix     = profile.name_suffix || "";
-    const fullName   = [firstName, middleName, lastName, suffix].filter(Boolean).join(" ");
-
-    const autofillData = {
-      field_map: {
-        firstName, first_name: firstName, givenName: firstName,
-        lastName,  last_name:  lastName,  familyName: lastName,
-        middleName, middle_name: middleName,
-        suffix,    name_suffix: suffix,
-        fullName,  full_name:  fullName,  name: fullName,
-        email:        profile.email          || "",
-        phone:        profile.phone          || "",
-        linkedin_url: profile.linkedin_url   || "",
-        github_url:   profile.github_url     || "",
-        address_line1: profile.address_line1 || "",
-        address_line2: profile.address_line2 || "",
-        city:    profile.city    || "",
-        state:   profile.state   || "",
-        zip:     profile.zip     || "",
-        country: profile.country || "United States",
-        location: profile.location || profile.city || "",
-        requires_sponsorship: profile.requires_sponsorship ? "Yes" : "No",
-        has_clearance:        profile.has_clearance        ? "Yes" : "No",
-      },
-      dropdown_map: {
-        country:  ["united states","usa","us"],
-        currency: ["usd","dollar"],
-      },
-    };
+    const autofillData = buildAutofillPayload(profile, req.user.applyMode);
 
     // Session state
     let storageStatePath = null;

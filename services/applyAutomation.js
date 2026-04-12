@@ -27,7 +27,7 @@ const inProgress = new Map();
 // ── Fill script injected into page context ────────────────────────────────────
 // Logic ported directly from extension/content.js and background.js
 const FILL_FN_SRC = `
-function resumeMasterFill(autofillData, labelMap) {
+function(autofillData, labelMap) {
   if (!autofillData || !autofillData.field_map) return 0;
   const fm  = autofillData.field_map;
   const ddm = autofillData.dropdown_map || {};
@@ -148,11 +148,14 @@ function resumeMasterFill(autofillData, labelMap) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function fillContext(pageOrFrame, autofillData, labelMap) {
   try {
+    // FILL_FN_SRC is an anonymous function expression — invoke as IIFE with args.
+    // Named function expressions (function foo(){}) have their name scoped only
+    // inside the body; calling foo() after the expression would ReferenceError.
     return await pageOrFrame.evaluate(
-      `(${FILL_FN_SRC}); resumeMasterFill(${JSON.stringify(autofillData)}, ${JSON.stringify(labelMap)})`
+      `(${FILL_FN_SRC})(${JSON.stringify(autofillData)}, ${JSON.stringify(labelMap)})`
     );
   } catch (e) {
-    console.warn("[applyAutomation] fillContext:", e.message);
+    console.warn("[applyAutomation] fillContext error:", e.message);
     return 0;
   }
 }
