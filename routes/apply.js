@@ -92,17 +92,30 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
         return res.status(500).json({ error: e.message });
       }
     } else {
-      // Semi mode: launch and return immediately
-      autoApply(jobUrl, autofillData, {
-        mode: "semi", resumePath, jobId: jobIdStr, storageStatePath,
-      }).catch(e => console.error("[apply semi]", e.message));
-
-      return res.json({
-        ok: true,
-        status: "semi_launched",
-        jobId: jobIdStr,
-        message: "Browser launched with form pre-filled. Review fields and submit manually.",
-      });
+      // Semi mode: AWAIT the launch + fill so errors reach the client.
+      // Fire-and-forget swallowed every error silently (browser never opened,
+      // client always got "launched" anyway). Awaiting keeps the request open
+      // for ~5-15s while Playwright launches and fills — client shows ⏳ already.
+      try {
+        const result = await autoApply(jobUrl, autofillData, {
+          mode: "semi", resumePath, jobId: jobIdStr, storageStatePath,
+        });
+        if (result.status === "error") {
+          return res.status(500).json({ ok: false, status: "error", error: result.error || "Automation failed" });
+        }
+        const n = result.fieldsFilled ?? 0;
+        return res.json({
+          ok: true,
+          status: "semi_launched",
+          jobId: jobIdStr,
+          fieldsFilled: n,
+          platform: result.platform,
+          message: `Browser open — ${n} field${n !== 1 ? "s" : ""} pre-filled. Review and submit manually.`,
+        });
+      } catch (e) {
+        console.error("[apply semi]", e.message);
+        return res.status(500).json({ ok: false, status: "error", error: e.message });
+      }
     }
   });
 

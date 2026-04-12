@@ -9,6 +9,7 @@
     "start": "node server.js",
     "build": "cd client && npm install && npm run build",
     "setup": "npm install && npm run build",
+    "postinstall": "npx playwright install chromium --with-deps",
     "migrate": "node scripts/migrate.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/backup.js restore"

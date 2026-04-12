@@ -212,10 +212,12 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
   let browser, context, page;
 
   try {
+    console.log(`[autoApply] launching browser — mode=${mode} url=${jobUrl}`);
     browser = await chromium.launch({
       headless: isFullAuto,
       args: ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage"],
     });
+    console.log("[autoApply] browser launched");
 
     const ctxOpts = {};
     if (storageStatePath && fs.existsSync(storageStatePath)) {
@@ -225,12 +227,14 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     page    = await context.newPage();
 
     inProgress.set(String(jobId), { status: "navigating", browser });
+    console.log(`[autoApply] navigating to ${jobUrl}`);
 
     await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(1500);
 
     const detected  = platform || detectPlatformFromUrl(jobUrl) || await detectPlatformFromPage(page);
     const labelMap  = getPlatformLabelMap(detected);
+    console.log(`[autoApply] detected platform=${detected}`);
 
     inProgress.set(String(jobId), { status: "filling", browser });
 
@@ -273,6 +277,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       pageTitle = await page.title().catch(() => "");
     }
 
+    console.log(`[autoApply] done — status=${status} fieldsFilled=${totalFilled}`);
     const ss = await takeScreenshot(page, jobId);
     inProgress.set(String(jobId), { status, browser: isFullAuto ? null : browser });
     if (isFullAuto) await browser.close();
@@ -287,6 +292,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     };
 
   } catch (e) {
+    console.error(`[autoApply] error: ${e.message}`);
     inProgress.delete(String(jobId));
     let ss = { base64: null, path: null };
     try { if (page) ss = await takeScreenshot(page, jobId); } catch {}
