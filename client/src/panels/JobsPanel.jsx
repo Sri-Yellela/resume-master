@@ -569,6 +569,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     try { localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify(panelSizes)); } catch {}
   }, [panelSizes]);
 
+  // Tracks jobs disliked in this browser session — survives filter/sort refetches
+  // but is cleared on page reload (so server exclusions take effect on next login)
+  const sessionDislikedRef = useRef(new Map()); // jobId → job object
+
   // Job data
   const [jobs,        setJobs]        = useState([]);
   const [totalJobs,   setTotalJobs]   = useState(0);
@@ -776,7 +780,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           return [...map.values()];
         });
       } else {
-        setJobs(incoming);
+        // Replace list but re-inject any jobs disliked this session so they
+        // remain visible (faded) until the user reloads the page.
+        setJobs(() => {
+          const result = new Map(incoming.map(j => [j.jobId, j]));
+          for (const [id, job] of sessionDislikedRef.current) {
+            if (!result.has(id)) result.set(id, job);
+          }
+          return [...result.values()];
+        });
       }
       setTotalJobs(d.total || 0);
       setTotalPages(d.totalPages || 0);
@@ -853,7 +865,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             const d = await api(`/api/jobs?${qs.toString()}`);
             const newCount = (d.jobs || []).length;
             if (newCount > prevCount.current || pollCount >= 20) {
-              setJobs(d.jobs || []);
+              setJobs(() => {
+                const result = new Map((d.jobs || []).map(j => [j.jobId, j]));
+                for (const [id, job] of sessionDislikedRef.current) {
+                  if (!result.has(id)) result.set(id, job);
+                }
+                return [...result.values()];
+              });
               setTotalJobs(d.total || 0);
               setTotalPages(d.totalPages || 0);
               setCurrentPage(1);
@@ -875,7 +893,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       qs.set("page","1"); qs.set("pageSize","25"); qs.set("sort", sortBy);
       qs.set("role", roleQ);
       const d = await api(`/api/jobs?${qs.toString()}`);
-      setJobs(d.jobs || []);
+      setJobs(() => {
+        const result = new Map((d.jobs || []).map(j => [j.jobId, j]));
+        for (const [id, job] of sessionDislikedRef.current) {
+          if (!result.has(id)) result.set(id, job);
+        }
+        return [...result.values()];
+      });
       setTotalJobs(d.total || 0);
       setTotalPages(d.totalPages || 0);
       setCurrentPage(1);
@@ -1064,15 +1088,30 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     } catch {}
   }, []);
 
-  // ── Dislike toggle — deferred removal (job stays visible until next fetch) ──
+  // ── Dislike toggle — deferred removal ────────────────────────
+  // Card stays visible (faded/greyed) for the rest of the session.
+  // sessionDislikedRef ensures the card survives any fetchJobs call
+  // (sort change, filter change, pagination, etc.) within this session.
+  // Only a page reload clears the ref and lets the server exclusion apply.
   const toggleDislike = useCallback(async (jobId) => {
     try {
       const d = await dislikeJob(jobId);
-      const updateFn = j => j.jobId === jobId
-        ? { ...j, disliked: !!d.disliked, starred: d.disliked ? false : j.starred }
-        : j;
-      setJobs(prev => prev.map(updateFn));
-      setPendingJobs(prev => prev.map(updateFn));
+      const isNowDisliked = !!d.disliked;
+      setJobs(prev => {
+        return prev.map(j => {
+          if (j.jobId !== jobId) return j;
+          const updated = { ...j, disliked: isNowDisliked, starred: isNowDisliked ? false : j.starred };
+          if (isNowDisliked) {
+            sessionDislikedRef.current.set(jobId, updated);
+          } else {
+            sessionDislikedRef.current.delete(jobId);
+          }
+          return updated;
+        });
+      });
+      setPendingJobs(prev => prev.map(j => j.jobId !== jobId ? j : {
+        ...j, disliked: isNowDisliked, starred: isNowDisliked ? false : j.starred,
+      }));
     } catch {}
   }, []);
 
