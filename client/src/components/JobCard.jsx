@@ -187,7 +187,7 @@ export default function JobCard({
 
   const frostedBg = isDark
     ? (hov ? "rgba(28,28,28,0.88)" : "rgba(17,17,17,0.55)")
-    : (hov ? "rgba(255,255,255,0.94)" : "rgba(255,255,255,0.62)");
+    : (hov ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.44)");
   const frostedBlur = hov ? "blur(20px) saturate(2)" : "blur(12px) saturate(1.6)";
   const frostedOverlay = isDark
     ? "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(200,200,200,0.02) 100%)"
@@ -225,7 +225,7 @@ export default function JobCard({
         border: `1px solid ${selected ? theme.accent : (hov ? theme.accent + "66" : theme.border + "88")}`,
         borderRadius: 4, margin: "0 16px 8px",
         boxShadow: hov
-          ? `0 0 0 3px ${theme.accent}22, 0 8px 24px ${theme.accent}18, ${theme.shadowLg}`
+          ? `0 0 0 2px ${theme.accent}, 0 8px 24px ${theme.accent}44`
           : theme.shadowSm,
         transform: hov ? "translateY(-3px) scale(1.008)" : "translateY(0) scale(1)",
         transition: "all 0.2s ease", position: "relative",
@@ -240,8 +240,8 @@ export default function JobCard({
         background: frostedOverlay,
       }}/>
       <div aria-hidden style={{
-        position:"absolute", inset:0, pointerEvents:"none", borderRadius:"inherit", zIndex:0,
-        opacity: isDark ? 0.055 : 0.04, mixBlendMode:"overlay",
+        position:"absolute", inset:0, pointerEvents:"none", borderRadius:"inherit", zIndex:2,
+        opacity: isDark ? 0.12 : 0.08, mixBlendMode: isDark ? "overlay" : "multiply",
         backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E")`,
         backgroundSize:"160px 160px",
       }}/>
