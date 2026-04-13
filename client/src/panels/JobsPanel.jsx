@@ -461,27 +461,33 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 
 
 
-// DEFAULT SIZES (all four): A=20% B=25% C=30% D=25%
-// Two panel: A=30% B=70%
+// DEFAULT SIZES:
+// A+B only: A=30% B=70%
+// Any additional panel open: A=10% (condensed)
+// A+B+C: A=10% B=47% C=43%
+// A+B+D: A=10% B=65% D=25%
+// A+B+C+D: A=10% B=25% C=35% D=30%
 // To change defaults edit getPanelDefaults() below.
-// Defaults reset whenever panel visibility changes.
+// Condensed mode (A=10%) triggers automatically when
+// panel count > 2. Manual resize overrides until
+// panel visibility changes.
 function getPanelDefaults(showDetail, showSandbox, showAts) {
   const count = [true, showDetail, showSandbox, showAts].filter(Boolean).length;
   // Only jobs panel visible
   if (count === 1) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
-  // Two-panel: A + B
+  // Two-panel: A + B — wide mode, A stays at 30%
   if (count === 2 && showDetail && !showSandbox && !showAts) return { jobs: 30, detail: 70, sandbox: 0, ats: 0 };
-  // All four panels
-  if (showDetail && showSandbox && showAts) return { jobs: 20, detail: 25, sandbox: 30, ats: 25 };
-  // A + B + C (no ATS)
-  if (showDetail && showSandbox && !showAts) return { jobs: 20, detail: 40, sandbox: 40, ats: 0 };
-  // A + B + D (no sandbox)
-  if (showDetail && !showSandbox && showAts) return { jobs: 20, detail: 55, sandbox: 0, ats: 25 };
-  // General fallback: A=20, D=25 if visible, remaining split B+C equally
-  const aSize = 20, dSize = showAts ? 25 : 0;
+  // All four panels: A=10% B=25% C=35% D=30%
+  if (showDetail && showSandbox && showAts) return { jobs: 10, detail: 25, sandbox: 35, ats: 30 };
+  // A + B + C (sandbox open, no ATS): A=10% B=47% C=43%
+  if (showDetail && showSandbox && !showAts) return { jobs: 10, detail: 47, sandbox: 43, ats: 0 };
+  // A + B + D (ATS open, no sandbox): A=10% B=65% D=25%
+  if (showDetail && !showSandbox && showAts) return { jobs: 10, detail: 65, sandbox: 0, ats: 25 };
+  // Fallback: A=10, D=25 if visible, remainder split B+C
+  const aSize = 10, dSize = showAts ? 25 : 0;
   const remaining = 100 - aSize - dSize;
   const bcPanels = [showDetail, showSandbox].filter(Boolean).length;
-  if (bcPanels === 0) return { jobs: 20, detail: 0, sandbox: 0, ats: 80 };
+  if (bcPanels === 0) return { jobs: 10, detail: 0, sandbox: 0, ats: 90 };
   const bcSize = remaining / bcPanels;
   return { jobs: aSize, detail: showDetail ? bcSize : 0, sandbox: showSandbox ? bcSize : 0, ats: dSize };
 }

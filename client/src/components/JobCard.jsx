@@ -193,12 +193,21 @@ export default function JobCard({
 
   // RESPONSIVE TIERS: width >= 280px = full layout (Tier 1)
   // 180-279px = condensed two-row (Tier 2)
-  // < 180px = logo + company name only (Tier 3)
+  // < 180px = condensed narrow (Tier 3)
   // Width is measured on the panel container via ResizeObserver in the parent panel
   // component and passed down as panelWidth prop. To change breakpoints edit
-  // TIER_BREAKPOINTS constant below.
-  const TIER_BREAKPOINTS = { tier2: 280, tier3: 180 };
-  const tier = panelWidth >= TIER_BREAKPOINTS.tier2 ? 1 : panelWidth >= TIER_BREAKPOINTS.tier3 ? 2 : 3;
+  // TIER_BREAKPOINTS below.
+  //
+  // TIER 3 (< 180px): condensed mode for narrow panel.
+  // Activates automatically when resume/ATS panels open
+  // (panel A defaults to 10% = ~150px on most screens).
+  // Shows: logo, company name, resume badge if generated.
+  // All other info omitted to preserve readability.
+  // To change what shows in Tier 3, edit the TIER_3_CONTENT
+  // section below. To change the width threshold, edit
+  // TIER_BREAKPOINTS.NARROW (currently 180).
+  const TIER_BREAKPOINTS = { tier2: 280, NARROW: 180 };
+  const tier = panelWidth >= TIER_BREAKPOINTS.tier2 ? 1 : panelWidth >= TIER_BREAKPOINTS.NARROW ? 2 : 3;
 
   return (
     <div
@@ -232,19 +241,35 @@ export default function JobCard({
         backgroundSize:"160px 160px",
       }}/>
 
-      {/* ── Tier 3: logo + company name only (< 180px) ── */}
+      {/* ── TIER_3_CONTENT: condensed narrow mode (< 180px) ── */}
       {tier === 3 && (
         <div onClick={handleCardClick}
           title={`${job.company} — ${job.title}`}
-          style={{ padding:"8px 10px", display:"flex", flexDirection:"column",
-                   alignItems:"center", gap:4, cursor:"pointer", position:"relative", zIndex:1,
-                   transition:"opacity 0.15s ease" }}>
-          <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={36}/>
+          style={{ padding:"10px 8px 10px", display:"flex", flexDirection:"column",
+                   alignItems:"center", gap:5, cursor:"pointer", position:"relative", zIndex:1,
+                   minHeight:72 }}>
+          {/* Logo — fades in as tier changes */}
+          <div style={{ opacity:1, transition:"opacity 0.15s ease 0.05s" }}>
+            <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={32}/>
+          </div>
+          {/* Company name */}
           <span style={{ fontSize:10, fontWeight:700, color:theme.text, textAlign:"center",
                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-                         width:"100%", maxWidth:120 }}>
+                         width:"100%", maxWidth:110,
+                         opacity:1, transition:"opacity 0.15s ease 0.05s" }}>
             {job.company}
           </span>
+          {/* Resume badge — only if a resume has been generated */}
+          {done && (
+            <span style={{
+              fontSize:9, fontWeight:700, padding:"2px 6px", borderRadius:999,
+              background:theme.accentMuted, color:theme.accentText,
+              border:`1px solid ${theme.accent}44`, whiteSpace:"nowrap",
+              opacity:1, transition:"opacity 0.2s ease 0.22s",
+            }}>
+              ✓ Resume
+            </span>
+          )}
         </div>
       )}
 
@@ -253,7 +278,7 @@ export default function JobCard({
         <div onClick={handleCardClick}
           style={{ padding:"10px 12px", display:"flex", alignItems:"center", gap:10,
                    cursor:"pointer", position:"relative", zIndex:1,
-                   transition:"opacity 0.15s ease" }}>
+                   opacity:1, transition:"opacity 0.15s ease" }}>
           <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={36}/>
           <div style={{ flex:1, minWidth:0 }}>
             {/* Row 1: company + age + ATS + star + dislike */}
