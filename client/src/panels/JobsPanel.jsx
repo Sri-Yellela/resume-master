@@ -202,6 +202,13 @@ function IconBtn({ bg, onClick, title, children, disabled = false, size = 28 }) 
   );
 }
 
+const EMP_TYPE_OPTIONS = [
+  { value:"full-time",  label:"Full-time" },
+  { value:"contract",   label:"Contract"  },
+  { value:"internship", label:"Internship"},
+  { value:"part-time",  label:"Part-time" },
+];
+
 // ── Filters panel (collapsible) ───────────────────────────────
 function FiltersPanel({
   open, onClose,
@@ -209,6 +216,7 @@ function FiltersPanel({
   role, setRole,
   location, setLocation,
   workType, setWorkType,
+  employmentTypePrefs, setEmploymentTypePrefs,
   catFilter, setCatFilter,
   srcFilter, setSrcFilter,
   minYoe, setMinYoe,
@@ -271,6 +279,35 @@ function FiltersPanel({
             <option value="">All types</option>
             <option>Remote</option><option>Hybrid</option><option>Onsite</option>
           </select>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Employment Type</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {EMP_TYPE_OPTIONS.map(opt => {
+              const active = employmentTypePrefs.includes(opt.value);
+              return (
+                <button key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    const next = active
+                      ? employmentTypePrefs.filter(v => v !== opt.value)
+                      : [...employmentTypePrefs, opt.value];
+                    // Always keep at least one selected
+                    if (next.length > 0) setEmploymentTypePrefs(next);
+                  }}
+                  style={{
+                    padding:"5px 12px", borderRadius:999, fontSize:11, fontWeight:600,
+                    cursor:"pointer", border:`1px solid ${active ? theme.accent : theme.border}`,
+                    background: active ? theme.accentMuted : "transparent",
+                    color: active ? theme.accentText : theme.textMuted,
+                    transition:"all 0.15s",
+                  }}>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div>
@@ -602,6 +639,18 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // Filter panel
   const [filtersOpen, setFiltersOpen] = useState(false);
 
+  // Employment type preferences — persisted in localStorage
+  const [employmentTypePrefs, setEmploymentTypePrefsRaw] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("empTypePrefs") || "null");
+      return Array.isArray(saved) && saved.length ? saved : ["full-time"];
+    } catch { return ["full-time"]; }
+  });
+  const setEmploymentTypePrefs = (val) => {
+    setEmploymentTypePrefsRaw(val);
+    try { localStorage.setItem("empTypePrefs", JSON.stringify(val)); } catch {}
+  };
+
   // Scrape trigger input
   const [searchInput, setSearchInput] = useState("");
 
@@ -752,6 +801,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     if (roleFilter.trim())    p.set("role",     roleFilter.trim().toLowerCase());
     if (locationFilter.trim())p.set("location", locationFilter.trim());
     if (workType)             p.set("workType", workType);
+    if (employmentTypePrefs.length && !(employmentTypePrefs.length === 1 && employmentTypePrefs[0] === "full-time"))
+      p.set("employmentType", employmentTypePrefs.join(","));
     if (catFilter)            p.set("category", catFilter);
     if (srcFilter)            p.set("source",   srcFilter);
     if (minYoe !== "")        p.set("minYoe",        minYoe);
@@ -761,7 +812,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     if (ageFilter)            p.set("ageFilter",     ageFilter);
     if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
     return p.toString();
-  }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
+  }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab]);
 
   // ── Fetch pending jobs ────────────────────────────────────────
@@ -832,7 +883,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   useEffect(() => {
     if (!user) return;
     fetchJobs(1);
-  }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
+  }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey]);
 
   // Shared poll loop — used by handleSearch, handlePullRefresh, handleSetRole
@@ -892,7 +943,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setSearchInput(q);
     // AUTO-SCRAPE: silently trigger background scrape if local results < THRESHOLD (50)
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, employmentTypes:employmentTypePrefs }) });
       if (!result || result.missingToken || result.limitReached || result.error) return;
       const roleQ = (result.query || q).toLowerCase();
       if (result.scraping) {
@@ -912,7 +963,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setScraping(true);
     let managedByPoller = false;
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, employmentTypes:employmentTypePrefs }) });
       if (result.missingToken) {
         setScrapeError("No Apify token set. Add it via avatar → Apify Token.");
         return;
@@ -963,7 +1014,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setScraping(true);
     let managedByPoller = false;
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, employmentTypes:employmentTypePrefs }) });
       if (result.missingToken) {
         setScrapeError("No Apify token — add it in avatar → Apify Token.");
         return;
@@ -1212,7 +1263,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // ── Filter reset ──────────────────────────────────────────
   const resetFilters = () => {
-    setRoleFilter(""); setLocationFilter(""); setWorkType(""); setCatFilter("");
+    setRoleFilter(""); setLocationFilter(""); setWorkType(""); setEmploymentTypePrefs(["full-time"]); setCatFilter("");
     setSrcFilter(""); setMinYoe(""); setMaxYoe(""); setMaxApplicants(""); setVisitedFilter("");
     setAgeFilter(""); setLocalSearch("");
   };
@@ -1259,6 +1310,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             role={roleFilter}         setRole={setRoleFilter}
             location={locationFilter} setLocation={setLocationFilter}
             workType={workType}       setWorkType={setWorkType}
+            employmentTypePrefs={employmentTypePrefs} setEmploymentTypePrefs={setEmploymentTypePrefs}
             catFilter={catFilter}     setCatFilter={setCatFilter}
             srcFilter={srcFilter}     setSrcFilter={setSrcFilter}
             minYoe={minYoe}           setMinYoe={setMinYoe}

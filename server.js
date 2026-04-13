@@ -352,6 +352,10 @@ db.pragma("busy_timeout = 5000");
       sql: `UPDATE user_jobs SET disliked = 0 WHERE disliked = 1;`,
     },
     {
+      id: "013_employment_type",
+      sql: `ALTER TABLE scraped_jobs ADD COLUMN employment_type TEXT;`,
+    },
+    {
       id: "admin_usage_events",
       sql: `
         CREATE TABLE IF NOT EXISTS usage_events (
@@ -711,6 +715,26 @@ function isFullTimeNorm(item) {
   return !NON_FULLTIME_TERMS.some(t => text.includes(t));
 }
 
+function isEmploymentTypeWanted(item, wantedTypes) {
+  // If 3+ types selected, keep everything
+  if (wantedTypes.length >= 3) return true;
+
+  const text = [item.title, item.jobType, item.description].join(" ").toLowerCase();
+
+  const signals = {
+    "full-time":  ["full-time", "full time", "permanent"],
+    "contract":   ["contract", "contractor", "freelance", "temp", "temporary"],
+    "internship": ["intern", "internship", "co-op", "coop"],
+  };
+
+  // No type signal in text — assume full-time (most roles don't say it explicitly)
+  const hasAnySignal = Object.values(signals).flat().some(s => text.includes(s));
+  if (!hasAnySignal) return wantedTypes.includes("full-time");
+
+  // Check if any wanted type's signals match
+  return wantedTypes.some(type => signals[type]?.some(s => text.includes(s)));
+}
+
 function parseYearsExperience(description = "") {
   const patterns = [
     { re:/(\d+)\s*\+\s*years?\s+(?:of\s+)?experience/i,              type:"plus"  },
@@ -803,14 +827,14 @@ async function fetchCompanyIcon(domain) {
 // ── Scraping ──────────────────────────────────────────────────
 // Actor: harvestapi/linkedin-job-search
 // Returns real LinkedIn job IDs — INSERT OR IGNORE keeps first-write wins.
-async function scrapeHarvestAPI(query, token) {
+async function scrapeHarvestAPI(query, token, employmentTypes) {
   if (!token) throw new Error("No Apify token");
   const client = new ApifyClient({ token });
   const input = {
     jobTitles:      [query],
     locations:      ["United States"],
     workplaceType:  ["remote", "hybrid", "office"],
-    employmentType: ["full-time"],
+    employmentType: employmentTypes || ["full-time"],
     postedLimit:    "24h",
     maxItems:       MAX_JOBS_PER_REFRESH * 3,
   };
@@ -818,31 +842,14 @@ async function scrapeHarvestAPI(query, token) {
   const dataset = await client.dataset(run.defaultDatasetId).listItems({ limit: MAX_JOBS_PER_REFRESH * 3 });
   const items = Array.isArray(dataset.items) ? dataset.items : [];
   console.log(`[scrape] HarvestAPI returned ${items.length} raw items`);
-  console.log('[scrape] RAW SAMPLE (first 20 items):',
-    JSON.stringify(
-      items.slice(0, 20).map(item => ({
-        id:             item.id ?? item.jobId,
-        title:          item.title ?? item.jobTitle,
-        company:        item.company?.name ?? item.companyName,
-        employmentType: item.contractType ?? item.employmentType
-                        ?? item.jobType,
-        workplaceType:  item.workplaceType ?? item.workplaceTypes,
-        applyUrl:       item.applyMethod?.companyApplyUrl
-                        ?? item.applyUrl ?? item.apply_url,
-        url:            item.linkedinUrl ?? item.url,
-        postedAt:       item.listingDate ?? item.listedAt
-                        ?? item.postedAt,
-      })),
-    null, 2)
-  );
   return items;
 }
 
-async function scrapeJobs(query, apifyToken) {
-  console.log(`[scrape] "${query}" — HarvestAPI`);
+async function scrapeJobs(query, apifyToken, employmentTypes = ["full-time"]) {
+  console.log(`[scrape] "${query}" — HarvestAPI (employmentTypes: ${employmentTypes.join(",")})`);
   let rawItems = [];
   try {
-    rawItems = await scrapeHarvestAPI(query, apifyToken);
+    rawItems = await scrapeHarvestAPI(query, apifyToken, employmentTypes);
     console.log(`[scrape] HarvestAPI: ${rawItems.length} raw items`);
   } catch(e) {
     console.warn("[scrape] HarvestAPI failed:", e.message);
@@ -863,7 +870,7 @@ async function scrapeJobs(query, apifyToken) {
       const applyDomain = extractDomain(item.applyUrl);
       if (applyDomain && applyDomain.includes("linkedin.com")) { cntNoApply++; return false; }
     }
-    if (!isFullTimeNorm(item))                 { cntNotFT++;      return false; }
+    if (!isEmploymentTypeWanted(item, employmentTypes)) { cntNotFT++; return false; }
     if (!isTitleRelevantNew(item.title, query))   { cntIrrelevant++; return false; }
     if (isReposted(item))                      { cntRepost++;     return false; }
     if (ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }) >= 4) { cntGhost++; return false; }
@@ -880,26 +887,6 @@ async function scrapeJobs(query, apifyToken) {
     ` (missingTitleOrCompany:${cntNoTitle} noExternalApplyUrl:${cntNoApply} notFullTime:${cntNotFT}` +
     ` titleIrrelevant:${cntIrrelevant} repost:${cntRepost} ghostScore:${cntGhost} duplicate:${cntDup})`
   );
-  console.log('[scrape] FILTERED BREAKDOWN:');
-  combined.slice(0, 30).forEach(item => {
-    const title    = item.title || '';
-    const jobType  = [item.title, item.jobType,
-                      item.description?.slice(0,100)]
-                     .join(' ').toLowerCase();
-    const isNonFT  = NON_FULLTIME_TERMS.some(t =>
-                       jobType.includes(t));
-    const relevant = isTitleRelevantNew(item.title,
-                       item._searchQuery || '');
-    console.log({
-      title,
-      employmentType: item.contractType ?? item.employmentType
-                      ?? item.jobType ?? 'unknown',
-      isNonFT,
-      relevant,
-      kept: !isNonFT && relevant,
-    });
-  });
-
   const classified = [];
   for (let i = 0; i < Math.min(filtered.length, MAX_JOBS_PER_REFRESH); i += 5) {
     const batch = filtered.slice(i, i + 5);
@@ -915,19 +902,21 @@ async function scrapeJobs(query, apifyToken) {
      work_type, source, url, apply_url, posted_at, description, description_html,
      ghost_score, years_experience, min_years_exp, max_years_exp, exp_raw,
      is_frequent_repost, _hash, scraped_at, source_platform,
-     salary_min, salary_max, salary_currency, applicant_count, company_icon_url)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     salary_min, salary_max, salary_currency, applicant_count, company_icon_url,
+     employment_type)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   const insertMany = db.transaction((jobs) => {
     let inserted = 0;
     jobs.forEach(item => {
-      const jobId = item.jobId; // always a real LinkedIn job ID — synthetic IDs were removed
-      const hash  = jobHash(item);
-      const yoe   = parseYearsExperience(item.description);
-      const wt    = inferWorkType(
+      const jobId   = item.jobId; // always a real LinkedIn job ID — synthetic IDs were removed
+      const hash    = jobHash(item);
+      const yoe     = parseYearsExperience(item.description);
+      const wt      = inferWorkType(
         (item.workTypeHint || "") + " " + (item.location || "") + " " + (item.description || "")
       );
+      const empType = item.jobType || null;
       const result = insertJob.run(
         jobId,
         query.toLowerCase(),
@@ -956,6 +945,7 @@ async function scrapeJobs(query, apifyToken) {
         item.salaryCurrency || null,
         item.applicantCount || null,
         item.companyLogoUrl || null,
+        empType,
       );
       if (result.changes > 0) inserted++;
     });
@@ -1564,6 +1554,15 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const workType = (req.query.workType || "").trim();
   if (workType) { conditions.push(`sj.work_type = ?`); filterParams.push(workType); }
 
+  const empTypeParam = (req.query.employmentType || "").trim();
+  if (empTypeParam) {
+    const empTypes = empTypeParam.split(",").map(t => t.trim()).filter(Boolean);
+    if (empTypes.length) {
+      conditions.push(`(sj.employment_type IS NULL OR sj.employment_type IN (${empTypes.map(() => "?").join(",")}))`);
+      filterParams.push(...empTypes);
+    }
+  }
+
   const cat = (req.query.category || "").trim();
   if (cat) { conditions.push(`sj.category = ?`); filterParams.push(cat); }
 
@@ -1670,6 +1669,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     category:             j.category,
     location:             j.location,
     workType:             j.work_type,
+    employmentType:       j.employment_type || "full-time",
     source:               j.source,
     sourcePlatform:       "linkedin",
     url:                  j.url,
@@ -1769,10 +1769,19 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
   res.json({ jobs, scraping: stillScraping, total: jobs.length });
 });
 
+const VALID_EMP_TYPES = new Set(["full-time","part-time","contract","internship","temporary"]);
+
 app.post("/api/scrape", requireAuth, async (req, res) => {
   const rawQuery = (req.body.query || "").trim();
   if (!rawQuery) return res.status(400).json({ error:"query required" });
   const query = normaliseRole(rawQuery);
+
+  // employmentTypes: array of HarvestAPI-accepted strings; default full-time
+  const rawEmpTypes = Array.isArray(req.body.employmentTypes) ? req.body.employmentTypes : [];
+  const employmentTypes = rawEmpTypes.length
+    ? rawEmpTypes.filter(t => VALID_EMP_TYPES.has(t))
+    : ["full-time"];
+  if (!employmentTypes.length) employmentTypes.push("full-time");
 
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
   const token = user?.apify_token;
@@ -1840,7 +1849,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   setImmediate(async () => {
     const scrapeStart = Date.now();
     try {
-      const scrapeResult = await scrapeJobs(query, token);
+      const scrapeResult = await scrapeJobs(query, token, employmentTypes);
       db.prepare(`
         INSERT OR IGNORE INTO user_jobs (user_id, job_id)
         SELECT ?, sj.job_id FROM scraped_jobs sj
