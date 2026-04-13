@@ -9,7 +9,7 @@ export function ATSPanel({ report, score }) {
                   alignItems:"center", justifyContent:"center", gap:12,
                   height:"100%", color:theme.textMuted, fontSize:13, textAlign:"center" }}>
       <div style={{ fontSize:40 }}>📊</div>
-      <div>Generate a resume to see the ATS report.</div>
+      <div>Generate a resume for this role to see your ATS report.</div>
     </div>
   );
 

@@ -458,91 +458,7 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
   );
 }
 
-// ── Resize divider ────────────────────────────────────────────
-function ResizeDivider({ onDrag }) {
-  const [hov, setHov] = useState(false);
-  const { theme } = useTheme();
-  const startRef = useRef(null);
 
-  const onMouseDown = (e) => {
-    e.preventDefault();
-    startRef.current = e.clientX;
-
-    const onMove = (ev) => {
-      if (startRef.current === null) return;
-      const delta = ev.clientX - startRef.current;
-      startRef.current = ev.clientX;
-      const container = document.getElementById("jobs-columns");
-      if (container) onDrag(delta, container.offsetWidth);
-    };
-    const onUp = () => {
-      startRef.current = null;
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  };
-
-  return (
-    <div
-      onMouseDown={onMouseDown}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        width: 8, flexShrink: 0, cursor: "col-resize",
-        display: "flex", alignItems: "stretch", justifyContent: "center",
-        position: "relative", zIndex: 2,
-        userSelect: "none",
-      }}>
-      <div style={{
-        width: 2, background: hov ? theme.accent : "transparent",
-        borderLeft: `1px solid ${hov ? theme.accent : "transparent"}`,
-        transition: "background 0.15s, border-color 0.15s",
-        pointerEvents: "none",
-      }}/>
-    </div>
-  );
-}
-
-const PANEL_SIZE_KEY = "rm_panel_sizes";
-const DEFAULT_SIZES = { left: 50, right: 50 };
-const DEFAULT_SIZES_3 = { left: 33.33, center: 33.34, right: 33.33 };
-
-// ── Collapsible ATS wrapper ───────────────────────────────────
-function CollapsibleATS({ report, score, expanded, onToggle, theme }) {
-  const bg  = score >= 80 ? "#dcfce7" : score >= 60 ? "#fef9c3" : "#fee2e2";
-  const fg  = score >= 80 ? "#166534" : score >= 60 ? "#854d0e" : "#991b1b";
-  return (
-    <div>
-      <div onClick={onToggle}
-        style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-                 padding:"8px 14px", cursor:"pointer",
-                 borderBottom:`1px solid ${theme.border}`, background:theme.surface,
-                 userSelect:"none" }}>
-        <span style={{ fontSize:11, fontWeight:700, textTransform:"uppercase",
-                        letterSpacing:"0.06em", color:theme.textMuted }}>
-          ATS Report
-        </span>
-        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          {score != null && (
-            <span style={{ background:bg, color:fg, padding:"2px 8px",
-                            borderRadius:999, fontSize:10, fontWeight:700 }}>
-              ATS {score}
-            </span>
-          )}
-          <span style={{ fontSize:11, color:theme.textDim, display:"inline-block",
-                          transform: expanded ? "rotate(180deg)" : "none",
-                          transition:"transform 0.2s" }}>▾</span>
-        </div>
-      </div>
-      <div style={{ overflow:"hidden", maxHeight: expanded ? 1200 : 0,
-                    transition:"max-height 0.3s ease" }}>
-        <ATSPanel report={report} score={score}/>
-      </div>
-    </div>
-  );
-}
 
 // ── Main panel ────────────────────────────────────────────────
 export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResumeStateChange, isActive = true }) {
@@ -554,20 +470,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // Mobile pane state
   const [mobilePane, setMobilePane] = useState("jobs"); // "jobs" | "editor" | "ats"
-
-  // Panel sizes (percentages) — only for wide mode
-  const [panelSizes, setPanelSizes] = useState(() => {
-    try {
-      const saved = localStorage.getItem(PANEL_SIZE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return DEFAULT_SIZES;
-  });
-
-  // Persist panel sizes
-  useEffect(() => {
-    try { localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify(panelSizes)); } catch {}
-  }, [panelSizes]);
 
   // Tracks jobs disliked in this browser session — survives filter/sort refetches
   // but is cleared on page reload (so server exclusions take effect on next login)
@@ -592,14 +494,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [rightTab,      setRightTab]      = useState("history");
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  const [atsExpanded,   setAtsExpanded]   = useState(false);
 
-  // Split view — splitPercent is the COLLAPSED LIST width as % of the container.
-  // Detail gets flex:1. Survives job-card switches (state stays mounted).
+  // Split view
   const [selectedJob,  setSelectedJob]  = useState(null);
-  const [splitPercent, setSplitPercent] = useState(40); // 40% list / 60% detail default
-  const isDraggingRef     = useRef(false);
-  const splitContainerRef = useRef(null);
 
   // Open / close sandbox — panel size rebalancing handled by useEffect below
   const openSandbox = useCallback((entry) => {
@@ -613,25 +510,23 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     if (isMobile) setMobilePane("jobs");
   }, [isMobile]);
 
-  // Equal panel splitting whenever panel count changes
-  useEffect(() => {
-    if (!isWide) return;
-    const has3 = sandboxOpen && rightPanelOpen;
-    const has2sandbox = sandboxOpen && !rightPanelOpen;
-    const has2right = !sandboxOpen && rightPanelOpen;
-    if (has3) {
-      setPanelSizes(DEFAULT_SIZES_3);
-    } else if (has2sandbox) {
-      setPanelSizes({ left: 50, center: 50, right: 0 });
-    } else if (has2right) {
-      setPanelSizes({ left: 50, center: 0, right: 50 });
-    } else {
-      setPanelSizes({ left: 100, center: 0, right: 0 });
-    }
-  }, [sandboxOpen, rightPanelOpen, isWide]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const [activeAts,   setActiveAts]   = useState(null);
   const [smartSearching, setSmartSearching] = useState(false);
+
+  // Task 3 — Live scrape status
+  const [scrapeError,    setScrapeError]    = useState("");
+  const [scrapeNewCount, setScrapeNewCount] = useState(0);
+
+  // Task 4 — Generation progress
+  const [genStage, setGenStage] = useState("");
+  const genTimerRef = useRef(null);
+
+  // Task 5 — Inline error states
+  const [smartSearchError, setSmartSearchError] = useState("");
+  const [uploadError,      setUploadError]      = useState("");
+
+  // Task 6 — Company reuse modal
+  const [companyReuseTarget, setCompanyReuseTarget] = useState(null);
 
   // Board tabs
   const [boardTab,    setBoardTab]    = useState("all");  // "all" | "saved" | "pending"
@@ -717,25 +612,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Resizable split divider — drag controls the COLLAPSED LIST % of container
-  const handleDividerMouseDown = useCallback((e) => {
-    e.preventDefault();
-    isDraggingRef.current = true;
-    const onMove = (me) => {
-      if (!isDraggingRef.current || !splitContainerRef.current) return;
-      const rect = splitContainerRef.current.getBoundingClientRect();
-      const newPct = ((me.clientX - rect.left) / rect.width) * 100;
-      setSplitPercent(Math.max(15, Math.min(70, newPct)));
-    };
-    const onUp = () => {
-      isDraggingRef.current = false;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, []);
 
   // Skills extracted from the base resume — used for keyword highlighting in expanded cards
   const baseResumeSkills = useMemo(() => {
@@ -841,6 +717,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const handleSearch = useCallback(async (overrideQuery) => {
     const q = (overrideQuery || searchInput).trim();
     if (!q) return;
+    setScrapeError("");
     // If board already has jobs, just filter to this role — no scrape
     if (jobs.length > 0) {
       setRoleFilter(q.toLowerCase());
@@ -852,16 +729,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
       if (result.missingToken) {
-        alert("⚠ No Apify token set.\n\nTo search for jobs:\n1. Go to console.apify.com\n2. Sign up free\n3. Settings → Integrations → copy your API token\n4. In this app: avatar → paste and Save");
+        setScrapeError("No Apify token set. Add it via avatar → Apify Token.");
         return;
       }
-      if (result.error) { alert(result.error); return; }
+      if (result.error) { setScrapeError(result.error); return; }
 
       // Server normalises the query (pm → Product Manager); use it for role filter
       const roleQ = (result.query || q).toLowerCase();
 
       if (result.scraping) {
-        // Background scrape in progress — poll every 8s until jobs arrive (up to ~160s)
+        // Background scrape in progress — poll every 3s until jobs arrive (up to ~60s)
         managedByPoller = true;
         let pollCount = 0;
         const prevCount = { current: 0 };
@@ -893,7 +770,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             clearInterval(poll);
             setScraping(false);
           }
-        }, 8000);
+        }, 3000);
         return;
       }
 
@@ -913,7 +790,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setTotalPages(d.totalPages || 0);
       setCurrentPage(1);
       setRoleFilter(roleQ);
-    } catch(e) { alert("Scrape failed: " + e.message); }
+    } catch(e) { setScrapeError(e.message); }
     finally { if (!managedByPoller) setScraping(false); }
   }, [searchInput, fetchJobs, jobs.length, sortBy]);
 
@@ -923,20 +800,21 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     const q = (searchInput || roleFilter).trim();
     if (!q) return;
     if (scraping || bgLoading) return;
+    setScrapeError(""); setScrapeNewCount(0);
     setScraping(true);
     let managedByPoller = false;
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
       if (result.missingToken) {
-        alert("⚠ No Apify token — add it in avatar → Apify Token.");
+        setScrapeError("No Apify token — add it in avatar → Apify Token.");
         return;
       }
-      if (result.error) { alert(result.error); return; }
+      if (result.error) { setScrapeError(result.error); return; }
 
       const roleQ = (result.query || q).toLowerCase();
 
       if (result.scraping) {
-        // Background scrape — poll every 8s for up to ~160s, merge new jobs in
+        // Background scrape — poll every 3s for up to ~60s, merge new jobs in
         managedByPoller = true;
         let pollCount = 0;
         const poll = setInterval(async () => {
@@ -955,6 +833,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                   new Date(b.postedAt || 0) - new Date(a.postedAt || 0)
                 );
               });
+              if (incoming.length > 0) {
+                setScrapeNewCount(incoming.length);
+                setTimeout(() => setScrapeNewCount(0), 4000);
+              }
               setTotalJobs(d.total || 0);
               setRoleFilter(roleQ);
               clearInterval(poll);
@@ -964,7 +846,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             clearInterval(poll);
             setScraping(false);
           }
-        }, 8000);
+        }, 3000);
         return;
       }
 
@@ -981,9 +863,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           new Date(b.postedAt || 0) - new Date(a.postedAt || 0)
         );
       });
+      if (incoming.length > 0) {
+        setScrapeNewCount(incoming.length);
+        setTimeout(() => setScrapeNewCount(0), 4000);
+      }
       setTotalJobs(d.total || 0);
       setRoleFilter(roleQ);
-    } catch(e) { alert("Refresh failed: " + e.message); }
+    } catch(e) { setScrapeError(e.message); }
     finally { if (!managedByPoller) setScraping(false); }
   }, [searchInput, roleFilter, sortBy, scraping, bgLoading]);
 
@@ -993,23 +879,24 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // ── Smart search ──────────────────────────────────────────
   const handleSmartSearch = useCallback(async () => {
     if (!resumeText) {
-      alert("Upload your base resume first — smart search extracts the best query from it.");
+      setSmartSearchError("Upload your base resume first — smart search extracts the best query from it.");
       fileRef.current?.click(); return;
     }
+    setSmartSearchError("");
     setSmartSearching(true);
     try {
       const result = await api("/api/smart-search", { method:"POST", body:JSON.stringify({ resumeText }) });
-      if (result.error) { alert(result.error); return; }
+      if (result.error) { setSmartSearchError(result.error); return; }
       const q = result.searchQuery;
       if (q) { setSearchInput(q); await handleSearch(q); }
-    } catch(e) { alert("Smart search failed: " + e.message); }
+    } catch(e) { setSmartSearchError("Smart search failed: " + e.message); }
     finally { setSmartSearching(false); }
   }, [resumeText, handleSearch]);
 
   // ── File upload ───────────────────────────────────────────
   const handleFile = useCallback(async e => {
     const file = e.target.files[0]; if (!file) return;
-    setFileName(file.name); setUploading(true);
+    setFileName(file.name); setUploading(true); setUploadError("");
     try {
       const ext = file.name.split(".").pop().toLowerCase();
       let text = "";
@@ -1025,15 +912,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setResumeText(text);
       await api("/api/base-resume", { method:"POST", body:JSON.stringify({ content:text, name:file.name }) });
     } catch(err) {
-      alert("Error: " + err.message);
+      setUploadError("Error: " + err.message);
       setFileName(""); if (fileRef.current) fileRef.current.value = "";
     } finally { setUploading(false); }
   }, []);
 
-  // ── Generate ──────────────────────────────────────────────
-  const generate = useCallback(async (job, force = false) => {
-    if (applyMode === "SIMPLE") { alert("Generation is disabled in Simple Apply mode."); return; }
-    if (!resumeText)            { alert("Upload your base resume first."); return; }
+  // ── Generate (actual logic) ───────────────────────────────
+  const generateActual = useCallback(async (job, force = false, skipCompanyCheck = false) => {
+    if (applyMode === "SIMPLE") { return; }
+    if (!resumeText)            { return; }
     const key = job.jobId, existing = generated[key];
     if (existing?.html && existing.html !== "__exists__" && !force) {
       const entry = {...existing, company:existing.company||job.company, title:existing.title||job.title};
@@ -1051,10 +938,33 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         openSandbox({ ...entry, company: entry.company, title: entry.title });
         setActiveAts({ score: d.ats_score, report: d.atsReport, company: d.company, title: d.role });
         setRightPanelOpen(true); setRightTab("ats");
-      } catch(e) { alert("Failed to load resume: " + e.message); }
+      } catch(e) { setSandbox({ generating: false, error: e.message, company: job.company, title: job.title }); }
       finally { setLoading(p => { const n = {...p}; delete n[key]; return n; }); }
       return;
     }
+
+    // Open sandbox with skeleton state immediately
+    openSandbox({ generating: true, company: job.company, title: job.title });
+
+    // Cycle through generation stages
+    const stages = [
+      [0,    "Analysing job description…"],
+      [5000, "Selecting companies…"],
+      [12000,"Writing experience bullets…"],
+      [22000,"Formatting resume…"],
+    ];
+    if (genTimerRef.current) clearInterval(genTimerRef.current);
+    const startTime = Date.now();
+    const advanceStage = () => {
+      const elapsed = Date.now() - startTime;
+      const current = [...stages].reverse().find(([ms]) => elapsed >= ms);
+      const stage = current?.[1] || stages[0][1];
+      setGenStage(stage);
+      setSandbox(s => s?.generating ? { ...s, stage } : s);
+    };
+    advanceStage();
+    genTimerRef.current = setInterval(advanceStage, 1000);
+
     setLoading(p => ({ ...p, [key]:"generating" }));
     try {
       const d = await api("/api/generate", { method:"POST",
@@ -1065,9 +975,34 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       openSandbox({ html:d.html, company:job.company, title:job.title });
       setActiveAts({ score:d.atsScore, report:d.atsReport, company:job.company, title:job.title });
       setRightPanelOpen(true); setRightTab("ats");
-    } catch(e) { alert("Generation failed: " + e.message); }
-    finally { setLoading(p => { const n = {...p}; delete n[key]; return n; }); }
-  }, [resumeText, generated, applyMode]);
+    } catch(e) {
+      setSandbox({ generating: false, error: e.message, company: job.company, title: job.title });
+    }
+    finally {
+      if (genTimerRef.current) { clearInterval(genTimerRef.current); genTimerRef.current = null; }
+      setGenStage("");
+      setLoading(p => { const n = {...p}; delete n[key]; return n; });
+    }
+  }, [resumeText, generated, applyMode, openSandbox]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Generate (with company-reuse check) ──────────────────
+  const generate = useCallback(async (job, force = false) => {
+    if (applyMode === "SIMPLE") { return; }
+    if (!resumeText)            { return; }
+    // Company check: if we have a prior resume for this company and this is a fresh generate (not force),
+    // show the reuse modal instead of generating.
+    if (!force) {
+      const priorEntry = Object.values(generated).find(v =>
+        v?.html && v.html !== "__exists__" &&
+        v.company?.toLowerCase() === (job.company || "").toLowerCase()
+      );
+      if (priorEntry && !generated[job.jobId]?.html) {
+        setCompanyReuseTarget({ job, priorEntry });
+        return;
+      }
+    }
+    await generateActual(job, force, false);
+  }, [generated, generateActual, resumeText, applyMode]);
 
   const saveSandboxHtml = useCallback(async html => {
     if (!sandbox) return;
@@ -1144,7 +1079,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const resetFilters = () => {
     setRoleFilter(""); setLocationFilter(""); setWorkType(""); setCatFilter("");
     setSrcFilter(""); setMinYoe(""); setMaxYoe(""); setMaxApplicants(""); setVisitedFilter("");
-    setAppliedFilter(""); setAgeFilter(""); setLocalSearch("");
+    setAgeFilter(""); setLocalSearch("");
   };
 
   // ── Live client-side filter (instant, no API call) ───────────
@@ -1167,6 +1102,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const showPreview = !!(normalisedPreview && normalisedPreview.toLowerCase() !== searchInput.trim().toLowerCase());
 
   const isLastPage = currentPage >= totalPages;
+
+  // PANEL SPLIT: width = 100% / visiblePanelCount, default equal.
+  // To change default split behaviour edit this component.
+  // To add a new panel register it in the panelVisibility state here.
+  const visiblePanelCount = [
+    true,             // jobs always visible
+    !!selectedJob,    // detail panel
+    sandboxOpen,      // sandbox
+    rightPanelOpen,   // ats panel
+  ].filter(Boolean).length;
+  const equalPanelWidth = `${(100 / Math.max(1, visiblePanelCount)).toFixed(4)}%`;
 
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:theme.bg }}>
@@ -1313,12 +1259,18 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           {smartSearching ? "Analysing…" : "✦ Best Match"}
         </LucyBtn>
 
-        {!isMobile && (
-          <LucyBtn onClick={() => setRightPanelOpen(p => !p)}
-            accent={rightPanelOpen ? theme.accent : theme.surfaceHigh}
-            title={rightPanelOpen ? "Hide ATS/History panel" : "Show ATS/History panel"}>
-            {rightPanelOpen ? "◧ Panel" : "▣ Panel"}
-          </LucyBtn>
+        {smartSearchError && (
+          <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
+            ✗ {smartSearchError}
+            <button onClick={() => setSmartSearchError("")} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:"#991b1b" }}>Dismiss</button>
+          </div>
+        )}
+
+        {uploadError && (
+          <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
+            ✗ {uploadError}
+            <button onClick={() => setUploadError("")} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:"#991b1b" }}>Dismiss</button>
+          </div>
         )}
 
         {/* Resume upload — button lives in TopBar mode dropdown */}
@@ -1327,6 +1279,31 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       </div>
 
       {/* ── Body: responsive layout ─────────────────────────── */}
+
+      {/* Company reuse modal (Task 6) */}
+      {companyReuseTarget && (
+        <CompanyReuseModal
+          company={companyReuseTarget.job.company}
+          theme={theme}
+          onUseExisting={() => {
+            const { job, priorEntry } = companyReuseTarget;
+            setCompanyReuseTarget(null);
+            const key = job.jobId;
+            setGenerated(p => ({ ...p, [key]: priorEntry }));
+            openSandbox({ ...priorEntry, company: job.company, title: job.title });
+            if (priorEntry.atsReport || priorEntry.atsScore != null) {
+              setActiveAts({ score: priorEntry.atsScore, report: priorEntry.atsReport, company: job.company, title: job.title });
+              setRightPanelOpen(true); setRightTab("ats");
+            }
+          }}
+          onGenerateNew={() => {
+            const { job } = companyReuseTarget;
+            setCompanyReuseTarget(null);
+            generateActual(job, false, true);
+          }}
+          onCancel={() => setCompanyReuseTarget(null)}
+        />
+      )}
 
       {/* ── MOBILE / TABLET: single-pane + bottom nav ── */}
       {isMobile && (
@@ -1358,7 +1335,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
             {mobilePane === "jobs" && (
               <JobsColumn
-                jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
+                jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
+                scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
+                onClearScrapeError={() => setScrapeError("")}
+                generated={generated} loading={loading}
                 applyMode={applyMode} theme={theme} isDark={isDark}
                 totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
                 generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
@@ -1390,7 +1370,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     </button>
                   ))}
                 </div>
-                {rightTab === "ats" && activeAts?.report && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
+                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
                 {rightTab === "history" && (
                   <HistoryList generated={generated}
                     theme={theme}
@@ -1428,66 +1408,72 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         </div>
       )}
 
-      {/* ── PORTRAIT / LAPTOP: two columns, sandbox as overlay ── */}
+      {/* ── PORTRAIT / LAPTOP: equal-width inline panels ── */}
       {isPortrait && !isMobile && (
-        <div style={{ flex:1, display:"flex", overflow:"hidden", position:"relative" }}>
-          {/* LEFT jobs */}
-          <div ref={splitContainerRef} style={{ display:"flex", flexDirection:"row", minWidth:0,
-                        flex: rightPanelOpen ? "0 0 50%" : "1",
-                        borderRight: rightPanelOpen ? `1px solid ${theme.border}` : "none",
-                        transition: "flex 0.2s ease" }}>
-            {/* List column: full-width when no job selected; narrows to give detail more room */}
-            <div style={{
-              ...(selectedJob
-                ? { width:`${splitPercent}%`, flexShrink:0, minWidth:0 }
-                : { flex:1, minWidth:220 }),
-              display:"flex", flexDirection:"column", overflow:"hidden"
-            }}>
-              <JobsColumn
-                jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
-                applyMode={applyMode} theme={theme} isDark={isDark}
-                baseResumeSkills={baseResumeSkills}
-                totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
-                generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-                visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike} setActiveAts={setActiveAts}
-                setRightTab={setRightTab} setRightPanelOpen={setRightPanelOpen} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
-                setMobilePane={setMobilePane} isMobile={isMobile}
-                compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
-              />
-            </div>
-            {selectedJob && (() => {
-              const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
-              return <>
-                <div onMouseDown={handleDividerMouseDown}
-                  style={{ width:4, background:theme.border, cursor:"col-resize", flexShrink:0,
-                            transition:"background 0.15s" }}
-                  onMouseEnter={e => e.currentTarget.style.background=theme.accent}
-                  onMouseLeave={e => e.currentTarget.style.background=theme.border}/>
-                <div style={{ flex:1, minWidth:260, display:"flex", flexDirection:"column",
-                              overflow:"hidden", borderLeft:`1px solid ${theme.border}` }}>
-                  <JobDetailPanel
-                    job={selectedJob} theme={theme} isDark={isDark}
-                    baseResumeSkills={baseResumeSkills}
-                    g={g2} done={done2} st={st2} applyMode={applyMode}
-                    onClose={() => setSelectedJob(null)}
-                    onGenerate={force => generate(selectedJob, force)}
-                    onViewSandbox={() => { const e2 = {...g2, company:g2.company||selectedJob.company, title:g2.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2.atsScore, report:g2.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
-                    onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
-                    onVisit={() => visitUrl(selectedJob)}
-                    onStar={() => toggleStar(selectedJob.jobId)}
-                    onDislike={() => toggleDislike?.(selectedJob.jobId)}
-                    onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
-                    onResume={() => generate(selectedJob, false)}
-                  />
-                </div>
-              </>;
-            })()}
+        <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
+          {/* PANEL 1 — Jobs list */}
+          <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
+                        transition: "width 0.2s ease", display: "flex",
+                        flexDirection: "column", overflow: "hidden" }}>
+            <JobsColumn
+              jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
+              scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
+              onClearScrapeError={() => setScrapeError("")}
+              generated={generated} loading={loading}
+              applyMode={applyMode} theme={theme} isDark={isDark}
+              baseResumeSkills={baseResumeSkills}
+              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+              visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
+              setActiveAts={setActiveAts} setRightTab={setRightTab} setRightPanelOpen={setRightPanelOpen}
+              goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+              setMobilePane={setMobilePane} isMobile={isMobile}
+              compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
+            />
           </div>
-          {/* RIGHT ATS — only when open */}
+
+          {/* PANEL 2 — Job detail */}
+          {selectedJob && (() => {
+            const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
+            return (
+              <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
+                            transition: "width 0.2s ease", display: "flex", flexDirection: "column",
+                            overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
+                <JobDetailPanel
+                  job={selectedJob} theme={theme} isDark={isDark}
+                  baseResumeSkills={baseResumeSkills}
+                  g={g2} done={done2} st={st2} applyMode={applyMode}
+                  onClose={() => setSelectedJob(null)}
+                  onGenerate={force => generate(selectedJob, force)}
+                  onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
+                  onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
+                  onVisit={() => visitUrl(selectedJob)}
+                  onStar={() => toggleStar(selectedJob.jobId)}
+                  onDislike={() => toggleDislike?.(selectedJob.jobId)}
+                  onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
+                  onResume={() => generate(selectedJob, false)}
+                />
+              </div>
+            );
+          })()}
+
+          {/* PANEL 3 — Sandbox */}
+          {sandboxOpen && (
+            <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
+                          transition: "width 0.2s ease", display: "flex", flexDirection: "column",
+                          overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
+              <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+            </div>
+          )}
+
+          {/* PANEL 4 — ATS + History */}
           {rightPanelOpen && (
-            <div style={{ display:"flex", flexDirection:"column", minWidth:0, flex:1 }}>
+            <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
+                          transition: "width 0.2s ease", display: "flex", flexDirection: "column",
+                          overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
               <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
-                            padding:"0 14px", flexShrink:0 }}>
+                            padding:"0 14px", flexShrink:0, alignItems:"center" }}>
                 {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
                   <button key={id} onClick={() => setRightTab(id)}
                     style={{
@@ -1495,18 +1481,20 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                       fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
                       fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
                       color: rightTab===id ? theme.text : theme.textDim,
-                      cursor:"pointer", position:"relative",
+                      cursor:"pointer",
                       borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
                     }}>
                     {lbl}
                   </button>
                 ))}
+                <button onClick={() => setRightPanelOpen(false)} title="Close panel"
+                  style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
+                           color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>✕</button>
               </div>
               <div style={{ flex:1, overflowY:"auto" }}>
-                {rightTab === "ats" && activeAts?.report && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
+                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
                 {rightTab === "history" && (
-                  <HistoryList generated={generated}
-                    theme={theme}
+                  <HistoryList generated={generated} theme={theme}
                     onOpen={e => {
                       openSandbox(e);
                       setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
@@ -1517,131 +1505,79 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               </div>
             </div>
           )}
-          {/* Sandbox overlay for portrait/laptop */}
-          {sandboxOpen && (
-            <div style={{
-              position:"absolute", inset:0, zIndex:50,
-              display:"flex", flexDirection:"column",
-              background:theme.bg,
-            }}>
-              <div style={{ background:theme.surface, borderBottom:`1px solid ${theme.border}`,
-                            padding:"8px 14px", display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-                <button onClick={closeSandbox}
-                  style={{ background:"none", border:"none", cursor:"pointer",
-                            color:theme.textMuted, fontSize:13, fontWeight:700,
-                            display:"flex", alignItems:"center", gap:4 }}>
-                  ← Back
-                </button>
+        </div>
+      )}
+
+      {/* ── WIDE: equal-width panels ── */}
+      {isWide && (
+        <div id="jobs-columns" style={{ flex:1, display:"flex", overflow:"hidden" }}>
+          {/* PANEL SPLIT: width = 100% / visiblePanelCount, default equal.
+              To change default split behaviour edit this component.
+              To add a new panel register it in the panelVisibility state here. */}
+
+          {/* PANEL 1 — Jobs list */}
+          <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
+                        transition: "width 0.2s ease", display: "flex",
+                        flexDirection: "column", overflow: "hidden" }}>
+            <JobsColumn
+              jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
+              scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
+              onClearScrapeError={() => setScrapeError("")}
+              generated={generated} loading={loading}
+              applyMode={applyMode} theme={theme} isDark={isDark}
+              baseResumeSkills={baseResumeSkills}
+              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+              visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
+              setActiveAts={setActiveAts} setRightTab={setRightTab} setRightPanelOpen={setRightPanelOpen}
+              goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+              setMobilePane={setMobilePane} isMobile={isMobile}
+              compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
+            />
+          </div>
+
+          {/* PANEL 2 — Job detail */}
+          {selectedJob && (() => {
+            const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
+            return (
+              <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
+                            transition: "width 0.2s ease", display: "flex", flexDirection: "column",
+                            overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
+                <JobDetailPanel
+                  job={selectedJob} theme={theme} isDark={isDark}
+                  baseResumeSkills={baseResumeSkills}
+                  g={g2} done={done2} st={st2} applyMode={applyMode}
+                  onClose={() => setSelectedJob(null)}
+                  onGenerate={force => generate(selectedJob, force)}
+                  onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
+                  onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
+                  onVisit={() => visitUrl(selectedJob)}
+                  onStar={() => toggleStar(selectedJob.jobId)}
+                  onDislike={() => toggleDislike?.(selectedJob.jobId)}
+                  onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
+                  onResume={() => generate(selectedJob, false)}
+                />
               </div>
+            );
+          })()}
+
+          {/* PANEL 3 — Sandbox */}
+          {sandboxOpen && (
+            <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
+                          transition: "width 0.2s ease", display: "flex", flexDirection: "column",
+                          overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
               <SandboxPanel entry={sandbox} onClose={closeSandbox}
                 onSave={saveSandboxHtml} onExport={exportAndTrack}/>
             </div>
           )}
-        </div>
-      )}
 
-      {/* ── WIDE: three-column resizable ── */}
-      {isWide && (
-        <div id="jobs-columns" style={{ flex:1, display:"flex", overflow:"hidden" }}>
-
-          {/* LEFT — job cards (+ optional split detail panel) */}
-          <div ref={splitContainerRef} style={{
-            display:"flex", flexDirection:"row", minWidth:0,
-            flex: rightPanelOpen ? `0 0 ${panelSizes.left}%` : "1",
-            transition: "flex 0.2s ease",
-          }}>
-            {/* List column: full-width when no job selected; narrows to give detail more room */}
-            <div style={{
-              ...(selectedJob
-                ? { width:`${splitPercent}%`, flexShrink:0, minWidth:0 }
-                : { flex:1, minWidth:220 }),
-              display:"flex", flexDirection:"column", overflow:"hidden"
-            }}>
-              <JobsColumn
-                jobs={displayJobs} scraping={scraping} generated={generated} loading={loading}
-                applyMode={applyMode} theme={theme} isDark={isDark}
-                baseResumeSkills={baseResumeSkills}
-                totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
-                generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-                visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike} setActiveAts={setActiveAts}
-                setRightTab={setRightTab} setRightPanelOpen={setRightPanelOpen} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
-                setMobilePane={setMobilePane} isMobile={isMobile}
-                compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
-              />
-            </div>
-            {selectedJob && (() => {
-              const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
-              return <>
-                <div onMouseDown={handleDividerMouseDown}
-                  style={{ width:4, background:theme.border, cursor:"col-resize", flexShrink:0 }}
-                  onMouseEnter={e => e.currentTarget.style.background=theme.accent}
-                  onMouseLeave={e => e.currentTarget.style.background=theme.border}/>
-                <div style={{ flex:1, minWidth:260, display:"flex", flexDirection:"column",
-                              overflow:"hidden", borderLeft:`1px solid ${theme.border}` }}>
-                  <JobDetailPanel
-                    job={selectedJob} theme={theme} isDark={isDark}
-                    baseResumeSkills={baseResumeSkills}
-                    g={g2} done={done2} st={st2} applyMode={applyMode}
-                    onClose={() => setSelectedJob(null)}
-                    onGenerate={force => generate(selectedJob, force)}
-                    onViewSandbox={() => { const e2 = {...g2, company:g2.company||selectedJob.company, title:g2.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2.atsScore, report:g2.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
-                    onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
-                    onVisit={() => visitUrl(selectedJob)}
-                    onStar={() => toggleStar(selectedJob.jobId)}
-                    onDislike={() => toggleDislike?.(selectedJob.jobId)}
-                    onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
-                    onResume={() => generate(selectedJob, false)}
-                  />
-                </div>
-              </>;
-            })()}
-          </div>
-
-          {/* LEFT↔CENTRE or LEFT↔RIGHT divider — only when right panel open */}
+          {/* PANEL 4 — ATS + History */}
           {rightPanelOpen && (
-            <ResizeDivider onDrag={(delta, containerW) => {
-              const deltaPct = (delta / containerW) * 100;
-              setPanelSizes(prev => {
-                if (sandboxOpen) {
-                  const newLeft = Math.min(Math.max(20, prev.left + deltaPct), 100 - prev.right - 20);
-                  return { ...prev, left: newLeft };
-                } else {
-                  const newLeft = Math.min(Math.max(20, prev.left + deltaPct), 100 - 15);
-                  const newRight = 100 - newLeft;
-                  return { left: newLeft, right: Math.max(15, newRight) };
-                }
-              });
-            }}/>
-          )}
-
-          {/* CENTRE — Sandbox */}
-          {sandboxOpen && (
-            <>
-              <div style={{ display:"flex", flexDirection:"column", minWidth:0,
-                            flex: `0 0 ${panelSizes.center}%`, transition:"flex 0.2s ease" }}>
-                <SandboxPanel entry={sandbox} onClose={closeSandbox}
-                  onSave={saveSandboxHtml} onExport={exportAndTrack}/>
-              </div>
-              {/* CENTRE↔RIGHT divider */}
-              {rightPanelOpen && (
-                <ResizeDivider onDrag={(delta, containerW) => {
-                  const deltaPct = (delta / containerW) * 100;
-                  setPanelSizes(prev => {
-                    const newCenter = Math.min(Math.max(20, (prev.center||30) + deltaPct), 100 - prev.left - 15);
-                    const newRight  = Math.max(15, 100 - prev.left - newCenter);
-                    return { ...prev, center: newCenter, right: newRight };
-                  });
-                }}/>
-              )}
-            </>
-          )}
-
-          {/* RIGHT — ATS + History — only when open */}
-          {rightPanelOpen && (
-            <div style={{ display:"flex", flexDirection:"column", minWidth:0,
-                          flex: `0 0 ${panelSizes.right}%`, transition:"flex 0.2s ease" }}>
+            <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
+                          transition: "width 0.2s ease", display: "flex", flexDirection: "column",
+                          overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
               <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
-                            padding:"0 14px", flexShrink:0 }}>
+                            padding:"0 14px", flexShrink:0, alignItems:"center" }}>
                 {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
                   <button key={id} onClick={() => setRightTab(id)}
                     style={{
@@ -1649,18 +1585,20 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                       fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
                       fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
                       color: rightTab===id ? theme.text : theme.textDim,
-                      cursor:"pointer", position:"relative",
+                      cursor:"pointer",
                       borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
                     }}>
                     {lbl}
                   </button>
                 ))}
+                <button onClick={() => setRightPanelOpen(false)} title="Close panel"
+                  style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
+                           color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>✕</button>
               </div>
               <div style={{ flex:1, overflowY:"auto" }}>
-                {rightTab === "ats" && activeAts?.report && <CollapsibleATS report={activeAts?.report} score={activeAts?.score} expanded={atsExpanded} onToggle={() => setAtsExpanded(x => !x)} theme={theme}/>}
+                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
                 {rightTab === "history" && (
-                  <HistoryList generated={generated}
-                    theme={theme}
+                  <HistoryList generated={generated} theme={theme}
                     onOpen={e => {
                       openSandbox(e);
                       setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
@@ -1678,7 +1616,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 }
 
 // ── Jobs column (shared across layout modes) ──────────────────
-function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme, isDark,
+function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrapeNew, onClearScrapeError,
+                      generated, loading, applyMode, theme, isDark,
                       baseResumeSkills, totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, toggleDislike, setActiveAts, setRightTab, setRightPanelOpen,
@@ -1693,21 +1632,33 @@ function JobsColumn({ jobs, scraping, generated, loading, applyMode, theme, isDa
       {jobs.length === 0 && !scraping ? <EmptyState theme={theme}/> : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
-          {/* Skeleton cards while scraping */}
-          {scraping && Array.from({length:6},(_,i) => (
-            <div key={i} style={{ border:`1px solid ${theme.border}`,
-              borderRadius:4, padding:"14px 18px", margin:"0 16px 8px",
-              display:"flex", alignItems:"center", gap:14 }}>
-              <div style={{ width:48, height:48, borderRadius:10, background:theme.surfaceHigh, flexShrink:0 }}/>
-              <div style={{ flex:1, display:"flex", flexDirection:"column", gap:8 }}>
-                <div style={{ height:14, width:"40%", borderRadius:4, background:theme.surfaceHigh }}/>
-                <div style={{ height:11, width:"60%", borderRadius:4, background:theme.surfaceHigh }}/>
-              </div>
+          {/* Scrape error banner */}
+          {scrapeError && (
+            <div style={{ margin:"8px 16px", padding:"10px 14px", borderRadius:4,
+                          background:"#fee2e2", border:"1px solid #fca5a5",
+                          display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <span style={{ fontSize:12, color:"#991b1b" }}>
+                ✗ Could not fetch new jobs — {scrapeError}
+              </span>
+              <button onClick={onClearScrapeError} style={{ background:"none", border:"none",
+                cursor:"pointer", color:"#991b1b", fontSize:14 }}>✕</button>
             </div>
-          ))}
+          )}
 
-          {/* Job cards */}
-          {!scraping && jobs.map(job => {
+          {/* New jobs found banner */}
+          {scrapeNewCount > 0 && (
+            <div style={{ margin:"8px 16px", padding:"8px 14px", borderRadius:4,
+                          background:"#dcfce7", border:"1px solid #86efac",
+                          fontSize:12, fontWeight:700, color:"#166534",
+                          display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              ✓ {scrapeNewCount} new job{scrapeNewCount !== 1 ? "s" : ""} found
+              <button onClick={onClearScrapeNew} style={{ background:"none", border:"none",
+                cursor:"pointer", color:"#166534", fontSize:14 }}>✕</button>
+            </div>
+          )}
+
+          {/* Job cards — always rendered (even when scraping) */}
+          {jobs.map(job => {
             const key = job.jobId, g = generated[key],
                   done = !!g?.html, st = loading[key];
             return (
@@ -1843,6 +1794,57 @@ function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── Company Reuse Modal ────────────────────────────────────────
+function CompanyReuseModal({ company, onUseExisting, onGenerateNew, onCancel, theme }) {
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:1000, display:"flex",
+      alignItems:"center", justifyContent:"center",
+      background:"rgba(0,0,0,0.45)", backdropFilter:"blur(3px)",
+    }}
+    onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div style={{
+        background:theme.surface, borderRadius:12, padding:28,
+        maxWidth:380, width:"90%", boxShadow:theme.shadowLg,
+        border:`1px solid ${theme.border}`,
+        display:"flex", flexDirection:"column", gap:16,
+      }}>
+        <div style={{ fontSize:18, fontWeight:800, color:theme.text }}>
+          Previously applied to {company}
+        </div>
+        <div style={{ fontSize:13, color:theme.textMuted, lineHeight:1.6 }}>
+          You've already generated a resume for a role at <strong style={{ color:theme.text }}>{company}</strong>.
+          Use your existing resume for this role, or generate a new one?
+        </div>
+        <div style={{ display:"flex", gap:10, flexDirection:"column" }}>
+          <button onClick={onUseExisting} style={{
+            padding:"10px 0", borderRadius:999, border:`2px solid ${theme.accent}`,
+            background:theme.accent, color:"#0f0f0f", fontWeight:800, fontSize:13,
+            cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif",
+            letterSpacing:"0.06em", textTransform:"uppercase",
+          }}>
+            Use Existing Resume
+          </button>
+          <button onClick={onGenerateNew} style={{
+            padding:"10px 0", borderRadius:999, border:`2px solid ${theme.border}`,
+            background:"transparent", color:theme.text, fontWeight:800, fontSize:13,
+            cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif",
+            letterSpacing:"0.06em", textTransform:"uppercase",
+          }}>
+            Generate New
+          </button>
+          <button onClick={onCancel} style={{
+            padding:"6px 0", border:"none", background:"none",
+            color:theme.textMuted, fontSize:12, cursor:"pointer",
+          }}>
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
