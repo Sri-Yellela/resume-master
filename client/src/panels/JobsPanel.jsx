@@ -461,27 +461,27 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 
 
 
-// DEFAULT SIZES:
-// A+B only: A=30% B=70%
-// Any additional panel open: A=10% (condensed)
-// A+B+C: A=10% B=47% C=43%
-// A+B+D: A=10% B=65% D=25%
-// A+B+C+D: A=10% B=25% C=35% D=30%
+// DEFAULT SIZES (canonical, do not edit inline):
+// A+B only:       A=30  B=70
+// A+B+C:          A=10  B=43  C=47
+// A+B+D:          A=10  B=65  D=25
+// A+B+C+D:        A=10  B=33  C=33  D=24
+// Rule: A=10% whenever any panel beyond B is open.
+// Reset fires via useEffect on C/D visibility change.
+// ALL panel open triggers share one visibility setter —
+// never set panel visibility outside openSandbox / openAtsPanel.
 // To change defaults edit getPanelDefaults() below.
-// Condensed mode (A=10%) triggers automatically when
-// panel count > 2. Manual resize overrides until
-// panel visibility changes.
 function getPanelDefaults(showDetail, showSandbox, showAts) {
   const count = [true, showDetail, showSandbox, showAts].filter(Boolean).length;
   // Only jobs panel visible
   if (count === 1) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
-  // Two-panel: A + B — wide mode, A stays at 30%
+  // Two-panel: A + B — A=30%, B=70%
   if (count === 2 && showDetail && !showSandbox && !showAts) return { jobs: 30, detail: 70, sandbox: 0, ats: 0 };
-  // All four panels: A=10% B=25% C=35% D=30%
-  if (showDetail && showSandbox && showAts) return { jobs: 10, detail: 25, sandbox: 35, ats: 30 };
-  // A + B + C (sandbox open, no ATS): A=10% B=47% C=43%
-  if (showDetail && showSandbox && !showAts) return { jobs: 10, detail: 47, sandbox: 43, ats: 0 };
-  // A + B + D (ATS open, no sandbox): A=10% B=65% D=25%
+  // All four panels: A=10% B=33% C=33% D=24%
+  if (showDetail && showSandbox && showAts) return { jobs: 10, detail: 33, sandbox: 33, ats: 24 };
+  // A + B + C (sandbox, no ATS): A=10% B=43% C=47%
+  if (showDetail && showSandbox && !showAts) return { jobs: 10, detail: 43, sandbox: 47, ats: 0 };
+  // A + B + D (ATS, no sandbox): A=10% B=65% D=25%
   if (showDetail && !showSandbox && showAts) return { jobs: 10, detail: 65, sandbox: 0, ats: 25 };
   // Fallback: A=10, D=25 if visible, remainder split B+C
   const aSize = 10, dSize = showAts ? 25 : 0;
@@ -541,6 +541,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setSandboxOpen(false);
     if (isMobile) setMobilePane("jobs");
   }, [isMobile]);
+
+  const openAtsPanel = useCallback((atsData) => {
+    if (atsData) setActiveAts(atsData);
+    setRightPanelOpen(true);
+    setRightTab("ats");
+    if (isMobile) setMobilePane("ats");
+  }, [isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const closeAtsPanel = useCallback(() => {
+    setRightPanelOpen(false);
+  }, []);
 
   const [activeAts,   setActiveAts]   = useState(null);
   const [smartSearching, setSmartSearching] = useState(false);
@@ -647,10 +658,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       };
       setGenerated(p => ({ ...p, [key]: entry }));
       openSandbox({ ...entry });
-      setActiveAts({ score: entry.atsScore, report: entry.atsReport,
+      openAtsPanel({ score: entry.atsScore, report: entry.atsReport,
                      company: selectedJob.company, title: selectedJob.title });
-      setRightPanelOpen(true);
-      setRightTab("ats");
       return;
     }
 
@@ -1035,8 +1044,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     if (existing?.html && existing.html !== "__exists__" && !force) {
       const entry = {...existing, company:existing.company||job.company, title:existing.title||job.title};
       openSandbox(entry);
-      setActiveAts({ score:existing.atsScore, report:existing.atsReport, company:job.company, title:job.title });
-      setRightPanelOpen(true); setRightTab("ats"); return;
+      openAtsPanel({ score:existing.atsScore, report:existing.atsReport, company:job.company, title:job.title });
+      return;
     }
     if (existing?.html === "__exists__" && !force) {
       // Resume exists in DB but not in memory — fetch on demand
@@ -1046,8 +1055,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         const entry = { html: d.html, atsScore: d.ats_score, atsReport: d.atsReport, company: d.company, title: d.role };
         setGenerated(p => ({ ...p, [key]: entry }));
         openSandbox({ ...entry, company: entry.company, title: entry.title });
-        setActiveAts({ score: d.ats_score, report: d.atsReport, company: d.company, title: d.role });
-        setRightPanelOpen(true); setRightTab("ats");
+        openAtsPanel({ score: d.ats_score, report: d.atsReport, company: d.company, title: d.role });
       } catch(e) { setSandbox({ generating: false, error: e.message, company: job.company, title: job.title }); }
       finally { setLoading(p => { const n = {...p}; delete n[key]; return n; }); }
       return;
@@ -1087,8 +1095,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setGenerated(p => ({ ...p, [key]:{ html:d.html, atsScore:d.atsScore, atsReport:d.atsReport,
         company:job.company, title:job.title } }));
       openSandbox({ html:d.html, company:job.company, title:job.title });
-      setActiveAts({ score:d.atsScore, report:d.atsReport, company:job.company, title:job.title });
-      setRightPanelOpen(true); setRightTab("ats");
+      openAtsPanel({ score:d.atsScore, report:d.atsReport, company:job.company, title:job.title });
     } catch(e) {
       setSandbox({ generating: false, error: e.message, company: job.company, title: job.title });
     }
@@ -1408,8 +1415,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             setGenerated(p => ({ ...p, [key]: priorEntry }));
             openSandbox({ ...priorEntry, company: job.company, title: job.title });
             if (priorEntry.atsReport || priorEntry.atsScore != null) {
-              setActiveAts({ score: priorEntry.atsScore, report: priorEntry.atsReport, company: job.company, title: job.title });
-              setRightPanelOpen(true); setRightTab("ats");
+              openAtsPanel({ score: priorEntry.atsScore, report: priorEntry.atsReport, company: job.company, title: job.title });
             }
           }}
           onGenerateNew={() => {
@@ -1435,12 +1441,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                   g={g2} done={done2} st={st2} applyMode={applyMode}
                   onClose={() => setSelectedJob(null)}
                   onGenerate={force => generate(selectedJob, force)}
-                  onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); setMobilePane("editor"); setSelectedJob(null); }}
+                  onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setMobilePane("editor"); setSelectedJob(null); }}
                   onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
                   onVisit={() => visitUrl(selectedJob)}
                   onStar={() => toggleStar(selectedJob.jobId)}
                   onDislike={() => toggleDislike?.(selectedJob.jobId)}
-                  onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); setMobilePane("ats"); setSelectedJob(null); }}
+                  onAts={() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setSelectedJob(null); }}
                   onResume={() => generate(selectedJob, false)}
                 />
               </div>
@@ -1457,8 +1463,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 applyMode={applyMode} theme={theme} isDark={isDark}
                 totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
                 generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-                visitUrl={visitUrl} toggleStar={toggleStar} setActiveAts={setActiveAts}
-                setRightTab={setRightTab} setRightPanelOpen={setRightPanelOpen} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+                visitUrl={visitUrl} toggleStar={toggleStar} openAtsPanel={openAtsPanel}
+                goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
                 setMobilePane={setMobilePane} isMobile={isMobile}
                 onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
                 panelWidth={jobsPanelWidth}
@@ -1492,8 +1498,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     theme={theme}
                     onOpen={e => {
                       openSandbox(e);
-                      setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
-                      setRightPanelOpen(true); setRightTab("ats");
+                      openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
                     }}
                     onExport={exportAndTrack}/>
                 )}
@@ -1544,7 +1549,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
-              setActiveAts={setActiveAts} setRightTab={setRightTab} setRightPanelOpen={setRightPanelOpen}
+              openAtsPanel={openAtsPanel}
               goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
               setMobilePane={setMobilePane} isMobile={isMobile}
               compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
@@ -1569,12 +1574,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     g={g2} done={done2} st={st2} applyMode={applyMode}
                     onClose={() => setSelectedJob(null)}
                     onGenerate={force => generate(selectedJob, force)}
-                    onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
+                    onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); }}
                     onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
                     onVisit={() => visitUrl(selectedJob)}
                     onStar={() => toggleStar(selectedJob.jobId)}
                     onDislike={() => toggleDislike?.(selectedJob.jobId)}
-                    onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
+                    onAts={() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); }}
                     onResume={() => generate(selectedJob, false)}
                   />
                 </Panel>
@@ -1623,7 +1628,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                       {lbl}
                     </button>
                   ))}
-                  <button onClick={() => setRightPanelOpen(false)} title="Close panel"
+                  <button onClick={closeAtsPanel} title="Close panel"
                     style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
                              color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>✕</button>
                 </div>
@@ -1633,8 +1638,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     <HistoryList generated={generated} theme={theme}
                       onOpen={e => {
                         openSandbox(e);
-                        setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
-                        setRightPanelOpen(true); setRightTab("ats");
+                        openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
                       }}
                       onExport={exportAndTrack}/>
                   )}
@@ -1680,7 +1684,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                       generated, loading, applyMode, theme, isDark,
                       totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
-                      visitUrl, toggleStar, toggleDislike, setActiveAts, setRightTab, setRightPanelOpen,
+                      visitUrl, toggleStar, toggleDislike, openAtsPanel,
                       goPage, handleRefresh, onPullRefresh,
                       setMobilePane, isMobile,
                       compact, selectedJobId, onJobSelect,
@@ -1737,8 +1741,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                 onViewSandbox={() => {
                   const entry = {...g, company:g.company||job.company, title:g.title||job.title};
                   openSandbox(entry);
-                  setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
-                  setRightPanelOpen(true); setRightTab("ats");
+                  openAtsPanel({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
                 }}
                 onExport={() => exportAndTrack(job, g.html, job.company)}
                 onVisit={() => visitUrl(job)}
@@ -1748,17 +1751,14 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                   if (done && g.html !== "__exists__") {
                     const entry = {...g, company:g.company||job.company, title:g.title||job.title};
                     openSandbox(entry);
-                    setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
-                    setRightPanelOpen(true); setRightTab("ats");
+                    openAtsPanel({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
                   } else if (job.url) {
                     visitUrl(job);
                   }
                 } : undefined}
                 onAts={() => {
                   if (g?.atsReport || g?.atsScore != null) {
-                    setActiveAts({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
-                    setRightPanelOpen(true); setRightTab("ats");
-                    if (isMobile) setMobilePane("ats");
+                    openAtsPanel({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
                   }
                 }}
                 onResume={() => generate(job, false)}
