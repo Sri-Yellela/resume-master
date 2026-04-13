@@ -1,6 +1,7 @@
 // client/src/panels/JobsPanel.jsx — Lucy Brand, shared job pool
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { api, printResume, dislikeJob } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
@@ -460,6 +461,33 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 
 
 
+// DEFAULT SIZES: A=30/B=70 for two-panel state.
+// When 3+ panels open: A=20%, D=20% if visible,
+// remainder split equally among B and C.
+// To change defaults edit the getPanelDefaults()
+// function below. Manual resize overrides these
+// until panel visibility changes.
+function getPanelDefaults(showDetail, showSandbox, showAts) {
+  const count = [true, showDetail, showSandbox, showAts].filter(Boolean).length;
+  if (count === 1) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
+  if (count === 2 && showDetail && !showSandbox && !showAts) {
+    return { jobs: 30, detail: 70, sandbox: 0, ats: 0 };
+  }
+  // 3+ panels: A=20 fixed, D=20 if visible, remainder split equally among B and C
+  const aSize = 20;
+  const dSize = showAts ? 20 : 0;
+  const remaining = 100 - aSize - dSize;
+  const bcPanels = [showDetail, showSandbox].filter(Boolean).length;
+  if (bcPanels === 0) return { jobs: 20, detail: 0, sandbox: 0, ats: 80 }; // edge: A+D only
+  const bcSize = remaining / bcPanels;
+  return {
+    jobs: aSize,
+    detail: showDetail ? bcSize : 0,
+    sandbox: showSandbox ? bcSize : 0,
+    ats: dSize,
+  };
+}
+
 // ── Main panel ────────────────────────────────────────────────
 export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResumeStateChange, isActive = true }) {
   const { theme, isDark } = useTheme();
@@ -521,6 +549,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [genStage, setGenStage] = useState("");
   const genTimerRef = useRef(null);
 
+  // Panel resize refs (react-resizable-panels imperative API)
+  const jobsPanelRef    = useRef(null);
+  const detailPanelRef  = useRef(null);
+  const sandboxPanelRef = useRef(null);
+  const atsPanelRef     = useRef(null);
+
   // Task 5 — Inline error states
   const [smartSearchError, setSmartSearchError] = useState("");
   const [uploadError,      setUploadError]      = useState("");
@@ -561,6 +595,22 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const displayJobsRef = useRef([]);
   jobCountRef.current = jobs.length;
   const applyMode = user?.applyMode || "TAILORED";
+
+  // Reset panel sizes to defaults when panel visibility changes.
+  // Programmatic resize fires after the new panel mounts (requestAnimationFrame).
+  useEffect(() => {
+    if (isMobile) return;
+    const showDetail  = !!selectedJob;
+    const showSandbox = sandboxOpen;
+    const showAts     = rightPanelOpen;
+    const d = getPanelDefaults(showDetail, showSandbox, showAts);
+    requestAnimationFrame(() => {
+      jobsPanelRef.current?.resize(d.jobs);
+      if (showDetail)  detailPanelRef.current?.resize(d.detail);
+      if (showSandbox) sandboxPanelRef.current?.resize(d.sandbox);
+      if (showAts)     atsPanelRef.current?.resize(d.ats);
+    });
+  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleResumeClear = useCallback(() => {
     setResumeText(""); setFileName("");
@@ -1115,16 +1165,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   const isLastPage = currentPage >= totalPages;
 
-  // PANEL SPLIT: width = 100% / visiblePanelCount, default equal.
-  // To change default split behaviour edit this component.
-  // To add a new panel register it in the panelVisibility state here.
-  const visiblePanelCount = [
-    true,             // jobs always visible
-    !!selectedJob,    // detail panel
-    sandboxOpen,      // sandbox
-    rightPanelOpen,   // ats panel
-  ].filter(Boolean).length;
-  const equalPanelWidth = `${(100 / Math.max(1, visiblePanelCount)).toFixed(4)}%`;
+  // Panel sizing is handled by react-resizable-panels + getPanelDefaults().
+  // See the getPanelDefaults() function above for default size rules.
 
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:theme.bg }}>
@@ -1420,13 +1462,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         </div>
       )}
 
-      {/* ── PORTRAIT / LAPTOP: equal-width inline panels ── */}
-      {isPortrait && !isMobile && (
-        <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
-          {/* PANEL 1 — Jobs list */}
-          <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
-                        transition: "width 0.2s ease", display: "flex",
-                        flexDirection: "column", overflow: "hidden" }}>
+      {/* ── PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) ── */}
+      {(isWide || (isPortrait && !isMobile)) && (
+        <PanelGroup orientation="horizontal" style={{ flex: 1, overflow: "hidden" }}>
+
+          {/* PANEL A — Jobs list (always visible) */}
+          <Panel
+            ref={jobsPanelRef}
+            defaultSize={!!selectedJob ? 30 : 100}
+            minSize={10}
+            style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <JobsColumn
               jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
               scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
@@ -1442,188 +1487,129 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               setMobilePane={setMobilePane} isMobile={isMobile}
               compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
             />
-          </div>
+          </Panel>
 
-          {/* PANEL 2 — Job detail */}
+          {/* PANEL B — Job detail */}
           {selectedJob && (() => {
             const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
             return (
-              <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
-                            transition: "width 0.2s ease", display: "flex", flexDirection: "column",
-                            overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
-                <JobDetailPanel
-                  job={selectedJob} theme={theme} isDark={isDark}
-                  baseResumeSkills={baseResumeSkills}
-                  g={g2} done={done2} st={st2} applyMode={applyMode}
-                  onClose={() => setSelectedJob(null)}
-                  onGenerate={force => generate(selectedJob, force)}
-                  onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
-                  onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
-                  onVisit={() => visitUrl(selectedJob)}
-                  onStar={() => toggleStar(selectedJob.jobId)}
-                  onDislike={() => toggleDislike?.(selectedJob.jobId)}
-                  onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
-                  onResume={() => generate(selectedJob, false)}
-                />
-              </div>
+              <>
+                <ResizeHandle theme={theme} />
+                <Panel
+                  ref={detailPanelRef}
+                  defaultSize={70}
+                  minSize={10}
+                  style={{ display: "flex", flexDirection: "column", overflow: "hidden",
+                           borderLeft: `1px solid ${theme.border}` }}>
+                  <JobDetailPanel
+                    job={selectedJob} theme={theme} isDark={isDark}
+                    baseResumeSkills={baseResumeSkills}
+                    g={g2} done={done2} st={st2} applyMode={applyMode}
+                    onClose={() => setSelectedJob(null)}
+                    onGenerate={force => generate(selectedJob, force)}
+                    onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
+                    onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
+                    onVisit={() => visitUrl(selectedJob)}
+                    onStar={() => toggleStar(selectedJob.jobId)}
+                    onDislike={() => toggleDislike?.(selectedJob.jobId)}
+                    onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
+                    onResume={() => generate(selectedJob, false)}
+                  />
+                </Panel>
+              </>
             );
           })()}
 
-          {/* PANEL 3 — Sandbox */}
+          {/* PANEL C — Sandbox / Resume */}
           {sandboxOpen && (
-            <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
-                          transition: "width 0.2s ease", display: "flex", flexDirection: "column",
-                          overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
-              <SandboxPanel entry={sandbox} onClose={closeSandbox}
-                onSave={saveSandboxHtml} onExport={exportAndTrack}/>
-            </div>
+            <>
+              <ResizeHandle theme={theme} />
+              <Panel
+                ref={sandboxPanelRef}
+                defaultSize={40}
+                minSize={10}
+                style={{ display: "flex", flexDirection: "column", overflow: "hidden",
+                         borderLeft: `1px solid ${theme.border}` }}>
+                <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                  onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+              </Panel>
+            </>
           )}
 
-          {/* PANEL 4 — ATS + History */}
+          {/* PANEL D — ATS + History */}
           {rightPanelOpen && (
-            <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
-                          transition: "width 0.2s ease", display: "flex", flexDirection: "column",
-                          overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
-              <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
-                            padding:"0 14px", flexShrink:0, alignItems:"center" }}>
-                {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
-                  <button key={id} onClick={() => setRightTab(id)}
-                    style={{
-                      padding:"10px 16px", border:"none", background:"transparent",
-                      fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                      fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
-                      color: rightTab===id ? theme.text : theme.textDim,
-                      cursor:"pointer",
-                      borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
-                    }}>
-                    {lbl}
-                  </button>
-                ))}
-                <button onClick={() => setRightPanelOpen(false)} title="Close panel"
-                  style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
-                           color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>✕</button>
-              </div>
-              <div style={{ flex:1, overflowY:"auto" }}>
-                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
-                {rightTab === "history" && (
-                  <HistoryList generated={generated} theme={theme}
-                    onOpen={e => {
-                      openSandbox(e);
-                      setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
-                      setRightPanelOpen(true); setRightTab("ats");
-                    }}
-                    onExport={exportAndTrack}/>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── WIDE: equal-width panels ── */}
-      {isWide && (
-        <div id="jobs-columns" style={{ flex:1, display:"flex", overflow:"hidden" }}>
-          {/* PANEL SPLIT: width = 100% / visiblePanelCount, default equal.
-              To change default split behaviour edit this component.
-              To add a new panel register it in the panelVisibility state here. */}
-
-          {/* PANEL 1 — Jobs list */}
-          <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
-                        transition: "width 0.2s ease", display: "flex",
-                        flexDirection: "column", overflow: "hidden" }}>
-            <JobsColumn
-              jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
-              scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
-              onClearScrapeError={() => setScrapeError("")}
-              generated={generated} loading={loading}
-              applyMode={applyMode} theme={theme} isDark={isDark}
-              baseResumeSkills={baseResumeSkills}
-              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
-              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-              visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
-              setActiveAts={setActiveAts} setRightTab={setRightTab} setRightPanelOpen={setRightPanelOpen}
-              goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
-              setMobilePane={setMobilePane} isMobile={isMobile}
-              compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
-            />
-          </div>
-
-          {/* PANEL 2 — Job detail */}
-          {selectedJob && (() => {
-            const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
-            return (
-              <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
-                            transition: "width 0.2s ease", display: "flex", flexDirection: "column",
-                            overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
-                <JobDetailPanel
-                  job={selectedJob} theme={theme} isDark={isDark}
-                  baseResumeSkills={baseResumeSkills}
-                  g={g2} done={done2} st={st2} applyMode={applyMode}
-                  onClose={() => setSelectedJob(null)}
-                  onGenerate={force => generate(selectedJob, force)}
-                  onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
-                  onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
-                  onVisit={() => visitUrl(selectedJob)}
-                  onStar={() => toggleStar(selectedJob.jobId)}
-                  onDislike={() => toggleDislike?.(selectedJob.jobId)}
-                  onAts={() => { setActiveAts({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setRightPanelOpen(true); setRightTab("ats"); }}
-                  onResume={() => generate(selectedJob, false)}
-                />
-              </div>
-            );
-          })()}
-
-          {/* PANEL 3 — Sandbox */}
-          {sandboxOpen && (
-            <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
-                          transition: "width 0.2s ease", display: "flex", flexDirection: "column",
-                          overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
-              <SandboxPanel entry={sandbox} onClose={closeSandbox}
-                onSave={saveSandboxHtml} onExport={exportAndTrack}/>
-            </div>
+            <>
+              <ResizeHandle theme={theme} />
+              <Panel
+                ref={atsPanelRef}
+                defaultSize={20}
+                minSize={10}
+                style={{ display: "flex", flexDirection: "column", overflow: "hidden",
+                         borderLeft: `1px solid ${theme.border}` }}>
+                <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
+                              padding:"0 14px", flexShrink:0, alignItems:"center" }}>
+                  {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
+                    <button key={id} onClick={() => setRightTab(id)}
+                      style={{
+                        padding:"10px 16px", border:"none", background:"transparent",
+                        fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                        fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
+                        color: rightTab===id ? theme.text : theme.textDim,
+                        cursor:"pointer",
+                        borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
+                      }}>
+                      {lbl}
+                    </button>
+                  ))}
+                  <button onClick={() => setRightPanelOpen(false)} title="Close panel"
+                    style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
+                             color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>✕</button>
+                </div>
+                <div style={{ flex:1, overflowY:"auto" }}>
+                  {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
+                  {rightTab === "history" && (
+                    <HistoryList generated={generated} theme={theme}
+                      onOpen={e => {
+                        openSandbox(e);
+                        setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
+                        setRightPanelOpen(true); setRightTab("ats");
+                      }}
+                      onExport={exportAndTrack}/>
+                  )}
+                </div>
+              </Panel>
+            </>
           )}
 
-          {/* PANEL 4 — ATS + History */}
-          {rightPanelOpen && (
-            <div style={{ width: equalPanelWidth, minWidth: 240, flexShrink: 0,
-                          transition: "width 0.2s ease", display: "flex", flexDirection: "column",
-                          overflow: "hidden", borderLeft: `1px solid ${theme.border}` }}>
-              <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
-                            padding:"0 14px", flexShrink:0, alignItems:"center" }}>
-                {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
-                  <button key={id} onClick={() => setRightTab(id)}
-                    style={{
-                      padding:"10px 16px", border:"none", background:"transparent",
-                      fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                      fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
-                      color: rightTab===id ? theme.text : theme.textDim,
-                      cursor:"pointer",
-                      borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
-                    }}>
-                    {lbl}
-                  </button>
-                ))}
-                <button onClick={() => setRightPanelOpen(false)} title="Close panel"
-                  style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
-                           color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>✕</button>
-              </div>
-              <div style={{ flex:1, overflowY:"auto" }}>
-                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
-                {rightTab === "history" && (
-                  <HistoryList generated={generated} theme={theme}
-                    onOpen={e => {
-                      openSandbox(e);
-                      setActiveAts({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
-                      setRightPanelOpen(true); setRightTab("ats");
-                    }}
-                    onExport={exportAndTrack}/>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        </PanelGroup>
       )}
     </div>
+  );
+}
+
+// ── Drag resize handle ────────────────────────────────────────
+function ResizeHandle({ theme: themeProp }) {
+  const { theme: t } = useTheme();
+  const theme = themeProp || t;
+  const [active, setActive] = useState(false);
+  return (
+    <PanelResizeHandle
+      style={{
+        width: 7, flexShrink: 0, cursor: "col-resize",
+        display: "flex", alignItems: "stretch", background: "transparent",
+        zIndex: 10,
+      }}
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => setActive(false)}
+    >
+      <div style={{
+        width: active ? 3 : 2,
+        margin: "0 auto",
+        background: active ? theme.accent : theme.border,
+        transition: "all 0.15s ease",
+        borderRadius: 2,
+      }} />
+    </PanelResizeHandle>
   );
 }
 

@@ -781,7 +781,7 @@ async function scrapeHarvestAPI(query, token) {
   const input = {
     jobTitles:      [query],
     locations:      ["United States"],
-    workplaceType:  ["Remote", "Hybrid", "On-site"],
+    workplaceType:  ["remote", "hybrid", "office"],
     employmentType: ["Full-time"],
     postedLimit:    "24h",
     maxItems:       MAX_JOBS_PER_REFRESH * 3,
