@@ -587,12 +587,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const jobsPanelElementRef = useRef(null);
   const [jobsPanelWidth, setJobsPanelWidth] = useState(400);
 
-  // ResizeObserver: track total PanelGroup width for Panel C maxSize calculation
-  // RESUME PANEL MAX WIDTH: capped at A4 natural width (RESUME_PAGE_WIDTH_PX + 8px = ~802px).
-  // Beyond this, dragging left pushes the ATS panel narrower instead. D has a minimum of 10%.
-  // To change page width constant edit RESUME_PAGE_WIDTH_PX in SandboxPanel.jsx.
-  const panelGroupElementRef = useRef(null);
-  const [groupWidth, setGroupWidth] = useState(0);
 
   // Task 5 — Inline error states
   const [smartSearchError, setSmartSearchError] = useState("");
@@ -658,15 +652,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     const ro = new ResizeObserver(entries => {
       for (const e of entries) setJobsPanelWidth(e.contentRect.width);
     });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Observe PanelGroup total width for Panel C maxSize percentage calculation
-  useEffect(() => {
-    const el = panelGroupElementRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => setGroupWidth(e.contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1563,7 +1548,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
       {/* ── PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) ── */}
       {(isWide || (isPortrait && !isMobile)) && (
-        <div ref={panelGroupElementRef} style={{ flex:1, overflow:"hidden", display:"flex" }}>
+        <div style={{ flex:1, overflow:"hidden", display:"flex" }}>
         <PanelGroup orientation="horizontal" style={{ flex: 1, overflow: "hidden" }}>
 
           {/* PANEL A — Jobs list (always visible) */}
@@ -1624,30 +1609,21 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           })()}
 
           {/* PANEL C — Sandbox / Resume */}
-          {/* RESUME PANEL MAX WIDTH: capped at A4 natural width + padding (~802px).
-              Beyond this, dragging left pushes the ATS panel narrower.
-              To change page width constant edit RESUME_PAGE_WIDTH_PX in SandboxPanel.jsx. */}
-          {sandboxOpen && (() => {
-            const MAX_RESUME_PANEL_PX = 802; // RESUME_PAGE_WIDTH_PX (794) + 8px padding
-            const maxSandboxPct = groupWidth > MAX_RESUME_PANEL_PX
-              ? (MAX_RESUME_PANEL_PX / groupWidth) * 100
-              : 100;
-            return (
-              <>
-                <ResizeHandle theme={theme} />
-                <Panel
-                  ref={sandboxPanelRef}
-                  defaultSize={40}
-                  minSize={10}
-                  maxSize={maxSandboxPct}
-                  style={{ display: "flex", flexDirection: "column", overflow: "hidden",
-                           borderLeft: `1px solid ${theme.border}` }}>
-                  <SandboxPanel entry={sandbox} onClose={closeSandbox}
-                    onSave={saveSandboxHtml} onExport={exportAndTrack}/>
-                </Panel>
-              </>
-            );
-          })()}
+          {/* No maxSize cap — CSS scale transform in SandboxPanel handles wider-than-A4 display. */}
+          {sandboxOpen && (
+            <>
+              <ResizeHandle theme={theme} />
+              <Panel
+                ref={sandboxPanelRef}
+                defaultSize={40}
+                minSize={10}
+                style={{ display: "flex", flexDirection: "column", overflow: "hidden",
+                         borderLeft: `1px solid ${theme.border}` }}>
+                <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                  onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+              </Panel>
+            </>
+          )}
 
           {/* PANEL D — ATS + History */}
           {rightPanelOpen && (
