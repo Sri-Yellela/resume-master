@@ -116,8 +116,9 @@ function PosterCard({ company, index }) {
 // ── Auth modal ────────────────────────────────────────────────
 function AuthModal({ onLogin }) {
   const { theme, mode } = useTheme();
-  const [tab,     setTab]     = useState("login");
-  const [regStep, setRegStep] = useState(1);
+  const [tab,       setTab]       = useState("login");
+  const [regStep,   setRegStep]   = useState(1);
+  const [adminMode, setAdminMode] = useState(false);
   // Login form
   const [login,   setLoginF]  = useState({ username:"", password:"" });
   // Registration step 1 — only in React state, never sent until step 2 completes
@@ -216,8 +217,15 @@ function AuthModal({ onLogin }) {
 
       {tab === "login" ? (
         <form onSubmit={handleLogin} style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {adminMode && (
+            <div style={{ padding:"8px 12px", borderRadius:8, fontSize:12, fontWeight:600,
+                          background:theme.surfaceHigh, color:theme.textMuted,
+                          border:`1px solid ${theme.border}`, display:"flex", alignItems:"center", gap:6 }}>
+              🔒 Sign in with your admin credentials
+            </div>
+          )}
           <input style={inputStyle} placeholder="Username" value={login.username}
-            onChange={e=>setL("username",e.target.value)} autoFocus/>
+            onChange={e=>{ setL("username",e.target.value); setAdminMode(false); }} autoFocus/>
           <input style={inputStyle} placeholder="Password" type="password" value={login.password}
             onChange={e=>setL("password",e.target.value)}/>
           {error && <div style={{ color:theme.danger, fontSize:12 }}>{error}</div>}
@@ -304,6 +312,27 @@ function AuthModal({ onLogin }) {
           </div>
         </form>
       )}
+
+      {/* Admin access — only visible on login tab */}
+      {tab === "login" && (
+        <div style={{ textAlign:"center", marginTop:24 }}>
+          <button
+            type="button"
+            onClick={() => setAdminMode(true)}
+            style={{
+              background:"none", border:"none", cursor:"pointer",
+              fontSize:12, color:theme.textDim, fontFamily:"'DM Sans',system-ui",
+              padding:"4px 8px", borderRadius:4,
+              textDecoration:"none",
+              transition:"color 0.15s, textDecoration 0.15s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = theme.textMuted; e.currentTarget.style.textDecoration = "underline"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = theme.textDim;   e.currentTarget.style.textDecoration = "none"; }}
+          >
+            🔒 Admin Access
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -318,16 +347,17 @@ export default function AuthScreen({ onLogin }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", minHeight:"100vh" }}>
+      {/* Main content area — flex:1 fills space between top of page and footer */}
       <div style={{ display:"flex", flexDirection: isMobile ? "column" : "row",
-                    flex:1, overflow: isMobile ? "auto" : "hidden",
+                    flex:1,
                     background:theme.bg, fontFamily:"'DM Sans',system-ui,sans-serif" }}>
 
-        {/* LEFT/TOP — Hero */}
-        <div style={{ flex: isMobile ? "none" : "0 0 55%",
+        {/* LEFT/TOP — Hero + login form, vertically centered */}
+        <div style={{ flex: isMobile ? "1 1 auto" : "0 0 55%",
                       display:"flex", flexDirection:"column",
-                      justifyContent:"center",
-                      padding: isMobile ? "40px 24px 48px" : "60px 64px",
-                      overflowY: isMobile ? "visible" : "auto" }}>
+                      alignItems:"flex-start", justifyContent:"center",
+                      padding: isMobile ? "32px 24px" : "40px 64px",
+                      overflowY:"auto" }}>
           {/* Logo */}
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: isMobile ? 28 : 48 }}>
             <span className="site-title" style={{ fontSize: isMobile ? 20 : 22 }}>Resume Master</span>
@@ -381,7 +411,7 @@ export default function AuthScreen({ onLogin }) {
         {/* RIGHT — Scrolling poster cards — hidden on mobile */}
         {!isMobile && <div style={{
           flex:"0 0 45%", overflow:"hidden", position:"relative",
-          background: theme.surfaceHigh,
+          background: theme.surfaceHigh, minHeight:0,
         }}>
           {/* Top fade */}
           <div style={{ position:"absolute", top:0, left:0, right:0, height:80,
