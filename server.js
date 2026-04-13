@@ -840,17 +840,22 @@ async function fetchCompanyIcon(domain) {
 // ── Scraping ──────────────────────────────────────────────────
 // Actor: harvestapi/linkedin-job-search
 // Returns real LinkedIn job IDs — INSERT OR IGNORE keeps first-write wins.
-async function scrapeHarvestAPI(query, token, employmentTypes) {
+async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
   if (!token) throw new Error("No Apify token");
   const client = new ApifyClient({ token });
   const input = {
     jobTitles:      [query],
-    locations:      ["United States"],
-    workplaceType:  ["remote", "hybrid", "office"],
-    employmentType: employmentTypes || ["full-time"],
-    postedLimit:    "24h",
+    locations:      [scrapeParams.location      || "United States"],
+    workplaceType:  scrapeParams.workplaceTypes?.length
+                      ? scrapeParams.workplaceTypes
+                      : ["remote", "hybrid", "office"],
+    employmentType: scrapeParams.employmentTypes?.length
+                      ? scrapeParams.employmentTypes
+                      : ["full-time"],
+    postedLimit:    scrapeParams.postedLimit     || "24h",
     maxItems:       MAX_JOBS_PER_REFRESH * 3,
   };
+  console.log(`[scrape] Apify input: workplaceType=${input.workplaceType} empType=${input.employmentType} postedLimit=${input.postedLimit} location=${input.locations[0]}`);
   const run = await client.actor("harvestapi/linkedin-job-search").call(input, { waitSecs: 300 });
   const dataset = await client.dataset(run.defaultDatasetId).listItems({ limit: MAX_JOBS_PER_REFRESH * 3 });
   const items = Array.isArray(dataset.items) ? dataset.items : [];
@@ -858,11 +863,12 @@ async function scrapeHarvestAPI(query, token, employmentTypes) {
   return items;
 }
 
-async function scrapeJobs(query, apifyToken, employmentTypes = ["full-time"]) {
-  console.log(`[scrape] "${query}" — HarvestAPI (employmentTypes: ${employmentTypes.join(",")})`);
+async function scrapeJobs(query, apifyToken, scrapeParams = {}) {
+  const employmentTypes = scrapeParams.employmentTypes?.length ? scrapeParams.employmentTypes : ["full-time"];
+  console.log(`[scrape] "${query}" — HarvestAPI`);
   let rawItems = [];
   try {
-    rawItems = await scrapeHarvestAPI(query, apifyToken, employmentTypes);
+    rawItems = await scrapeHarvestAPI(query, apifyToken, scrapeParams);
     console.log(`[scrape] HarvestAPI: ${rawItems.length} raw items`);
   } catch(e) {
     console.warn("[scrape] HarvestAPI failed:", e.message);
@@ -1063,7 +1069,14 @@ cron.schedule("0 7 * * *", async () => {
     console.log("[cron] Skipping daily re-scrape — no user Apify token available");
     return;
   }
-  try { await scrapeJobs(last.search_query, recent.apify_token); }
+  try {
+    await scrapeJobs(last.search_query, recent.apify_token, {
+      workplaceTypes:  ["remote", "hybrid", "office"],
+      employmentTypes: ["full-time"],
+      location:        "United States",
+      postedLimit:     "24h",
+    });
+  }
   catch(e) { console.error("[cron]", e.message); }
 });
 
@@ -1782,19 +1795,52 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
   res.json({ jobs, scraping: stillScraping, total: jobs.length });
 });
 
-const VALID_EMP_TYPES = new Set(["full-time","part-time","contract","internship","temporary"]);
+const VALID_EMP_TYPES       = new Set(["full-time","part-time","contract","internship","temporary"]);
+const VALID_WORKPLACE_TYPES = new Set(["remote","hybrid","office"]);
+const VALID_POSTED_LIMITS   = new Set(["24h","1w","1m"]);
+
+// Map UI workType string → Apify workplaceType array
+function mapWorkplaceTypes(workType) {
+  const map = { Remote:"remote", Hybrid:"hybrid", Onsite:"office", "On-site":"office",
+                remote:"remote", hybrid:"hybrid", office:"office" };
+  if (!workType) return ["remote","hybrid","office"];
+  const mapped = map[workType];
+  return mapped ? [mapped] : ["remote","hybrid","office"];
+}
+
+// Map UI ageFilter string → Apify postedLimit
+function mapPostedLimit(ageFilter) {
+  const map = { "1d":"24h","2d":"24h","3d":"24h","1w":"1w","1m":"1m","1mo":"1m" };
+  return map[ageFilter] || "24h";
+}
 
 app.post("/api/scrape", requireAuth, async (req, res) => {
   const rawQuery = (req.body.query || "").trim();
   if (!rawQuery) return res.status(400).json({ error:"query required" });
   const query = normaliseRole(rawQuery);
 
-  // employmentTypes: array of HarvestAPI-accepted strings; default full-time
+  // employmentTypes — array of HarvestAPI-accepted strings; default full-time
   const rawEmpTypes = Array.isArray(req.body.employmentTypes) ? req.body.employmentTypes : [];
-  const employmentTypes = rawEmpTypes.length
-    ? rawEmpTypes.filter(t => VALID_EMP_TYPES.has(t))
-    : ["full-time"];
+  const employmentTypes = rawEmpTypes.filter(t => VALID_EMP_TYPES.has(t));
   if (!employmentTypes.length) employmentTypes.push("full-time");
+
+  // workplaceTypes — from UI workType string or explicit array
+  const rawWorkplaceTypes = Array.isArray(req.body.workplaceTypes) ? req.body.workplaceTypes : [];
+  const workplaceTypes = rawWorkplaceTypes.length
+    ? rawWorkplaceTypes.filter(t => VALID_WORKPLACE_TYPES.has(t))
+    : mapWorkplaceTypes(req.body.workType || "");
+  if (!workplaceTypes.length) workplaceTypes.push("remote","hybrid","office");
+
+  // postedLimit — from explicit value or mapped from ageFilter
+  const rawPostedLimit = req.body.postedLimit || mapPostedLimit(req.body.ageFilter || "");
+  const postedLimit = VALID_POSTED_LIMITS.has(rawPostedLimit) ? rawPostedLimit : "24h";
+
+  // location
+  const location = typeof req.body.location === "string" && req.body.location.trim()
+    ? req.body.location.trim()
+    : "United States";
+
+  const scrapeParams = { employmentTypes, workplaceTypes, postedLimit, location };
 
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
   const token = user?.apify_token;
@@ -1862,7 +1908,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   setImmediate(async () => {
     const scrapeStart = Date.now();
     try {
-      const scrapeResult = await scrapeJobs(query, token, employmentTypes);
+      const scrapeResult = await scrapeJobs(query, token, scrapeParams);
       db.prepare(`
         INSERT OR IGNORE INTO user_jobs (user_id, job_id)
         SELECT ?, sj.job_id FROM scraped_jobs sj

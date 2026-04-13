@@ -12,6 +12,30 @@ import { ATSPanel } from "./ATSPanel.jsx";
 
 const USER_TEXT   = "#0f0f0f";   // black text on accent
 
+// ── Pre-scrape param maps (UI → Apify enum) ───────────────────
+// workType UI value → Apify workplaceType array
+const WORKPLACE_TO_APIFY = {
+  Remote:  "remote",
+  Hybrid:  "hybrid",
+  Onsite:  "office",
+  "On-site": "office",
+};
+// ageFilter UI value → Apify postedLimit string
+const AGE_TO_POSTED_LIMIT = {
+  "1d":"24h","2d":"24h","3d":"24h","1w":"1w","1m":"1m","1mo":"1m",
+};
+function buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) {
+  const workplaceTypes = workType && WORKPLACE_TO_APIFY[workType]
+    ? [WORKPLACE_TO_APIFY[workType]]
+    : ["remote","hybrid","office"];
+  return {
+    workplaceTypes,
+    employmentTypes: employmentTypePrefs?.length ? employmentTypePrefs : ["full-time"],
+    postedLimit:     AGE_TO_POSTED_LIMIT[ageFilter] || "24h",
+    location:        locationFilter?.trim() || "United States",
+  };
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 function ago(ts) {
   if (!ts) return "—";
@@ -943,7 +967,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setSearchInput(q);
     // AUTO-SCRAPE: silently trigger background scrape if local results < THRESHOLD (50)
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, employmentTypes:employmentTypePrefs }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
       if (!result || result.missingToken || result.limitReached || result.error) return;
       const roleQ = (result.query || q).toLowerCase();
       if (result.scraping) {
@@ -963,7 +987,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setScraping(true);
     let managedByPoller = false;
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, employmentTypes:employmentTypePrefs }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
       if (result.missingToken) {
         setScrapeError("No Apify token set. Add it via avatar → Apify Token.");
         return;
@@ -1014,7 +1038,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setScraping(true);
     let managedByPoller = false;
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, employmentTypes:employmentTypePrefs }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
       if (result.missingToken) {
         setScrapeError("No Apify token — add it in avatar → Apify Token.");
         return;

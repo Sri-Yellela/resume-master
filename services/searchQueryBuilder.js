@@ -103,8 +103,7 @@ export function isTitleRelevant(title, query) {
   const stopWords = new Set([
     "the","and","for","with","ing","a","an","of","in",
     "at","by","to","or","senior","junior","staff",
-    "principal","lead","associate","assistant","entry",
-    "level","mid","ii","iii","iv","i",
+    "principal","lead","entry","level","mid","ii","iii","iv","i",
   ]);
 
   const tokens = q
