@@ -714,14 +714,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     return () => window.removeEventListener("keydown", handler);
   }, [selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Skills extracted from the base resume — used for keyword highlighting in expanded cards
-  const baseResumeSkills = useMemo(() => {
-    if (!resumeText) return new Set();
-    const re = /\b(python|javascript|typescript|java|golang|go|rust|c\+\+|c#|react|vue|angular|node\.?js|django|flask|fastapi|spring|docker|kubernetes|k8s|aws|gcp|azure|terraform|postgresql|mysql|mongodb|redis|kafka|spark|tensorflow|pytorch|sklearn|sql|git|linux|bash|rest|graphql|ml|ai|llm|nlp|cuda|hadoop|airflow|dbt|snowflake|bigquery|pandas|numpy|scipy|scikit|jupyter|tableau|looker|powerbi|figma|jira|scrum|agile|ci\/cd|jenkins|github|gitlab|bitbucket|microservices|grpc|oauth|jwt|html|css|sass|webpack|vite|next\.?js|nuxt|svelte|flutter|swift|kotlin)\b/gi;
-    const matches = resumeText.match(re) || [];
-    return new Set(matches.map(m => m.toLowerCase()));
-  }, [resumeText]);
-
   // ── Build query params from current filter state ──────────
   const buildParams = useCallback((page = 1, overrideStarred = null) => {
     const p = new URLSearchParams();
@@ -1434,7 +1426,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                             background:theme.bg }}>
                 <JobDetailPanel
                   job={selectedJob} theme={theme} isDark={isDark}
-                  baseResumeSkills={baseResumeSkills}
                   g={g2} done={done2} st={st2} applyMode={applyMode}
                   onClose={() => setSelectedJob(null)}
                   onGenerate={force => generate(selectedJob, force)}
@@ -1489,7 +1480,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     </button>
                   ))}
                 </div>
-                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
+                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText}/>}
                 {rightTab === "history" && (
                   <HistoryList generated={generated}
                     theme={theme}
@@ -1544,7 +1535,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               onClearScrapeError={() => setScrapeError("")}
               generated={generated} loading={loading}
               applyMode={applyMode} theme={theme} isDark={isDark}
-              baseResumeSkills={baseResumeSkills}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
@@ -1570,7 +1560,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                            borderLeft: `1px solid ${theme.border}` }}>
                   <JobDetailPanel
                     job={selectedJob} theme={theme} isDark={isDark}
-                    baseResumeSkills={baseResumeSkills}
                     g={g2} done={done2} st={st2} applyMode={applyMode}
                     onClose={() => setSelectedJob(null)}
                     onGenerate={force => generate(selectedJob, force)}
@@ -1633,7 +1622,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                              color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>✕</button>
                 </div>
                 <div style={{ flex:1, overflowY:"auto" }}>
-                  {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score}/>}
+                  {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText}/>}
                   {rightTab === "history" && (
                     <HistoryList generated={generated} theme={theme}
                       onOpen={e => {
@@ -1683,7 +1672,7 @@ function ResizeHandle({ theme: themeProp }) {
 // ── Jobs column (shared across layout modes) ──────────────────
 function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrapeNew, onClearScrapeError,
                       generated, loading, applyMode, theme, isDark,
-                      baseResumeSkills, totalPages, currentPage, isLastPage,
+                      totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, toggleDislike, setActiveAts, setRightTab, setRightPanelOpen,
                       goPage, handleRefresh, onPullRefresh,
@@ -1732,7 +1721,6 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                 key={key} job={job} g={g} done={done} st={st}
                 applyMode={applyMode}
                 theme={theme} isDark={isDark}
-                baseResumeSkills={baseResumeSkills}
                 showDislike={true}
                 showApplyButton={!compact}
                 compact={compact}

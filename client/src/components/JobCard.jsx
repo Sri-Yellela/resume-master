@@ -88,36 +88,13 @@ function ATSBadge({ score, onClick }) {
   );
 }
 
-// ── Keyword highlight ────────────────────────────────────────────
-// Highlights tech keywords in description text.
-// Green = found in user's base resume; Red = present in JD but missing from resume.
-const TECH_RE = /\b(python|javascript|typescript|java|golang|go|rust|c\+\+|c#|react|vue|angular|node\.?js|django|flask|fastapi|spring|docker|kubernetes|k8s|aws|gcp|azure|terraform|postgresql|mysql|mongodb|redis|kafka|spark|tensorflow|pytorch|sklearn|sql|git|linux|bash|rest|graphql|ml|ai|llm|nlp|cuda|hadoop|airflow|dbt|snowflake|bigquery|pandas|numpy|scipy|scikit|jupyter|excel|tableau|looker|powerbi|figma|jira|scrum|agile|ci\/cd|jenkins|github|gitlab|bitbucket|microservices|grpc|oauth|jwt|html|css|sass|webpack|vite|next\.?js|nuxt|svelte|flutter|swift|kotlin|ios|android|unity|unreal)\b/gi;
-
-function HighlightedDescription({ text, baseResumeSkills, theme }) {
+// ── Plain description renderer ───────────────────────────────────
+function DescriptionText({ text, theme }) {
   if (!text) return null;
   const trimmed = text.slice(0, 1200);
-  const parts = [];
-  let last = 0;
-  let match;
-  TECH_RE.lastIndex = 0;
-  while ((match = TECH_RE.exec(trimmed)) !== null) {
-    if (match.index > last) parts.push({ type:"text", content: trimmed.slice(last, match.index) });
-    const word = match[0];
-    const hasSkill = baseResumeSkills && baseResumeSkills.has(word.toLowerCase());
-    parts.push({ type:"kw", content: word, has: hasSkill });
-    last = match.index + word.length;
-  }
-  if (last < trimmed.length) parts.push({ type:"text", content: trimmed.slice(last) });
   return (
     <p style={{ fontSize:11, color:theme.textMuted, lineHeight:1.7, margin:0, whiteSpace:"pre-wrap" }}>
-      {parts.map((p, i) =>
-        p.type === "text" ? p.content :
-        <mark key={i} style={{
-          background: p.has ? "#dcfce7" : "#fee2e2",
-          color: p.has ? "#166534" : "#991b1b",
-          padding:"0 2px", borderRadius:2, fontWeight:600,
-        }}>{p.content}</mark>
-      )}
+      {trimmed}
       {text.length > 1200 && <span style={{ color:theme.textDim }}> … (truncated)</span>}
     </p>
   );
@@ -162,7 +139,6 @@ export default function JobCard({
   job,
   theme,
   isDark,
-  baseResumeSkills,   // Set<string> from base resume, for keyword highlighting
   showDislike = true,
   showApplyButton = true,
   g,                  // generated resume entry
@@ -471,23 +447,9 @@ export default function JobCard({
           padding: "12px 18px 16px",
           display: "flex", flexDirection: "column", gap: 10,
         }}>
-          {/* Keyword legend */}
-          {baseResumeSkills && baseResumeSkills.size > 0 && (
-            <div style={{ display:"flex", gap:10, alignItems:"center", fontSize:10, color:theme.textDim }}>
-              <span style={{ background:"#dcfce7", color:"#166534", padding:"1px 5px", borderRadius:2, fontWeight:600 }}>green</span>
-              = you have this skill ·
-              <span style={{ background:"#fee2e2", color:"#991b1b", padding:"1px 5px", borderRadius:2, fontWeight:600 }}>red</span>
-              = skill gap
-            </div>
-          )}
-
           {/* Description */}
           {job.description && (
-            <HighlightedDescription
-              text={job.description}
-              baseResumeSkills={baseResumeSkills}
-              theme={theme}
-            />
+            <DescriptionText text={job.description} theme={theme}/>
           )}
 
           {/* Extra meta row */}

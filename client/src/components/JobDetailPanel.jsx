@@ -59,7 +59,6 @@ function ActionBtn({ onClick, title, children, accent = "#0284c7", theme, active
 export default function JobDetailPanel({
   job,
   theme, isDark,
-  baseResumeSkills,
   g, done, st,
   applyMode,
   onClose,
@@ -269,20 +268,9 @@ export default function JobDetailPanel({
           </div>
         )}
 
-        {/* Keyword legend */}
-        {baseResumeSkills && baseResumeSkills.size > 0 && (
-          <div style={{ display:"flex", gap:8, alignItems:"center", fontSize:10, color:theme.textDim, marginBottom:10 }}>
-            <span style={{ background:"#dcfce7", color:"#166534", padding:"1px 5px", borderRadius:2, fontWeight:600 }}>green</span>
-            = you have ·
-            <span style={{ background:"#fee2e2", color:"#991b1b", padding:"1px 5px", borderRadius:2, fontWeight:600 }}>red</span>
-            = gap
-          </div>
-        )}
-
         {job.description ? (
           <HighlightedDescription
             text={job.description}
-            baseResumeSkills={baseResumeSkills}
             theme={theme}
             maxChars={3000}
           />

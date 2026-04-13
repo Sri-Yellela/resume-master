@@ -443,6 +443,20 @@ db.pragma("busy_timeout = 5000");
           ON scrape_events(user_id, created_at);
       `,
     },
+    {
+      id: "ats_only_reports",
+      sql: `
+        CREATE TABLE IF NOT EXISTS ats_only_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          job_id TEXT NOT NULL,
+          ats_report TEXT NOT NULL,
+          ats_score INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(user_id, job_id)
+        );
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -1776,6 +1790,88 @@ app.patch("/api/jobs/:id/disliked", requireAuth, (req, res) => {
 
 app.get("/api/jobs/:id/recruiter", requireAuth, (_req, res) => {
   res.json({ comingSoon: true, available: false });
+});
+
+// ── Keyword analysis for a job (no generated resume needed) ──────
+app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
+  const userId = req.user.id;
+  const jobId  = req.params.id;
+  const { resumeText } = req.body;
+  if (!resumeText) return res.status(400).json({ error: "resumeText required" });
+
+  // Priority 1: return ats_report from an existing generated resume (most accurate)
+  const existingResume = db.prepare(
+    "SELECT ats_report FROM resumes WHERE user_id=? AND job_id=?"
+  ).get(userId, jobId);
+  if (existingResume?.ats_report) {
+    try { return res.json(JSON.parse(existingResume.ats_report)); } catch {}
+  }
+
+  // Priority 2: return cached ats_only_reports entry (avoids re-running Haiku)
+  const cached = db.prepare(
+    "SELECT ats_report FROM ats_only_reports WHERE user_id=? AND job_id=?"
+  ).get(userId, jobId);
+  if (cached?.ats_report) {
+    try { return res.json(JSON.parse(cached.ats_report)); } catch {}
+  }
+
+  // Check monthly_ats_scores limit before running Haiku
+  const limitCheck = checkLimit(db, userId, "ats_score");
+  if (!limitCheck.allowed) {
+    return res.status(429).json({
+      error: limitCheck.reason, limitReached: true,
+      current: limitCheck.current, limit: limitCheck.limit, period: limitCheck.period,
+    });
+  }
+
+  // Priority 3: fetch job + run Haiku call
+  const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+
+  const jobDescription = job.description || job.title;
+  const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
+Company: ${job.company}
+Title: ${job.title}
+Category: ${job.category || ""}
+Full description:
+${jobDescription}
+
+RESUME TEXT (check which JD keywords appear here):
+${resumeText}`;
+
+  const t0 = Date.now();
+  try {
+    const msg = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 900,
+      system: ATS_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: atsDynamic }],
+    });
+    const raw = msg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
+    const result = JSON.parse(raw);
+
+    // Save to cache — INSERT OR REPLACE via ON CONFLICT
+    db.prepare(`
+      INSERT INTO ats_only_reports (user_id, job_id, ats_report, ats_score)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, job_id) DO UPDATE SET
+        ats_report=excluded.ats_report,
+        ats_score=excluded.ats_score,
+        created_at=unixepoch()
+    `).run(userId, jobId, JSON.stringify(result), result.score ?? null);
+
+    trackApiCall(db, {
+      userId, eventType: "ats_score", eventSubtype: "keywords",
+      model: "claude-haiku-4-5-20251001", usage: msg.usage,
+      durationMs: Date.now() - t0, jobId: String(jobId), company: job.company,
+      atsScoreAfter: result.score,
+    });
+
+    res.json(result);
+  } catch (e) {
+    console.error("[keywords]", e.message);
+    res.status(500).json({ error: "Keyword analysis failed" });
+  }
 });
 
 // ── Pending jobs (resume generated but not yet applied or disliked) ──
