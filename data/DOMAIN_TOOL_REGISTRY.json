@@ -1,0 +1,388 @@
+{
+  "__comment": "Machine-readable company tool authenticity registry. Schema per entry: { domain, stack[], notStack[], scaleRank(1-10) }. Used by classifier.js and the generation model to enforce company authenticity rule. scaleRank 10 = largest/most recognised in domain. To add entries: follow the schema. notStack lists tools that are NOT used at this company despite being common in the domain.",
+
+  "Stripe": {
+    "domain": "fintech",
+    "stack": ["GCP", "Pub/Sub", "BigQuery", "GKE", "Dataflow", "Python", "Go", "TypeScript", "Kafka", "PostgreSQL", "Redis", "payments infrastructure", "event-driven architecture", "financial data pipelines", "risk and fraud"],
+    "notStack": ["AWS Lambda", "DynamoDB", "Azure", "Salesforce CRM"],
+    "scaleRank": 8
+  },
+  "Amazon": {
+    "domain": "e_commerce",
+    "stack": ["AWS", "Lambda", "SQS", "S3", "DynamoDB", "EKS", "Java", "Kotlin", "Spring Boot", "PostgreSQL", "Kafka", "e-commerce backend", "supply chain", "distributed systems"],
+    "notStack": ["GCP", "Azure native services"],
+    "scaleRank": 10
+  },
+  "Google": {
+    "domain": "cloud_ai",
+    "stack": ["GCP", "Vertex AI", "BigQuery ML", "Pub/Sub", "GKE", "TensorFlow", "JAX", "Python", "Go", "ML platform", "large-scale model training", "Search", "Ads", "Maps", "YouTube", "feature stores", "recommendation systems", "LLM fine-tuning"],
+    "notStack": ["AWS", "Azure", "PyTorch (primary)"],
+    "scaleRank": 10
+  },
+  "Meta": {
+    "domain": "social_consumer",
+    "stack": ["PyTorch", "Presto", "Hive", "Spark", "FBLearner", "Python", "C++", "Kubernetes", "Hack", "social graph", "ads ranking", "real-time event processing", "React"],
+    "notStack": ["TensorFlow (primary)", "AWS native", "GCP native"],
+    "scaleRank": 10
+  },
+  "Microsoft": {
+    "domain": "enterprise_saas",
+    "stack": ["Azure", "AKS", "Event Hubs", "Cosmos DB", "Azure ML", "C#", ".NET", "TypeScript", "Python", "enterprise SaaS", "M365", "GitHub platform engineering", "Azure DevOps"],
+    "notStack": ["GCP", "AWS native services"],
+    "scaleRank": 10
+  },
+  "Apple": {
+    "domain": "consumer_hardware",
+    "stack": ["Swift", "Objective-C", "CoreML", "Metal", "on-device ML", "privacy-preserving inference", "App Store data pipelines", "Apple Music", "Maps"],
+    "notStack": ["Android", "AWS (primary)", "GCP (primary)"],
+    "scaleRank": 10
+  },
+  "Netflix": {
+    "domain": "streaming_media",
+    "stack": ["AWS", "Kafka", "Cassandra", "Spark", "Flink", "Java", "Python", "Go", "personalisation", "recommendation", "A/B experimentation", "streaming infrastructure", "chaos engineering"],
+    "notStack": ["GCP", "Azure"],
+    "scaleRank": 9
+  },
+  "Uber": {
+    "domain": "rideshare_logistics",
+    "stack": ["Kafka", "Flink", "Presto", "Cadence", "Kubernetes", "Go", "Java", "Python", "Michaelangelo ML platform", "PostgreSQL", "Redis", "marketplace dispatch", "geospatial platform", "pricing and demand forecasting"],
+    "notStack": ["Azure", "GCP native"],
+    "scaleRank": 9
+  },
+  "Lyft": {
+    "domain": "rideshare_logistics",
+    "stack": ["Kafka", "Flink", "AWS", "Snowflake", "Amundsen", "Python", "Java", "Go", "Kubernetes", "ride-share marketplace", "pricing and ETA prediction"],
+    "notStack": ["GCP", "Azure"],
+    "scaleRank": 7
+  },
+  "DoorDash": {
+    "domain": "rideshare_logistics",
+    "stack": ["Kafka", "Flink", "Snowflake", "AWS", "Kotlin", "Python", "Go", "Kubernetes", "last-mile delivery logistics", "real-time order routing", "ML for ETD and fraud"],
+    "notStack": ["GCP", "Azure"],
+    "scaleRank": 7
+  },
+  "Airbnb": {
+    "domain": "travel_hospitality",
+    "stack": ["Airflow", "Spark", "Presto", "Druid", "AWS", "Python", "Java", "Ruby", "Kubernetes", "Minerva metrics platform", "marketplace search and ranking", "pricing optimisation", "trust and safety"],
+    "notStack": ["GCP", "Azure"],
+    "scaleRank": 8
+  },
+  "Snowflake": {
+    "domain": "cloud_analytics",
+    "stack": ["Java", "C++", "Python", "multi-cloud", "query optimisation", "data sharing", "governance", "storage-compute separation"],
+    "notStack": [],
+    "scaleRank": 8
+  },
+  "Databricks": {
+    "domain": "cloud_analytics",
+    "stack": ["Apache Spark", "Delta Lake", "MLflow", "LLM fine-tuning", "Python", "Scala", "Java", "multi-cloud", "data lakehouse"],
+    "notStack": [],
+    "scaleRank": 7
+  },
+  "Palantir": {
+    "domain": "enterprise_analytics",
+    "stack": ["Foundry", "Gotham", "Java", "TypeScript", "ontology-driven data modelling", "government analytics", "enterprise analytics"],
+    "notStack": [],
+    "scaleRank": 6
+  },
+  "Salesforce": {
+    "domain": "enterprise_saas",
+    "stack": ["Apex", "Java", "Python", "Heroku", "MuleSoft", "Tableau", "Lightning Web Components", "CRM", "Sales Cloud", "Service Cloud", "Marketing Cloud"],
+    "notStack": ["AWS native (primary)", "GCP (primary)"],
+    "scaleRank": 9
+  },
+  "PayPal": {
+    "domain": "fintech",
+    "stack": ["Java", "Node.js", "Python", "AWS", "GCP", "Kafka", "PostgreSQL", "payments platform", "fraud detection", "checkout and wallet APIs"],
+    "notStack": ["Azure"],
+    "scaleRank": 8
+  },
+  "Capital One": {
+    "domain": "fintech",
+    "stack": ["AWS", "Python", "Java", "Spark", "Kafka", "Kubernetes", "consumer banking", "credit risk", "fraud analytics"],
+    "notStack": ["GCP", "Azure"],
+    "scaleRank": 8
+  },
+  "JPMorgan": {
+    "domain": "financial_services",
+    "stack": ["Java", ".NET", "Python", "AWS", "private cloud", "Kafka", "Oracle", "investment banking", "risk and compliance", "regulatory reporting"],
+    "notStack": ["GCP (primary)"],
+    "scaleRank": 10
+  },
+  "Goldman Sachs": {
+    "domain": "financial_services",
+    "stack": ["Java", "Python", "SecDB", "Marquee", "low-latency systems", "trading platform", "market data", "risk analytics"],
+    "notStack": ["GCP (primary)", "Azure (primary)"],
+    "scaleRank": 10
+  },
+  "UnitedHealth": {
+    "domain": "healthcare",
+    "stack": ["Java", "Python", ".NET", "AWS", "Kafka", "FHIR", "healthcare data platform", "claims processing", "HIPAA-compliant pipelines", "HL7"],
+    "notStack": ["GCP (primary)", "Azure (primary)"],
+    "scaleRank": 10
+  },
+  "CVS Health": {
+    "domain": "healthcare",
+    "stack": ["Java", "Python", "AWS", "Spark", "SQL", "pharmacy management", "benefits management", "healthcare analytics"],
+    "notStack": ["GCP (primary)"],
+    "scaleRank": 9
+  },
+  "Instacart": {
+    "domain": "e_commerce",
+    "stack": ["Python", "Go", "Kafka", "Spark", "Snowflake", "AWS", "ML for demand forecasting", "grocery delivery marketplace"],
+    "notStack": ["Azure", "GCP native"],
+    "scaleRank": 6
+  },
+  "Shopify": {
+    "domain": "e_commerce",
+    "stack": ["Ruby", "Go", "React", "MySQL", "Kafka", "Kubernetes", "GCP", "GraphQL", "e-commerce platform", "merchant systems", "checkout systems", "Polaris design system"],
+    "notStack": ["AWS (primary)", "Azure"],
+    "scaleRank": 8
+  },
+  "Datadog": {
+    "domain": "cloud_devtools",
+    "stack": ["Python", "Go", "Kubernetes", "AWS", "GCP", "Azure", "distributed tracing", "APM", "log management", "metrics pipelines"],
+    "notStack": [],
+    "scaleRank": 7
+  },
+  "Twilio": {
+    "domain": "cloud_devtools",
+    "stack": ["Python", "Ruby", "Java", "Node", "Kafka", "AWS", "REST APIs", "telephony", "messaging infrastructure"],
+    "notStack": ["GCP (primary)", "Azure (primary)"],
+    "scaleRank": 7
+  },
+  "HashiCorp": {
+    "domain": "cloud_devtools",
+    "stack": ["Go", "Terraform", "Vault", "Consul", "Nomad", "infrastructure-as-code"],
+    "notStack": [],
+    "scaleRank": 6
+  },
+  "MongoDB": {
+    "domain": "cloud_devtools",
+    "stack": ["JavaScript", "Python", "Java", "Atlas", "Realm", "document database", "aggregation pipelines"],
+    "notStack": [],
+    "scaleRank": 6
+  },
+  "Cloudflare": {
+    "domain": "cloud_devtools",
+    "stack": ["Rust", "Go", "TypeScript", "edge computing", "Workers", "DDoS mitigation", "CDN"],
+    "notStack": [],
+    "scaleRank": 7
+  },
+  "Okta": {
+    "domain": "cybersecurity",
+    "stack": ["Java", "Node", "OAuth 2.0", "SAML", "OIDC", "identity platform"],
+    "notStack": [],
+    "scaleRank": 7
+  },
+  "Palo Alto Networks": {
+    "domain": "cybersecurity",
+    "stack": ["Python", "C++", "Go", "NGFW", "SIEM", "SOAR", "Prisma Cloud", "Cortex XDR", "cloud security"],
+    "notStack": [],
+    "scaleRank": 8
+  },
+  "CrowdStrike": {
+    "domain": "cybersecurity",
+    "stack": ["Go", "Python", "Falcon platform", "EDR", "threat intelligence", "SIEM integration"],
+    "notStack": [],
+    "scaleRank": 8
+  },
+  "Walmart": {
+    "domain": "e_commerce",
+    "stack": ["Java", "Python", "Azure", "GCP", "Kafka", "Spark", "SAP", "retail analytics", "supply chain management"],
+    "notStack": ["AWS (primary)"],
+    "scaleRank": 10
+  },
+  "Target": {
+    "domain": "e_commerce",
+    "stack": ["Python", "Java", "GCP", "Kafka", "Spark", "retail analytics", "supply chain", "inventory management"],
+    "notStack": ["AWS (primary)", "Azure (primary)"],
+    "scaleRank": 9
+  },
+  "Wayfair": {
+    "domain": "e_commerce",
+    "stack": ["Python", "C#", ".NET", "AWS", "Kafka", "Spark", "Snowflake", "e-commerce platform", "furniture retail"],
+    "notStack": ["GCP (primary)"],
+    "scaleRank": 7
+  },
+  "Snap": {
+    "domain": "social_consumer",
+    "stack": ["Python", "Go", "Kotlin", "Swift", "GCP", "Pub/Sub", "Bigtable", "ML for AR and ads", "real-time messaging", "multimedia processing"],
+    "notStack": ["AWS (primary)", "Azure"],
+    "scaleRank": 8
+  },
+  "Pinterest": {
+    "domain": "social_consumer",
+    "stack": ["Python", "Java", "Go", "AWS", "Kafka", "Flink", "Hive", "Spark", "recommendation systems", "visual search"],
+    "notStack": ["GCP (primary)", "Azure"],
+    "scaleRank": 7
+  },
+  "LinkedIn": {
+    "domain": "social_consumer",
+    "stack": ["Java", "Python", "Kafka", "Samza", "Espresso", "Pinot", "Azure", "professional network", "feed ranking", "talent solutions"],
+    "notStack": ["GCP (primary)", "AWS (primary)"],
+    "scaleRank": 8
+  },
+  "Spotify": {
+    "domain": "streaming_media",
+    "stack": ["Python", "Java", "GCP", "BigQuery", "Pub/Sub", "Kafka", "Flink", "Luigi", "music recommendation", "podcast analytics", "A/B experimentation"],
+    "notStack": ["AWS (primary)", "Azure"],
+    "scaleRank": 8
+  },
+  "Stripe": {
+    "domain": "fintech",
+    "stack": ["GCP", "Pub/Sub", "BigQuery", "GKE", "Dataflow", "Python", "Go", "TypeScript", "payments infrastructure", "financial data pipelines", "risk and fraud"],
+    "notStack": ["AWS Lambda", "DynamoDB", "Azure"],
+    "scaleRank": 8
+  },
+  "Visa": {
+    "domain": "financial_services",
+    "stack": ["Java", "Python", "C++", "Oracle", "payments network", "fraud detection", "tokenisation", "settlement systems"],
+    "notStack": [],
+    "scaleRank": 10
+  },
+  "Mastercard": {
+    "domain": "financial_services",
+    "stack": ["Java", "Python", "Azure", "Oracle", "payments processing", "fraud analytics", "open banking APIs"],
+    "notStack": [],
+    "scaleRank": 10
+  },
+  "American Express": {
+    "domain": "financial_services",
+    "stack": ["Java", "Python", "AWS", "Spark", "Hadoop", "SAS", "credit risk", "fraud detection", "rewards platform"],
+    "notStack": ["GCP (primary)"],
+    "scaleRank": 9
+  },
+  "Fidelity": {
+    "domain": "asset_management",
+    "stack": ["Java", "Python", ".NET", "AWS", "Oracle", "SQL", "Bloomberg Terminal", "trading platform", "portfolio management", "retirement systems"],
+    "notStack": ["GCP (primary)"],
+    "scaleRank": 9
+  },
+  "BlackRock": {
+    "domain": "asset_management",
+    "stack": ["Python", "Java", "Aladdin", "Bloomberg", "FactSet", "SQL", "Tableau", "risk analytics", "portfolio attribution"],
+    "notStack": [],
+    "scaleRank": 10
+  },
+  "Epic Systems": {
+    "domain": "healthcare",
+    "stack": ["Cache", "MUMPS", "FHIR", "HL7", "EHR implementation methodology", "go-live readiness", "training delivery", "interface specifications"],
+    "notStack": ["AWS (primary)", "modern cloud stacks"],
+    "scaleRank": 8
+  },
+  "Turner Construction": {
+    "domain": "construction",
+    "stack": ["Procore", "Primavera P6", "Bluebeam Revu", "Autodesk Build", "Microsoft Project", "BIM 360", "Textura", "SharePoint"],
+    "notStack": ["PlanGrid (primary)", "CMiC"],
+    "scaleRank": 9
+  },
+  "Skanska": {
+    "domain": "construction",
+    "stack": ["Procore", "Primavera P6", "Bluebeam Revu", "BIM 360", "Microsoft Project", "Autodesk Construction Cloud"],
+    "notStack": [],
+    "scaleRank": 9
+  },
+  "AECOM": {
+    "domain": "construction",
+    "stack": ["Primavera P6", "BIM 360", "Oracle Aconex", "HCSS", "Trimble", "AutoCAD Civil 3D", "MicroStation"],
+    "notStack": ["Procore (primary)"],
+    "scaleRank": 9
+  },
+  "Accenture": {
+    "domain": "consulting",
+    "stack": ["MS Project", "ServiceNow", "Jira", "Azure DevOps", "PRINCE2", "PMP methodology", "SAP", "Salesforce", "client stakeholder management"],
+    "notStack": [],
+    "scaleRank": 9
+  },
+  "Deloitte": {
+    "domain": "consulting",
+    "stack": ["MS Project", "ServiceNow", "Tableau", "Alteryx", "SAP", "Salesforce", "Excel (advanced)", "Power BI", "process mapping"],
+    "notStack": [],
+    "scaleRank": 9
+  },
+  "McKinsey": {
+    "domain": "consulting",
+    "stack": ["Excel (advanced)", "PowerPoint", "Tableau", "Alteryx", "Miro", "Lean/Six Sigma", "data modelling"],
+    "notStack": [],
+    "scaleRank": 10
+  },
+  "The Trade Desk": {
+    "domain": "adtech",
+    "stack": ["Python", "C++", "Go", "AWS", "Kafka", "Spark", "DSP platform", "programmatic advertising", "bid optimisation", "data clean rooms"],
+    "notStack": ["GCP (primary)", "Azure (primary)"],
+    "scaleRank": 7
+  },
+  "Waymo": {
+    "domain": "autonomous_vehicles",
+    "stack": ["C++", "Python", "TensorFlow", "GCP", "Vertex AI", "ROS", "lidar processing", "simulation", "sensor fusion"],
+    "notStack": ["AWS (primary)", "Azure"],
+    "scaleRank": 7
+  },
+  "Coursera": {
+    "domain": "edtech",
+    "stack": ["Python", "Java", "AWS", "Spark", "MySQL", "Kafka", "React", "learning management", "recommendation systems", "A/B testing"],
+    "notStack": ["GCP (primary)", "Azure"],
+    "scaleRank": 7
+  },
+  "Zillow": {
+    "domain": "real_estate",
+    "stack": ["Python", "Java", "AWS", "Spark", "Kafka", "Redshift", "real estate valuation (Zestimate)", "recommendation systems", "geospatial analytics"],
+    "notStack": ["GCP (primary)", "Azure"],
+    "scaleRank": 7
+  },
+  "Optum": {
+    "domain": "healthcare",
+    "stack": ["Java", "Python", ".NET", "AWS", "Kafka", "FHIR", "HL7", "claims analytics", "HIPAA-compliant data pipelines", "SAS"],
+    "notStack": ["GCP (primary)"],
+    "scaleRank": 8
+  },
+  "Cigna": {
+    "domain": "healthcare",
+    "stack": ["Java", "Python", ".NET", "AWS", "Facets", "QNXT", "HIPAA compliance", "claims processing", "clinical data analytics"],
+    "notStack": ["GCP (primary)"],
+    "scaleRank": 8
+  },
+  "Humana": {
+    "domain": "healthcare",
+    "stack": ["Java", "Python", "AWS", "SAS", "SQL", "claims analytics", "HIPAA compliance", "health plan management"],
+    "notStack": [],
+    "scaleRank": 8
+  },
+  "Pfizer": {
+    "domain": "pharma",
+    "stack": ["Veeva", "CTMS", "SAS", "R", "Python", "21 CFR Part 11", "clinical trial management", "regulatory submissions"],
+    "notStack": [],
+    "scaleRank": 10
+  },
+  "FedEx": {
+    "domain": "logistics",
+    "stack": ["Java", ".NET", "Python", "Oracle TM", "Manhattan WMS", "SQL", "Tableau", "route optimisation", "package tracking"],
+    "notStack": [],
+    "scaleRank": 9
+  },
+  "Flexport": {
+    "domain": "logistics",
+    "stack": ["Python", "Ruby", "Go", "AWS", "Kafka", "PostgreSQL", "React", "freight forwarding", "customs management", "supply chain visibility"],
+    "notStack": ["GCP (primary)", "Azure"],
+    "scaleRank": 6
+  },
+  "ServiceNow": {
+    "domain": "enterprise_saas",
+    "stack": ["ServiceNow platform", "JavaScript", "Java", "GCP", "ITSM", "ITOM", "HRSD", "CSM", "workflow automation"],
+    "notStack": ["AWS (primary)", "Azure (primary)"],
+    "scaleRank": 8
+  },
+  "Workday": {
+    "domain": "enterprise_saas",
+    "stack": ["Workday HCM", "Workday Financials", "XSLT", "Java", "AWS", "HR management", "financial planning", "payroll"],
+    "notStack": ["GCP (primary)", "Azure (primary)"],
+    "scaleRank": 8
+  },
+  "HubSpot": {
+    "domain": "marketing_saas",
+    "stack": ["Java", "Python", "JavaScript", "AWS", "Kafka", "PostgreSQL", "CRM", "Marketing Hub", "Sales Hub", "Semrush integration"],
+    "notStack": ["GCP (primary)", "Azure (primary)"],
+    "scaleRank": 7
+  }
+}
