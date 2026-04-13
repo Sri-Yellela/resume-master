@@ -594,9 +594,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [atsExpanded,   setAtsExpanded]   = useState(false);
 
-  // Split view — splitWidth is the COLLAPSED LIST width (detail gets flex:1)
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [splitWidth,  setSplitWidth]  = useState(240);
+  // Split view — splitPercent is the COLLAPSED LIST width as % of the container.
+  // Detail gets flex:1. Survives job-card switches (state stays mounted).
+  const [selectedJob,  setSelectedJob]  = useState(null);
+  const [splitPercent, setSplitPercent] = useState(40); // 40% list / 60% detail default
   const isDraggingRef     = useRef(false);
   const splitContainerRef = useRef(null);
 
@@ -717,15 +718,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     return () => window.removeEventListener("keydown", handler);
   }, [selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Resizable split divider — drag controls the COLLAPSED LIST width
+  // Resizable split divider — drag controls the COLLAPSED LIST % of container
   const handleDividerMouseDown = useCallback((e) => {
     e.preventDefault();
     isDraggingRef.current = true;
     const onMove = (me) => {
       if (!isDraggingRef.current || !splitContainerRef.current) return;
-      const containerRect = splitContainerRef.current.getBoundingClientRect();
-      const newWidth = me.clientX - containerRect.left;
-      setSplitWidth(Math.max(160, Math.min(420, newWidth)));
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const newPct = ((me.clientX - rect.left) / rect.width) * 100;
+      setSplitPercent(Math.max(15, Math.min(70, newPct)));
     };
     const onUp = () => {
       isDraggingRef.current = false;
@@ -1438,7 +1439,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             {/* List column: full-width when no job selected; narrows to give detail more room */}
             <div style={{
               ...(selectedJob
-                ? { width:splitWidth, flexShrink:0, minWidth:0 }
+                ? { width:`${splitPercent}%`, flexShrink:0, minWidth:0 }
                 : { flex:1, minWidth:220 }),
               display:"flex", flexDirection:"column", overflow:"hidden"
             }}>
@@ -1552,7 +1553,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             {/* List column: full-width when no job selected; narrows to give detail more room */}
             <div style={{
               ...(selectedJob
-                ? { width:splitWidth, flexShrink:0, minWidth:0 }
+                ? { width:`${splitPercent}%`, flexShrink:0, minWidth:0 }
                 : { flex:1, minWidth:220 }),
               display:"flex", flexDirection:"column", overflow:"hidden"
             }}>
