@@ -82,47 +82,12 @@ export function buildApifyQueries(canonicalRole, classifierResult, qualTemplates
     .slice(0, 5);
 }
 
-// Port of isTitleRelevant() from server.js, extended to all role families.
-// TITLE RELEVANCE: requires BOTH function word match AND domain word match when present in query.
-// If query has a function word (engineer/manager/analyst/etc.) it must appear in title.
-// If query has a domain word (software/data/product/etc.) it or a synonym must appear in title.
-// Generic titles with no matching domain (Secretary, Agent, etc.) are correctly rejected.
+// TITLE RELEVANCE: ALL meaningful query tokens must appear in the job title (strict AND match).
+// "Project Coordinator" → tokens ["project","coordinator"] → both must be in title.
 export function isTitleRelevant(title, query) {
   if (!title || !query) return true;
-
-  // FUNCTION_WORDS: job type indicators — NOT in STOP_WORDS so they can be matched
-  const FUNCTION_WORDS = new Set([
-    "engineer","developer","scientist","analyst","manager","designer",
-    "architect","consultant","specialist","researcher","administrator",
-    "technician","recruiter","accountant","attorney","nurse","officer",
-    "planner","strategist","writer","programmer","instructor","teacher",
-    "coordinator","director","producer","editor","illustrator","animator",
-  ]);
-
-  // DOMAIN_SYNONYMS: for a domain word in the query, accept these in the title too
-  const DOMAIN_SYNONYMS = {
-    software:  ["software","web","frontend","backend","fullstack","application","app"],
-    machine:   ["machine","ml","deep","learning","neural","ai","artificial"],
-    data:      ["data","analytics","bi","database","warehouse"],
-    product:   ["product"],
-    devops:    ["devops","devsecops","platform","infrastructure","sre","reliability"],
-    security:  ["security","cybersecurity","infosec","appsec","devsecops"],
-    mobile:    ["mobile","ios","android","flutter","react"],
-    cloud:     ["cloud","infrastructure","platform","azure","aws","gcp"],
-    hardware:  ["hardware","electrical","electronics","embedded","firmware"],
-    network:   ["network","networking","systems","telecom"],
-    game:      ["game","gaming","unity","unreal"],
-    marketing: ["marketing","growth","digital","seo","content"],
-    finance:   ["finance","financial","accounting","treasury","investment"],
-    sales:     ["sales","revenue","business","account"],
-  };
-
-  // STOP_WORDS for tokenisation — intentionally does NOT include function words
-  const STOP_WORDS = new Set([
-    "the","and","for","with","senior","junior","staff","principal",
-    "lead","associate","head","vp","svp","evp","entry","level",
-    "remote","hybrid","onsite","part","time","full","contract",
-  ]);
+  const t = title.toLowerCase().trim();
+  const q = query.toLowerCase().trim();
 
   const TYPO_MAP = {
     "enginere":"engineer","enigneer":"engineer","enginerd":"engineer",
@@ -133,39 +98,22 @@ export function isTitleRelevant(title, query) {
     "maching":"machine","machien":"machine",
   };
 
-  function tokenise(s) {
-    return s.toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .split(" ")
-      .map(w => TYPO_MAP[w] || w)
-      .filter(w => w.length > 2 && !STOP_WORDS.has(w));
-  }
+  const normTerm = w => TYPO_MAP[w] || w;
 
-  const titleTokens = new Set(tokenise(title));
-  const queryTokens = tokenise(query);
+  const stopWords = new Set([
+    "the","and","for","with","ing","a","an","of","in",
+    "at","by","to","or","senior","junior","staff",
+    "principal","lead","associate","assistant","entry",
+    "level","mid","ii","iii","iv","i",
+  ]);
 
-  if (queryTokens.length === 0) return true;
+  const tokens = q
+    .split(/[\s,/\-]+/)
+    .filter(w => w.length > 2 && !stopWords.has(w))
+    .map(normTerm);
 
-  // Separate function words from domain words in the query
-  const queryFnWords  = queryTokens.filter(t => FUNCTION_WORDS.has(t));
-  const queryDomWords = queryTokens.filter(t => !FUNCTION_WORDS.has(t) && t.length > 2);
+  if (tokens.length === 0) return true;
 
-  // Function word check: if query has function words, at least one must appear in title
-  let fnMatch = queryFnWords.length === 0; // trivially pass if no function words in query
-  for (const fw of queryFnWords) {
-    if (titleTokens.has(fw)) { fnMatch = true; break; }
-  }
-
-  // Domain word check: if query has domain words, at least one (or synonym) must appear in title
-  let domMatch = queryDomWords.length === 0; // trivially pass if no domain words in query
-  for (const dw of queryDomWords) {
-    if (titleTokens.has(dw)) { domMatch = true; break; }
-    const syns = DOMAIN_SYNONYMS[dw] || [];
-    if (syns.some(s => titleTokens.has(s))) { domMatch = true; break; }
-  }
-
-  // Both must match when present in query
-  return fnMatch && domMatch;
+  // Every token must appear in the title — strict AND match
+  return tokens.every(token => t.includes(token));
 }

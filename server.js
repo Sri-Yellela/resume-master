@@ -669,11 +669,24 @@ function normaliseItem(raw) {
     raw.datePosted  ||
     null;
 
-  const jobType =
-    raw.contractType    ||
-    raw.employmentType  ||
-    raw.jobType         ||
-    "";
+  const EMP_TYPE_MAP = {
+    "full_time":  "full-time",
+    "part_time":  "part-time",
+    "full-time":  "full-time",
+    "part-time":  "part-time",
+    "contract":   "contract",
+    "internship": "internship",
+    "temporary":  "temporary",
+    "temp":       "temporary",
+    "other":      "full-time",
+  };
+  const rawJobType = (
+    raw.contractType   ||
+    raw.employmentType ||
+    raw.jobType        ||
+    ""
+  ).toLowerCase().replace(/\s+/g, "_");
+  const jobType = EMP_TYPE_MAP[rawJobType] || (rawJobType ? "full-time" : "");
 
   // Salary — HarvestAPI provides nested object or null
   const salaryMin      = raw.salary?.min      ?? null;
