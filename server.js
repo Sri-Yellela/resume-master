@@ -818,6 +818,23 @@ async function scrapeHarvestAPI(query, token) {
   const dataset = await client.dataset(run.defaultDatasetId).listItems({ limit: MAX_JOBS_PER_REFRESH * 3 });
   const items = Array.isArray(dataset.items) ? dataset.items : [];
   console.log(`[scrape] HarvestAPI returned ${items.length} raw items`);
+  console.log('[scrape] RAW SAMPLE (first 20 items):',
+    JSON.stringify(
+      items.slice(0, 20).map(item => ({
+        id:             item.id ?? item.jobId,
+        title:          item.title ?? item.jobTitle,
+        company:        item.company?.name ?? item.companyName,
+        employmentType: item.contractType ?? item.employmentType
+                        ?? item.jobType,
+        workplaceType:  item.workplaceType ?? item.workplaceTypes,
+        applyUrl:       item.applyMethod?.companyApplyUrl
+                        ?? item.applyUrl ?? item.apply_url,
+        url:            item.linkedinUrl ?? item.url,
+        postedAt:       item.listingDate ?? item.listedAt
+                        ?? item.postedAt,
+      })),
+    null, 2)
+  );
   return items;
 }
 
@@ -863,6 +880,25 @@ async function scrapeJobs(query, apifyToken) {
     ` (missingTitleOrCompany:${cntNoTitle} noExternalApplyUrl:${cntNoApply} notFullTime:${cntNotFT}` +
     ` titleIrrelevant:${cntIrrelevant} repost:${cntRepost} ghostScore:${cntGhost} duplicate:${cntDup})`
   );
+  console.log('[scrape] FILTERED BREAKDOWN:');
+  combined.slice(0, 30).forEach(item => {
+    const title    = item.title || '';
+    const jobType  = [item.title, item.jobType,
+                      item.description?.slice(0,100)]
+                     .join(' ').toLowerCase();
+    const isNonFT  = NON_FULLTIME_TERMS.some(t =>
+                       jobType.includes(t));
+    const relevant = isTitleRelevantNew(item.title,
+                       item._searchQuery || '');
+    console.log({
+      title,
+      employmentType: item.contractType ?? item.employmentType
+                      ?? item.jobType ?? 'unknown',
+      isNonFT,
+      relevant,
+      kept: !isNonFT && relevant,
+    });
+  });
 
   const classified = [];
   for (let i = 0; i < Math.min(filtered.length, MAX_JOBS_PER_REFRESH); i += 5) {
