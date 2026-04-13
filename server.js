@@ -1532,7 +1532,12 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     filterParams.push(maxApplicants);
   }
 
-  if (req.query.starred === "1") { conditions.push(`uj.starred = 1`); }
+  if (req.query.starred === "1") {
+    conditions.push(`uj.starred = 1`);
+  } else {
+    // Hide starred/saved jobs from All Jobs view — they appear in the Saved tab
+    conditions.push(`(uj.starred IS NULL OR uj.starred = 0)`);
+  }
 
   const visitedParam = (req.query.visited || "").trim();
   if (visitedParam === "0") {
@@ -1778,7 +1783,7 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
   const userId = req.user.id;
   const rows = db.prepare(`
     SELECT sj.*, uj.starred, uj.applied, uj.disliked, uj.visited, uj.resume_generated,
-           r.ats_score, r.apply_mode
+           r.ats_score, r.ats_report, r.html as resume_html, r.apply_mode
     FROM scraped_jobs sj
     JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id

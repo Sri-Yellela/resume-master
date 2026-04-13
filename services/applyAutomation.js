@@ -1,4 +1,4 @@
-// services/applyAutomation.js — Server-side Playwright apply automation
+// services/applyAutomation.js — Server-side Puppeteer apply automation
 // Replaces the Chrome extension form-fill logic with a Node.js service.
 //
 // autoApply(jobUrl, autofillData, options) — main entry point
@@ -8,7 +8,8 @@
 //   options.resumePath:      absolute path to PDF resume for upload
 //   options.storageStatePath: saved session state file
 
-import { chromium } from "playwright";
+import puppeteer  from "puppeteer-core";
+import chromium   from "@sparticuz/chromium";
 import path  from "path";
 import fs    from "fs";
 import { fileURLToPath } from "url";
@@ -163,10 +164,10 @@ async function fillContext(pageOrFrame, autofillData, labelMap) {
 async function handleResumeUpload(page, resumePath) {
   if (!resumePath || !fs.existsSync(resumePath)) return;
   try {
-    const inputs = await page.locator("input[type='file']").all();
+    const inputs = await page.$$("input[type='file']");
     if (inputs.length > 0) {
-      await inputs[0].setInputFiles(resumePath);
-      await page.waitForTimeout(800);
+      await inputs[0].uploadFile(resumePath);
+      await new Promise(r => setTimeout(r, 800));
     }
   } catch (e) {
     console.warn("[applyAutomation] file upload:", e.message);
@@ -175,11 +176,15 @@ async function handleResumeUpload(page, resumePath) {
 
 const NEXT_RE = /^(next|continue|proceed|save and continue|save & continue|next step)/i;
 async function clickNext(page) {
-  for (const btn of await page.locator("button,input[type='button'],input[type='submit'],a[role='button']").all()) {
+  for (const btn of await page.$$("button,input[type='button'],input[type='submit'],a[role='button']")) {
     try {
-      const txt = ((await btn.textContent()) || "").trim();
-      if (NEXT_RE.test(txt) && await btn.isVisible()) {
-        await btn.click(); await page.waitForTimeout(1500); return true;
+      const txt = (await btn.evaluate(el => el.textContent || "")).trim();
+      const visible = await btn.evaluate(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      if (NEXT_RE.test(txt) && visible) {
+        await btn.click(); await new Promise(r => setTimeout(r, 1500)); return true;
       }
     } catch {}
   }
@@ -209,28 +214,52 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
   } = options;
 
   const isFullAuto = mode === "full";
-  let browser, context, page;
+  let browser, page;
 
   try {
     console.log(`[autoApply] launching browser — mode=${mode} url=${jobUrl}`);
-    browser = await chromium.launch({
-      headless: isFullAuto,
-      args: ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage"],
+
+    const isWindows = process.platform === "win32";
+    let executablePath, launchArgs;
+    if (isWindows) {
+      const winPaths = [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        (process.env.LOCALAPPDATA || "") + "\\Google\\Chrome\\Application\\chrome.exe",
+      ];
+      executablePath = winPaths.find(p => { try { return fs.existsSync(p); } catch { return false; } });
+      if (!executablePath) throw new Error("Chrome not found on Windows.");
+      launchArgs = ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu"];
+    } else {
+      executablePath = await chromium.executablePath();
+      launchArgs = [...chromium.args, "--single-process"];
+    }
+    browser = await puppeteer.launch({
+      args:            launchArgs,
+      defaultViewport: isWindows ? { width: 1280, height: 800 } : chromium.defaultViewport,
+      executablePath,
+      headless:        isFullAuto || !isWindows,
     });
     console.log("[autoApply] browser launched");
 
-    const ctxOpts = {};
+    page = await browser.newPage();
+    // Restore cookies from session state file if provided
     if (storageStatePath && fs.existsSync(storageStatePath)) {
-      ctxOpts.storageState = storageStatePath;
+      try {
+        const state = JSON.parse(fs.readFileSync(storageStatePath, "utf8"));
+        if (Array.isArray(state.cookies) && state.cookies.length > 0) {
+          await page.setCookie(...state.cookies);
+        }
+      } catch (e) {
+        console.warn("[autoApply] could not restore session state:", e.message);
+      }
     }
-    context = await browser.newContext(ctxOpts);
-    page    = await context.newPage();
 
     inProgress.set(String(jobId), { status: "navigating", browser });
     console.log(`[autoApply] navigating to ${jobUrl}`);
 
     await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(1500);
+    await new Promise(r => setTimeout(r, 1500));
 
     const detected  = platform || detectPlatformFromUrl(jobUrl) || await detectPlatformFromPage(page);
     const labelMap  = getPlatformLabelMap(detected);
@@ -262,11 +291,15 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       inProgress.set(String(jobId), { status: "submitting", browser });
       const SUBMIT_RE = /^(submit|apply|apply now|submit application|send application)/i;
       let submitted = false;
-      for (const btn of await page.locator("button,input[type='submit']").all()) {
+      for (const btn of await page.$$("button,input[type='submit']")) {
         try {
-          const txt = ((await btn.textContent()) || "").trim();
-          if (SUBMIT_RE.test(txt) && await btn.isVisible()) {
-            await btn.click(); await page.waitForTimeout(2000); submitted = true; break;
+          const txt = (await btn.evaluate(el => el.textContent || "")).trim();
+          const visible = await btn.evaluate(el => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+          });
+          if (SUBMIT_RE.test(txt) && visible) {
+            await btn.click(); await new Promise(r => setTimeout(r, 2000)); submitted = true; break;
           }
         } catch {}
       }

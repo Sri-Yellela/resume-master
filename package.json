@@ -9,7 +9,6 @@
     "start": "node server.js",
     "build": "cd client && npm install && npm run build",
     "setup": "npm install && npm run build",
-    "postinstall": "npx playwright install chromium --with-deps",
     "migrate": "node scripts/migrate.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/backup.js restore"
@@ -30,7 +29,6 @@
     "node-cron": "^3.0.3",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
-    "playwright": "^1.59.1",
     "puppeteer-core": "^24.40.0"
   },
   "engines": {

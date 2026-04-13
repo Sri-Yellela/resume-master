@@ -83,26 +83,55 @@ export function buildApifyQueries(canonicalRole, classifierResult, qualTemplates
 }
 
 // Port of isTitleRelevant() from server.js, extended to all role families.
-// roleKeywords is derived dynamically from ROLE_ALIAS_MAP canonical titles.
-// To add new role families: add entries to ROLE_ALIAS_MAP.json.
+// TITLE RELEVANCE: requires BOTH function word match AND domain word match when present in query.
+// If query has a function word (engineer/manager/analyst/etc.) it must appear in title.
+// If query has a domain word (software/data/product/etc.) it or a synonym must appear in title.
+// Generic titles with no matching domain (Secretary, Agent, etc.) are correctly rejected.
 export function isTitleRelevant(title, query) {
   if (!title || !query) return true;
+
+  // FUNCTION_WORDS: job type indicators — NOT in STOP_WORDS so they can be matched
+  const FUNCTION_WORDS = new Set([
+    "engineer","developer","scientist","analyst","manager","designer",
+    "architect","consultant","specialist","researcher","administrator",
+    "technician","recruiter","accountant","attorney","nurse","officer",
+    "planner","strategist","writer","programmer","instructor","teacher",
+    "coordinator","director","producer","editor","illustrator","animator",
+  ]);
+
+  // DOMAIN_SYNONYMS: for a domain word in the query, accept these in the title too
+  const DOMAIN_SYNONYMS = {
+    software:  ["software","web","frontend","backend","fullstack","application","app"],
+    machine:   ["machine","ml","deep","learning","neural","ai","artificial"],
+    data:      ["data","analytics","bi","database","warehouse"],
+    product:   ["product"],
+    devops:    ["devops","devsecops","platform","infrastructure","sre","reliability"],
+    security:  ["security","cybersecurity","infosec","appsec","devsecops"],
+    mobile:    ["mobile","ios","android","flutter","react"],
+    cloud:     ["cloud","infrastructure","platform","azure","aws","gcp"],
+    hardware:  ["hardware","electrical","electronics","embedded","firmware"],
+    network:   ["network","networking","systems","telecom"],
+    game:      ["game","gaming","unity","unreal"],
+    marketing: ["marketing","growth","digital","seo","content"],
+    finance:   ["finance","financial","accounting","treasury","investment"],
+    sales:     ["sales","revenue","business","account"],
+  };
+
+  // STOP_WORDS for tokenisation — intentionally does NOT include function words
+  const STOP_WORDS = new Set([
+    "the","and","for","with","senior","junior","staff","principal",
+    "lead","associate","head","vp","svp","evp","entry","level",
+    "remote","hybrid","onsite","part","time","full","contract",
+  ]);
 
   const TYPO_MAP = {
     "enginere":"engineer","enigneer":"engineer","enginerd":"engineer",
     "sofware":"software","softwar":"software",
     "developr":"developer","devloper":"developer",
     "maneger":"manager","mangager":"manager","manger":"manager",
-    "progam":"program","proejct":"project",
     "analist":"analyst","analst":"analyst",
     "maching":"machine","machien":"machine",
   };
-
-  const STOP_WORDS = new Set([
-    "the","and","for","with","ing","senior","junior","staff","principal",
-    "lead","associate","manager","engineer","specialist","coordinator",
-    "director","executive","officer","head","vp","svp","evp",
-  ]);
 
   function tokenise(s) {
     return s.toLowerCase()
@@ -114,33 +143,29 @@ export function isTitleRelevant(title, query) {
       .filter(w => w.length > 2 && !STOP_WORDS.has(w));
   }
 
-  const titleTokens = tokenise(title);
+  const titleTokens = new Set(tokenise(title));
   const queryTokens = tokenise(query);
 
   if (queryTokens.length === 0) return true;
 
-  // Build dynamic role keywords from ROLE_ALIAS_MAP canonical titles
-  const map = getAliasMap();
-  const roleKeywords = new Set();
-  for (const entry of Object.values(map)) {
-    if (entry.canonical) {
-      tokenise(entry.canonical).forEach(t => roleKeywords.add(t));
-    }
+  // Separate function words from domain words in the query
+  const queryFnWords  = queryTokens.filter(t => FUNCTION_WORDS.has(t));
+  const queryDomWords = queryTokens.filter(t => !FUNCTION_WORDS.has(t) && t.length > 2);
+
+  // Function word check: if query has function words, at least one must appear in title
+  let fnMatch = queryFnWords.length === 0; // trivially pass if no function words in query
+  for (const fw of queryFnWords) {
+    if (titleTokens.has(fw)) { fnMatch = true; break; }
   }
-  // Add common role-class keywords not in the alias map
-  [
-    "engineer","developer","scientist","analyst","manager","designer",
-    "architect","consultant","specialist","coordinator","director",
-    "associate","researcher","planner","administrator","officer",
-    "technician","inspector","estimator","superintendent",
-    "accountant","auditor","controller","attorney","counsel",
-    "recruiter","buyer","planner","strategist","writer",
-  ].forEach(k => roleKeywords.add(k));
 
-  // A title is relevant if it shares at least one meaningful token with the query,
-  // OR if it contains at least one known role-class keyword
-  const sharedWithQuery = queryTokens.some(qt => titleTokens.includes(qt));
-  const hasRoleKeyword  = titleTokens.some(t  => roleKeywords.has(t));
+  // Domain word check: if query has domain words, at least one (or synonym) must appear in title
+  let domMatch = queryDomWords.length === 0; // trivially pass if no domain words in query
+  for (const dw of queryDomWords) {
+    if (titleTokens.has(dw)) { domMatch = true; break; }
+    const syns = DOMAIN_SYNONYMS[dw] || [];
+    if (syns.some(s => titleTokens.has(s))) { domMatch = true; break; }
+  }
 
-  return sharedWithQuery || hasRoleKeyword;
+  // Both must match when present in query
+  return fnMatch && domMatch;
 }

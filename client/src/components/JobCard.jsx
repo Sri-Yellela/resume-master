@@ -181,6 +181,7 @@ export default function JobCard({
   onSelect,           // split-view: select this card (replaces expand)
   selected,           // split-view: this card is selected
   compact,            // split-view: tighter layout
+  panelWidth = 400,
 }) {
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -214,6 +215,15 @@ export default function JobCard({
     setExpanded(prev => !prev);
   };
 
+  // RESPONSIVE TIERS: width >= 280px = full layout (Tier 1)
+  // 180-279px = condensed two-row (Tier 2)
+  // < 180px = logo + company name only (Tier 3)
+  // Width is measured on the panel container via ResizeObserver in the parent panel
+  // component and passed down as panelWidth prop. To change breakpoints edit
+  // TIER_BREAKPOINTS constant below.
+  const TIER_BREAKPOINTS = { tier2: 280, tier3: 180 };
+  const tier = panelWidth >= TIER_BREAKPOINTS.tier2 ? 1 : panelWidth >= TIER_BREAKPOINTS.tier3 ? 2 : 3;
+
   return (
     <div
       onMouseEnter={() => setHov(true)}
@@ -246,141 +256,213 @@ export default function JobCard({
         backgroundSize:"160px 160px",
       }}/>
 
-      {/* ── Collapsed row ────────────────────────────────────── */}
-      <div onClick={handleCardClick}
-        style={{ padding: compact ? "10px 14px" : "14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer", position:"relative", zIndex:1 }}>
+      {/* ── Tier 3: logo + company name only (< 180px) ── */}
+      {tier === 3 && (
+        <div onClick={handleCardClick}
+          title={`${job.company} — ${job.title}`}
+          style={{ padding:"8px 10px", display:"flex", flexDirection:"column",
+                   alignItems:"center", gap:4, cursor:"pointer", position:"relative", zIndex:1,
+                   transition:"opacity 0.15s ease" }}>
+          <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={36}/>
+          <span style={{ fontSize:10, fontWeight:700, color:theme.text, textAlign:"center",
+                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                         width:"100%", maxWidth:120 }}>
+            {job.company}
+          </span>
+        </div>
+      )}
 
-        {/* Company icon */}
-        <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={48}/>
+      {/* ── Tier 2: condensed two-row (180–279px) ── */}
+      {tier === 2 && (
+        <div onClick={handleCardClick}
+          style={{ padding:"10px 12px", display:"flex", alignItems:"center", gap:10,
+                   cursor:"pointer", position:"relative", zIndex:1,
+                   transition:"opacity 0.15s ease" }}>
+          <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={36}/>
+          <div style={{ flex:1, minWidth:0 }}>
+            {/* Row 1: company + age + ATS + star + dislike */}
+            <div style={{ display:"flex", alignItems:"center", gap:4, marginBottom:3 }}>
+              <span style={{ fontWeight:700, fontSize:12, color:theme.text,
+                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1, minWidth:0 }}>
+                {job.company}
+              </span>
+              <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt)}</span>
+              {g?.atsScore != null && <ATSBadge score={g.atsScore} onClick={onAts}/>}
+              {onStar && (
+                <button title={job.starred ? "Remove from saved" : "Save job"}
+                  onClick={e => { e.stopPropagation(); onStar(); }}
+                  style={{ width:28, height:28, minWidth:28, borderRadius:"50%",
+                    background: job.starred ? "#f59e0b22" : "transparent",
+                    border: job.starred ? "2px solid #f59e0b" : `2px solid ${theme.border}`,
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    cursor:"pointer", fontSize:12, color: job.starred ? "#f59e0b" : theme.textDim,
+                    transition:"all 0.2s", flexShrink:0 }}>
+                  {job.starred ? "★" : "☆"}
+                </button>
+              )}
+              {showDislike && onDislike && (
+                <button title="Not interested"
+                  onClick={e => { e.stopPropagation(); onDislike(); }}
+                  style={{ width:28, height:28, minWidth:28, borderRadius:"50%",
+                    background: job.disliked ? "#fef2f2" : "transparent",
+                    border: job.disliked ? "2px solid #dc2626" : `2px solid ${theme.border}`,
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    cursor:"pointer", color: job.disliked ? "#dc2626" : theme.textDim,
+                    transition:"all 0.2s", flexShrink:0 }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                    <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+            {/* Row 2: job title */}
+            <div style={{ fontSize:11, color:theme.textMuted,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {job.title}
+            </div>
+          </div>
+        </div>
+      )}
 
-        {/* Center info */}
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-            <span style={{ fontWeight:700, fontSize:14, color:theme.text,
-                            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-              {job.company}
-            </span>
-            {job.alreadyApplied && (
-              <span title="Applied" style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>✓APPLIED</span>
-            )}
-            {!job.alreadyApplied && job.companyAppliedBefore && (
-              <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>↩prev</span>
-            )}
-            {job.visited && (
-              <span style={{ fontSize:9, color:theme.textDim, background:theme.surfaceHigh,
-                              padding:"1px 6px", borderRadius:999 }}>visited</span>
-            )}
+      {/* ── Tier 1: full layout (>= 280px) — unchanged ── */}
+      {tier === 1 && (
+        <div onClick={handleCardClick}
+          style={{ padding: compact ? "10px 14px" : "14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer", position:"relative", zIndex:1 }}>
+
+          {/* Company icon */}
+          <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={48}/>
+
+          {/* Center info */}
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
+              <span style={{ fontWeight:700, fontSize:14, color:theme.text,
+                              overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {job.company}
+              </span>
+              {job.alreadyApplied && (
+                <span title="Applied" style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>✓APPLIED</span>
+              )}
+              {!job.alreadyApplied && job.companyAppliedBefore && (
+                <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>↩prev</span>
+              )}
+              {job.visited && (
+                <span style={{ fontSize:9, color:theme.textDim, background:theme.surfaceHigh,
+                                padding:"1px 6px", borderRadius:999 }}>visited</span>
+              )}
+            </div>
+            <div style={{ fontSize:12, color:theme.textMuted, marginBottom:6,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {job.title}
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
+              <WorkBadge t={job.workType} theme={theme}/>
+              <span style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>
+              </span>
+              {job.location && (
+                <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>
+              )}
+              {yoeStr && (
+                <span style={{ fontSize:10, color:theme.textDim }}>{yoeStr} exp</span>
+              )}
+              {salaryStr && (
+                <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>
+              )}
+              {!salaryStr && job.compensation && (
+                <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>
+              )}
+              {job.applicantCount != null && (
+                <span style={{ fontSize:10, color:theme.textDim }}>
+                  {job.applicantCount > 200 ? "200+ applicants" : `${job.applicantCount} applicants`}
+                </span>
+              )}
+            </div>
           </div>
-          <div style={{ fontSize:12, color:theme.textMuted, marginBottom:6,
-                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-            {job.title}
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
-            <WorkBadge t={job.workType} theme={theme}/>
-            <span style={{ display:"flex", alignItems:"center", gap:4 }}>
-              <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>
-            </span>
-            {job.location && (
-              <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>
+
+          {/* Right side */}
+          <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
+            <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
+
+            {g?.atsScore != null && (
+              <ATSBadge score={g.atsScore} onClick={onAts}/>
             )}
-            {yoeStr && (
-              <span style={{ fontSize:10, color:theme.textDim }}>{yoeStr} exp</span>
-            )}
-            {salaryStr && (
-              <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>
-            )}
-            {!salaryStr && job.compensation && (
-              <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>
-            )}
-            {job.applicantCount != null && (
-              <span style={{ fontSize:10, color:theme.textDim }}>
-                {job.applicantCount > 200 ? "200+ applicants" : `${job.applicantCount} applicants`}
+            {done && (
+              <span onClick={onResume ? e => { e.stopPropagation(); onResume(); } : undefined}
+                style={{ background:"#e8f6fb", color:"#1a6a8a", padding:"2px 8px",
+                         borderRadius:999, fontSize:10, fontWeight:700, cursor:"pointer",
+                         border:"1px solid #A8D8EA44", display:"inline-flex", alignItems:"center", gap:3 }}>
+                {st==="loading" ? "⏳" : "📄"} Resume
               </span>
             )}
+
+            {/* Star */}
+            {onStar && (
+              <button title={job.starred ? "Remove from saved" : "Save job"}
+                onClick={e => { e.stopPropagation(); onStar(); }}
+                style={{
+                  width:30, height:30, borderRadius:"50%",
+                  background: job.starred ? "#f59e0b22" : "transparent",
+                  border: job.starred ? "2px solid #f59e0b" : `2px solid ${theme.border}`,
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  cursor:"pointer", fontSize:14,
+                  color: job.starred ? "#f59e0b" : theme.textDim,
+                  transition:"all 0.2s", flexShrink:0,
+                  transform: job.starred ? "scale(1.15)" : "scale(1)",
+                }}>
+                {job.starred ? "★" : "☆"}
+              </button>
+            )}
+
+            {/* Dislike */}
+            {showDislike && onDislike && (
+              <button title="Not interested"
+                onClick={e => { e.stopPropagation(); onDislike(); }}
+                style={{
+                  width:28, height:28, borderRadius:"50%",
+                  background: job.disliked ? "#fef2f2" : "transparent",
+                  border: job.disliked ? "2px solid #dc2626" : `2px solid ${theme.border}`,
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  cursor:"pointer",
+                  color: job.disliked ? "#dc2626" : theme.textDim,
+                  transition:"all 0.2s", flexShrink:0,
+                }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                  <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                </svg>
+              </button>
+            )}
+
+            {/* Generate */}
+            {applyMode !== "SIMPLE" && onGenerate && showApplyButton && (
+              <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
+                disabled={!!st} theme={theme}
+                onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
+                {st ? "⏳" : done ? "↻" : "✦"}
+              </IconBtn>
+            )}
+
+            {/* View sandbox */}
+            {done && g?.html !== "__exists__" && showApplyButton && (
+              <IconBtn bg="#0284c7" title="View in sandbox" theme={theme}
+                onClick={e => { e.stopPropagation(); onViewSandbox?.(); }}>
+                👁
+              </IconBtn>
+            )}
+
+            {/* Visit URL */}
+            {onVisit && showApplyButton && job.url && (
+              <IconBtn bg={theme.accent} title="Open job listing" theme={theme}
+                onClick={e => { e.stopPropagation(); onVisit(); }}>
+                ↗
+              </IconBtn>
+            )}
           </div>
         </div>
-
-        {/* Right side */}
-        <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
-          <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
-
-          {g?.atsScore != null && (
-            <ATSBadge score={g.atsScore} onClick={onAts}/>
-          )}
-          {done && (
-            <span onClick={onResume ? e => { e.stopPropagation(); onResume(); } : undefined}
-              style={{ background:"#e8f6fb", color:"#1a6a8a", padding:"2px 8px",
-                       borderRadius:999, fontSize:10, fontWeight:700, cursor:"pointer",
-                       border:"1px solid #A8D8EA44", display:"inline-flex", alignItems:"center", gap:3 }}>
-              {st==="loading" ? "⏳" : "📄"} Resume
-            </span>
-          )}
-
-          {/* Star */}
-          {onStar && (
-            <button title={job.starred ? "Remove from saved" : "Save job"}
-              onClick={e => { e.stopPropagation(); onStar(); }}
-              style={{
-                width:30, height:30, borderRadius:"50%",
-                background: job.starred ? "#f59e0b22" : "transparent",
-                border: job.starred ? "2px solid #f59e0b" : `2px solid ${theme.border}`,
-                display:"flex", alignItems:"center", justifyContent:"center",
-                cursor:"pointer", fontSize:14,
-                color: job.starred ? "#f59e0b" : theme.textDim,
-                transition:"all 0.2s", flexShrink:0,
-                transform: job.starred ? "scale(1.15)" : "scale(1)",
-              }}>
-              {job.starred ? "★" : "☆"}
-            </button>
-          )}
-
-          {/* Dislike */}
-          {showDislike && onDislike && (
-            <button title="Not interested"
-              onClick={e => { e.stopPropagation(); onDislike(); }}
-              style={{
-                width:28, height:28, borderRadius:"50%",
-                background: job.disliked ? "#fef2f2" : "transparent",
-                border: job.disliked ? "2px solid #dc2626" : `2px solid ${theme.border}`,
-                display:"flex", alignItems:"center", justifyContent:"center",
-                cursor:"pointer",
-                color: job.disliked ? "#dc2626" : theme.textDim,
-                transition:"all 0.2s", flexShrink:0,
-              }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
-                <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
-              </svg>
-            </button>
-          )}
-
-          {/* Generate */}
-          {applyMode !== "SIMPLE" && onGenerate && showApplyButton && (
-            <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
-              disabled={!!st} theme={theme}
-              onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
-              {st ? "⏳" : done ? "↻" : "✦"}
-            </IconBtn>
-          )}
-
-          {/* View sandbox */}
-          {done && g?.html !== "__exists__" && showApplyButton && (
-            <IconBtn bg="#0284c7" title="View in sandbox" theme={theme}
-              onClick={e => { e.stopPropagation(); onViewSandbox?.(); }}>
-              👁
-            </IconBtn>
-          )}
-
-          {/* Visit URL */}
-          {onVisit && showApplyButton && job.url && (
-            <IconBtn bg={theme.accent} title="Open job listing" theme={theme}
-              onClick={e => { e.stopPropagation(); onVisit(); }}>
-              ↗
-            </IconBtn>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* ── Expanded section ──────────────────────────────────── */}
       {expanded && (

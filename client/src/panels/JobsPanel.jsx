@@ -461,31 +461,29 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 
 
 
-// DEFAULT SIZES: A=30/B=70 for two-panel state.
-// When 3+ panels open: A=20%, D=20% if visible,
-// remainder split equally among B and C.
-// To change defaults edit the getPanelDefaults()
-// function below. Manual resize overrides these
-// until panel visibility changes.
+// DEFAULT SIZES (all four): A=20% B=25% C=30% D=25%
+// Two panel: A=30% B=70%
+// To change defaults edit getPanelDefaults() below.
+// Defaults reset whenever panel visibility changes.
 function getPanelDefaults(showDetail, showSandbox, showAts) {
   const count = [true, showDetail, showSandbox, showAts].filter(Boolean).length;
+  // Only jobs panel visible
   if (count === 1) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
-  if (count === 2 && showDetail && !showSandbox && !showAts) {
-    return { jobs: 30, detail: 70, sandbox: 0, ats: 0 };
-  }
-  // 3+ panels: A=20 fixed, D=20 if visible, remainder split equally among B and C
-  const aSize = 20;
-  const dSize = showAts ? 20 : 0;
+  // Two-panel: A + B
+  if (count === 2 && showDetail && !showSandbox && !showAts) return { jobs: 30, detail: 70, sandbox: 0, ats: 0 };
+  // All four panels
+  if (showDetail && showSandbox && showAts) return { jobs: 20, detail: 25, sandbox: 30, ats: 25 };
+  // A + B + C (no ATS)
+  if (showDetail && showSandbox && !showAts) return { jobs: 20, detail: 40, sandbox: 40, ats: 0 };
+  // A + B + D (no sandbox)
+  if (showDetail && !showSandbox && showAts) return { jobs: 20, detail: 55, sandbox: 0, ats: 25 };
+  // General fallback: A=20, D=25 if visible, remaining split B+C equally
+  const aSize = 20, dSize = showAts ? 25 : 0;
   const remaining = 100 - aSize - dSize;
   const bcPanels = [showDetail, showSandbox].filter(Boolean).length;
-  if (bcPanels === 0) return { jobs: 20, detail: 0, sandbox: 0, ats: 80 }; // edge: A+D only
+  if (bcPanels === 0) return { jobs: 20, detail: 0, sandbox: 0, ats: 80 };
   const bcSize = remaining / bcPanels;
-  return {
-    jobs: aSize,
-    detail: showDetail ? bcSize : 0,
-    sandbox: showSandbox ? bcSize : 0,
-    ats: dSize,
-  };
+  return { jobs: aSize, detail: showDetail ? bcSize : 0, sandbox: showSandbox ? bcSize : 0, ats: dSize };
 }
 
 // ── Main panel ────────────────────────────────────────────────
@@ -555,6 +553,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const sandboxPanelRef = useRef(null);
   const atsPanelRef     = useRef(null);
 
+  // ResizeObserver: track jobs panel pixel width for responsive card tiers
+  const jobsPanelElementRef = useRef(null);
+  const [jobsPanelWidth, setJobsPanelWidth] = useState(400);
+
   // Task 5 — Inline error states
   const [smartSearchError, setSmartSearchError] = useState("");
   const [uploadError,      setUploadError]      = useState("");
@@ -611,6 +613,55 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (showAts)     atsPanelRef.current?.resize(d.ats);
     });
   }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Observe jobs panel container width for responsive card tiers
+  useEffect(() => {
+    const el = jobsPanelElementRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) setJobsPanelWidth(e.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-open resume + ATS panel when a pending job card is selected
+  useEffect(() => {
+    if (!selectedJob || boardTab !== "pending") return;
+    const key = selectedJob.jobId;
+
+    // If pending job response included resume_html, use it directly (no extra fetch)
+    if (selectedJob.resume_html) {
+      const entry = {
+        html:      selectedJob.resume_html,
+        atsScore:  selectedJob.ats_score,
+        atsReport: selectedJob.ats_report,
+        company:   selectedJob.company,
+        title:     selectedJob.title,
+      };
+      setGenerated(p => ({ ...p, [key]: entry }));
+      openSandbox({ ...entry });
+      setActiveAts({ score: entry.atsScore, report: entry.atsReport,
+                     company: selectedJob.company, title: selectedJob.title });
+      setRightPanelOpen(true);
+      setRightTab("ats");
+      return;
+    }
+
+    // Fallback: resume exists in DB (generated[key] = __exists__) — fetch on demand
+    if (generated[key]?.html) {
+      generateActual(selectedJob, false, true);
+      return;
+    }
+
+    // No resume data found — show error in sandbox
+    openSandbox({
+      generating: false,
+      error: "Resume data not found — try regenerating.",
+      company: selectedJob.company,
+      title:   selectedJob.title,
+    });
+  }, [selectedJob?.jobId, boardTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleResumeClear = useCallback(() => {
     setResumeText(""); setFileName("");
@@ -763,17 +814,20 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey]);
 
+  // Set active role and trigger DB-first lookup without scraping
+  const handleSetRole = useCallback((overrideQuery) => {
+    const q = (overrideQuery || searchInput).trim();
+    if (!q) return;
+    setScrapeError("");
+    setRoleFilter(q.toLowerCase());
+    setSearchInput(q);
+  }, [searchInput]);
+
   // ── Scrape / search ───────────────────────────────────────
   const handleSearch = useCallback(async (overrideQuery) => {
     const q = (overrideQuery || searchInput).trim();
     if (!q) return;
     setScrapeError("");
-    // If board already has jobs, just filter to this role — no scrape
-    if (jobs.length > 0) {
-      setRoleFilter(q.toLowerCase());
-      setSearchInput(q);
-      return;
-    }
     setScraping(true);
     let managedByPoller = false;
     try {
@@ -1165,6 +1219,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   const isLastPage = currentPage >= totalPages;
 
+  // BUTTON STATES: 'Set Role' = save role + DB lookup.
+  // 'Search New' = trigger fresh Apify scrape.
+  // To change labels edit the buttonLabel derived value below.
+  const roleIsSet = !!roleFilter &&
+    searchInput.trim().toLowerCase() === roleFilter.trim();
+  const buttonLabel = scraping ? "Searching…" : roleIsSet ? "Search New" : "Set Role";
+
   // Panel sizing is handled by react-resizable-panels + getPanelDefaults().
   // See the getPanelDefaults() function above for default size rules.
 
@@ -1288,7 +1349,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                          transform:"translateY(-50%)", fontSize:14, color:theme.textDim,
                          pointerEvents:"none" }}>🔍</span>
           <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
-            onKeyDown={e => e.key==="Enter" && handleSearch()}
+            onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
             placeholder="Search role — e.g. ML Engineer, SWE…"
             style={{ width:"100%", height:38, paddingLeft:38, paddingRight:14,
                      borderRadius:2, border:`1px solid ${theme.border}`,
@@ -1305,8 +1366,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           )}
         </div>
 
-        <LucyBtn onClick={() => handleSearch()} disabled={scraping || bgLoading}>
-          {scraping ? "Searching…" : jobs.length === 0 ? "Search" : "Set Role"}
+        <LucyBtn
+          onClick={() => roleIsSet ? handleSearch() : handleSetRole()}
+          disabled={scraping || bgLoading}
+          title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : undefined}>
+          {buttonLabel}
         </LucyBtn>
         <LucyBtn onClick={handleSmartSearch} disabled={smartSearching || scraping}
                   accent={theme.surfaceHigh}>
@@ -1400,6 +1464,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 setRightTab={setRightTab} setRightPanelOpen={setRightPanelOpen} goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
                 setMobilePane={setMobilePane} isMobile={isMobile}
                 onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
+                panelWidth={jobsPanelWidth}
               />
             )}
             {mobilePane === "editor" && (
@@ -1469,6 +1534,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           {/* PANEL A — Jobs list (always visible) */}
           <Panel
             ref={jobsPanelRef}
+            elementRef={jobsPanelElementRef}
             defaultSize={!!selectedJob ? 30 : 100}
             minSize={10}
             style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -1486,6 +1552,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
               setMobilePane={setMobilePane} isMobile={isMobile}
               compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
+              panelWidth={jobsPanelWidth}
             />
           </Panel>
 
@@ -1621,7 +1688,8 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                       visitUrl, toggleStar, toggleDislike, setActiveAts, setRightTab, setRightPanelOpen,
                       goPage, handleRefresh, onPullRefresh,
                       setMobilePane, isMobile,
-                      compact, selectedJobId, onJobSelect }) {
+                      compact, selectedJobId, onJobSelect,
+                      panelWidth = 400 }) {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
                   background: isDark
@@ -1670,6 +1738,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                 compact={compact}
                 selected={selectedJobId === key}
                 onSelect={onJobSelect ? () => onJobSelect(job) : undefined}
+                panelWidth={panelWidth}
                 onGenerate={force => generate(job, force)}
                 onViewSandbox={() => {
                   const entry = {...g, company:g.company||job.company, title:g.title||job.title};
