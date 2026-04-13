@@ -7,7 +7,7 @@ import cors           from "cors";
 import cron           from "node-cron";
 import Database       from "better-sqlite3";
 import Anthropic      from "@anthropic-ai/sdk";
-import ApifyClient    from "apify-client";
+import { ApifyClient } from "apify-client";
 import passport       from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import session        from "express-session";
