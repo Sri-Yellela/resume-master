@@ -810,7 +810,7 @@ async function scrapeHarvestAPI(query, token) {
     jobTitles:      [query],
     locations:      ["United States"],
     workplaceType:  ["remote", "hybrid", "office"],
-    employmentType: ["Full-time"],
+    employmentType: ["FULL_TIME"],
     postedLimit:    "24h",
     maxItems:       MAX_JOBS_PER_REFRESH * 3,
   };
@@ -1261,6 +1261,9 @@ function requireAdmin(req, res, next) { if (req.isAuthenticated()&&req.user.isAd
 
 // ── Express ───────────────────────────────────────────────────
 const app = express();
+// Active scrapes: key = "userId:query", value = { startedAt, done }
+// Polled by GET /api/jobs/poll to determine if a background scrape is still running.
+const activeScrapes = new Map();
 // trust proxy: required for Railway/Render — without this, secure: true cookies
 // fail behind their HTTPS reverse proxy and all sessions silently break.
 app.set("trust proxy", 1);
@@ -1662,6 +1665,74 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   res.json({ jobs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
 });
 
+// GET /api/jobs/poll — returns new jobs since <since> ms timestamp + scraping status
+// Used by frontend to stream live results during an active background scrape.
+// LIVE POLLING: polls every 4s during active scrape (POLL_INTERVAL_MS on client).
+// Stops when scraping:false returned. Stale entries cleaned up every poll (>10 min).
+app.get("/api/jobs/poll", requireAuth, (req, res) => {
+  const since  = parseInt(req.query.since) || 0;
+  const qRaw   = (req.query.query || "").trim().toLowerCase();
+  if (!qRaw) return res.status(400).json({ error:"query required" });
+
+  // Evict stale activeScrapes entries older than 10 minutes
+  const staleCutoff = Date.now() - 10 * 60 * 1000;
+  for (const [k, v] of activeScrapes) {
+    if (v.startedAt < staleCutoff) activeScrapes.delete(k);
+  }
+
+  const scrapeKey    = `${req.user.id}:${qRaw}`;
+  const scrapeState  = activeScrapes.get(scrapeKey);
+  const stillScraping = !!(scrapeState && !scrapeState.done);
+
+  const sinceSeconds = Math.floor(since / 1000);
+  const userId = req.user.id;
+
+  const rows = db.prepare(`
+    SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked
+    FROM scraped_jobs sj
+    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    WHERE LOWER(sj.search_query) = ?
+      AND sj.scraped_at > ?
+      AND (uj.disliked  IS NULL OR uj.disliked  = 0)
+      AND (uj.applied   IS NULL OR uj.applied   = 0)
+    ORDER BY sj.scraped_at DESC
+    LIMIT 50
+  `).all(userId, qRaw, sinceSeconds);
+
+  const jobs = rows.map(j => ({
+    jobId:           j.job_id,
+    company:         j.company,
+    title:           j.title,
+    category:        j.category,
+    location:        j.location,
+    workType:        j.work_type,
+    source:          j.source,
+    sourcePlatform:  "linkedin",
+    url:             j.url,
+    applyUrl:        j.apply_url,
+    postedAt:        j.posted_at,
+    description:     j.description,
+    descriptionHtml: j.description_html,
+    ghostScore:      j.ghost_score,
+    minYearsExp:     j.min_years_exp,
+    maxYearsExp:     j.max_years_exp,
+    expRaw:          j.exp_raw,
+    salaryMin:       j.salary_min,
+    salaryMax:       j.salary_max,
+    salaryCurrency:  j.salary_currency,
+    applicantCount:  j.applicant_count,
+    compensation:    j.compensation,
+    companyIconUrl:  j.company_icon_url,
+    isFrequentRepost: !!j.is_frequent_repost,
+    visited:         !!j.visited,
+    alreadyApplied:  !!j.applied,
+    starred:         !!j.starred,
+    disliked:        !!j.disliked,
+  }));
+
+  res.json({ jobs, scraping: stillScraping, total: jobs.length });
+});
+
 app.post("/api/scrape", requireAuth, async (req, res) => {
   const rawQuery = (req.body.query || "").trim();
   if (!rawQuery) return res.status(400).json({ error:"query required" });
@@ -1703,7 +1774,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       AND sj.ghost_score < 4
   `).get(req.user.id, query.toLowerCase(), sevenDaysAgo);
 
-  const THRESHOLD = 15;
+  const THRESHOLD = 50;
   const hasEnough = (existingCount?.cnt || 0) >= THRESHOLD;
 
   if (hasEnough) {
@@ -1726,6 +1797,9 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   res.json({ ok:true, count:0, scrapedAt:Date.now(), query, scraping:true });
 
   const scrapeUserId = req.user.id;
+  const scrapeKey = `${scrapeUserId}:${query.toLowerCase()}`;
+  activeScrapes.set(scrapeKey, { startedAt: Date.now(), done: false });
+
   // Background scrape — runs after response is flushed
   setImmediate(async () => {
     const scrapeStart = Date.now();
@@ -1759,6 +1833,9 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
         success: false, errorText: e.message,
       });
       console.error(`[scrape] Background scrape failed for "${query}":`, e.message);
+    } finally {
+      const existing = activeScrapes.get(scrapeKey) || {};
+      activeScrapes.set(scrapeKey, { ...existing, done: true });
     }
   });
 });

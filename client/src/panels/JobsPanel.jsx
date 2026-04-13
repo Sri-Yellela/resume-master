@@ -556,11 +556,24 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [activeAts,   setActiveAts]   = useState(null);
   const [smartSearching, setSmartSearching] = useState(false);
 
-  // Task 3 — Live scrape status
+  // Live scrape status
   const [scrapeError,    setScrapeError]    = useState("");
   const [scrapeNewCount, setScrapeNewCount] = useState(0);
 
-  // Task 4 — Generation progress
+  // LIVE POLLING: polls /api/jobs/poll every 4s during active scrape.
+  // Stops when scraping:false returned or after 3 consecutive failures.
+  // To change poll interval edit POLL_INTERVAL_MS below.
+  const POLL_INTERVAL_MS = 4000;
+  const [pollStatus,   setPollStatus]   = useState("idle"); // "idle"|"polling"|"complete"|"error"
+  const [pollNewCount, setPollNewCount] = useState(0);
+  const pollIntervalRef = useRef(null);
+
+  // AUTO-SCRAPE: Set Role triggers background scrape automatically if local results < 50
+  // (THRESHOLD in server.js). Search New always forces a fresh scrape.
+  // To change the threshold edit THRESHOLD in /api/scrape.
+  const [resultsUpToDate, setResultsUpToDate] = useState(false);
+
+  // Generation progress
   const [genStage, setGenStage] = useState("");
   const genTimerRef = useRef(null);
 
@@ -573,6 +586,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // ResizeObserver: track jobs panel pixel width for responsive card tiers
   const jobsPanelElementRef = useRef(null);
   const [jobsPanelWidth, setJobsPanelWidth] = useState(400);
+
+  // ResizeObserver: track total PanelGroup width for Panel C maxSize calculation
+  // RESUME PANEL MAX WIDTH: capped at A4 natural width (RESUME_PAGE_WIDTH_PX + 8px = ~802px).
+  // Beyond this, dragging left pushes the ATS panel narrower instead. D has a minimum of 10%.
+  // To change page width constant edit RESUME_PAGE_WIDTH_PX in SandboxPanel.jsx.
+  const panelGroupElementRef = useRef(null);
+  const [groupWidth, setGroupWidth] = useState(0);
 
   // Task 5 — Inline error states
   const [smartSearchError, setSmartSearchError] = useState("");
@@ -638,6 +658,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     const ro = new ResizeObserver(entries => {
       for (const e of entries) setJobsPanelWidth(e.contentRect.width);
     });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Observe PanelGroup total width for Panel C maxSize percentage calculation
+  useEffect(() => {
+    const el = panelGroupElementRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setGroupWidth(e.contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -821,14 +850,74 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [sortBy, roleFilter, locationFilter, workType, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey]);
 
-  // Set active role and trigger DB-first lookup without scraping
-  const handleSetRole = useCallback((overrideQuery) => {
+  // Shared poll loop — used by handleSearch, handlePullRefresh, handleSetRole
+  const startPollLoop = useCallback((roleQ, pollSince) => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    setPollStatus("polling");
+    setPollNewCount(0);
+    let failCount = 0;
+    const seenIds = new Set();
+    let totalNew = 0;
+
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const qs = new URLSearchParams({ since: String(pollSince), query: roleQ });
+        const pollData = await api(`/api/jobs/poll?${qs.toString()}`);
+        failCount = 0;
+
+        const newJobs = (pollData.jobs || []).filter(j => !seenIds.has(j.jobId));
+        if (newJobs.length > 0) {
+          newJobs.forEach(j => seenIds.add(j.jobId));
+          totalNew += newJobs.length;
+          setPollNewCount(totalNew);
+          setJobs(prev => {
+            const existingIds = new Set(prev.map(j => j.jobId));
+            const toAdd = newJobs.filter(j => !existingIds.has(j.jobId));
+            return toAdd.length > 0 ? [...toAdd, ...prev] : prev;
+          });
+        }
+
+        if (!pollData.scraping) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setScraping(false);
+          setScrapeNewCount(totalNew);
+          setPollStatus("complete");
+          setTimeout(() => { setPollStatus("idle"); setScrapeNewCount(0); }, 5000);
+        }
+      } catch {
+        failCount++;
+        if (failCount >= 3) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setScraping(false);
+          setPollStatus("error");
+          setScrapeError("Could not fetch new jobs — check your Apify token");
+        }
+      }
+    }, POLL_INTERVAL_MS);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Set active role — immediately shows DB results, then auto-scrapes if count < threshold
+  const handleSetRole = useCallback(async (overrideQuery) => {
     const q = (overrideQuery || searchInput).trim();
     if (!q) return;
     setScrapeError("");
     setRoleFilter(q.toLowerCase());
     setSearchInput(q);
-  }, [searchInput]);
+    // AUTO-SCRAPE: silently trigger background scrape if local results < THRESHOLD (50)
+    try {
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
+      if (!result || result.missingToken || result.limitReached || result.error) return;
+      const roleQ = (result.query || q).toLowerCase();
+      if (result.scraping) {
+        startPollLoop(roleQ, Date.now());
+      } else if (result.fromCache) {
+        setResultsUpToDate(true);
+        setTimeout(() => setResultsUpToDate(false), 2000);
+      }
+    } catch {} // silent — DB results already shown
+  }, [searchInput, startPollLoop]);
 
   // ── Scrape / search ───────────────────────────────────────
   const handleSearch = useCallback(async (overrideQuery) => {
@@ -853,39 +942,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       const roleQ = (result.query || q).toLowerCase();
 
       if (result.scraping) {
-        // Background scrape in progress — poll every 3s until jobs arrive (up to ~60s)
         managedByPoller = true;
-        let pollCount = 0;
-        const prevCount = { current: 0 };
-        const poll = setInterval(async () => {
-          pollCount++;
-          try {
-            const qs = new URLSearchParams();
-            qs.set("page","1"); qs.set("pageSize","25"); qs.set("sort", sortBy);
-            qs.set("role", roleQ);
-            const d = await api(`/api/jobs?${qs.toString()}`);
-            const newCount = (d.jobs || []).length;
-            if (newCount > prevCount.current || pollCount >= 20) {
-              setJobs(() => {
-                const result = new Map((d.jobs || []).map(j => [j.jobId, j]));
-                for (const [id, job] of sessionDislikedRef.current) {
-                  if (!result.has(id)) result.set(id, job);
-                }
-                return [...result.values()];
-              });
-              setTotalJobs(d.total || 0);
-              setTotalPages(d.totalPages || 0);
-              setCurrentPage(1);
-              setRoleFilter(roleQ);
-              clearInterval(poll);
-              setScraping(false);
-            }
-            prevCount.current = newCount;
-          } catch {
-            clearInterval(poll);
-            setScraping(false);
-          }
-        }, 3000);
+        setRoleFilter(roleQ);
+        startPollLoop(roleQ, Date.now());
         return;
       }
 
@@ -907,7 +966,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setRoleFilter(roleQ);
     } catch(e) { setScrapeError(e.message); }
     finally { if (!managedByPoller) setScraping(false); }
-  }, [searchInput, fetchJobs, jobs.length, sortBy]);
+  }, [searchInput, fetchJobs, jobs.length, sortBy, startPollLoop]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Pull / Check-for-new: DB-first, then scrape if quota unmet ─
   // Merges new jobs into the board; removes visited entries.
@@ -933,39 +992,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       const roleQ = (result.query || q).toLowerCase();
 
       if (result.scraping) {
-        // Background scrape — poll every 3s for up to ~60s, merge new jobs in
         managedByPoller = true;
-        let pollCount = 0;
-        const poll = setInterval(async () => {
-          pollCount++;
-          try {
-            const qs = new URLSearchParams();
-            qs.set("page","1"); qs.set("pageSize","50"); qs.set("sort", sortBy);
-            qs.set("role", roleQ); qs.set("visited","0");
-            const d = await api(`/api/jobs?${qs.toString()}`);
-            const incoming = d.jobs || [];
-            if (incoming.length > 0 || pollCount >= 20) {
-              setJobs(prev => {
-                const map = new Map(prev.filter(j => !j.visited).map(j => [j.jobId, j]));
-                incoming.forEach(j => map.set(j.jobId, j));
-                return [...map.values()].sort((a, b) =>
-                  new Date(b.postedAt || 0) - new Date(a.postedAt || 0)
-                );
-              });
-              if (incoming.length > 0) {
-                setScrapeNewCount(incoming.length);
-                setTimeout(() => setScrapeNewCount(0), 4000);
-              }
-              setTotalJobs(d.total || 0);
-              setRoleFilter(roleQ);
-              clearInterval(poll);
-              setScraping(false);
-            }
-          } catch {
-            clearInterval(poll);
-            setScraping(false);
-          }
-        }, 3000);
+        setRoleFilter(roleQ);
+        startPollLoop(roleQ, Date.now());
         return;
       }
 
@@ -990,7 +1019,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setRoleFilter(roleQ);
     } catch(e) { setScrapeError(e.message); }
     finally { if (!managedByPoller) setScraping(false); }
-  }, [searchInput, roleFilter, sortBy, scraping, bgLoading]);
+  }, [searchInput, roleFilter, sortBy, scraping, bgLoading, startPollLoop]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Legacy Refresh button (end-of-list) ───────────────────────
   const handleRefresh = handlePullRefresh;
@@ -1459,6 +1488,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
                 scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
                 onClearScrapeError={() => setScrapeError("")}
+                pollStatus={pollStatus} pollNewCount={pollNewCount}
+                resultsUpToDate={resultsUpToDate}
+                onRetryPoll={handlePullRefresh}
                 generated={generated} loading={loading}
                 applyMode={applyMode} theme={theme} isDark={isDark}
                 totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
@@ -1531,6 +1563,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
       {/* ── PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) ── */}
       {(isWide || (isPortrait && !isMobile)) && (
+        <div ref={panelGroupElementRef} style={{ flex:1, overflow:"hidden", display:"flex" }}>
         <PanelGroup orientation="horizontal" style={{ flex: 1, overflow: "hidden" }}>
 
           {/* PANEL A — Jobs list (always visible) */}
@@ -1544,6 +1577,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
               scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
               onClearScrapeError={() => setScrapeError("")}
+              pollStatus={pollStatus} pollNewCount={pollNewCount}
+              resultsUpToDate={resultsUpToDate}
+              onRetryPoll={handlePullRefresh}
               generated={generated} loading={loading}
               applyMode={applyMode} theme={theme} isDark={isDark}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
@@ -1588,20 +1624,30 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           })()}
 
           {/* PANEL C — Sandbox / Resume */}
-          {sandboxOpen && (
-            <>
-              <ResizeHandle theme={theme} />
-              <Panel
-                ref={sandboxPanelRef}
-                defaultSize={40}
-                minSize={10}
-                style={{ display: "flex", flexDirection: "column", overflow: "hidden",
-                         borderLeft: `1px solid ${theme.border}` }}>
-                <SandboxPanel entry={sandbox} onClose={closeSandbox}
-                  onSave={saveSandboxHtml} onExport={exportAndTrack}/>
-              </Panel>
-            </>
-          )}
+          {/* RESUME PANEL MAX WIDTH: capped at A4 natural width + padding (~802px).
+              Beyond this, dragging left pushes the ATS panel narrower.
+              To change page width constant edit RESUME_PAGE_WIDTH_PX in SandboxPanel.jsx. */}
+          {sandboxOpen && (() => {
+            const MAX_RESUME_PANEL_PX = 802; // RESUME_PAGE_WIDTH_PX (794) + 8px padding
+            const maxSandboxPct = groupWidth > MAX_RESUME_PANEL_PX
+              ? (MAX_RESUME_PANEL_PX / groupWidth) * 100
+              : 100;
+            return (
+              <>
+                <ResizeHandle theme={theme} />
+                <Panel
+                  ref={sandboxPanelRef}
+                  defaultSize={40}
+                  minSize={10}
+                  maxSize={maxSandboxPct}
+                  style={{ display: "flex", flexDirection: "column", overflow: "hidden",
+                           borderLeft: `1px solid ${theme.border}` }}>
+                  <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                    onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+                </Panel>
+              </>
+            );
+          })()}
 
           {/* PANEL D — ATS + History */}
           {rightPanelOpen && (
@@ -1648,6 +1694,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           )}
 
         </PanelGroup>
+        </div>
       )}
     </div>
   );
@@ -1681,6 +1728,7 @@ function ResizeHandle({ theme: themeProp }) {
 
 // ── Jobs column (shared across layout modes) ──────────────────
 function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrapeNew, onClearScrapeError,
+                      pollStatus, pollNewCount, resultsUpToDate, onRetryPoll,
                       generated, loading, applyMode, theme, isDark,
                       totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
@@ -1697,28 +1745,63 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
       {jobs.length === 0 && !scraping ? <EmptyState theme={theme}/> : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
-          {/* Scrape error banner */}
-          {scrapeError && (
-            <div style={{ margin:"8px 16px", padding:"10px 14px", borderRadius:4,
-                          background:"#fee2e2", border:"1px solid #fca5a5",
-                          display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-              <span style={{ fontSize:12, color:"#991b1b" }}>
-                ✗ Could not fetch new jobs — {scrapeError}
+          {/* Live polling pulsing bar — shows while scrape is in progress */}
+          {pollStatus === "polling" && (
+            <div style={{ margin:"6px 16px 0", padding:"8px 12px", borderRadius:4,
+                          background:theme.accentMuted, border:`1px solid ${theme.accent}33`,
+                          display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%",
+                             background:theme.accent, animation:"pulse 1.5s ease-in-out infinite" }}/>
+              <span style={{ fontSize:11, color:theme.accentText, fontWeight:600 }}>
+                {pollNewCount > 0
+                  ? `Fetching… ${pollNewCount} new job${pollNewCount !== 1 ? "s" : ""} found so far`
+                  : "Fetching new jobs…"}
               </span>
-              <button onClick={onClearScrapeError} style={{ background:"none", border:"none",
-                cursor:"pointer", color:"#991b1b", fontSize:14 }}>✕</button>
             </div>
           )}
 
-          {/* New jobs found banner */}
-          {scrapeNewCount > 0 && (
-            <div style={{ margin:"8px 16px", padding:"8px 14px", borderRadius:4,
+          {/* Scrape complete — fades after 5s */}
+          {pollStatus === "complete" && scrapeNewCount > 0 && (
+            <div style={{ margin:"6px 16px 0", padding:"8px 12px", borderRadius:4,
                           background:"#dcfce7", border:"1px solid #86efac",
-                          fontSize:12, fontWeight:700, color:"#166534",
                           display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-              ✓ {scrapeNewCount} new job{scrapeNewCount !== 1 ? "s" : ""} found
+              <span style={{ fontSize:11, fontWeight:700, color:"#166534" }}>
+                ✓ Scrape complete — {scrapeNewCount} new job{scrapeNewCount !== 1 ? "s" : ""} added
+              </span>
               <button onClick={onClearScrapeNew} style={{ background:"none", border:"none",
-                cursor:"pointer", color:"#166534", fontSize:14 }}>✕</button>
+                cursor:"pointer", color:"#166534", fontSize:13 }}>✕</button>
+            </div>
+          )}
+
+          {/* Results up to date (Set Role cache hit) */}
+          {resultsUpToDate && (
+            <div style={{ margin:"6px 16px 0", padding:"6px 12px", borderRadius:4,
+                          background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
+                          fontSize:11, color:theme.textMuted }}>
+              ✓ Results up to date
+            </div>
+          )}
+
+          {/* Scrape error banner */}
+          {scrapeError && (
+            <div style={{ margin:"8px 16px 0", padding:"10px 14px", borderRadius:4,
+                          background:"#fee2e2", border:"1px solid #fca5a5",
+                          display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <span style={{ fontSize:12, color:"#991b1b" }}>
+                ✗ {scrapeError}
+              </span>
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                {pollStatus === "error" && onRetryPoll && (
+                  <button onClick={onRetryPoll}
+                    style={{ background:"none", border:`1px solid #991b1b`, borderRadius:4,
+                             cursor:"pointer", color:"#991b1b", fontSize:11, padding:"2px 8px",
+                             fontWeight:700 }}>
+                    Retry
+                  </button>
+                )}
+                <button onClick={onClearScrapeError} style={{ background:"none", border:"none",
+                  cursor:"pointer", color:"#991b1b", fontSize:14 }}>✕</button>
+              </div>
             </div>
           )}
 
