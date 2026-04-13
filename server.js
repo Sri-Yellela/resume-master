@@ -23,6 +23,9 @@ import path           from "path";
 import fs             from "fs";
 import { createBackup, listBackups, restoreBackup } from "./scripts/backup.js";
 import applyRoutes from "./routes/apply.js";
+import { createAdminRouter } from "./routes/admin.js";
+import { trackApiCall, trackScrape } from "./services/usageTracker.js";
+import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
@@ -348,6 +351,98 @@ db.pragma("busy_timeout = 5000");
       id: "012_clear_all_dislikes",
       sql: `UPDATE user_jobs SET disliked = 0 WHERE disliked = 1;`,
     },
+    {
+      id: "admin_usage_events",
+      sql: `
+        CREATE TABLE IF NOT EXISTS usage_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL,
+          event_subtype TEXT,
+          input_tokens INTEGER DEFAULT 0,
+          output_tokens INTEGER DEFAULT 0,
+          cache_read_tokens INTEGER DEFAULT 0,
+          cache_creation_tokens INTEGER DEFAULT 0,
+          cached INTEGER NOT NULL DEFAULT 0,
+          model TEXT,
+          cost_usd REAL DEFAULT 0,
+          ats_score_before INTEGER,
+          ats_score_after INTEGER,
+          duration_ms INTEGER,
+          job_id TEXT,
+          company TEXT,
+          success INTEGER NOT NULL DEFAULT 1,
+          error_text TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_usage_events_user
+          ON usage_events(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_usage_events_type
+          ON usage_events(event_type, created_at);
+      `,
+    },
+    {
+      id: "admin_user_limits",
+      sql: `
+        CREATE TABLE IF NOT EXISTS user_limits (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+          monthly_resumes INTEGER,
+          monthly_ats_scores INTEGER,
+          monthly_job_scrapes INTEGER,
+          monthly_pdf_exports INTEGER,
+          monthly_apply_runs INTEGER,
+          monthly_token_budget INTEGER,
+          daily_resumes INTEGER,
+          daily_job_scrapes INTEGER,
+          warning_threshold REAL DEFAULT 0.8,
+          notes TEXT,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_by INTEGER REFERENCES users(id)
+        );
+      `,
+    },
+    {
+      id: "admin_cache_events",
+      sql: `
+        CREATE TABLE IF NOT EXISTS cache_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL,
+          layer TEXT,
+          domain_module TEXT,
+          tokens_in_cache INTEGER DEFAULT 0,
+          tokens_saved INTEGER DEFAULT 0,
+          cost_saved_usd REAL DEFAULT 0,
+          model TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_cache_events_user
+          ON cache_events(user_id, created_at);
+      `,
+    },
+    {
+      id: "admin_scrape_events",
+      sql: `
+        CREATE TABLE IF NOT EXISTS scrape_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          search_query TEXT NOT NULL,
+          raw_count INTEGER DEFAULT 0,
+          filtered_count INTEGER DEFAULT 0,
+          inserted_count INTEGER DEFAULT 0,
+          duplicate_count INTEGER DEFAULT 0,
+          ghost_count INTEGER DEFAULT 0,
+          irrelevant_count INTEGER DEFAULT 0,
+          duration_ms INTEGER,
+          success INTEGER NOT NULL DEFAULT 1,
+          error_text TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_scrape_events_user
+          ON scrape_events(user_id, created_at);
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -401,6 +496,40 @@ if (!ANTHROPIC_KEY) {
   console.error("[startup] WARNING: ANTHROPIC_KEY is not set in .env — PDF parsing and resume generation will fail.");
 }
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
+
+// PRICING: Anthropic per-token costs in USD as of 2025.
+// Update these when Anthropic changes pricing.
+// Cache read tokens cost 10% of base input price.
+// Cache write tokens cost 125% of base input price.
+const ANTHROPIC_PRICING = {
+  "claude-sonnet-4-20250514": {
+    input:       0.000003,
+    output:      0.000015,
+    cache_read:  0.0000003,
+    cache_write: 0.00000375,
+  },
+  "claude-haiku-4-5-20251001": {
+    input:       0.0000008,
+    output:      0.000004,
+    cache_read:  0.00000008,
+    cache_write: 0.000001,
+  },
+};
+
+function calculateCost(model, usage) {
+  const p = ANTHROPIC_PRICING[model];
+  if (!p) return 0;
+  return (
+    (usage.input_tokens || 0)              * p.input +
+    (usage.output_tokens || 0)             * p.output +
+    (usage.cache_read_input_tokens || 0)   * p.cache_read +
+    (usage.cache_creation_tokens || 0)     * p.cache_write
+  );
+}
+// TO UPDATE PRICING — edit ANTHROPIC_PRICING above.
+// Historical cost calculations use the price at insert time
+// (stored in usage_events.cost_usd) so changing this does not
+// retroactively alter past records.
 
 // ── Multer ────────────────────────────────────────────────────
 const upload = multer({
@@ -787,7 +916,15 @@ async function scrapeJobs(query, apifyToken) {
   });
 
   console.log(`[scrape] ✓ ${inserted} new jobs inserted (${classified.length} classified)`);
-  return classified;
+  return {
+    classified,
+    rawCount: rawItems.length,
+    filteredCount: filtered.length,
+    insertedCount: inserted,
+    duplicateCount: cntDup,
+    ghostCount: cntGhost,
+    irrelevantCount: cntIrrelevant,
+  };
 }
 
 // ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
@@ -1241,6 +1378,9 @@ app.get("/api/admin/users/:id/applications", requireAdmin, (req, res) => {
 });
 // (quota reset routes removed — no refresh cap)
 
+// Analytics admin routes (usage tracking, limits, timeseries)
+app.use("/api/admin/analytics", createAdminRouter(db));
+
 // ═══════════════════════════════════════════════════════════════
 // SETTINGS
 // ═══════════════════════════════════════════════════════════════
@@ -1501,6 +1641,14 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     missingToken:true,
   });
 
+  const scrapeLimit = checkLimit(db, req.user.id, "job_scrape");
+  if (!scrapeLimit.allowed) {
+    return res.status(429).json({
+      error: scrapeLimit.reason, limitReached: true,
+      current: scrapeLimit.current, limit: scrapeLimit.limit, period: scrapeLimit.period,
+    });
+  }
+
   // Log search intent (enables pool inheritance for this user)
   db.prepare(`
     INSERT INTO user_job_searches (user_id, search_query, last_scraped_at)
@@ -1544,10 +1692,12 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   // Respond immediately — HarvestAPI takes 2–5 min; Railway timeout is 30s
   res.json({ ok:true, count:0, scrapedAt:Date.now(), query, scraping:true });
 
+  const scrapeUserId = req.user.id;
   // Background scrape — runs after response is flushed
   setImmediate(async () => {
+    const scrapeStart = Date.now();
     try {
-      await scrapeJobs(query, token);
+      const scrapeResult = await scrapeJobs(query, token);
       db.prepare(`
         INSERT OR IGNORE INTO user_jobs (user_id, job_id)
         SELECT ?, sj.job_id FROM scraped_jobs sj
@@ -1555,9 +1705,26 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
         AND sj.job_id NOT IN (
           SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
         )
-      `).run(req.user.id, query.toLowerCase(), sevenDaysAgo, req.user.id);
+      `).run(scrapeUserId, query.toLowerCase(), sevenDaysAgo, scrapeUserId);
+      trackScrape(db, {
+        userId: scrapeUserId, searchQuery: query,
+        rawCount: scrapeResult.rawCount,
+        filteredCount: scrapeResult.filteredCount,
+        insertedCount: scrapeResult.insertedCount,
+        duplicateCount: scrapeResult.duplicateCount,
+        ghostCount: scrapeResult.ghostCount,
+        irrelevantCount: scrapeResult.irrelevantCount,
+        durationMs: Date.now() - scrapeStart,
+      });
       console.log(`[scrape] Background scrape complete for "${query}"`);
     } catch(e) {
+      trackScrape(db, {
+        userId: scrapeUserId, searchQuery: query,
+        rawCount: 0, filteredCount: 0, insertedCount: 0,
+        duplicateCount: 0, ghostCount: 0, irrelevantCount: 0,
+        durationMs: Date.now() - scrapeStart,
+        success: false, errorText: e.message,
+      });
       console.error(`[scrape] Background scrape failed for "${query}":`, e.message);
     }
   });
@@ -1678,6 +1845,17 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   }
 
   const existing = db.prepare("SELECT * FROM resumes WHERE user_id=? AND job_id=?").get(req.user.id, String(jobId));
+
+  // Limit check only applies to new generation (not cache hits)
+  if (!existing || forceRegen) {
+    const limitCheck = checkLimit(db, req.user.id, "resume_generate");
+    if (!limitCheck.allowed) {
+      return res.status(429).json({
+        error: limitCheck.reason, limitReached: true,
+        current: limitCheck.current, limit: limitCheck.limit, period: limitCheck.period,
+      });
+    }
+  }
   if (existing && !forceRegen) {
     try {
       const cachedResumeText = existing.html
@@ -1696,6 +1874,7 @@ ${jobDescription}
 RESUME TEXT (check which JD keywords appear here):
 ${cachedResumeText}`;
 
+      const t0 = Date.now();
       const freshScore = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 900,
@@ -1712,6 +1891,12 @@ ${cachedResumeText}`;
           "UPDATE resumes SET ats_score=?,ats_report=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?"
         ).run(freshScoreVal, JSON.stringify(freshReport), req.user.id, String(jobId));
       } catch {}
+      trackApiCall(db, {
+        userId: req.user.id, eventType: "ats_score", eventSubtype: mode,
+        model: "claude-haiku-4-5-20251001", usage: freshScore.usage,
+        durationMs: Date.now() - t0, jobId: String(jobId), company: job.company,
+        atsScoreAfter: freshScoreVal,
+      });
       return res.json({
         html:existing.html,
         atsScore:freshScoreVal,
@@ -1745,11 +1930,18 @@ ${cachedResumeText}`;
     const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, mode, employers);
     const { systemBlocks } = assemblePrompt(domainModuleKey, mode, runtimeInputs);
 
+    const genStart = Date.now();
     const resumeMsg = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 4096,
       system: systemBlocks,
       messages: [{ role: "user", content: runtimeInputs }],
+    });
+    trackApiCall(db, {
+      userId: req.user.id, eventType: "resume_generate", eventSubtype: mode,
+      model: "claude-sonnet-4-20250514", usage: resumeMsg.usage,
+      durationMs: Date.now() - genStart, jobId: String(jobId), company: job.company,
+      domainModule: domainModuleKey,
     });
     const html = resumeMsg.content.map(b=>b.text||"").join("").replace(/```html|```/g,"").trim();
 
@@ -1826,11 +2018,17 @@ RULES:
 - Entry headers must be a single flex row — company on left, date on right
 - Output only the complete HTML file, nothing else`;
 
+      const fmtStart = Date.now();
       const formatMsg = await anthropic.messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 4096,
         system: [{ type: "text", text: FORMATTING_SYSTEM, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: `Reformat this resume HTML to match the design specification exactly. Preserve all content:\n\n${html}` }],
+      });
+      trackApiCall(db, {
+        userId: req.user.id, eventType: "resume_format", eventSubtype: mode,
+        model: "claude-haiku-4-5-20251001", usage: formatMsg.usage,
+        durationMs: Date.now() - fmtStart,
       });
       const formatted = formatMsg.content.map(b=>b.text||"").join("").replace(/```html|```/g,"").trim();
       if (formatted && formatted.includes("<html")) formattedHtml = formatted;
@@ -1856,6 +2054,7 @@ ${jobDescription}
 RESUME TEXT (check which JD keywords appear here):
 ${resumeStripped}`;
 
+    const atsStart = Date.now();
     const scoreMsg = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 900,
@@ -1867,6 +2066,12 @@ ${resumeStripped}`;
       const raw = scoreMsg.content.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
       atsReport = JSON.parse(raw); atsScore = atsReport.score;
     } catch {}
+    trackApiCall(db, {
+      userId: req.user.id, eventType: "ats_score", eventSubtype: mode,
+      model: "claude-haiku-4-5-20251001", usage: scoreMsg.usage,
+      durationMs: Date.now() - atsStart, jobId: String(jobId), company: job.company,
+      atsScoreAfter: atsScore,
+    });
 
     const version = existing
       ? (db.prepare("SELECT MAX(version) as v FROM resume_versions WHERE user_id=? AND job_id=?").get(req.user.id,String(jobId))?.v||0)+1

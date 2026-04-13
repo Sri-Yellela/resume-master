@@ -1,5 +1,5 @@
 // client/src/panels/AdminPanel.jsx — Lucy Brand (yellow accent)
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
@@ -7,6 +7,485 @@ import { useTheme } from "../styles/theme.jsx";
 // Lucy admin yellow accent — consistent across this panel
 const ADMIN_ACCENT = "#F5E642";
 const ADMIN_TEXT   = "#0f0f0f";
+
+// ── DateRange presets ─────────────────────────────────────────
+function DateRange({ from, to, onFromChange, onToChange }) {
+  const { theme } = useTheme();
+  const presets = [
+    { label: "Today",    days: 1 },
+    { label: "7 days",   days: 7 },
+    { label: "30 days",  days: 30 },
+    { label: "90 days",  days: 90 },
+    { label: "All time", days: 3650 },
+  ];
+  return (
+    <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+      {presets.map(p => {
+        const pFrom = Math.floor(Date.now()/1000) - p.days * 86400;
+        const active = Math.abs(from - pFrom) < 86401;
+        return (
+          <button key={p.label} onClick={() => { onFromChange(pFrom); onToChange(Math.floor(Date.now()/1000) + 86400); }}
+            style={{
+              padding:"4px 12px", borderRadius:999, border:`1px solid ${active ? theme.accent : theme.border}`,
+              background: active ? theme.accent : "transparent", color: active ? "#0f0f0f" : theme.text,
+              fontSize:11, fontWeight:700, cursor:"pointer",
+            }}>
+            {p.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── MiniLineChart ─────────────────────────────────────────────
+function MiniLineChart({ data, width=300, height=80, color="#7c3aed" }) {
+  const { theme } = useTheme();
+  if (!data || data.length < 2) return (
+    <div style={{ width, height, display:"flex", alignItems:"center", justifyContent:"center",
+                  color:theme.textDim, fontSize:11 }}>No data</div>
+  );
+  const values = data.map(d => d.value);
+  const maxV = Math.max(...values, 1);
+  const minV = Math.min(...values, 0);
+  const range = maxV - minV || 1;
+  const pad = 8;
+  const w = width - pad * 2;
+  const h = height - pad * 2;
+  const pts = data.map((d, i) => {
+    const x = pad + (i / (data.length - 1)) * w;
+    const y = pad + h - ((d.value - minV) / range) * h;
+    return `${x},${y}`;
+  });
+  return (
+    <svg width={width} height={height} style={{ overflow:"visible" }}>
+      <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>
+      <circle cx={pts[pts.length-1].split(",")[0]} cy={pts[pts.length-1].split(",")[1]} r={3} fill={color}/>
+    </svg>
+  );
+}
+
+// ── MiniBarChart ──────────────────────────────────────────────
+function MiniBarChart({ data, width=300, height=80, color="#7c3aed" }) {
+  const { theme } = useTheme();
+  if (!data || data.length === 0) return (
+    <div style={{ width, height, display:"flex", alignItems:"center", justifyContent:"center",
+                  color:theme.textDim, fontSize:11 }}>No data</div>
+  );
+  const maxV = Math.max(...data.map(d => d.value), 1);
+  const pad = 4;
+  const barW = Math.max(4, (width - pad * 2) / data.length - 2);
+  return (
+    <svg width={width} height={height}>
+      {data.map((d, i) => {
+        const bh = Math.max(2, (d.value / maxV) * (height - pad * 2));
+        const x = pad + i * ((width - pad*2) / data.length);
+        return (
+          <rect key={i} x={x} y={height - pad - bh} width={barW} height={bh}
+            fill={color} rx={2} opacity={0.85}/>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── StatCard ──────────────────────────────────────────────────
+function StatCard({ label, value, sub, color, theme }) {
+  return (
+    <div style={{
+      background:theme.surface, border:`1px solid ${theme.border}`,
+      borderRadius:12, padding:"16px 18px", flex:1, minWidth:140,
+    }}>
+      <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
+                    letterSpacing:"0.07em", color:theme.textMuted, marginBottom:6 }}>
+        {label}
+      </div>
+      <div style={{ fontSize:22, fontWeight:900, color: color || theme.text, lineHeight:1 }}>
+        {value}
+      </div>
+      {sub && <div style={{ fontSize:11, color:theme.textMuted, marginTop:4 }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── UsageTab ──────────────────────────────────────────────────
+function UsageTab({ theme }) {
+  const [from, setFrom] = useState(Math.floor(Date.now()/1000) - 30*86400);
+  const [to,   setTo]   = useState(Math.floor(Date.now()/1000) + 86400);
+  const [overview, setOverview] = useState(null);
+  const [timeseries, setTimeseries] = useState({});
+  const [loading, setLoading] = useState(false);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [ov, tsResumes, tsCost] = await Promise.all([
+        api(`/api/admin/analytics/overview?from=${from}&to=${to}`),
+        api(`/api/admin/analytics/timeseries?from=${from}&to=${to}&metric=resumes&granularity=day`),
+        api(`/api/admin/analytics/timeseries?from=${from}&to=${to}&metric=cost&granularity=day`),
+      ]);
+      setOverview(ov);
+      setTimeseries({ resumes: tsResumes, cost: tsCost });
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  }, [from, to]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  if (loading && !overview) return (
+    <div style={{ padding:32, textAlign:"center", color:theme.textMuted }}>Loading…</div>
+  );
+  if (!overview) return null;
+
+  const fmtNum = n => n == null ? "—" : n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}k` : String(Math.round(n));
+  const fmtUsd = n => n == null ? "—" : `$${Number(n).toFixed(4)}`;
+  const fmtPct = n => n == null ? "—" : `${(n*100).toFixed(1)}%`;
+
+  const cacheColor = overview.cacheHitRate >= 0.7 ? "#16a34a" : overview.cacheHitRate >= 0.4 ? "#d97706" : "#dc2626";
+
+  return (
+    <div style={{ padding:"20px", display:"flex", flexDirection:"column", gap:20 }}>
+      <DateRange from={from} to={to} onFromChange={setFrom} onToChange={setTo}/>
+
+      {/* Stat cards */}
+      <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
+        <StatCard label="Active Users" value={overview.activeUsers} sub={`of ${overview.totalUsers} total`} theme={theme}/>
+        <StatCard label="Resumes Generated" value={overview.totalResumes}
+          sub={overview.avgAtsImprovement != null ? `▲${overview.avgAtsImprovement.toFixed(1)} pts ATS avg` : null}
+          theme={theme} color={theme.accent}/>
+        <StatCard label="Jobs Scraped" value={fmtNum(overview.totalJobsInserted)} sub={`${overview.totalScrapes} scrape runs`} theme={theme}/>
+        <StatCard label="Token Usage" value={fmtNum(overview.totalTokensUsed)} sub="tokens" theme={theme}/>
+        <StatCard label="API Cost" value={fmtUsd(overview.totalCostUsd)} theme={theme} color="#dc2626"/>
+        <StatCard label="Cache Savings" value={fmtUsd(overview.totalCostSaved)} theme={theme} color="#16a34a"/>
+        <StatCard label="Cache Hit Rate" value={fmtPct(overview.cacheHitRate)} theme={theme} color={cacheColor}/>
+        <StatCard label="Avg ATS Δ"
+          value={overview.avgAtsImprovement != null ? `+${overview.avgAtsImprovement.toFixed(1)}` : "—"}
+          sub={overview.avgAtsScoreBefore != null ? `${overview.avgAtsScoreBefore?.toFixed(0)} → ${overview.avgAtsScoreAfter?.toFixed(0)}` : null}
+          theme={theme} color={theme.accent}/>
+      </div>
+
+      {/* Charts */}
+      <div style={{ display:"flex", gap:16, flexWrap:"wrap" }}>
+        <div style={{ flex:1, minWidth:280, background:theme.surface, border:`1px solid ${theme.border}`,
+                      borderRadius:12, padding:16 }}>
+          <div style={{ fontSize:12, fontWeight:700, marginBottom:12, color:theme.text }}>Resumes Generated</div>
+          <MiniLineChart data={timeseries.resumes || []} width={300} height={90} color={theme.accent}/>
+        </div>
+        <div style={{ flex:1, minWidth:280, background:theme.surface, border:`1px solid ${theme.border}`,
+                      borderRadius:12, padding:16 }}>
+          <div style={{ fontSize:12, fontWeight:700, marginBottom:12, color:theme.text }}>API Cost (USD/day)</div>
+          <MiniBarChart data={timeseries.cost || []} width={300} height={90} color="#dc2626"/>
+        </div>
+      </div>
+
+      {/* Top event types */}
+      {overview.topEventTypes?.length > 0 && (
+        <div style={{ background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:12, padding:16 }}>
+          <div style={{ fontSize:12, fontWeight:700, marginBottom:12, color:theme.text }}>Event Breakdown</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            {overview.topEventTypes.map(ev => (
+              <div key={ev.event_type} style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ width:160, fontSize:12, color:theme.text }}>{ev.event_type}</div>
+                <div style={{ flex:1, height:6, background:theme.surfaceHigh, borderRadius:999 }}>
+                  <div style={{ height:6, borderRadius:999, background:theme.accent,
+                                width: `${Math.min(100, (ev.count / (overview.topEventTypes[0]?.count||1))*100)}%` }}/>
+                </div>
+                <div style={{ width:50, textAlign:"right", fontSize:12, color:theme.textMuted }}>{ev.count}</div>
+                <div style={{ width:70, textAlign:"right", fontSize:11, color:"#dc2626" }}>{fmtUsd(ev.cost)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── LimitsModal ───────────────────────────────────────────────
+function LimitsModal({ userId, username, initialLimits, onSave, onClose, theme }) {
+  const [limits, setLimits] = useState({
+    monthly_resumes: initialLimits.monthly_resumes ?? "",
+    monthly_ats_scores: initialLimits.monthly_ats_scores ?? "",
+    monthly_job_scrapes: initialLimits.monthly_job_scrapes ?? "",
+    monthly_pdf_exports: initialLimits.monthly_pdf_exports ?? "",
+    monthly_apply_runs: initialLimits.monthly_apply_runs ?? "",
+    monthly_token_budget: initialLimits.monthly_token_budget ?? "",
+    daily_resumes: initialLimits.daily_resumes ?? "",
+    daily_job_scrapes: initialLimits.daily_job_scrapes ?? "",
+    notes: initialLimits.notes ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const numOrNull = v => v === "" || v == null ? null : parseInt(v);
+  const fields = [
+    { key:"monthly_resumes",     label:"Monthly resumes",         unit:"resumes/mo" },
+    { key:"daily_resumes",       label:"Daily resumes",           unit:"resumes/day" },
+    { key:"monthly_ats_scores",  label:"Monthly ATS scores",      unit:"scores/mo" },
+    { key:"monthly_job_scrapes", label:"Monthly job scrapes",     unit:"scrapes/mo" },
+    { key:"daily_job_scrapes",   label:"Daily job scrapes",       unit:"scrapes/day" },
+    { key:"monthly_pdf_exports", label:"Monthly PDF exports",     unit:"exports/mo" },
+    { key:"monthly_apply_runs",  label:"Monthly apply runs",      unit:"runs/mo" },
+    { key:"monthly_token_budget",label:"Monthly token budget",    unit:"tokens" },
+  ];
+  const inp = {
+    height:36, padding:"0 12px", borderRadius:8, border:`1px solid ${theme.border}`,
+    background:theme.surface, color:theme.text, fontSize:12, outline:"none", width:"100%",
+    boxSizing:"border-box",
+  };
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:1100, display:"flex",
+                  alignItems:"center", justifyContent:"center",
+                  background:"rgba(0,0,0,0.5)" }}
+      onClick={e => { if(e.target===e.currentTarget) onClose(); }}>
+      <div style={{ background:theme.surface, borderRadius:16, padding:28,
+                    maxWidth:420, width:"90%", maxHeight:"80vh", overflowY:"auto",
+                    border:`1px solid ${theme.border}` }}>
+        <div style={{ fontSize:16, fontWeight:800, marginBottom:16, color:theme.text }}>
+          Limits: {username}
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {fields.map(f => (
+            <div key={f.key}>
+              <div style={{ fontSize:11, fontWeight:700, color:theme.textMuted, marginBottom:4 }}>
+                {f.label} <span style={{ fontWeight:400 }}>({f.unit}, blank = unlimited)</span>
+              </div>
+              <input style={inp} type="number" min={0}
+                value={limits[f.key]} placeholder="Unlimited"
+                onChange={e => setLimits(l => ({ ...l, [f.key]: e.target.value }))}/>
+            </div>
+          ))}
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:theme.textMuted, marginBottom:4 }}>Admin notes</div>
+            <textarea style={{ ...inp, height:72, padding:"8px 12px", resize:"vertical" }}
+              value={limits.notes} onChange={e => setLimits(l => ({ ...l, notes: e.target.value }))}/>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:8, marginTop:20 }}>
+          <button onClick={onClose}
+            style={{ flex:1, padding:"10px 0", borderRadius:999, border:`1px solid ${theme.border}`,
+                     background:"transparent", color:theme.text, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+            Cancel
+          </button>
+          <button disabled={saving} onClick={async () => {
+            setSaving(true);
+            await onSave({
+              monthly_resumes: numOrNull(limits.monthly_resumes),
+              monthly_ats_scores: numOrNull(limits.monthly_ats_scores),
+              monthly_job_scrapes: numOrNull(limits.monthly_job_scrapes),
+              monthly_pdf_exports: numOrNull(limits.monthly_pdf_exports),
+              monthly_apply_runs: numOrNull(limits.monthly_apply_runs),
+              monthly_token_budget: numOrNull(limits.monthly_token_budget),
+              daily_resumes: numOrNull(limits.daily_resumes),
+              daily_job_scrapes: numOrNull(limits.daily_job_scrapes),
+              notes: limits.notes || null,
+            });
+            setSaving(false);
+          }}
+            style={{ flex:2, padding:"10px 0", borderRadius:999, border:"none",
+                     background:theme.accent, color:"#0f0f0f", fontWeight:800, fontSize:13,
+                     cursor:"pointer", opacity:saving?0.7:1 }}>
+            {saving ? "Saving…" : "Save Limits"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── UsersTab ──────────────────────────────────────────────────
+function UsersTab({ theme }) {
+  const [from, setFrom] = useState(Math.floor(Date.now()/1000) - 30*86400);
+  const [to,   setTo]   = useState(Math.floor(Date.now()/1000) + 86400);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [editLimits, setEditLimits] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const [events, setEvents] = useState({});
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api(`/api/admin/analytics/users?from=${from}&to=${to}`);
+      setUsers(data);
+    } catch(e) {}
+    setLoading(false);
+  }, [from, to]);
+
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  const loadEvents = async (userId) => {
+    if (events[userId]) return;
+    try {
+      const data = await api(`/api/admin/analytics/users/${userId}/events?pageSize=20`);
+      setEvents(e => ({ ...e, [userId]: data }));
+    } catch(e) {}
+  };
+
+  const fmtNum = n => n == null ? "—" : n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}k` : String(Math.round(n));
+  const fmtUsd = n => n == null ? "—" : `$${Number(n).toFixed(4)}`;
+  const fmtPct = n => n == null ? "—" : `${(n*100).toFixed(0)}%`;
+
+  return (
+    <div style={{ padding:20, display:"flex", flexDirection:"column", gap:16 }}>
+      <DateRange from={from} to={to} onFromChange={setFrom} onToChange={setTo}/>
+
+      {loading ? <div style={{ color:theme.textMuted, fontSize:12 }}>Loading…</div> : (
+        <div style={{ background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:12, overflow:"hidden" }}>
+          {/* Table header */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 60px 60px 80px 80px 70px 70px 80px 80px",
+                        padding:"10px 16px", background:theme.surfaceHigh,
+                        fontSize:10, fontWeight:700, textTransform:"uppercase",
+                        letterSpacing:"0.06em", color:theme.textMuted }}>
+            <div>User</div><div>Resumes</div><div>Scrapes</div>
+            <div>Tokens</div><div>Cost</div><div>Cache%</div>
+            <div>ATS Δ</div><div>Last Active</div><div>Actions</div>
+          </div>
+          {users.map(u => (
+            <div key={u.userId}>
+              <div onClick={() => { setExpanded(e => e===u.userId?null:u.userId); loadEvents(u.userId); }}
+                style={{ display:"grid", gridTemplateColumns:"1fr 60px 60px 80px 80px 70px 70px 80px 80px",
+                         padding:"12px 16px", borderTop:`1px solid ${theme.border}`,
+                         cursor:"pointer", fontSize:12,
+                         background: expanded===u.userId ? theme.surfaceHigh : "transparent" }}>
+                <div style={{ fontWeight:700, color:theme.text }}>{u.username}</div>
+                <div style={{ color:theme.textMuted }}>{u.resumesGenerated}</div>
+                <div style={{ color:theme.textMuted }}>{u.jobScrapes}</div>
+                <div style={{ color:theme.textMuted }}>{fmtNum(u.totalTokens)}</div>
+                <div style={{ color:"#dc2626" }}>{fmtUsd(u.totalCost)}</div>
+                <div style={{ color:theme.textMuted }}>{fmtPct(u.cacheHitRate)}</div>
+                <div style={{ color:theme.accent }}>
+                  {u.avgAtsScoreAfter != null && u.avgAtsScoreBefore != null
+                    ? `+${(u.avgAtsScoreAfter - u.avgAtsScoreBefore).toFixed(0)}`
+                    : "—"}
+                </div>
+                <div style={{ color:theme.textMuted, fontSize:11 }}>
+                  {u.lastActiveAt ? new Date(u.lastActiveAt*1000).toLocaleDateString() : "—"}
+                </div>
+                <div onClick={e2 => { e2.stopPropagation(); setEditLimits({ userId:u.userId, username:u.username, limits:u.limits||{} }); }}>
+                  <span style={{ fontSize:11, padding:"2px 8px", borderRadius:999,
+                                 border:`1px solid ${theme.border}`, cursor:"pointer",
+                                 color:theme.text, whiteSpace:"nowrap" }}>
+                    Limits
+                  </span>
+                </div>
+              </div>
+              {/* Expanded row */}
+              {expanded === u.userId && (
+                <div style={{ padding:"12px 16px 16px", borderTop:`1px solid ${theme.border}`,
+                              background:theme.surfaceHigh }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:theme.textMuted, marginBottom:8 }}>
+                    Recent Events
+                  </div>
+                  {(events[u.userId] || []).slice(0,10).map(ev => (
+                    <div key={ev.id} style={{ display:"flex", gap:12, fontSize:11,
+                                              color:theme.textMuted, padding:"3px 0",
+                                              borderBottom:`1px solid ${theme.border}` }}>
+                      <span style={{ color:theme.text, fontWeight:600, width:140 }}>{ev.event_type}</span>
+                      <span>{ev.model?.replace("claude-","")}</span>
+                      <span>{(ev.input_tokens||0)+(ev.output_tokens||0)} tok</span>
+                      <span style={{ color:"#dc2626" }}>${Number(ev.cost_usd||0).toFixed(5)}</span>
+                      <span>{new Date(ev.created_at*1000).toLocaleString()}</span>
+                    </div>
+                  ))}
+                  {!events[u.userId] && <div style={{ color:theme.textDim, fontSize:11 }}>Loading…</div>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Limits editor modal */}
+      {editLimits && (
+        <LimitsModal
+          userId={editLimits.userId}
+          username={editLimits.username}
+          initialLimits={editLimits.limits}
+          theme={theme}
+          onSave={async (limits) => {
+            await api(`/api/admin/analytics/limits/${editLimits.userId}`, {
+              method:"PUT", body:JSON.stringify(limits),
+            });
+            setEditLimits(null);
+            loadUsers();
+          }}
+          onClose={() => setEditLimits(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── CacheTab ──────────────────────────────────────────────────
+function CacheTab({ theme }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    api("/api/admin/analytics/cache").then(setData).catch(()=>{});
+  }, []);
+  if (!data) return <div style={{ padding:32, color:theme.textMuted }}>Loading…</div>;
+  const fmtPct = n => `${(n*100).toFixed(1)}%`;
+  const fmtUsd = n => `$${Number(n||0).toFixed(4)}`;
+  return (
+    <div style={{ padding:20, display:"flex", flexDirection:"column", gap:16 }}>
+      {/* Warmth score */}
+      <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                    borderRadius:12, padding:20, display:"flex", alignItems:"center", gap:20 }}>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:40, fontWeight:900,
+                        color: data.warmthScore >= 70 ? "#16a34a" : data.warmthScore >= 40 ? "#d97706" : "#dc2626" }}>
+            {data.warmthScore}
+          </div>
+          <div style={{ fontSize:10, color:theme.textMuted, fontWeight:700 }}>WARMTH SCORE</div>
+        </div>
+        <div>
+          <div style={{ fontSize:13, color:theme.text, lineHeight:1.6 }}>
+            {fmtPct(data.hitRate)} of recent generation calls hit a cached prompt layer,
+            saving {fmtUsd(data.totalCostSaved)} this period.
+          </div>
+          <div style={{ fontSize:11, color:theme.textMuted, marginTop:4 }}>
+            {data.totalCacheHits} hits · {data.totalCacheMisses} misses · {(data.totalTokensSaved||0).toLocaleString()} tokens saved
+          </div>
+        </div>
+      </div>
+      {/* By layer */}
+      {data.byLayer?.length > 0 && (
+        <div style={{ background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:12, overflow:"hidden" }}>
+          <div style={{ padding:"10px 16px", background:theme.surfaceHigh, fontSize:10,
+                        fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em",
+                        color:theme.textMuted }}>By Layer</div>
+          {data.byLayer.map(l => (
+            <div key={l.layer} style={{ display:"flex", gap:12, padding:"10px 16px",
+                                         borderTop:`1px solid ${theme.border}`, fontSize:12 }}>
+              <div style={{ width:160, color:theme.text, fontWeight:600 }}>{l.layer || "unknown"}</div>
+              <div style={{ color:theme.textMuted }}>{l.hits} hits</div>
+              <div style={{ color:theme.textMuted }}>{l.misses} misses</div>
+              <div style={{ color:theme.textMuted }}>{l.hits + l.misses > 0 ? fmtPct(l.hits / (l.hits + l.misses)) : "—"}</div>
+              <div style={{ color:"#16a34a" }}>{fmtUsd(l.cost_saved)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* By domain */}
+      {data.byDomain?.length > 0 && (
+        <div style={{ background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:12, overflow:"hidden" }}>
+          <div style={{ padding:"10px 16px", background:theme.surfaceHigh, fontSize:10,
+                        fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em",
+                        color:theme.textMuted }}>By Domain Module</div>
+          {data.byDomain.map(d => (
+            <div key={d.domain_module} style={{ display:"flex", gap:12, padding:"10px 16px",
+                                                 borderTop:`1px solid ${theme.border}`, fontSize:12 }}>
+              <div style={{ width:160, color:theme.text, fontWeight:600 }}>{d.domain_module}</div>
+              <div style={{ color:theme.textMuted }}>{d.calls} calls</div>
+              <div style={{ color:theme.textMuted }}>{d.hits} hits</div>
+              <div style={{ color:theme.textMuted }}>{d.calls > 0 ? fmtPct(d.hits / d.calls) : "—"}</div>
+              <div style={{ color:"#16a34a" }}>{fmtUsd(d.cost_saved)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function AdminPanel() {
   const { theme } = useTheme();
@@ -17,6 +496,9 @@ export function AdminPanel() {
   const [bStatus,  setBStatus]  = useState("");
   const [backing,  setBacking]  = useState(false);
   const [section,  setSection]  = useState("users");
+
+  // Top-level tab: "system" | "usage" | "users_analytics" | "cache"
+  const [topTab, setTopTab] = useState("system");
 
   useEffect(() => { loadUsers(); loadBackups(); }, []);
 
@@ -78,9 +560,16 @@ export function AdminPanel() {
     whiteSpace:"nowrap",
   };
 
+  const TOP_TABS = [
+    { id:"system",          label:"System" },
+    { id:"usage",           label:"Usage" },
+    { id:"users_analytics", label:"Users" },
+    { id:"cache",           label:"Cache" },
+  ];
+
   return (
     <div style={{ padding:"32px 24px", overflowY:"auto", height:"100%",
-                  boxSizing:"border-box", background:theme.bg, maxWidth:900,
+                  boxSizing:"border-box", background:theme.bg, maxWidth:1200,
                   borderTop:`4px solid ${ADMIN_ACCENT}` }}>
 
       {/* Lucy admin header — yellow accent */}
@@ -98,233 +587,262 @@ export function AdminPanel() {
         }}>Panel</span>
       </div>
 
-      {/* ── Section tabs — Lucy style ── */}
+      {/* ── Top-level tabs ── */}
       <div style={{ display:"flex", borderBottom:`2px solid ${ADMIN_ACCENT}`, marginBottom:24 }}>
-        {SECTIONS.map(([id, lbl]) => (
+        {TOP_TABS.map(({ id, label }) => (
           <button key={id}
             style={{
               padding:"10px 20px", border:"none", cursor:"pointer",
               fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
               fontWeight:800, fontSize:14, letterSpacing:"0.06em", textTransform:"uppercase",
-              background: section===id ? ADMIN_ACCENT : "transparent",
-              color: section===id ? ADMIN_TEXT : theme.textMuted,
+              background: topTab===id ? ADMIN_ACCENT : "transparent",
+              color: topTab===id ? ADMIN_TEXT : theme.textMuted,
               transition:"all 0.15s", borderRadius:"2px 2px 0 0",
             }}
-            onClick={() => setSection(id)}>
-            {lbl}
+            onClick={() => setTopTab(id)}>
+            {label}
           </button>
         ))}
       </div>
 
-      <AnimatePresence mode="wait">
-        {section === "users" && (
-          <motion.div key="users"
-            initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }}
-            exit={{ opacity:0, y:-6 }} transition={{ duration:0.18 }}>
+      {/* ── Usage analytics tab ── */}
+      {topTab === "usage" && <UsageTab theme={theme}/>}
+      {topTab === "users_analytics" && <UsersTab theme={theme}/>}
+      {topTab === "cache" && <CacheTab theme={theme}/>}
 
-            {/* Create user card */}
-            <div className="rm-card" style={{ marginBottom:24, maxWidth:440 }}>
-              <div style={{ fontWeight:700, fontSize:14, color:theme.text, marginBottom:16 }}>
-                Create User
-              </div>
-              <form onSubmit={createUser} style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                <input className="rm-input" value={newU.username}
-                  onChange={e => setNewU(u => ({ ...u, username:e.target.value }))}
-                  placeholder="Username"/>
-                <input className="rm-input" type="password" value={newU.password}
-                  onChange={e => setNewU(u => ({ ...u, password:e.target.value }))}
-                  placeholder="Password (min 8 chars)"/>
-                <label style={{ display:"flex", alignItems:"center", gap:8,
-                                fontSize:13, color:theme.text, cursor:"pointer" }}>
-                  <input type="checkbox" checked={newU.isAdmin}
-                    onChange={e => setNewU(u => ({ ...u, isAdmin:e.target.checked }))}
-                    style={{ accentColor:theme.accent, width:16, height:16 }}/>
-                  Admin user
-                </label>
-                <div style={{ display:"flex", gap:10, alignItems:"center", marginTop:4 }}>
-                  <button type="submit" className="rm-btn rm-btn-primary rm-btn-sm">
-                    Create
-                  </button>
-                  {status && (
-                    <span style={{ fontSize:12,
-                      color:status.startsWith("✓") ? theme.success : theme.danger }}>
-                      {status}
+      {/* ── System tab (existing user management + backups) ── */}
+      {topTab === "system" && (
+        <>
+          {/* ── Section tabs — Lucy style ── */}
+          <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`, marginBottom:24 }}>
+            {SECTIONS.map(([id, lbl]) => (
+              <button key={id}
+                style={{
+                  padding:"8px 16px", border:"none", cursor:"pointer",
+                  fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
+                  fontWeight:800, fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
+                  background: section===id ? theme.surfaceHigh : "transparent",
+                  color: section===id ? theme.text : theme.textMuted,
+                  transition:"all 0.15s", borderRadius:"4px 4px 0 0",
+                  borderBottom: section===id ? `2px solid ${theme.accent}` : "2px solid transparent",
+                }}
+                onClick={() => setSection(id)}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          <AnimatePresence mode="wait">
+            {section === "users" && (
+              <motion.div key="users"
+                initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }}
+                exit={{ opacity:0, y:-6 }} transition={{ duration:0.18 }}>
+
+                {/* Create user card */}
+                <div className="rm-card" style={{ marginBottom:24, maxWidth:440 }}>
+                  <div style={{ fontWeight:700, fontSize:14, color:theme.text, marginBottom:16 }}>
+                    Create User
+                  </div>
+                  <form onSubmit={createUser} style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                    <input className="rm-input" value={newU.username}
+                      onChange={e => setNewU(u => ({ ...u, username:e.target.value }))}
+                      placeholder="Username"/>
+                    <input className="rm-input" type="password" value={newU.password}
+                      onChange={e => setNewU(u => ({ ...u, password:e.target.value }))}
+                      placeholder="Password (min 8 chars)"/>
+                    <label style={{ display:"flex", alignItems:"center", gap:8,
+                                    fontSize:13, color:theme.text, cursor:"pointer" }}>
+                      <input type="checkbox" checked={newU.isAdmin}
+                        onChange={e => setNewU(u => ({ ...u, isAdmin:e.target.checked }))}
+                        style={{ accentColor:theme.accent, width:16, height:16 }}/>
+                      Admin user
+                    </label>
+                    <div style={{ display:"flex", gap:10, alignItems:"center", marginTop:4 }}>
+                      <button type="submit" className="rm-btn rm-btn-primary rm-btn-sm">
+                        Create
+                      </button>
+                      {status && (
+                        <span style={{ fontSize:12,
+                          color:status.startsWith("✓") ? theme.success : theme.danger }}>
+                          {status}
+                        </span>
+                      )}
+                    </div>
+                  </form>
+                </div>
+
+                {/* User table */}
+                <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                              borderRadius:16, overflow:"hidden" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                    <thead>
+                      <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}` }}>
+                        {["Username","Role","Mode","Created","Actions"].map(h => (
+                          <th key={h} style={thStyle}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map((u, i) => (
+                        <tr key={u.id} className="rm-table-row"
+                          style={{ borderBottom:`1px solid ${theme.border}` }}>
+                          <td style={{ padding:"12px 14px", fontSize:13,
+                                       color:theme.text, fontWeight:600 }}>
+                            {u.username}
+                          </td>
+                          <td style={{ padding:"12px 14px" }}>
+                            <span className="rm-badge" style={{
+                              background: u.is_admin ? "#f3e8ff" : theme.surfaceHigh,
+                              color: u.is_admin ? "#7c3aed" : theme.textMuted,
+                              border:`1px solid ${u.is_admin ? "#7c3aed33" : theme.border}`,
+                            }}>
+                              {u.is_admin ? "Admin" : "User"}
+                            </span>
+                          </td>
+                          <td style={{ padding:"12px 14px", fontSize:12, color:theme.textMuted }}>
+                            {u.apply_mode}
+                          </td>
+                          <td style={{ padding:"12px 14px", fontSize:11, color:theme.textDim }}>
+                            {new Date(u.created_at * 1000).toLocaleDateString()}
+                          </td>
+                          <td style={{ padding:"12px 14px" }}>
+                            <div style={{ display:"flex", gap:6 }}>
+                              {!u.is_admin && (
+                                <button className="rm-btn rm-btn-ghost rm-btn-sm"
+                                  style={{ color:theme.danger, borderColor:theme.danger+"44" }}
+                                  onClick={() => deleteUser(u.id)}>
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </motion.div>
+            )}
+
+            {section === "backups" && (
+              <motion.div key="backups"
+                initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }}
+                exit={{ opacity:0, y:-6 }} transition={{ duration:0.18 }}>
+
+                {/* Backup card */}
+                <div className="rm-card" style={{ marginBottom:24, maxWidth:560 }}>
+                  <div style={{ fontWeight:700, fontSize:14, color:theme.text, marginBottom:10 }}>
+                    Database Backup
+                  </div>
+                  <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6, marginBottom:14 }}>
+                    Backups are saved to{" "}
+                    <code style={{ color:theme.accentText, fontFamily:"monospace" }}>data/backups/</code>{" "}
+                    and kept for the last 30 snapshots.
+                    An automatic backup runs daily at 2:00 AM. Restore creates a safety backup
+                    of the current DB before overwriting.
+                    After restoring, <strong style={{ color:theme.text }}>restart the server</strong> to apply.
+                  </div>
+                  <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                    <button
+                      disabled={backing} onClick={triggerBackup}
+                      style={{
+                        background: backing ? theme.border : ADMIN_ACCENT,
+                        color: ADMIN_TEXT, border:"none", borderRadius:2,
+                        padding:"8px 20px", cursor:"pointer",
+                        fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
+                        fontWeight:800, fontSize:13, letterSpacing:"0.08em",
+                        textTransform:"uppercase",
+                        transition:"border-radius 1s ease",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.borderRadius="999px"}
+                      onMouseLeave={e => e.currentTarget.style.borderRadius="2px"}>
+                      {backing ? "Creating…" : "Backup Now"}
+                    </button>
+                    {bStatus && (
+                      <span style={{ fontSize:12,
+                        color:bStatus.startsWith("✓") ? theme.success : theme.danger }}>
+                        {bStatus}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Backup list */}
+                <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+                              borderRadius:16, overflow:"hidden", maxWidth:700 }}>
+                  <div style={{ background:theme.surfaceHigh, padding:"10px 16px",
+                                display:"flex", alignItems:"center",
+                                justifyContent:"space-between",
+                                borderBottom:`1px solid ${theme.border}` }}>
+                    <span style={{ fontSize:11, fontWeight:700, color:theme.textMuted }}>
+                      Restore Points ({backups.length})
                     </span>
+                    <button className="rm-btn rm-btn-ghost rm-btn-sm"
+                      onClick={loadBackups}>
+                      ↻ Refresh
+                    </button>
+                  </div>
+                  {backups.length === 0 ? (
+                    <div style={{ padding:"32px", color:theme.textDim,
+                                  fontSize:13, textAlign:"center" }}>
+                      No backups yet — click "Backup Now" to create the first one.
+                    </div>
+                  ) : (
+                    <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                      <thead>
+                        <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}` }}>
+                          {["File","Type","Created","Size",""].map(h => (
+                            <th key={h} style={thStyle}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {backups.map((b, i) => (
+                          <tr key={i} className="rm-table-row"
+                            style={{ borderBottom:`1px solid ${theme.border}` }}>
+                            <td style={{ padding:"10px 14px", fontSize:11,
+                                         color:theme.textMuted, fontFamily:"monospace",
+                                         maxWidth:260, overflow:"hidden",
+                                         textOverflow:"ellipsis", whiteSpace:"nowrap" }}
+                              title={b.filename}>
+                              {b.filename}
+                            </td>
+                            <td style={{ padding:"10px 14px" }}>
+                              <span className="rm-badge" style={{
+                                background: b.label==="auto-daily" ? theme.infoMuted
+                                          : b.label==="manual"     ? theme.surfaceHigh
+                                          : theme.dangerMuted,
+                                color: b.label==="auto-daily" ? theme.info
+                                     : b.label==="manual"     ? theme.textMuted
+                                     : theme.danger,
+                              }}>
+                                {b.label}
+                              </span>
+                            </td>
+                            <td style={{ padding:"10px 14px", fontSize:11, color:theme.textMuted }}>
+                              {new Date(b.created).toLocaleString()}
+                            </td>
+                            <td style={{ padding:"10px 14px", fontSize:11, color:theme.textDim }}>
+                              {b.size ? fmtSize(b.size) : "—"}
+                            </td>
+                            <td style={{ padding:"10px 14px" }}>
+                              <button className="rm-btn rm-btn-ghost rm-btn-sm"
+                                style={{ color:theme.success, borderColor:theme.success+"44" }}
+                                onClick={() => restoreBackup(b.filename)}>
+                                Restore
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </div>
-              </form>
-            </div>
-
-            {/* User table */}
-            <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
-                          borderRadius:16, overflow:"hidden" }}>
-              <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                <thead>
-                  <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}` }}>
-                    {["Username","Role","Mode","Created","Actions"].map(h => (
-                      <th key={h} style={thStyle}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u, i) => (
-                    <tr key={u.id} className="rm-table-row"
-                      style={{ borderBottom:`1px solid ${theme.border}` }}>
-                      <td style={{ padding:"12px 14px", fontSize:13,
-                                   color:theme.text, fontWeight:600 }}>
-                        {u.username}
-                      </td>
-                      <td style={{ padding:"12px 14px" }}>
-                        <span className="rm-badge" style={{
-                          background: u.is_admin ? "#f3e8ff" : theme.surfaceHigh,
-                          color: u.is_admin ? "#7c3aed" : theme.textMuted,
-                          border:`1px solid ${u.is_admin ? "#7c3aed33" : theme.border}`,
-                        }}>
-                          {u.is_admin ? "Admin" : "User"}
-                        </span>
-                      </td>
-                      <td style={{ padding:"12px 14px", fontSize:12, color:theme.textMuted }}>
-                        {u.apply_mode}
-                      </td>
-                      <td style={{ padding:"12px 14px", fontSize:11, color:theme.textDim }}>
-                        {new Date(u.created_at * 1000).toLocaleDateString()}
-                      </td>
-                      <td style={{ padding:"12px 14px" }}>
-                        <div style={{ display:"flex", gap:6 }}>
-                          {!u.is_admin && (
-                            <button className="rm-btn rm-btn-ghost rm-btn-sm"
-                              style={{ color:theme.danger, borderColor:theme.danger+"44" }}
-                              onClick={() => deleteUser(u.id)}>
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </motion.div>
-        )}
-
-        {section === "backups" && (
-          <motion.div key="backups"
-            initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }}
-            exit={{ opacity:0, y:-6 }} transition={{ duration:0.18 }}>
-
-            {/* Backup card */}
-            <div className="rm-card" style={{ marginBottom:24, maxWidth:560 }}>
-              <div style={{ fontWeight:700, fontSize:14, color:theme.text, marginBottom:10 }}>
-                Database Backup
-              </div>
-              <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6, marginBottom:14 }}>
-                Backups are saved to{" "}
-                <code style={{ color:theme.accentText, fontFamily:"monospace" }}>data/backups/</code>{" "}
-                and kept for the last 30 snapshots.
-                An automatic backup runs daily at 2:00 AM. Restore creates a safety backup
-                of the current DB before overwriting.
-                After restoring, <strong style={{ color:theme.text }}>restart the server</strong> to apply.
-              </div>
-              <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-                <button
-                  disabled={backing} onClick={triggerBackup}
-                  style={{
-                    background: backing ? theme.border : ADMIN_ACCENT,
-                    color: ADMIN_TEXT, border:"none", borderRadius:2,
-                    padding:"8px 20px", cursor:"pointer",
-                    fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
-                    fontWeight:800, fontSize:13, letterSpacing:"0.08em",
-                    textTransform:"uppercase",
-                    transition:"border-radius 1s ease",
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.borderRadius="999px"}
-                  onMouseLeave={e => e.currentTarget.style.borderRadius="2px"}>
-                  {backing ? "Creating…" : "Backup Now"}
-                </button>
-                {bStatus && (
-                  <span style={{ fontSize:12,
-                    color:bStatus.startsWith("✓") ? theme.success : theme.danger }}>
-                    {bStatus}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Backup list */}
-            <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
-                          borderRadius:16, overflow:"hidden", maxWidth:700 }}>
-              <div style={{ background:theme.surfaceHigh, padding:"10px 16px",
-                            display:"flex", alignItems:"center",
-                            justifyContent:"space-between",
-                            borderBottom:`1px solid ${theme.border}` }}>
-                <span style={{ fontSize:11, fontWeight:700, color:theme.textMuted }}>
-                  Restore Points ({backups.length})
-                </span>
-                <button className="rm-btn rm-btn-ghost rm-btn-sm"
-                  onClick={loadBackups}>
-                  ↻ Refresh
-                </button>
-              </div>
-              {backups.length === 0 ? (
-                <div style={{ padding:"32px", color:theme.textDim,
-                              fontSize:13, textAlign:"center" }}>
-                  No backups yet — click "Backup Now" to create the first one.
-                </div>
-              ) : (
-                <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                  <thead>
-                    <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}` }}>
-                      {["File","Type","Created","Size",""].map(h => (
-                        <th key={h} style={thStyle}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {backups.map((b, i) => (
-                      <tr key={i} className="rm-table-row"
-                        style={{ borderBottom:`1px solid ${theme.border}` }}>
-                        <td style={{ padding:"10px 14px", fontSize:11,
-                                     color:theme.textMuted, fontFamily:"monospace",
-                                     maxWidth:260, overflow:"hidden",
-                                     textOverflow:"ellipsis", whiteSpace:"nowrap" }}
-                          title={b.filename}>
-                          {b.filename}
-                        </td>
-                        <td style={{ padding:"10px 14px" }}>
-                          <span className="rm-badge" style={{
-                            background: b.label==="auto-daily" ? theme.infoMuted
-                                      : b.label==="manual"     ? theme.surfaceHigh
-                                      : theme.dangerMuted,
-                            color: b.label==="auto-daily" ? theme.info
-                                 : b.label==="manual"     ? theme.textMuted
-                                 : theme.danger,
-                          }}>
-                            {b.label}
-                          </span>
-                        </td>
-                        <td style={{ padding:"10px 14px", fontSize:11, color:theme.textMuted }}>
-                          {new Date(b.created).toLocaleString()}
-                        </td>
-                        <td style={{ padding:"10px 14px", fontSize:11, color:theme.textDim }}>
-                          {b.size ? fmtSize(b.size) : "—"}
-                        </td>
-                        <td style={{ padding:"10px 14px" }}>
-                          <button className="rm-btn rm-btn-ghost rm-btn-sm"
-                            style={{ color:theme.success, borderColor:theme.success+"44" }}
-                            onClick={() => restoreBackup(b.filename)}>
-                            Restore
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>
+      )}
     </div>
   );
 }
