@@ -810,7 +810,7 @@ async function scrapeHarvestAPI(query, token) {
     jobTitles:      [query],
     locations:      ["United States"],
     workplaceType:  ["remote", "hybrid", "office"],
-    employmentType: ["FULL_TIME"],
+    employmentType: ["full-time"],
     postedLimit:    "24h",
     maxItems:       MAX_JOBS_PER_REFRESH * 3,
   };
