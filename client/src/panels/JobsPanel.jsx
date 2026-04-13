@@ -732,6 +732,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         setScrapeError("No Apify token set. Add it via avatar → Apify Token.");
         return;
       }
+      if (result.limitReached) {
+        setScrapeError(result.error);
+        return;
+      }
       if (result.error) { setScrapeError(result.error); return; }
 
       // Server normalises the query (pm → Product Manager); use it for role filter
@@ -807,6 +811,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q }) });
       if (result.missingToken) {
         setScrapeError("No Apify token — add it in avatar → Apify Token.");
+        return;
+      }
+      if (result.limitReached) {
+        setScrapeError(result.error);
         return;
       }
       if (result.error) { setScrapeError(result.error); return; }
@@ -969,6 +977,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     try {
       const d = await api("/api/generate", { method:"POST",
         body:JSON.stringify({ jobId:key, job, resumeText, forceRegen:force }) });
+      if (d.limitReached) {
+        setSandbox({ generating: false, error: d.error, company: job.company, title: job.title });
+        return; // don't throw, just show error in sandbox panel
+      }
       if (d.error) throw new Error(d.error);
       setGenerated(p => ({ ...p, [key]:{ html:d.html, atsScore:d.atsScore, atsReport:d.atsReport,
         company:job.company, title:job.title } }));
