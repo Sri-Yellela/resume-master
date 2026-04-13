@@ -1,0 +1,166 @@
+{
+  "__comment": "Qualification-to-domain mapping. Schema per entry: { domainModule, atsBoost[], searchQueryTemplates[], description }. Used by qualificationResolver.js to derive domain module key and ATS boost keywords. To add a new qualification: add an entry following the schema. To add search templates: use {role} as a placeholder for the canonical role title.",
+
+  "bs_cs": {
+    "domainModule": "engineering",
+    "atsBoost": ["computer science", "B.S. Computer Science", "BS CS"],
+    "searchQueryTemplates": ["Software Engineer", "Backend Engineer", "Full Stack Engineer"],
+    "description": "Bachelor of Science in Computer Science"
+  },
+  "ms_cs": {
+    "domainModule": "engineering",
+    "atsBoost": ["computer science", "M.S. Computer Science", "MS CS", "master's degree"],
+    "searchQueryTemplates": ["Software Engineer", "Senior Software Engineer", "Machine Learning Engineer"],
+    "description": "Master of Science in Computer Science"
+  },
+  "phd": {
+    "domainModule": "data",
+    "atsBoost": ["PhD", "doctorate", "doctoral", "research", "publications"],
+    "searchQueryTemplates": ["Research Scientist", "Senior Data Scientist", "ML Research Engineer"],
+    "description": "Doctor of Philosophy (any field)"
+  },
+  "mba": {
+    "domainModule": "general",
+    "atsBoost": ["MBA", "business administration", "graduate degree", "strategic planning"],
+    "searchQueryTemplates": ["Product Manager", "Strategy Manager", "Operations Manager", "Business Analyst"],
+    "description": "Master of Business Administration"
+  },
+  "jd": {
+    "domainModule": "legal",
+    "atsBoost": ["J.D.", "Juris Doctor", "attorney", "bar admission", "legal"],
+    "searchQueryTemplates": ["Attorney", "Associate General Counsel", "Corporate Counsel", "Compliance Counsel"],
+    "description": "Juris Doctor (law degree)"
+  },
+  "md": {
+    "domainModule": "pm_healthcare",
+    "atsBoost": ["M.D.", "medical degree", "physician", "clinical", "board certified"],
+    "searchQueryTemplates": ["Physician", "Medical Director", "Clinical Informatics", "Chief Medical Officer"],
+    "description": "Doctor of Medicine"
+  },
+  "cpa": {
+    "domainModule": "finance",
+    "atsBoost": ["CPA", "Certified Public Accountant", "GAAP", "audit", "financial reporting"],
+    "searchQueryTemplates": ["Staff Accountant", "Senior Accountant", "Audit Manager", "Controller", "CFO"],
+    "description": "Certified Public Accountant"
+  },
+  "ms_finance": {
+    "domainModule": "finance",
+    "atsBoost": ["M.S. Finance", "quantitative finance", "financial modeling", "CFA candidate"],
+    "searchQueryTemplates": ["Financial Analyst", "Investment Banking Analyst", "FP&A Analyst", "Risk Analyst"],
+    "description": "Master of Science in Finance"
+  },
+  "be_civil": {
+    "domainModule": "pm_construction",
+    "atsBoost": ["civil engineering", "B.E. Civil", "structural", "infrastructure", "construction management"],
+    "searchQueryTemplates": ["Civil Engineer", "Project Engineer", "Construction Project Manager", "Structural Engineer"],
+    "description": "Bachelor of Engineering in Civil Engineering"
+  },
+  "ms_construction_mgmt": {
+    "domainModule": "pm_construction",
+    "atsBoost": ["construction management", "M.S. Construction", "project controls", "CPM scheduling"],
+    "searchQueryTemplates": ["Construction Project Manager", "Project Controls Manager", "Senior Project Manager"],
+    "description": "Master of Science in Construction Management"
+  },
+  "mfa": {
+    "domainModule": "design",
+    "atsBoost": ["MFA", "Master of Fine Arts", "visual design", "creative direction"],
+    "searchQueryTemplates": ["Visual Designer", "Creative Director", "UX Designer", "Brand Designer"],
+    "description": "Master of Fine Arts"
+  },
+  "bsn": {
+    "domainModule": "pm_healthcare",
+    "atsBoost": ["BSN", "Bachelor of Science Nursing", "registered nurse", "RN", "clinical"],
+    "searchQueryTemplates": ["Registered Nurse", "Clinical Nurse Specialist", "Nurse Manager", "Healthcare Project Manager"],
+    "description": "Bachelor of Science in Nursing"
+  },
+  "msn": {
+    "domainModule": "pm_healthcare",
+    "atsBoost": ["MSN", "Master of Science Nursing", "nurse practitioner", "advanced practice"],
+    "searchQueryTemplates": ["Nurse Practitioner", "Clinical Nurse Specialist", "Director of Nursing", "CNO"],
+    "description": "Master of Science in Nursing"
+  },
+  "mph": {
+    "domainModule": "pm_healthcare",
+    "atsBoost": ["MPH", "Master of Public Health", "epidemiology", "public health", "health policy"],
+    "searchQueryTemplates": ["Public Health Analyst", "Epidemiologist", "Health Program Manager", "Healthcare Consultant"],
+    "description": "Master of Public Health"
+  },
+  "bs_business": {
+    "domainModule": "general",
+    "atsBoost": ["business administration", "B.S. Business", "management", "operations"],
+    "searchQueryTemplates": ["Business Analyst", "Operations Analyst", "Project Coordinator", "Associate Product Manager"],
+    "description": "Bachelor of Science in Business Administration"
+  },
+  "ba_liberal_arts": {
+    "domainModule": "general",
+    "atsBoost": ["liberal arts", "communications", "critical thinking", "writing"],
+    "searchQueryTemplates": ["Program Coordinator", "Content Strategist", "Operations Associate", "Analyst"],
+    "description": "Bachelor of Arts (liberal arts field)"
+  },
+  "ms_data_science": {
+    "domainModule": "data",
+    "atsBoost": ["data science", "machine learning", "M.S. Data Science", "statistical modeling", "Python"],
+    "searchQueryTemplates": ["Data Scientist", "Machine Learning Engineer", "Analytics Engineer", "Senior Data Analyst"],
+    "description": "Master of Science in Data Science"
+  },
+  "ms_electrical_engineering": {
+    "domainModule": "engineering",
+    "atsBoost": ["electrical engineering", "M.S. EE", "embedded systems", "signal processing", "VLSI"],
+    "searchQueryTemplates": ["Electrical Engineer", "Embedded Software Engineer", "Hardware Engineer", "Systems Engineer"],
+    "description": "Master of Science in Electrical Engineering"
+  },
+  "ms_mechanical_engineering": {
+    "domainModule": "operations",
+    "atsBoost": ["mechanical engineering", "M.S. ME", "thermodynamics", "CAD", "manufacturing"],
+    "searchQueryTemplates": ["Mechanical Engineer", "Manufacturing Engineer", "Product Development Engineer", "Process Engineer"],
+    "description": "Master of Science in Mechanical Engineering"
+  },
+  "ms_chemical_engineering": {
+    "domainModule": "operations",
+    "atsBoost": ["chemical engineering", "M.S. ChE", "process engineering", "reaction engineering", "thermodynamics"],
+    "searchQueryTemplates": ["Chemical Engineer", "Process Engineer", "R&D Engineer", "Plant Engineer"],
+    "description": "Master of Science in Chemical Engineering"
+  },
+  "pgce": {
+    "domainModule": "general",
+    "atsBoost": ["PGCE", "teaching certificate", "education", "curriculum", "pedagogy"],
+    "searchQueryTemplates": ["Teacher", "Curriculum Specialist", "Instructional Designer", "Education Program Manager"],
+    "description": "Postgraduate Certificate in Education"
+  },
+  "pmp": {
+    "domainModule": "pm_it",
+    "atsBoost": ["PMP", "Project Management Professional", "PMI", "project management certification"],
+    "searchQueryTemplates": ["Project Manager", "Senior Project Manager", "Program Manager", "PMO Manager"],
+    "description": "Project Management Professional certification"
+  },
+  "cfa": {
+    "domainModule": "finance",
+    "atsBoost": ["CFA", "Chartered Financial Analyst", "portfolio management", "equity research", "investment analysis"],
+    "searchQueryTemplates": ["Investment Analyst", "Portfolio Manager", "Equity Research Analyst", "Asset Manager"],
+    "description": "Chartered Financial Analyst"
+  },
+  "frm": {
+    "domainModule": "finance",
+    "atsBoost": ["FRM", "Financial Risk Manager", "risk management", "market risk", "credit risk"],
+    "searchQueryTemplates": ["Risk Analyst", "Risk Manager", "Credit Risk Analyst", "Market Risk Manager"],
+    "description": "Financial Risk Manager"
+  },
+  "pharmd": {
+    "domainModule": "pm_healthcare",
+    "atsBoost": ["PharmD", "Doctor of Pharmacy", "clinical pharmacist", "drug therapy", "pharmaceutical"],
+    "searchQueryTemplates": ["Pharmacist", "Clinical Pharmacist", "Pharmacy Manager", "Drug Safety Scientist"],
+    "description": "Doctor of Pharmacy"
+  },
+  "dds": {
+    "domainModule": "pm_healthcare",
+    "atsBoost": ["DDS", "Doctor of Dental Surgery", "dental", "oral health", "clinical"],
+    "searchQueryTemplates": ["Dentist", "Dental Director", "Oral Health Consultant", "Clinical Dental Director"],
+    "description": "Doctor of Dental Surgery"
+  },
+  "pe_license": {
+    "domainModule": "pm_construction",
+    "atsBoost": ["PE", "Professional Engineer", "P.E. license", "licensed engineer", "stamp"],
+    "searchQueryTemplates": ["Licensed Professional Engineer", "Senior Civil Engineer", "Structural Engineer PE", "Project Engineer"],
+    "description": "Professional Engineer license"
+  }
+}

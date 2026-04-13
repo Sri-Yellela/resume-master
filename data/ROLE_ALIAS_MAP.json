@@ -1,0 +1,706 @@
+{
+  "__comment": "Role alias map. Maps abbreviations, shorthand, and common variants to canonical role titles. Schema per entry: { canonical, roleFamily, domain, searchVariants[] }. Used by searchQueryBuilder.js for role normalisation and query building. To expand role coverage: add entries here. Do not add aliases directly in searchQueryBuilder.js.",
+
+  "swe": {
+    "canonical": "Software Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Software Developer", "Software Development Engineer"]
+  },
+  "software dev": {
+    "canonical": "Software Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Software Developer", "Software Development Engineer"]
+  },
+  "software developer": {
+    "canonical": "Software Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Software Developer", "Software Development Engineer"]
+  },
+  "mle": {
+    "canonical": "Machine Learning Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["ML Engineer", "Applied ML Engineer", "Applied Scientist"]
+  },
+  "ml engineer": {
+    "canonical": "Machine Learning Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["ML Engineer", "Applied ML Engineer"]
+  },
+  "ml": {
+    "canonical": "Machine Learning Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Machine Learning Engineer", "ML Engineer"]
+  },
+  "ds": {
+    "canonical": "Data Scientist",
+    "roleFamily": "data",
+    "domain": "it_digital",
+    "searchVariants": ["Senior Data Scientist", "Applied Scientist"]
+  },
+  "data science": {
+    "canonical": "Data Scientist",
+    "roleFamily": "data",
+    "domain": "it_digital",
+    "searchVariants": ["Data Scientist", "Applied Scientist"]
+  },
+  "mle intern": {
+    "canonical": "Machine Learning Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["ML Engineer Intern", "Machine Learning Intern"]
+  },
+  "sde": {
+    "canonical": "Software Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Software Development Engineer", "SDE"]
+  },
+  "sde2": {
+    "canonical": "Software Engineer II",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Software Engineer II", "SDE II", "Senior Software Engineer"]
+  },
+  "sde1": {
+    "canonical": "Software Engineer I",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Software Engineer I", "SDE I", "Junior Software Engineer"]
+  },
+  "frontend": {
+    "canonical": "Frontend Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Front-End Engineer", "Frontend Developer", "UI Engineer"]
+  },
+  "front end": {
+    "canonical": "Frontend Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Front-End Engineer", "Frontend Developer"]
+  },
+  "front-end": {
+    "canonical": "Frontend Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Frontend Developer", "Front-End Developer"]
+  },
+  "backend": {
+    "canonical": "Backend Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Back-End Engineer", "Backend Developer", "Server-Side Engineer"]
+  },
+  "back end": {
+    "canonical": "Backend Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Back-End Engineer", "Backend Developer"]
+  },
+  "back-end": {
+    "canonical": "Backend Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Backend Developer", "Back-End Developer"]
+  },
+  "fullstack": {
+    "canonical": "Full Stack Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Full Stack Developer", "Full-Stack Engineer"]
+  },
+  "full stack": {
+    "canonical": "Full Stack Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Full Stack Developer", "Full-Stack Engineer"]
+  },
+  "full-stack": {
+    "canonical": "Full Stack Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Full Stack Developer", "Full-Stack Developer"]
+  },
+  "devops": {
+    "canonical": "DevOps Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["DevOps Specialist", "Platform Engineer", "Infrastructure Engineer"]
+  },
+  "dev ops": {
+    "canonical": "DevOps Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["DevOps Specialist", "Platform Engineer"]
+  },
+  "sre": {
+    "canonical": "Site Reliability Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["SRE", "Platform Engineer", "Infrastructure Engineer"]
+  },
+  "site reliability": {
+    "canonical": "Site Reliability Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["SRE", "Platform Engineer"]
+  },
+  "ios": {
+    "canonical": "iOS Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["iOS Developer", "Apple Developer", "Swift Developer"]
+  },
+  "android": {
+    "canonical": "Android Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Android Developer", "Kotlin Developer", "Mobile Engineer"]
+  },
+  "mobile": {
+    "canonical": "Mobile Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Mobile Developer", "iOS Engineer", "Android Engineer"]
+  },
+  "embedded": {
+    "canonical": "Embedded Systems Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Firmware Engineer", "Embedded Software Engineer"]
+  },
+  "firmware": {
+    "canonical": "Firmware Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Embedded Software Engineer", "Embedded Systems Engineer"]
+  },
+  "security engineer": {
+    "canonical": "Security Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Application Security Engineer", "Cybersecurity Engineer", "InfoSec Engineer"]
+  },
+  "cloud engineer": {
+    "canonical": "Cloud Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Cloud Infrastructure Engineer", "Cloud Architect", "AWS Engineer"]
+  },
+  "infra": {
+    "canonical": "Infrastructure Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Platform Engineer", "Cloud Infrastructure Engineer", "DevOps Engineer"]
+  },
+  "pm": {
+    "canonical": "Product Manager",
+    "roleFamily": "pm",
+    "domain": "it_digital",
+    "searchVariants": ["Senior Product Manager", "Technical Product Manager"]
+  },
+  "apm": {
+    "canonical": "Associate Product Manager",
+    "roleFamily": "pm",
+    "domain": "it_digital",
+    "searchVariants": ["APM", "Junior Product Manager", "Product Analyst"]
+  },
+  "tpm": {
+    "canonical": "Technical Program Manager",
+    "roleFamily": "pm",
+    "domain": "it_digital",
+    "searchVariants": ["Technical Project Manager", "Engineering Program Manager"]
+  },
+  "spm": {
+    "canonical": "Senior Product Manager",
+    "roleFamily": "pm",
+    "domain": "it_digital",
+    "searchVariants": ["Product Manager", "Principal Product Manager"]
+  },
+  "gpm": {
+    "canonical": "Group Product Manager",
+    "roleFamily": "pm",
+    "domain": "it_digital",
+    "searchVariants": ["Senior Director of Product", "Principal Product Manager"]
+  },
+  "pjm": {
+    "canonical": "Project Manager",
+    "roleFamily": "pm",
+    "domain": "pmo",
+    "searchVariants": ["Program Manager", "IT Project Manager", "Senior Project Manager"]
+  },
+  "construction pm": {
+    "canonical": "Construction Project Manager",
+    "roleFamily": "pm",
+    "domain": "construction",
+    "searchVariants": ["Senior Project Manager", "Project Executive", "Project Engineer"]
+  },
+  "it pm": {
+    "canonical": "IT Project Manager",
+    "roleFamily": "pm",
+    "domain": "it_digital",
+    "searchVariants": ["Technology Project Manager", "Program Manager", "Senior Project Manager"]
+  },
+  "healthcare pm": {
+    "canonical": "Healthcare Project Manager",
+    "roleFamily": "pm",
+    "domain": "healthcare",
+    "searchVariants": ["Clinical Project Manager", "Health IT Project Manager"]
+  },
+  "agile pm": {
+    "canonical": "Agile Project Manager",
+    "roleFamily": "pm",
+    "domain": "it_digital",
+    "searchVariants": ["Scrum Master", "Agile Coach", "Agile Program Manager"]
+  },
+  "product owner": {
+    "canonical": "Product Owner",
+    "roleFamily": "pm",
+    "domain": "it_digital",
+    "searchVariants": ["Product Manager", "Technical Product Owner", "Scrum Product Owner"]
+  },
+  "em": {
+    "canonical": "Engineering Manager",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Senior Engineering Manager", "Director of Engineering"]
+  },
+  "de": {
+    "canonical": "Data Engineer",
+    "roleFamily": "data",
+    "domain": "it_digital",
+    "searchVariants": ["Senior Data Engineer", "Analytics Engineer", "ETL Engineer"]
+  },
+  "data eng": {
+    "canonical": "Data Engineer",
+    "roleFamily": "data",
+    "domain": "it_digital",
+    "searchVariants": ["Senior Data Engineer", "Analytics Engineer"]
+  },
+  "da": {
+    "canonical": "Data Analyst",
+    "roleFamily": "data",
+    "domain": "it_digital",
+    "searchVariants": ["Senior Data Analyst", "Business Analyst", "Analytics Analyst"]
+  },
+  "bi analyst": {
+    "canonical": "Business Intelligence Analyst",
+    "roleFamily": "data",
+    "domain": "it_digital",
+    "searchVariants": ["BI Analyst", "Data Analyst", "Reporting Analyst"]
+  },
+  "bi developer": {
+    "canonical": "Business Intelligence Developer",
+    "roleFamily": "data",
+    "domain": "it_digital",
+    "searchVariants": ["BI Developer", "Analytics Engineer", "Tableau Developer"]
+  },
+  "analytics engineer": {
+    "canonical": "Analytics Engineer",
+    "roleFamily": "data",
+    "domain": "it_digital",
+    "searchVariants": ["Data Engineer", "Senior Analytics Engineer", "dbt Engineer"]
+  },
+  "nlp engineer": {
+    "canonical": "NLP Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Natural Language Processing Engineer", "ML Engineer NLP", "Conversational AI Engineer"]
+  },
+  "cv engineer": {
+    "canonical": "Computer Vision Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Computer Vision Scientist", "ML Engineer Computer Vision"]
+  },
+  "computer vision": {
+    "canonical": "Computer Vision Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Computer Vision Scientist", "ML Engineer"]
+  },
+  "ai engineer": {
+    "canonical": "AI Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Applied AI Engineer", "Generative AI Engineer", "LLM Engineer"]
+  },
+  "genai": {
+    "canonical": "Generative AI Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["AI Engineer", "LLM Engineer", "Applied AI Engineer"]
+  },
+  "gen ai": {
+    "canonical": "Generative AI Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["AI Engineer", "LLM Engineer", "Generative AI Specialist"]
+  },
+  "llm": {
+    "canonical": "LLM Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["Large Language Model Engineer", "AI Engineer", "Generative AI Engineer"]
+  },
+  "rl engineer": {
+    "canonical": "Reinforcement Learning Engineer",
+    "roleFamily": "engineering",
+    "domain": "it_digital",
+    "searchVariants": ["RL Research Engineer", "ML Engineer Reinforcement Learning"]
+  },
+  "fp&a": {
+    "canonical": "Financial Planning and Analysis Manager",
+    "roleFamily": "finance",
+    "domain": "fintech",
+    "searchVariants": ["FP&A Analyst", "Senior FP&A Analyst", "Finance Manager"]
+  },
+  "fpa": {
+    "canonical": "Financial Planning and Analysis Analyst",
+    "roleFamily": "finance",
+    "domain": "fintech",
+    "searchVariants": ["FP&A Analyst", "Finance Analyst", "Corporate Finance Analyst"]
+  },
+  "ib": {
+    "canonical": "Investment Banker",
+    "roleFamily": "finance",
+    "domain": "financial_services",
+    "searchVariants": ["Investment Banking Analyst", "Investment Banking Associate"]
+  },
+  "iba": {
+    "canonical": "Investment Banking Analyst",
+    "roleFamily": "finance",
+    "domain": "financial_services",
+    "searchVariants": ["Investment Banker", "M&A Analyst", "Corporate Finance Analyst"]
+  },
+  "credit analyst": {
+    "canonical": "Credit Analyst",
+    "roleFamily": "finance",
+    "domain": "financial_services",
+    "searchVariants": ["Commercial Credit Analyst", "Senior Credit Analyst", "Underwriter"]
+  },
+  "quant": {
+    "canonical": "Quantitative Analyst",
+    "roleFamily": "finance",
+    "domain": "financial_services",
+    "searchVariants": ["Quantitative Researcher", "Quant Developer", "Quantitative Strategist"]
+  },
+  "actuary": {
+    "canonical": "Actuary",
+    "roleFamily": "finance",
+    "domain": "financial_services",
+    "searchVariants": ["Actuarial Analyst", "Senior Actuary", "Actuarial Associate"]
+  },
+  "cfo": {
+    "canonical": "Chief Financial Officer",
+    "roleFamily": "finance",
+    "domain": "financial_services",
+    "searchVariants": ["VP Finance", "Director of Finance", "Senior Vice President Finance"]
+  },
+  "controller": {
+    "canonical": "Controller",
+    "roleFamily": "finance",
+    "domain": "financial_services",
+    "searchVariants": ["Accounting Manager", "Assistant Controller", "VP Controller"]
+  },
+  "auditor": {
+    "canonical": "Auditor",
+    "roleFamily": "finance",
+    "domain": "financial_services",
+    "searchVariants": ["Internal Auditor", "External Auditor", "Audit Manager"]
+  },
+  "hr": {
+    "canonical": "Human Resources Manager",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["HR Generalist", "HR Manager", "People Manager"]
+  },
+  "hrbp": {
+    "canonical": "HR Business Partner",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["Senior HRBP", "People Business Partner", "HR Generalist"]
+  },
+  "recruiter": {
+    "canonical": "Recruiter",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["Technical Recruiter", "Talent Acquisition Specialist", "Sourcer"]
+  },
+  "talent acquisition": {
+    "canonical": "Talent Acquisition Manager",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["TA Manager", "Head of Recruiting", "Senior Recruiter"]
+  },
+  "ta": {
+    "canonical": "Talent Acquisition Specialist",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["Recruiter", "Technical Recruiter", "Talent Acquisition Coordinator"]
+  },
+  "comp analyst": {
+    "canonical": "Compensation Analyst",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["Total Rewards Analyst", "Compensation Specialist", "Senior Compensation Analyst"]
+  },
+  "l&d": {
+    "canonical": "Learning and Development Manager",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["L&D Specialist", "Training Manager", "Instructional Designer"]
+  },
+  "chro": {
+    "canonical": "Chief Human Resources Officer",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["VP People", "VP Human Resources", "Chief People Officer"]
+  },
+  "people ops": {
+    "canonical": "People Operations Manager",
+    "roleFamily": "hr",
+    "domain": "it_digital",
+    "searchVariants": ["People Ops Specialist", "HR Operations Manager", "HR Generalist"]
+  },
+  "ux": {
+    "canonical": "UX Designer",
+    "roleFamily": "design",
+    "domain": "it_digital",
+    "searchVariants": ["User Experience Designer", "Product Designer", "UI/UX Designer"]
+  },
+  "ui": {
+    "canonical": "UI Designer",
+    "roleFamily": "design",
+    "domain": "it_digital",
+    "searchVariants": ["Visual Designer", "UI/UX Designer", "Interface Designer"]
+  },
+  "ux/ui": {
+    "canonical": "UX/UI Designer",
+    "roleFamily": "design",
+    "domain": "it_digital",
+    "searchVariants": ["Product Designer", "UX Designer", "UI/UX Designer"]
+  },
+  "product designer": {
+    "canonical": "Product Designer",
+    "roleFamily": "design",
+    "domain": "it_digital",
+    "searchVariants": ["UX Designer", "Senior Product Designer", "UI/UX Designer"]
+  },
+  "graphic designer": {
+    "canonical": "Graphic Designer",
+    "roleFamily": "design",
+    "domain": "it_digital",
+    "searchVariants": ["Visual Designer", "Brand Designer", "Senior Graphic Designer"]
+  },
+  "visual designer": {
+    "canonical": "Visual Designer",
+    "roleFamily": "design",
+    "domain": "it_digital",
+    "searchVariants": ["Graphic Designer", "Brand Designer", "UI Designer"]
+  },
+  "ux researcher": {
+    "canonical": "UX Researcher",
+    "roleFamily": "design",
+    "domain": "it_digital",
+    "searchVariants": ["User Researcher", "Product Researcher", "Senior UX Researcher"]
+  },
+  "seo": {
+    "canonical": "SEO Specialist",
+    "roleFamily": "marketing",
+    "domain": "marketing",
+    "searchVariants": ["SEO Manager", "Organic Search Manager", "Search Engine Optimisation Specialist"]
+  },
+  "sem": {
+    "canonical": "SEM Specialist",
+    "roleFamily": "marketing",
+    "domain": "marketing",
+    "searchVariants": ["Paid Search Manager", "Google Ads Specialist", "PPC Manager"]
+  },
+  "demand gen": {
+    "canonical": "Demand Generation Manager",
+    "roleFamily": "marketing",
+    "domain": "marketing",
+    "searchVariants": ["Demand Gen Manager", "Growth Marketing Manager", "B2B Marketing Manager"]
+  },
+  "growth": {
+    "canonical": "Growth Manager",
+    "roleFamily": "marketing",
+    "domain": "marketing",
+    "searchVariants": ["Growth Marketing Manager", "Growth Product Manager", "Head of Growth"]
+  },
+  "cmo": {
+    "canonical": "Chief Marketing Officer",
+    "roleFamily": "marketing",
+    "domain": "marketing",
+    "searchVariants": ["VP Marketing", "VP of Growth", "Senior VP Marketing"]
+  },
+  "brand manager": {
+    "canonical": "Brand Manager",
+    "roleFamily": "marketing",
+    "domain": "marketing",
+    "searchVariants": ["Senior Brand Manager", "Brand Strategist", "Marketing Manager"]
+  },
+  "content": {
+    "canonical": "Content Marketing Manager",
+    "roleFamily": "marketing",
+    "domain": "marketing",
+    "searchVariants": ["Content Strategist", "Content Manager", "Senior Content Writer"]
+  },
+  "pmm": {
+    "canonical": "Product Marketing Manager",
+    "roleFamily": "marketing",
+    "domain": "marketing",
+    "searchVariants": ["Senior PMM", "Director of Product Marketing", "Go-to-Market Manager"]
+  },
+  "ops": {
+    "canonical": "Operations Manager",
+    "roleFamily": "operations",
+    "domain": "manufacturing",
+    "searchVariants": ["Senior Operations Manager", "Director of Operations", "VP Operations"]
+  },
+  "supply chain": {
+    "canonical": "Supply Chain Manager",
+    "roleFamily": "operations",
+    "domain": "manufacturing",
+    "searchVariants": ["Supply Chain Analyst", "Senior Supply Chain Manager", "Director of Supply Chain"]
+  },
+  "scm": {
+    "canonical": "Supply Chain Manager",
+    "roleFamily": "operations",
+    "domain": "manufacturing",
+    "searchVariants": ["Supply Chain Analyst", "Logistics Manager", "Senior Supply Chain Manager"]
+  },
+  "logistics": {
+    "canonical": "Logistics Manager",
+    "roleFamily": "operations",
+    "domain": "manufacturing",
+    "searchVariants": ["Transportation Manager", "Distribution Manager", "Supply Chain Manager"]
+  },
+  "procurement": {
+    "canonical": "Procurement Manager",
+    "roleFamily": "operations",
+    "domain": "manufacturing",
+    "searchVariants": ["Strategic Sourcing Manager", "Purchasing Manager", "Senior Buyer"]
+  },
+  "quality": {
+    "canonical": "Quality Manager",
+    "roleFamily": "operations",
+    "domain": "manufacturing",
+    "searchVariants": ["Quality Assurance Manager", "QA/QC Manager", "Director of Quality"]
+  },
+  "manufacturing": {
+    "canonical": "Manufacturing Engineer",
+    "roleFamily": "operations",
+    "domain": "manufacturing",
+    "searchVariants": ["Process Engineer", "Industrial Engineer", "Manufacturing Manager"]
+  },
+  "attorney": {
+    "canonical": "Attorney",
+    "roleFamily": "legal",
+    "domain": "legal",
+    "searchVariants": ["Associate Attorney", "Counsel", "Senior Attorney"]
+  },
+  "counsel": {
+    "canonical": "Counsel",
+    "roleFamily": "legal",
+    "domain": "legal",
+    "searchVariants": ["Associate General Counsel", "Senior Counsel", "Legal Counsel"]
+  },
+  "paralegal": {
+    "canonical": "Paralegal",
+    "roleFamily": "legal",
+    "domain": "legal",
+    "searchVariants": ["Senior Paralegal", "Legal Assistant", "Litigation Paralegal"]
+  },
+  "compliance officer": {
+    "canonical": "Compliance Officer",
+    "roleFamily": "legal",
+    "domain": "legal",
+    "searchVariants": ["Compliance Manager", "Senior Compliance Officer", "Chief Compliance Officer"]
+  },
+  "rn": {
+    "canonical": "Registered Nurse",
+    "roleFamily": "general",
+    "domain": "healthcare",
+    "searchVariants": ["Clinical Nurse", "Staff Nurse", "Senior Registered Nurse"]
+  },
+  "np": {
+    "canonical": "Nurse Practitioner",
+    "roleFamily": "general",
+    "domain": "healthcare",
+    "searchVariants": ["Advanced Practice Nurse", "Family Nurse Practitioner", "Clinical Nurse Specialist"]
+  },
+  "pa": {
+    "canonical": "Physician Assistant",
+    "roleFamily": "general",
+    "domain": "healthcare",
+    "searchVariants": ["PA-C", "Certified Physician Assistant", "Surgical PA"]
+  },
+  "pharmacist": {
+    "canonical": "Pharmacist",
+    "roleFamily": "general",
+    "domain": "healthcare",
+    "searchVariants": ["Clinical Pharmacist", "Staff Pharmacist", "Pharmacy Manager"]
+  },
+  "pt": {
+    "canonical": "Physical Therapist",
+    "roleFamily": "general",
+    "domain": "healthcare",
+    "searchVariants": ["Licensed Physical Therapist", "Physical Therapy Specialist", "DPT"]
+  },
+  "ot": {
+    "canonical": "Occupational Therapist",
+    "roleFamily": "general",
+    "domain": "healthcare",
+    "searchVariants": ["Licensed Occupational Therapist", "OTR", "OT Specialist"]
+  },
+  "rad tech": {
+    "canonical": "Radiologic Technologist",
+    "roleFamily": "general",
+    "domain": "healthcare",
+    "searchVariants": ["Radiographer", "X-Ray Technologist", "Imaging Technologist"]
+  },
+  "rt": {
+    "canonical": "Respiratory Therapist",
+    "roleFamily": "general",
+    "domain": "healthcare",
+    "searchVariants": ["RRT", "Registered Respiratory Therapist", "Pulmonary Therapist"]
+  },
+  "pe": {
+    "canonical": "Professional Engineer",
+    "roleFamily": "general",
+    "domain": "construction",
+    "searchVariants": ["Licensed PE", "Civil Engineer PE", "Structural Engineer PE"]
+  },
+  "superintendent": {
+    "canonical": "Construction Superintendent",
+    "roleFamily": "pm",
+    "domain": "construction",
+    "searchVariants": ["General Superintendent", "Field Superintendent", "Senior Superintendent"]
+  },
+  "estimator": {
+    "canonical": "Construction Estimator",
+    "roleFamily": "pm",
+    "domain": "construction",
+    "searchVariants": ["Senior Estimator", "Chief Estimator", "Preconstruction Manager"]
+  },
+  "scheduler": {
+    "canonical": "Project Scheduler",
+    "roleFamily": "pm",
+    "domain": "construction",
+    "searchVariants": ["Construction Scheduler", "Planning Engineer", "P6 Scheduler"]
+  },
+  "commissioning": {
+    "canonical": "Commissioning Manager",
+    "roleFamily": "pm",
+    "domain": "construction",
+    "searchVariants": ["Cx Manager", "Commissioning Engineer", "Building Commissioning Specialist"]
+  }
+}

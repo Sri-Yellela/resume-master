@@ -23,6 +23,10 @@ import path           from "path";
 import fs             from "fs";
 import { createBackup, listBackups, restoreBackup } from "./scripts/backup.js";
 import applyRoutes from "./routes/apply.js";
+import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
+import { classify } from "./services/classifier.js";
+import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
+import { normaliseRole, buildApifyQueries, isTitleRelevant as isTitleRelevantNew } from "./services/searchQueryBuilder.js";
 
 // ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
@@ -363,6 +367,9 @@ db.pragma("busy_timeout = 5000");
   }
 }
 
+// Load layered prompt system at startup
+loadAllPrompts();
+
 // ── Backfill: split full_name into first_name / last_name ─────
 {
   const rows = db.prepare("SELECT user_id, full_name FROM user_profile WHERE full_name IS NOT NULL AND first_name IS NULL").all();
@@ -413,11 +420,7 @@ in the job description text provided below.
 
 ACTION VERB RULES — critical:
 Only include STRONG, SPECIFIC action verbs in action_verbs_matched and action_verbs_missing.
-Strong action verbs are domain-specific and demonstrate concrete capability:
-  Examples of STRONG verbs to include: Architecting, Designing, Implementing, Developing,
-  Deploying, Collaborating, Optimizing, Scaling, Migrating, Integrating, Automating,
-  Mentoring, Leading, Building, Launching, Refactoring, Debugging, Analyzing, Modelling,
-  Orchestrating, Coordinating, Delivering, Executing, Driving, Governing, Auditing.
+Strong action verbs are domain-specific and demonstrate concrete professional capability. What counts as strong depends on the role: Architecting and Deploying are strong for engineering; Negotiated, Structured, and Modelled are strong for finance; Procured, Commissioned, and Coordinated are strong for construction PM; Diagnosed, Administered, and Triaged are strong for healthcare. Apply the same principle: include verbs that signal specific professional capability in the domain of the job description. Exclude weak/generic verbs regardless of domain.
 
 WEAK generic verbs to EXCLUDE from action verb lists (do not count these):
   Utilize, Use, Apply, Employ, Bring, Demonstrate, Perform, Do, Make, Have, Get,
@@ -441,47 +444,6 @@ Use this exact schema:
   "best_possible_reason": "<one sentence: specific gaps preventing higher score>",
   "verdict": "<one sentence overall assessment>"
 }`;
-
-// ── Prompt file loader ──────────────────────────────────────────
-// Tries __dirname (git-deployed next to server.js) first,
-// then __dirname/data (Railway volume mount at /app/data) as fallback.
-// This handles both local dev and Railway deployments where prompt files
-// may reside on a persistent volume rather than in the git-deployed tree.
-function loadPromptFile(filename) {
-  const candidates = [
-    path.join(__dirname, filename),
-    path.join(__dirname, "data", filename),
-  ];
-  for (const p of candidates) {
-    try {
-      const content = fs.readFileSync(p, "utf8");
-      console.log(`[prompt] ${filename} loaded from ${p} (${content.length} chars)`);
-      return content;
-    } catch {}
-  }
-  return null;
-}
-
-// ── Static master prompt (loaded once at startup) ─────────────
-const MASTER_PROMPT_STATIC = loadPromptFile("resume_masterprompt.md") || "";
-if (!MASTER_PROMPT_STATIC) {
-  console.error("[prompt] WARNING: resume_masterprompt.md not found in __dirname or __dirname/data — resume generation will fail");
-}
-
-// ── Mode-specific prompts (loaded at startup) ──────────────────
-const TAILORED_PROMPT_STATIC = loadPromptFile("tailored_system_prompt.md") || "";
-if (!TAILORED_PROMPT_STATIC) {
-  console.log("[prompt] tailored_system_prompt.md not found — TAILORED mode will use master prompt");
-}
-
-const CUSTOM_SAMPLER_PROMPT_STATIC = loadPromptFile("custom_sampler_system_prompt.md") || "";
-if (!CUSTOM_SAMPLER_PROMPT_STATIC) {
-  console.log("[prompt] custom_sampler_system_prompt.md not found — CUSTOM_SAMPLER mode will use master prompt");
-}
-
-if (!TAILORED_PROMPT_STATIC || !CUSTOM_SAMPLER_PROMPT_STATIC) {
-  console.log("[startup] One or more mode-specific prompts missing — affected modes will fall back to master prompt. CUSTOM_SAMPLER rules (one-FAANG limit, company scale ordering) will NOT apply.");
-}
 
 // ── Helpers ───────────────────────────────────────────────────
 function inferWorkType(text = "") {
@@ -592,51 +554,6 @@ function isFullTimeNorm(item) {
   return !NON_FULLTIME_TERMS.some(t => text.includes(t));
 }
 
-const TYPO_MAP = {
-  "enginere":"engineer","enigneer":"engineer","enginer":"engineer",
-  "sofware":"software","softwar":"software",
-  "developr":"developer","devloper":"developer",
-  "maneger":"manager","mangager":"manager","manger":"manager",
-  "progam":"program","proejct":"project",
-  "analist":"analyst","analst":"analyst",
-  "maching":"machine","machien":"machine",
-  "lerning":"learning","learnig":"learning",
-  "scienist":"scientist","sceintist":"scientist",
-};
-
-function isTitleRelevant(title, query) {
-  const t = title.toLowerCase();
-  const stopWords = new Set(["the","and","for","with","ing","senior","junior","staff","principal"]);
-  const normTerm = w => TYPO_MAP[w] || w;
-  const terms = query.toLowerCase()
-    .split(/[\s,/\-]+/)
-    .filter(w => w.length > 2 && !stopWords.has(w))
-    .map(normTerm);
-  if (terms.length === 0) return true;
-  if (terms.length === 1) return t.includes(terms[0]);
-  const roleKeywords = [
-    // Engineering
-    "engineer","developer","scientist","architect","programmer","coder",
-    // Management / Leadership
-    "manager","director","lead","head","president","officer","executive",
-    // Analysis / Strategy
-    "analyst","consultant","advisor","strategist","specialist",
-    // Design / Research
-    "designer","researcher",
-    // Operations / Coordination
-    "coordinator","administrator","associate","representative","agent","planner","operator",
-    // Product / Program / Project
-    "product","program","project",
-    // Other
-    "technician","support","writer","editor",
-  ];
-  const coreTerms = terms.filter(w => !roleKeywords.includes(w));
-  const roleTerms = terms.filter(w =>  roleKeywords.includes(w));
-  const coreMatch = coreTerms.length === 0 || coreTerms.every(w => t.includes(w));
-  const roleMatch = roleTerms.length === 0 || roleTerms.some(w => t.includes(w));
-  return coreMatch && roleMatch;
-}
-
 function parseYearsExperience(description = "") {
   const patterns = [
     { re:/(\d+)\s*\+\s*years?\s+(?:of\s+)?experience/i,              type:"plus"  },
@@ -708,58 +625,6 @@ Reply with the category name only. No explanation.` }],
   } catch { return "Other"; }
 }
 
-// ── Search query normaliser ───────────────────────────────────
-const ROLE_ALIASES = {
-  "swe":                      "Software Engineer",
-  "software dev":             "Software Engineer",
-  "software developer":       "Software Engineer",
-  "mle":                      "Machine Learning Engineer",
-  "ml engineer":              "Machine Learning Engineer",
-  "ml":                       "Machine Learning Engineer",
-  "ds":                       "Data Scientist",
-  "data science":             "Data Scientist",
-  "mle intern":               "Machine Learning Engineer",
-  "sde":                      "Software Engineer",
-  "sde2":                     "Software Engineer II",
-  "sde1":                     "Software Engineer I",
-  "frontend":                 "Frontend Engineer",
-  "front end":                "Frontend Engineer",
-  "front-end":                "Frontend Engineer",
-  "backend":                  "Backend Engineer",
-  "back end":                 "Backend Engineer",
-  "back-end":                 "Backend Engineer",
-  "fullstack":                "Full Stack Engineer",
-  "full stack":               "Full Stack Engineer",
-  "full-stack":               "Full Stack Engineer",
-  "devops":                   "DevOps Engineer",
-  "dev ops":                  "DevOps Engineer",
-  "sre":                      "Site Reliability Engineer",
-  "site reliability":         "Site Reliability Engineer",
-  "pm":                       "Product Manager",
-  "tpm":                      "Technical Program Manager",
-  "pjm":                      "Project Manager",
-  "apm":                      "Associate Product Manager",
-  "em":                       "Engineering Manager",
-  "de":                       "Data Engineer",
-  "data eng":                 "Data Engineer",
-  "nlp engineer":             "NLP Engineer",
-  "cv engineer":              "Computer Vision Engineer",
-  "computer vision":          "Computer Vision Engineer",
-  "ai engineer":              "AI Engineer",
-  "genai":                    "Generative AI Engineer",
-  "gen ai":                   "Generative AI Engineer",
-  "llm":                      "LLM Engineer",
-  "rl engineer":              "Reinforcement Learning Engineer",
-};
-
-function normaliseSearchQuery(raw) {
-  if (!raw) return "";
-  const trimmed = raw.trim().replace(/\s+/g, " ");
-  const lower   = trimmed.toLowerCase();
-  if (ROLE_ALIASES[lower]) return ROLE_ALIASES[lower];
-  return trimmed.replace(/\b\w/g, c => c.toUpperCase());
-}
-
 // ── Company icon helpers ──────────────────────────────────────
 function extractDomain(url) {
   if (!url) return null;
@@ -825,7 +690,7 @@ async function scrapeJobs(query, apifyToken) {
       if (applyDomain && applyDomain.includes("linkedin.com")) { cntNoApply++; return false; }
     }
     if (!isFullTimeNorm(item))                 { cntNotFT++;      return false; }
-    if (!isTitleRelevant(item.title, query))   { cntIrrelevant++; return false; }
+    if (!isTitleRelevantNew(item.title, query))   { cntIrrelevant++; return false; }
     if (isReposted(item))                      { cntRepost++;     return false; }
     if (ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }) >= 4) { cntGhost++; return false; }
     if (thisRunIds.has(item.jobId))            { cntDup++;        return false; }
@@ -1032,16 +897,6 @@ ${job.description||job.title}
 
 **BASE RESUME TEXT**
 ${resumeText}`;
-}
-
-function buildFullPrompt(profile, job, resumeText, mode, employers) {
-  const runtimeInputs = buildRuntimeInputs(profile, job, resumeText, mode, employers);
-  // Use mode-specific prompt if available, fall back to master prompt
-  let raw = MASTER_PROMPT_STATIC;
-  if (mode === "TAILORED"       && TAILORED_PROMPT_STATIC)       raw = TAILORED_PROMPT_STATIC;
-  if (mode === "CUSTOM_SAMPLER" && CUSTOM_SAMPLER_PROMPT_STATIC) raw = CUSTOM_SAMPLER_PROMPT_STATIC;
-  const staticPart = raw.split("## RUNTIME INPUTS")[0].trimEnd();
-  return { system: staticPart, user: runtimeInputs };
 }
 
 // ── PDF generation ─────────────────────────────────────────────
@@ -1637,7 +1492,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
 app.post("/api/scrape", requireAuth, async (req, res) => {
   const rawQuery = (req.body.query || "").trim();
   if (!rawQuery) return res.status(400).json({ error:"query required" });
-  const query = normaliseSearchQuery(rawQuery);
+  const query = normaliseRole(rawQuery);
 
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
   const token = user?.apify_token;
@@ -1878,12 +1733,23 @@ ${cachedResumeText}`;
   const storedResume = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
   const authoritativeResumeText = storedResume?.content || resumeText;
   try {
-    const { system, user } = buildFullPrompt(profile, job, authoritativeResumeText, mode, employers);
+    // New layered prompt flow
+    let domainModuleKey = "general";
+    try {
+      const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "");
+      const qualKey = resolveFromClassifier(classifierResult, profile?.qualification_key);
+      domainModuleKey = getDomainModuleKey(qualKey, classifierResult.roleFamily, classifierResult.domain);
+    } catch(e) {
+      console.warn("[generate] classifier failed, using general domain:", e.message);
+    }
+    const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, mode, employers);
+    const { systemBlocks } = assemblePrompt(domainModuleKey, mode, runtimeInputs);
+
     const resumeMsg = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 4096,
-      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: user }],
+      system: systemBlocks,
+      messages: [{ role: "user", content: runtimeInputs }],
     });
     const html = resumeMsg.content.map(b=>b.text||"").join("").replace(/```html|```/g,"").trim();
 
@@ -2237,41 +2103,25 @@ app.get("/api/extension/autofill", requireAuth, (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 app.post("/api/smart-search", requireAuth, async (req, res) => {
   const { resumeText } = req.body;
-  if (!resumeText) return res.status(400).json({ error:"resumeText required" });
-  if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured" });
+  if (!resumeText) return res.status(400).json({ error: "resumeText required" });
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
   try {
-    const extractMsg = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 400,
-      messages: [{
-        role:"user",
-        content:`Extract the top job search keywords from this resume.
-Return ONLY valid JSON, no markdown fences, no explanation:
-{
-  "role": "<most senior/recent job title, normalised to standard ATS title>",
-  "skills": ["<top 8 technical skills as short strings>"],
-  "action_verbs": ["<top 5 action verbs from bullet points>"],
-  "years_experience": <integer total years of experience or null>,
-  "domains": ["<top 2 industry domains>"],
-  "search_query": "<best single job search query string, 2-4 words, optimised for job boards>"
-}
-
-Resume:
-${resumeText.slice(0, 3000)}`
-      }]
-    });
-    const raw    = extractMsg.content.map(b=>b.text||"").join("")
-      .replace(/```json|```/g,"").trim();
-    const parsed = JSON.parse(raw);
+    const classifierResult = await classify(anthropic, resumeText, "");
+    const qualKey    = resolveFromClassifier(classifierResult);
+    const qualTemplates = getSearchQueryTemplates(qualKey);
+    const canonical  = normaliseRole(classifierResult.searchQueries?.[0] || "");
+    const queries    = buildApifyQueries(canonical, classifierResult, qualTemplates);
     res.json({
-      ok:           true,
-      searchQuery:  parsed.search_query || parsed.role || "",
-      skills:       parsed.skills       || [],
-      actionVerbs:  parsed.action_verbs || [],
-      yearsExperience: parsed.years_experience || null,
-      domains:      parsed.domains      || [],
+      ok:              true,
+      searchQuery:     queries[0] || canonical,
+      searchQueries:   queries,
+      roleFamily:      classifierResult.roleFamily,
+      domain:          classifierResult.domain,
+      seniority:       classifierResult.seniority,
+      topTools:        classifierResult.topTools || [],
+      yearsExperience: null,
     });
-  } catch(e) { res.status(500).json({ error:e.message }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════════
