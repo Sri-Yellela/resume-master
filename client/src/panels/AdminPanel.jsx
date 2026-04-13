@@ -487,6 +487,140 @@ function CacheTab({ theme }) {
   );
 }
 
+function ContactMessagesSection({ theme }) {
+  const [messages, setMessages]   = useState([]);
+  const [loading,  setLoading]    = useState(true);
+  const [expanded, setExpanded]   = useState(null);
+  const [unreadOnly, setUnreadOnly] = useState(false);
+
+  const loadMessages = useCallback(async () => {
+    setLoading(true);
+    try {
+      const rows = await api(`/api/admin/contact-messages${unreadOnly ? "?unread=1" : ""}`);
+      setMessages(Array.isArray(rows) ? rows : []);
+    } catch {}
+    setLoading(false);
+  }, [unreadOnly]);
+
+  useEffect(() => { loadMessages(); }, [loadMessages]);
+
+  const markRead = async (id) => {
+    try {
+      await api(`/api/admin/contact-messages/${id}/read`, { method: "PATCH" });
+      setMessages(ms => ms.map(m => m.id === id ? { ...m, read: 1 } : m));
+    } catch {}
+  };
+
+  const unreadCount = messages.filter(m => !m.read).length;
+
+  return (
+    <div style={{ marginBottom: 40 }}>
+      {/* Section header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 800, color: ADMIN_ACCENT, margin: 0,
+                      letterSpacing: "0.05em", textTransform: "uppercase" }}>
+          Contact Messages
+        </h2>
+        {unreadCount > 0 && (
+          <span style={{ background: theme.danger, color: "white", fontSize: 11,
+                          fontWeight: 700, padding: "2px 8px", borderRadius: 999 }}>
+            {unreadCount} unread
+          </span>
+        )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <label style={{ fontSize: 12, color: theme.textMuted, display: "flex",
+                           gap: 6, alignItems: "center", cursor: "pointer" }}>
+            <input type="checkbox" checked={unreadOnly}
+              onChange={e => setUnreadOnly(e.target.checked)}/>
+            Unread only
+          </label>
+          <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={loadMessages}>
+            ↻ Refresh
+          </button>
+        </div>
+      </div>
+
+      <div style={{ background: theme.surface, border: `1px solid ${theme.border}`,
+                     borderRadius: 16, overflow: "hidden" }}>
+        {loading ? (
+          <div style={{ padding: 32, textAlign: "center", color: theme.textDim, fontSize: 13 }}>
+            Loading…
+          </div>
+        ) : messages.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: theme.textDim, fontSize: 13 }}>
+            No messages yet.
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: theme.surfaceHigh, borderBottom: `1px solid ${theme.border}` }}>
+                {["Name", "Email", "Subject", "Preview", "Date", ""].map(h => (
+                  <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontSize: 11,
+                                        fontWeight: 700, color: theme.textMuted,
+                                        textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {messages.map(m => (
+                <>
+                  <tr key={m.id}
+                    style={{ borderBottom: `1px solid ${theme.border}`,
+                               background: expanded === m.id ? theme.surfaceHigh : "transparent",
+                               cursor: "pointer",
+                               opacity: m.read ? 0.65 : 1 }}
+                    onClick={() => setExpanded(expanded === m.id ? null : m.id)}>
+                    <td style={{ padding: "10px 14px", fontSize: 13, color: theme.text,
+                                  fontWeight: m.read ? 400 : 700 }}>
+                      {m.name}
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: theme.textMuted }}>
+                      {m.email}
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: theme.textMuted }}>
+                      {m.subject || "—"}
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 12, color: theme.textDim,
+                                  maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap" }}>
+                      {m.message.slice(0, 80)}{m.message.length > 80 ? "…" : ""}
+                    </td>
+                    <td style={{ padding: "10px 14px", fontSize: 11, color: theme.textDim,
+                                  whiteSpace: "nowrap" }}>
+                      {new Date(m.created_at * 1000).toLocaleDateString()}
+                    </td>
+                    <td style={{ padding: "10px 14px" }}>
+                      {!m.read && (
+                        <button className="rm-btn rm-btn-ghost rm-btn-sm"
+                          onClick={e => { e.stopPropagation(); markRead(m.id); }}
+                          style={{ whiteSpace: "nowrap" }}>
+                          Mark read
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {expanded === m.id && (
+                    <tr key={`exp-${m.id}`} style={{ background: theme.surfaceHigh }}>
+                      <td colSpan={6} style={{ padding: "16px 20px" }}>
+                        <div style={{ fontSize: 13, color: theme.textMuted,
+                                       lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                          {m.message}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function AdminPanel() {
   const { theme } = useTheme();
   const [users,    setUsers]    = useState([]);
@@ -609,6 +743,9 @@ export function AdminPanel() {
       {topTab === "usage" && <UsageTab theme={theme}/>}
       {topTab === "users_analytics" && <UsersTab theme={theme}/>}
       {topTab === "cache" && <CacheTab theme={theme}/>}
+
+      {/* ── CONTACT MESSAGES SECTION ──────────────────────────────── */}
+      <ContactMessagesSection theme={theme}/>
 
       {/* ── System tab (existing user management + backups) ── */}
       {topTab === "system" && (

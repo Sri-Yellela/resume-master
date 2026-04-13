@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
+import { Footer } from "./Footer.jsx";
 
 // ── AtomEmblem — keep this exported, TopBar imports it ────────
 function tiltedEllipsePath(cx, cy, rx, ry, angleDeg) {
@@ -316,95 +317,98 @@ export default function AuthScreen({ onLogin }) {
   const col2 = COMPANY_POSTERS.slice(8);
 
   return (
-    <div style={{ display:"flex", flexDirection: isMobile ? "column" : "row",
-                  height:"100vh", overflow: isMobile ? "auto" : "hidden",
-                  background:theme.bg, fontFamily:"'DM Sans',system-ui,sans-serif" }}>
+    <div style={{ display:"flex", flexDirection:"column", minHeight:"100vh" }}>
+      <div style={{ display:"flex", flexDirection: isMobile ? "column" : "row",
+                    flex:1, overflow: isMobile ? "auto" : "hidden",
+                    background:theme.bg, fontFamily:"'DM Sans',system-ui,sans-serif" }}>
 
-      {/* LEFT/TOP — Hero */}
-      <div style={{ flex: isMobile ? "none" : "0 0 55%",
-                    display:"flex", flexDirection:"column",
-                    justifyContent:"center",
-                    padding: isMobile ? "40px 24px 48px" : "60px 64px",
-                    overflowY: isMobile ? "visible" : "auto" }}>
-        {/* Logo */}
-        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: isMobile ? 28 : 48 }}>
-          <span className="site-title" style={{ fontSize: isMobile ? 20 : 22 }}>Resume Master</span>
+        {/* LEFT/TOP — Hero */}
+        <div style={{ flex: isMobile ? "none" : "0 0 55%",
+                      display:"flex", flexDirection:"column",
+                      justifyContent:"center",
+                      padding: isMobile ? "40px 24px 48px" : "60px 64px",
+                      overflowY: isMobile ? "visible" : "auto" }}>
+          {/* Logo */}
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: isMobile ? 28 : 48 }}>
+            <span className="site-title" style={{ fontSize: isMobile ? 20 : 22 }}>Resume Master</span>
+          </div>
+
+          {/* Hero tiles — editorial style */}
+          <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom: isMobile ? 20 : 32 }}>
+            {/* Row 1 */}
+            <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+              <div style={{
+                padding:"14px 28px", borderRadius:14,
+                border:`1.5px solid ${theme.border}`, background:theme.surface,
+                fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
+                letterSpacing:"-3px", color:theme.text, lineHeight:1,
+              }}>Land</div>
+              <div style={{
+                padding:"14px 28px", borderRadius:999,
+                background:theme.gradAccent,
+                fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
+                letterSpacing:"-3px", color:"white", lineHeight:1,
+              }}>your next</div>
+            </div>
+            {/* Row 2 */}
+            <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+              <div style={{
+                padding:"14px 28px", borderRadius:14,
+                border:`1.5px solid ${theme.border}`, background:theme.surface,
+                fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
+                letterSpacing:"-3px", color:theme.text, lineHeight:1,
+              }}>role</div>
+              <div style={{
+                padding:"14px 28px", borderRadius:14,
+                border:`1.5px solid ${theme.border}`, background:theme.surface,
+                fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
+                letterSpacing:"-3px", color:theme.text, lineHeight:1,
+              }}>faster</div>
+            </div>
+          </div>
+
+          {/* Subtitle */}
+          <p style={{ fontSize: isMobile ? 13 : 15, color:theme.textMuted, lineHeight:1.6,
+                      marginBottom: isMobile ? 24 : 36, maxWidth:420 }}>
+            AI-tailored resumes, real-time job scraping, one-click autofill.<br/>
+            Match every job description with a perfectly tailored resume.
+          </p>
+
+          {/* Auth modal */}
+          <AuthModal onLogin={onLogin}/>
         </div>
 
-        {/* Hero tiles — editorial style */}
-        <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom: isMobile ? 20 : 32 }}>
-          {/* Row 1 */}
-          <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
-            <div style={{
-              padding:"14px 28px", borderRadius:14,
-              border:`1.5px solid ${theme.border}`, background:theme.surface,
-              fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
-              letterSpacing:"-3px", color:theme.text, lineHeight:1,
-            }}>Land</div>
-            <div style={{
-              padding:"14px 28px", borderRadius:999,
-              background:theme.gradAccent,
-              fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
-              letterSpacing:"-3px", color:"white", lineHeight:1,
-            }}>your next</div>
-          </div>
-          {/* Row 2 */}
-          <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
-            <div style={{
-              padding:"14px 28px", borderRadius:14,
-              border:`1.5px solid ${theme.border}`, background:theme.surface,
-              fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
-              letterSpacing:"-3px", color:theme.text, lineHeight:1,
-            }}>role</div>
-            <div style={{
-              padding:"14px 28px", borderRadius:14,
-              border:`1.5px solid ${theme.border}`, background:theme.surface,
-              fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
-              letterSpacing:"-3px", color:theme.text, lineHeight:1,
-            }}>faster</div>
-          </div>
-        </div>
+        {/* RIGHT — Scrolling poster cards — hidden on mobile */}
+        {!isMobile && <div style={{
+          flex:"0 0 45%", overflow:"hidden", position:"relative",
+          background: theme.surfaceHigh,
+        }}>
+          {/* Top fade */}
+          <div style={{ position:"absolute", top:0, left:0, right:0, height:80,
+                        background:`linear-gradient(to bottom, ${theme.surfaceHigh}, transparent)`,
+                        zIndex:10 }}/>
+          {/* Bottom fade */}
+          <div style={{ position:"absolute", bottom:0, left:0, right:0, height:80,
+                        background:`linear-gradient(to top, ${theme.surfaceHigh}, transparent)`,
+                        zIndex:10 }}/>
 
-        {/* Subtitle */}
-        <p style={{ fontSize: isMobile ? 13 : 15, color:theme.textMuted, lineHeight:1.6,
-                    marginBottom: isMobile ? 24 : 36, maxWidth:420 }}>
-          AI-tailored resumes, real-time job scraping, one-click autofill.<br/>
-          Match every job description with a perfectly tailored resume.
-        </p>
-
-        {/* Auth modal */}
-        <AuthModal onLogin={onLogin}/>
+          <div style={{ display:"flex", gap:12, height:"100%", padding:"0 16px" }}>
+            {/* Column 1 — scrolls up */}
+            <div style={{ flex:1, overflow:"hidden" }}>
+              <div style={{ display:"flex", flexDirection:"column", animation:"scrollUp 30s linear infinite" }}>
+                {[...col1,...col1].map((c,i) => <PosterCard key={i} company={c} index={i}/>)}
+              </div>
+            </div>
+            {/* Column 2 — scrolls up slightly slower */}
+            <div style={{ flex:1, overflow:"hidden" }}>
+              <div style={{ display:"flex", flexDirection:"column", animation:"scrollUp 38s linear infinite", marginTop:60 }}>
+                {[...col2,...col2].map((c,i) => <PosterCard key={i} company={c} index={i+1}/>)}
+              </div>
+            </div>
+          </div>
+        </div>}
       </div>
-
-      {/* RIGHT — Scrolling poster cards — hidden on mobile */}
-      {!isMobile && <div style={{
-        flex:"0 0 45%", overflow:"hidden", position:"relative",
-        background: theme.surfaceHigh,
-      }}>
-        {/* Top fade */}
-        <div style={{ position:"absolute", top:0, left:0, right:0, height:80,
-                      background:`linear-gradient(to bottom, ${theme.surfaceHigh}, transparent)`,
-                      zIndex:10 }}/>
-        {/* Bottom fade */}
-        <div style={{ position:"absolute", bottom:0, left:0, right:0, height:80,
-                      background:`linear-gradient(to top, ${theme.surfaceHigh}, transparent)`,
-                      zIndex:10 }}/>
-
-        <div style={{ display:"flex", gap:12, height:"100%", padding:"0 16px" }}>
-          {/* Column 1 — scrolls up */}
-          <div style={{ flex:1, overflow:"hidden" }}>
-            <div style={{ display:"flex", flexDirection:"column", animation:"scrollUp 30s linear infinite" }}>
-              {[...col1,...col1].map((c,i) => <PosterCard key={i} company={c} index={i}/>)}
-            </div>
-          </div>
-          {/* Column 2 — scrolls up slightly slower */}
-          <div style={{ flex:1, overflow:"hidden" }}>
-            <div style={{ display:"flex", flexDirection:"column", animation:"scrollUp 38s linear infinite", marginTop:60 }}>
-              {[...col2,...col2].map((c,i) => <PosterCard key={i} company={c} index={i+1}/>)}
-            </div>
-          </div>
-        </div>
-      </div>}
+      <Footer/>
     </div>
   );
 }

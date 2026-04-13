@@ -457,6 +457,20 @@ db.pragma("busy_timeout = 5000");
         );
       `,
     },
+    {
+      id: "contact_messages",
+      sql: `
+        CREATE TABLE IF NOT EXISTS contact_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL,
+          subject TEXT,
+          message TEXT NOT NULL,
+          read INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -2465,6 +2479,27 @@ app.delete("/api/linkedin/cookies", requireAuth, (req, res) => {
 // APPLY AUTOMATION (Playwright)
 // ═══════════════════════════════════════════════════════════════
 applyRoutes(app, db, requireAuth, buildAutofillPayload);
+
+// ── Contact form (public — no auth required) ──────────────────
+app.post("/api/contact", (req, res) => {
+  const { name, email, subject, message } = req.body || {};
+  if (!name?.trim() || !email?.trim() || !message?.trim())
+    return res.status(400).json({ error: "name, email, and message are required" });
+  db.prepare(`INSERT INTO contact_messages (name, email, subject, message) VALUES (?, ?, ?, ?)`)
+    .run(name.trim(), email.trim(), subject?.trim() || null, message.trim());
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/contact-messages", requireAdmin, (req, res) => {
+  const where = req.query.unread === "1" ? "WHERE read = 0" : "";
+  const rows = db.prepare(`SELECT * FROM contact_messages ${where} ORDER BY created_at DESC`).all();
+  res.json(rows);
+});
+
+app.patch("/api/admin/contact-messages/:id/read", requireAdmin, (req, res) => {
+  db.prepare("UPDATE contact_messages SET read = 1 WHERE id = ?").run(Number(req.params.id));
+  res.json({ ok: true });
+});
 
 // ═══════════════════════════════════════════════════════════════
 // HEALTH + SPA
