@@ -923,9 +923,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     if (visitedFilter)        p.set("visited",       visitedFilter);
     if (ageFilter)            p.set("ageFilter",     ageFilter);
     if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
+    if (localSearch.trim())   p.set("localSearch",   localSearch.trim().toLowerCase());
     return p.toString();
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
-      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab]);
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, localSearch]);
 
   // ── Fetch pending jobs ────────────────────────────────────────
   const fetchPending = useCallback(async () => {
@@ -992,11 +993,22 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [user]);
 
   // Re-fetch when server-side filters/sort/tab change (background — board stays visible)
+  // Note: localSearch is NOT in this dep array — it has its own debounced effect below
   useEffect(() => {
     if (!user) return;
     fetchJobs(1);
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
-      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey]);
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced backend search — fires 300ms after user stops typing
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      setCurrentPage(1);
+      fetchJobs(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [localSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Shared poll loop — used by handleSearch, handlePullRefresh, handleSetRole
   const startPollLoop = useCallback((roleQ, pollSince) => {
@@ -1380,18 +1392,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setAgeFilter(""); setLocalSearch("");
   };
 
-  // ── Live client-side filter (instant, no API call) ───────────
+  // displayJobs: backend handles localSearch filtering across all pages
   const displayJobs = useMemo(() => {
-    const src = boardTab === "pending" ? pendingJobs : jobs;
-    if (!localSearch.trim()) return src;
-    const q = localSearch.trim().toLowerCase();
-    return src.filter(j =>
-      j.company?.toLowerCase().includes(q) ||
-      j.title?.toLowerCase().includes(q)   ||
-      j.location?.toLowerCase().includes(q) ||
-      j.category?.toLowerCase().includes(q)
-    );
-  }, [jobs, pendingJobs, boardTab, localSearch]);
+    return boardTab === "pending" ? pendingJobs : jobs;
+  }, [jobs, pendingJobs, boardTab]);
   displayJobsRef.current = displayJobs;
 
   const genCount = Object.values(generated).filter(v=>v?.html && v.html !== "__exists__").length;
@@ -1566,7 +1570,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         {/* Local search — live client-side, every keystroke */}
         <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
           onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
-          placeholder="Filter visible jobs…"
+          placeholder="Search all jobs…"
           style={{ flex:1, minWidth:140, height:34, padding:"0 12px",
                    borderRadius:2, border:`1px solid ${theme.border}`,
                    background:theme.surface, color:theme.text,
@@ -1587,8 +1591,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           )}
           {boardTab === "pending"
             ? `${displayJobs.length}`
-            : localSearch ? `${displayJobs.length} of ${totalJobs}` : `${totalJobs}`
-          } job{displayJobs.length !== 1 ? "s" : ""}
+            : `${totalJobs}`
+          } job{totalJobs !== 1 ? "s" : ""}
+          {localSearch && !bgLoading ? " matched" : ""}
         </span>
 
         {/* ── Row B (wraps to next line) ──────────────── */}
