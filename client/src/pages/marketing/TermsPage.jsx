@@ -1,6 +1,6 @@
 // client/src/pages/marketing/TermsPage.jsx
 import { useTheme } from "../../styles/theme.jsx";
-import { MarketingNav } from "../../components/MarketingNav.jsx";
+import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
 
 const SECTIONS = [
@@ -37,10 +37,10 @@ const SECTIONS = [
 export function TermsPage() {
   const { theme } = useTheme();
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
+    <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
                   background: theme.bg, color: theme.text,
                   fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <MarketingNav/>
+      <ScrollDock variant="marketing" />
       <main style={{ flex: 1, maxWidth: 720, margin: "0 auto", padding: "64px 24px" }}>
         <h1 style={{ fontSize: "clamp(28px, 4vw, 44px)", fontWeight: 900, letterSpacing: "-1px",
                       color: theme.text, marginBottom: 8, lineHeight: 1.1,

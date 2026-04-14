@@ -9,6 +9,7 @@ import AuthScreen                from "./components/AuthScreen.jsx";
 import AdminLayout               from "./components/AdminLayout.jsx";
 import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
 import TopBar                    from "./components/TopBar.jsx";
+import ScrollDock               from "./components/ScrollDock.jsx";
 import JobsPanel                 from "./panels/JobsPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
@@ -62,6 +63,14 @@ function AppDashboard({ authUser, setAuthUser }) {
                   background:theme.bg, height:"100vh",
                   display:"flex", flexDirection:"column",
                   overflow:"hidden", color:theme.text }}>
+      <ScrollDock
+        variant="app"
+        user={authUser}
+        onLogout={handleLogout}
+        onTabChange={handlePanelChange}
+        activeTab={activeTab}
+        onUserChange={setAuthUser}
+      />
       <TopBar
         user={authUser}
         activeTab={activeTab}
@@ -69,6 +78,7 @@ function AppDashboard({ authUser, setAuthUser }) {
         onLogout={handleLogout}
         onUserChange={setAuthUser}
         resumeWidget={resumeWidget}
+        hideLogo
       />
       <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
         <div style={{ display: activeTab === "jobs" ? "flex" : "none",

@@ -212,6 +212,13 @@ export function ThemeProvider({ children }) {
           -moz-osx-font-smoothing: grayscale;
           transition: background 0.3s ease, color 0.3s ease;
         }
+        /* Padding for fixed ScrollDock on public pages */
+        .scroll-dock-page {
+          padding-top: 56px;
+        }
+        @media (max-width: 768px) {
+          .scroll-dock-page { padding-top: 52px; }
+        }
         ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: ${theme.border}; border-radius: 999px; }

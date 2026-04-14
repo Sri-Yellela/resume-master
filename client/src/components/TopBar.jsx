@@ -109,7 +109,7 @@ const TABS = [
   { id:"database", label:"Database", icon:"🗃" },
 ];
 
-export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange, resumeWidget }) {
+export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange, resumeWidget, hideLogo = false }) {
   const { theme, accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
   const { mode: vpMode } = useViewport();
   const isMobile = vpMode === "mobile" || vpMode === "tablet";
@@ -172,10 +172,12 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
       position: "sticky", top: 0, zIndex: 100,
       flexShrink: 0,
     }}>
-      {/* Brand logo */}
-      <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
-        <LucyLogo theme={theme} mini={isMobile}/>
-      </div>
+      {/* Brand logo — hidden when ScrollDock is present */}
+      {!hideLogo && (
+        <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
+          <LucyLogo theme={theme} mini={isMobile}/>
+        </div>
+      )}
 
       {/* Nav tabs */}
       <nav style={{ display:"flex", alignItems:"center", gap:isMobile?0:4, flex:1 }}>

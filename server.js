@@ -582,6 +582,33 @@ db.pragma("busy_timeout = 5000");
         ALTER TABLE users ADD COLUMN enhance_paid INTEGER NOT NULL DEFAULT 0;
       `,
     },
+    {
+      id: "019_notifications",
+      sql: `
+        CREATE TABLE IF NOT EXISTS notifications (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          type       TEXT    NOT NULL,
+          message    TEXT    NOT NULL,
+          payload    TEXT,
+          read       INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_notifications_user
+          ON notifications(user_id, created_at);
+      `,
+    },
+    {
+      id: "020_dock_preferences",
+      sql: `
+        CREATE TABLE IF NOT EXISTS dock_preferences (
+          user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          items_json TEXT    NOT NULL DEFAULT '["profile_switcher","notifications","quick_actions","settings","user_avatar"]',
+          dock_enabled INTEGER NOT NULL DEFAULT 1,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -1681,6 +1708,79 @@ app.get("/api/sync/events", requireAuth, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════════
+
+// Helper: insert a notification and emit SSE so badges update live.
+function insertNotification(userId, type, message, payload = null) {
+  try {
+    const row = db.prepare(
+      "INSERT INTO notifications (user_id, type, message, payload) VALUES (?,?,?,?)"
+    ).run(userId, type, message, payload ? JSON.stringify(payload) : null);
+    emitToUser(userId, { type: "notification", id: row.lastInsertRowid, notif_type: type, message });
+  } catch(e) {
+    console.warn("[notification] insert failed:", e.message);
+  }
+}
+
+app.get("/api/notifications", requireAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT id, type, message, payload, read, created_at
+    FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50
+  `).all(req.user.id);
+  const unreadCount = rows.filter(r => !r.read).length;
+  res.json({ notifications: rows, unreadCount });
+});
+
+app.patch("/api/notifications/read-all", requireAuth, (req, res) => {
+  db.prepare("UPDATE notifications SET read=1 WHERE user_id=?").run(req.user.id);
+  res.json({ ok: true });
+});
+
+// Must be after /read-all to avoid route collision
+app.patch("/api/notifications/:id/read", requireAuth, (req, res) => {
+  const id = parseInt(req.params.id);
+  const row = db.prepare("SELECT id FROM notifications WHERE id=? AND user_id=?").get(id, req.user.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  db.prepare("UPDATE notifications SET read=1 WHERE id=?").run(id);
+  res.json({ ok: true });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// DOCK PREFERENCES
+// ═══════════════════════════════════════════════════════════════
+
+const DEFAULT_DOCK_ITEMS = ["profile_switcher","notifications","quick_actions","settings","user_avatar"];
+
+app.get("/api/dock-preferences", requireAuth, (req, res) => {
+  const row = db.prepare("SELECT items_json, dock_enabled FROM dock_preferences WHERE user_id=?").get(req.user.id);
+  if (!row) return res.json({ itemsOrder: DEFAULT_DOCK_ITEMS, dockEnabled: true });
+  let itemsOrder;
+  try { itemsOrder = JSON.parse(row.items_json); } catch { itemsOrder = DEFAULT_DOCK_ITEMS; }
+  res.json({ itemsOrder, dockEnabled: !!row.dock_enabled });
+});
+
+app.put("/api/dock-preferences", requireAuth, (req, res) => {
+  const VALID_KEYS = new Set(["profile_switcher","notifications","quick_actions","settings","user_avatar"]);
+  let { itemsOrder, dockEnabled } = req.body;
+  if (!Array.isArray(itemsOrder)) return res.status(400).json({ error: "itemsOrder must be array" });
+  // Validate keys
+  if (!itemsOrder.every(k => VALID_KEYS.has(k))) return res.status(400).json({ error: "Invalid item key" });
+  // Ensure user_avatar is last
+  itemsOrder = itemsOrder.filter(k => k !== "user_avatar");
+  itemsOrder.push("user_avatar");
+  // Ensure settings is present
+  if (!itemsOrder.includes("settings")) itemsOrder.splice(itemsOrder.length - 1, 0, "settings");
+  db.prepare(`
+    INSERT INTO dock_preferences (user_id, items_json, dock_enabled, updated_at)
+    VALUES (?, ?, ?, unixepoch())
+    ON CONFLICT(user_id) DO UPDATE SET items_json=excluded.items_json,
+      dock_enabled=excluded.dock_enabled, updated_at=excluded.updated_at
+  `).run(req.user.id, JSON.stringify(itemsOrder), dockEnabled ? 1 : 0);
+  res.json({ itemsOrder, dockEnabled: !!dockEnabled });
+});
+
+// ═══════════════════════════════════════════════════════════════
 // ADMIN BACKUP / RESTORE
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/admin/backups", requireAdmin, (_req, res) => {
@@ -2398,6 +2498,11 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
         durationMs: Date.now() - scrapeStart,
       });
       emitToUser(scrapeUserId, { type: "scrape_complete", query, insertedCount: scrapeResult.insertedCount });
+      if (scrapeResult.insertedCount > 0) {
+        insertNotification(scrapeUserId, "scrape_complete",
+          `${scrapeResult.insertedCount} new job${scrapeResult.insertedCount > 1 ? "s" : ""} added for "${query}"`,
+          { query, count: scrapeResult.insertedCount });
+      }
       console.log(`[scrape] Background scrape complete for "${query}"`);
     } catch(e) {
       trackScrape(db, {
@@ -2663,6 +2768,9 @@ Return ONLY the improved resume text with no commentary, preamble, or explanatio
       WHERE user_id=?
     `).run(enhancedText, delta, req.user.id);
 
+    insertNotification(req.user.id, "enhance_ready",
+      `Enhanced resume ready${delta > 0 ? ` (+${delta} ATS pts)` : ""}`,
+      { delta });
     res.json({
       original: { text: originalText, atsScore: origReport?.score ?? null },
       enhanced: { text: enhancedText, atsScore: enhReport?.score ?? null },
@@ -3033,6 +3141,9 @@ ${resumeStripped}`;
     `).run(req.user.id, String(jobId));
 
     emitToUser(req.user.id, { type: "resume_generated", jobId: String(jobId), atsScore });
+    insertNotification(req.user.id, "resume_generated",
+      `Resume ready for ${job.company}${atsScore != null ? ` (ATS: ${atsScore})` : ""}`,
+      { jobId: String(jobId), company: job.company, atsScore });
     res.json({ html: formattedHtml, atsScore, atsReport, cached:false, version });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });

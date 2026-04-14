@@ -1,6 +1,6 @@
 // client/src/pages/marketing/HowItWorksPage.jsx
 import { useTheme } from "../../styles/theme.jsx";
-import { MarketingNav } from "../../components/MarketingNav.jsx";
+import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
 
 const STEPS = [
@@ -19,10 +19,10 @@ const STEPS = [
 export function HowItWorksPage() {
   const { theme } = useTheme();
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
+    <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
                   background: theme.bg, color: theme.text,
                   fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <MarketingNav/>
+      <ScrollDock variant="marketing" />
       <main style={{ flex: 1, maxWidth: 800, margin: "0 auto", padding: "64px 24px" }}>
         <h1 style={{ fontSize: "clamp(32px, 5vw, 52px)", fontWeight: 900, letterSpacing: "-1.5px",
                       color: theme.text, marginBottom: 16, lineHeight: 1.1,

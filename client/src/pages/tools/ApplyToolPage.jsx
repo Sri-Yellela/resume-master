@@ -3,32 +3,7 @@ import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useTheme } from "../../styles/theme.jsx";
 import { Footer } from "../../components/Footer.jsx";
-
-function ToolNav() {
-  const { theme } = useTheme();
-  return (
-    <nav style={{
-      borderBottom: `1px solid ${theme.border}`,
-      padding: "14px 32px",
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      background: theme.surface,
-    }}>
-      <Link to="/" style={{ textDecoration: "none" }}>
-        <span style={{ fontFamily: "'Barlow Condensed', sans-serif",
-                       fontWeight: 900, fontSize: 22, letterSpacing: "-0.5px", color: theme.accent }}>
-          Resume Master
-        </span>
-      </Link>
-      <Link to="/login">
-        <button style={{ padding: "7px 20px", borderRadius: 6, border: `1px solid ${theme.border}`,
-                         background: theme.accent, color: "#0f0f0f",
-                         fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-          Try the full platform →
-        </button>
-      </Link>
-    </nav>
-  );
-}
+import ScrollDock from "../../components/ScrollDock.jsx";
 
 export function ApplyToolPage() {
   const { theme } = useTheme();
@@ -68,10 +43,10 @@ export function ApplyToolPage() {
 
   if (authNeeded) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
+      <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
                     background: theme.bg, color: theme.text,
                     fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-        <ToolNav/>
+        <ScrollDock variant="tools" />
         <div style={{ flex: 1, display: "flex", flexDirection: "column",
                       alignItems: "center", justifyContent: "center", gap: 16, padding: 24, textAlign: "center" }}>
           <div style={{ fontSize: 48 }}>🔒</div>
@@ -92,10 +67,10 @@ export function ApplyToolPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
+    <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
                   background: theme.bg, color: theme.text,
                   fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <ToolNav/>
+      <ScrollDock variant="tools" />
 
       <main style={{ flex: 1, maxWidth: 720, margin: "0 auto", padding: "48px 24px", width: "100%" }}>
         <h1 style={{ fontSize: "clamp(28px, 5vw, 44px)", fontWeight: 900,
