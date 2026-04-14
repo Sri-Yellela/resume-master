@@ -1,23 +1,20 @@
 // routes/domainProfiles.js — Domain profile CRUD + chip generation
-import { Router }    from "express";
-import Anthropic     from "@anthropic-ai/sdk";
-import fs            from "fs";
-import path          from "path";
-import { fileURLToPath } from "url";
+import { Router }       from "express";
+import Anthropic        from "@anthropic-ai/sdk";
+import { createRequire } from "module";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const _require = createRequire(import.meta.url);
 
-// Load registry once at startup
-let _registry = null;
-function getRegistry() {
-  if (!_registry) {
-    try {
-      const p = path.join(__dirname, "..", "data", "DOMAIN_METADATA_REGISTRY.json");
-      _registry = JSON.parse(fs.readFileSync(p, "utf8"));
-    } catch { _registry = {}; }
-  }
-  return _registry;
+// Load registry at module init so any missing-file error is visible immediately
+// in server logs rather than silently returning an empty domain list.
+let _registry;
+try {
+  _registry = _require("../data/DOMAIN_METADATA_REGISTRY.json");
+} catch (e) {
+  console.error("[domain-registry] FAILED to load registry:", e.message);
+  _registry = {};
 }
+function getRegistry() { return _registry; }
 
 export function createDomainProfilesRouter(db, anthropic) {
   const router = Router();
