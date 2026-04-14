@@ -1,4 +1,5 @@
 // client/src/pages/marketing/FeaturesPage.jsx
+import { Link } from "react-router-dom";
 import { useTheme } from "../../styles/theme.jsx";
 import { MarketingNav } from "../../components/MarketingNav.jsx";
 import { Footer } from "../../components/Footer.jsx";
@@ -71,6 +72,44 @@ export function FeaturesPage() {
               </div>
             </div>
           ))}
+        </div>
+
+
+        {/* Try it free — standalone tools */}
+        <div style={{ marginTop: 64 }}>
+          <h2 style={{ fontSize: "clamp(24px, 3vw, 36px)", fontWeight: 900,
+                       letterSpacing: "-0.8px", color: theme.text, marginBottom: 8,
+                       fontFamily: "'Barlow Condensed', 'DM Sans', system-ui" }}>
+            Try it free — no account required
+          </h2>
+          <p style={{ fontSize: 14, color: theme.textMuted, lineHeight: 1.6, marginBottom: 32, maxWidth: 480 }}>
+            Test the core tools before you sign up. Each tool is fully functional.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
+            {[
+              { path: "/tools/ats",      title: "ATS Scorer",       desc: "Score your resume against any job description.", limit: "3 free scores / month" },
+              { path: "/tools/generate", title: "Resume Generator", desc: "Get a tailored resume for any job in 30 seconds.", limit: "2 free resumes / month" },
+              { path: "/tools/apply",    title: "Auto Apply",       desc: "Fill applications at any job portal automatically.", limit: "2 free runs / month (sign in required)" },
+            ].map(t => (
+              <div key={t.path} style={{
+                padding: "24px", background: theme.surface, border: `1px solid ${theme.border}`,
+                borderRadius: 12, display: "flex", flexDirection: "column", gap: 10,
+              }}>
+                <div style={{ fontWeight: 800, fontSize: 15, color: theme.text }}>{t.title}</div>
+                <div style={{ fontSize: 13, color: theme.textMuted, lineHeight: 1.5, flex: 1 }}>{t.desc}</div>
+                <div style={{ fontSize: 11, color: theme.textMuted, fontStyle: "italic" }}>{t.limit}</div>
+                <Link to={t.path}>
+                  <button style={{
+                    width: "100%", padding: "8px", borderRadius: 6, border: "none",
+                    background: theme.accent, color: "#0f0f0f",
+                    fontWeight: 700, fontSize: 13, cursor: "pointer",
+                  }}>
+                    Try free →
+                  </button>
+                </Link>
+              </div>
+            ))}
+          </div>
         </div>
       </main>
       <Footer/>

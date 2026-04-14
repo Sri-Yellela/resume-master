@@ -6,11 +6,16 @@ import { useTheme }              from "./styles/theme.jsx";
 import { useViewport }           from "./hooks/useViewport.js";
 import { useInactivityLogout }   from "./hooks/useInactivityLogout.js";
 import AuthScreen                from "./components/AuthScreen.jsx";
+import AdminLayout               from "./components/AdminLayout.jsx";
+import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
+import DomainProfileWizard       from "./components/DomainProfileWizard.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import JobsPanel                 from "./panels/JobsPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
-import { AdminPanel }            from "./panels/AdminPanel.jsx";
+import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
+import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
+import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
 
 // Marketing pages (lazy-loaded is fine but direct imports work too)
 import { FeaturesPage }    from "./pages/marketing/FeaturesPage.jsx";
@@ -28,6 +33,10 @@ function AppDashboard({ authUser, setAuthUser }) {
   const [activeTab,          setActiveTab]          = useState("jobs");
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
   const [resumeWidget,       setResumeWidget]       = useState(null);
+  // Domain profile onboarding: show blocking wizard if not complete
+  const [showProfileWizard,  setShowProfileWizard]  = useState(
+    !authUser?.domain_profile_complete
+  );
 
   const handleLogout = useCallback(async () => {
     try { await api("/api/auth/logout", { method:"POST" }); } catch {}
@@ -58,6 +67,17 @@ function AppDashboard({ authUser, setAuthUser }) {
                   background:theme.bg, height:"100vh",
                   display:"flex", flexDirection:"column",
                   overflow:"hidden", color:theme.text }}>
+      {/* Blocking domain profile wizard — shown until onboarding complete */}
+      {showProfileWizard && (
+        <DomainProfileWizard
+          bannerText="Before you continue, help us personalise your job search. This takes 2 minutes and unlocks targeted results for your domain."
+          onComplete={async (profile) => {
+            try { await api("/api/auth/complete-profile", { method: "PATCH" }); } catch {}
+            setAuthUser(u => ({ ...u, domain_profile_complete: 1 }));
+            setShowProfileWizard(false);
+          }}
+        />
+      )}
       <TopBar
         user={authUser}
         activeTab={activeTab}
@@ -75,7 +95,6 @@ function AppDashboard({ authUser, setAuthUser }) {
         </div>
         {activeTab === "database" && <DatabasePanel user={authUser}/>}
         {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
-        {activeTab === "admin"    && authUser.isAdmin && <AdminPanel/>}
       </div>
     </div>
   );
@@ -85,6 +104,11 @@ function AppRouter() {
   const { theme } = useTheme();
   const [authUser,    setAuthUser]    = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+
+  const handleAdminLogout = useCallback(async () => {
+    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+    setAuthUser(null);
+  }, []);
 
   useEffect(() => {
     api("/api/auth/me")
@@ -107,28 +131,67 @@ function AppRouter() {
 
   return (
     <Routes>
-      {/* Marketing pages — always public */}
-      <Route path="/features"    element={<FeaturesPage/>}/>
-      <Route path="/how-it-works" element={<HowItWorksPage/>}/>
-      <Route path="/pricing"     element={<PricingPage/>}/>
-      <Route path="/about"       element={<AboutPage/>}/>
-      <Route path="/contact"     element={<ContactPage/>}/>
-      <Route path="/faq"         element={<FAQPage/>}/>
-      <Route path="/privacy"     element={<PrivacyPage/>}/>
-      <Route path="/terms"       element={<TermsPage/>}/>
+      {/* Standalone tool pages — always public */}
+      <Route path="/tools/ats"      element={<ATSToolPage/>}/>
+      <Route path="/tools/generate" element={<GenerateToolPage/>}/>
+      <Route path="/tools/apply"    element={<ApplyToolPage/>}/>
 
-      {/* Auth page — redirect to / if already logged in */}
+      {/* Marketing pages — always public */}
+      <Route path="/features"     element={<FeaturesPage/>}/>
+      <Route path="/how-it-works" element={<HowItWorksPage/>}/>
+      <Route path="/pricing"      element={<PricingPage/>}/>
+      <Route path="/about"        element={<AboutPage/>}/>
+      <Route path="/contact"      element={<ContactPage/>}/>
+      <Route path="/faq"          element={<FAQPage/>}/>
+      <Route path="/privacy"      element={<PrivacyPage/>}/>
+      <Route path="/terms"        element={<TermsPage/>}/>
+
+      {/* Admin login — redirect if already authenticated */}
+      <Route path="/admin/login" element={
+        authUser
+          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
+          : <AdminLoginPage onLogin={setAuthUser}/>
+      }/>
+
+      {/* Admin dashboard — requires auth + isAdmin */}
+      <Route path="/admin" element={
+        !authUser
+          ? <Navigate to="/admin/login" replace/>
+          : !authUser.isAdmin
+            ? <Navigate to="/app" replace/>
+            : <AdminLayout user={authUser} onLogout={handleAdminLogout}/>
+      }/>
+
+      {/* User login — redirect to /app if logged in as user, /admin if admin */}
       <Route path="/login" element={
         authUser
-          ? <Navigate to="/" replace/>
+          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
           : <AuthScreen onLogin={setAuthUser}/>
       }/>
 
-      {/* App dashboard — redirect to /login if not authenticated */}
-      <Route path="/*" element={
-        authUser
-          ? <AppDashboard authUser={authUser} setAuthUser={setAuthUser}/>
-          : <Navigate to="/login" replace/>
+      {/* User app — redirect admin to /admin */}
+      <Route path="/app" element={
+        !authUser
+          ? <Navigate to="/login" replace/>
+          : authUser.isAdmin
+            ? <Navigate to="/admin" replace/>
+            : <AppDashboard authUser={authUser} setAuthUser={setAuthUser}/>
+      }/>
+
+      {/* Root and catch-all: redirect based on auth state */}
+      <Route path="/" element={
+        !authUser
+          ? <Navigate to="/login" replace/>
+          : authUser.isAdmin
+            ? <Navigate to="/admin" replace/>
+            : <Navigate to="/app" replace/>
+      }/>
+      <Route path="*" element={
+        !authUser
+          ? <Navigate to="/login" replace/>
+          : authUser.isAdmin
+            ? <Navigate to="/admin" replace/>
+            : <Navigate to="/app" replace/>
       }/>
     </Routes>
   );

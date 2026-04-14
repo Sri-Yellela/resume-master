@@ -1,5 +1,6 @@
 // client/src/components/AuthScreen.jsx — Design System v4
 import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
@@ -116,9 +117,8 @@ function PosterCard({ company, index }) {
 // ── Auth modal ────────────────────────────────────────────────
 function AuthModal({ onLogin }) {
   const { theme, mode } = useTheme();
-  const [tab,       setTab]       = useState("login");
-  const [regStep,   setRegStep]   = useState(1);
-  const [adminMode, setAdminMode] = useState(false);
+  const [tab,     setTab]   = useState("login");
+  const [regStep, setRegStep] = useState(1);
   // Login form
   const [login,   setLoginF]  = useState({ username:"", password:"" });
   // Registration step 1 — only in React state, never sent until step 2 completes
@@ -217,15 +217,8 @@ function AuthModal({ onLogin }) {
 
       {tab === "login" ? (
         <form onSubmit={handleLogin} style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          {adminMode && (
-            <div style={{ padding:"8px 12px", borderRadius:8, fontSize:12, fontWeight:600,
-                          background:theme.surfaceHigh, color:theme.textMuted,
-                          border:`1px solid ${theme.border}`, display:"flex", alignItems:"center", gap:6 }}>
-              🔒 Sign in with your admin credentials
-            </div>
-          )}
           <input style={inputStyle} placeholder="Username" value={login.username}
-            onChange={e=>{ setL("username",e.target.value); setAdminMode(false); }} autoFocus/>
+            onChange={e=>setL("username",e.target.value)} autoFocus/>
           <input style={inputStyle} placeholder="Password" type="password" value={login.password}
             onChange={e=>setL("password",e.target.value)}/>
           {error && <div style={{ color:theme.danger, fontSize:12 }}>{error}</div>}
@@ -313,24 +306,16 @@ function AuthModal({ onLogin }) {
         </form>
       )}
 
-      {/* Admin access — only visible on login tab */}
+      {/* Admin link — only visible on login tab */}
       {tab === "login" && (
-        <div style={{ textAlign:"center", marginTop:24 }}>
-          <button
-            type="button"
-            onClick={() => setAdminMode(true)}
-            style={{
-              background:"none", border:"none", cursor:"pointer",
-              fontSize:12, color:theme.textDim, fontFamily:"'DM Sans',system-ui",
-              padding:"4px 8px", borderRadius:4,
-              textDecoration:"none",
-              transition:"color 0.15s, textDecoration 0.15s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = theme.textMuted; e.currentTarget.style.textDecoration = "underline"; }}
-            onMouseLeave={e => { e.currentTarget.style.color = theme.textDim;   e.currentTarget.style.textDecoration = "none"; }}
-          >
-            🔒 Admin Access
-          </button>
+        <div style={{ textAlign:"center", marginTop:20 }}>
+          <Link to="/admin/login"
+            style={{ fontSize:12, color:theme.textDim, textDecoration:"none",
+                     transition:"color 0.15s" }}
+            onMouseEnter={e => e.currentTarget.style.color = theme.textMuted}
+            onMouseLeave={e => e.currentTarget.style.color = theme.textDim}>
+            Admin? Sign in here →
+          </Link>
         </div>
       )}
     </motion.div>

@@ -9,6 +9,7 @@ import JobCard from "../components/JobCard.jsx";
 import JobDetailPanel from "../components/JobDetailPanel.jsx";
 import SandboxPanel from "./SandboxPanel.jsx";
 import { ATSPanel } from "./ATSPanel.jsx";
+import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
 
 const USER_TEXT   = "#0f0f0f";   // black text on accent
 
@@ -616,6 +617,38 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   const [activeAts,   setActiveAts]   = useState(null);
   const [smartSearching, setSmartSearching] = useState(false);
+
+  // Domain profiles
+  const [domainProfiles,   setDomainProfiles]   = useState([]);
+  const [profileMenuOpen,  setProfileMenuOpen]  = useState(false);
+  const [profileWizardOpen, setProfileWizardOpen] = useState(false);
+  const profileMenuRef = useRef(null);
+
+  // Load domain profiles on mount
+  useEffect(() => {
+    api("/api/domain-profiles").then(setDomainProfiles).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close profile menu on outside click
+  useEffect(() => {
+    const handler = e => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const activateDomainProfile = async (id) => {
+    try {
+      const updated = await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
+      setDomainProfiles(prev => prev.map(p => ({ ...p, is_active: p.id === updated.id ? 1 : 0 })));
+    } catch {}
+    setProfileMenuOpen(false);
+  };
+
+  const activeProfile = domainProfiles.find(p => p.is_active);
 
   // Live scrape status
   const [scrapeError,    setScrapeError]    = useState("");
@@ -1354,6 +1387,75 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:theme.bg }}>
+
+      {/* Domain profile wizard modal (non-blocking "+ New Profile") */}
+      {profileWizardOpen && (
+        <DomainProfileWizard
+          onComplete={profile => {
+            setDomainProfiles(prev => [...prev, profile]);
+            setProfileWizardOpen(false);
+          }}
+          onDismiss={() => setProfileWizardOpen(false)}
+        />
+      )}
+
+      {/* ── Profile switcher bar ──────────────────────────────── */}
+      {domainProfiles.length > 0 && !isMobile && (
+        <div style={{
+          background: theme.surface, borderBottom: `1px solid ${theme.border}`,
+          padding: "6px 20px", display: "flex", alignItems: "center", gap: 10,
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 11, color: theme.textMuted, fontWeight: 600 }}>Profile:</span>
+          {/* Dropdown trigger */}
+          <div ref={profileMenuRef} style={{ position: "relative" }}>
+            <button onClick={() => setProfileMenuOpen(o => !o)} style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "4px 12px", borderRadius: 6, cursor: "pointer",
+              border: `1px solid ${theme.border}`, background: theme.bg,
+              color: theme.text, fontSize: 12, fontWeight: 600,
+            }}>
+              {activeProfile?.profile_name || "None"}
+              <span style={{ fontSize: 10, color: theme.textMuted }}>▾</span>
+            </button>
+            {profileMenuOpen && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 4px)", left: 0,
+                background: theme.surface, border: `1px solid ${theme.border}`,
+                borderRadius: 8, boxShadow: theme.shadowXl, minWidth: 180,
+                zIndex: 200, overflow: "hidden",
+              }}>
+                {domainProfiles.map(p => (
+                  <button key={p.id} onClick={() => activateDomainProfile(p.id)} style={{
+                    display: "block", width: "100%", textAlign: "left",
+                    padding: "9px 14px", border: "none", cursor: "pointer",
+                    background: p.is_active ? theme.accent + "18" : "transparent",
+                    color: p.is_active ? theme.accent : theme.text,
+                    fontSize: 13, fontWeight: p.is_active ? 700 : 400,
+                    transition: "background 0.1s",
+                  }}>
+                    {p.is_active ? "✓ " : ""}{p.profile_name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* New profile button */}
+          <button
+            onClick={() => { if (domainProfiles.length < 4) setProfileWizardOpen(true); }}
+            disabled={domainProfiles.length >= 4}
+            title={domainProfiles.length >= 4 ? "Maximum 4 profiles" : "Add another profile"}
+            style={{
+              padding: "4px 10px", borderRadius: 6, border: `1px solid ${theme.border}`,
+              background: "transparent", color: theme.textMuted,
+              fontSize: 12, cursor: domainProfiles.length >= 4 ? "default" : "pointer",
+              opacity: domainProfiles.length >= 4 ? 0.4 : 1,
+            }}
+          >
+            + New Profile
+          </button>
+        </div>
+      )}
 
       <AnimatePresence>
         {filtersOpen && (

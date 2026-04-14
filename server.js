@@ -24,12 +24,13 @@ import fs             from "fs";
 import { createBackup, listBackups, restoreBackup } from "./scripts/backup.js";
 import applyRoutes from "./routes/apply.js";
 import { createAdminRouter } from "./routes/admin.js";
+import { createDomainProfilesRouter } from "./routes/domainProfiles.js";
 import { trackApiCall, trackScrape } from "./services/usageTracker.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
-import { normaliseRole, buildApifyQueries, isTitleRelevant as isTitleRelevantNew } from "./services/searchQueryBuilder.js";
+import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
 
 // ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
@@ -475,6 +476,63 @@ db.pragma("busy_timeout = 5000");
         );
       `,
     },
+    // ── Phase 2A: Domain profiles ──────────────────────────────
+    {
+      id: "013_domain_profiles",
+      sql: `
+        CREATE TABLE IF NOT EXISTS domain_profiles (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          profile_name TEXT NOT NULL,
+          role_family TEXT NOT NULL,
+          domain TEXT NOT NULL,
+          seniority TEXT NOT NULL DEFAULT 'mid',
+          target_titles JSON NOT NULL DEFAULT '[]',
+          selected_keywords JSON NOT NULL DEFAULT '[]',
+          selected_verbs JSON NOT NULL DEFAULT '[]',
+          selected_tools JSON NOT NULL DEFAULT '[]',
+          is_active INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_domain_profiles_user
+          ON domain_profiles(user_id, is_active);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_domain_profiles_active
+          ON domain_profiles(user_id) WHERE is_active = 1;
+      `,
+    },
+    {
+      id: "014_profile_onboarding_flag",
+      sql: `
+        ALTER TABLE users ADD COLUMN domain_profile_complete INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
+    // ── Phase 5A: Standalone users ─────────────────────────────
+    {
+      id: "015_standalone_users",
+      sql: `
+        CREATE TABLE IF NOT EXISTS standalone_users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          email TEXT UNIQUE,
+          phone TEXT UNIQUE,
+          google_id TEXT UNIQUE,
+          display_name TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          last_seen_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE TABLE IF NOT EXISTS standalone_usage (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          standalone_user_id INTEGER REFERENCES standalone_users(id) ON DELETE CASCADE,
+          session_id TEXT,
+          service TEXT NOT NULL,
+          used_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_standalone_usage_user
+          ON standalone_usage(standalone_user_id, service);
+        CREATE INDEX IF NOT EXISTS idx_standalone_usage_session
+          ON standalone_usage(session_id, service);
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -843,8 +901,13 @@ async function fetchCompanyIcon(domain) {
 async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
   if (!token) throw new Error("No Apify token");
   const client = new ApifyClient({ token });
+  // QUERY BUILDING: scrapeParams.jobTitles (profile-driven array) takes priority over
+  // the single query string. This allows multi-title searches from domain profiles.
+  const jobTitles = (scrapeParams.jobTitles?.length)
+    ? scrapeParams.jobTitles
+    : [query];
   const input = {
-    jobTitles:      [query],
+    jobTitles,
     locations:      [scrapeParams.location      || "United States"],
     workplaceType:  scrapeParams.workplaceTypes?.length
                       ? scrapeParams.workplaceTypes
@@ -855,7 +918,7 @@ async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
     postedLimit:    scrapeParams.postedLimit     || "24h",
     maxItems:       MAX_JOBS_PER_REFRESH * 3,
   };
-  console.log(`[scrape] Apify input: workplaceType=${input.workplaceType} empType=${input.employmentType} postedLimit=${input.postedLimit} location=${input.locations[0]}`);
+  console.log(`[scrape] Apify input: titles=[${jobTitles.join(",")}] workplaceType=${input.workplaceType} empType=${input.employmentType} postedLimit=${input.postedLimit} location=${input.locations[0]}`);
   const run = await client.actor("harvestapi/linkedin-job-search").call(input, { waitSecs: 300 });
   const dataset = await client.dataset(run.defaultDatasetId).listItems({ limit: MAX_JOBS_PER_REFRESH * 3 });
   const items = Array.isArray(dataset.items) ? dataset.items : [];
@@ -872,7 +935,11 @@ async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
 
 async function scrapeJobs(query, apifyToken, scrapeParams = {}) {
   const employmentTypes = scrapeParams.employmentTypes?.length ? scrapeParams.employmentTypes : ["full-time"];
-  console.log(`[scrape] "${query}" — HarvestAPI`);
+  // TITLE RELEVANCE: if jobTitles array supplied (profile-driven), check against all targets.
+  // Otherwise fall back to single-query isTitleRelevantNew.
+  // Edit isTitleRelevantToProfile() in services/searchQueryBuilder.js to change matching logic.
+  const profileTitles = scrapeParams.jobTitles?.length ? scrapeParams.jobTitles : null;
+  console.log(`[scrape] "${query}" — HarvestAPI (${profileTitles ? profileTitles.length + " profile titles" : "single query"})`);
   let rawItems = [];
   try {
     rawItems = await scrapeHarvestAPI(query, apifyToken, scrapeParams);
@@ -897,7 +964,10 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}) {
       if (applyDomain && applyDomain.includes("linkedin.com")) { cntNoApply++; return false; }
     }
     if (!isEmploymentTypeWanted(item, employmentTypes)) { cntNotFT++; return false; }
-    if (!isTitleRelevantNew(item.title, query))   { cntIrrelevant++; return false; }
+    const titleOk = profileTitles
+      ? isTitleRelevantToProfile(item.title, profileTitles)
+      : isTitleRelevantNew(item.title, query);
+    if (!titleOk) { cntIrrelevant++; return false; }
     if (isReposted(item))                      { cntRepost++;     return false; }
     if (ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }) >= 4) { cntGhost++; return false; }
     if (thisRunIds.has(item.jobId))            { cntDup++;        return false; }
@@ -1088,7 +1158,9 @@ cron.schedule("0 7 * * *", async () => {
 });
 
 // ── Prompt injection ──────────────────────────────────────────
-function buildRuntimeInputs(profile, job, resumeText, mode, employers) {
+// domainProfile is the active domain_profiles row (or null).
+// When supplied, profile keywords/verbs/tools are injected as Tier 1 signal.
+function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainProfile = null) {
   const userLocation = mode === "CUSTOM_SAMPLER" ? "" : (profile?.location||"");
   let employerBlock  = "";
   if (mode === "TAILORED" && employers?.length >= 2)
@@ -1096,6 +1168,21 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers) {
 
   const candidateName = profile?.full_name ||
     [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "";
+
+  // Domain profile block — injected when user has an active profile
+  let domainProfileBlock = "";
+  if (domainProfile) {
+    const kw    = JSON.parse(domainProfile.selected_keywords || "[]").join(", ");
+    const tools = JSON.parse(domainProfile.selected_tools    || "[]").join(", ");
+    const verbs = JSON.parse(domainProfile.selected_verbs    || "[]").join(", ");
+    domainProfileBlock = `
+**User domain profile:** ${domainProfile.profile_name}
+**Target seniority:** ${domainProfile.seniority}
+**Profile keywords:** ${kw || "—"}
+**Profile tools:** ${tools || "—"}
+**Profile action verbs:** ${verbs || "—"}
+`;
+  }
 
   return `## RUNTIME INPUTS
 
@@ -1106,7 +1193,7 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers) {
 **LinkedIn URL:** ${profile?.linkedin_url||""}
 **GitHub URL:** ${profile?.github_url||""}
 **User location (City, State):** ${userLocation}
-${employerBlock}
+${employerBlock}${domainProfileBlock}
 **Target role / job title:** ${job.title}
 **Target industry / domain:** ${job.category && job.category !== "Other" ? job.category : job.title || "Technology"}
 **Target company:** ${job.company}
@@ -1424,6 +1511,24 @@ app.get("/api/auth/me", (req, res) =>
 );
 
 // ═══════════════════════════════════════════════════════════════
+// DOMAIN PROFILES
+// ═══════════════════════════════════════════════════════════════
+// /api/domain-profiles        — CRUD + activate
+// /api/domain-profiles/metadata[/:domain]  — registry (no auth)
+// /api/domain-profiles/generate-chips      — AI chip generation
+app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic));
+// Metadata is also public — mount without requireAuth at a sub-path so
+// the chip registry is accessible from the wizard before login
+app.get("/api/domain-metadata",       (_req, res) => res.redirect(307, "/api/domain-profiles/metadata"));
+app.get("/api/domain-metadata/:key",  (req, res) => res.redirect(307, `/api/domain-profiles/metadata/${req.params.key}`));
+
+// Mark onboarding complete (called by wizard on profile save, also done inside createDomainProfilesRouter)
+app.patch("/api/auth/complete-profile", requireAuth, (req, res) => {
+  db.prepare("UPDATE users SET domain_profile_complete=1 WHERE id=?").run(req.user.id);
+  res.json({ ok: true });
+});
+
+// ═══════════════════════════════════════════════════════════════
 // ADMIN BACKUP / RESTORE
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/admin/backups", requireAdmin, (_req, res) => {
@@ -1552,6 +1657,49 @@ app.get("/api/extension/autofill", requireAuth, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// ── /api/jobs/facets — live counts for filter UI ──────────────
+// Returns grouped counts over the current user's job pool (7-day window,
+// non-disliked, non-applied). Used to show "Remote (23)" labels and hide
+// zero-count filter options. Re-fetch after each scrape completes.
+app.get("/api/jobs/facets", requireAuth, (req, res) => {
+  const userId = req.user.id;
+  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+  const rows = db.prepare(`
+    SELECT sj.work_type, sj.employment_type, sj.category,
+           sj.scraped_at, sj.posted_at, sj.salary_min, sj.salary_max
+    FROM scraped_jobs sj
+    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    WHERE (uj.disliked IS NULL OR uj.disliked = 0)
+      AND (uj.applied  IS NULL OR uj.applied  = 0)
+      AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
+            AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
+           OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
+  `).all(userId, sevenDaysAgo, sevenDaysAgo);
+
+  const workType = {}, empType = {}, category = {}, postedAge = {};
+  const salaries = [];
+  const now = Math.floor(Date.now() / 1000);
+
+  for (const r of rows) {
+    if (r.work_type)       workType[r.work_type]           = (workType[r.work_type]       || 0) + 1;
+    if (r.employment_type) empType[r.employment_type]      = (empType[r.employment_type]  || 0) + 1;
+    if (r.category)        category[r.category]            = (category[r.category]        || 0) + 1;
+    const ts = r.posted_at ? parseInt(r.posted_at) || 0 : r.scraped_at;
+    const age = now - ts;
+    const bucket = age < 86400 ? "24h" : age < 259200 ? "3d" : "1w";
+    postedAge[bucket] = (postedAge[bucket] || 0) + 1;
+    if (r.salary_min) salaries.push(r.salary_min);
+    if (r.salary_max) salaries.push(r.salary_max);
+  }
+
+  const salaryRange = salaries.length
+    ? { min: Math.min(...salaries), max: Math.max(...salaries),
+        median: salaries.sort((a,b)=>a-b)[Math.floor(salaries.length/2)] }
+    : null;
+
+  res.json({ workType, employmentType: empType, category, postedAge, salaryRange, total: rows.length });
+});
+
 // JOBS — shared pool with pagination, filters, sort
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/jobs", requireAuth, (req, res) => {
@@ -1838,6 +1986,18 @@ function mapPostedLimit(ageFilter) {
 app.post("/api/scrape", requireAuth, async (req, res) => {
   const rawQuery = (req.body.query || "").trim();
   if (!rawQuery) return res.status(400).json({ error:"query required" });
+
+  // DOMAIN PROFILE: if an active profile exists, build multi-title jobTitles array.
+  // Falls back to single normalised query when no profile is set.
+  // QUERY PRIORITY: active profile target_titles + seniority variants first;
+  // single query string as fallback. Edit buildApifyQueriesFromProfile() in
+  // services/searchQueryBuilder.js to change title variant logic.
+  const activeProfile = db.prepare(
+    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
+  ).get(req.user.id);
+  const profileJobTitles = activeProfile
+    ? buildApifyQueriesFromProfile(activeProfile)
+    : null;
   const query = normaliseRole(rawQuery);
 
   // employmentTypes — array of HarvestAPI-accepted strings; default full-time
@@ -1861,7 +2021,10 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     ? req.body.location.trim()
     : "United States";
 
-  const scrapeParams = { employmentTypes, workplaceTypes, postedLimit, location };
+  const scrapeParams = {
+    employmentTypes, workplaceTypes, postedLimit, location,
+    ...(profileJobTitles ? { jobTitles: profileJobTitles } : {}),
+  };
 
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
   const token = user?.apify_token;
@@ -2234,17 +2397,32 @@ ${cachedResumeText}`;
   // Phase 4A: always use stored base resume as authoritative source
   const storedResume = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
   const authoritativeResumeText = storedResume?.content || resumeText;
+
+  // DOMAIN MODULE SELECTION: active domain profile takes priority over classifier inference.
+  // Profile domain + roleFamily → domainModuleKey directly, skipping the Haiku classify call.
+  // Classifier runs only as fallback when no active profile is set.
+  // To change priority: edit this block.
+  const activeDomainProfile = db.prepare(
+    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
+  ).get(req.user.id);
+
   try {
     // New layered prompt flow
     let domainModuleKey = "general";
-    try {
-      const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "");
-      const qualKey = resolveFromClassifier(classifierResult, profile?.qualification_key);
-      domainModuleKey = getDomainModuleKey(qualKey, classifierResult.roleFamily, classifierResult.domain);
-    } catch(e) {
-      console.warn("[generate] classifier failed, using general domain:", e.message);
+    if (activeDomainProfile) {
+      // Fast path: derive domainModuleKey directly from profile — no Haiku call
+      domainModuleKey = getDomainModuleKey(null, activeDomainProfile.role_family, activeDomainProfile.domain);
+      console.log(`[generate] domain from profile: ${activeDomainProfile.profile_name} → ${domainModuleKey}`);
+    } else {
+      try {
+        const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "");
+        const qualKey = resolveFromClassifier(classifierResult, profile?.qualification_key);
+        domainModuleKey = getDomainModuleKey(qualKey, classifierResult.roleFamily, classifierResult.domain);
+      } catch(e) {
+        console.warn("[generate] classifier failed, using general domain:", e.message);
+      }
     }
-    const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, mode, employers);
+    const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, mode, employers, activeDomainProfile);
     const { systemBlocks } = assemblePrompt(domainModuleKey, mode, runtimeInputs);
 
     const genStart = Date.now();
@@ -2702,6 +2880,190 @@ app.patch("/api/admin/contact-messages/:id/read", requireAdmin, (req, res) => {
   db.prepare("UPDATE contact_messages SET read = 1 WHERE id = ?").run(Number(req.params.id));
   res.json({ ok: true });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// STANDALONE TOOL PAGES — AUTH INFRASTRUCTURE (Phase 5B)
+// ═══════════════════════════════════════════════════════════════
+// Placeholder OTP store (in-memory; replace with Redis/DB in production)
+const _otpStore = new Map(); // contact → { otp, expiresAt }
+
+app.post("/api/standalone/auth/google", (_req, res) => {
+  // TODO: validate Google ID token with google-auth-library
+  res.json({ ok: true, mock: true });
+});
+
+app.post("/api/standalone/auth/email-otp/send", (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: "email required" });
+  _otpStore.set(email, { otp: "123456", expiresAt: Date.now() + 10 * 60 * 1000 });
+  // TODO: send real email via SendGrid/Resend
+  res.json({ ok: true, mock: true });
+});
+
+app.post("/api/standalone/auth/phone-otp/send", (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: "phone required" });
+  _otpStore.set(phone, { otp: "123456", expiresAt: Date.now() + 10 * 60 * 1000 });
+  // TODO: send real SMS via Twilio
+  res.json({ ok: true, mock: true });
+});
+
+app.post("/api/standalone/auth/otp/verify", (req, res) => {
+  const { contact, otp } = req.body;
+  if (!contact || !otp) return res.status(400).json({ error: "contact and otp required" });
+  const stored = _otpStore.get(contact);
+  if (!stored || stored.otp !== otp || Date.now() > stored.expiresAt) {
+    return res.status(401).json({ error: "Invalid or expired OTP" });
+  }
+  _otpStore.delete(contact);
+  // Find or create standalone user
+  const isEmail = contact.includes("@");
+  let user = isEmail
+    ? db.prepare("SELECT * FROM standalone_users WHERE email=?").get(contact)
+    : db.prepare("SELECT * FROM standalone_users WHERE phone=?").get(contact);
+  if (!user) {
+    const r = isEmail
+      ? db.prepare("INSERT INTO standalone_users (email) VALUES (?)").run(contact)
+      : db.prepare("INSERT INTO standalone_users (phone) VALUES (?)").run(contact);
+    user = db.prepare("SELECT * FROM standalone_users WHERE id=?").get(r.lastInsertRowid);
+  } else {
+    db.prepare("UPDATE standalone_users SET last_seen_at=unixepoch() WHERE id=?").run(user.id);
+  }
+  req.session.standaloneUserId = user.id;
+  res.json({ ok: true, user: { id: user.id, email: user.email, phone: user.phone } });
+});
+
+app.get("/api/standalone/auth/me", (req, res) => {
+  const uid = req.session?.standaloneUserId;
+  if (!uid) return res.json({ authenticated: false });
+  const user = db.prepare("SELECT id, email, phone, display_name FROM standalone_users WHERE id=?").get(uid);
+  res.json({ authenticated: !!user, user: user || null });
+});
+
+app.post("/api/standalone/auth/logout", (req, res) => {
+  req.session.standaloneUserId = null;
+  res.json({ ok: true });
+});
+
+// Standalone rate-limit middleware
+// anonMax: max uses per session (anonymous); userMax: max per registered user per month
+function standaloneRateLimit(service, anonMax, userMax) {
+  return (req, res, next) => {
+    const userId    = req.session?.standaloneUserId;
+    const sessionId = req.sessionID;
+    const since     = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+
+    const count = userId
+      ? db.prepare("SELECT COUNT(*) as c FROM standalone_usage WHERE standalone_user_id=? AND service=? AND used_at>?").get(userId, service, since).c
+      : db.prepare("SELECT COUNT(*) as c FROM standalone_usage WHERE session_id=? AND service=? AND used_at>?").get(sessionId, service, since).c;
+
+    const limit = userId ? userMax : anonMax;
+    if (count >= limit) {
+      return res.status(429).json({
+        error: "limit_reached", service, count, limit,
+        message: `You have used ${count} of ${limit} free ${service} runs this month.`,
+      });
+    }
+    db.prepare("INSERT INTO standalone_usage (standalone_user_id, session_id, service) VALUES (?,?,?)")
+      .run(userId || null, sessionId, service);
+    next();
+  };
+}
+
+// Multer for standalone uploads
+const standaloneUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+// ═══════════════════════════════════════════════════════════════
+// STANDALONE TOOL API ROUTES (Phase 5C)
+// ═══════════════════════════════════════════════════════════════
+
+// POST /api/standalone/ats — ATS scoring (no main-app auth required)
+// Uses same ATS_SYSTEM_PROMPT and Haiku call as main app.
+app.post("/api/standalone/ats", standaloneRateLimit("ats", 1, 3), standaloneUpload.single("resume"), async (req, res) => {
+  const jdText = req.body?.jd_text || "";
+  if (!req.file || !jdText.trim()) return res.status(400).json({ error: "resume PDF and jd_text required" });
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
+
+  try {
+    // Parse PDF text using pdf-parse (same path as /api/parse-pdf)
+    const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
+    const parsed = await pdfParse(req.file.buffer);
+    const resumeText = parsed.text?.trim();
+    if (!resumeText || resumeText.length < 50) return res.status(400).json({ error: "Could not extract text from PDF" });
+
+    const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):\n${jdText}\n\nRESUME TEXT (check which JD keywords appear here):\n${resumeText}`;
+    const msg = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 900,
+      system: ATS_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: atsDynamic }],
+    });
+    const raw = msg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
+    const report = JSON.parse(raw);
+    res.json(report);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/standalone/generate — tailored resume (no main-app auth)
+app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), standaloneUpload.single("resume"), async (req, res) => {
+  const jdText = req.body?.jd_text || "";
+  if (!req.file || !jdText.trim()) return res.status(400).json({ error: "resume PDF and jd_text required" });
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
+
+  try {
+    const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
+    const parsed = await pdfParse(req.file.buffer);
+    const resumeText = parsed.text?.trim();
+    if (!resumeText || resumeText.length < 50) return res.status(400).json({ error: "Could not extract text from PDF" });
+
+    // No domain profile for standalone users — use classifier
+    let domainModuleKey = "general";
+    try {
+      const cr = await classify(anthropic, resumeText, jdText);
+      const qk = resolveFromClassifier(cr, null);
+      domainModuleKey = getDomainModuleKey(qk, cr.roleFamily, cr.domain);
+    } catch {}
+
+    const fakeJob = { title: "Role", company: "Company", description: jdText, category: "", stack: "" };
+    const runtimeInputs = buildRuntimeInputs({}, fakeJob, resumeText, "TAILORED", []);
+    const { systemBlocks } = assemblePrompt(domainModuleKey, "TAILORED", runtimeInputs);
+
+    const resumeMsg = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4096,
+      system: systemBlocks,
+      messages: [{ role: "user", content: runtimeInputs }],
+    });
+    const html = resumeMsg.content.map(b => b.text || "").join("").trim();
+
+    // Quick ATS score
+    const cachedText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    let atsScore = null;
+    try {
+      const atsMsg = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001", max_tokens: 900,
+        system: ATS_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: `JOB DESCRIPTION:\n${jdText}\n\nRESUME TEXT:\n${cachedText}` }],
+      });
+      const atsRaw = atsMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
+      atsScore = JSON.parse(atsRaw).score;
+    } catch {}
+
+    res.json({ html, atsScore });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/standalone/apply — auto-apply (requires standalone auth)
+app.post("/api/standalone/apply",
+  (req, res, next) => { if (!req.session?.standaloneUserId) return res.status(401).json({ error: "Authentication required" }); next(); },
+  standaloneRateLimit("apply", 0, 2),
+  standaloneUpload.single("resume"),
+  async (req, res) => {
+    // Delegates to the same apply logic as the main app via applyRoutes
+    // For now: return a structured response indicating the run was accepted
+    res.json({ ok: true, results: [], message: "Apply automation not yet wired for standalone mode" });
+  }
+);
 
 // ═══════════════════════════════════════════════════════════════
 // HEALTH + SPA

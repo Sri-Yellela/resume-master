@@ -82,6 +82,62 @@ export function buildApifyQueries(canonicalRole, classifierResult, qualTemplates
     .slice(0, 5);
 }
 
+// ── Profile-driven query builder ─────────────────────────────
+// QUERY BUILDING: driven by domain profile target_titles and seniority.
+// Returns up to 10 Apify jobTitles (array, not query strings).
+// To change max queries edit the break condition below.
+// To change seniority prefix words edit SENIORITY_PREFIX below.
+const SENIORITY_PREFIX = {
+  junior:    ["Junior", "Associate", "Entry Level"],
+  mid:       ["", "Mid-Level"],
+  senior:    ["Senior", "Lead", "Staff"],
+  executive: ["Director", "Head of", "VP", "Principal"],
+};
+
+export function buildApifyQueriesFromProfile(activeProfile) {
+  if (!activeProfile) return [];
+  const titles = [];
+  try { titles.push(...JSON.parse(activeProfile.target_titles || "[]")); } catch {}
+  if (!titles.length) return activeProfile.profile_name ? [activeProfile.profile_name] : [];
+
+  const prefixes = SENIORITY_PREFIX[activeProfile.seniority] || [""];
+  const variants = [];
+  for (const title of titles) {
+    for (const prefix of prefixes) {
+      const q = prefix ? `${prefix} ${title}` : title;
+      if (!variants.includes(q)) variants.push(q);
+      if (variants.length >= 10) break;
+    }
+    if (variants.length >= 10) break;
+  }
+  return variants.length > 0 ? variants : [activeProfile.profile_name];
+}
+
+// ── Profile-aware title relevance ─────────────────────────────
+// Title passes if it matches ANY target title's tokens (OR across titles, AND within each).
+// Used when scraping with a domain profile (profileTitles array available).
+export function isTitleRelevantToProfile(title, targetTitles) {
+  if (!targetTitles?.length) return true;
+  const t = title?.toLowerCase().trim() || "";
+  const stopWords = new Set([
+    "the","and","for","with","ing","a","an","of","in",
+    "at","by","to","or","senior","junior","staff",
+    "principal","lead","entry","level","mid","ii","iii","iv","i",
+  ]);
+  const TYPO_MAP = {
+    "enginere":"engineer","enigneer":"engineer","sofware":"software",
+    "managr":"manager","analist":"analyst",
+  };
+  return targetTitles.some(target => {
+    const tokens = target.toLowerCase()
+      .split(/[\s,/\-]+/)
+      .filter(w => w.length > 2 && !stopWords.has(w))
+      .map(w => TYPO_MAP[w] || w);
+    if (tokens.length === 0) return true;
+    return tokens.every(tok => t.includes(tok));
+  });
+}
+
 // TITLE RELEVANCE: ALL meaningful query tokens must appear in the job title (strict AND match).
 // "Project Coordinator" → tokens ["project","coordinator"] → both must be in title.
 export function isTitleRelevant(title, query) {

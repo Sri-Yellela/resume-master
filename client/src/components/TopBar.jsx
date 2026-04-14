@@ -109,8 +109,6 @@ const TABS = [
   { id:"database", label:"Database", icon:"🗃" },
 ];
 
-const ADMIN_ACCENT_COLOR = "#F5E642";
-
 export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange, resumeWidget }) {
   const { theme, accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
   const { mode: vpMode } = useViewport();
@@ -154,7 +152,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
     setTimeout(() => setTokenMsg(""), 3000);
   };
 
-  const tabs = [...TABS, ...(user?.isAdmin ? [{ id:"admin", label:"Admin", icon:"🔑", isAdmin:true }] : [])];
+  const tabs = TABS;
 
   const menuItemStyle = {
     padding: "10px 16px", cursor: "pointer", fontSize: 13,
@@ -182,27 +180,21 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
       {/* Nav tabs */}
       <nav style={{ display:"flex", alignItems:"center", gap:isMobile?0:4, flex:1 }}>
         {tabs.map(t => {
-          const isAdminTab = t.isAdmin;
           const isActive = activeTab === t.id;
           return (
             <button key={t.id} onClick={() => onTabChange(t.id)}
               style={{
-                background: isAdminTab && isActive ? ADMIN_ACCENT_COLOR
-                           : isAdminTab ? "transparent"
-                           : "transparent",
-                border: isAdminTab ? `1px solid ${isActive ? ADMIN_ACCENT_COLOR : ADMIN_ACCENT_COLOR+"66"}` : "none",
-                padding: isMobile ? "6px 8px" : "6px 14px", borderRadius: isAdminTab ? 4 : 4,
+                background: "transparent", border: "none",
+                padding: isMobile ? "6px 8px" : "6px 14px", borderRadius: 4,
                 fontFamily: "'Barlow Condensed', 'DM Sans', sans-serif",
                 fontWeight: isActive ? 800 : 600,
                 fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
-                color: isAdminTab && isActive ? "#0f0f0f"
-                     : isAdminTab ? ADMIN_ACCENT_COLOR
-                     : isActive ? theme.text : theme.textMuted,
+                color: isActive ? theme.text : theme.textMuted,
                 cursor: "pointer", position: "relative",
-                transition: "color 0.15s, background 0.15s",
+                transition: "color 0.15s",
               }}>
-              {isMobile ? t.icon : (isAdminTab ? `🔑 ${t.label}` : t.label)}
-              {isActive && !isAdminTab && (
+              {isMobile ? t.icon : t.label}
+              {isActive && (
                 <motion.div layoutId="tab-underline"
                   style={{
                     position: "absolute", bottom: -1, left: "50%",
