@@ -8,7 +8,6 @@ import { useInactivityLogout }   from "./hooks/useInactivityLogout.js";
 import AuthScreen                from "./components/AuthScreen.jsx";
 import AdminLayout               from "./components/AdminLayout.jsx";
 import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
-import DomainProfileWizard       from "./components/DomainProfileWizard.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import JobsPanel                 from "./panels/JobsPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
@@ -33,10 +32,6 @@ function AppDashboard({ authUser, setAuthUser }) {
   const [activeTab,          setActiveTab]          = useState("jobs");
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
   const [resumeWidget,       setResumeWidget]       = useState(null);
-  // Domain profile onboarding: show blocking wizard if not complete
-  const [showProfileWizard,  setShowProfileWizard]  = useState(
-    !authUser?.domainProfileComplete
-  );
 
   const handleLogout = useCallback(async () => {
     try { await api("/api/auth/logout", { method:"POST" }); } catch {}
@@ -67,17 +62,6 @@ function AppDashboard({ authUser, setAuthUser }) {
                   background:theme.bg, height:"100vh",
                   display:"flex", flexDirection:"column",
                   overflow:"hidden", color:theme.text }}>
-      {/* Blocking domain profile wizard — shown until onboarding complete */}
-      {showProfileWizard && (
-        <DomainProfileWizard
-          bannerText="Before you continue, help us personalise your job search. This takes 2 minutes and unlocks targeted results for your domain."
-          onComplete={async (profile) => {
-            try { await api("/api/auth/complete-profile", { method: "PATCH" }); } catch {}
-            setAuthUser(u => ({ ...u, domainProfileComplete: true }));
-            setShowProfileWizard(false);
-          }}
-        />
-      )}
       <TopBar
         user={authUser}
         activeTab={activeTab}
