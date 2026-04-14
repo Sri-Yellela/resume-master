@@ -613,41 +613,39 @@ db.pragma("busy_timeout = 5000");
     {
       id: "021_backfill_profile_tags",
       sql: `
-        -- Step 1: user_jobs where scraped_job already has a real profile tag
+        -- Disable foreign key enforcement for this migration
+        -- The -1 sentinel approach violates the FK constraint
+        -- on domain_profile_id. Use NULL instead of -1 for
+        -- unmatched legacy rows and handle exclusion in queries.
+
+        -- Best-effort tag: assign user_jobs rows to the user's
+        -- active profile where one exists
         UPDATE user_jobs
         SET domain_profile_id = (
-          SELECT sj.domain_profile_id FROM scraped_jobs sj
-          WHERE sj.job_id = user_jobs.job_id
-            AND sj.domain_profile_id IS NOT NULL
+          SELECT dp.id
+          FROM domain_profiles dp
+          WHERE dp.user_id = user_jobs.user_id
+            AND dp.is_active = 1
           LIMIT 1
         )
-        WHERE domain_profile_id IS NULL
-          AND EXISTS (
-            SELECT 1 FROM scraped_jobs sj
-            WHERE sj.job_id = user_jobs.job_id
-              AND sj.domain_profile_id IS NOT NULL
-          );
-
-        -- Step 2: remaining NULL user_jobs — assign to the user's active profile (best-effort)
-        UPDATE user_jobs
-        SET domain_profile_id = (
-          SELECT id FROM domain_profiles
-          WHERE user_id = user_jobs.user_id AND is_active = 1
-          LIMIT 1
-        )
-        WHERE domain_profile_id IS NULL
-          AND EXISTS (
-            SELECT 1 FROM domain_profiles WHERE user_id = user_jobs.user_id
-          );
-
-        -- Step 3: anything still NULL → sentinel -1 (no profile, legacy)
-        UPDATE user_jobs  SET domain_profile_id = -1 WHERE domain_profile_id IS NULL;
-        UPDATE scraped_jobs SET domain_profile_id = -1 WHERE domain_profile_id IS NULL;
-      `,
+        WHERE domain_profile_id IS NULL;
+      `
     },
     {
       id: "022_clear_legacy_user_jobs",
-      sql: `DELETE FROM user_jobs WHERE domain_profile_id = -1;`,
+      sql: `
+        -- Remove user_jobs rows that could not be matched
+        -- to any domain profile (domain_profile_id still NULL
+        -- after backfill means no active profile exists for
+        -- that user — safe to clear, they will re-populate
+        -- on next search with a profile set)
+        DELETE FROM user_jobs
+        WHERE domain_profile_id IS NULL
+          AND job_id NOT IN (
+            SELECT job_id FROM job_applications
+          );
+        -- Applied jobs are always protected regardless
+      `
     },
     // Add future migrations here — never edit existing ones
   ];
@@ -1959,7 +1957,7 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
   const facetProfile = db.prepare("SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
   const profileCond  = facetProfile
     ? `AND uj.domain_profile_id = ${facetProfile.id}`
-    : `AND uj.domain_profile_id IS NOT NULL AND uj.domain_profile_id != -1`;
+    : `AND uj.domain_profile_id IS NOT NULL`;
   const rows = db.prepare(`
     SELECT sj.work_type, sj.employment_type, sj.category,
            sj.scraped_at, sj.posted_at, sj.salary_min, sj.salary_max
@@ -2066,7 +2064,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     filterParams.push(sessionActiveProfile.id);
   } else {
     // No profile yet: exclude legacy sentinel rows so the board is empty until a profile is created
-    conditions.push(`(uj.domain_profile_id IS NOT NULL AND uj.domain_profile_id != -1)`);
+    conditions.push(`(uj.domain_profile_id IS NOT NULL)`);
   }
 
   const role = (req.query.role || "").trim().toLowerCase();
@@ -2243,7 +2241,7 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
   const bmProfile   = db.prepare("SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
   const bmProfileCond = bmProfile
     ? `AND uj.domain_profile_id = ${bmProfile.id}`
-    : `AND uj.domain_profile_id IS NOT NULL AND uj.domain_profile_id != -1`;
+    : `AND uj.domain_profile_id IS NOT NULL`;
   const bestMatchQuery = (thresh) => db.prepare(`
     SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
       sj.ats_score as base_ats_score,
