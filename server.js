@@ -1534,6 +1534,22 @@ const app = express();
 // Active scrapes: key = "userId:query", value = { startedAt, done }
 // Polled by GET /api/jobs/poll to determine if a background scrape is still running.
 const activeScrapes = new Map();
+
+// SYNC CLIENTS: in-memory SSE registry.
+// Clients reconnect on server restart automatically.
+// To add a new sync event type: call emitToUser() from the relevant route handler
+// and handle the event type in the frontend useSyncEvents hook.
+const syncClients = new Map(); // key: userId, value: Set of res objects
+
+function emitToUser(userId, event) {
+  const clients = syncClients.get(userId);
+  if (!clients?.size) return;
+  const data = `data: ${JSON.stringify(event)}\n\n`;
+  clients.forEach(res => {
+    try { res.write(data); }
+    catch(e) { clients.delete(res); }
+  });
+}
 // trust proxy: required for Railway/Render — without this, secure: true cookies
 // fail behind their HTTPS reverse proxy and all sessions silently break.
 app.set("trust proxy", 1);
@@ -1630,7 +1646,7 @@ app.get("/api/auth/me", (req, res) =>
 // /api/domain-profiles        — CRUD + activate
 // /api/domain-profiles/metadata[/:domain]  — registry (no auth)
 // /api/domain-profiles/generate-chips      — AI chip generation
-app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic));
+app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic, emitToUser));
 // Metadata is also public — mount without requireAuth at a sub-path so
 // the chip registry is accessible from the wizard before login
 app.get("/api/domain-metadata",       (_req, res) => res.redirect(307, "/api/domain-profiles/metadata"));
@@ -1640,6 +1656,28 @@ app.get("/api/domain-metadata/:key",  (req, res) => res.redirect(307, `/api/doma
 app.patch("/api/auth/complete-profile", requireAuth, (req, res) => {
   db.prepare("UPDATE users SET domain_profile_complete=1 WHERE id=?").run(req.user.id);
   res.json({ ok: true });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// MULTI-SESSION SYNC — Server-Sent Events
+// ═══════════════════════════════════════════════════════════════
+app.get("/api/sync/events", requireAuth, (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  const userId = req.user.id;
+  if (!syncClients.has(userId)) syncClients.set(userId, new Set());
+  syncClients.get(userId).add(res);
+  res.write('data: {"type":"connected"}\n\n');
+  const heartbeat = setInterval(() => {
+    try { res.write('data: {"type":"heartbeat"}\n\n'); }
+    catch { clearInterval(heartbeat); }
+  }, 30000);
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    syncClients.get(userId)?.delete(res);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -2359,6 +2397,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
         irrelevantCount: scrapeResult.irrelevantCount,
         durationMs: Date.now() - scrapeStart,
       });
+      emitToUser(scrapeUserId, { type: "scrape_complete", query, insertedCount: scrapeResult.insertedCount });
       console.log(`[scrape] Background scrape complete for "${query}"`);
     } catch(e) {
       trackScrape(db, {
@@ -2398,6 +2437,7 @@ app.patch("/api/jobs/:id/starred", requireAuth, (req, res) => {
     VALUES (?, ?, ?, 0, unixepoch())
     ON CONFLICT(user_id, job_id) DO UPDATE SET starred = ?, disliked = 0, updated_at = unixepoch()
   `).run(req.user.id, jobId, newStarred, newStarred);
+  emitToUser(req.user.id, { type: "job_flag", jobId, starred: !!newStarred });
   res.json({ ok:true, starred: !!newStarred });
 });
 
@@ -2412,6 +2452,7 @@ app.patch("/api/jobs/:id/disliked", requireAuth, (req, res) => {
     VALUES (?, ?, ?, 0, unixepoch())
     ON CONFLICT(user_id, job_id) DO UPDATE SET disliked = ?, starred = 0, updated_at = unixepoch()
   `).run(req.user.id, jobId, newDisliked, newDisliked);
+  emitToUser(req.user.id, { type: "job_flag", jobId, disliked: !!newDisliked });
   res.json({ ok:true, disliked: !!newDisliked });
 });
 
@@ -2991,6 +3032,7 @@ ${resumeStripped}`;
         resume_generated = 1, updated_at = unixepoch()
     `).run(req.user.id, String(jobId));
 
+    emitToUser(req.user.id, { type: "resume_generated", jobId: String(jobId), atsScore });
     res.json({ html: formattedHtml, atsScore, atsReport, cached:false, version });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });

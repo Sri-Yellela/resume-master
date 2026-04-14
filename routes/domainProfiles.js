@@ -47,7 +47,7 @@ function getRegistry() {
   return _registry;
 }
 
-export function createDomainProfilesRouter(db, anthropic) {
+export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {}) {
   const router = Router();
 
   // ── GET /api/domain-profiles ──────────────────────────────────
@@ -173,6 +173,7 @@ export function createDomainProfilesRouter(db, anthropic) {
     db.prepare("UPDATE domain_profiles SET is_active=1, updated_at=unixepoch() WHERE id=?").run(req.params.id);
 
     const updated = db.prepare("SELECT * FROM domain_profiles WHERE id=?").get(req.params.id);
+    emitToUser(req.user.id, { type: "profile_switched", profileId: req.params.id });
     res.json({
       ...updated,
       target_titles:     JSON.parse(updated.target_titles     || "[]"),

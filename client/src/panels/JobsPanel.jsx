@@ -10,6 +10,7 @@ import JobDetailPanel from "../components/JobDetailPanel.jsx";
 import SandboxPanel from "./SandboxPanel.jsx";
 import { ATSPanel } from "./ATSPanel.jsx";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
+import { useSyncEvents } from "../hooks/useSyncEvents.js";
 
 const USER_TEXT   = "#0f0f0f";   // black text on accent
 
@@ -1043,6 +1044,27 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     }, 300);
     return () => clearTimeout(timer);
   }, [localSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Multi-session sync — reflect changes from other tabs/devices without full reload
+  useSyncEvents({
+    job_flag: ({ jobId, starred, disliked }) => {
+      setJobs(prev => prev.map(j =>
+        j.jobId === jobId
+          ? { ...j, ...(starred  != null ? { starred:  !!starred,  disliked: false } : {}),
+                     ...(disliked != null ? { disliked: !!disliked, starred:  false } : {}) }
+          : j
+      ));
+    },
+    resume_generated: () => {
+      fetchJobs(currentPage);
+    },
+    profile_switched: () => {
+      setProfileSwitchKey(k => k + 1);
+    },
+    scrape_complete: () => {
+      fetchJobs(1);
+    },
+  });
 
   // Shared poll loop — used by handleSearch, handlePullRefresh, handleSetRole
   const startPollLoop = useCallback((roleQ, pollSince) => {
