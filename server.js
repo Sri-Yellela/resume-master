@@ -860,6 +860,13 @@ async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
   const dataset = await client.dataset(run.defaultDatasetId).listItems({ limit: MAX_JOBS_PER_REFRESH * 3 });
   const items = Array.isArray(dataset.items) ? dataset.items : [];
   console.log(`[scrape] HarvestAPI returned ${items.length} raw items`);
+  items.forEach((item, i) => {
+    const title   = item.title   ?? item.jobTitle   ?? "unknown";
+    const company = item.company?.name ?? item.companyName ?? "unknown";
+    const empType = item.contractType  ?? item.employmentType ?? item.jobType ?? "unknown";
+    const wpType  = item.workplaceType ?? item.workplaceTypes?.[0] ?? "unknown";
+    console.log(`[scrape] #${i+1} "${title}" @ ${company} | ${empType} | ${wpType}`);
+  });
   return items;
 }
 
@@ -988,7 +995,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}) {
     }
   });
 
-  console.log(`[scrape] ✓ ${inserted} new jobs inserted (${classified.length} classified)`);
+  console.log(`[scrape] ✓ "${query}" — ${inserted} inserted, ${classified.length} classified, ${filtered.length} passed filter of ${combined.length} total`);
   return {
     classified,
     rawCount: rawItems.length,
