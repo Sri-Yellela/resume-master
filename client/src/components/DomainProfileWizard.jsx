@@ -19,6 +19,7 @@ function Chip({ label, selected, onToggle }) {
   const { theme } = useTheme();
   return (
     <button
+      type="button"
       onClick={() => onToggle(label)}
       style={{
         padding: "4px 12px", borderRadius: 999, border: "none",
@@ -54,7 +55,7 @@ function ChipAddInput({ placeholder, onAdd }) {
           color: theme.text, fontSize: 12, outline: "none",
         }}
       />
-      <button onClick={submit} style={{
+      <button type="button" onClick={submit} style={{
         padding: "4px 12px", borderRadius: 6, border: "none",
         background: theme.accent, color: "#0f0f0f",
         fontSize: 12, fontWeight: 700, cursor: "pointer",
@@ -100,13 +101,20 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
   const [aiChips,    setAiChips]    = useState(null);
   const [loadingAi,  setLoadingAi]  = useState(false);
   const [profileName, setProfileName] = useState("");
-  const [saving,     setSaving]     = useState(false);
-  const [error,      setError]      = useState("");
+  const [saving,        setSaving]        = useState(false);
+  const [error,         setError]         = useState("");
+  const [loadingDomains, setLoadingDomains] = useState(true);
+  const [domainsError,   setDomainsError]   = useState(false);
 
   // Load domain list on mount
-  useEffect(() => {
-    api("/api/domain-profiles/metadata").then(setDomains).catch(() => {});
-  }, []);
+  const loadDomains = () => {
+    setLoadingDomains(true);
+    setDomainsError(false);
+    api("/api/domain-profiles/metadata")
+      .then(list => { setDomains(Array.isArray(list) ? list : []); setLoadingDomains(false); })
+      .catch(() => { setLoadingDomains(false); setDomainsError(true); });
+  };
+  useEffect(() => { loadDomains(); }, []);
 
   // When domain is selected, fetch its metadata and pre-select all chips
   useEffect(() => {
@@ -226,15 +234,15 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
             )}
           </div>
           {onDismiss && (
-            <button onClick={onDismiss} style={{
+            <button type="button" onClick={onDismiss} style={{
               background: "none", border: "none", cursor: "pointer",
               color: theme.textMuted, fontSize: 18, padding: "0 4px", lineHeight: 1,
             }}>✕</button>
           )}
         </div>
 
-        {/* Body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+        {/* Body — minHeight:0 is critical: lets flex child shrink so the footer stays visible */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "24px", minHeight: 0 }}>
           <StepIndicator current={step} total={STEPS.length} />
 
           {/* ── STEP 1: Domain ── */}
@@ -246,23 +254,45 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
               <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 20 }}>
                 Select the domain that best fits your career focus. You can add up to 4 profiles total.
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
-                {domains.map(d => (
-                  <button key={d.key} onClick={() => setDomainKey(d.key)} style={{
-                    padding: "14px 16px", borderRadius: 8, cursor: "pointer",
-                    border: `2px solid ${domainKey === d.key ? theme.accent : theme.border}`,
-                    background: domainKey === d.key ? theme.accent + "18" : theme.bg,
-                    textAlign: "left", transition: "all 0.15s",
-                  }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: theme.text, marginBottom: 4 }}>
-                      {d.label}
+              {loadingDomains ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "24px 0", color: theme.textMuted, fontSize: 13 }}>
+                  <div style={{ width: 18, height: 18, border: `2px solid ${theme.border}`, borderTop: `2px solid ${theme.accent}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }}/>
+                  Loading domains…
+                </div>
+              ) : domainsError ? (
+                <div style={{ padding: "20px 0" }}>
+                  <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 12 }}>Could not load domain options.</div>
+                  <button type="button" onClick={loadDomains} style={{
+                    padding: "6px 16px", borderRadius: 6, border: `1px solid ${theme.border}`,
+                    background: theme.bg, color: theme.text, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  }}>Retry</button>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+                    {domains.map(d => (
+                      <button type="button" key={d.key} onClick={() => setDomainKey(d.key)} style={{
+                        padding: "14px 16px", borderRadius: 8, cursor: "pointer",
+                        border: `2px solid ${domainKey === d.key ? theme.accent : theme.border}`,
+                        background: domainKey === d.key ? theme.accent + "18" : theme.bg,
+                        textAlign: "left", transition: "all 0.15s",
+                      }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: theme.text, marginBottom: 4 }}>
+                          {d.label}
+                        </div>
+                        <div style={{ fontSize: 11, color: theme.textMuted, lineHeight: 1.4 }}>
+                          {(d.exampleTitles || []).join(" · ")}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  {!domainKey && domains.length > 0 && (
+                    <div style={{ marginTop: 12, fontSize: 11, color: theme.textMuted, fontStyle: "italic" }}>
+                      Select a domain above to continue.
                     </div>
-                    <div style={{ fontSize: 11, color: theme.textMuted, lineHeight: 1.4 }}>
-                      {d.exampleTitles.join(" · ")}
-                    </div>
-                  </button>
-                ))}
-              </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -277,7 +307,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {SENIORITY_OPTIONS.map(opt => (
-                  <button key={opt.id} onClick={() => setSeniority(opt.id)} style={{
+                  <button type="button" key={opt.id} onClick={() => setSeniority(opt.id)} style={{
                     padding: "16px 20px", borderRadius: 8, cursor: "pointer",
                     border: `2px solid ${seniority === opt.id ? theme.accent : theme.border}`,
                     background: seniority === opt.id ? theme.accent + "18" : theme.bg,
@@ -360,6 +390,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
               ))}
 
               <button
+                type="button"
                 onClick={loadAiChips}
                 disabled={loadingAi}
                 style={{
@@ -430,6 +461,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
           display: "flex", justifyContent: "space-between", flexShrink: 0,
         }}>
           <button
+            type="button"
             onClick={() => setStep(s => Math.max(1, s - 1))}
             disabled={step === 1}
             style={{
@@ -443,6 +475,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
           </button>
           {step < STEPS.length ? (
             <button
+              type="button"
               onClick={() => setStep(s => s + 1)}
               disabled={!canNext()}
               style={{
@@ -457,6 +490,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
             </button>
           ) : (
             <button
+              type="button"
               onClick={save}
               disabled={saving || !profileName.trim()}
               style={{
