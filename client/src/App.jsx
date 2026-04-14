@@ -35,7 +35,7 @@ function AppDashboard({ authUser, setAuthUser }) {
   const [resumeWidget,       setResumeWidget]       = useState(null);
   // Domain profile onboarding: show blocking wizard if not complete
   const [showProfileWizard,  setShowProfileWizard]  = useState(
-    !authUser?.domain_profile_complete
+    !authUser?.domainProfileComplete
   );
 
   const handleLogout = useCallback(async () => {
@@ -73,7 +73,7 @@ function AppDashboard({ authUser, setAuthUser }) {
           bannerText="Before you continue, help us personalise your job search. This takes 2 minutes and unlocks targeted results for your domain."
           onComplete={async (profile) => {
             try { await api("/api/auth/complete-profile", { method: "PATCH" }); } catch {}
-            setAuthUser(u => ({ ...u, domain_profile_complete: 1 }));
+            setAuthUser(u => ({ ...u, domainProfileComplete: true }));
             setShowProfileWizard(false);
           }}
         />

@@ -1393,12 +1393,12 @@ passport.use(new LocalStrategy((username, password, done) => {
   const user = db.prepare("SELECT * FROM users WHERE username=?").get(username);
   if (!user || !bcrypt.compareSync(password, user.password_hash))
     return done(null, false, { message:"Invalid credentials." });
-  return done(null, { id:user.id, username:user.username, isAdmin:!!user.is_admin, applyMode:user.apply_mode });
+  return done(null, { id:user.id, username:user.username, isAdmin:!!user.is_admin, applyMode:user.apply_mode, domainProfileComplete:!!user.domain_profile_complete });
 }));
 passport.serializeUser((user, done) => done(null, user.id));
 passport.deserializeUser((id, done) => {
-  const user = db.prepare("SELECT id,username,is_admin,apply_mode FROM users WHERE id=?").get(id);
-  user ? done(null, { id:user.id, username:user.username, isAdmin:!!user.is_admin, applyMode:user.apply_mode })
+  const user = db.prepare("SELECT id,username,is_admin,apply_mode,domain_profile_complete FROM users WHERE id=?").get(id);
+  user ? done(null, { id:user.id, username:user.username, isAdmin:!!user.is_admin, applyMode:user.apply_mode, domainProfileComplete:!!user.domain_profile_complete })
        : done(new Error("User not found"));
 });
 
@@ -1449,7 +1449,7 @@ app.post("/api/auth/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     if (err)   return next(err);
     if (!user) return res.status(401).json({ error:info?.message||"Invalid credentials." });
-    req.logIn(user, e => e ? next(e) : res.json({ ok:true, user:{ id:user.id, username:user.username, isAdmin:user.isAdmin, applyMode:user.applyMode } }));
+    req.logIn(user, e => e ? next(e) : res.json({ ok:true, user:{ id:user.id, username:user.username, isAdmin:user.isAdmin, applyMode:user.applyMode, domainProfileComplete:user.domainProfileComplete } }));
   })(req, res, next);
 });
 
@@ -1496,7 +1496,11 @@ app.post("/api/auth/register", (req, res) => {
         profile.clearance_level||null, profile.visa_type||null, profile.work_auth||null
       );
     db.prepare("UPDATE users SET apify_token=? WHERE id=?").run(apifyToken||null, newUser.id);
-    res.json({ ok:true });
+    const sessionUser = { id:newUser.id, username, isAdmin:false, applyMode:"TAILORED", domainProfileComplete:false };
+    req.logIn(sessionUser, e => {
+      if (e) return res.status(500).json({ error:"Account created but login failed. Please sign in." });
+      res.json({ ok:true, user:sessionUser });
+    });
   } catch(e) {
     res.status(400).json({ error:e.message.includes("UNIQUE")?"Username already taken.":e.message });
   }
@@ -1506,7 +1510,7 @@ app.post("/api/auth/logout", (req, res) => req.logout(() => res.json({ ok:true }
 
 app.get("/api/auth/me", (req, res) =>
   req.isAuthenticated()
-    ? res.json({ authenticated:true, user:{ id:req.user.id, username:req.user.username, isAdmin:req.user.isAdmin, applyMode:req.user.applyMode } })
+    ? res.json({ authenticated:true, user:{ id:req.user.id, username:req.user.username, isAdmin:req.user.isAdmin, applyMode:req.user.applyMode, domainProfileComplete:req.user.domainProfileComplete } })
     : res.json({ authenticated:false })
 );
 
