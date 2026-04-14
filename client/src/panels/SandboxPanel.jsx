@@ -1,50 +1,64 @@
 // client/src/panels/SandboxPanel.jsx — Design System v4
 //
 // RESUME SCALING:
-// Renders the resume at A4 natural width (RESUME_PAGE_WIDTH_PX).
-// When the panel is narrower than A4, CSS transform: scale() shrinks the
-// content to fit. When wider, scale stays at 1 (no upscaling).
-// transformOrigin: top left — content anchors to the top-left of its wrapper.
-// The centered wrapper sets its width/height to the scaled dimensions so the
-// outer scroll container sees the correct content size.
-// Single scrollbar: outer container (overflow:auto) is the ONE scroll surface.
-// Iframe height is set imperatively after load to prevent iframe-internal scroll.
-// To change the page width constant edit RESUME_PAGE_WIDTH_PX below.
+// Renders the resume at fixed A4 dimensions (794×1123px at 96dpi).
+// Scale is stored in a ref — NOT state — so ResizeObserver can update the
+// transform directly on the DOM node (innerRef) without triggering a React
+// re-render. This eliminates the flicker that occurs when setScale() causes
+// a re-render mid-drag.
+// Initial scale is calculated synchronously on mount (before first paint) to
+// prevent the scale-1 → scale-N snap on first load.
+// willChange: transform promotes the inner div to a GPU layer.
+// Container: overflowX hidden, overflowY auto — one clean vertical scrollbar.
+// iframe: scrolling="no", overflow hidden — no internal scroll.
+// To change page dimensions edit RESUME_PAGE_WIDTH / RESUME_PAGE_HEIGHT below.
 
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "../styles/theme.jsx";
 
-const RESUME_PAGE_WIDTH_PX = 794; // A4 at 96dpi
+const RESUME_PAGE_WIDTH  = 794;  // A4 at 96dpi
+const RESUME_PAGE_HEIGHT = 1123; // A4 at 96dpi
 
 export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const { theme, mode } = useTheme();
-  const [exporting,      setExporting]      = useState(false);
-  const [exportError,    setExportError]    = useState("");
-  const [dirty,          setDirty]          = useState(false);
-  const [saveMsg,        setSaveMsg]        = useState("");
-  const [naturalHeight,  setNaturalHeight]  = useState(1100);
-  const [containerWidth, setContainerWidth] = useState(0);
+  const [exporting,   setExporting]   = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [dirty,       setDirty]       = useState(false);
+  const [saveMsg,     setSaveMsg]     = useState("");
 
   const frameRef     = useRef(null);
-  const containerRef = useRef(null);
+  const containerRef = useRef(null);  // outer scroll container, observed by ResizeObserver
+  const innerRef     = useRef(null);  // scale host — transform applied directly to DOM
+  const scaleRef     = useRef(1);     // current scale value — never stored in state
 
   useEffect(() => { setDirty(false); setExportError(""); }, [entry?.html]);
 
-  // Observe container width — fires in real time as the resize handle is dragged
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => setContainerWidth(e.contentRect.width));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // Apply scale directly to the DOM node — no state update, no re-render, no flicker.
+  const applyScale = (s) => {
+    scaleRef.current = s;
+    if (innerRef.current) {
+      innerRef.current.style.transform = `scale(${s})`;
+      innerRef.current.style.height    = `${RESUME_PAGE_HEIGHT * s}px`;
+    }
+  };
 
-  // Scale: fit A4 to available width; never scale up past 1
-  // availableWidth = containerWidth minus 4px padding on each side
-  const availableWidth = Math.max(0, containerWidth - 8);
-  const scale = availableWidth === 0 || availableWidth >= RESUME_PAGE_WIDTH_PX
-    ? 1
-    : availableWidth / RESUME_PAGE_WIDTH_PX;
+  // Compute initial scale synchronously, then observe for changes.
+  // Dependency [entry?.html] ensures scale recalculates when new resume arrives.
+  useEffect(() => {
+    // Compute initial scale immediately — avoids scale-1 flash before RO fires
+    if (containerRef.current) {
+      const w = containerRef.current.clientWidth - 8;
+      if (w > 0) applyScale(Math.min(w / RESUME_PAGE_WIDTH, 1));
+    }
+
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0].contentRect.width - 8;
+      const s = Math.min(Math.max(w, 0) / RESUME_PAGE_WIDTH, 1);
+      if (Math.abs(s - scaleRef.current) > 0.001) applyScale(s);
+    });
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, [entry?.html]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getCurrentHtml = () => {
     if (!frameRef.current) return entry?.html || "";
@@ -92,15 +106,6 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     doc.body.contentEditable = "true";
     doc.body.spellcheck = false;
     doc.addEventListener("input", () => setDirty(true));
-    // Measure actual content height — same-origin srcDoc allows this
-    const h = Math.max(
-      doc.documentElement.scrollHeight,
-      doc.body?.scrollHeight || 0,
-      1100
-    );
-    setNaturalHeight(h);
-    // Set iframe height explicitly to prevent iframe-internal scrollbar
-    frame.style.height = h + "px";
   };
 
   const btnStyle = () => ({
@@ -194,49 +199,49 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
               <div style={{ fontWeight:700, fontSize:14 }}>Generate a resume to populate the sandbox.</div>
             </div>
           ) : (
-            // SINGLE scroll surface — outer div only; iframe height is set
-            // explicitly in handleFrameLoad to prevent a second scrollbar.
-            // Scale wrapper width = RESUME_PAGE_WIDTH_PX * scale (scaled visual size).
-            // margin:auto centers it when the panel is wider than A4 natural size.
+            // containerRef — observed by ResizeObserver, single vertical scroll surface.
+            // innerRef     — scale host, transform applied directly to DOM (no re-render).
             <div
               ref={containerRef}
               style={{
-                flex:1, overflowY:"auto", overflowX:"hidden",
+                flex:1,
+                overflowX: "hidden",  // never horizontal scroll
+                overflowY: "auto",    // one clean vertical scrollbar
                 background: mode==="dark" ? theme.bg : theme.surfaceHigh,
-                padding:4,
+                padding: "4px",
+                boxSizing: "border-box",
               }}
             >
-              {/* Centered wrapper — width/height match the scaled visual dimensions */}
-              <div style={{
-                width:      RESUME_PAGE_WIDTH_PX * scale,
-                background: theme.surface,
-                borderRadius: 4,
-                boxShadow:  theme.shadowXl,
-                margin:     "0 auto",
-                overflow:   "hidden",
-              }}>
-                {/* Scale host — natural A4 width, scaled via CSS transform */}
-                <div style={{
-                  width:           RESUME_PAGE_WIDTH_PX,
-                  transform:       `scale(${scale})`,
+              {/* Scale host — natural A4 dimensions; transform mutated directly via innerRef */}
+              <div
+                ref={innerRef}
+                style={{
+                  width:           RESUME_PAGE_WIDTH + "px",
+                  height:          RESUME_PAGE_HEIGHT + "px",
                   transformOrigin: "top left",
-                  // Collapse empty vertical DOM space caused by scale < 1
-                  marginBottom:    scale < 1 ? -(naturalHeight * (1 - scale)) : 0,
-                }}>
-                  <iframe
-                    ref={frameRef}
-                    srcDoc={entry.html}
-                    onLoad={handleFrameLoad}
-                    style={{
-                      width:"100%",
-                      height: naturalHeight,
-                      border:"none",
-                      display:"block",
-                    }}
-                    title="preview"
-                    sandbox="allow-same-origin allow-scripts"
-                  />
-                </div>
+                  transform:       `scale(${scaleRef.current})`,
+                  overflow:        "hidden",
+                  willChange:      "transform",  // GPU layer — prevents paint flicker
+                  background:      theme.surface,
+                  borderRadius:    4,
+                  boxShadow:       theme.shadowXl,
+                }}
+              >
+                <iframe
+                  ref={frameRef}
+                  srcDoc={entry.html}
+                  onLoad={handleFrameLoad}
+                  style={{
+                    width:    RESUME_PAGE_WIDTH  + "px",
+                    height:   RESUME_PAGE_HEIGHT + "px",
+                    border:   "none",
+                    display:  "block",
+                    overflow: "hidden",
+                  }}
+                  scrolling="no"
+                  title="resume-preview"
+                  sandbox="allow-same-origin allow-scripts"
+                />
               </div>
             </div>
           )}

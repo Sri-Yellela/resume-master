@@ -702,20 +702,49 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   jobCountRef.current = jobs.length;
   const applyMode = user?.applyMode || "TAILORED";
 
+  // Apply initial A+B defaults (30/70) once on mount.
+  // The visibility-change effect below doesn't fire on first render because
+  // C and D start false — this effect covers that gap.
+  useEffect(() => {
+    if (isMobile) return;
+    let r1, r2, r3;
+    r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => {
+        r3 = requestAnimationFrame(() => {
+          try {
+            if (jobsPanelRef.current)   jobsPanelRef.current.resize(30);
+            if (detailPanelRef.current) detailPanelRef.current.resize(70);
+          } catch(e) { console.warn("[panels] initial resize not ready:", e.message); }
+        });
+      });
+    });
+    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
+  }, [isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Reset panel sizes to defaults when panel visibility changes.
-  // Programmatic resize fires after the new panel mounts (requestAnimationFrame).
+  // Triple RAF ensures react-resizable-panels has fully committed the new
+  // layout before imperative resize() calls fire. resize() can throw if the
+  // panel is not yet initialised — catch silently, next interaction corrects.
   useEffect(() => {
     if (isMobile) return;
     const showDetail  = !!selectedJob;
     const showSandbox = sandboxOpen;
     const showAts     = rightPanelOpen;
     const d = getPanelDefaults(showDetail, showSandbox, showAts);
-    requestAnimationFrame(() => {
-      jobsPanelRef.current?.resize(d.jobs);
-      if (showDetail)  detailPanelRef.current?.resize(d.detail);
-      if (showSandbox) sandboxPanelRef.current?.resize(d.sandbox);
-      if (showAts)     atsPanelRef.current?.resize(d.ats);
+    let r1, r2, r3;
+    r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => {
+        r3 = requestAnimationFrame(() => {
+          try {
+            if (jobsPanelRef.current)                           jobsPanelRef.current.resize(d.jobs);
+            if (showDetail  && detailPanelRef.current)          detailPanelRef.current.resize(d.detail);
+            if (showSandbox && sandboxPanelRef.current)         sandboxPanelRef.current.resize(d.sandbox);
+            if (showAts     && atsPanelRef.current)             atsPanelRef.current.resize(d.ats);
+          } catch(e) { console.warn("[panels] resize not ready:", e.message); }
+        });
+      });
     });
+    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
   }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Observe jobs panel container width for responsive card tiers
