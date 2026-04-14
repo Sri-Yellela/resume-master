@@ -7,6 +7,7 @@ import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
 import { useScrollCollapsed } from "../hooks/useScrollCollapsed.js";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
+import { useAppScroll } from "../contexts/AppScrollContext.jsx";
 import { api } from "../lib/api.js";
 
 // ── Logo (nested-box Lucy brand mark) ────────────────────────
@@ -755,54 +756,145 @@ function useProximityReveal(dockEnabled) {
   return nearTop;
 }
 
-// ══════════════════════════════════════════════════════════════
-// Main ScrollDock component
-// ══════════════════════════════════════════════════════════════
-export default function ScrollDock({
-  variant = "marketing",
-  // app variant props:
-  user,
-  onLogout,
-  onTabChange,
-  activeTab,
-  onUserChange,
-  onProfileActivate,
-}) {
+// ── Animated logo: "R" always visible, "esume Master" collapses ──
+function AnimatedLucyLogo({ theme, progress: p }) {
+  // Clamp to avoid flash during mount
+  const pc = Math.min(Math.max(p, 0), 1);
+  const textMaxW = Math.round((1 - pc) * 130);
+  const textOpacity = Math.max(0, 1 - pc * 1.8);
+  return (
+    <div style={{
+      position: "relative", display: "inline-flex", alignItems: "center",
+      justifyContent: "center", flexShrink: 0, height: 36,
+      // width shrinks as text collapses; min 50px for "R"
+      minWidth: 50,
+    }}>
+      <div style={{ position: "absolute", inset: 0, background: theme.accent,
+                    transform: "rotate(-3deg)", borderRadius: 2 }}/>
+      <div style={{
+        position: "relative", zIndex: 1, padding: "3px 10px",
+        background: "#ffffff", border: "2.5px solid #0f0f0f",
+        transform: "rotate(-2deg)", borderRadius: 2,
+        display: "flex", alignItems: "center", overflow: "hidden",
+      }}>
+        <span style={{
+          fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
+          fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
+          textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
+          lineHeight: 1, whiteSpace: "nowrap",
+        }}>R</span>
+        <span style={{
+          fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
+          fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
+          textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
+          lineHeight: 1, whiteSpace: "nowrap",
+          display: "inline-block",
+          maxWidth: textMaxW + "px",
+          overflow: "hidden",
+          opacity: textOpacity,
+          transition: "max-width 0.05s linear, opacity 0.05s linear",
+          verticalAlign: "bottom",
+        }}>esume Master</span>
+      </div>
+    </div>
+  );
+}
+
+// ── App dock bar: convergence animation driven by AppScrollContext ──
+function AppDockBar({ user, onLogout, onTabChange, activeTab, onUserChange, onProfileActivate }) {
   const { theme } = useTheme();
-  const { mode: vpMode } = useViewport();
-  const isMobile = vpMode === "mobile" || vpMode === "tablet";
-  const isApp = variant === "app";
+  const { progress: rawProgress, pinned } = useAppScroll();
+  // Pinned (pagination) holds the dock at fully collapsed; scroll-to-top clears it
+  const p = pinned ? 1 : rawProgress;
+  const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
 
-  // Scroll collapse — disabled for app (non-scrolling layout)
-  const scrolled = useScrollCollapsed(60, isApp);
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth);
+    window.addEventListener("resize", onResize, { passive: true });
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
-  // For marketing/tools: collapsed when scrolled
-  const collapsed = isApp ? false : scrolled;
-
-  // Mobile menu
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  // Dock preferences (for auto-hide) — only loaded in app variant
+  // Dock preferences
   const [dockEnabled, setDockEnabled] = useState(true);
   useEffect(() => {
-    if (!isApp || !user) return;
+    if (!user) return;
     api("/api/dock-preferences")
       .then(d => setDockEnabled(d.dockEnabled !== false))
       .catch(() => {});
-  }, [isApp, user]);
+  }, [user]);
 
-  // Listen for dock pref changes from useSyncEvents
-  useSyncEvents({
-    // no-op for non-notification events in this component
-  });
+  const PILL_W = 320;
+  // Interpolated values
+  const pillWidth  = Math.round(vw - p * (vw - PILL_W));
+  const pillHeight = Math.round(56 - p * 12);
+  const radius     = Math.round(p * 9999);
+  // Alpha as 2-digit hex for appending to theme.surface hex
+  const alphaHex   = Math.round((0.95 - p * 0.45) * 255).toString(16).padStart(2, "0");
+  const blur       = Math.round(12 + p * 8);
+  const topOffset  = Math.round(p * 12);
+  const borderAlphaHex = Math.round((0.1 + p * 0.15) * 255).toString(16).padStart(2, "0");
 
-  // Proximity reveal for auto-hide
-  const mouseNearTop = useProximityReveal(dockEnabled ? true : false);
+  // Outer wrapper: holds space in flex column (height always 56px)
+  // Inner pill: absolutely positioned, animates width/radius/bg
+  return (
+    <div style={{ position: "relative", height: 56, flexShrink: 0, zIndex: 200 }}>
+      <div style={{
+        position: "absolute",
+        top: topOffset,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: pillWidth,
+        height: pillHeight,
+        borderRadius: radius,
+        background: `${theme.surface}${alphaHex}`,
+        backdropFilter: `blur(${blur}px)`,
+        WebkitBackdropFilter: `blur(${blur}px)`,
+        border: `1px solid ${theme.border}${borderAlphaHex}`,
+        boxShadow: p > 0.05 ? `0 ${Math.round(p * 4)}px ${Math.round(p * 24)}px rgba(0,0,0,${(p * 0.12).toFixed(2)})` : "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: `0 ${Math.round(32 - p * 22)}px`,
+        overflow: "hidden",
+        fontFamily: "'DM Sans',system-ui,sans-serif",
+      }}>
+        {/* Logo */}
+        <Link to="/app" style={{ textDecoration: "none", flexShrink: 0 }}>
+          <AnimatedLucyLogo theme={theme} progress={p}/>
+        </Link>
 
-  // Dock visible: always visible unless dockEnabled=false AND scrolled AND not near top
-  const dockVisible = isApp
-    ? (!scrolled || dockEnabled || mouseNearTop)
-    : true;
+        {/* App dock items */}
+        {user && (
+          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <ProfileSwitcher theme={theme} onProfileActivate={onProfileActivate} onTabChange={onTabChange}/>
+            <DockDivider theme={theme}/>
+            <NotificationsBell theme={theme}/>
+            <DockDivider theme={theme}/>
+            <QuickActions theme={theme} onTabChange={onTabChange}/>
+            <DockDivider theme={theme}/>
+            {dockEnabled && <DockSettingsPanel theme={theme}/>}
+            {dockEnabled && <DockDivider theme={theme}/>}
+            <UserAvatarMenu theme={theme} user={user} onLogout={onLogout}
+              onTabChange={onTabChange} onUserChange={onUserChange}/>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Marketing / Tools dock (scroll-collapse pill)
+// ══════════════════════════════════════════════════════════════
+function MarketingToolsDock({ variant }) {
+  const { theme } = useTheme();
+  const { mode: vpMode } = useViewport();
+  const isMobile = vpMode === "mobile" || vpMode === "tablet";
+
+  const scrolled = useScrollCollapsed(60, false);
+  const collapsed = scrolled;
+
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Variant content definitions
   const MARKETING_LINKS = [
@@ -829,8 +921,6 @@ export default function ScrollDock({
   const ctaLinks  = variant === "marketing" ? MARKETING_CTAS  : variant === "tools" ? TOOLS_CTAS  : [];
 
   // ── Styles ────────────────────────────────────────────────
-  // App variant: position relative (participates in flex column layout)
-  // Marketing/tools: position fixed (overlays content)
   const baseStyle = {
     display: "flex", alignItems: "center",
     fontFamily: "'DM Sans',system-ui,sans-serif",
@@ -840,7 +930,7 @@ export default function ScrollDock({
 
   const expandedStyle = {
     ...baseStyle,
-    position: isApp ? "relative" : "fixed",
+    position: "fixed",
     top: 0, left: 0, right: 0,
     height: 56,
     padding: "0 32px",
@@ -850,7 +940,6 @@ export default function ScrollDock({
     WebkitBackdropFilter: "blur(12px)",
     borderBottom: `1px solid ${theme.accent}1a`,
     borderRadius: 0,
-    width: isApp ? "auto" : undefined,
     boxShadow: "none",
   };
 
@@ -875,54 +964,13 @@ export default function ScrollDock({
     width: "auto",
   };
 
-  const currentStyle = collapsed ? collapsedStyle : expandedStyle;
-
-  // Visibility / auto-hide
-  const visibilityStyle = {
-    opacity: dockVisible ? 1 : 0,
-    pointerEvents: dockVisible ? "auto" : "none",
-    transform: [
-      currentStyle.transform || "",
-      dockVisible ? "translateY(0)" : "translateY(-60px)",
-    ].filter(Boolean).join(" ") || undefined,
-  };
-
-  // Merge base + visibility
-  const finalStyle = {
-    ...currentStyle,
-    ...(isApp ? {} : visibilityStyle),
-    // Visibility hint line handled separately below
-  };
-
-  // Nav link style
-  const navLinkStyle = (hovered) => ({
-    fontSize: collapsed ? 12 : 13,
-    fontWeight: 600,
-    color: theme.textMuted,
-    textDecoration: "none",
-    padding: collapsed ? "0 10px" : "6px 12px",
-    borderRadius: 8,
-    transition: "color 0.15s",
-    lineHeight: collapsed ? "44px" : "auto",
-    whiteSpace: "nowrap",
-  });
+  const finalStyle = collapsed ? collapsedStyle : expandedStyle;
 
   return (
     <>
-      {/* DOCK VISIBILITY LINE — shown only when dock hidden (app, dockEnabled=false, scrolled) */}
-      {isApp && !dockEnabled && scrolled && !dockVisible && (
-        /* DOCK VISIBILITY LINE: thin accent stripe shown at viewport top when dock is hidden.
-           Signals to user that hovering reveals the dock. */
-        <div style={{
-          position: "fixed", top: 0, left: 0, right: 0, height: 2, zIndex: 999,
-          background: `linear-gradient(90deg, transparent 0%, ${theme.accent} 30%, ${theme.accent} 70%, transparent 100%)`,
-          opacity: 0.6, pointerEvents: "none",
-        }}/>
-      )}
-
       <nav style={finalStyle}>
         {/* ── LEFT: Logo ──────────────────────────────── */}
-        <Link to={isApp ? "/app" : "/"} style={{ textDecoration: "none", flexShrink: 0 }}>
+        <Link to="/" style={{ textDecoration: "none", flexShrink: 0 }}>
           <LucyLogo theme={theme} mini={collapsed || (isMobile && !collapsed)} />
         </Link>
 
@@ -940,24 +988,7 @@ export default function ScrollDock({
           </div>
         )}
 
-        {/* ── CENTER / RIGHT: App variant dock items ──── */}
-        {variant === "app" && user && (
-          <div style={{ display: "flex", alignItems: "center", gap: 2, marginLeft: "auto" }}>
-            {!collapsed && !isMobile && <DockDivider theme={theme}/>}
-            <ProfileSwitcher theme={theme} onProfileActivate={onProfileActivate} onTabChange={onTabChange}/>
-            <DockDivider theme={theme}/>
-            <NotificationsBell theme={theme}/>
-            <DockDivider theme={theme}/>
-            <QuickActions theme={theme} onTabChange={onTabChange}/>
-            <DockDivider theme={theme}/>
-            <DockSettingsPanel theme={theme}/>
-            <DockDivider theme={theme}/>
-            <UserAvatarMenu theme={theme} user={user} onLogout={onLogout}
-              onTabChange={onTabChange} onUserChange={onUserChange}/>
-          </div>
-        )}
-
-        {/* ── RIGHT: CTA buttons (marketing/tools, desktop) ─ */}
+        {/* ── RIGHT: CTA buttons (desktop) ─ */}
         {!isMobile && ctaLinks.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             {collapsed && <DockDivider theme={theme}/>}
@@ -979,7 +1010,7 @@ export default function ScrollDock({
         )}
 
         {/* ── Mobile: hamburger ─────────────────────────── */}
-        {isMobile && variant !== "app" && (
+        {isMobile && (
           <button onClick={() => setMobileMenuOpen(true)}
             style={{
               background: "none", border: "none", cursor: "pointer",
@@ -990,18 +1021,42 @@ export default function ScrollDock({
         )}
       </nav>
 
-      {/* Mobile overlay menu */}
-      {variant !== "app" && (
-        <HamburgerOverlay
-          open={mobileMenuOpen}
-          onClose={() => setMobileMenuOpen(false)}
-          theme={theme}
-          links={navLinks}
-          ctaLinks={ctaLinks}
-        />
-      )}
+      <HamburgerOverlay
+        open={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        theme={theme}
+        links={navLinks}
+        ctaLinks={ctaLinks}
+      />
     </>
   );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Main ScrollDock — routes to correct component by variant
+// ══════════════════════════════════════════════════════════════
+export default function ScrollDock({
+  variant = "marketing",
+  user,
+  onLogout,
+  onTabChange,
+  activeTab,
+  onUserChange,
+  onProfileActivate,
+}) {
+  if (variant === "app") {
+    return (
+      <AppDockBar
+        user={user}
+        onLogout={onLogout}
+        onTabChange={onTabChange}
+        activeTab={activeTab}
+        onUserChange={onUserChange}
+        onProfileActivate={onProfileActivate}
+      />
+    );
+  }
+  return <MarketingToolsDock variant={variant}/>;
 }
 
 // Helper: nav link with hover state

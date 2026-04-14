@@ -11,6 +11,7 @@ import SandboxPanel from "./SandboxPanel.jsx";
 import { ATSPanel } from "./ATSPanel.jsx";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
+import { useAppScroll } from "../contexts/AppScrollContext.jsx";
 
 const USER_TEXT   = "#0f0f0f";   // black text on accent
 
@@ -445,10 +446,19 @@ const ALIASES = {
 // ── Pull-to-refresh ───────────────────────────────────────────
 function PullToRefresh({ onRefresh, refreshing, theme, children }) {
   const scrollRef = useRef(null);
+  const { update: updateScroll, scrollToTopRef } = useAppScroll();
   const [pullY,   setPullY]   = useState(0);
   const [ready,   setReady]   = useState(false);
   const startY = useRef(null);
   const THRESHOLD = 56;
+
+  // Register scroll-to-top fn so goPage can scroll this container, not window
+  useEffect(() => {
+    scrollToTopRef.current = () => {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    };
+    return () => { scrollToTopRef.current = null; };
+  }, [scrollToTopRef]);
 
   // Touch: pull-down gesture when already at the top
   const onTouchStart = (e) => {
@@ -515,6 +525,7 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
+        onScroll={(e) => updateScroll(e.currentTarget.scrollTop / 60)}
         style={{ flex:1, overflowY:"auto", paddingTop:4, paddingBottom:8 }}>
         {children}
       </div>
@@ -572,6 +583,7 @@ function getPanelDefaults(showDetail, showSandbox, showAts) {
 export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResumeStateChange, isActive = true }) {
   const { theme, isDark } = useTheme();
   const { mode: vpMode } = useViewport();
+  const { pin: pinDock, scrollToTopRef } = useAppScroll();
   const isWide     = vpMode === "wide";
   const isMobile   = vpMode === "mobile" || vpMode === "tablet";
   const isPortrait = vpMode === "portrait" || vpMode === "laptop";
@@ -1483,7 +1495,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [markVisited]);
 
   // ── Pagination ────────────────────────────────────────────
-  const goPage = async (p) => { await fetchJobs(p); window.scrollTo(0,0); };
+  const goPage = async (p) => {
+    pinDock();                       // collapse dock immediately
+    scrollToTopRef.current?.();      // scroll job list to top (not window)
+    await fetchJobs(p);
+  };
 
   // ── Filter reset ──────────────────────────────────────────
   const resetFilters = () => {

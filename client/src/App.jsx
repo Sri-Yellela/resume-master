@@ -10,6 +10,7 @@ import AdminLayout               from "./components/AdminLayout.jsx";
 import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import ScrollDock               from "./components/ScrollDock.jsx";
+import { AppScrollProvider }     from "./contexts/AppScrollContext.jsx";
 import JobsPanel                 from "./panels/JobsPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
@@ -59,38 +60,40 @@ function AppDashboard({ authUser, setAuthUser }) {
   }, [handleLogout]);
 
   return (
-    <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
-                  background:theme.bg, height:"100vh",
-                  display:"flex", flexDirection:"column",
-                  overflow:"hidden", color:theme.text }}>
-      <ScrollDock
-        variant="app"
-        user={authUser}
-        onLogout={handleLogout}
-        onTabChange={handlePanelChange}
-        activeTab={activeTab}
-        onUserChange={setAuthUser}
-      />
-      <TopBar
-        user={authUser}
-        activeTab={activeTab}
-        onTabChange={handlePanelChange}
-        onLogout={handleLogout}
-        onUserChange={setAuthUser}
-        resumeWidget={resumeWidget}
-        hideLogo
-      />
-      <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-        <div style={{ display: activeTab === "jobs" ? "flex" : "none",
-                      flex: 1, flexDirection: "column", overflow: "hidden" }}>
-          <JobsPanel user={authUser} onUserChange={setAuthUser}
-            refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
-            isActive={activeTab === "jobs"}/>
+    <AppScrollProvider>
+      <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
+                    background:theme.bg, height:"100vh",
+                    display:"flex", flexDirection:"column",
+                    overflow:"hidden", color:theme.text }}>
+        <ScrollDock
+          variant="app"
+          user={authUser}
+          onLogout={handleLogout}
+          onTabChange={handlePanelChange}
+          activeTab={activeTab}
+          onUserChange={setAuthUser}
+        />
+        <TopBar
+          user={authUser}
+          activeTab={activeTab}
+          onTabChange={handlePanelChange}
+          onLogout={handleLogout}
+          onUserChange={setAuthUser}
+          resumeWidget={resumeWidget}
+          hideLogo
+        />
+        <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+          <div style={{ display: activeTab === "jobs" ? "flex" : "none",
+                        flex: 1, flexDirection: "column", overflow: "hidden" }}>
+            <JobsPanel user={authUser} onUserChange={setAuthUser}
+              refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
+              isActive={activeTab === "jobs"}/>
+          </div>
+          {activeTab === "database" && <DatabasePanel user={authUser}/>}
+          {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
         </div>
-        {activeTab === "database" && <DatabasePanel user={authUser}/>}
-        {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
       </div>
-    </div>
+    </AppScrollProvider>
   );
 }
 
