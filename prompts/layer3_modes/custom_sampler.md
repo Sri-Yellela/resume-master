@@ -27,15 +27,15 @@ Standard structure: Domain Leader (most recent) → FAANG (middle) → Domain Le
 
 Domain company selection guidance (map JD domain to these groups):
 - Analytics and Enterprise SaaS: Non-FAANG: Salesforce, Snowflake, Databricks, Palantir, Workday, ServiceNow, Adobe | FAANG: Google
-- Financial Services and Fintech: Non-FAANG: Capital One, JPMorgan Chase, Goldman Sachs, American Express, Stripe, PayPal, Fidelity, Visa, Mastercard | FAANG: Amazon
-- Healthcare and Health Insurance: Non-FAANG: UnitedHealth Group, CVS Health, Cigna, Humana, Optum, Elevance Health, Kaiser Permanente, Epic Systems | FAANG: Apple
+- Financial Services and Fintech: Non-FAANG: Capital One, JPMorgan Chase, Goldman Sachs, American Express, Stripe, PayPal, Visa, Mastercard | FAANG: Amazon
+- Healthcare and Health Insurance: Non-FAANG: UnitedHealth Group, CVS Health, Cigna, Humana, Optum, Elevance Health, Kaiser Permanente, Epic Systems | FAANG: Google
 - E-commerce and Retail: Non-FAANG: Walmart, Target, Shopify, Instacart, Wayfair, eBay, Chewy | FAANG: Amazon (use Meta if Amazon is target)
 - Ride-share, Delivery and Logistics: Non-FAANG: Uber, Lyft, DoorDash, FedEx, UPS, Flexport | FAANG: Google
 - Advertising and Marketing Technology: Non-FAANG: The Trade Desk, Criteo, LiveRamp, Roku, Twilio Segment, Nielsen | FAANG: Meta
 - Cloud Infrastructure and Dev Tools: Non-FAANG: Snowflake, Databricks, HashiCorp, Cloudflare, Datadog, Twilio, Okta | FAANG: Google
 - Cybersecurity: Non-FAANG: Palo Alto Networks, CrowdStrike, Zscaler, Fortinet, SentinelOne | FAANG: Google
-- Autonomous Vehicles and Robotics: Non-FAANG: Waymo, Cruise, Zoox, Mobileye, Aurora | FAANG: Apple
-- Streaming and Media: Non-FAANG: Spotify, Disney+, Hulu, Paramount, Warner Bros Discovery | FAANG: Netflix (if not target); otherwise Amazon
+- Autonomous Vehicles and Robotics: Non-FAANG: Waymo, Cruise, Zoox, Mobileye, Aurora | FAANG: Google
+- Streaming and Media: Non-FAANG: Spotify, Disney+, Hulu, Paramount, Warner Bros Discovery | FAANG: Amazon
 - Social and Consumer Apps: Non-FAANG: Snap, Pinterest, LinkedIn, Reddit, Twitter/X, Discord | FAANG: Meta
 - Gaming: Non-FAANG: Electronic Arts, Activision Blizzard, Roblox, Unity, Epic Games | FAANG: Meta
 - Real Estate and PropTech: Non-FAANG: Zillow, Redfin, CoStar, Opendoor, Compass | FAANG: Google

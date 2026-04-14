@@ -31,18 +31,6 @@
     "notStack": ["GCP", "AWS native services"],
     "scaleRank": 10
   },
-  "Apple": {
-    "domain": "consumer_hardware",
-    "stack": ["Swift", "Objective-C", "CoreML", "Metal", "on-device ML", "privacy-preserving inference", "App Store data pipelines", "Apple Music", "Maps"],
-    "notStack": ["Android", "AWS (primary)", "GCP (primary)"],
-    "scaleRank": 10
-  },
-  "Netflix": {
-    "domain": "streaming_media",
-    "stack": ["AWS", "Kafka", "Cassandra", "Spark", "Flink", "Java", "Python", "Go", "personalisation", "recommendation", "A/B experimentation", "streaming infrastructure", "chaos engineering"],
-    "notStack": ["GCP", "Azure"],
-    "scaleRank": 9
-  },
   "Uber": {
     "domain": "rideshare_logistics",
     "stack": ["Kafka", "Flink", "Presto", "Cadence", "Kubernetes", "Go", "Java", "Python", "Michaelangelo ML platform", "PostgreSQL", "Redis", "marketplace dispatch", "geospatial platform", "pricing and demand forecasting"],
@@ -229,12 +217,6 @@
     "notStack": ["AWS (primary)", "Azure"],
     "scaleRank": 8
   },
-  "Stripe": {
-    "domain": "fintech",
-    "stack": ["GCP", "Pub/Sub", "BigQuery", "GKE", "Dataflow", "Python", "Go", "TypeScript", "payments infrastructure", "financial data pipelines", "risk and fraud"],
-    "notStack": ["AWS Lambda", "DynamoDB", "Azure"],
-    "scaleRank": 8
-  },
   "Visa": {
     "domain": "financial_services",
     "stack": ["Java", "Python", "C++", "Oracle", "payments network", "fraud detection", "tokenisation", "settlement systems"],
@@ -250,12 +232,6 @@
   "American Express": {
     "domain": "financial_services",
     "stack": ["Java", "Python", "AWS", "Spark", "Hadoop", "SAS", "credit risk", "fraud detection", "rewards platform"],
-    "notStack": ["GCP (primary)"],
-    "scaleRank": 9
-  },
-  "Fidelity": {
-    "domain": "asset_management",
-    "stack": ["Java", "Python", ".NET", "AWS", "Oracle", "SQL", "Bloomberg Terminal", "trading platform", "portfolio management", "retirement systems"],
     "notStack": ["GCP (primary)"],
     "scaleRank": 9
   },

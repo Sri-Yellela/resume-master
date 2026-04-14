@@ -82,6 +82,22 @@ const COOKIE_ENCRYPTION_KEY = Buffer.from(
 //    Push client/dist to Cloudflare R2 or S3
 //    Reduces Railway egress costs at scale
 
+// ABSOLUTE EXCLUSION LIST: these companies never appear in generated output.
+// To modify this list edit ABSOLUTE COMPANY EXCLUSION in layer1_global_rules.md
+// and update this array in sync.
+const EXCLUDED_COMPANIES = [
+  'apple', 'netflix', 'fidelity',
+  'tiktok', 'bytedance',
+];
+
+// Strip excluded companies from any employer list before passing to prompt
+function sanitiseEmployers(employers) {
+  if (!employers?.length) return employers;
+  return employers.filter(e =>
+    !EXCLUDED_COMPANIES.includes((e || '').toLowerCase().trim())
+  );
+}
+
 const NON_FULLTIME_TERMS = [
   "intern","internship","co-op","coop","contract","contractor",
   "temporary","temp","part-time","part time","freelance","seasonal",
@@ -1163,8 +1179,10 @@ cron.schedule("0 7 * * *", async () => {
 function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainProfile = null) {
   const userLocation = mode === "CUSTOM_SAMPLER" ? "" : (profile?.location||"");
   let employerBlock  = "";
-  if (mode === "TAILORED" && employers?.length >= 2)
-    employerBlock = `**Employer 1 (fixed):** ${employers[0]}\n**Employer 2 (fixed):** ${employers[1]}\n`;
+  // Apply exclusion list before injecting employer names into prompt
+  const safeEmployers = sanitiseEmployers(employers);
+  if (mode === "TAILORED" && safeEmployers?.length >= 2)
+    employerBlock = `**Employer 1 (fixed):** ${safeEmployers[0]}\n**Employer 2 (fixed):** ${safeEmployers[1]}\n`;
 
   const candidateName = profile?.full_name ||
     [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "";
@@ -1814,9 +1832,9 @@ app.get("/api/jobs", requireAuth, (req, res) => {
 
   const localSearch = (req.query.localSearch || "").trim().toLowerCase();
   if (localSearch) {
-    conditions.push(`(LOWER(sj.company) LIKE ? OR LOWER(sj.location) LIKE ? OR LOWER(sj.category) LIKE ? OR LOWER(sj.search_query) LIKE ?)`);
+    conditions.push(`(LOWER(sj.company) LIKE ? OR LOWER(sj.location) LIKE ? OR LOWER(sj.category) LIKE ? OR LOWER(sj.search_query) LIKE ? OR LOWER(sj.title) LIKE ?)`);
     const pat = `%${localSearch}%`;
-    filterParams.push(pat, pat, pat, pat);
+    filterParams.push(pat, pat, pat, pat, pat);
   }
 
   const sortMap = {
@@ -2312,7 +2330,9 @@ app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) 
 // GENERATE
 // ═══════════════════════════════════════════════════════════════
 app.post("/api/generate", requireAuth, async (req, res) => {
-  const { jobId, job, resumeText, forceRegen, employers } = req.body;
+  const { jobId, job, resumeText, forceRegen } = req.body;
+  // Strip excluded companies from employer list before any processing
+  const employers = sanitiseEmployers(req.body.employers);
   if (!job||!resumeText) return res.status(400).json({ error:"job and resumeText required" });
   const mode = req.user.applyMode;
   if (mode==="SIMPLE") return res.status(400).json({ error:"Generate not available in SIMPLE mode" });

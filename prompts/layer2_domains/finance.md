@@ -24,7 +24,7 @@ Finance professionals model, analyse, forecast, and communicate financial perfor
 ### B. CANONICAL TOOL REGISTRY
 
 - **Investment banking (Goldman Sachs, JPMorgan, Morgan Stanley, Lazard):** Excel (advanced), Bloomberg, FactSet, Capital IQ, Pitchbook, PowerPoint, Dealogic, SecDB (Goldman-specific)
-- **Asset management (BlackRock, Fidelity, Vanguard, Citadel):** Bloomberg, Python, R, SQL, Aladdin (BlackRock), FactSet, Tableau, portfolio attribution models
+- **Asset management (BlackRock, Vanguard, Citadel):** Bloomberg, Python, R, SQL, Aladdin (BlackRock), FactSet, Tableau, portfolio attribution models
 - **Corporate FP&A (Fortune 500):** Anaplan, Hyperion, Oracle EPM, Adaptive Insights, SAP BW, Excel, Tableau, Power BI, SQL, Workday Financials
 - **Private equity (KKR, Apollo, Warburg Pincus):** Excel, Capital IQ, FactSet, PowerPoint, deal pipeline management, LBO modelling
 - **Commercial banking (Wells Fargo, Bank of America, Citi):** Moody's, S&P, SQL, SAS, Python, AML/BSA compliance systems, credit origination platforms

@@ -81,6 +81,15 @@ If a technology or domain in the JD sits outside the typical scope of one employ
 
 ## COMPANY AUTHENTICITY
 
+<!-- ABSOLUTE EXCLUSION LIST: these companies never appear in generated output.
+     To modify this list edit ABSOLUTE COMPANY EXCLUSION below
+     and update EXCLUDED_COMPANIES in server.js. -->
+### ABSOLUTE COMPANY EXCLUSION
+
+The following companies must NEVER appear anywhere in a generated resume — not in experience entries, not in company selections, not in any bullet. If any selection logic would place one of these in a resume slot, skip it and select the next best alternative. Do not mention this constraint in the resume output.
+
+Excluded companies: Apple, Netflix, Fidelity, TikTok, ByteDance.
+
 ### COMPANY AUTHENTICITY RULE
 
 Never place a tool, platform, product, service, workflow, methodology, software, or operational practice at a company that does not authentically use it. Before assigning any tool or practice to a company slot, verify it against the domain tool registry provided in the domain module. If a tool cannot be confirmed as authentic for that company, omit it and use an equivalent the company actually uses. This rule applies across all domains: do not list Procore at a company using PlanGrid, do not list Salesforce CRM at a company using Microsoft Dynamics, do not list AWS services at a company running on GCP, do not list a methodology a company is not known to follow. When in doubt, omit rather than invent.

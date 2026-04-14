@@ -24,7 +24,7 @@ Data professionals build pipelines, models, and platforms that enable data-drive
 ### B. CANONICAL TOOL REGISTRY
 
 - **Cloud analytics (Snowflake, Databricks, dbt Labs):** Snowflake, dbt, Databricks, Spark, Airflow, Fivetran, Great Expectations, Delta Lake, Python/SQL
-- **Big tech data (Meta, Google, Netflix):** Presto, Hive, Spark, Flink, Airflow, Kafka, Python, internal platforms (FBLearner, Vertex AI, Meson/Metaflow)
+- **Big tech data (Meta, Google):** Presto, Hive, Spark, Flink, Airflow, Kafka, Python, internal platforms (FBLearner, Vertex AI, Meson/Metaflow)
 - **E-commerce data (Amazon, Shopify, Instacart):** Redshift, dbt, Airflow, Spark, Python, Tableau, A/B testing frameworks
 - **Fintech data (Stripe, PayPal, Square):** BigQuery, dbt, Airflow, Looker, Python, SQL, fraud feature engineering, risk modelling
 - **Health data (Optum, CVS, Epic):** FHIR, SQL, Python, SAS, HIPAA-compliant pipelines, claims data modelling, HL7

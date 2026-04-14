@@ -33,8 +33,6 @@ Use this registry to verify company-authentic tool placement. Only assign a tool
 - **Google:** GCP (Vertex AI, BigQuery ML, Pub/Sub, GKE), TensorFlow/JAX, Python, Go, ML platform, large-scale model training, Search/Ads/Maps/YouTube, feature stores, recommendation systems, LLM fine-tuning
 - **Meta:** PyTorch, Presto, Hive, Spark, FBLearner ML platform, Python/C++, Kubernetes, social graph, ads ranking, real-time event processing
 - **Microsoft:** Azure-native (AKS, Event Hubs, Cosmos DB, Azure ML), C#/.NET, TypeScript, Python, enterprise SaaS, M365, GitHub platform engineering
-- **Apple:** Swift/Objective-C, CoreML, Metal, on-device ML, privacy-preserving inference, App Store/Apple Music/Maps data pipelines
-- **Netflix:** AWS-native, Kafka, Cassandra, Spark, Flink, Java/Python/Go, personalisation and recommendation, A/B experimentation, streaming infrastructure, chaos engineering
 - **Uber:** Kafka, Flink, Presto, Cadence, Kubernetes, Go/Java/Python, Michaelangelo ML platform, PostgreSQL, Redis, marketplace dispatch, geospatial platform, pricing and demand forecasting
 - **Lyft:** Kafka, Flink, AWS, Snowflake, Amundsen, Python/Java/Go, Kubernetes, ride-share marketplace, pricing and ETA prediction
 - **DoorDash:** Kafka, Flink, Snowflake, AWS, Kotlin/Python/Go, Kubernetes, last-mile delivery logistics, real-time order routing, ML for ETD and fraud
