@@ -549,6 +549,20 @@ db.pragma("busy_timeout = 5000");
           ON standalone_usage(session_id, service);
       `,
     },
+    // ── Phase 6A: Profile-isolated job pools ──────────────────
+    {
+      id: "016_scraped_jobs_profile_tag",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN
+          domain_profile_id INTEGER REFERENCES domain_profiles(id) ON DELETE SET NULL;
+        ALTER TABLE user_jobs ADD COLUMN
+          domain_profile_id INTEGER REFERENCES domain_profiles(id) ON DELETE SET NULL;
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_profile
+          ON scraped_jobs(domain_profile_id);
+        CREATE INDEX IF NOT EXISTS idx_user_jobs_profile
+          ON user_jobs(user_id, domain_profile_id);
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -1732,19 +1746,41 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const sort     = req.query.sort || "dateDesc";
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
 
-  // ── Session sync: populate user_jobs from central pool (skip already-disliked) ──
-  db.prepare(`
-    INSERT OR IGNORE INTO user_jobs (user_id, job_id)
-    SELECT ?, sj.job_id FROM scraped_jobs sj
-    WHERE LOWER(sj.search_query) IN (
-      SELECT LOWER(search_query) FROM user_job_searches WHERE user_id = ?
-    ) AND (
-      (sj.posted_at IS NOT NULL AND sj.posted_at != ''
-        AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
-      OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
-    )
-    AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
-  `).run(userId, userId, userId);
+  // ── Session sync: populate user_jobs from pool — profile-isolated to prevent cross-user bleeding ──
+  const sessionActiveProfile = db.prepare(
+    "SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1"
+  ).get(userId);
+
+  if (sessionActiveProfile) {
+    // Profile path: only jobs scraped by THIS user's profiles enter their board
+    db.prepare(`
+      INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
+      SELECT ?, sj.job_id, sj.domain_profile_id
+      FROM scraped_jobs sj
+      WHERE sj.domain_profile_id IN (
+        SELECT id FROM domain_profiles WHERE user_id = ?
+      ) AND (
+        (sj.posted_at IS NOT NULL AND sj.posted_at != ''
+          AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
+        OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
+      )
+      AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
+    `).run(userId, userId, userId);
+  } else {
+    // Fallback for users without profiles (backwards compat)
+    db.prepare(`
+      INSERT OR IGNORE INTO user_jobs (user_id, job_id)
+      SELECT ?, sj.job_id FROM scraped_jobs sj
+      WHERE LOWER(sj.search_query) IN (
+        SELECT LOWER(search_query) FROM user_job_searches WHERE user_id = ?
+      ) AND (
+        (sj.posted_at IS NOT NULL AND sj.posted_at != ''
+          AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
+        OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
+      )
+      AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
+    `).run(userId, userId, userId);
+  }
 
   // Keep applied flag in sync with job_applications
   db.prepare(`
@@ -1761,6 +1797,12 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
   ];
   const filterParams = [];
+
+  // Profile isolation: show only jobs tagged to the user's active profile, or untagged (pre-migration / no-profile fallback)
+  if (sessionActiveProfile) {
+    conditions.push(`(uj.domain_profile_id = ? OR uj.domain_profile_id IS NULL)`);
+    filterParams.push(sessionActiveProfile.id);
+  }
 
   const role = (req.query.role || "").trim().toLowerCase();
   if (role) { conditions.push(`LOWER(sj.search_query) = ?`); filterParams.push(role); }
@@ -2089,15 +2131,22 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
 
   if (hasEnough) {
     console.log(`[scrape] DB-first: ${existingCount.cnt} jobs for "${query}" — skipping scrape`);
-    // Sync pool jobs not yet in user_jobs
-    db.prepare(`
-      INSERT OR IGNORE INTO user_jobs (user_id, job_id)
-      SELECT ?, sj.job_id FROM scraped_jobs sj
-      WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
-      AND sj.job_id NOT IN (
-        SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
-      )
-    `).run(req.user.id, query.toLowerCase(), sevenDaysAgo, req.user.id);
+    // Sync pool jobs not yet in user_jobs (profile-isolated)
+    if (activeProfile) {
+      db.prepare(`
+        INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
+        SELECT ?, sj.job_id, sj.domain_profile_id FROM scraped_jobs sj
+        WHERE sj.domain_profile_id = ? AND sj.scraped_at > ?
+        AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
+      `).run(req.user.id, activeProfile.id, sevenDaysAgo, req.user.id);
+    } else {
+      db.prepare(`
+        INSERT OR IGNORE INTO user_jobs (user_id, job_id)
+        SELECT ?, sj.job_id FROM scraped_jobs sj
+        WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
+        AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
+      `).run(req.user.id, query.toLowerCase(), sevenDaysAgo, req.user.id);
+    }
     return res.json({ ok:true, count:0, scrapedAt:Date.now(), query, fromCache:true });
   }
 
@@ -2115,14 +2164,48 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     const scrapeStart = Date.now();
     try {
       const scrapeResult = await scrapeJobs(query, token, scrapeParams);
-      db.prepare(`
-        INSERT OR IGNORE INTO user_jobs (user_id, job_id)
-        SELECT ?, sj.job_id FROM scraped_jobs sj
-        WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
-        AND sj.job_id NOT IN (
-          SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
-        )
-      `).run(scrapeUserId, query.toLowerCase(), sevenDaysAgo, scrapeUserId);
+
+      // Tag newly inserted scraped_jobs rows with the active profile id
+      if (activeProfile) {
+        const nowUnixScrape = Math.floor(Date.now() / 1000);
+        const jobTitlePlaceholders = (scrapeResult.classified || []).map(() => '?').join(',');
+        if (jobTitlePlaceholders) {
+          const jobIds = (scrapeResult.classified || []).map(j => j.jobId);
+          if (jobIds.length) {
+            const idsPlaceholders = jobIds.map(() => '?').join(',');
+            db.prepare(`
+              UPDATE scraped_jobs SET domain_profile_id = ?
+              WHERE job_id IN (${idsPlaceholders})
+                AND domain_profile_id IS NULL
+                AND scraped_at >= ?
+            `).run(activeProfile.id, ...jobIds, nowUnixScrape - 120);
+          }
+        }
+      }
+
+      // Insert into user_jobs with profile isolation
+      if (activeProfile) {
+        db.prepare(`
+          INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
+          SELECT ?, sj.job_id, sj.domain_profile_id
+          FROM scraped_jobs sj
+          WHERE sj.domain_profile_id = ?
+            AND sj.scraped_at > ?
+            AND sj.job_id NOT IN (
+              SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
+            )
+        `).run(scrapeUserId, activeProfile.id, sevenDaysAgo, scrapeUserId);
+      } else {
+        // Fallback for users without profiles (backwards compat)
+        db.prepare(`
+          INSERT OR IGNORE INTO user_jobs (user_id, job_id)
+          SELECT ?, sj.job_id FROM scraped_jobs sj
+          WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
+          AND sj.job_id NOT IN (
+            SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
+          )
+        `).run(scrapeUserId, query.toLowerCase(), sevenDaysAgo, scrapeUserId);
+      }
       trackScrape(db, {
         userId: scrapeUserId, searchQuery: query,
         rawCount: scrapeResult.rawCount,

@@ -636,6 +636,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [profileMenuOpen,  setProfileMenuOpen]  = useState(false);
   const [profileWizardOpen, setProfileWizardOpen] = useState(false);
   const profileMenuRef = useRef(null);
+  // Increments when active profile changes — triggers job board refetch
+  const [profileSwitchKey, setProfileSwitchKey] = useState(0);
 
   // Load domain profiles on mount
   useEffect(() => {
@@ -657,6 +659,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     try {
       const updated = await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
       setDomainProfiles(prev => prev.map(p => ({ ...p, is_active: p.id === updated.id ? 1 : 0 })));
+      // Reset job board to page 1 with fresh fetch for the new profile's pool
+      setJobs([]);
+      setCurrentPage(1);
+      setTotalJobs(0);
+      setTotalPages(0);
+      setLocalSearch("");
+      setProfileSwitchKey(k => k + 1);
     } catch {}
     setProfileMenuOpen(false);
   };
@@ -998,7 +1007,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     if (!user) return;
     fetchJobs(1);
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
-      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey,
+      profileSwitchKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced backend search — fires 300ms after user stops typing
   useEffect(() => {
