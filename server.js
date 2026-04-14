@@ -1318,6 +1318,20 @@ passport.deserializeUser((id, done) => {
 function requireAuth(req, res, next)  { if (req.isAuthenticated()) return next(); res.status(401).json({ error:"Unauthorized." }); }
 function requireAdmin(req, res, next) { if (req.isAuthenticated()&&req.user.isAdmin) return next(); res.status(403).json({ error:"Forbidden." }); }
 
+// assertUserOwns — use this when fetching a record by ID WITHOUT user_id in the
+// WHERE clause, then verifying ownership. Returns the row on success; sends the
+// appropriate error response and returns null if the check fails.
+// NOTE: Most routes in this file use the safer pattern:
+//   WHERE user_id=? AND id=?  ← returns null for both "not found" and "not yours"
+// which leaks no information about whether the record exists. assertUserOwns is
+// most useful for admin-adjacent lookups or any future route that must fetch a
+// shared resource then check whether the caller may mutate it.
+function assertUserOwns(row, userId, res) {
+  if (!row) { res.status(404).json({ error:"Not found" }); return null; }
+  if (row.user_id !== userId) { res.status(403).json({ error:"Forbidden" }); return null; }
+  return row;
+}
+
 // ── Express ───────────────────────────────────────────────────
 const app = express();
 // Active scrapes: key = "userId:query", value = { startedAt, done }
