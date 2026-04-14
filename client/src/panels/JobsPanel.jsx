@@ -723,6 +723,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [boardTab,    setBoardTab]    = useState("all");  // "all" | "saved" | "pending"
   const [pendingJobs, setPendingJobs] = useState([]);
 
+  // Best Match view
+  const [bestMatchView,   setBestMatchView]   = useState(false);
+  const [bestMatchJobs,   setBestMatchJobs]   = useState([]);
+  const [bestMatchThresh, setBestMatchThresh] = useState(70);
+  const [bestMatchLoading,setBestMatchLoading]= useState(false);
+
   // Filter panel
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -1194,6 +1200,21 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // ── Legacy Refresh button (end-of-list) ───────────────────────
   const handleRefresh = handlePullRefresh;
 
+  // ── Best Match: show jobs where base resume already scores well ──
+  const handleBestMatch = useCallback(async () => {
+    setBestMatchLoading(true);
+    try {
+      const d = await api("/api/jobs/best-match");
+      setBestMatchJobs(d.jobs || []);
+      setBestMatchThresh(d.threshold || 70);
+      setBestMatchView(true);
+    } catch(e) {
+      console.warn("[bestMatch]", e.message);
+    } finally {
+      setBestMatchLoading(false);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Smart search ──────────────────────────────────────────
   const handleSmartSearch = useCallback(async () => {
     if (!resumeText) {
@@ -1639,9 +1660,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : undefined}>
           {buttonLabel}
         </LucyBtn>
-        <LucyBtn onClick={handleSmartSearch} disabled={smartSearching || scraping}
+        <LucyBtn onClick={handleBestMatch} disabled={bestMatchLoading || scraping}
                   accent={theme.surfaceHigh}>
-          {smartSearching ? "Analysing…" : "✦ Best Match"}
+          {bestMatchLoading ? "Finding…" : "✦ Best Match"}
         </LucyBtn>
 
         {smartSearchError && (
@@ -1662,6 +1683,101 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
           onChange={handleFile} style={{ display:"none" }}/>
       </div>
+
+      {/* ── Best Match view ─────────────────────────────────── */}
+      {bestMatchView && (
+        <div style={{
+          position:"absolute", inset:0, zIndex:400,
+          background:theme.surface, overflowY:"auto",
+          display:"flex", flexDirection:"column",
+        }}>
+          <div style={{
+            padding:"16px 20px", borderBottom:`1px solid ${theme.border}`,
+            display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:12,
+          }}>
+            <div>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                             fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                Your Best Matches
+              </div>
+              <div style={{ fontSize:12, color:theme.textMuted, marginTop:3 }}>
+                Roles where your current resume already scores {bestMatchThresh}+
+              </div>
+              <div style={{ fontSize:11, color:theme.textDim, marginTop:2 }}>
+                Apply directly or generate a tailored resume to score even higher.
+              </div>
+            </div>
+            <button onClick={() => setBestMatchView(false)}
+              style={{ background:"none", border:"none", cursor:"pointer",
+                       fontSize:18, color:theme.textMuted, flexShrink:0 }}>✕</button>
+          </div>
+
+          {bestMatchJobs.length === 0 ? (
+            <div style={{ padding:40, textAlign:"center", color:theme.textMuted, fontSize:13 }}>
+              No strong matches yet. Search for more roles or try the Resume Enhancer to improve your base resume score.
+            </div>
+          ) : (
+            <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:8 }}>
+              {bestMatchJobs.map(job => {
+                const atsScore = job.baseAtsScore;
+                const atsBg = atsScore >= 80 ? "#dcfce7" : atsScore >= 60 ? "#fef9c3" : "#fee2e2";
+                const atsFg = atsScore >= 80 ? "#166534" : atsScore >= 60 ? "#854d0e" : "#991b1b";
+                return (
+                  <div key={job.jobId} style={{
+                    border:`1px solid ${theme.border}`, borderRadius:6,
+                    padding:"14px 16px", background:theme.surfaceHigh,
+                    display:"flex", alignItems:"center", gap:12,
+                  }}>
+                    {/* ATS score badge — large */}
+                    {atsScore != null && (
+                      <div style={{
+                        background:atsBg, color:atsFg,
+                        borderRadius:8, padding:"8px 12px", textAlign:"center",
+                        flexShrink:0, minWidth:56,
+                      }}>
+                        <div style={{ fontSize:20, fontWeight:800, lineHeight:1 }}>{atsScore}</div>
+                        <div style={{ fontSize:9, fontWeight:700, letterSpacing:"0.04em", marginTop:2 }}>ATS</div>
+                      </div>
+                    )}
+                    {/* Job info */}
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:700, fontSize:13, color:theme.text,
+                                     overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {job.title}
+                      </div>
+                      <div style={{ fontSize:12, color:theme.textMuted, marginTop:2 }}>
+                        {job.company}{job.location ? ` · ${job.location}` : ""}
+                      </div>
+                    </div>
+                    {/* Actions */}
+                    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                      {job.applyUrl && (
+                        <a href={job.applyUrl} target="_blank" rel="noreferrer"
+                          style={{
+                            padding:"6px 14px", borderRadius:4, fontSize:11, fontWeight:700,
+                            background:theme.accent, color:"#fff", textDecoration:"none",
+                            border:`1.5px solid ${theme.accent}`,
+                          }}>
+                          Apply
+                        </a>
+                      )}
+                      <button
+                        onClick={() => { setBestMatchView(false); }}
+                        style={{
+                          padding:"6px 12px", borderRadius:4, fontSize:11, fontWeight:700,
+                          background:"transparent", color:theme.textMuted,
+                          border:`1.5px solid ${theme.border}`, cursor:"pointer",
+                        }}>
+                        View Job
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Body: responsive layout ─────────────────────────── */}
 

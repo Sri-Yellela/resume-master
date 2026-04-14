@@ -277,7 +277,7 @@ export default function JobCard({
                 {job.company}
               </span>
               <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt)}</span>
-              {g?.atsScore != null && <ATSBadge score={g.atsScore} onClick={onAts}/>}
+              {(g?.atsScore != null || job?.baseAtsScore != null) && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>}
               {onStar && (
                 <button title={job.starred ? "Remove from saved" : "Save job"}
                   onClick={e => { e.stopPropagation(); onStar(); }}
@@ -375,8 +375,8 @@ export default function JobCard({
           <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
             <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
 
-            {g?.atsScore != null && (
-              <ATSBadge score={g.atsScore} onClick={onAts}/>
+            {(g?.atsScore != null || job?.baseAtsScore != null) && (
+              <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>
             )}
             {done && (
               <span onClick={onResume ? e => { e.stopPropagation(); onResume(); } : undefined}

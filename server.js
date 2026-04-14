@@ -563,6 +563,14 @@ db.pragma("busy_timeout = 5000");
           ON user_jobs(user_id, domain_profile_id);
       `,
     },
+    // ── Phase 6B: ATS scoring at scrape time ──────────────────
+    {
+      id: "017_scraped_jobs_ats",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN ats_score INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN ats_report TEXT;
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -963,7 +971,7 @@ async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
   return items;
 }
 
-async function scrapeJobs(query, apifyToken, scrapeParams = {}) {
+async function scrapeJobs(query, apifyToken, scrapeParams = {}, userId = null) {
   const employmentTypes = scrapeParams.employmentTypes?.length ? scrapeParams.employmentTypes : ["full-time"];
   // TITLE RELEVANCE: if jobTitles array supplied (profile-driven), check against all targets.
   // Otherwise fall back to single-query isTitleRelevantNew.
@@ -1079,6 +1087,65 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}) {
   });
 
   const inserted = insertMany(classified);
+
+  // ── ATS scoring for newly inserted jobs (D1) ──────────────────────────────
+  // Score new jobs against the user's base resume using Haiku.
+  // Non-fatal — job is still inserted if scoring fails.
+  if (userId && ANTHROPIC_KEY) {
+    setImmediate(async () => {
+      try {
+        const baseResumeRow = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
+        const baseResumeText = baseResumeRow?.content;
+        if (!baseResumeText) return; // No base resume — skip scoring
+
+        // Find newly inserted jobs that have no ats_score yet
+        const newlyInserted = classified.filter(item => {
+          const row = db.prepare("SELECT ats_score FROM scraped_jobs WHERE job_id=?").get(item.jobId);
+          return row && row.ats_score === null;
+        });
+
+        if (!newlyInserted.length) return;
+
+        const updateAts = db.prepare(
+          "UPDATE scraped_jobs SET ats_score=?, ats_report=? WHERE job_id=?"
+        );
+
+        for (let i = 0; i < newlyInserted.length; i += 5) {
+          const batch = newlyInserted.slice(i, i + 5);
+          await Promise.all(batch.map(async item => {
+            try {
+              const start = Date.now();
+              const scoreMsg = await anthropic.messages.create({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 900,
+                system: ATS_SYSTEM_PROMPT,
+                messages: [{ role: "user", content:
+                  `JOB DESCRIPTION:\n${item.description || item.title}\n\nRESUME TEXT:\n${baseResumeText}` }],
+              });
+              const raw = scoreMsg.content.map(b => b.text || "").join("")
+                .replace(/```json|```/g, "").trim();
+              const report = JSON.parse(raw);
+              updateAts.run(report.score, JSON.stringify(report), item.jobId);
+              trackApiCall(db, {
+                userId,
+                eventType: "ats_score",
+                eventSubtype: "scrape_time",
+                model: "claude-haiku-4-5-20251001",
+                usage: scoreMsg.usage,
+                durationMs: Date.now() - start,
+                jobId: item.jobId,
+                company: item.company,
+              });
+            } catch(e) {
+              console.warn(`[scrape] ATS score failed for ${item.jobId}:`, e.message);
+            }
+          }));
+        }
+      } catch(e) {
+        console.warn("[scrape] ATS batch scoring failed:", e.message);
+      }
+    });
+  }
 
   // ── Async clearbit icon fallback (non-blocking, only for jobs without a logo) ──
   setImmediate(async () => {
@@ -1901,11 +1968,16 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const total = countRow?.cnt || 0;
 
   let rows = db.prepare(
-    `SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked
-     ${baseJoin} ${where}
+    `SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
+       sj.ats_score as base_ats_score,
+       r.ats_score as resume_ats_score,
+       r.html as resume_html, r.ats_report
+     ${baseJoin}
+     LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
+     ${where}
      ORDER BY CASE WHEN (uj.visited IS NOT NULL AND uj.visited = 1) THEN 1 ELSE 0 END ASC, ${orderBy}
      LIMIT ? OFFSET ?`
-  ).all(userId, ...filterParams, pageSize, offset);
+  ).all(userId, userId, ...filterParams, pageSize, offset);
 
   // Filter clearance-required jobs for non-cleared users
   const profile = db.prepare("SELECT has_clearance FROM user_profile WHERE user_id=?").get(userId) || {};
@@ -1953,11 +2025,71 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     starred:              !!j.starred,
     disliked:             !!j.disliked,
     companyAppliedBefore: appliedCoSet.has((j.company || "").toLowerCase()),
+    baseAtsScore:         j.base_ats_score ?? null,   // ATS of base resume vs JD (from scrape time)
+    resumeAtsScore:       j.resume_ats_score ?? null, // ATS of generated tailored resume vs JD
     recruiterData:        null,
     enrichmentAvailable:  false,
   }));
 
   res.json({ jobs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+});
+
+// GET /api/jobs/best-match — jobs where base resume already scores well
+// Returns jobs ordered by base_ats_score DESC for the user's active profile pool.
+app.get("/api/jobs/best-match", requireAuth, (req, res) => {
+  const userId = req.user.id;
+  let threshold = parseInt(req.query.threshold || "70");
+  const limit   = Math.min(50, Math.max(1, parseInt(req.query.limit || "20")));
+  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+
+  const bestMatchQuery = (thresh) => db.prepare(`
+    SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
+      sj.ats_score as base_ats_score,
+      r.ats_score as resume_ats_score
+    FROM scraped_jobs sj
+    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
+    WHERE sj.ats_score >= ?
+      AND (uj.applied IS NULL OR uj.applied = 0)
+      AND (uj.disliked IS NULL OR uj.disliked = 0)
+      AND (
+        (sj.posted_at IS NOT NULL AND sj.posted_at != ''
+          AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
+        OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
+      )
+    ORDER BY sj.ats_score DESC
+    LIMIT ?
+  `).all(userId, userId, thresh, limit);
+
+  let jobs = bestMatchQuery(threshold);
+
+  // Lower threshold to 60 if fewer than 5 results
+  if (jobs.length < 5) {
+    threshold = 60;
+    jobs = bestMatchQuery(threshold);
+  }
+
+  res.json({
+    jobs: jobs.map(j => ({
+      jobId:        j.job_id,
+      company:      j.company,
+      title:        j.title,
+      location:     j.location,
+      workType:     j.work_type,
+      url:          j.url,
+      applyUrl:     j.apply_url,
+      description:  j.description,
+      postedAt:     j.posted_at,
+      applicantCount: j.applicant_count,
+      companyIconUrl: j.company_icon_url,
+      baseAtsScore: j.base_ats_score,
+      resumeAtsScore: j.resume_ats_score,
+      visited:      !!j.visited,
+      starred:      !!j.starred,
+    })),
+    threshold,
+    total: jobs.length,
+  });
 });
 
 // GET /api/jobs/poll — returns new jobs since <since> ms timestamp + scraping status
@@ -2163,7 +2295,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   setImmediate(async () => {
     const scrapeStart = Date.now();
     try {
-      const scrapeResult = await scrapeJobs(query, token, scrapeParams);
+      const scrapeResult = await scrapeJobs(query, token, scrapeParams, scrapeUserId);
 
       // Tag newly inserted scraped_jobs rows with the active profile id
       if (activeProfile) {
