@@ -533,6 +533,19 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 // ALL panel open triggers share one visibility setter —
 // never set panel visibility outside openSandbox / openAtsPanel.
 // To change defaults edit getPanelDefaults() below.
+// ── Card tier — driven by open-panel count, not pixel width ──────
+// Tier 1 (full layout):  A alone, or A+B (detail only, 30% default)
+// Tier 3 (condensed):    A+B+C or A+B+C+D (panel A shrinks to 10%)
+// Tier 2 (medium):       only reached by manual drag — ResizeObserver
+//                        overrides Tier 1 → 2 when user drags A to 180-279px.
+//                        Tier 3 always wins over pixel measurement.
+function getCardTier(panelBVisible, panelCVisible, panelDVisible) {
+  const extraPanels = [panelBVisible, panelCVisible, panelDVisible].filter(Boolean).length;
+  if (extraPanels === 0) return 1; // A only — full width
+  if (extraPanels === 1) return 1; // A+B — still 30%, full layout
+  return 3;                        // A+B+C or A+B+C+D — 10%, condensed
+}
+
 function getPanelDefaults(showDetail, showSandbox, showAts) {
   const count = [true, showDetail, showSandbox, showAts].filter(Boolean).length;
   // Only jobs panel visible
@@ -677,9 +690,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const sandboxPanelRef = useRef(null);
   const atsPanelRef     = useRef(null);
 
-  // ResizeObserver: track jobs panel pixel width for responsive card tiers
+  // ResizeObserver: tracks manual drag width for Tier 1 → 2 override only
   const jobsPanelElementRef = useRef(null);
-  const [jobsPanelWidth, setJobsPanelWidth] = useState(400);
+  const [manualWidth, setManualWidth] = useState(null);
+
+  // effectiveTier: panel count is primary driver; ResizeObserver only overrides Tier 1 → 2
+  const effectiveTier = useMemo(() => {
+    const baseTier = getCardTier(!!selectedJob, sandboxOpen, rightPanelOpen);
+    if (baseTier === 3) return 3; // panel count wins — never override Tier 3
+    if (manualWidth !== null && manualWidth < 280 && manualWidth >= 180) return 2;
+    return baseTier;
+  }, [!!selectedJob, sandboxOpen, rightPanelOpen, manualWidth]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // Task 5 — Inline error states
@@ -780,15 +801,20 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
   }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Observe jobs panel container width for responsive card tiers
+  // ResizeObserver — only used for Tier 1 → 2 manual-drag fallback
   useEffect(() => {
     const el = jobsPanelElementRef.current;
     if (!el) return;
+    let debounceTimer;
     const ro = new ResizeObserver(entries => {
-      for (const e of entries) setJobsPanelWidth(e.contentRect.width);
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const w = entries[0]?.contentRect.width;
+        if (w !== undefined) setManualWidth(w);
+      }, 50);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { clearTimeout(debounceTimer); ro.disconnect(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-open resume + ATS panel when a pending job card is selected
@@ -1691,7 +1717,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
                 setMobilePane={setMobilePane} isMobile={isMobile}
                 onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
-                panelWidth={jobsPanelWidth}
+                cardTier={1}
               />
             )}
             {mobilePane === "editor" && (
@@ -1761,7 +1787,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           {/* PANEL A — Jobs list (always visible) */}
           <Panel
             ref={jobsPanelRef}
-            elementRef={jobsPanelElementRef}
             defaultSize={!!selectedJob ? 30 : 100}
             minSize={10}
             style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -1781,7 +1806,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
               setMobilePane={setMobilePane} isMobile={isMobile}
               compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
-              panelWidth={jobsPanelWidth}
+              cardTier={effectiveTier}
+              containerRef={jobsPanelElementRef}
             />
           </Panel>
 
@@ -1919,9 +1945,9 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                       goPage, handleRefresh, onPullRefresh,
                       setMobilePane, isMobile,
                       compact, selectedJobId, onJobSelect,
-                      panelWidth = 400 }) {
+                      cardTier = 1, containerRef }) {
   return (
-    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
+    <div ref={containerRef} style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
                   background: isDark
                     ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
                     : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
@@ -2002,7 +2028,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                 compact={compact}
                 selected={selectedJobId === key}
                 onSelect={onJobSelect ? () => onJobSelect(job) : undefined}
-                panelWidth={panelWidth}
+                cardTier={cardTier}
                 onGenerate={force => generate(job, force)}
                 onViewSandbox={() => {
                   const entry = {...g, company:g.company||job.company, title:g.title||job.title};

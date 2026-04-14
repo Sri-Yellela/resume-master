@@ -202,25 +202,45 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
   ];
 
   return (
+    /* OVERLAY — covers viewport, centres modal, never clips children */
     <div style={{
-      position: "fixed", inset: 0, zIndex: 9999,
-      background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "center", justifyContent: "center",
+      position: "fixed",
+      inset: 0,
+      backgroundColor: "rgba(0,0,0,0.65)",
+      backdropFilter: "blur(4px)",
+      WebkitBackdropFilter: "blur(4px)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 1000,
+      pointerEvents: "auto",
       padding: "16px",
     }}>
+
+      {/* MODAL CONTAINER — flex column, height capped at 90vh */}
       <div style={{
-        background: theme.surface, borderRadius: 12,
+        background: theme.surface,
         border: `1px solid ${theme.border}`,
         boxShadow: theme.shadowXl,
-        width: "100%", maxWidth: 680,
-        maxHeight: "90vh", display: "flex", flexDirection: "column",
+        borderRadius: 12,
+        width: "100%",
+        maxWidth: 680,
+        maxHeight: "90vh",
+        display: "flex",
+        flexDirection: "column",
         overflow: "hidden",
+        zIndex: 1001,
+        position: "relative",
       }}>
-        {/* Header */}
+
+        {/* HEADER — never scrolls, never shrinks */}
         <div style={{
-          padding: "20px 24px 0", borderBottom: `1px solid ${theme.border}`,
-          paddingBottom: 16, flexShrink: 0,
-          display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+          flexShrink: 0,
+          padding: "20px 24px 16px",
+          borderBottom: `1px solid ${theme.border}`,
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
         }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: 20, color: theme.text,
@@ -236,14 +256,24 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
           {onDismiss && (
             <button type="button" onClick={onDismiss} style={{
               background: "none", border: "none", cursor: "pointer",
-              color: theme.textMuted, fontSize: 18, padding: "0 4px", lineHeight: 1,
+              color: theme.textMuted, fontSize: 18, padding: "0 4px", lineHeight: 1, flexShrink: 0,
             }}>✕</button>
           )}
         </div>
 
-        {/* Body — minHeight:0 is critical: lets flex child shrink so the footer stays visible */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px", minHeight: 0 }}>
+        {/* PROGRESS — never scrolls, never shrinks */}
+        <div style={{ flexShrink: 0, padding: "12px 24px 0" }}>
           <StepIndicator current={step} total={STEPS.length} />
+        </div>
+
+        {/* BODY — the ONLY scrolling element; minHeight:0 is critical */}
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+          padding: "0 24px 16px",
+        }}>
 
           {/* ── STEP 1: Domain ── */}
           {step === 1 && (
@@ -255,13 +285,18 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                 Select the domain that best fits your career focus. You can add up to 4 profiles total.
               </div>
               {loadingDomains ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "24px 0", color: theme.textMuted, fontSize: 13 }}>
-                  <div style={{ width: 18, height: 18, border: `2px solid ${theme.border}`, borderTop: `2px solid ${theme.accent}`, borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }}/>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "24px 0",
+                              color: theme.textMuted, fontSize: 13 }}>
+                  <div style={{ width: 18, height: 18, border: `2px solid ${theme.border}`,
+                                borderTop: `2px solid ${theme.accent}`, borderRadius: "50%",
+                                animation: "spin 0.8s linear infinite", flexShrink: 0 }}/>
                   Loading domains…
                 </div>
               ) : domainsError ? (
                 <div style={{ padding: "20px 0" }}>
-                  <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 12 }}>Could not load domain options.</div>
+                  <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 12 }}>
+                    Could not load domain options.
+                  </div>
                   <button type="button" onClick={loadDomains} style={{
                     padding: "6px 16px", borderRadius: 6, border: `1px solid ${theme.border}`,
                     background: theme.bg, color: theme.text, fontSize: 12, fontWeight: 600, cursor: "pointer",
@@ -362,7 +397,6 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                   These drive your job search and resume generation. All pre-selected.
                 </div>
               </div>
-
               {[
                 { label: "Keywords", set: keywords, setter: setKeywords,
                   base: domainMeta?.keywords || [], ai: aiChips?.keywords || [],
@@ -388,7 +422,6 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                   <ChipAddInput placeholder={placeholder} onAdd={v => addToSet(setter, v)} />
                 </div>
               ))}
-
               <button
                 type="button"
                 onClick={loadAiChips}
@@ -426,7 +459,6 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                   outline: "none", boxSizing: "border-box",
                 }}
               />
-              {/* Summary */}
               <div style={{
                 marginTop: 20, padding: "14px 16px", borderRadius: 8,
                 background: theme.bg, border: `1px solid ${theme.border}`,
@@ -442,10 +474,12 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                     : seniority}
                 </div>
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
-                  <strong style={{ color: theme.text }}>Titles:</strong> {[...titles].slice(0,5).join(", ")}{titles.size > 5 ? ` +${titles.size-5} more` : ""}
+                  <strong style={{ color: theme.text }}>Titles:</strong>{" "}
+                  {[...titles].slice(0,5).join(", ")}{titles.size > 5 ? ` +${titles.size-5} more` : ""}
                 </div>
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
-                  <strong style={{ color: theme.text }}>Keywords selected:</strong> {keywords.size} · Tools: {tools.size} · Verbs: {verbs.size}
+                  <strong style={{ color: theme.text }}>Keywords selected:</strong>{" "}
+                  {keywords.size} · Tools: {tools.size} · Verbs: {verbs.size}
                 </div>
               </div>
               {error && (
@@ -455,10 +489,15 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
           )}
         </div>
 
-        {/* Footer navigation */}
+        {/* FOOTER — never scrolls, never shrinks */}
         <div style={{
-          padding: "16px 24px", borderTop: `1px solid ${theme.border}`,
-          display: "flex", justifyContent: "space-between", flexShrink: 0,
+          flexShrink: 0,
+          borderTop: `1px solid ${theme.border}`,
+          padding: "16px 24px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          background: theme.surface,
         }}>
           <button
             type="button"
@@ -473,10 +512,15 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
           >
             Back
           </button>
+
+          <span style={{ fontSize: 12, color: theme.textMuted }}>
+            {step} of {STEPS.length}
+          </span>
+
           {step < STEPS.length ? (
             <button
               type="button"
-              onClick={() => setStep(s => s + 1)}
+              onClick={() => canNext() && setStep(s => s + 1)}
               disabled={!canNext()}
               style={{
                 padding: "8px 28px", borderRadius: 6, border: "none",
@@ -505,6 +549,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
             </button>
           )}
         </div>
+
       </div>
     </div>
   );

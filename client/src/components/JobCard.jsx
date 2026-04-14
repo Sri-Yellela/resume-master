@@ -157,7 +157,7 @@ export default function JobCard({
   onSelect,           // split-view: select this card (replaces expand)
   selected,           // split-view: this card is selected
   compact,            // split-view: tighter layout
-  panelWidth = 400,
+  cardTier = 1,       // 1=full, 2=medium (manual resize), 3=condensed (3+ panels open)
 }) {
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -191,23 +191,12 @@ export default function JobCard({
     setExpanded(prev => !prev);
   };
 
-  // RESPONSIVE TIERS: width >= 280px = full layout (Tier 1)
-  // 180-279px = condensed two-row (Tier 2)
-  // < 180px = condensed narrow (Tier 3)
-  // Width is measured on the panel container via ResizeObserver in the parent panel
-  // component and passed down as panelWidth prop. To change breakpoints edit
-  // TIER_BREAKPOINTS below.
-  //
-  // TIER 3 (< 180px): condensed mode for narrow panel.
-  // Activates automatically when resume/ATS panels open
-  // (panel A defaults to 10% = ~150px on most screens).
-  // Shows: logo, company name, resume badge if generated.
-  // All other info omitted to preserve readability.
-  // To change what shows in Tier 3, edit the TIER_3_CONTENT
-  // section below. To change the width threshold, edit
-  // TIER_BREAKPOINTS.NARROW (currently 180).
-  const TIER_BREAKPOINTS = { tier2: 280, NARROW: 180 };
-  const tier = panelWidth >= TIER_BREAKPOINTS.tier2 ? 1 : panelWidth >= TIER_BREAKPOINTS.NARROW ? 2 : 3;
+  // RESPONSIVE TIERS: driven by open-panel count (see getCardTier in JobsPanel.jsx).
+  // Tier 1 (full layout):   A alone or A+B — cardTier=1
+  // Tier 2 (medium):        manual drag to 180-279px — cardTier=2
+  // Tier 3 (condensed):     3+ panels open (A at 10%) — cardTier=3
+  // To change tier triggers, edit getCardTier() in JobsPanel.jsx.
+  const tier = cardTier;
 
   return (
     <div
