@@ -756,6 +756,16 @@ function useProximityReveal(dockEnabled) {
   return nearTop;
 }
 
+// ── Parse hex color to [r, g, b] for rgba() construction ────────
+function hexToRgb(hex) {
+  if (!hex || hex.length < 7) return [168, 216, 234]; // accent fallback
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+
 // ── Animated logo: "R" always visible, "esume Master" collapses ──
 function AnimatedLucyLogo({ theme, progress: p }) {
   // Clamp to avoid flash during mount
@@ -792,7 +802,7 @@ function AnimatedLucyLogo({ theme, progress: p }) {
           maxWidth: textMaxW + "px",
           overflow: "hidden",
           opacity: textOpacity,
-          transition: "max-width 0.05s linear, opacity 0.05s linear",
+          transition: "max-width 0.075s linear, opacity 0.075s linear",
           verticalAlign: "bottom",
         }}>esume Master</span>
       </div>
@@ -824,15 +834,32 @@ function AppDockBar({ user, onLogout, onTabChange, activeTab, onUserChange, onPr
   }, [user]);
 
   const PILL_W = 320;
+  const [ar, ag, ab] = hexToRgb(theme.accent);
+
   // Interpolated values
   const pillWidth  = Math.round(vw - p * (vw - PILL_W));
   const pillHeight = Math.round(56 - p * 12);
   const radius     = Math.round(p * 9999);
-  // Alpha as 2-digit hex for appending to theme.surface hex
-  const alphaHex   = Math.round((0.95 - p * 0.45) * 255).toString(16).padStart(2, "0");
   const blur       = Math.round(12 + p * 8);
   const topOffset  = Math.round(p * 12);
-  const borderAlphaHex = Math.round((0.1 + p * 0.15) * 255).toString(16).padStart(2, "0");
+
+  // Background: base surface fades out while glassy accent gradient fades in
+  const surfaceAlphaHex = Math.round((0.95 - p * 0.45) * 255).toString(16).padStart(2, "0");
+  const bgBase     = `${theme.surface}${surfaceAlphaHex}`;
+  const a1 = (p * 0.18).toFixed(3);
+  const a2 = (p * 0.08).toFixed(3);
+  const a3 = (p * 0.12).toFixed(3);
+  const pillBg = `linear-gradient(135deg, rgba(${ar},${ag},${ab},${a1}) 0%, rgba(${ar},${ag},${ab},${a2}) 40%, rgba(255,255,255,${a3}) 100%), ${bgBase}`;
+
+  // Border: theme.border at expanded → accent-tinted at pill
+  const borderColor = p < 0.02
+    ? `${theme.border}1a`
+    : `rgba(${ar},${ag},${ab},${(p * 0.25).toFixed(3)})`;
+
+  // Box-shadow: elevation + inset top-edge highlight (glassy light catch)
+  const pillShadow = p > 0.05
+    ? `0 ${Math.round(p * 4)}px ${Math.round(p * 24)}px rgba(0,0,0,${(p * 0.10).toFixed(2)}), 0 1px 6px rgba(0,0,0,${(p * 0.06).toFixed(2)}), inset 0 1px 0 rgba(255,255,255,${(p * 0.35).toFixed(2)})`
+    : "none";
 
   // Outer wrapper: holds space in flex column (height always 56px)
   // Inner pill: absolutely positioned, animates width/radius/bg
@@ -846,11 +873,11 @@ function AppDockBar({ user, onLogout, onTabChange, activeTab, onUserChange, onPr
         width: pillWidth,
         height: pillHeight,
         borderRadius: radius,
-        background: `${theme.surface}${alphaHex}`,
+        background: pillBg,
         backdropFilter: `blur(${blur}px)`,
         WebkitBackdropFilter: `blur(${blur}px)`,
-        border: `1px solid ${theme.border}${borderAlphaHex}`,
-        boxShadow: p > 0.05 ? `0 ${Math.round(p * 4)}px ${Math.round(p * 24)}px rgba(0,0,0,${(p * 0.12).toFixed(2)})` : "none",
+        border: `1px solid ${borderColor}`,
+        boxShadow: pillShadow,
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",

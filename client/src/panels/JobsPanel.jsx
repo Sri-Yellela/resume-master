@@ -525,7 +525,7 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        onScroll={(e) => updateScroll(e.currentTarget.scrollTop / 60)}
+        onScroll={(e) => updateScroll(e.currentTarget.scrollTop / 90)}
         style={{ flex:1, overflowY:"auto", paddingTop:4, paddingBottom:8 }}>
         {children}
       </div>
@@ -583,7 +583,7 @@ function getPanelDefaults(showDetail, showSandbox, showAts) {
 export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResumeStateChange, isActive = true }) {
   const { theme, isDark } = useTheme();
   const { mode: vpMode } = useViewport();
-  const { pin: pinDock, scrollToTopRef } = useAppScroll();
+  const { pin: pinDock, scrollToTopRef, progress: scrollProgress } = useAppScroll();
   const isWide     = vpMode === "wide";
   const isMobile   = vpMode === "mobile" || vpMode === "tablet";
   const isPortrait = vpMode === "portrait" || vpMode === "laptop";
@@ -1551,6 +1551,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           background: theme.surface, borderBottom: `1px solid ${theme.border}`,
           padding: "6px 20px", display: "flex", alignItems: "center", gap: 10,
           flexShrink: 0,
+          opacity: 1 - scrollProgress,
+          pointerEvents: scrollProgress > 0.5 ? "none" : "auto",
+          transition: "opacity 450ms cubic-bezier(0.4, 0, 0.2, 1)",
         }}>
           <span style={{ fontSize: 11, color: theme.textMuted, fontWeight: 600 }}>Profile:</span>
           {/* Dropdown trigger */}
@@ -1631,6 +1634,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         background:theme.surface, borderBottom:`1px solid ${theme.border}`,
         padding:"10px 20px", display:"flex", alignItems:"center", gap:8,
         flexShrink:0, flexWrap:"wrap",
+        opacity: 1 - scrollProgress,
+        pointerEvents: scrollProgress > 0.5 ? "none" : "auto",
+        transition: "opacity 450ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}>
 
         {/* ── Row A ──────────────────────────────────── */}

@@ -24,7 +24,7 @@ export function AppScrollProvider({ children }) {
   const update = useCallback((p) => {
     const clamped = Math.min(Math.max(p, 0), 1);
     setProgress(clamped);
-    // Scrolled back near top → clear the pagination pin
+    // Scrolled back near top (< ~4.5px at 90px threshold) → clear the pagination pin
     if (clamped < 0.05) setPinned(false);
   }, []);
 
