@@ -609,6 +609,46 @@ db.pragma("busy_timeout = 5000");
         );
       `,
     },
+    // ── Phase 7: Profile isolation backfill ──────────────────
+    {
+      id: "021_backfill_profile_tags",
+      sql: `
+        -- Step 1: user_jobs where scraped_job already has a real profile tag
+        UPDATE user_jobs
+        SET domain_profile_id = (
+          SELECT sj.domain_profile_id FROM scraped_jobs sj
+          WHERE sj.job_id = user_jobs.job_id
+            AND sj.domain_profile_id IS NOT NULL
+          LIMIT 1
+        )
+        WHERE domain_profile_id IS NULL
+          AND EXISTS (
+            SELECT 1 FROM scraped_jobs sj
+            WHERE sj.job_id = user_jobs.job_id
+              AND sj.domain_profile_id IS NOT NULL
+          );
+
+        -- Step 2: remaining NULL user_jobs — assign to the user's active profile (best-effort)
+        UPDATE user_jobs
+        SET domain_profile_id = (
+          SELECT id FROM domain_profiles
+          WHERE user_id = user_jobs.user_id AND is_active = 1
+          LIMIT 1
+        )
+        WHERE domain_profile_id IS NULL
+          AND EXISTS (
+            SELECT 1 FROM domain_profiles WHERE user_id = user_jobs.user_id
+          );
+
+        -- Step 3: anything still NULL → sentinel -1 (no profile, legacy)
+        UPDATE user_jobs  SET domain_profile_id = -1 WHERE domain_profile_id IS NULL;
+        UPDATE scraped_jobs SET domain_profile_id = -1 WHERE domain_profile_id IS NULL;
+      `,
+    },
+    {
+      id: "022_clear_legacy_user_jobs",
+      sql: `DELETE FROM user_jobs WHERE domain_profile_id = -1;`,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -1916,6 +1956,10 @@ app.get("/api/extension/autofill", requireAuth, (req, res) => {
 app.get("/api/jobs/facets", requireAuth, (req, res) => {
   const userId = req.user.id;
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+  const facetProfile = db.prepare("SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
+  const profileCond  = facetProfile
+    ? `AND uj.domain_profile_id = ${facetProfile.id}`
+    : `AND uj.domain_profile_id IS NOT NULL AND uj.domain_profile_id != -1`;
   const rows = db.prepare(`
     SELECT sj.work_type, sj.employment_type, sj.category,
            sj.scraped_at, sj.posted_at, sj.salary_min, sj.salary_max
@@ -1926,6 +1970,7 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
       AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
            OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
+      ${profileCond}
   `).all(userId, sevenDaysAgo, sevenDaysAgo);
 
   const workType = {}, empType = {}, category = {}, postedAge = {};
@@ -2014,10 +2059,14 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   ];
   const filterParams = [];
 
-  // Profile isolation: show only jobs tagged to the user's active profile, or untagged (pre-migration / no-profile fallback)
+  // Profile isolation: show only jobs tagged to the active profile.
+  // Never show NULL or sentinel -1 rows — migrations 021+022 backfilled and removed those.
   if (sessionActiveProfile) {
-    conditions.push(`(uj.domain_profile_id = ? OR uj.domain_profile_id IS NULL)`);
+    conditions.push(`uj.domain_profile_id = ?`);
     filterParams.push(sessionActiveProfile.id);
+  } else {
+    // No profile yet: exclude legacy sentinel rows so the board is empty until a profile is created
+    conditions.push(`(uj.domain_profile_id IS NOT NULL AND uj.domain_profile_id != -1)`);
   }
 
   const role = (req.query.role || "").trim().toLowerCase();
@@ -2191,6 +2240,10 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
   const limit   = Math.min(50, Math.max(1, parseInt(req.query.limit || "20")));
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
 
+  const bmProfile   = db.prepare("SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
+  const bmProfileCond = bmProfile
+    ? `AND uj.domain_profile_id = ${bmProfile.id}`
+    : `AND uj.domain_profile_id IS NOT NULL AND uj.domain_profile_id != -1`;
   const bestMatchQuery = (thresh) => db.prepare(`
     SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
       sj.ats_score as base_ats_score,
@@ -2206,6 +2259,7 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
           AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
         OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
       )
+      ${bmProfileCond}
     ORDER BY sj.ats_score DESC
     LIMIT ?
   `).all(userId, userId, thresh, limit);
