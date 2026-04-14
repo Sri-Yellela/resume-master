@@ -723,6 +723,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [boardTab,    setBoardTab]    = useState("all");  // "all" | "saved" | "pending"
   const [pendingJobs, setPendingJobs] = useState([]);
 
+  // Enhance resume state
+  // ENHANCE GATING: one free per account lifetime.
+  // enhance_used is set server-side on API call, not on adoption. Cannot be reset.
+  // Future paid unlock: enhance_paid flag in users table.
+  // To change gating logic: edit /api/base-resume/enhance in server.js and update enhance-status response.
+  const [enhanceUsed,    setEnhanceUsed]    = useState(false);
+  const [enhancePaid,    setEnhancePaid]    = useState(false);
+  const [enhancing,      setEnhancing]      = useState(false);
+  const [enhanceResult,  setEnhanceResult]  = useState(null); // { original, enhanced, delta }
+  const [enhanceModalOpen, setEnhanceModalOpen] = useState(false);
+
   // Best Match view
   const [bestMatchView,   setBestMatchView]   = useState(false);
   const [bestMatchJobs,   setBestMatchJobs]   = useState([]);
@@ -878,8 +889,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       text: resumeText, fileName, uploading,
       onUploadClick: () => fileRef.current?.click(),
       onClear: handleResumeClear,
+      enhanceUsed, enhancePaid, enhancing,
+      onEnhance: handleEnhance,
     });
-  }, [resumeText, fileName, uploading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [resumeText, fileName, uploading, enhanceUsed, enhancePaid, enhancing]); // eslint-disable-line react-hooks/exhaustive-deps
   const PAGE_SIZE = 25;
 
   // ── Split-view: job selection ─────────────────────────────────
@@ -1005,7 +1018,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         setGenerated(map);
       }
     }).catch(console.error);
-  }, [user]);
+    // Fetch enhance status
+    api("/api/base-resume/enhance-status").then(s => {
+      setEnhanceUsed(s.enhanceUsed || false);
+      setEnhancePaid(s.enhancePaid || false);
+    }).catch(() => {});
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-fetch when server-side filters/sort/tab change (background — board stays visible)
   // Note: localSearch is NOT in this dep array — it has its own debounced effect below
@@ -1199,6 +1217,35 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // ── Legacy Refresh button (end-of-list) ───────────────────────
   const handleRefresh = handlePullRefresh;
+
+  // ── Resume Enhancer ──────────────────────────────────────────
+  const handleEnhance = useCallback(async () => {
+    if (enhancing) return;
+    setEnhancing(true);
+    try {
+      const result = await api("/api/base-resume/enhance", { method: "POST" });
+      setEnhanceResult(result);
+      setEnhanceModalOpen(true);
+    } catch(e) {
+      if (e.status === 403) {
+        setEnhanceUsed(true);
+      } else {
+        setUploadError("Enhancement failed: " + e.message);
+      }
+    } finally {
+      // Consume the free use regardless of outcome — server already set enhance_used
+      setEnhanceUsed(true);
+      setEnhancing(false);
+    }
+  }, [enhancing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleAdoptEnhanced = useCallback(async () => {
+    try {
+      await api("/api/base-resume/adopt-enhanced", { method: "PATCH" });
+      if (enhanceResult?.enhanced?.text) setResumeText(enhanceResult.enhanced.text);
+    } catch(e) { console.warn("[adopt]", e.message); }
+    setEnhanceModalOpen(false);
+  }, [enhanceResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Best Match: show jobs where base resume already scores well ──
   const handleBestMatch = useCallback(async () => {
@@ -1683,6 +1730,91 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
           onChange={handleFile} style={{ display:"none" }}/>
       </div>
+
+      {/* ── Resume Enhance modal ────────────────────────────── */}
+      {enhanceModalOpen && enhanceResult && (
+        <div style={{
+          position:"fixed", inset:0, zIndex:600,
+          background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center",
+        }}>
+          <div style={{
+            background:theme.surface, borderRadius:8, width:"min(92vw, 760px)",
+            maxHeight:"85vh", overflowY:"auto", padding:0,
+            border:`1px solid ${theme.border}`, boxShadow:"0 24px 64px rgba(0,0,0,0.35)",
+          }}>
+            {/* Header */}
+            <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${theme.border}` }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                             fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                Resume Enhancement
+              </div>
+              {enhanceResult.delta != null && (
+                <div style={{ fontSize:12, color:theme.textMuted, marginTop:4 }}>
+                  ATS score improved by
+                  <span style={{ color: enhanceResult.delta > 0 ? "#16a34a" : "#dc2626",
+                                  fontWeight:700, marginLeft:4 }}>
+                    {enhanceResult.delta > 0 ? "+" : ""}{enhanceResult.delta} points
+                  </span>
+                  {" "}({enhanceResult.original?.atsScore ?? "—"} → {enhanceResult.enhanced?.atsScore ?? "—"})
+                </div>
+              )}
+            </div>
+            {/* Side-by-side comparison */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:0 }}>
+              <div style={{ padding:"16px 20px", borderRight:`1px solid ${theme.border}` }}>
+                <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase",
+                               letterSpacing:"0.06em", color:theme.textMuted, marginBottom:8 }}>
+                  Original
+                </div>
+                <pre style={{ fontSize:11, color:theme.text, whiteSpace:"pre-wrap",
+                               wordBreak:"break-word", maxHeight:340, overflowY:"auto",
+                               fontFamily:"monospace", margin:0 }}>
+                  {enhanceResult.original?.text}
+                </pre>
+              </div>
+              <div style={{ padding:"16px 20px" }}>
+                <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase",
+                               letterSpacing:"0.06em", color:"#16a34a", marginBottom:8 }}>
+                  Enhanced
+                </div>
+                <pre style={{ fontSize:11, color:theme.text, whiteSpace:"pre-wrap",
+                               wordBreak:"break-word", maxHeight:340, overflowY:"auto",
+                               fontFamily:"monospace", margin:0 }}>
+                  {enhanceResult.enhanced?.text}
+                </pre>
+              </div>
+            </div>
+            {/* Footer */}
+            <div style={{ padding:"16px 24px", borderTop:`1px solid ${theme.border}`,
+                           display:"flex", flexDirection:"column", gap:10, alignItems:"center" }}>
+              <div style={{ display:"flex", gap:10, width:"100%", justifyContent:"center" }}>
+                <button onClick={handleAdoptEnhanced}
+                  style={{
+                    padding:"10px 24px", borderRadius:4, fontWeight:800, fontSize:13,
+                    background:theme.accent, color:"#fff", border:"none", cursor:"pointer",
+                    fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.06em",
+                    textTransform:"uppercase",
+                  }}>
+                  Adopt Enhanced Version
+                </button>
+                <button onClick={() => setEnhanceModalOpen(false)}
+                  style={{
+                    padding:"10px 24px", borderRadius:4, fontWeight:800, fontSize:13,
+                    background:"transparent", color:theme.textMuted,
+                    border:`1.5px solid ${theme.border}`, cursor:"pointer",
+                    fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.06em",
+                    textTransform:"uppercase",
+                  }}>
+                  Keep Original
+                </button>
+              </div>
+              <div style={{ fontSize:10, color:theme.textDim, textAlign:"center", maxWidth:480 }}>
+                This is your one-time free enhancement. Your choice here does not affect whether it has been used.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Best Match view ─────────────────────────────────── */}
       {bestMatchView && (

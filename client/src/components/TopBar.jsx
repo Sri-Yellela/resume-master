@@ -280,6 +280,56 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                         </button>
                       )}
                     </div>
+                    {/* Enhance button — only shown when resume is uploaded */}
+                    {resumeWidget.text && !resumeWidget.uploading && (
+                      <div style={{ marginTop:8 }}>
+                        {/* STATE 1: free enhance available */}
+                        {!resumeWidget.enhanceUsed && (
+                          <button
+                            onClick={() => resumeWidget.onEnhance?.()}
+                            disabled={resumeWidget.enhancing}
+                            title="One-time free enhancement — rewrites your resume for better ATS without changing any facts or experience"
+                            style={{
+                              width:"100%", padding:"7px 10px", borderRadius:4,
+                              background: resumeWidget.enhancing ? theme.surfaceHigh : theme.accentMuted,
+                              color: theme.accentText, border:`1px solid ${theme.accent}44`,
+                              cursor: resumeWidget.enhancing ? "not-allowed" : "pointer",
+                              fontSize:11, fontWeight:700, fontFamily:"'DM Sans',system-ui",
+                              opacity: resumeWidget.enhancing ? 0.7 : 1,
+                            }}>
+                            {resumeWidget.enhancing ? "⏳ Rewriting for better ATS…" : "✨ Enhance Resume"}
+                          </button>
+                        )}
+                        {/* STATE 2: used, not paid */}
+                        {resumeWidget.enhanceUsed && !resumeWidget.enhancePaid && (
+                          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+                            <span style={{
+                              fontSize:11, fontWeight:700,
+                              background:"#dcfce7", color:"#166534",
+                              padding:"4px 10px", borderRadius:999,
+                            }}>Enhanced ✓</span>
+                            <a href="/pricing" style={{ fontSize:10, color:theme.textMuted, textDecoration:"none" }}>
+                              Upgrade to enhance again →
+                            </a>
+                          </div>
+                        )}
+                        {/* STATE 3: paid — reserved for future */}
+                        {resumeWidget.enhanceUsed && resumeWidget.enhancePaid && (
+                          <button
+                            onClick={() => resumeWidget.onEnhance?.()}
+                            disabled={resumeWidget.enhancing}
+                            style={{
+                              width:"100%", padding:"7px 10px", borderRadius:4,
+                              background: theme.accentMuted, color: theme.accentText,
+                              border:`1px solid ${theme.accent}44`,
+                              cursor: resumeWidget.enhancing ? "not-allowed" : "pointer",
+                              fontSize:11, fontWeight:700, fontFamily:"'DM Sans',system-ui",
+                            }}>
+                            {resumeWidget.enhancing ? "⏳ Rewriting…" : "✨ Enhance Resume"}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </Panel>
@@ -378,7 +428,7 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                                      letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
                         Base Resume
                       </div>
-                      <div style={{ display:"flex", gap:6, alignItems:"center", paddingBottom:8 }}>
+                      <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                         <button
                           onClick={() => !resumeWidget.uploading && resumeWidget.onUploadClick?.()}
                           style={{
@@ -402,6 +452,33 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
                           </button>
                         )}
                       </div>
+                      {resumeWidget.text && !resumeWidget.uploading && (
+                        <div style={{ marginTop:8, paddingBottom:8 }}>
+                          {!resumeWidget.enhanceUsed && (
+                            <button
+                              onClick={() => resumeWidget.onEnhance?.()}
+                              disabled={resumeWidget.enhancing}
+                              style={{
+                                width:"100%", padding:"7px 10px", borderRadius:4,
+                                background: resumeWidget.enhancing ? theme.surfaceHigh : theme.accentMuted,
+                                color: theme.accentText, border:`1px solid ${theme.accent}44`,
+                                cursor: resumeWidget.enhancing ? "not-allowed" : "pointer",
+                                fontSize:11, fontWeight:700, fontFamily:"'DM Sans',system-ui",
+                              }}>
+                              {resumeWidget.enhancing ? "⏳ Rewriting…" : "✨ Enhance Resume"}
+                            </button>
+                          )}
+                          {resumeWidget.enhanceUsed && !resumeWidget.enhancePaid && (
+                            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                              <span style={{ fontSize:11, fontWeight:700, background:"#dcfce7", color:"#166534",
+                                              padding:"3px 8px", borderRadius:999 }}>Enhanced ✓</span>
+                              <a href="/pricing" style={{ fontSize:10, color:theme.textMuted, textDecoration:"none" }}>
+                                Upgrade →
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

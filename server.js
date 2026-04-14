@@ -571,6 +571,17 @@ db.pragma("busy_timeout = 5000");
         ALTER TABLE scraped_jobs ADD COLUMN ats_report TEXT;
       `,
     },
+    // ── Phase 6C: Resume Enhancer ────────────────────────────
+    {
+      id: "018_base_resume_enhance",
+      sql: `
+        ALTER TABLE base_resume ADD COLUMN enhanced_at INTEGER;
+        ALTER TABLE base_resume ADD COLUMN enhanced_content TEXT;
+        ALTER TABLE base_resume ADD COLUMN enhanced_ats_delta INTEGER;
+        ALTER TABLE users ADD COLUMN enhance_used INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE users ADD COLUMN enhance_paid INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -2524,6 +2535,160 @@ app.post("/api/base-resume", requireAuth, (req, res) => {
     .run(req.user.id, content, name||"resume.txt");
   res.json({ ok:true });
 });
+// ENHANCE GATING: one free per account lifetime.
+// enhance_used is set server-side on API call, not on adoption.
+// Cannot be reset. Future paid unlock: enhance_paid flag in users table.
+// To change gating logic: edit /api/base-resume/enhance below
+// and update enhance-status response.
+
+// GET /api/base-resume/enhance-status
+app.get("/api/base-resume/enhance-status", requireAuth, (req, res) => {
+  const user = db.prepare("SELECT enhance_used, enhance_paid FROM users WHERE id=?").get(req.user.id);
+  res.json({
+    enhanceUsed: !!(user?.enhance_used),
+    enhancePaid: !!(user?.enhance_paid),
+  });
+});
+
+// POST /api/base-resume/enhance — one-time free enhancement
+app.post("/api/base-resume/enhance", requireAuth, async (req, res) => {
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
+
+  const user = db.prepare("SELECT enhance_used, enhance_paid FROM users WHERE id=?").get(req.user.id);
+  if (user?.enhance_used && !user?.enhance_paid) {
+    return res.status(403).json({
+      error: "enhance_limit_reached",
+      message: "You have used your free resume enhancement. Upgrade to enhance again.",
+      upgradeRequired: true,
+    });
+  }
+
+  const baseResumeRow = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
+  if (!baseResumeRow?.content) return res.status(400).json({ error: "No base resume uploaded" });
+
+  const originalText = baseResumeRow.content;
+
+  // Mark enhance as used immediately (consumed on API call, not on adoption)
+  db.prepare("UPDATE users SET enhance_used = 1 WHERE id = ?").run(req.user.id);
+
+  try {
+    const ENHANCE_SYSTEM = `You are a professional resume writer specialising in ATS optimisation.
+Rewrite the provided resume to significantly improve its ATS score by:
+- Strengthening action verbs (replace weak verbs with domain-specific strong ones)
+- Improving keyword density and placement without keyword stuffing
+- Restructuring bullet points to lead with impact (action → outcome → metric)
+- Removing filler adjectives and generic phrases
+- Ensuring consistent past tense and clean formatting
+- Keeping all facts, dates, companies, job titles, and metrics exactly as provided
+Do NOT fabricate any information. Do NOT change employment dates, company names, or job titles.
+Return ONLY the improved resume text with no commentary, preamble, or explanation.`;
+
+    const t0 = Date.now();
+    const enhanceMsg = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4000,
+      system: ENHANCE_SYSTEM,
+      messages: [{ role: "user", content: `RESUME TO ENHANCE:\n\n${originalText}` }],
+    });
+    const enhancedText = enhanceMsg.content.map(b => b.text || "").join("").trim();
+    trackApiCall(db, {
+      userId: req.user.id, eventType: "resume_enhance", eventSubtype: "enhance",
+      model: "claude-sonnet-4-20250514", usage: enhanceMsg.usage,
+      durationMs: Date.now() - t0,
+    });
+
+    // Score both against a generic template to calculate delta
+    const templateJd = "Software Engineer, Product Manager, Data Scientist, Data Engineer, Machine Learning Engineer";
+    const scoreFor = async (resumeContent) => {
+      try {
+        const scoreMsg = await anthropic.messages.create({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 900,
+          system: ATS_SYSTEM_PROMPT,
+          messages: [{ role: "user", content:
+            `JOB DESCRIPTION:\n${templateJd}\n\nRESUME TEXT:\n${resumeContent}` }],
+        });
+        const raw = scoreMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
+        return JSON.parse(raw);
+      } catch { return null; }
+    };
+
+    const [origReport, enhReport] = await Promise.all([scoreFor(originalText), scoreFor(enhancedText)]);
+    const delta = (enhReport?.score ?? 0) - (origReport?.score ?? 0);
+
+    // Store enhanced content
+    db.prepare(`
+      UPDATE base_resume SET enhanced_content=?, enhanced_at=unixepoch(), enhanced_ats_delta=?
+      WHERE user_id=?
+    `).run(enhancedText, delta, req.user.id);
+
+    res.json({
+      original: { text: originalText, atsScore: origReport?.score ?? null },
+      enhanced: { text: enhancedText, atsScore: enhReport?.score ?? null },
+      delta,
+      improvements: enhReport?.improvements || [],
+    });
+  } catch(e) {
+    // If generation fails, the enhance_used flag is already set — resource was consumed
+    console.error("[enhance]", e.message);
+    res.status(500).json({ error: "Enhancement failed: " + e.message });
+  }
+});
+
+// PATCH /api/base-resume/adopt-enhanced — replace base resume with enhanced version
+app.patch("/api/base-resume/adopt-enhanced", requireAuth, async (req, res) => {
+  const row = db.prepare("SELECT enhanced_content FROM base_resume WHERE user_id=?").get(req.user.id);
+  if (!row?.enhanced_content) return res.status(400).json({ error: "No enhanced resume available" });
+
+  // Replace base resume content with enhanced version
+  db.prepare(`
+    UPDATE base_resume SET content = enhanced_content, updated_at = unixepoch()
+    WHERE user_id = ?
+  `).run(req.user.id);
+
+  // Background: re-score all user's jobs against the new enhanced resume
+  const userId = req.user.id;
+  setImmediate(async () => {
+    try {
+      const newContent = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId)?.content;
+      if (!newContent) return;
+
+      const jobsToRescore = db.prepare(`
+        SELECT sj.job_id, sj.description, sj.title, sj.company FROM scraped_jobs sj
+        JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+        WHERE sj.description IS NOT NULL
+      `).all(userId);
+
+      const updateAts = db.prepare("UPDATE scraped_jobs SET ats_score=?, ats_report=? WHERE job_id=?");
+
+      for (let i = 0; i < jobsToRescore.length; i += 5) {
+        const batch = jobsToRescore.slice(i, i + 5);
+        await Promise.all(batch.map(async job => {
+          try {
+            const scoreMsg = await anthropic.messages.create({
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 900,
+              system: ATS_SYSTEM_PROMPT,
+              messages: [{ role: "user", content:
+                `JOB DESCRIPTION:\n${job.description}\n\nRESUME TEXT:\n${newContent}` }],
+            });
+            const raw = scoreMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
+            const report = JSON.parse(raw);
+            updateAts.run(report.score, JSON.stringify(report), job.job_id);
+          } catch(e) {
+            console.warn(`[adopt-enhanced] rescore failed for ${job.job_id}:`, e.message);
+          }
+        }));
+      }
+      console.log(`[adopt-enhanced] Re-scored ${jobsToRescore.length} jobs for user ${userId}`);
+    } catch(e) {
+      console.warn("[adopt-enhanced] background rescore failed:", e.message);
+    }
+  });
+
+  res.json({ ok: true });
+});
+
 app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error:"No file" });
   if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured on server. Set it in your .env file." });
