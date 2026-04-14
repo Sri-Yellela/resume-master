@@ -9,7 +9,6 @@ import AuthScreen                from "./components/AuthScreen.jsx";
 import AdminLayout               from "./components/AdminLayout.jsx";
 import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
 import TopBar                    from "./components/TopBar.jsx";
-import ScrollDock               from "./components/ScrollDock.jsx";
 import { AppScrollProvider }     from "./contexts/AppScrollContext.jsx";
 import JobsPanel                 from "./panels/JobsPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
@@ -28,9 +27,15 @@ import { FAQPage }         from "./pages/marketing/FAQPage.jsx";
 import { PrivacyPage }     from "./pages/marketing/PrivacyPage.jsx";
 import { TermsPage }       from "./pages/marketing/TermsPage.jsx";
 
+const APP_TABS = [
+  { id: "jobs",     label: "Jobs",     icon: "💼" },
+  { id: "database", label: "Database", icon: "🗃" },
+];
+
 function AppDashboard({ authUser, setAuthUser }) {
   const { theme } = useTheme();
   const { mode: vpMode } = useViewport();
+  const isMobile = vpMode === "mobile" || vpMode === "tablet";
   const [activeTab,          setActiveTab]          = useState("jobs");
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
   const [resumeWidget,       setResumeWidget]       = useState(null);
@@ -44,6 +49,10 @@ function AppDashboard({ authUser, setAuthUser }) {
     if (tab === "jobs" && activeTab !== "jobs") setJobBoardRefreshKey(k => k + 1);
     setActiveTab(tab);
   }, [activeTab]);
+
+  const handleProfileActivate = useCallback(() => {
+    setJobBoardRefreshKey(k => k + 1);
+  }, []);
 
   useInactivityLogout(handleLogout, true);
 
@@ -65,32 +74,68 @@ function AppDashboard({ authUser, setAuthUser }) {
                     background:theme.bg, height:"100vh",
                     display:"flex", flexDirection:"column",
                     overflow:"hidden", color:theme.text }}>
-        <ScrollDock
-          variant="app"
-          user={authUser}
-          onLogout={handleLogout}
-          onTabChange={handlePanelChange}
-          activeTab={activeTab}
-          onUserChange={setAuthUser}
-        />
+
+        {/* TopBar: position:fixed — takes no space in flex layout */}
         <TopBar
           user={authUser}
-          activeTab={activeTab}
           onTabChange={handlePanelChange}
           onLogout={handleLogout}
           onUserChange={setAuthUser}
           resumeWidget={resumeWidget}
-          hideLogo
+          onProfileActivate={handleProfileActivate}
         />
-        <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-          <div style={{ display: activeTab === "jobs" ? "flex" : "none",
-                        flex: 1, flexDirection: "column", overflow: "hidden" }}>
-            <JobsPanel user={authUser} onUserChange={setAuthUser}
-              refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
-              isActive={activeTab === "jobs"}/>
+
+        {/* Page content — paddingTop reserves space below the fixed TopBar */}
+        <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column",
+                      paddingTop: 52 }}>
+
+          {/* JOBS | DATABASE tabs — normal document flow, not fixed */}
+          <nav style={{
+            display:"flex", alignItems:"center",
+            background: theme.surface,
+            borderBottom: `1px solid ${theme.border}`,
+            padding: isMobile ? "0 12px" : "0 20px",
+            flexShrink: 0,
+          }}>
+            {APP_TABS.map(t => {
+              const isActive = activeTab === t.id;
+              return (
+                <button key={t.id} onClick={() => handlePanelChange(t.id)}
+                  style={{
+                    background: "transparent", border: "none",
+                    padding: isMobile ? "10px 8px" : "10px 14px",
+                    fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
+                    fontWeight: isActive ? 800 : 600,
+                    fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
+                    color: isActive ? theme.text : theme.textMuted,
+                    cursor: "pointer", position: "relative",
+                    transition: "color 0.15s",
+                  }}>
+                  {isMobile ? t.icon : t.label}
+                  {isActive && (
+                    <div style={{
+                      position: "absolute", bottom: 0, left: "50%",
+                      transform: "translateX(-50%)",
+                      width: 16, height: 2, borderRadius: 999,
+                      background: theme.accent,
+                    }}/>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Panels */}
+          <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+            <div style={{ display: activeTab === "jobs" ? "flex" : "none",
+                          flex: 1, flexDirection: "column", overflow: "hidden" }}>
+              <JobsPanel user={authUser} onUserChange={setAuthUser}
+                refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
+                isActive={activeTab === "jobs"}/>
+            </div>
+            {activeTab === "database" && <DatabasePanel user={authUser}/>}
+            {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
           </div>
-          {activeTab === "database" && <DatabasePanel user={authUser}/>}
-          {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
         </div>
       </div>
     </AppScrollProvider>

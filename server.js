@@ -2063,8 +2063,8 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     conditions.push(`uj.domain_profile_id = ?`);
     filterParams.push(sessionActiveProfile.id);
   } else {
-    // No profile yet: exclude legacy sentinel rows so the board is empty until a profile is created
-    conditions.push(`(uj.domain_profile_id IS NOT NULL)`);
+    // No active profile → return empty board immediately
+    return res.json({ jobs: [], total: 0, totalPages: 0, page, pageSize });
   }
 
   const role = (req.query.role || "").trim().toLowerCase();

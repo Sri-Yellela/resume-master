@@ -1545,15 +1545,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         />
       )}
 
-      {/* ── Profile switcher bar ──────────────────────────────── */}
-      {domainProfiles.length > 0 && !isMobile && (
+      {/* ── Profile switcher bar — hidden when TopBar pill is active to avoid duplication ── */}
+      {domainProfiles.length > 0 && !isMobile && scrollProgress < 0.5 && (
         <div style={{
           background: theme.surface, borderBottom: `1px solid ${theme.border}`,
           padding: "6px 20px", display: "flex", alignItems: "center", gap: 10,
           flexShrink: 0,
-          opacity: 1 - scrollProgress,
-          pointerEvents: scrollProgress > 0.5 ? "none" : "auto",
-          transition: "opacity 450ms cubic-bezier(0.4, 0, 0.2, 1)",
         }}>
           <span style={{ fontSize: 11, color: theme.textMuted, fontWeight: 600 }}>Profile:</span>
           {/* Dropdown trigger */}
@@ -1634,9 +1631,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         background:theme.surface, borderBottom:`1px solid ${theme.border}`,
         padding:"10px 20px", display:"flex", alignItems:"center", gap:8,
         flexShrink:0, flexWrap:"wrap",
-        opacity: 1 - scrollProgress,
-        pointerEvents: scrollProgress > 0.5 ? "none" : "auto",
-        transition: "opacity 450ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}>
 
         {/* ── Row A ──────────────────────────────────── */}

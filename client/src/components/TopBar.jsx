@@ -1,75 +1,93 @@
-// client/src/components/TopBar.jsx — Lucy Brand
-// Dropdowns are state-controlled with explicit inline styles (no Radix Portal / CSS-var dependency)
-import { useState, useEffect, useRef } from "react";
-import { motion } from "framer-motion";
-import { api } from "../lib/api.js";
+// client/src/components/TopBar.jsx — single animated nav (Lucy Brand)
+// position:fixed, converges from full-width bar → centered glassy pill on scroll.
+// Consumes AppScrollContext progress/pinned set by PullToRefresh in JobsPanel.
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "../styles/theme.jsx";
-import { useViewport } from "../hooks/useViewport.js";
-import { Avatar, AvatarFallback } from "./ui/avatar";
+import { useAppScroll } from "../contexts/AppScrollContext.jsx";
+import { useSyncEvents } from "../hooks/useSyncEvents.js";
+import { api } from "../lib/api.js";
 
-const APPLY_MODES = [
-  { value:"SIMPLE",         label:"Simple",         icon:"⚡", desc:"Job board only — no generation" },
-  { value:"TAILORED",       label:"Tailored",        icon:"✦", desc:"Rewrite bullets, fixed employers" },
-  { value:"CUSTOM_SAMPLER", label:"Custom Sampler",  icon:"⚙", desc:"Full customisation, JD-driven companies" },
-];
+// ── Parse hex → [r,g,b] ──────────────────────────────────────
+function hexToRgb(hex) {
+  if (!hex || hex.length < 7) return [168, 216, 234];
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
 
-// ── Lucy nested-box logo ──────────────────────────────────────
-function LucyLogo({ theme, mini = false }) {
-  if (mini) {
-    return (
-      <div style={{ position:"relative", width:38, height:28, display:"flex",
-                    alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-        <div style={{ position:"absolute", inset:0, background:theme.accent,
-                      transform:"rotate(-3deg)", borderRadius:2 }}/>
-        <div style={{ position:"relative", zIndex:1, padding:"2px 6px",
-                      background:"#ffffff", border:"2px solid #0f0f0f",
-                      transform:"rotate(-2deg)", borderRadius:2,
-                      display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <span style={{ fontFamily:"'Barlow Condensed','DM Sans',system-ui,sans-serif",
-                          fontWeight:800, fontSize:13, letterSpacing:"0.06em",
-                          textTransform:"uppercase", color:"#0f0f0f", fontStyle:"italic",
-                          lineHeight:1, whiteSpace:"nowrap" }}>RM</span>
-        </div>
-      </div>
-    );
-  }
+// ── Animated logo — "R" persists, "esume Master" collapses ───
+function AnimatedLucyLogo({ theme, progress: p }) {
+  const pc = Math.min(Math.max(p, 0), 1);
+  const textMaxW = Math.round((1 - pc) * 130);
+  const textOpacity = Math.max(0, 1 - pc * 1.8);
   return (
-    <div style={{ position:"relative", display:"inline-flex", alignItems:"center",
-                  justifyContent:"center", flexShrink:0, height:38, width:166 }}>
-      {/* Outer box — accent fill, slightly more tilted */}
-      <div style={{ position:"absolute", inset:0, background:theme.accent,
-                    transform:"rotate(-3deg)", borderRadius:2 }}/>
-      {/* Inner box — white fill, thick black border */}
-      <div style={{ position:"relative", zIndex:1, padding:"3px 10px",
-                    background:"#ffffff", border:"2.5px solid #0f0f0f",
-                    transform:"rotate(-2deg)", borderRadius:2,
-                    display:"flex", alignItems:"center", justifyContent:"center" }}>
-        <span style={{ fontFamily:"'Barlow Condensed','DM Sans',system-ui,sans-serif",
-                        fontWeight:800, fontSize:17, letterSpacing:"0.06em",
-                        textTransform:"uppercase", color:"#0f0f0f", fontStyle:"italic",
-                        lineHeight:1, whiteSpace:"nowrap" }}>Resume Master</span>
+    <div style={{
+      position: "relative", display: "inline-flex", alignItems: "center",
+      justifyContent: "center", flexShrink: 0, height: 36, minWidth: 50,
+    }}>
+      <div style={{ position: "absolute", inset: 0, background: theme.accent,
+                    transform: "rotate(-3deg)", borderRadius: 2 }}/>
+      <div style={{
+        position: "relative", zIndex: 1, padding: "3px 10px",
+        background: "#ffffff", border: "2.5px solid #0f0f0f",
+        transform: "rotate(-2deg)", borderRadius: 2,
+        display: "flex", alignItems: "center", overflow: "hidden",
+      }}>
+        <span style={{
+          fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
+          fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
+          textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
+          lineHeight: 1, whiteSpace: "nowrap",
+        }}>R</span>
+        <span style={{
+          fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
+          fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
+          textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
+          lineHeight: 1, whiteSpace: "nowrap",
+          display: "inline-block",
+          maxWidth: textMaxW + "px",
+          overflow: "hidden",
+          opacity: textOpacity,
+          transition: "max-width 0.075s linear, opacity 0.075s linear",
+          verticalAlign: "bottom",
+        }}>esume Master</span>
       </div>
     </div>
   );
 }
 
-// ── Generic close-on-outside-click hook ───────────────────────
+// ── Close-on-outside-click ─────────────────────────────────────
 function useClickOutside(ref, onClose) {
   useEffect(() => {
-    const handler = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", h);
+    document.addEventListener("touchstart", h);
+    return () => {
+      document.removeEventListener("mousedown", h);
+      document.removeEventListener("touchstart", h);
+    };
   }, [ref, onClose]);
 }
 
-// ── Inline dropdown panel (no Portal, no CSS vars) ────────────
-function Panel({ children, style = {}, theme }) {
+// ── Dock divider ─────────────────────────────────────────────
+function Divider({ theme }) {
+  return (
+    <div style={{ width: 1, height: 20, background: `${theme.accent}33`,
+                  flexShrink: 0, margin: "0 2px" }}/>
+  );
+}
+
+// ── Dropdown panel ─────────────────────────────────────────────
+function DropPanel({ children, style = {}, theme }) {
   return (
     <div style={{
-      position: "absolute", top: "calc(100% + 8px)", right: 0,
+      position: "absolute", top: "calc(100% + 10px)", right: 0,
       background: theme.surface, border: `1px solid ${theme.border}`,
-      borderRadius: 12, boxShadow: theme.shadowMd,
-      zIndex: 9999, minWidth: 260, padding: "8px 0",
+      borderRadius: 12, boxShadow: theme.shadowLg,
+      zIndex: 9999, minWidth: 240, padding: "8px 0",
+      backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
       ...style,
     }}>
       {children}
@@ -77,74 +95,304 @@ function Panel({ children, style = {}, theme }) {
   );
 }
 
-// ── Light/Dark toggle ─────────────────────────────────────────
-function ThemeToggle() {
-  const { mode, toggleMode, theme } = useTheme();
+// ── Notification bell ─────────────────────────────────────────
+function NotificationsBell({ theme }) {
+  const [open, setOpen] = useState(false);
+  const [notifs, setNotifs] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false));
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api("/api/notifications");
+      setNotifs(d.notifications || []);
+      setUnread(d.unreadCount || 0);
+    } catch {}
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  useSyncEvents({
+    notification:     () => setUnread(n => n + 1),
+    scrape_complete:  () => setUnread(n => n + 1),
+    resume_generated: () => setUnread(n => n + 1),
+  });
+
+  const markAll = async () => {
+    try { await api("/api/notifications/read-all", { method: "PATCH" }); } catch {}
+    setNotifs(n => n.map(x => ({ ...x, read: 1 })));
+    setUnread(0);
+  };
+
+  const timeAgo = (ts) => {
+    const s = Math.floor(Date.now() / 1000 - ts);
+    if (s < 60)    return "just now";
+    if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return `${Math.floor(s / 86400)}d ago`;
+  };
+
+  const TYPE_ICONS = {
+    scrape_complete: "🔍", resume_generated: "✦", ats_scored: "🎯",
+    enhance_ready: "✨", best_match: "⚡", apply_complete: "✅",
+  };
+
   return (
-    <button onClick={toggleMode} title={`Switch to ${mode === "light" ? "dark" : "light"} mode`}
-      style={{
-        width: 52, height: 28, borderRadius: 999,
-        background: mode === "dark" ? theme.accent : theme.border,
-        border: "none", cursor: "pointer", position: "relative",
-        transition: "background 0.3s ease", flexShrink: 0,
-        display: "flex", alignItems: "center",
-      }}>
-      <span style={{ position:"absolute", left:7, fontSize:12,
-                     opacity: mode==="light" ? 1 : 0.35, transition:"opacity 0.2s" }}>☀</span>
-      <span style={{ position:"absolute", right:7, fontSize:11,
-                     opacity: mode==="dark" ? 1 : 0.35, transition:"opacity 0.2s" }}>☽</span>
-      <div style={{
-        position:"absolute", top:3,
-        left: mode === "dark" ? 27 : 3,
-        width:22, height:22, borderRadius:"50%",
-        background:"white", boxShadow:"0 1px 4px rgba(0,0,0,0.25)",
-        transition:"left 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)",
-      }}/>
-    </button>
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => { setOpen(o => !o); if (!open) load(); }}
+        title="Notifications"
+        style={{
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "4px 8px", borderRadius: 8, position: "relative",
+          display: "flex", alignItems: "center", color: theme.textMuted,
+          fontSize: 16, transition: "color 0.15s",
+        }}
+        onMouseEnter={e => e.currentTarget.style.color = theme.accent}
+        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
+        🔔
+        {unread > 0 && (
+          <span style={{
+            position: "absolute", top: 0, right: 2,
+            background: theme.accent, color: "#0f0f0f",
+            borderRadius: "50%", width: 16, height: 16,
+            fontSize: 9, fontWeight: 800, lineHeight: "16px", textAlign: "center",
+          }}>
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <DropPanel theme={theme} style={{ minWidth: 300, right: "auto", left: "50%", transform: "translateX(-50%)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "6px 14px 10px", borderBottom: `1px solid ${theme.border}` }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: theme.text }}>Notifications</span>
+            {unread > 0 && (
+              <button onClick={markAll}
+                style={{ background: "none", border: "none", cursor: "pointer",
+                         fontSize: 10, color: theme.accentText, fontWeight: 700, padding: 0 }}>
+                Mark all read
+              </button>
+            )}
+          </div>
+          {notifs.length === 0 ? (
+            <div style={{ padding: "20px 14px", textAlign: "center", fontSize: 12, color: theme.textDim }}>
+              No notifications yet
+            </div>
+          ) : notifs.slice(0, 20).map(n => (
+            <div key={n.id} style={{
+              padding: "8px 14px", display: "flex", alignItems: "flex-start", gap: 10,
+              background: !n.read ? `${theme.accent}0d` : "transparent",
+            }}>
+              <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>
+                {TYPE_ICONS[n.type] || "ℹ"}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: theme.text, lineHeight: 1.4 }}>{n.message}</div>
+                <div style={{ fontSize: 10, color: theme.textDim, marginTop: 2 }}>{timeAgo(n.created_at)}</div>
+              </div>
+              {!n.read && (
+                <div style={{ width: 6, height: 6, borderRadius: "50%",
+                               background: theme.accent, flexShrink: 0, marginTop: 4 }}/>
+              )}
+            </div>
+          ))}
+        </DropPanel>
+      )}
+    </div>
   );
 }
 
-const TABS = [
-  { id:"jobs",     label:"Jobs",     icon:"💼" },
-  { id:"database", label:"Database", icon:"🗃" },
+// ── Profile switcher (shown in docked pill) ───────────────────
+function ProfileSwitcher({ theme, profiles, onActivate }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false));
+
+  const active = profiles.find(p => p.is_active);
+  if (!profiles.length) return null;
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Switch profile"
+        style={{
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "4px 10px", borderRadius: 8,
+          display: "flex", alignItems: "center", gap: 5,
+          color: theme.textMuted, fontSize: 12, fontWeight: 600,
+          transition: "color 0.15s", maxWidth: 130, overflow: "hidden",
+        }}
+        onMouseEnter={e => e.currentTarget.style.color = theme.text}
+        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%",
+                        background: theme.accent, flexShrink: 0 }}/>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis",
+                        whiteSpace: "nowrap", maxWidth: 96 }}>
+          {active?.profile_name || "Profile"}
+        </span>
+        <span style={{ fontSize: 9 }}>▾</span>
+      </button>
+
+      {open && (
+        <DropPanel theme={theme} style={{ minWidth: 200 }}>
+          <div style={{ padding: "6px 14px 8px", fontSize: 10, fontWeight: 700,
+                         textTransform: "uppercase", letterSpacing: "0.08em", color: theme.textDim }}>
+            Switch Profile
+          </div>
+          {profiles.map(p => (
+            <button key={p.id}
+              onClick={() => { onActivate(p.id); setOpen(false); }}
+              onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, width: "100%",
+                background: "transparent", border: "none", padding: "8px 14px",
+                cursor: "pointer", fontSize: 13, color: theme.text, textAlign: "left",
+              }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                              background: p.is_active ? theme.accent : theme.border }}/>
+              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.profile_name}
+              </span>
+              {p.is_active && (
+                <span style={{ fontSize: 10, color: theme.accent, fontWeight: 700 }}>✓</span>
+              )}
+            </button>
+          ))}
+        </DropPanel>
+      )}
+    </div>
+  );
+}
+
+// ── Quick actions ─────────────────────────────────────────────
+function QuickActions({ theme, onTabChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false));
+
+  const actions = [
+    { icon: "🔍", label: "Search new role", action: () => { onTabChange?.("jobs"); setOpen(false); } },
+    { icon: "⚡", label: "Best match",       action: () => { onTabChange?.("jobs"); setOpen(false); } },
+    { icon: "📄", label: "Export PDF",       action: () => { window.print(); setOpen(false); } },
+  ];
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Quick actions"
+        style={{
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "4px 8px", borderRadius: 8,
+          color: theme.textMuted, fontSize: 16, transition: "color 0.15s",
+        }}
+        onMouseEnter={e => e.currentTarget.style.color = theme.accent}
+        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
+        ⚡
+      </button>
+
+      {open && (
+        <DropPanel theme={theme}
+          style={{ minWidth: 200, right: "auto", left: "50%", transform: "translateX(-50%)" }}>
+          <div style={{ padding: "6px 14px 8px", fontSize: 10, fontWeight: 700,
+                         textTransform: "uppercase", letterSpacing: "0.08em", color: theme.textDim }}>
+            Quick Actions
+          </div>
+          {actions.map(a => (
+            <button key={a.label} onClick={a.action}
+              onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, width: "100%",
+                background: "transparent", border: "none", padding: "9px 14px",
+                cursor: "pointer", fontSize: 13, color: theme.text, textAlign: "left",
+              }}>
+              <span>{a.icon}</span>
+              <span>{a.label}</span>
+            </button>
+          ))}
+        </DropPanel>
+      )}
+    </div>
+  );
+}
+
+// ── Settings gear ─────────────────────────────────────────────
+function SettingsGear({ theme, onTabChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false));
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Settings"
+        style={{
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "4px 8px", borderRadius: 8,
+          color: theme.textMuted, fontSize: 15, transition: "color 0.15s",
+        }}
+        onMouseEnter={e => e.currentTarget.style.color = theme.text}
+        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
+        ⚙
+      </button>
+
+      {open && (
+        <DropPanel theme={theme} style={{ right: 0, minWidth: 180 }}>
+          <button
+            onClick={() => { onTabChange?.("profile"); setOpen(false); }}
+            onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, width: "100%",
+              background: "transparent", border: "none", padding: "9px 14px",
+              cursor: "pointer", fontSize: 13, color: theme.text, textAlign: "left",
+            }}>
+            ✦ Profile Settings
+          </button>
+        </DropPanel>
+      )}
+    </div>
+  );
+}
+
+// ── Apply modes ───────────────────────────────────────────────
+const APPLY_MODES = [
+  { value: "SIMPLE",         label: "Simple",         icon: "⚡", desc: "Job board only — no generation" },
+  { value: "TAILORED",       label: "Tailored",        icon: "✦", desc: "Rewrite bullets, fixed employers" },
+  { value: "CUSTOM_SAMPLER", label: "Custom Sampler",  icon: "⚙", desc: "Full customisation, JD-driven companies" },
 ];
 
-export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserChange, resumeWidget, hideLogo = false }) {
-  const { theme, accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
-  const { mode: vpMode } = useViewport();
-  const isMobile = vpMode === "mobile" || vpMode === "tablet";
-
-  // Mode picker
-  const [modeOpen,    setModeOpen]    = useState(false);
-  const modeRef = useRef(null);
-  useClickOutside(modeRef, () => setModeOpen(false));
-
-  // User menu (avatar click)
-  const [userOpen,    setUserOpen]    = useState(false);
-  const userRef = useRef(null);
-  useClickOutside(userRef, () => setUserOpen(false));
-
-  // Apify token
+// ── User avatar + full menu ────────────────────────────────────
+function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget }) {
+  const [open,        setOpen]        = useState(false);
   const [tokenInput,  setTokenInput]  = useState("");
   const [tokenSaving, setTokenSaving] = useState(false);
   const [tokenMsg,    setTokenMsg]    = useState("");
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false));
+  const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
 
   const currentMode = user?.applyMode || "TAILORED";
-  const modeObj = APPLY_MODES.find(m => m.value === currentMode) || APPLY_MODES[1];
 
   const selectMode = async (val) => {
     try {
-      await api("/api/settings/apply-mode", { method:"PATCH", body:JSON.stringify({ mode:val }) });
+      await api("/api/settings/apply-mode", { method: "PATCH", body: JSON.stringify({ mode: val }) });
       if (onUserChange) onUserChange(u => ({ ...u, applyMode: val }));
     } catch {}
-    setModeOpen(false);
   };
 
   const saveToken = async () => {
     if (!tokenInput.trim()) return;
     setTokenSaving(true);
     try {
-      await api("/api/settings/apify-token", { method:"PATCH", body:JSON.stringify({ token:tokenInput.trim() }) });
+      await api("/api/settings/apify-token", { method: "PATCH", body: JSON.stringify({ token: tokenInput.trim() }) });
       setTokenMsg("✓ Saved");
       setTokenInput("");
     } catch(e) { setTokenMsg("✗ " + e.message); }
@@ -152,401 +400,309 @@ export default function TopBar({ user, activeTab, onTabChange, onLogout, onUserC
     setTimeout(() => setTokenMsg(""), 3000);
   };
 
-  const tabs = TABS;
-
   const menuItemStyle = {
     padding: "10px 16px", cursor: "pointer", fontSize: 13,
     color: theme.text, background: "transparent", border: "none",
     display: "block", width: "100%", textAlign: "left",
-    transition: "background 0.1s",
   };
 
   return (
-    <div style={{
-      height: 56,
-      background: theme.surface,
-      borderBottom: `3px solid ${theme.accent}`,
-      display: "flex", alignItems: "center",
-      padding: isMobile ? "0 12px" : "0 20px",
-      gap: isMobile ? 8 : 24,
-      position: "sticky", top: 0, zIndex: 100,
-      flexShrink: 0,
-    }}>
-      {/* Brand logo — hidden when ScrollDock is present */}
-      {!hideLogo && (
-        <div style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
-          <LucyLogo theme={theme} mini={isMobile}/>
-        </div>
-      )}
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title={user?.username}
+        style={{
+          width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer",
+          background: theme.accent, color: "#0f0f0f",
+          fontWeight: 800, fontSize: 12,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          outline: open ? `2px solid ${theme.accent}` : "none",
+          outlineOffset: 2, transition: "outline 0.15s",
+          fontFamily: "'DM Sans',system-ui,sans-serif",
+        }}>
+        {(user?.username || "U")[0].toUpperCase()}
+      </button>
 
-      {/* Nav tabs */}
-      <nav style={{ display:"flex", alignItems:"center", gap:isMobile?0:4, flex:1 }}>
-        {tabs.map(t => {
-          const isActive = activeTab === t.id;
-          return (
-            <button key={t.id} onClick={() => onTabChange(t.id)}
-              style={{
-                background: "transparent", border: "none",
-                padding: isMobile ? "6px 8px" : "6px 14px", borderRadius: 4,
-                fontFamily: "'Barlow Condensed', 'DM Sans', sans-serif",
-                fontWeight: isActive ? 800 : 600,
-                fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
-                color: isActive ? theme.text : theme.textMuted,
-                cursor: "pointer", position: "relative",
-                transition: "color 0.15s",
-              }}>
-              {isMobile ? t.icon : t.label}
-              {isActive && (
-                <motion.div layoutId="tab-underline"
-                  style={{
-                    position: "absolute", bottom: -1, left: "50%",
-                    transform: "translateX(-50%)",
-                    width: 16, height: 2, borderRadius: 999,
-                    background: theme.accent,
-                  }}/>
-              )}
-            </button>
-          );
-        })}
-      </nav>
-
-      {/* Right side controls */}
-      <div style={{ display:"flex", alignItems:"center", gap:isMobile?4:8, flexShrink:0 }}>
-        <ThemeToggle/>
-
-        {/* Mode chip — hidden on mobile to save space */}
-        {!isMobile && (
-          <div ref={modeRef} style={{ position:"relative" }}>
+      {open && (
+        <DropPanel theme={theme} style={{ right: 0, minWidth: 280 }}>
+          {/* PROFILE nav */}
+          <div style={{ padding: "10px 16px 8px", borderBottom: `1px solid ${theme.border}` }}>
             <button
-              onClick={() => setModeOpen(o => !o)}
+              onClick={() => { setOpen(false); onTabChange?.("profile"); }}
               style={{
-                display:"flex", alignItems:"center", gap:5,
-                background: theme.accentMuted, color: theme.accentText,
-                border: `1px solid ${theme.accent}55`,
-                borderRadius: 999, padding:"4px 12px",
-                fontSize: 11, fontWeight: 700, cursor:"pointer",
-                transition: "border-radius 1s ease",
-              }}>
-              <span>{modeObj.icon}</span>
-              <span>{modeObj.label}</span>
+                background: "transparent", border: "none", padding: 0, cursor: "pointer",
+                fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
+                fontWeight: 800, fontSize: 14, letterSpacing: "0.06em",
+                textTransform: "uppercase", color: theme.text,
+                display: "block", width: "100%", textAlign: "left",
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = theme.accent}
+              onMouseLeave={e => e.currentTarget.style.color = theme.text}>
+              PROFILE
             </button>
-            {modeOpen && (
-              <Panel theme={theme} style={{ minWidth:220 }}>
-                <div style={{ fontSize:10, letterSpacing:"0.1em", textTransform:"uppercase",
-                               padding:"8px 16px 6px", color:theme.textDim, fontWeight:700 }}>
-                  Apply Mode
-                </div>
-                {APPLY_MODES.map(m => (
-                  <button key={m.value}
-                    onClick={() => selectMode(m.value)}
-                    onMouseEnter={e => e.currentTarget.style.background=theme.surfaceHigh}
-                    onMouseLeave={e => e.currentTarget.style.background=m.value===currentMode?"#e8f6fb":"transparent"}
-                    style={{
-                      ...menuItemStyle,
-                      background: m.value === currentMode ? theme.accentMuted : "transparent",
-                      display:"flex", alignItems:"center", gap:10,
-                    }}>
-                    <span style={{ fontWeight:700 }}>{m.icon} {m.label}</span>
-                    <span style={{ fontSize:10, color:theme.textDim, flex:1 }}>{m.desc}</span>
-                    {m.value === currentMode && <span style={{ color:theme.accent, fontWeight:700 }}>✓</span>}
+            <div style={{ fontSize: 10, color: theme.textDim, marginTop: 2 }}>
+              {user?.username} · {user?.isAdmin ? "Administrator" : "Member"}
+            </div>
+          </div>
+
+          {/* Accent color */}
+          <div style={{ padding: "10px 16px 8px", borderBottom: `1px solid ${theme.border}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
+              Accent Color
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {ACCENT_OPTIONS.map(opt => (
+                <button key={opt.id} title={opt.label} onClick={() => setAccentId(opt.id)}
+                  style={{
+                    width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                    background: opt.color,
+                    border: accentId === opt.id ? `2px solid ${theme.text}` : "2px solid transparent",
+                    outline: accentId === opt.id ? `1.5px solid ${opt.color}` : "none",
+                    outlineOffset: "1px", cursor: "pointer",
+                    transform: accentId === opt.id ? "scale(1.25)" : "scale(1)",
+                    transition: "transform 0.15s", padding: 0,
+                  }}/>
+              ))}
+            </div>
+          </div>
+
+          {/* Apply mode */}
+          <div style={{ padding: "8px 16px", borderBottom: `1px solid ${theme.border}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 6 }}>
+              Apply Mode
+            </div>
+            {APPLY_MODES.map(m => (
+              <button key={m.value} onClick={() => selectMode(m.value)}
+                onMouseEnter={e => e.currentTarget.style.background = theme.surfaceHigh}
+                onMouseLeave={e => e.currentTarget.style.background = m.value === currentMode ? theme.accentMuted : "transparent"}
+                style={{
+                  background: m.value === currentMode ? theme.accentMuted : "transparent",
+                  padding: "6px 0", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 10,
+                  border: "none", width: "100%", textAlign: "left",
+                  fontSize: 13, color: theme.text,
+                }}>
+                <span style={{ fontWeight: 700 }}>{m.icon} {m.label}</span>
+                <span style={{ fontSize: 10, color: theme.textDim, flex: 1 }}>{m.desc}</span>
+                {m.value === currentMode && <span style={{ color: theme.accent, fontWeight: 700 }}>✓</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* Resume widget */}
+          {resumeWidget && (
+            <div style={{ padding: "10px 16px 12px", borderBottom: `1px solid ${theme.border}` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                             letterSpacing: "0.08em", color: theme.textDim, marginBottom: 6 }}>
+                Base Resume
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button
+                  onClick={() => !resumeWidget.uploading && resumeWidget.onUploadClick?.()}
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${resumeWidget.text ? "#16a34a44" : theme.border}`,
+                    borderRadius: 2, padding: "6px 10px", cursor: "pointer",
+                    fontSize: 11, flex: 1,
+                    color: resumeWidget.uploading ? "#d97706" : resumeWidget.text ? "#16a34a" : theme.textMuted,
+                    fontFamily: "'DM Sans',system-ui",
+                  }}>
+                  {resumeWidget.uploading ? "⏳ Parsing…"
+                    : resumeWidget.text
+                      ? `✓ ${(resumeWidget.fileName || "").length > 24
+                          ? (resumeWidget.fileName || "").slice(0, 24) + "…"
+                          : resumeWidget.fileName}`
+                    : "📄 Upload Resume"}
+                </button>
+                {resumeWidget.text && !resumeWidget.uploading && (
+                  <button onClick={() => resumeWidget.onClear?.()}
+                    style={{ background: "none", border: "none", color: "#dc2626",
+                             cursor: "pointer", fontSize: 12, padding: "4px 6px", flexShrink: 0 }}>
+                    ✕
                   </button>
-                ))}
-                {/* Base Resume */}
-                {resumeWidget && (
-                  <div style={{ borderTop:`1px solid ${theme.border}`, padding:"10px 16px 8px" }}>
-                    <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
-                                   letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
-                      Base Resume
-                    </div>
-                    <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                      <button
-                        onClick={() => !resumeWidget.uploading && resumeWidget.onUploadClick?.()}
-                        style={{
-                          background:"transparent",
-                          border:`1px solid ${resumeWidget.text ? "#16a34a44" : theme.border}`,
-                          borderRadius:2, padding:"6px 10px", cursor:"pointer",
-                          fontSize:11, flex:1,
-                          color: resumeWidget.uploading ? "#d97706" : resumeWidget.text ? "#16a34a" : theme.textMuted,
-                          fontFamily:"'DM Sans',system-ui",
-                        }}>
-                        {resumeWidget.uploading ? "⏳ Parsing…"
-                          : resumeWidget.text
-                            ? `✓ ${(resumeWidget.fileName||"").length>24 ? (resumeWidget.fileName||"").slice(0,24)+"…" : resumeWidget.fileName}`
-                          : "📄 Upload Resume"}
-                      </button>
-                      {resumeWidget.text && !resumeWidget.uploading && (
-                        <button onClick={() => resumeWidget.onClear?.()}
-                          style={{ background:"none", border:"none", color:"#dc2626",
-                                   cursor:"pointer", fontSize:12, padding:"4px 6px", flexShrink:0 }}>
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                    {/* Enhance button — only shown when resume is uploaded */}
-                    {resumeWidget.text && !resumeWidget.uploading && (
-                      <div style={{ marginTop:8 }}>
-                        {/* STATE 1: free enhance available */}
-                        {!resumeWidget.enhanceUsed && (
-                          <button
-                            onClick={() => resumeWidget.onEnhance?.()}
-                            disabled={resumeWidget.enhancing}
-                            title="One-time free enhancement — rewrites your resume for better ATS without changing any facts or experience"
-                            style={{
-                              width:"100%", padding:"7px 10px", borderRadius:4,
-                              background: resumeWidget.enhancing ? theme.surfaceHigh : theme.accentMuted,
-                              color: theme.accentText, border:`1px solid ${theme.accent}44`,
-                              cursor: resumeWidget.enhancing ? "not-allowed" : "pointer",
-                              fontSize:11, fontWeight:700, fontFamily:"'DM Sans',system-ui",
-                              opacity: resumeWidget.enhancing ? 0.7 : 1,
-                            }}>
-                            {resumeWidget.enhancing ? "⏳ Rewriting for better ATS…" : "✨ Enhance Resume"}
-                          </button>
-                        )}
-                        {/* STATE 2: used, not paid */}
-                        {resumeWidget.enhanceUsed && !resumeWidget.enhancePaid && (
-                          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
-                            <span style={{
-                              fontSize:11, fontWeight:700,
-                              background:"#dcfce7", color:"#166534",
-                              padding:"4px 10px", borderRadius:999,
-                            }}>Enhanced ✓</span>
-                            <a href="/pricing" style={{ fontSize:10, color:theme.textMuted, textDecoration:"none" }}>
-                              Upgrade to enhance again →
-                            </a>
-                          </div>
-                        )}
-                        {/* STATE 3: paid — reserved for future */}
-                        {resumeWidget.enhanceUsed && resumeWidget.enhancePaid && (
-                          <button
-                            onClick={() => resumeWidget.onEnhance?.()}
-                            disabled={resumeWidget.enhancing}
-                            style={{
-                              width:"100%", padding:"7px 10px", borderRadius:4,
-                              background: theme.accentMuted, color: theme.accentText,
-                              border:`1px solid ${theme.accent}44`,
-                              cursor: resumeWidget.enhancing ? "not-allowed" : "pointer",
-                              fontSize:11, fontWeight:700, fontFamily:"'DM Sans',system-ui",
-                            }}>
-                            {resumeWidget.enhancing ? "⏳ Rewriting…" : "✨ Enhance Resume"}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
                 )}
-              </Panel>
+              </div>
+              {resumeWidget.text && !resumeWidget.uploading && !resumeWidget.enhanceUsed && (
+                <button
+                  onClick={() => resumeWidget.onEnhance?.()}
+                  disabled={resumeWidget.enhancing}
+                  style={{
+                    marginTop: 8, width: "100%", padding: "7px 10px", borderRadius: 4,
+                    background: resumeWidget.enhancing ? theme.surfaceHigh : theme.accentMuted,
+                    color: theme.accentText, border: `1px solid ${theme.accent}44`,
+                    cursor: resumeWidget.enhancing ? "not-allowed" : "pointer",
+                    fontSize: 11, fontWeight: 700, fontFamily: "'DM Sans',system-ui",
+                    opacity: resumeWidget.enhancing ? 0.7 : 1,
+                  }}>
+                  {resumeWidget.enhancing ? "⏳ Rewriting for better ATS…" : "✨ Enhance Resume"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Apify token */}
+          <div style={{ padding: "10px 16px 12px", borderBottom: `1px solid ${theme.border}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 4 }}>
+              Apify Token
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                value={tokenInput} onChange={e => setTokenInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && saveToken()}
+                placeholder="apify_api_…" type="password"
+                style={{
+                  flex: 1, height: 32, padding: "0 10px",
+                  border: `1px solid ${tokenInput && !tokenInput.startsWith("apify_api_") ? "#dc2626" : theme.border}`,
+                  borderRadius: 4, background: theme.surface, color: theme.text,
+                  fontSize: 11, outline: "none",
+                }}/>
+              <button onClick={saveToken} disabled={tokenSaving}
+                style={{
+                  background: tokenSaving ? theme.border : theme.accent,
+                  color: "#0f0f0f", border: "none", borderRadius: 4,
+                  padding: "0 12px", cursor: "pointer", fontSize: 11,
+                  fontWeight: 700, flexShrink: 0,
+                }}>
+                {tokenSaving ? "…" : "Save"}
+              </button>
+            </div>
+            {tokenMsg && (
+              <div style={{ fontSize: 10, marginTop: 4,
+                             color: tokenMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>
+                {tokenMsg}
+              </div>
             )}
           </div>
+
+          {/* Sign out */}
+          <button
+            onClick={() => { setOpen(false); onLogout?.(); }}
+            onMouseEnter={e => e.currentTarget.style.background = "#fef2f2"}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            style={{ ...menuItemStyle, color: "#dc2626", fontWeight: 600 }}>
+            Sign Out
+          </button>
+        </DropPanel>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Main TopBar — position:fixed, convergence animation
+// ═══════════════════════════════════════════════════════════════
+export default function TopBar({
+  user, onTabChange, onLogout, onUserChange, resumeWidget, onProfileActivate,
+}) {
+  const { theme } = useTheme();
+  const { progress: rawProgress, pinned } = useAppScroll();
+  // pinned (pagination click) holds dock fully collapsed
+  const p = pinned ? 1 : rawProgress;
+  const scrolled = p >= 0.5;
+
+  const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth);
+    window.addEventListener("resize", onResize, { passive: true });
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Domain profiles for docked pill switcher
+  const [profiles, setProfiles] = useState([]);
+  useEffect(() => {
+    if (!user) return;
+    api("/api/domain-profiles")
+      .then(d => setProfiles(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [user]);
+
+  const activateProfile = async (id) => {
+    try {
+      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
+      setProfiles(ps => ps.map(pr => ({ ...pr, is_active: pr.id === id ? 1 : 0 })));
+      onProfileActivate?.();
+    } catch {}
+  };
+
+  // ── Geometry interpolation (same technique as the old AppDockBar) ──
+  const PILL_W = 400;
+  const [ar, ag, ab] = hexToRgb(theme.accent);
+
+  const pillWidth  = Math.round(vw - p * (vw - PILL_W));
+  const pillHeight = Math.round(52 - p * 8);
+  const radius     = Math.round(p * 9999);
+  const blur       = Math.round(12 + p * 8);
+  const topOffset  = Math.round(p * 10);
+  const padH       = Math.round(20 - p * 4);
+
+  // Background: solid surface → glassy accent gradient
+  const surfaceAlphaHex = Math.round((0.95 - p * 0.45) * 255).toString(16).padStart(2, "0");
+  const bgBase = `${theme.surface}${surfaceAlphaHex}`;
+  const a1 = (p * 0.18).toFixed(3);
+  const a2 = (p * 0.08).toFixed(3);
+  const a3 = (p * 0.12).toFixed(3);
+  const pillBg = `linear-gradient(135deg, rgba(${ar},${ag},${ab},${a1}) 0%, rgba(${ar},${ag},${ab},${a2}) 40%, rgba(255,255,255,${a3}) 100%), ${bgBase}`;
+
+  // Border: barely visible at full width → accent pill border when collapsed
+  const borderColor = p < 0.02
+    ? `${theme.border}33`
+    : `rgba(${ar},${ag},${ab},${(p * 0.25).toFixed(3)})`;
+
+  // Shadow: elevation + glassy inset highlight
+  const shadow = p > 0.05
+    ? `0 ${Math.round(p * 4)}px ${Math.round(p * 24)}px rgba(0,0,0,${(p * 0.10).toFixed(2)}), inset 0 1px 0 rgba(255,255,255,${(p * 0.35).toFixed(2)})`
+    : "none";
+
+  return (
+    <div style={{
+      position: "fixed",
+      top: topOffset,
+      left: "50%",
+      transform: "translateX(-50%)",
+      width: pillWidth,
+      height: pillHeight,
+      borderRadius: radius,
+      background: pillBg,
+      backdropFilter: `blur(${blur}px)`,
+      WebkitBackdropFilter: `blur(${blur}px)`,
+      border: `1px solid ${borderColor}`,
+      boxShadow: shadow,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: `0 ${padH}px`,
+      overflow: "hidden",
+      zIndex: 1000,
+      fontFamily: "'DM Sans',system-ui,sans-serif",
+    }}>
+      {/* Logo — "R" always visible, "esume Master" collapses */}
+      <AnimatedLucyLogo theme={theme} progress={p}/>
+
+      {/* Center: profile switcher — only shown when docked */}
+      {scrolled && profiles.length > 0 && (
+        <>
+          <Divider theme={theme}/>
+          <ProfileSwitcher theme={theme} profiles={profiles} onActivate={activateProfile}/>
+        </>
+      )}
+
+      {/* Right: utility icons */}
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        {scrolled && <Divider theme={theme}/>}
+        {user && <NotificationsBell theme={theme}/>}
+        {user && <QuickActions theme={theme} onTabChange={onTabChange}/>}
+        <SettingsGear theme={theme} onTabChange={onTabChange}/>
+        {scrolled && <Divider theme={theme}/>}
+        {user && (
+          <UserAvatarMenu
+            theme={theme} user={user} onLogout={onLogout}
+            onTabChange={onTabChange} onUserChange={onUserChange}
+            resumeWidget={resumeWidget}
+          />
         )}
-
-        {/* Avatar — opens user menu with API key + sign out */}
-        <div ref={userRef} style={{ position:"relative" }}>
-          <Avatar
-            onClick={() => setUserOpen(o => !o)}
-            style={{ width:36, height:36, cursor:"pointer",
-                     border:`2px solid ${userOpen ? theme.accent : theme.border}`,
-                     borderRadius:"50%", transition:"border-color 0.15s" }}>
-            <AvatarFallback style={{ background:theme.accent, color:"#0f0f0f",
-                                      fontWeight:800, fontSize:13 }}>
-              {(user?.username||"U")[0].toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-
-          {userOpen && (
-            <Panel theme={theme} style={{ minWidth:280 }}>
-              {/* PROFILE nav button + user info */}
-              <div style={{ padding:"10px 16px 8px", borderBottom:`1px solid ${theme.border}` }}>
-                <button
-                  onClick={() => { setUserOpen(false); onTabChange("profile"); }}
-                  style={{
-                    background:"transparent", border:"none", padding:0, cursor:"pointer",
-                    fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
-                    fontWeight:800, fontSize:14, letterSpacing:"0.06em",
-                    textTransform:"uppercase", color:theme.text,
-                    display:"block", width:"100%", textAlign:"left",
-                    transition:"color 0.15s",
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.color=theme.accent}
-                  onMouseLeave={e => e.currentTarget.style.color=theme.text}>
-                  PROFILE
-                </button>
-                <div style={{ fontSize:10, color:theme.textDim, marginTop:2 }}>
-                  {user?.username} · {user?.isAdmin ? "Administrator" : "Member"}
-                </div>
-              </div>
-
-              {/* Accent color */}
-              <div style={{ padding:"10px 16px 8px", borderBottom:`1px solid ${theme.border}` }}>
-                <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
-                               letterSpacing:"0.08em", color:theme.textDim, marginBottom:8 }}>
-                  Accent Color
-                </div>
-                <div style={{
-                  display:"flex", alignItems:"center", gap:8,
-                  overflowX:"auto", paddingBottom:2,
-                  /* touch-scroll */ WebkitOverflowScrolling:"touch",
-                }}>
-                  {ACCENT_OPTIONS.map(opt => (
-                    <button key={opt.id} title={opt.label} onClick={() => setAccentId(opt.id)}
-                      style={{
-                        width:22, height:22, borderRadius:"50%", flexShrink:0,
-                        background: opt.color,
-                        border: accentId === opt.id ? `2px solid ${theme.text}` : "2px solid transparent",
-                        outline: accentId === opt.id ? `1.5px solid ${opt.color}` : "none",
-                        outlineOffset:"1px",
-                        cursor:"pointer",
-                        transform: accentId === opt.id ? "scale(1.25)" : "scale(1)",
-                        transition:"transform 0.15s, border-color 0.15s",
-                        padding:0,
-                      }}/>
-                  ))}
-                </div>
-              </div>
-
-              {/* Mode chip in mobile user menu */}
-              {isMobile && (
-                <div style={{ padding:"8px 16px 0", borderBottom:`1px solid ${theme.border}` }}>
-                  <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
-                                 letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
-                    Apply Mode
-                  </div>
-                  {APPLY_MODES.map(m => (
-                    <button key={m.value}
-                      onClick={() => selectMode(m.value)}
-                      onMouseEnter={e => e.currentTarget.style.background=theme.surfaceHigh}
-                      onMouseLeave={e => e.currentTarget.style.background="transparent"}
-                      style={{
-                        ...menuItemStyle,
-                        display:"flex", alignItems:"center", gap:8, padding:"6px 0",
-                        background: "transparent",
-                      }}>
-                      <span style={{ fontWeight:700 }}>{m.icon} {m.label}</span>
-                      {m.value === currentMode && <span style={{ color:theme.accent, fontWeight:700 }}>✓</span>}
-                    </button>
-                  ))}
-                  {resumeWidget && (
-                    <div style={{ paddingTop:8 }}>
-                      <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
-                                     letterSpacing:"0.08em", color:theme.textDim, marginBottom:6 }}>
-                        Base Resume
-                      </div>
-                      <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                        <button
-                          onClick={() => !resumeWidget.uploading && resumeWidget.onUploadClick?.()}
-                          style={{
-                            background:"transparent",
-                            border:`1px solid ${resumeWidget.text ? "#16a34a44" : theme.border}`,
-                            borderRadius:2, padding:"6px 10px", cursor:"pointer",
-                            fontSize:11, flex:1,
-                            color: resumeWidget.uploading ? "#d97706" : resumeWidget.text ? "#16a34a" : theme.textMuted,
-                            fontFamily:"'DM Sans',system-ui",
-                          }}>
-                          {resumeWidget.uploading ? "⏳ Parsing…"
-                            : resumeWidget.text
-                              ? `✓ ${(resumeWidget.fileName||"").length>24 ? (resumeWidget.fileName||"").slice(0,24)+"…" : resumeWidget.fileName}`
-                            : "📄 Upload Resume"}
-                        </button>
-                        {resumeWidget.text && !resumeWidget.uploading && (
-                          <button onClick={() => resumeWidget.onClear?.()}
-                            style={{ background:"none", border:"none", color:"#dc2626",
-                                     cursor:"pointer", fontSize:12, padding:"4px 6px", flexShrink:0 }}>
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                      {resumeWidget.text && !resumeWidget.uploading && (
-                        <div style={{ marginTop:8, paddingBottom:8 }}>
-                          {!resumeWidget.enhanceUsed && (
-                            <button
-                              onClick={() => resumeWidget.onEnhance?.()}
-                              disabled={resumeWidget.enhancing}
-                              style={{
-                                width:"100%", padding:"7px 10px", borderRadius:4,
-                                background: resumeWidget.enhancing ? theme.surfaceHigh : theme.accentMuted,
-                                color: theme.accentText, border:`1px solid ${theme.accent}44`,
-                                cursor: resumeWidget.enhancing ? "not-allowed" : "pointer",
-                                fontSize:11, fontWeight:700, fontFamily:"'DM Sans',system-ui",
-                              }}>
-                              {resumeWidget.enhancing ? "⏳ Rewriting…" : "✨ Enhance Resume"}
-                            </button>
-                          )}
-                          {resumeWidget.enhanceUsed && !resumeWidget.enhancePaid && (
-                            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-                              <span style={{ fontSize:11, fontWeight:700, background:"#dcfce7", color:"#166534",
-                                              padding:"3px 8px", borderRadius:999 }}>Enhanced ✓</span>
-                              <a href="/pricing" style={{ fontSize:10, color:theme.textMuted, textDecoration:"none" }}>
-                                Upgrade →
-                              </a>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* API key */}
-              <div style={{ padding:"10px 16px 12px", borderBottom:`1px solid ${theme.border}` }}>
-                <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
-                               letterSpacing:"0.08em", color:theme.textDim, marginBottom:4 }}>
-                  Apify Token
-                </div>
-                <div style={{ fontSize:10, color:theme.textDim, marginBottom:6, lineHeight:1.5 }}>
-                  Used by{" "}
-                  <code style={{ fontSize:9, background:theme.surfaceHigh, padding:"1px 3px", borderRadius:2 }}>
-                    harvestapi/linkedin-job-search
-                  </code>{" "}to fetch jobs.
-                </div>
-                <div style={{ display:"flex", gap:6 }}>
-                  <input
-                    value={tokenInput} onChange={e => setTokenInput(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && saveToken()}
-                    placeholder="apify_api_…" type="password"
-                    style={{
-                      flex:1, height:32, padding:"0 10px",
-                      border:`1px solid ${tokenInput && !tokenInput.startsWith("apify_api_") ? "#dc2626" : theme.border}`,
-                      borderRadius:4,
-                      background:theme.surface, color:theme.text,
-                      fontSize:11, outline:"none",
-                    }}/>
-                  <button onClick={saveToken} disabled={tokenSaving}
-                    style={{
-                      background: tokenSaving ? theme.border : theme.accent,
-                      color:"#0f0f0f", border:"none", borderRadius:4,
-                      padding:"0 12px", cursor:"pointer", fontSize:11,
-                      fontWeight:700, flexShrink:0,
-                      transition:"border-radius 1s ease",
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.borderRadius="999px"}
-                    onMouseLeave={e => e.currentTarget.style.borderRadius="4px"}>
-                    {tokenSaving ? "…" : "Save"}
-                  </button>
-                </div>
-                {tokenInput && !tokenInput.startsWith("apify_api_") && (
-                  <div style={{ fontSize:10, marginTop:4, color:"#d97706" }}>
-                    ⚠ Token should start with apify_api_
-                  </div>
-                )}
-                {tokenMsg && (
-                  <div style={{ fontSize:10, marginTop:4,
-                                 color: tokenMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>
-                    {tokenMsg}
-                  </div>
-                )}
-              </div>
-
-              {/* Sign out */}
-              <button
-                onClick={() => { setUserOpen(false); onLogout(); }}
-                onMouseEnter={e => e.currentTarget.style.background=theme.dangerMuted||"#fef2f2"}
-                onMouseLeave={e => e.currentTarget.style.background="transparent"}
-                style={{ ...menuItemStyle, color:"#dc2626", fontWeight:600 }}>
-                Sign Out
-              </button>
-            </Panel>
-          )}
-        </div>
       </div>
     </div>
   );
