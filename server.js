@@ -689,6 +689,22 @@ db.pragma("busy_timeout = 5000");
           );
       `
     },
+    {
+      id: "025_clean_wrong_profile_jobs",
+      sql: `
+        -- Remove user_jobs rows with NULL profile tag
+        -- that are not applied jobs.
+        -- These were inserted by the old search_query
+        -- sync before this fix and will never match
+        -- any profile filter.
+        DELETE FROM user_jobs
+        WHERE domain_profile_id IS NULL
+        AND job_id NOT IN (
+          SELECT job_id FROM job_applications
+          WHERE user_id = user_jobs.user_id
+        );
+      `
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -2059,17 +2075,39 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     return res.json({ jobs: [], total: 0, totalPages: 0, page, pageSize });
   }
 
-  db.prepare(`
-    INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
-    SELECT ?, sj.job_id, sj.domain_profile_id
-    FROM scraped_jobs sj
-    WHERE sj.domain_profile_id = (
-      SELECT id FROM domain_profiles WHERE user_id = ? AND is_active = 1 LIMIT 1
-    )
-    AND sj.domain_profile_id IS NOT NULL
-    AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
-    AND CAST(strftime('%s', COALESCE(NULLIF(sj.posted_at,''), datetime(sj.scraped_at, 'unixepoch'))) AS INTEGER) > ${sevenDaysAgo}
-  `).run(userId, userId, userId);
+  // ── Session sync: populate user_jobs from active
+  // domain profile only ──────────────────────────────────
+  // IMPORTANT: uses domain_profile_id not search_query.
+  // Only jobs scraped for the user's active profile
+  // enter their pool. This prevents cross-profile and
+  // cross-user job bleeding.
+  // To change: update the domain_profiles WHERE clause.
+  // ────────────────────────────────────────────────────
+  const syncProfile = db.prepare(`
+    SELECT id FROM domain_profiles
+    WHERE user_id = ? AND is_active = 1
+  `).get(userId);
+
+  if (syncProfile) {
+    db.prepare(`
+      INSERT OR IGNORE INTO user_jobs
+        (user_id, job_id, domain_profile_id)
+      SELECT ?, sj.job_id, sj.domain_profile_id
+      FROM scraped_jobs sj
+      WHERE sj.domain_profile_id = ?
+      AND (
+        (sj.posted_at IS NOT NULL AND sj.posted_at != ''
+          AND CAST(strftime('%s', sj.posted_at) AS INTEGER)
+          > ${sevenDaysAgo})
+        OR ((sj.posted_at IS NULL OR sj.posted_at = '')
+          AND sj.scraped_at > ${sevenDaysAgo})
+      )
+      AND sj.job_id NOT IN (
+        SELECT job_id FROM user_jobs
+        WHERE user_id = ? AND disliked = 1
+      )
+    `).run(userId, syncProfile.id, userId);
+  }
 
   // Keep applied flag in sync with job_applications
   db.prepare(`
@@ -2078,18 +2116,35 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     AND job_id IN (SELECT job_id FROM job_applications WHERE user_id = ?)
   `).run(userId, userId);
 
-  // ── Filter conditions ──
+  // ── Active profile filter ──────────────────────────────
+  // Fetch active profile for WHERE clause.
+  // Same profile used in session sync above.
+  // If no profile: return empty results.
+  // ──────────────────────────────────────────────────────
+  const activeProfile = db.prepare(`
+    SELECT id FROM domain_profiles
+    WHERE user_id = ? AND is_active = 1
+  `).get(userId);
+
+  if (!activeProfile) {
+    return res.json({
+      jobs: [], total: 0, page: 1,
+      pageSize, totalPages: 0,
+    });
+  }
+
+  // ── Filter conditions ──────────────────────────────────
+  // domain_profile_id filter is ALWAYS first and required.
+  // This ensures only jobs from the active profile show.
+  // ──────────────────────────────────────────────────────
   const conditions = [
+    `uj.domain_profile_id = ?`,
     `((sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo}) OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))`,
     `(uj.disliked IS NULL OR uj.disliked = 0)`,
     `(uj.applied IS NULL OR uj.applied = 0)`,
     `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
   ];
-  const filterParams = [];
-
-  // Profile isolation — sessionActiveProfile is guaranteed non-null (early return above)
-  conditions.push(`uj.domain_profile_id = ?`);
-  filterParams.push(sessionActiveProfile.id);
+  const filterParams = [activeProfile.id];
 
   const role = (req.query.role || "").trim().toLowerCase();
   if (role) { conditions.push(`LOWER(sj.search_query) = ?`); filterParams.push(role); }
