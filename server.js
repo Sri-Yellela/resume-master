@@ -650,42 +650,19 @@ db.pragma("busy_timeout = 5000");
     {
       id: "023_clean_wrong_profile_jobs",
       sql: `
-        -- Part 1: Remove user_jobs with NULL or invalid profile IDs (skipping applied jobs)
-        DELETE FROM user_jobs
-        WHERE user_id IN (SELECT id FROM users WHERE is_admin = 0)
-          AND (
-            domain_profile_id IS NULL
-            OR domain_profile_id NOT IN (
-              SELECT id FROM domain_profiles WHERE user_id = user_jobs.user_id
-            )
+        -- Keep only user_jobs that belong to a valid profile or are applied.
+        -- Uses temp table to avoid correlated-subquery limitations in older SQLite.
+        CREATE TEMP TABLE IF NOT EXISTS jobs_to_keep AS
+          SELECT uj.rowid FROM user_jobs uj
+          WHERE uj.domain_profile_id IN (
+            SELECT id FROM domain_profiles WHERE user_id = uj.user_id
           )
-          AND job_id NOT IN (SELECT job_id FROM job_applications);
+          OR uj.job_id IN (SELECT job_id FROM job_applications);
 
-        -- Part 2: Remove PM/coordinator titles from engineering-type profiles
-        -- These were scraped while an SWE profile was active — title doesn't match profile domain
         DELETE FROM user_jobs
-        WHERE user_id IN (SELECT id FROM users WHERE is_admin = 0)
-          AND domain_profile_id IN (
-            SELECT id FROM domain_profiles
-            WHERE user_id = user_jobs.user_id
-              AND (
-                LOWER(COALESCE(role_family,'')) LIKE '%engineer%'
-                OR LOWER(COALESCE(role_family,'')) LIKE '%software%'
-                OR LOWER(COALESCE(domain,'')) LIKE '%engineer%'
-                OR LOWER(COALESCE(domain,'')) LIKE '%software%'
-                OR LOWER(COALESCE(domain,'')) LIKE '%tech%'
-              )
-          )
-          AND job_id IN (
-            SELECT job_id FROM scraped_jobs
-            WHERE LOWER(title) LIKE '%project manager%'
-              OR LOWER(title) LIKE '%project coordinator%'
-              OR LOWER(title) LIKE '%program manager%'
-              OR LOWER(title) LIKE '%project director%'
-              OR LOWER(title) LIKE '%scrum master%'
-              OR LOWER(title) LIKE '%product owner%'
-          )
-          AND job_id NOT IN (SELECT job_id FROM job_applications);
+        WHERE rowid NOT IN (SELECT rowid FROM jobs_to_keep);
+
+        DROP TABLE IF EXISTS jobs_to_keep;
       `
     },
     // Add future migrations here — never edit existing ones
@@ -2062,9 +2039,13 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
     SELECT ?, sj.job_id, sj.domain_profile_id
     FROM scraped_jobs sj
-    WHERE sj.domain_profile_id = ?
+    WHERE sj.domain_profile_id = (
+      SELECT id FROM domain_profiles WHERE user_id = ? AND is_active = 1 LIMIT 1
+    )
+    AND sj.domain_profile_id IS NOT NULL
     AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
-  `).run(userId, sessionActiveProfile.id, userId);
+    AND CAST(strftime('%s', COALESCE(NULLIF(sj.posted_at,''), datetime(sj.scraped_at, 'unixepoch'))) AS INTEGER) > ${sevenDaysAgo}
+  `).run(userId, userId, userId);
 
   // Keep applied flag in sync with job_applications
   db.prepare(`

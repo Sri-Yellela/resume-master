@@ -7,6 +7,21 @@ import { useAppScroll } from "../contexts/AppScrollContext.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { api } from "../lib/api.js";
+import { DockPortal } from "./DockPortal.jsx";
+
+// ── Inject slideDown keyframe once ────────────────────────────
+function injectKeyframes() {
+  if (document.getElementById("topbar-kf")) return;
+  const s = document.createElement("style");
+  s.id = "topbar-kf";
+  s.textContent = `
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+  `;
+  document.head.appendChild(s);
+}
 
 // ── Parse hex → [r,g,b] ──────────────────────────────────────
 function hexToRgb(hex) {
@@ -59,19 +74,6 @@ function AnimatedLucyLogo({ theme, progress: p }) {
   );
 }
 
-// ── Close-on-outside-click ─────────────────────────────────────
-function useClickOutside(ref, onClose) {
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-    document.addEventListener("mousedown", h);
-    document.addEventListener("touchstart", h);
-    return () => {
-      document.removeEventListener("mousedown", h);
-      document.removeEventListener("touchstart", h);
-    };
-  }, [ref, onClose]);
-}
-
 // ── Dock divider ─────────────────────────────────────────────
 function Divider({ theme }) {
   return (
@@ -80,29 +82,13 @@ function Divider({ theme }) {
   );
 }
 
-// ── Dropdown panel ─────────────────────────────────────────────
-function DropPanel({ children, style = {}, theme }) {
-  return (
-    <div style={{
-      position: "absolute", top: "calc(100% + 10px)", right: 0,
-      background: theme.surface, border: `1px solid ${theme.border}`,
-      borderRadius: 12, boxShadow: theme.shadowLg,
-      zIndex: 9999, minWidth: 240, padding: "8px 0",
-      backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-      ...style,
-    }}>
-      {children}
-    </div>
-  );
-}
-
 // ── Notification bell ─────────────────────────────────────────
 function NotificationsBell({ theme }) {
   const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState(null);
   const [notifs, setNotifs] = useState([]);
   const [unread, setUnread] = useState(0);
-  const ref = useRef(null);
-  useClickOutside(ref, () => setOpen(false));
+  const triggerRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -140,9 +126,13 @@ function NotificationsBell({ theme }) {
   };
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div style={{ position: "relative" }}>
       <button
-        onClick={() => { setOpen(o => !o); if (!open) load(); }}
+        ref={triggerRef}
+        onClick={() => {
+          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+          setOpen(o => { if (!o) load(); return !o; });
+        }}
         title="Notifications"
         style={{
           background: "transparent", border: "none", cursor: "pointer",
@@ -166,8 +156,9 @@ function NotificationsBell({ theme }) {
         )}
       </button>
 
-      {open && (
-        <DropPanel theme={theme} style={{ minWidth: 300, right: "auto", left: "50%", transform: "translateX(-50%)" }}>
+      {open && rect && (
+        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
+          style={{ minWidth: 300 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                         padding: "6px 14px 10px", borderBottom: `1px solid ${theme.border}` }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: theme.text }}>Notifications</span>
@@ -201,7 +192,7 @@ function NotificationsBell({ theme }) {
               )}
             </div>
           ))}
-        </DropPanel>
+        </DockPortal>
       )}
     </div>
   );
@@ -210,16 +201,20 @@ function NotificationsBell({ theme }) {
 // ── Profile switcher (shown in docked pill) ───────────────────
 function ProfileSwitcher({ theme, profiles, onActivate }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useClickOutside(ref, () => setOpen(false));
+  const [rect, setRect] = useState(null);
+  const triggerRef = useRef(null);
 
   const active = profiles.find(p => p.is_active);
   if (!profiles.length) return null;
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div style={{ position: "relative" }}>
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={triggerRef}
+        onClick={() => {
+          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+          setOpen(o => !o);
+        }}
         title="Switch profile"
         style={{
           background: "transparent", border: "none", cursor: "pointer",
@@ -239,8 +234,9 @@ function ProfileSwitcher({ theme, profiles, onActivate }) {
         <span style={{ fontSize: 9 }}>▾</span>
       </button>
 
-      {open && (
-        <DropPanel theme={theme} style={{ minWidth: 200 }}>
+      {open && rect && (
+        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
+          style={{ minWidth: 200 }}>
           <div style={{ padding: "6px 14px 8px", fontSize: 10, fontWeight: 700,
                          textTransform: "uppercase", letterSpacing: "0.08em", color: theme.textDim }}>
             Switch Profile
@@ -265,7 +261,7 @@ function ProfileSwitcher({ theme, profiles, onActivate }) {
               )}
             </button>
           ))}
-        </DropPanel>
+        </DockPortal>
       )}
     </div>
   );
@@ -274,8 +270,8 @@ function ProfileSwitcher({ theme, profiles, onActivate }) {
 // ── Quick actions ─────────────────────────────────────────────
 function QuickActions({ theme, onTabChange }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useClickOutside(ref, () => setOpen(false));
+  const [rect, setRect] = useState(null);
+  const triggerRef = useRef(null);
 
   const actions = [
     { icon: "🔍", label: "Search new role", action: () => { onTabChange?.("jobs"); setOpen(false); } },
@@ -284,9 +280,13 @@ function QuickActions({ theme, onTabChange }) {
   ];
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div style={{ position: "relative" }}>
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={triggerRef}
+        onClick={() => {
+          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+          setOpen(o => !o);
+        }}
         title="Quick actions"
         style={{
           background: "transparent", border: "none", cursor: "pointer",
@@ -300,9 +300,9 @@ function QuickActions({ theme, onTabChange }) {
         ⚡
       </button>
 
-      {open && (
-        <DropPanel theme={theme}
-          style={{ minWidth: 200, right: "auto", left: "50%", transform: "translateX(-50%)" }}>
+      {open && rect && (
+        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
+          style={{ minWidth: 200 }}>
           <div style={{ padding: "6px 14px 8px", fontSize: 10, fontWeight: 700,
                          textTransform: "uppercase", letterSpacing: "0.08em", color: theme.textDim }}>
             Quick Actions
@@ -320,7 +320,7 @@ function QuickActions({ theme, onTabChange }) {
               <span>{a.label}</span>
             </button>
           ))}
-        </DropPanel>
+        </DockPortal>
       )}
     </div>
   );
@@ -329,13 +329,17 @@ function QuickActions({ theme, onTabChange }) {
 // ── Settings gear ─────────────────────────────────────────────
 function SettingsGear({ theme, onTabChange }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useClickOutside(ref, () => setOpen(false));
+  const [rect, setRect] = useState(null);
+  const triggerRef = useRef(null);
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div style={{ position: "relative" }}>
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={triggerRef}
+        onClick={() => {
+          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+          setOpen(o => !o);
+        }}
         title="Settings"
         style={{
           background: "transparent", border: "none", cursor: "pointer",
@@ -349,8 +353,9 @@ function SettingsGear({ theme, onTabChange }) {
         ⚙
       </button>
 
-      {open && (
-        <DropPanel theme={theme} style={{ right: 0, minWidth: 180 }}>
+      {open && rect && (
+        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
+          style={{ minWidth: 180 }}>
           <button
             onClick={() => { onTabChange?.("profile"); setOpen(false); }}
             onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
@@ -362,7 +367,7 @@ function SettingsGear({ theme, onTabChange }) {
             }}>
             ✦ Profile Settings
           </button>
-        </DropPanel>
+        </DockPortal>
       )}
     </div>
   );
@@ -378,11 +383,11 @@ const APPLY_MODES = [
 // ── User avatar + full menu ────────────────────────────────────
 function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget }) {
   const [open,        setOpen]        = useState(false);
+  const [rect,        setRect]        = useState(null);
   const [tokenInput,  setTokenInput]  = useState("");
   const [tokenSaving, setTokenSaving] = useState(false);
   const [tokenMsg,    setTokenMsg]    = useState("");
-  const ref = useRef(null);
-  useClickOutside(ref, () => setOpen(false));
+  const triggerRef = useRef(null);
   const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
 
   const currentMode = user?.applyMode || "TAILORED";
@@ -413,9 +418,13 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
   };
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div style={{ position: "relative" }}>
       <button
-        onClick={() => setOpen(o => !o)}
+        ref={triggerRef}
+        onClick={() => {
+          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+          setOpen(o => !o);
+        }}
         title={user?.username}
         style={{
           width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer",
@@ -429,8 +438,9 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
         {(user?.username || "U")[0].toUpperCase()}
       </button>
 
-      {open && (
-        <DropPanel theme={theme} style={{ right: 0, minWidth: 280 }}>
+      {open && rect && (
+        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
+          style={{ minWidth: 280 }}>
           {/* PROFILE nav */}
           <div style={{ padding: "10px 16px 8px", borderBottom: `1px solid ${theme.border}` }}>
             <button
@@ -591,7 +601,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
             style={{ ...menuItemStyle, color: "#dc2626", fontWeight: 600 }}>
             Sign Out
           </button>
-        </DropPanel>
+        </DockPortal>
       )}
     </div>
   );
@@ -609,10 +619,25 @@ export default function TopBar({
   const p = pinned ? 1 : rawProgress;
   const scrolled = p >= 0.5;
 
-  const [hovered,      setHovered]      = useState(false);
+  const [hovered,       setHovered]       = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  const hoverTimerRef = useRef(null);
+
   // Clear hover + search state when un-scrolled
   useEffect(() => { if (!scrolled) { setHovered(false); setSearchFocused(false); } }, [scrolled]);
+
+  // Inject slideDown keyframe
+  useEffect(() => { injectKeyframes(); }, []);
+
+  // Hover handlers with 100ms grace period so gap between pills doesn't dismiss row 2
+  const handleMouseEnter = useCallback(() => {
+    clearTimeout(hoverTimerRef.current);
+    if (scrolled) setHovered(true);
+  }, [scrolled]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (scrolled) hoverTimerRef.current = setTimeout(() => setHovered(false), 100);
+  }, [scrolled]);
 
   const { boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy } = useJobBoard() || {};
 
@@ -640,16 +665,11 @@ export default function TopBar({
     } catch {}
   };
 
-  // ── Geometry interpolation (same technique as the old AppDockBar) ──
-  // Pill expands to 500px when search input is focused in hover row
-  const PILL_W     = (scrolled && hovered && searchFocused) ? 500 : 400;
+  // ── Geometry interpolation ──
   const [ar, ag, ab] = hexToRgb(theme.accent);
 
-  const pillWidth  = Math.round(vw - p * (vw - PILL_W));
-  // 46px collapsed (at p=1), 88px expanded (hovered)
-  const pillHeight = Math.round(52 - p * 6) + (scrolled && hovered ? 42 : 0);
-  // Slightly rectangular (14px) when expanded, full pill when collapsed
-  const radius     = (scrolled && hovered) ? 14 : Math.round(p * 9999);
+  const pillWidth  = Math.round(vw - p * (vw - 400));
+  const radius     = Math.round(p * 9999);
   const blur       = Math.round(12 + p * 8);
   const topOffset  = Math.round(p * 10);
   const padH       = 20;
@@ -672,72 +692,90 @@ export default function TopBar({
     ? `0 ${Math.round(p * 4)}px ${Math.round(p * 24)}px rgba(0,0,0,${(p * 0.10).toFixed(2)}), inset 0 1px 0 rgba(255,255,255,${(p * 0.35).toFixed(2)})`
     : "none";
 
+  // Pill 2 styling (fully-collapsed glassy pill, same accent)
+  const pill2Bg = `linear-gradient(135deg, rgba(${ar},${ag},${ab},0.18) 0%, rgba(${ar},${ag},${ab},0.08) 40%, rgba(255,255,255,0.12) 100%), ${theme.surface}88`;
+
   return (
-    <div
-      onMouseEnter={() => scrolled && setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        position: "fixed",
-        top: topOffset,
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: pillWidth,
-        height: pillHeight,
-        borderRadius: radius,
-        background: pillBg,
-        backdropFilter: `blur(${blur}px)`,
-        WebkitBackdropFilter: `blur(${blur}px)`,
-        border: `1px solid ${borderColor}`,
-        boxShadow: shadow,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: `0 ${padH}px`,
-        overflow: "hidden",
-        zIndex: 1000,
-        fontFamily: "'DM Sans',system-ui,sans-serif",
-        transition: p >= 0.95 ? "height 0.2s ease, width 0.2s ease, border-radius 0.2s ease" : "none",
-      }}>
-      {/* Logo — "R" always visible, "esume Master" collapses */}
-      <AnimatedLucyLogo theme={theme} progress={p}/>
-
-      {/* Center: profile switcher — only shown when docked */}
-      {scrolled && profiles.length > 0 && (
-        <>
-          <Divider theme={theme}/>
-          <ProfileSwitcher theme={theme} profiles={profiles} onActivate={activateProfile}/>
-        </>
-      )}
-
-      {/* Right: utility icons */}
-      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        {scrolled && <Divider theme={theme}/>}
-        {user && <NotificationsBell theme={theme}/>}
-        {user && <QuickActions theme={theme} onTabChange={onTabChange}/>}
-        <SettingsGear theme={theme} onTabChange={onTabChange}/>
-        {scrolled && <Divider theme={theme}/>}
-        {user && (
-          <UserAvatarMenu
-            theme={theme} user={user} onLogout={onLogout}
-            onTabChange={onTabChange} onUserChange={onUserChange}
-            resumeWidget={resumeWidget}
-          />
-        )}
-      </div>
-
-      {/* Hover expansion row — compact controls at top: 46 (after 46px base pill) */}
-      {scrolled && hovered && boardTab !== undefined && (
-        <div style={{
-          position: "absolute",
-          top: 46,
-          left: 0, right: 0,
-          height: 42,
+    <>
+      {/* ── Pill 1: main nav bar — always visible ── */}
+      <div
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        style={{
+          position: "fixed",
+          top: topOffset,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: pillWidth,
+          height: 46,
+          borderRadius: radius,
+          background: pillBg,
+          backdropFilter: `blur(${blur}px)`,
+          WebkitBackdropFilter: `blur(${blur}px)`,
+          border: `1px solid ${borderColor}`,
+          boxShadow: shadow,
           display: "flex",
           alignItems: "center",
-          padding: "0 20px",
-          gap: 6,
-          borderTop: `1px solid ${borderColor}`,
+          justifyContent: "space-between",
+          padding: `0 ${padH}px`,
+          overflow: "visible",
+          zIndex: 1000,
+          fontFamily: "'DM Sans',system-ui,sans-serif",
         }}>
+        {/* Logo — "R" always visible, "esume Master" collapses */}
+        <AnimatedLucyLogo theme={theme} progress={p}/>
+
+        {/* Center: profile switcher — only shown when docked */}
+        {scrolled && profiles.length > 0 && (
+          <>
+            <Divider theme={theme}/>
+            <ProfileSwitcher theme={theme} profiles={profiles} onActivate={activateProfile}/>
+          </>
+        )}
+
+        {/* Right: utility icons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          {scrolled && <Divider theme={theme}/>}
+          {user && <NotificationsBell theme={theme}/>}
+          {user && <QuickActions theme={theme} onTabChange={onTabChange}/>}
+          <SettingsGear theme={theme} onTabChange={onTabChange}/>
+          {scrolled && <Divider theme={theme}/>}
+          {user && (
+            <UserAvatarMenu
+              theme={theme} user={user} onLogout={onLogout}
+              onTabChange={onTabChange} onUserChange={onUserChange}
+              resumeWidget={resumeWidget}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* ── Pill 2: filter row — slides down when scrolled + hovered ── */}
+      {scrolled && hovered && boardTab !== undefined && (
+        <div
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          style={{
+            position: "fixed",
+            top: topOffset + 46 + 8,
+            left: "50%",
+            transform: "translateX(-50%)",
+            height: 36,
+            borderRadius: 9999,
+            background: pill2Bg,
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            border: `1px solid rgba(${ar},${ag},${ab},0.25)`,
+            boxShadow: `0 4px 24px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.35)`,
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "0 14px",
+            gap: 6,
+            zIndex: 1000,
+            fontFamily: "'DM Sans',system-ui,sans-serif",
+            animation: "slideDown 200ms ease",
+            whiteSpace: "nowrap",
+          }}>
           {/* Board tab pills */}
           {[["all","All"],["saved","★"],["pending","⏳"]].map(([id, lbl]) => (
             <button key={id} onClick={() => setBoardTab?.(id)}
@@ -766,7 +804,7 @@ export default function TopBar({
             <option value="yoeLow">Exp ↑</option>
             <option value="yoeHigh">Exp ↓</option>
           </select>
-          {/* Local search — expands on focus, driving pill width to 500px */}
+          {/* Local search — expands on focus */}
           <input
             value={localSearch || ""}
             onChange={e => setLocalSearch?.(e.target.value)}
@@ -790,6 +828,6 @@ export default function TopBar({
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }
