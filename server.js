@@ -665,6 +665,30 @@ db.pragma("busy_timeout = 5000");
         DROP TABLE IF EXISTS jobs_to_keep;
       `
     },
+    {
+      id: "024_clean_crossprofile_jobs",
+      sql: `
+        -- Remove user_jobs rows whose domain_profile_id belongs to a different user
+        DELETE FROM user_jobs
+        WHERE rowid IN (
+          SELECT uj.rowid FROM user_jobs uj
+          WHERE uj.domain_profile_id IS NOT NULL
+            AND uj.domain_profile_id NOT IN (
+              SELECT id FROM domain_profiles WHERE user_id = uj.user_id
+            )
+            AND uj.job_id NOT IN (
+              SELECT job_id FROM job_applications WHERE user_id = uj.user_id
+            )
+        );
+
+        -- Remove NULL-tagged rows that are not applied jobs
+        DELETE FROM user_jobs
+        WHERE domain_profile_id IS NULL
+          AND job_id NOT IN (
+            SELECT job_id FROM job_applications WHERE user_id = user_jobs.user_id
+          );
+      `
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -2465,6 +2489,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   if (hasEnough) {
     console.log(`[scrape] DB-first: ${existingCount.cnt} jobs for "${query}" — skipping scrape`);
     // Sync pool jobs not yet in user_jobs (profile-isolated)
+    // Only sync if user has an active profile — no fallback to search_query matching
     if (activeProfile) {
       db.prepare(`
         INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
@@ -2472,13 +2497,6 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
         WHERE sj.domain_profile_id = ? AND sj.scraped_at > ?
         AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
       `).run(req.user.id, activeProfile.id, sevenDaysAgo, req.user.id);
-    } else {
-      db.prepare(`
-        INSERT OR IGNORE INTO user_jobs (user_id, job_id)
-        SELECT ?, sj.job_id FROM scraped_jobs sj
-        WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
-        AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
-      `).run(req.user.id, query.toLowerCase(), sevenDaysAgo, req.user.id);
     }
     return res.json({ ok:true, count:0, scrapedAt:Date.now(), query, fromCache:true });
   }
@@ -2517,6 +2535,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       }
 
       // Insert into user_jobs with profile isolation
+      // Only sync if user has an active profile — no fallback to search_query matching
       if (activeProfile) {
         db.prepare(`
           INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
@@ -2528,16 +2547,6 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
               SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
             )
         `).run(scrapeUserId, activeProfile.id, sevenDaysAgo, scrapeUserId);
-      } else {
-        // Fallback for users without profiles (backwards compat)
-        db.prepare(`
-          INSERT OR IGNORE INTO user_jobs (user_id, job_id)
-          SELECT ?, sj.job_id FROM scraped_jobs sj
-          WHERE LOWER(sj.search_query) = ? AND sj.scraped_at > ?
-          AND sj.job_id NOT IN (
-            SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
-          )
-        `).run(scrapeUserId, query.toLowerCase(), sevenDaysAgo, scrapeUserId);
       }
       trackScrape(db, {
         userId: scrapeUserId, searchQuery: query,
@@ -3683,6 +3692,32 @@ app.get("*", (req, res) => {
   const index = path.join(CLIENT_DIST,"index.html");
   if (fs.existsSync(index)) return res.sendFile(index);
   res.status(404).send("Run: cd client && npm run build");
+});
+
+// ── Profile isolation diagnostic ─────────────────────────────
+app.get("/api/debug/verify-isolation", requireAuth, (req, res) => {
+  const userId  = req.user.id;
+  const profile = db.prepare(
+    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
+  ).get(userId);
+  const wrongJobs = profile ? db.prepare(`
+    SELECT sj.title, uj.domain_profile_id
+    FROM user_jobs uj JOIN scraped_jobs sj ON sj.job_id=uj.job_id
+    WHERE uj.user_id=? AND uj.domain_profile_id != ?
+    LIMIT 10
+  `).all(userId, profile.id) : [];
+  const totalJobs   = db.prepare("SELECT COUNT(*) as c FROM user_jobs WHERE user_id=?").get(userId);
+  const profileJobs = profile
+    ? db.prepare("SELECT COUNT(*) as c FROM user_jobs WHERE user_id=? AND domain_profile_id=?").get(userId, profile.id)
+    : { c: 0 };
+  res.json({
+    activeProfile:        profile?.profile_name ?? null,
+    totalJobsInPool:      totalJobs.c,
+    jobsMatchingProfile:  profileJobs.c,
+    wrongJobsStillPresent: wrongJobs.length,
+    wrongJobSamples:      wrongJobs,
+    isolated:             wrongJobs.length === 0,
+  });
 });
 
 app.listen(PORT, () => console.log(`[server] Resume Master v5 on :${PORT}`));

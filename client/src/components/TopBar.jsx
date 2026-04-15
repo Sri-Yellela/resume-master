@@ -388,7 +388,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
   const [tokenSaving, setTokenSaving] = useState(false);
   const [tokenMsg,    setTokenMsg]    = useState("");
   const triggerRef = useRef(null);
-  const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
+  const { accentId, setAccentId, ACCENT_OPTIONS, isDark, toggleMode } = useTheme();
 
   const currentMode = user?.applyMode || "TAILORED";
 
@@ -441,6 +441,21 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
       {open && rect && (
         <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
           style={{ minWidth: 280 }}>
+          {/* Dark / Light toggle */}
+          <div style={{ padding: "8px 16px 6px", borderBottom: `1px solid ${theme.border}` }}>
+            <button
+              onClick={toggleMode}
+              style={{
+                background: "transparent", border: "none", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 10, width: "100%",
+                padding: "4px 0", color: theme.text, fontSize: 13,
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = theme.accent}
+              onMouseLeave={e => e.currentTarget.style.color = theme.text}>
+              <span style={{ fontSize: 15 }}>{isDark ? "☀️" : "🌙"}</span>
+              <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
+            </button>
+          </div>
           {/* PROFILE nav */}
           <div style={{ padding: "10px 16px 8px", borderBottom: `1px solid ${theme.border}` }}>
             <button
