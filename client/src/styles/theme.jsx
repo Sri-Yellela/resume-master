@@ -17,9 +17,13 @@ export const ACCENT_OPTIONS = [
 
 export const THEMES = {
   light: {
-    bg:           "#ffffff",
-    surface:      "#ffffff",
-    surfaceHigh:  "#f5f5f3",
+    // ── iOS 26 liquid glass surfaces ─────────────────────────
+    bg:           "rgba(255,255,255,0.72)",
+    surface:      "rgba(255,255,255,0.60)",
+    surfaceHigh:  "rgba(245,245,247,0.65)",
+    backdrop:     "blur(40px) saturate(180%)",
+    backdropCard: "blur(20px) saturate(160%)",
+    // ─────────────────────────────────────────────────────────
     overlay:      "rgba(0,0,0,0.04)",
     border:       "#e5e5e5",
     borderStrong: "#c0c0c0",
@@ -43,7 +47,7 @@ export const THEMES = {
     shadowLg:     "0 20px 40px rgba(0,0,0,0.10), 0 8px 16px rgba(0,0,0,0.06)",
     shadowXl:     "0 40px 80px rgba(0,0,0,0.12), 0 16px 32px rgba(0,0,0,0.08)",
     gradAccent:   "#A8D8EA",
-    gradSubtle:   "linear-gradient(135deg, #ffffff 0%, #f0f8fb 100%)",
+    gradSubtle:   "linear-gradient(135deg, rgba(255,255,255,0.72) 0%, rgba(240,248,251,0.72) 100%)",
     fontDisplay:  "'Barlow Condensed', 'DM Sans', system-ui, sans-serif",
     fontBody:     "'DM Sans', system-ui, sans-serif",
     fontMono:     "'JetBrains Mono', monospace",
@@ -55,28 +59,32 @@ export const THEMES = {
     colorPrimary:   "#A8D8EA",
     colorSecondary: "#1a6a8a",
     colorAccent:    "#1a6a8a",
-    colorSurface:   "#ffffff",
+    colorSurface:   "rgba(255,255,255,0.60)",
     colorBorder:    "#e5e5e5",
     colorText:      "#0f0f0f",
     colorMuted:     "#3d3d3d",
     colorDim:       "#4B5563",
-    colorCard:      "#f5f5f3",
-    colorInputBg:   "#ffffff",
+    colorCard:      "rgba(245,245,247,0.65)",
+    colorInputBg:   "rgba(255,255,255,0.55)",
     colorTag:       "#e8f6fb",
-    gradBg:         "#ffffff",
-    gradPanel:      "#ffffff",
+    gradBg:         "rgba(255,255,255,0.72)",
+    gradPanel:      "rgba(255,255,255,0.60)",
     gradHover:      "rgba(0,0,0,0.04)",
     glowPrimary:    "0 0 0 3px #A8D8EA44",
-    shimmer1:       "#ffffff",
-    shimmer2:       "#f5f5f3",
+    shimmer1:       "rgba(255,255,255,0.72)",
+    shimmer2:       "rgba(245,245,247,0.65)",
     radiusPill:     "999px",
     radiusCard:     "16px",
     radiusInput:    "10px",
   },
   dark: {
-    bg:           "#0a0a0a",
-    surface:      "#111111",
-    surfaceHigh:  "#1a1a1a",
+    // ── iOS 26 liquid glass surfaces ─────────────────────────
+    bg:           "rgba(0,0,0,0.72)",
+    surface:      "rgba(28,28,30,0.60)",
+    surfaceHigh:  "rgba(44,44,46,0.65)",
+    backdrop:     "blur(40px) saturate(180%)",
+    backdropCard: "blur(20px) saturate(160%)",
+    // ─────────────────────────────────────────────────────────
     overlay:      "rgba(255,255,255,0.04)",
     border:       "#2a2a2a",
     borderStrong: "#3a3a3a",
@@ -99,7 +107,7 @@ export const THEMES = {
     shadowLg:     "0 20px 40px rgba(0,0,0,0.6), 0 8px 16px rgba(0,0,0,0.4)",
     shadowXl:     "0 40px 80px rgba(0,0,0,0.7), 0 16px 32px rgba(0,0,0,0.5)",
     gradAccent:   "#A8D8EA",
-    gradSubtle:   "linear-gradient(135deg, #111111 0%, #1a1a1a 100%)",
+    gradSubtle:   "linear-gradient(135deg, rgba(28,28,30,0.60) 0%, rgba(44,44,46,0.65) 100%)",
     fontDisplay:  "'Barlow Condensed', 'DM Sans', system-ui, sans-serif",
     fontBody:     "'DM Sans', system-ui, sans-serif",
     fontMono:     "'JetBrains Mono', monospace",
@@ -110,20 +118,20 @@ export const THEMES = {
     colorPrimary:   "#A8D8EA",
     colorSecondary: "#A8D8EA",
     colorAccent:    "#A8D8EA",
-    colorSurface:   "#111111",
+    colorSurface:   "rgba(28,28,30,0.60)",
     colorBorder:    "#2a2a2a",
     colorText:      "#f5f5f5",
     colorMuted:     "#c0c0c0",
     colorDim:       "#9CA3AF",
-    colorCard:      "#1a1a1a",
-    colorInputBg:   "#111111",
+    colorCard:      "rgba(44,44,46,0.65)",
+    colorInputBg:   "rgba(44,44,46,0.55)",
     colorTag:       "#0a1f2a",
-    gradBg:         "#0a0a0a",
-    gradPanel:      "#111111",
+    gradBg:         "rgba(0,0,0,0.72)",
+    gradPanel:      "rgba(28,28,30,0.60)",
     gradHover:      "rgba(255,255,255,0.04)",
     glowPrimary:    "0 0 0 3px #A8D8EA33",
-    shimmer1:       "#111111",
-    shimmer2:       "#1a1a1a",
+    shimmer1:       "rgba(28,28,30,0.60)",
+    shimmer2:       "rgba(44,44,46,0.65)",
     radiusPill:     "999px",
     radiusCard:     "16px",
     radiusInput:    "10px",
@@ -202,15 +210,31 @@ export function ThemeProvider({ children }) {
     }}>
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
-        html { color-scheme: ${mode}; }
+        /* ── Solid base behind all glass layers ── */
+        html {
+          color-scheme: ${mode};
+          background-color: ${mode === "dark" ? "#0a0a0a" : "#f0f0f0"};
+          min-height: 100vh;
+        }
+        /* ── Subtle noise grain (iOS glass texture) ── */
+        html::before {
+          content: '';
+          position: fixed;
+          inset: 0;
+          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.025'/%3E%3C/svg%3E");
+          pointer-events: none;
+          z-index: 0;
+        }
         body {
           margin: 0;
           font-family: 'DM Sans', system-ui, sans-serif;
           background: ${theme.bg};
+          backdrop-filter: ${theme.backdrop};
+          -webkit-backdrop-filter: ${theme.backdrop};
           color: ${theme.text};
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
-          transition: background 0.3s ease, color 0.3s ease;
+          transition: background 0.3s ease, color 0.3s ease, backdrop-filter 0.3s ease;
         }
         /* Padding for fixed ScrollDock on public pages */
         .scroll-dock-page {
@@ -242,6 +266,8 @@ export function ThemeProvider({ children }) {
         }
         .rm-card {
           background: ${theme.surface};
+          backdrop-filter: ${theme.backdropCard};
+          -webkit-backdrop-filter: ${theme.backdropCard};
           border: 1px solid ${theme.border};
           border-radius: 16px;
           padding: 20px 24px;
@@ -250,6 +276,8 @@ export function ThemeProvider({ children }) {
         }
         .rm-card-interactive {
           background: ${theme.surface};
+          backdrop-filter: ${theme.backdropCard};
+          -webkit-backdrop-filter: ${theme.backdropCard};
           border: 1px solid ${theme.border};
           border-radius: 16px;
           padding: 16px 20px;
@@ -302,7 +330,9 @@ export function ThemeProvider({ children }) {
         .rm-input {
           width: 100%; height: 40px; padding: 0 14px;
           border-radius: 10px; border: 1px solid ${theme.border};
-          background: ${theme.surface}; color: ${theme.text};
+          background: ${theme.colorInputBg}; color: ${theme.text};
+          backdrop-filter: ${theme.backdropCard};
+          -webkit-backdrop-filter: ${theme.backdropCard};
           font-family: 'DM Sans', system-ui, sans-serif; font-size: 13px;
           outline: none; transition: border-color 0.15s, box-shadow 0.15s;
         }
@@ -335,7 +365,7 @@ export function ThemeProvider({ children }) {
           background: ${theme.overlay} !important;
         }
         .rm-skeleton {
-          background: linear-gradient(90deg, ${theme.surfaceHigh} 25%, ${theme.border} 50%, ${theme.surfaceHigh} 75%);
+          background: linear-gradient(90deg, ${mode === "dark" ? "rgba(44,44,46,0.65)" : "rgba(245,245,247,0.65)"} 25%, ${theme.border} 50%, ${mode === "dark" ? "rgba(44,44,46,0.65)" : "rgba(245,245,247,0.65)"} 75%);
           background-size: 200% 100%;
           animation: shimmer 1.5s ease infinite;
           border-radius: 8px;
