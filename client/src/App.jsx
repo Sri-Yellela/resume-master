@@ -9,7 +9,8 @@ import AuthScreen                from "./components/AuthScreen.jsx";
 import AdminLayout               from "./components/AdminLayout.jsx";
 import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
 import TopBar                    from "./components/TopBar.jsx";
-import { AppScrollProvider }     from "./contexts/AppScrollContext.jsx";
+import { AppScrollProvider, useAppScroll } from "./contexts/AppScrollContext.jsx";
+import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
 import JobsPanel                 from "./panels/JobsPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
@@ -31,6 +32,54 @@ const APP_TABS = [
   { id: "jobs",     label: "Jobs",     icon: "💼" },
   { id: "database", label: "Database", icon: "🗃" },
 ];
+
+// AppShell: inside AppScrollProvider — drives dynamic paddingTop + tab visibility
+function AppShell({ theme, isMobile, activeTab, handlePanelChange, children }) {
+  const { progress: p } = useAppScroll();
+  const paddingTop = Math.round(52 * (1 - p));
+  const showTabs   = p < 0.5;
+  return (
+    <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column", paddingTop }}>
+      {showTabs && (
+        <nav style={{
+          display:"flex", alignItems:"center",
+          background: theme.surface,
+          borderBottom: `1px solid ${theme.border}`,
+          padding: isMobile ? "0 12px" : "0 20px",
+          flexShrink: 0,
+        }}>
+          {APP_TABS.map(t => {
+            const isActive = activeTab === t.id;
+            return (
+              <button key={t.id} onClick={() => handlePanelChange(t.id)}
+                style={{
+                  background: "transparent", border: "none",
+                  padding: isMobile ? "10px 8px" : "10px 14px",
+                  fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
+                  fontWeight: isActive ? 800 : 600,
+                  fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
+                  color: isActive ? theme.text : theme.textMuted,
+                  cursor: "pointer", position: "relative",
+                  transition: "color 0.15s",
+                }}>
+                {isMobile ? t.icon : t.label}
+                {isActive && (
+                  <div style={{
+                    position: "absolute", bottom: 0, left: "50%",
+                    transform: "translateX(-50%)",
+                    width: 16, height: 2, borderRadius: 999,
+                    background: theme.accent,
+                  }}/>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+      {children}
+    </div>
+  );
+}
 
 function AppDashboard({ authUser, setAuthUser }) {
   const { theme } = useTheme();
@@ -69,76 +118,40 @@ function AppDashboard({ authUser, setAuthUser }) {
   }, [handleLogout]);
 
   return (
-    <AppScrollProvider>
-      <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
-                    background:theme.bg, height:"100vh",
-                    display:"flex", flexDirection:"column",
-                    overflow:"hidden", color:theme.text }}>
+    <JobBoardProvider>
+      <AppScrollProvider>
+        <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
+                      background:theme.bg, height:"100vh",
+                      display:"flex", flexDirection:"column",
+                      overflow:"hidden", color:theme.text }}>
 
-        {/* TopBar: position:fixed — takes no space in flex layout */}
-        <TopBar
-          user={authUser}
-          onTabChange={handlePanelChange}
-          onLogout={handleLogout}
-          onUserChange={setAuthUser}
-          resumeWidget={resumeWidget}
-          onProfileActivate={handleProfileActivate}
-        />
+          {/* TopBar: position:fixed — takes no space in flex layout */}
+          <TopBar
+            user={authUser}
+            onTabChange={handlePanelChange}
+            onLogout={handleLogout}
+            onUserChange={setAuthUser}
+            resumeWidget={resumeWidget}
+            onProfileActivate={handleProfileActivate}
+          />
 
-        {/* Page content — paddingTop reserves space below the fixed TopBar */}
-        <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column",
-                      paddingTop: 52 }}>
-
-          {/* JOBS | DATABASE tabs — normal document flow, not fixed */}
-          <nav style={{
-            display:"flex", alignItems:"center",
-            background: theme.surface,
-            borderBottom: `1px solid ${theme.border}`,
-            padding: isMobile ? "0 12px" : "0 20px",
-            flexShrink: 0,
-          }}>
-            {APP_TABS.map(t => {
-              const isActive = activeTab === t.id;
-              return (
-                <button key={t.id} onClick={() => handlePanelChange(t.id)}
-                  style={{
-                    background: "transparent", border: "none",
-                    padding: isMobile ? "10px 8px" : "10px 14px",
-                    fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
-                    fontWeight: isActive ? 800 : 600,
-                    fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
-                    color: isActive ? theme.text : theme.textMuted,
-                    cursor: "pointer", position: "relative",
-                    transition: "color 0.15s",
-                  }}>
-                  {isMobile ? t.icon : t.label}
-                  {isActive && (
-                    <div style={{
-                      position: "absolute", bottom: 0, left: "50%",
-                      transform: "translateX(-50%)",
-                      width: 16, height: 2, borderRadius: 999,
-                      background: theme.accent,
-                    }}/>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Panels */}
-          <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-            <div style={{ display: activeTab === "jobs" ? "flex" : "none",
-                          flex: 1, flexDirection: "column", overflow: "hidden" }}>
-              <JobsPanel user={authUser} onUserChange={setAuthUser}
-                refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
-                isActive={activeTab === "jobs"}/>
+          {/* AppShell: reads scroll progress for dynamic paddingTop + tab visibility */}
+          <AppShell theme={theme} isMobile={isMobile} activeTab={activeTab} handlePanelChange={handlePanelChange}>
+            {/* Panels */}
+            <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+              <div style={{ display: activeTab === "jobs" ? "flex" : "none",
+                            flex: 1, flexDirection: "column", overflow: "hidden" }}>
+                <JobsPanel user={authUser} onUserChange={setAuthUser}
+                  refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
+                  isActive={activeTab === "jobs"}/>
+              </div>
+              {activeTab === "database" && <DatabasePanel user={authUser}/>}
+              {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
             </div>
-            {activeTab === "database" && <DatabasePanel user={authUser}/>}
-            {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
-          </div>
+          </AppShell>
         </div>
-      </div>
-    </AppScrollProvider>
+      </AppScrollProvider>
+    </JobBoardProvider>
   );
 }
 

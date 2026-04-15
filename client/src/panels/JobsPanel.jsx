@@ -12,6 +12,7 @@ import { ATSPanel } from "./ATSPanel.jsx";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { useAppScroll } from "../contexts/AppScrollContext.jsx";
+import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 
 const USER_TEXT   = "#0f0f0f";   // black text on accent
 
@@ -732,8 +733,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // Task 6 — Company reuse modal
   const [companyReuseTarget, setCompanyReuseTarget] = useState(null);
 
-  // Board tabs
-  const [boardTab,    setBoardTab]    = useState("all");  // "all" | "saved" | "pending"
+  // Board tabs — shared via JobBoardContext so TopBar compact row can drive them
+  const { boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy } = useJobBoard();
   const [pendingJobs, setPendingJobs] = useState([]);
 
   // Enhance resume state
@@ -770,12 +771,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // Scrape trigger input
   const [searchInput, setSearchInput] = useState("");
-
-  // Local text search (scoped to loaded jobs)
-  const [localSearch, setLocalSearch] = useState("");
-
-  // Sort
-  const [sortBy,      setSortBy]      = useState("dateDesc");
 
   // Filters
   const [roleFilter,    setRoleFilter]    = useState("");
@@ -1624,10 +1619,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         )}
       </AnimatePresence>
 
-      {/* ── Unified toolbar ──────────────────────────────── */}
+      {/* ── Unified toolbar — hidden when dock is active (scrollProgress ≥ 0.5) ── */}
       {/* Row A: tabs | filters | sort | local-search | job count */}
       {/* Row B (wraps): search input | Search | Best Match | resume upload */}
-      <div style={{
+      {scrollProgress < 0.5 && <div style={{
         background:theme.surface, borderBottom:`1px solid ${theme.border}`,
         padding:"10px 20px", display:"flex", alignItems:"center", gap:8,
         flexShrink:0, flexWrap:"wrap",
@@ -1767,7 +1762,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         {/* Resume upload — button lives in TopBar mode dropdown */}
         <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
           onChange={handleFile} style={{ display:"none" }}/>
-      </div>
+      </div>}
 
       {/* ── Resume Enhance modal ────────────────────────────── */}
       {enhanceModalOpen && enhanceResult && (

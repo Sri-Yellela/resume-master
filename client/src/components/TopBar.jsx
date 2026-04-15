@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "../styles/theme.jsx";
 import { useAppScroll } from "../contexts/AppScrollContext.jsx";
+import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { api } from "../lib/api.js";
 
@@ -603,6 +604,12 @@ export default function TopBar({
   const p = pinned ? 1 : rawProgress;
   const scrolled = p >= 0.5;
 
+  const [hovered, setHovered] = useState(false);
+  // Clear hover when un-scrolled (so expansion doesn't persist on scroll-up)
+  useEffect(() => { if (!scrolled) setHovered(false); }, [scrolled]);
+
+  const { boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy } = useJobBoard() || {};
+
   const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
   useEffect(() => {
     const onResize = () => setVw(window.innerWidth);
@@ -632,7 +639,7 @@ export default function TopBar({
   const [ar, ag, ab] = hexToRgb(theme.accent);
 
   const pillWidth  = Math.round(vw - p * (vw - PILL_W));
-  const pillHeight = Math.round(52 - p * 8);
+  const pillHeight = Math.round(52 - p * 8) + (scrolled && hovered ? 44 : 0);
   const radius     = Math.round(p * 9999);
   const blur       = Math.round(12 + p * 8);
   const topOffset  = Math.round(p * 10);
@@ -657,27 +664,31 @@ export default function TopBar({
     : "none";
 
   return (
-    <div style={{
-      position: "fixed",
-      top: topOffset,
-      left: "50%",
-      transform: "translateX(-50%)",
-      width: pillWidth,
-      height: pillHeight,
-      borderRadius: radius,
-      background: pillBg,
-      backdropFilter: `blur(${blur}px)`,
-      WebkitBackdropFilter: `blur(${blur}px)`,
-      border: `1px solid ${borderColor}`,
-      boxShadow: shadow,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      padding: `0 ${padH}px`,
-      overflow: "hidden",
-      zIndex: 1000,
-      fontFamily: "'DM Sans',system-ui,sans-serif",
-    }}>
+    <div
+      onMouseEnter={() => scrolled && setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: "fixed",
+        top: topOffset,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: pillWidth,
+        height: pillHeight,
+        borderRadius: radius,
+        background: pillBg,
+        backdropFilter: `blur(${blur}px)`,
+        WebkitBackdropFilter: `blur(${blur}px)`,
+        border: `1px solid ${borderColor}`,
+        boxShadow: shadow,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: `0 ${padH}px`,
+        overflow: "hidden",
+        zIndex: 1000,
+        fontFamily: "'DM Sans',system-ui,sans-serif",
+        transition: p >= 0.95 ? "height 0.2s ease" : "none",
+      }}>
       {/* Logo — "R" always visible, "esume Master" collapses */}
       <AnimatedLucyLogo theme={theme} progress={p}/>
 
@@ -704,6 +715,67 @@ export default function TopBar({
           />
         )}
       </div>
+
+      {/* Hover expansion row — compact controls revealed when dock is hovered */}
+      {scrolled && hovered && boardTab !== undefined && (
+        <div style={{
+          position: "absolute",
+          top: 44,
+          left: 0, right: 0,
+          height: 44,
+          display: "flex",
+          alignItems: "center",
+          padding: "0 14px",
+          gap: 8,
+          borderTop: `1px solid ${borderColor}`,
+        }}>
+          {/* Board tabs */}
+          <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
+                        border:`1px solid ${theme.border}`, borderRadius:4 }}>
+            {[["all","All"],["saved","★"],["pending","…"]].map(([id, lbl]) => (
+              <button key={id} onClick={() => setBoardTab?.(id)}
+                style={{
+                  padding: "4px 10px", border: "none", cursor: "pointer",
+                  fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
+                  fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase",
+                  background: boardTab === id ? theme.accent : "transparent",
+                  color: boardTab === id ? "#0f0f0f" : theme.textMuted,
+                  borderRight: `1px solid ${theme.border}`,
+                }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          {/* Sort */}
+          <select value={sortBy || "dateDesc"} onChange={e => setSortBy?.(e.target.value)}
+            style={{ height: 28, padding: "0 6px", borderRadius: 4, flexShrink: 0,
+                     border: `1px solid ${theme.border}`, background: theme.surface,
+                     fontSize: 11, color: theme.text, outline: "none", cursor: "pointer" }}>
+            <option value="dateDesc">Newest</option>
+            <option value="dateAsc">Oldest</option>
+            <option value="compHigh">Pay ↓</option>
+            <option value="compLow">Pay ↑</option>
+            <option value="yoeLow">Exp ↑</option>
+            <option value="yoeHigh">Exp ↓</option>
+          </select>
+          {/* Local search */}
+          <input
+            value={localSearch || ""}
+            onChange={e => setLocalSearch?.(e.target.value)}
+            onKeyDown={e => e.key === "Escape" && setLocalSearch?.("")}
+            placeholder="Filter jobs…"
+            style={{ flex: 1, height: 28, padding: "0 10px", borderRadius: 4,
+                     border: `1px solid ${theme.border}`, background: theme.surface,
+                     color: theme.text, fontSize: 11, outline: "none" }}/>
+          {localSearch && (
+            <button onClick={() => setLocalSearch?.("")}
+              style={{ background: "none", border: "none", color: theme.textDim,
+                       cursor: "pointer", fontSize: 13, padding: "0 2px", flexShrink: 0 }}>
+              ✕
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

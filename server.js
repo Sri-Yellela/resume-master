@@ -1723,6 +1723,41 @@ app.patch("/api/auth/complete-profile", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Debug: profile ↔ jobs diagnostic ─────────────────────────
+app.get("/api/debug/profile-jobs", requireAuth, (req, res) => {
+  const userId = req.user.id;
+  const activeProfile = db.prepare(`SELECT id, profile_name FROM domain_profiles WHERE user_id = ? AND is_active = 1`).get(userId);
+  const profileCount   = db.prepare(`SELECT COUNT(*) as c FROM domain_profiles WHERE user_id = ?`).get(userId);
+  const userJobsTotal  = db.prepare(`SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ?`).get(userId);
+  const userJobsTagged = db.prepare(`SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ? AND domain_profile_id IS NOT NULL`).get(userId);
+  const userJobsUntagged = db.prepare(`SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ? AND domain_profile_id IS NULL`).get(userId);
+  const userJobsByProfile = db.prepare(`
+    SELECT uj.domain_profile_id, dp.profile_name, COUNT(*) as job_count
+    FROM user_jobs uj
+    LEFT JOIN domain_profiles dp ON dp.id = uj.domain_profile_id
+    WHERE uj.user_id = ?
+    GROUP BY uj.domain_profile_id
+  `).all(userId);
+  const samplePMJobsInSWE = activeProfile ? db.prepare(`
+    SELECT sj.title, sj.company, sj.search_query, uj.domain_profile_id
+    FROM user_jobs uj
+    JOIN scraped_jobs sj ON sj.job_id = uj.job_id
+    WHERE uj.user_id = ? AND uj.domain_profile_id = ?
+      AND (LOWER(sj.title) LIKE '%project manager%'
+        OR LOWER(sj.title) LIKE '%project coordinator%'
+        OR LOWER(sj.title) LIKE '%program manager%')
+    LIMIT 10
+  `).all(userId, activeProfile.id) : [];
+  const whereConditionCheck = db.prepare(`
+    SELECT sj.title, sj.company, uj.domain_profile_id, sj.domain_profile_id as scraped_profile_id
+    FROM user_jobs uj
+    JOIN scraped_jobs sj ON sj.job_id = uj.job_id
+    WHERE uj.user_id = ?
+    LIMIT 5
+  `).all(userId);
+  res.json({ activeProfile, profileCount, userJobsTotal, userJobsTagged, userJobsUntagged, userJobsByProfile, samplePMJobsInSWE, whereConditionCheck });
+});
+
 // ═══════════════════════════════════════════════════════════════
 // MULTI-SESSION SYNC — Server-Sent Events
 // ═══════════════════════════════════════════════════════════════
