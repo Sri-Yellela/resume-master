@@ -1758,6 +1758,92 @@ app.get("/api/debug/profile-jobs", requireAuth, (req, res) => {
   res.json({ activeProfile, profileCount, userJobsTotal, userJobsTagged, userJobsUntagged, userJobsByProfile, samplePMJobsInSWE, whereConditionCheck });
 });
 
+// ── Debug: trace a single job through the profile pipeline ───
+app.get("/api/debug/job-trace/:jobId", requireAuth, (req, res) => {
+  const { jobId } = req.params;
+  const userId = req.user.id;
+
+  const scrapedJob = db.prepare(`
+    SELECT job_id, title, company, search_query, domain_profile_id
+    FROM scraped_jobs WHERE job_id = ?
+  `).get(jobId);
+
+  const userJob = db.prepare(`
+    SELECT * FROM user_jobs WHERE user_id = ? AND job_id = ?
+  `).get(userId, jobId);
+
+  const activeProfile = db.prepare(`
+    SELECT id, profile_name, role_family, domain, target_titles
+    FROM domain_profiles WHERE user_id = ? AND is_active = 1
+  `).get(userId);
+
+  const allProfiles = db.prepare(`
+    SELECT id, profile_name, role_family, is_active
+    FROM domain_profiles WHERE user_id = ?
+  `).all(userId);
+
+  const pmJobsInUserPool = db.prepare(`
+    SELECT uj.domain_profile_id, uj.job_id, sj.title,
+      CASE WHEN uj.domain_profile_id = ?
+        THEN 'MATCHES active profile'
+        ELSE 'DOES NOT MATCH active profile'
+      END as profile_match
+    FROM user_jobs uj
+    JOIN scraped_jobs sj ON sj.job_id = uj.job_id
+    WHERE uj.user_id = ?
+      AND (LOWER(sj.title) LIKE '%project manager%'
+        OR LOWER(sj.title) LIKE '%coordinator%'
+        OR LOWER(sj.title) LIKE '%program manager%')
+    LIMIT 10
+  `).all(activeProfile?.id, userId);
+
+  res.json({
+    scrapedJob,
+    userJob,
+    activeProfile,
+    allProfiles,
+    pmJobsCurrentlyInUserPool: pmJobsInUserPool,
+    diagnosis: {
+      jobTaggedToProfile: userJob?.domain_profile_id,
+      activeProfileId: activeProfile?.id,
+      mismatch: userJob?.domain_profile_id !== activeProfile?.id,
+      scrapedJobTaggedToProfile: scrapedJob?.domain_profile_id,
+    },
+  });
+});
+
+// ── Debug: simulate exactly what /api/jobs queries ────────────
+app.get("/api/debug/jobs-query", requireAuth, (req, res) => {
+  const userId = req.user.id;
+
+  const activeProfile = db.prepare(`
+    SELECT id, profile_name FROM domain_profiles
+    WHERE user_id = ? AND is_active = 1
+  `).get(userId);
+
+  const jobs = db.prepare(`
+    SELECT sj.title, sj.company, uj.domain_profile_id,
+      CASE WHEN uj.domain_profile_id = ?
+        THEN 'IN ACTIVE PROFILE'
+        ELSE 'WRONG PROFILE OR NULL'
+      END as profile_status
+    FROM scraped_jobs sj
+    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    ORDER BY uj.domain_profile_id
+    LIMIT 30
+  `).all(activeProfile?.id, userId);
+
+  res.json({
+    activeProfile,
+    totalJobsForUser: jobs.length,
+    profileBreakdown: jobs.reduce((acc, j) => {
+      acc[j.profile_status] = (acc[j.profile_status] || 0) + 1;
+      return acc;
+    }, {}),
+    sampleJobs: jobs.slice(0, 20),
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════
 // MULTI-SESSION SYNC — Server-Sent Events
 // ═══════════════════════════════════════════════════════════════

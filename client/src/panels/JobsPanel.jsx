@@ -1759,10 +1759,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           </div>
         )}
 
-        {/* Resume upload — button lives in TopBar mode dropdown */}
-        <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
-          onChange={handleFile} style={{ display:"none" }}/>
       </div>}
+      {/* Hidden file input — always mounted so TopBar resume upload button works even when toolbar is hidden */}
+      <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
+        onChange={handleFile} style={{ display:"none" }}/>
 
       {/* ── Resume Enhance modal ────────────────────────────── */}
       {enhanceModalOpen && enhanceResult && (

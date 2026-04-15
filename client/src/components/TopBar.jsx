@@ -75,8 +75,8 @@ function useClickOutside(ref, onClose) {
 // ── Dock divider ─────────────────────────────────────────────
 function Divider({ theme }) {
   return (
-    <div style={{ width: 1, height: 20, background: `${theme.accent}33`,
-                  flexShrink: 0, margin: "0 2px" }}/>
+    <div style={{ width: 1, height: 18, background: `${theme.accent}33`,
+                  flexShrink: 0, margin: "0 4px" }}/>
   );
 }
 
@@ -146,12 +146,13 @@ function NotificationsBell({ theme }) {
         title="Notifications"
         style={{
           background: "transparent", border: "none", cursor: "pointer",
-          padding: "4px 8px", borderRadius: 8, position: "relative",
-          display: "flex", alignItems: "center", color: theme.textMuted,
-          fontSize: 16, transition: "color 0.15s",
+          width: 32, height: 32, borderRadius: 6, position: "relative", flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: theme.textMuted, fontSize: 15,
+          transition: "color 0.15s, background 0.15s",
         }}
-        onMouseEnter={e => e.currentTarget.style.color = theme.accent}
-        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
+        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.color = theme.accent; }}
+        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.textMuted; }}>
         🔔
         {unread > 0 && (
           <span style={{
@@ -232,7 +233,7 @@ function ProfileSwitcher({ theme, profiles, onActivate }) {
         <span style={{ width: 6, height: 6, borderRadius: "50%",
                         background: theme.accent, flexShrink: 0 }}/>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis",
-                        whiteSpace: "nowrap", maxWidth: 96 }}>
+                        whiteSpace: "nowrap", maxWidth: 110 }}>
           {active?.profile_name || "Profile"}
         </span>
         <span style={{ fontSize: 9 }}>▾</span>
@@ -289,11 +290,13 @@ function QuickActions({ theme, onTabChange }) {
         title="Quick actions"
         style={{
           background: "transparent", border: "none", cursor: "pointer",
-          padding: "4px 8px", borderRadius: 8,
-          color: theme.textMuted, fontSize: 16, transition: "color 0.15s",
+          width: 32, height: 32, borderRadius: 6, flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: theme.textMuted, fontSize: 15,
+          transition: "color 0.15s, background 0.15s",
         }}
-        onMouseEnter={e => e.currentTarget.style.color = theme.accent}
-        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
+        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.color = theme.accent; }}
+        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.textMuted; }}>
         ⚡
       </button>
 
@@ -336,11 +339,13 @@ function SettingsGear({ theme, onTabChange }) {
         title="Settings"
         style={{
           background: "transparent", border: "none", cursor: "pointer",
-          padding: "4px 8px", borderRadius: 8,
-          color: theme.textMuted, fontSize: 15, transition: "color 0.15s",
+          width: 32, height: 32, borderRadius: 6, flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: theme.textMuted, fontSize: 15,
+          transition: "color 0.15s, background 0.15s",
         }}
-        onMouseEnter={e => e.currentTarget.style.color = theme.text}
-        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
+        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.color = theme.text; }}
+        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.textMuted; }}>
         ⚙
       </button>
 
@@ -604,9 +609,10 @@ export default function TopBar({
   const p = pinned ? 1 : rawProgress;
   const scrolled = p >= 0.5;
 
-  const [hovered, setHovered] = useState(false);
-  // Clear hover when un-scrolled (so expansion doesn't persist on scroll-up)
-  useEffect(() => { if (!scrolled) setHovered(false); }, [scrolled]);
+  const [hovered,      setHovered]      = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  // Clear hover + search state when un-scrolled
+  useEffect(() => { if (!scrolled) { setHovered(false); setSearchFocused(false); } }, [scrolled]);
 
   const { boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy } = useJobBoard() || {};
 
@@ -635,15 +641,18 @@ export default function TopBar({
   };
 
   // ── Geometry interpolation (same technique as the old AppDockBar) ──
-  const PILL_W = 400;
+  // Pill expands to 500px when search input is focused in hover row
+  const PILL_W     = (scrolled && hovered && searchFocused) ? 500 : 400;
   const [ar, ag, ab] = hexToRgb(theme.accent);
 
   const pillWidth  = Math.round(vw - p * (vw - PILL_W));
-  const pillHeight = Math.round(52 - p * 8) + (scrolled && hovered ? 44 : 0);
-  const radius     = Math.round(p * 9999);
+  // 46px collapsed (at p=1), 88px expanded (hovered)
+  const pillHeight = Math.round(52 - p * 6) + (scrolled && hovered ? 42 : 0);
+  // Slightly rectangular (14px) when expanded, full pill when collapsed
+  const radius     = (scrolled && hovered) ? 14 : Math.round(p * 9999);
   const blur       = Math.round(12 + p * 8);
   const topOffset  = Math.round(p * 10);
-  const padH       = Math.round(20 - p * 4);
+  const padH       = 20;
 
   // Background: solid surface → glassy accent gradient
   const surfaceAlphaHex = Math.round((0.95 - p * 0.45) * 255).toString(16).padStart(2, "0");
@@ -687,7 +696,7 @@ export default function TopBar({
         overflow: "hidden",
         zIndex: 1000,
         fontFamily: "'DM Sans',system-ui,sans-serif",
-        transition: p >= 0.95 ? "height 0.2s ease" : "none",
+        transition: p >= 0.95 ? "height 0.2s ease, width 0.2s ease, border-radius 0.2s ease" : "none",
       }}>
       {/* Logo — "R" always visible, "esume Master" collapses */}
       <AnimatedLucyLogo theme={theme} progress={p}/>
@@ -716,41 +725,40 @@ export default function TopBar({
         )}
       </div>
 
-      {/* Hover expansion row — compact controls revealed when dock is hovered */}
+      {/* Hover expansion row — compact controls at top: 46 (after 46px base pill) */}
       {scrolled && hovered && boardTab !== undefined && (
         <div style={{
           position: "absolute",
-          top: 44,
+          top: 46,
           left: 0, right: 0,
-          height: 44,
+          height: 42,
           display: "flex",
           alignItems: "center",
-          padding: "0 14px",
-          gap: 8,
+          padding: "0 20px",
+          gap: 6,
           borderTop: `1px solid ${borderColor}`,
         }}>
-          {/* Board tabs */}
-          <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
-                        border:`1px solid ${theme.border}`, borderRadius:4 }}>
-            {[["all","All"],["saved","★"],["pending","…"]].map(([id, lbl]) => (
-              <button key={id} onClick={() => setBoardTab?.(id)}
-                style={{
-                  padding: "4px 10px", border: "none", cursor: "pointer",
-                  fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
-                  fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase",
-                  background: boardTab === id ? theme.accent : "transparent",
-                  color: boardTab === id ? "#0f0f0f" : theme.textMuted,
-                  borderRight: `1px solid ${theme.border}`,
-                }}>
-                {lbl}
-              </button>
-            ))}
-          </div>
+          {/* Board tab pills */}
+          {[["all","All"],["saved","★"],["pending","⏳"]].map(([id, lbl]) => (
+            <button key={id} onClick={() => setBoardTab?.(id)}
+              style={{
+                padding: "0 10px", height: 26, border: "none", cursor: "pointer",
+                fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
+                fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase",
+                borderRadius: 9999, flexShrink: 0,
+                background: boardTab === id ? theme.accent : `${theme.accent}18`,
+                color: boardTab === id ? "#0f0f0f" : theme.textMuted,
+                transition: "background 0.15s, color 0.15s",
+              }}>
+              {lbl}
+            </button>
+          ))}
+          <Divider theme={theme}/>
           {/* Sort */}
           <select value={sortBy || "dateDesc"} onChange={e => setSortBy?.(e.target.value)}
-            style={{ height: 28, padding: "0 6px", borderRadius: 4, flexShrink: 0,
-                     border: `1px solid ${theme.border}`, background: theme.surface,
-                     fontSize: 11, color: theme.text, outline: "none", cursor: "pointer" }}>
+            style={{ height: 26, padding: "4px 8px", borderRadius: 4, flexShrink: 0,
+                     minWidth: 80, border: `1px solid ${theme.border}`, background: theme.surface,
+                     fontSize: 12, color: theme.text, outline: "none", cursor: "pointer" }}>
             <option value="dateDesc">Newest</option>
             <option value="dateAsc">Oldest</option>
             <option value="compHigh">Pay ↓</option>
@@ -758,15 +766,21 @@ export default function TopBar({
             <option value="yoeLow">Exp ↑</option>
             <option value="yoeHigh">Exp ↓</option>
           </select>
-          {/* Local search */}
+          {/* Local search — expands on focus, driving pill width to 500px */}
           <input
             value={localSearch || ""}
             onChange={e => setLocalSearch?.(e.target.value)}
             onKeyDown={e => e.key === "Escape" && setLocalSearch?.("")}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
             placeholder="Filter jobs…"
-            style={{ flex: 1, height: 28, padding: "0 10px", borderRadius: 4,
-                     border: `1px solid ${theme.border}`, background: theme.surface,
-                     color: theme.text, fontSize: 11, outline: "none" }}/>
+            style={{
+              height: 26, padding: "4px 10px", borderRadius: 4,
+              border: `1px solid ${theme.border}`, background: theme.surface,
+              color: theme.text, fontSize: 12, outline: "none",
+              width: searchFocused ? 180 : 120,
+              transition: "width 0.2s ease",
+            }}/>
           {localSearch && (
             <button onClick={() => setLocalSearch?.("")}
               style={{ background: "none", border: "none", color: theme.textDim,
