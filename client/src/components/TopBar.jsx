@@ -388,7 +388,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
   const [tokenSaving, setTokenSaving] = useState(false);
   const [tokenMsg,    setTokenMsg]    = useState("");
   const triggerRef = useRef(null);
-  const { accentId, setAccentId, ACCENT_OPTIONS, isDark, toggleMode } = useTheme();
+  const { accentId, setAccentId, ACCENT_OPTIONS, isDark, toggleMode, bgMode, setBgMode, BG_MODES } = useTheme();
 
   const currentMode = user?.applyMode || "TAILORED";
 
@@ -494,6 +494,38 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                     transform: accentId === opt.id ? "scale(1.25)" : "scale(1)",
                     transition: "transform 0.15s", padding: 0,
                   }}/>
+              ))}
+            </div>
+          </div>
+
+          {/* Background style */}
+          <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
+              Background
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {BG_MODES.map(m => (
+                <button key={m.id} title={m.label} onClick={() => setBgMode(m.id)}
+                  style={{
+                    width: 60, height: 38, borderRadius: 8, flexShrink: 0,
+                    background: m.previewBg,
+                    border: bgMode === m.id ? `2px solid ${theme.accent}` : `1px solid ${theme.border}`,
+                    outline: bgMode === m.id ? `2px solid ${theme.accent}44` : "none",
+                    outlineOffset: 1,
+                    cursor: "pointer", padding: 0,
+                    position: "relative", overflow: "hidden",
+                    transition: "border 0.15s, outline 0.15s",
+                  }}>
+                  {bgMode === m.id && (
+                    <span style={{
+                      position: "absolute", inset: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "rgba(0,0,0,0.25)", color: "#fff",
+                      fontSize: 14, fontWeight: 700,
+                    }}>✓</span>
+                  )}
+                </button>
               ))}
             </div>
           </div>
@@ -691,7 +723,7 @@ export default function TopBar({
 
   // Background: solid surface → glassy accent gradient
   const surfaceAlphaHex = Math.round((0.95 - p * 0.45) * 255).toString(16).padStart(2, "0");
-  const bgBase = `${theme.surface}${surfaceAlphaHex}`;
+  const bgBase = `${theme.surfaceBase}${surfaceAlphaHex}`;
   const a1 = (p * 0.18).toFixed(3);
   const a2 = (p * 0.08).toFixed(3);
   const a3 = (p * 0.12).toFixed(3);
@@ -708,7 +740,7 @@ export default function TopBar({
     : "none";
 
   // Pill 2 styling (fully-collapsed glassy pill, same accent)
-  const pill2Bg = `linear-gradient(135deg, rgba(${ar},${ag},${ab},0.18) 0%, rgba(${ar},${ag},${ab},0.08) 40%, rgba(255,255,255,0.12) 100%), ${theme.surface}88`;
+  const pill2Bg = `linear-gradient(135deg, rgba(${ar},${ag},${ab},0.18) 0%, rgba(${ar},${ag},${ab},0.08) 40%, rgba(255,255,255,0.12) 100%), ${theme.surfaceBase}88`;
 
   return (
     <>

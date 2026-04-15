@@ -123,7 +123,9 @@ function AppDashboard({ authUser, setAuthUser }) {
         <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
                       background:theme.bg, height:"100vh",
                       display:"flex", flexDirection:"column",
-                      overflow:"hidden", color:theme.text }}>
+                      overflow:"hidden", color:theme.text,
+                      backdropFilter: theme.backdrop,
+                      WebkitBackdropFilter: theme.backdrop }}>
 
           {/* TopBar: position:fixed — takes no space in flex layout */}
           <TopBar

@@ -1,10 +1,9 @@
-// client/src/styles/theme.jsx — Design System v4
-import { useState, createContext, useContext } from "react";
+// client/src/styles/theme.jsx — Design System v5 (iOS 26 glass — 6 bg modes)
+import { useState, useEffect, createContext, useContext } from "react";
 
 // Lucy brand accent colors:
 //   User board (JobsPanel, main UI) = soft sky blue #A8D8EA
 //   Admin panel                     = citrus yellow #F5E642
-// These are defined per-screen; the global theme uses the user accent.
 export const LUCY_USER_ACCENT  = "#A8D8EA";
 export const LUCY_ADMIN_ACCENT = "#F5E642";
 
@@ -15,14 +14,26 @@ export const ACCENT_OPTIONS = [
   { id:"sunset", label:"Sunset Orange", color:"#FFB07A", mutedLight:"#fff0e2", mutedDark:"#2a1400", textLight:"#8a3600", textDark:"#FFB07A" },
 ];
 
+export const BG_MODES = [
+  { id: "glass-light",      label: "Glass Light",    previewBg: "linear-gradient(135deg, rgba(100,180,255,0.35) 0%, rgba(200,120,255,0.25) 50%, rgba(255,200,150,0.30) 100%), #f0f4f8" },
+  { id: "glass-dark",       label: "Glass Dark",     previewBg: "linear-gradient(135deg, rgba(60,100,200,0.50) 0%, rgba(120,60,180,0.40) 50%, rgba(20,80,60,0.45) 100%), #080810" },
+  { id: "high-glass-light", label: "Hi-Glass Light", previewBg: "linear-gradient(135deg, rgba(80,160,255,0.55) 0%, rgba(180,90,255,0.45) 50%, rgba(255,180,100,0.50) 100%), #edf2fc" },
+  { id: "high-glass-dark",  label: "Hi-Glass Dark",  previewBg: "linear-gradient(135deg, rgba(60,100,220,0.65) 0%, rgba(130,50,200,0.55) 50%, rgba(20,90,60,0.60) 100%), #04040e" },
+  { id: "solid-white",      label: "Solid White",    previewBg: "#ffffff" },
+  { id: "solid-black",      label: "Solid Black",    previewBg: "#000000" },
+];
+
 export const THEMES = {
   light: {
-    // ── iOS 26 liquid glass surfaces ─────────────────────────
-    bg:           "rgba(255,255,255,0.72)",
-    surface:      "rgba(255,255,255,0.60)",
-    surfaceHigh:  "rgba(245,245,247,0.65)",
-    backdrop:     "blur(40px) saturate(180%)",
-    backdropCard: "blur(20px) saturate(160%)",
+    // ── Surfaces resolve via CSS vars per bg mode ─────────────
+    bg:           "var(--bg-page)",
+    surface:      "var(--bg-card)",
+    surfaceHigh:  "var(--bg-panel)",
+    backdrop:     "var(--bg-blur)",
+    backdropCard: "var(--bg-blur-sm)",
+    // Solid hex fallbacks for alpha-concatenation (TopBar pillBg)
+    bgBase:       "#ffffff",
+    surfaceBase:  "#ffffff",
     // ─────────────────────────────────────────────────────────
     overlay:      "rgba(0,0,0,0.04)",
     border:       "#e5e5e5",
@@ -30,7 +41,6 @@ export const THEMES = {
     text:         "#0f0f0f",
     textMuted:    "#3d3d3d",
     textDim:      "#4B5563",
-    // Lucy sky-blue accent (user board)
     accent:       "#A8D8EA",
     accentMuted:  "#e8f6fb",
     accentText:   "#1a6a8a",
@@ -47,11 +57,10 @@ export const THEMES = {
     shadowLg:     "0 20px 40px rgba(0,0,0,0.10), 0 8px 16px rgba(0,0,0,0.06)",
     shadowXl:     "0 40px 80px rgba(0,0,0,0.12), 0 16px 32px rgba(0,0,0,0.08)",
     gradAccent:   "#A8D8EA",
-    gradSubtle:   "linear-gradient(135deg, rgba(255,255,255,0.72) 0%, rgba(240,248,251,0.72) 100%)",
+    gradSubtle:   "linear-gradient(135deg, var(--bg-page) 0%, var(--bg-panel) 100%)",
     fontDisplay:  "'Barlow Condensed', 'DM Sans', system-ui, sans-serif",
     fontBody:     "'DM Sans', system-ui, sans-serif",
     fontMono:     "'JetBrains Mono', monospace",
-    // Lucy admin yellow (used in AdminPanel)
     adminAccent:      "#F5E642",
     adminAccentText:  "#5a5000",
     adminAccentMuted: "#fdfbca",
@@ -59,31 +68,34 @@ export const THEMES = {
     colorPrimary:   "#A8D8EA",
     colorSecondary: "#1a6a8a",
     colorAccent:    "#1a6a8a",
-    colorSurface:   "rgba(255,255,255,0.60)",
+    colorSurface:   "var(--bg-card)",
     colorBorder:    "#e5e5e5",
     colorText:      "#0f0f0f",
     colorMuted:     "#3d3d3d",
     colorDim:       "#4B5563",
-    colorCard:      "rgba(245,245,247,0.65)",
-    colorInputBg:   "rgba(255,255,255,0.55)",
+    colorCard:      "var(--bg-panel)",
+    colorInputBg:   "var(--bg-input)",
     colorTag:       "#e8f6fb",
-    gradBg:         "rgba(255,255,255,0.72)",
-    gradPanel:      "rgba(255,255,255,0.60)",
+    gradBg:         "var(--bg-page)",
+    gradPanel:      "var(--bg-card)",
     gradHover:      "rgba(0,0,0,0.04)",
     glowPrimary:    "0 0 0 3px #A8D8EA44",
-    shimmer1:       "rgba(255,255,255,0.72)",
-    shimmer2:       "rgba(245,245,247,0.65)",
+    shimmer1:       "rgba(245,245,247,0.65)",
+    shimmer2:       "#e5e5e5",
     radiusPill:     "999px",
     radiusCard:     "16px",
     radiusInput:    "10px",
   },
   dark: {
-    // ── iOS 26 liquid glass surfaces ─────────────────────────
-    bg:           "rgba(0,0,0,0.72)",
-    surface:      "rgba(28,28,30,0.60)",
-    surfaceHigh:  "rgba(44,44,46,0.65)",
-    backdrop:     "blur(40px) saturate(180%)",
-    backdropCard: "blur(20px) saturate(160%)",
+    // ── Surfaces resolve via CSS vars per bg mode ─────────────
+    bg:           "var(--bg-page)",
+    surface:      "var(--bg-card)",
+    surfaceHigh:  "var(--bg-panel)",
+    backdrop:     "var(--bg-blur)",
+    backdropCard: "var(--bg-blur-sm)",
+    // Solid hex fallbacks for alpha-concatenation (TopBar pillBg)
+    bgBase:       "#1c1c1e",
+    surfaceBase:  "#1c1c1e",
     // ─────────────────────────────────────────────────────────
     overlay:      "rgba(255,255,255,0.04)",
     border:       "#2a2a2a",
@@ -107,7 +119,7 @@ export const THEMES = {
     shadowLg:     "0 20px 40px rgba(0,0,0,0.6), 0 8px 16px rgba(0,0,0,0.4)",
     shadowXl:     "0 40px 80px rgba(0,0,0,0.7), 0 16px 32px rgba(0,0,0,0.5)",
     gradAccent:   "#A8D8EA",
-    gradSubtle:   "linear-gradient(135deg, rgba(28,28,30,0.60) 0%, rgba(44,44,46,0.65) 100%)",
+    gradSubtle:   "linear-gradient(135deg, var(--bg-page) 0%, var(--bg-panel) 100%)",
     fontDisplay:  "'Barlow Condensed', 'DM Sans', system-ui, sans-serif",
     fontBody:     "'DM Sans', system-ui, sans-serif",
     fontMono:     "'JetBrains Mono', monospace",
@@ -118,20 +130,20 @@ export const THEMES = {
     colorPrimary:   "#A8D8EA",
     colorSecondary: "#A8D8EA",
     colorAccent:    "#A8D8EA",
-    colorSurface:   "rgba(28,28,30,0.60)",
+    colorSurface:   "var(--bg-card)",
     colorBorder:    "#2a2a2a",
     colorText:      "#f5f5f5",
     colorMuted:     "#c0c0c0",
     colorDim:       "#9CA3AF",
-    colorCard:      "rgba(44,44,46,0.65)",
-    colorInputBg:   "rgba(44,44,46,0.55)",
+    colorCard:      "var(--bg-panel)",
+    colorInputBg:   "var(--bg-input)",
     colorTag:       "#0a1f2a",
-    gradBg:         "rgba(0,0,0,0.72)",
-    gradPanel:      "rgba(28,28,30,0.60)",
+    gradBg:         "var(--bg-page)",
+    gradPanel:      "var(--bg-card)",
     gradHover:      "rgba(255,255,255,0.04)",
     glowPrimary:    "0 0 0 3px #A8D8EA33",
-    shimmer1:       "rgba(28,28,30,0.60)",
-    shimmer2:       "rgba(44,44,46,0.65)",
+    shimmer1:       "rgba(44,44,46,0.65)",
+    shimmer2:       "#2a2a2a",
     radiusPill:     "999px",
     radiusCard:     "16px",
     radiusInput:    "10px",
@@ -147,9 +159,12 @@ export function ThemeProvider({ children }) {
   const [mode, setMode] = useState(() => {
     const saved = localStorage.getItem("rm_theme_mode");
     if (saved === "light" || saved === "dark") return saved;
-    // Legacy: any of the old theme names → dark
     const legacySaved = localStorage.getItem("rm_theme");
     return LEGACY_MAP[legacySaved] || "light";
+  });
+
+  const [bgMode, setBgModeRaw] = useState(() => {
+    return localStorage.getItem("rm-bg-mode") || "glass-light";
   });
 
   const [accentId, setAccentIdRaw] = useState(() => {
@@ -164,6 +179,17 @@ export function ThemeProvider({ children }) {
     setAccentIdRaw(id);
     sessionStorage.setItem("rm_session_accent", id);
   };
+
+  const setBgMode = (id) => {
+    setBgModeRaw(id);
+    localStorage.setItem("rm-bg-mode", id);
+    document.documentElement.setAttribute("data-bg", id);
+  };
+
+  // Sync data-bg attribute on mount and when bgMode changes
+  useEffect(() => {
+    document.documentElement.setAttribute("data-bg", bgMode);
+  }, [bgMode]);
 
   const accentOpt = ACCENT_OPTIONS.find(a => a.id === accentId) || ACCENT_OPTIONS[0];
   const baseTheme = THEMES[mode] || THEMES.light;
@@ -207,34 +233,140 @@ export function ThemeProvider({ children }) {
       accentId,
       setAccentId,
       ACCENT_OPTIONS,
+      bgMode,
+      setBgMode,
+      BG_MODES,
     }}>
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
-        /* ── Solid base behind all glass layers ── */
+
+        /* ══ Default CSS vars (glass-light — no data-bg fallback) ══ */
         html {
           color-scheme: ${mode};
-          background-color: ${mode === "dark" ? "#0a0a0a" : "#f0f0f0"};
           min-height: 100vh;
+          background: #f0f4f8;
+          background-image:
+            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(100,180,255,0.35) 0%, transparent 70%),
+            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(200,120,255,0.25) 0%, transparent 70%),
+            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,200,150,0.30) 0%, transparent 70%);
+          background-attachment: fixed;
+          --bg-page:      rgba(255,255,255,0.72);
+          --bg-card:      rgba(255,255,255,0.60);
+          --bg-panel:     rgba(245,245,247,0.65);
+          --bg-input:     rgba(255,255,255,0.55);
+          --bg-hover:     rgba(0,0,0,0.04);
+          --bg-blur:      blur(40px) saturate(180%);
+          --bg-blur-sm:   blur(20px) saturate(160%);
+          --border-glass: rgba(0,0,0,0.08);
+          transition: background 0.4s ease;
         }
-        /* ── Subtle noise grain (iOS glass texture) ── */
-        html::before {
-          content: '';
-          position: fixed;
-          inset: 0;
-          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.025'/%3E%3C/svg%3E");
-          pointer-events: none;
-          z-index: 0;
+
+        /* ══ Glass Light ══ */
+        html[data-bg="glass-light"] {
+          background: #f0f4f8;
+          background-image:
+            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(100,180,255,0.35) 0%, transparent 70%),
+            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(200,120,255,0.25) 0%, transparent 70%),
+            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,200,150,0.30) 0%, transparent 70%);
+          background-attachment: fixed;
+          --bg-page:      rgba(255,255,255,0.72);
+          --bg-card:      rgba(255,255,255,0.60);
+          --bg-panel:     rgba(245,245,247,0.65);
+          --bg-input:     rgba(255,255,255,0.55);
+          --bg-hover:     rgba(0,0,0,0.04);
+          --bg-blur:      blur(40px) saturate(180%);
+          --bg-blur-sm:   blur(20px) saturate(160%);
+          --border-glass: rgba(0,0,0,0.08);
         }
+
+        /* ══ Glass Dark ══ */
+        html[data-bg="glass-dark"] {
+          background: #080810;
+          background-image:
+            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(60,100,200,0.40) 0%, transparent 70%),
+            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(120,60,180,0.30) 0%, transparent 70%),
+            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(20,80,60,0.40) 0%, transparent 70%);
+          background-attachment: fixed;
+          --bg-page:      rgba(0,0,0,0.72);
+          --bg-card:      rgba(28,28,30,0.60);
+          --bg-panel:     rgba(44,44,46,0.65);
+          --bg-input:     rgba(44,44,46,0.55);
+          --bg-hover:     rgba(255,255,255,0.04);
+          --bg-blur:      blur(40px) saturate(180%);
+          --bg-blur-sm:   blur(20px) saturate(160%);
+          --border-glass: rgba(255,255,255,0.08);
+        }
+
+        /* ══ High Glass Light ══ */
+        html[data-bg="high-glass-light"] {
+          background: #edf2fc;
+          background-image:
+            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(80,160,255,0.50) 0%, transparent 70%),
+            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(180,90,255,0.40) 0%, transparent 70%),
+            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,180,100,0.45) 0%, transparent 70%);
+          background-attachment: fixed;
+          --bg-page:      rgba(255,255,255,0.45);
+          --bg-card:      rgba(255,255,255,0.35);
+          --bg-panel:     rgba(245,245,247,0.40);
+          --bg-input:     rgba(255,255,255,0.30);
+          --bg-hover:     rgba(0,0,0,0.03);
+          --bg-blur:      blur(60px) saturate(200%);
+          --bg-blur-sm:   blur(30px) saturate(180%);
+          --border-glass: rgba(255,255,255,0.50);
+        }
+
+        /* ══ High Glass Dark ══ */
+        html[data-bg="high-glass-dark"] {
+          background: #04040e;
+          background-image:
+            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(60,100,220,0.60) 0%, transparent 70%),
+            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(130,50,200,0.50) 0%, transparent 70%),
+            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(20,90,60,0.60) 0%, transparent 70%);
+          background-attachment: fixed;
+          --bg-page:      rgba(0,0,0,0.45);
+          --bg-card:      rgba(28,28,30,0.35);
+          --bg-panel:     rgba(44,44,46,0.40);
+          --bg-input:     rgba(44,44,46,0.35);
+          --bg-hover:     rgba(255,255,255,0.03);
+          --bg-blur:      blur(60px) saturate(200%);
+          --bg-blur-sm:   blur(30px) saturate(180%);
+          --border-glass: rgba(255,255,255,0.15);
+        }
+
+        /* ══ Solid White ══ */
+        html[data-bg="solid-white"] {
+          background: #ffffff;
+          --bg-page:      #ffffff;
+          --bg-card:      #ffffff;
+          --bg-panel:     #f5f5f7;
+          --bg-input:     #f0f0f2;
+          --bg-hover:     rgba(0,0,0,0.04);
+          --bg-blur:      none;
+          --bg-blur-sm:   none;
+          --border-glass: rgba(0,0,0,0.08);
+        }
+
+        /* ══ Solid Black ══ */
+        html[data-bg="solid-black"] {
+          background: #000000;
+          --bg-page:      #000000;
+          --bg-card:      #1c1c1e;
+          --bg-panel:     #2c2c2e;
+          --bg-input:     #2c2c2e;
+          --bg-hover:     rgba(255,255,255,0.04);
+          --bg-blur:      none;
+          --bg-blur-sm:   none;
+          --border-glass: rgba(255,255,255,0.08);
+        }
+
         body {
           margin: 0;
           font-family: 'DM Sans', system-ui, sans-serif;
-          background: ${theme.bg};
-          backdrop-filter: ${theme.backdrop};
-          -webkit-backdrop-filter: ${theme.backdrop};
+          background: transparent;
           color: ${theme.text};
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
-          transition: background 0.3s ease, color 0.3s ease, backdrop-filter 0.3s ease;
+          transition: color 0.3s ease;
         }
         /* Padding for fixed ScrollDock on public pages */
         .scroll-dock-page {
@@ -263,6 +395,23 @@ export function ThemeProvider({ children }) {
           text-transform: uppercase;
           color: ${theme.text};
           font-style: italic;
+        }
+        /* ── Glass surface utility class ── */
+        .glass-surface {
+          backdrop-filter: var(--bg-blur-sm);
+          -webkit-backdrop-filter: var(--bg-blur-sm);
+          position: relative;
+        }
+        .glass-surface::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+          opacity: 0.04;
+          mix-blend-mode: overlay;
+          pointer-events: none;
+          border-radius: inherit;
+          z-index: 0;
         }
         .rm-card {
           background: ${theme.surface};
@@ -315,7 +464,7 @@ export function ThemeProvider({ children }) {
           background-size: 100% 100%; border-color: ${theme.accent};
         }
         .rm-btn-secondary:hover:not(:disabled) {
-          background-image: linear-gradient(to top, ${theme.surfaceHigh}, ${theme.surfaceHigh});
+          background-image: linear-gradient(to top, var(--bg-panel), var(--bg-panel));
           background-size: 100% 100%; border-color: ${theme.borderStrong};
         }
         .rm-btn-ghost { border-color: ${theme.border}; color: ${theme.textMuted}; }
