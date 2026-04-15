@@ -647,6 +647,47 @@ db.pragma("busy_timeout = 5000");
         -- Applied jobs are always protected regardless
       `
     },
+    {
+      id: "023_clean_wrong_profile_jobs",
+      sql: `
+        -- Part 1: Remove user_jobs with NULL or invalid profile IDs (skipping applied jobs)
+        DELETE FROM user_jobs
+        WHERE user_id IN (SELECT id FROM users WHERE is_admin = 0)
+          AND (
+            domain_profile_id IS NULL
+            OR domain_profile_id NOT IN (
+              SELECT id FROM domain_profiles WHERE user_id = user_jobs.user_id
+            )
+          )
+          AND job_id NOT IN (SELECT job_id FROM job_applications);
+
+        -- Part 2: Remove PM/coordinator titles from engineering-type profiles
+        -- These were scraped while an SWE profile was active — title doesn't match profile domain
+        DELETE FROM user_jobs
+        WHERE user_id IN (SELECT id FROM users WHERE is_admin = 0)
+          AND domain_profile_id IN (
+            SELECT id FROM domain_profiles
+            WHERE user_id = user_jobs.user_id
+              AND (
+                LOWER(COALESCE(role_family,'')) LIKE '%engineer%'
+                OR LOWER(COALESCE(role_family,'')) LIKE '%software%'
+                OR LOWER(COALESCE(domain,'')) LIKE '%engineer%'
+                OR LOWER(COALESCE(domain,'')) LIKE '%software%'
+                OR LOWER(COALESCE(domain,'')) LIKE '%tech%'
+              )
+          )
+          AND job_id IN (
+            SELECT job_id FROM scraped_jobs
+            WHERE LOWER(title) LIKE '%project manager%'
+              OR LOWER(title) LIKE '%project coordinator%'
+              OR LOWER(title) LIKE '%program manager%'
+              OR LOWER(title) LIKE '%project director%'
+              OR LOWER(title) LIKE '%scrum master%'
+              OR LOWER(title) LIKE '%product owner%'
+          )
+          AND job_id NOT IN (SELECT job_id FROM job_applications);
+      `
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -1723,126 +1764,6 @@ app.patch("/api/auth/complete-profile", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Debug: profile ↔ jobs diagnostic ─────────────────────────
-app.get("/api/debug/profile-jobs", requireAuth, (req, res) => {
-  const userId = req.user.id;
-  const activeProfile = db.prepare(`SELECT id, profile_name FROM domain_profiles WHERE user_id = ? AND is_active = 1`).get(userId);
-  const profileCount   = db.prepare(`SELECT COUNT(*) as c FROM domain_profiles WHERE user_id = ?`).get(userId);
-  const userJobsTotal  = db.prepare(`SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ?`).get(userId);
-  const userJobsTagged = db.prepare(`SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ? AND domain_profile_id IS NOT NULL`).get(userId);
-  const userJobsUntagged = db.prepare(`SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ? AND domain_profile_id IS NULL`).get(userId);
-  const userJobsByProfile = db.prepare(`
-    SELECT uj.domain_profile_id, dp.profile_name, COUNT(*) as job_count
-    FROM user_jobs uj
-    LEFT JOIN domain_profiles dp ON dp.id = uj.domain_profile_id
-    WHERE uj.user_id = ?
-    GROUP BY uj.domain_profile_id
-  `).all(userId);
-  const samplePMJobsInSWE = activeProfile ? db.prepare(`
-    SELECT sj.title, sj.company, sj.search_query, uj.domain_profile_id
-    FROM user_jobs uj
-    JOIN scraped_jobs sj ON sj.job_id = uj.job_id
-    WHERE uj.user_id = ? AND uj.domain_profile_id = ?
-      AND (LOWER(sj.title) LIKE '%project manager%'
-        OR LOWER(sj.title) LIKE '%project coordinator%'
-        OR LOWER(sj.title) LIKE '%program manager%')
-    LIMIT 10
-  `).all(userId, activeProfile.id) : [];
-  const whereConditionCheck = db.prepare(`
-    SELECT sj.title, sj.company, uj.domain_profile_id, sj.domain_profile_id as scraped_profile_id
-    FROM user_jobs uj
-    JOIN scraped_jobs sj ON sj.job_id = uj.job_id
-    WHERE uj.user_id = ?
-    LIMIT 5
-  `).all(userId);
-  res.json({ activeProfile, profileCount, userJobsTotal, userJobsTagged, userJobsUntagged, userJobsByProfile, samplePMJobsInSWE, whereConditionCheck });
-});
-
-// ── Debug: trace a single job through the profile pipeline ───
-app.get("/api/debug/job-trace/:jobId", requireAuth, (req, res) => {
-  const { jobId } = req.params;
-  const userId = req.user.id;
-
-  const scrapedJob = db.prepare(`
-    SELECT job_id, title, company, search_query, domain_profile_id
-    FROM scraped_jobs WHERE job_id = ?
-  `).get(jobId);
-
-  const userJob = db.prepare(`
-    SELECT * FROM user_jobs WHERE user_id = ? AND job_id = ?
-  `).get(userId, jobId);
-
-  const activeProfile = db.prepare(`
-    SELECT id, profile_name, role_family, domain, target_titles
-    FROM domain_profiles WHERE user_id = ? AND is_active = 1
-  `).get(userId);
-
-  const allProfiles = db.prepare(`
-    SELECT id, profile_name, role_family, is_active
-    FROM domain_profiles WHERE user_id = ?
-  `).all(userId);
-
-  const pmJobsInUserPool = db.prepare(`
-    SELECT uj.domain_profile_id, uj.job_id, sj.title,
-      CASE WHEN uj.domain_profile_id = ?
-        THEN 'MATCHES active profile'
-        ELSE 'DOES NOT MATCH active profile'
-      END as profile_match
-    FROM user_jobs uj
-    JOIN scraped_jobs sj ON sj.job_id = uj.job_id
-    WHERE uj.user_id = ?
-      AND (LOWER(sj.title) LIKE '%project manager%'
-        OR LOWER(sj.title) LIKE '%coordinator%'
-        OR LOWER(sj.title) LIKE '%program manager%')
-    LIMIT 10
-  `).all(activeProfile?.id, userId);
-
-  res.json({
-    scrapedJob,
-    userJob,
-    activeProfile,
-    allProfiles,
-    pmJobsCurrentlyInUserPool: pmJobsInUserPool,
-    diagnosis: {
-      jobTaggedToProfile: userJob?.domain_profile_id,
-      activeProfileId: activeProfile?.id,
-      mismatch: userJob?.domain_profile_id !== activeProfile?.id,
-      scrapedJobTaggedToProfile: scrapedJob?.domain_profile_id,
-    },
-  });
-});
-
-// ── Debug: simulate exactly what /api/jobs queries ────────────
-app.get("/api/debug/jobs-query", requireAuth, (req, res) => {
-  const userId = req.user.id;
-
-  const activeProfile = db.prepare(`
-    SELECT id, profile_name FROM domain_profiles
-    WHERE user_id = ? AND is_active = 1
-  `).get(userId);
-
-  const jobs = db.prepare(`
-    SELECT sj.title, sj.company, uj.domain_profile_id,
-      CASE WHEN uj.domain_profile_id = ?
-        THEN 'IN ACTIVE PROFILE'
-        ELSE 'WRONG PROFILE OR NULL'
-      END as profile_status
-    FROM scraped_jobs sj
-    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
-    ORDER BY uj.domain_profile_id
-    LIMIT 30
-  `).all(activeProfile?.id, userId);
-
-  res.json({
-    activeProfile,
-    totalJobsForUser: jobs.length,
-    profileBreakdown: jobs.reduce((acc, j) => {
-      acc[j.profile_status] = (acc[j.profile_status] || 0) + 1;
-      return acc;
-    }, {}),
-    sampleJobs: jobs.slice(0, 20),
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════
 // MULTI-SESSION SYNC — Server-Sent Events
@@ -2126,41 +2047,24 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const sort     = req.query.sort || "dateDesc";
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
 
-  // ── Session sync: populate user_jobs from pool — profile-isolated to prevent cross-user bleeding ──
+  // ── Session sync: populate user_jobs — strictly isolated to the active profile ──
+  // IMPORTANT: use domain_profile_id = ? (not IN all profiles) so jobs scraped under
+  // another profile never bleed into this board.  No active profile → return empty immediately.
   const sessionActiveProfile = db.prepare(
     "SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1"
   ).get(userId);
 
-  if (sessionActiveProfile) {
-    // Profile path: only jobs scraped by THIS user's profiles enter their board
-    db.prepare(`
-      INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
-      SELECT ?, sj.job_id, sj.domain_profile_id
-      FROM scraped_jobs sj
-      WHERE sj.domain_profile_id IN (
-        SELECT id FROM domain_profiles WHERE user_id = ?
-      ) AND (
-        (sj.posted_at IS NOT NULL AND sj.posted_at != ''
-          AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
-        OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
-      )
-      AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
-    `).run(userId, userId, userId);
-  } else {
-    // Fallback for users without profiles (backwards compat)
-    db.prepare(`
-      INSERT OR IGNORE INTO user_jobs (user_id, job_id)
-      SELECT ?, sj.job_id FROM scraped_jobs sj
-      WHERE LOWER(sj.search_query) IN (
-        SELECT LOWER(search_query) FROM user_job_searches WHERE user_id = ?
-      ) AND (
-        (sj.posted_at IS NOT NULL AND sj.posted_at != ''
-          AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
-        OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
-      )
-      AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
-    `).run(userId, userId, userId);
+  if (!sessionActiveProfile) {
+    return res.json({ jobs: [], total: 0, totalPages: 0, page, pageSize });
   }
+
+  db.prepare(`
+    INSERT OR IGNORE INTO user_jobs (user_id, job_id, domain_profile_id)
+    SELECT ?, sj.job_id, sj.domain_profile_id
+    FROM scraped_jobs sj
+    WHERE sj.domain_profile_id = ?
+    AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1)
+  `).run(userId, sessionActiveProfile.id, userId);
 
   // Keep applied flag in sync with job_applications
   db.prepare(`
@@ -2178,15 +2082,9 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   ];
   const filterParams = [];
 
-  // Profile isolation: show only jobs tagged to the active profile.
-  // Never show NULL or sentinel -1 rows — migrations 021+022 backfilled and removed those.
-  if (sessionActiveProfile) {
-    conditions.push(`uj.domain_profile_id = ?`);
-    filterParams.push(sessionActiveProfile.id);
-  } else {
-    // No active profile → return empty board immediately
-    return res.json({ jobs: [], total: 0, totalPages: 0, page, pageSize });
-  }
+  // Profile isolation — sessionActiveProfile is guaranteed non-null (early return above)
+  conditions.push(`uj.domain_profile_id = ?`);
+  filterParams.push(sessionActiveProfile.id);
 
   const role = (req.query.role || "").trim().toLowerCase();
   if (role) { conditions.push(`LOWER(sj.search_query) = ?`); filterParams.push(role); }
