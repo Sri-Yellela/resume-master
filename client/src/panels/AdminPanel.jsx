@@ -719,6 +719,29 @@ export function AdminPanel() {
           fontWeight:800, fontSize:28, letterSpacing:"0.08em",
           textTransform:"uppercase", color:theme.text,
         }}>Panel</span>
+        <div style={{ flex:1 }}/>
+        {/* DB Inspector shortcut */}
+        <a href="/admin/db" style={{ textDecoration:"none" }}>
+          <div style={{
+            display:"flex", alignItems:"center", gap:10,
+            background:theme.surface, border:`1px solid ${theme.border}`,
+            borderRadius:10, padding:"10px 16px", cursor:"pointer",
+            transition:"border-color 0.15s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = ADMIN_ACCENT}
+          onMouseLeave={e => e.currentTarget.style.borderColor = theme.border}>
+            <span style={{ fontSize:18 }}>🔬</span>
+            <div>
+              <div style={{ fontWeight:800, fontSize:12, color:theme.text, letterSpacing:"0.05em" }}>
+                DB Inspector
+              </div>
+              <div style={{ fontSize:10, color:theme.textMuted }}>
+                Scrapes · Pool · Schema · Trace
+              </div>
+            </div>
+            <span style={{ fontSize:11, color:ADMIN_ACCENT, fontWeight:700, marginLeft:4 }}>→</span>
+          </div>
+        </a>
       </div>
 
       {/* ── Top-level tabs ── */}

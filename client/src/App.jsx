@@ -8,6 +8,7 @@ import { useInactivityLogout }   from "./hooks/useInactivityLogout.js";
 import AuthScreen                from "./components/AuthScreen.jsx";
 import AdminLayout               from "./components/AdminLayout.jsx";
 import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
+import DBInspector               from "./pages/admin/DBInspector.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import { AppScrollProvider, useAppScroll } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
@@ -217,6 +218,15 @@ function AppRouter() {
           : !authUser.isAdmin
             ? <Navigate to="/app" replace/>
             : <AdminLayout user={authUser} onLogout={handleAdminLogout}/>
+      }/>
+
+      {/* Admin DB Inspector */}
+      <Route path="/admin/db" element={
+        !authUser
+          ? <Navigate to="/admin/login" replace/>
+          : !authUser.isAdmin
+            ? <Navigate to="/app" replace/>
+            : <AdminLayout user={authUser} onLogout={handleAdminLogout}><DBInspector/></AdminLayout>
       }/>
 
       {/* User login — redirect to /app if logged in as user, /admin if admin */}

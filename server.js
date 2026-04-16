@@ -24,6 +24,7 @@ import fs             from "fs";
 import { createBackup, listBackups, restoreBackup } from "./scripts/backup.js";
 import applyRoutes from "./routes/apply.js";
 import { createAdminRouter } from "./routes/admin.js";
+import { createAdminDbRouter } from "./routes/adminDb.js";
 import { createDomainProfilesRouter } from "./routes/domainProfiles.js";
 import { trackApiCall, trackScrape } from "./services/usageTracker.js";
 import { checkLimit } from "./services/limitEnforcer.js";
@@ -1938,6 +1939,7 @@ app.get("/api/admin/users/:id/applications", requireAdmin, (req, res) => {
 
 // Analytics admin routes (usage tracking, limits, timeseries)
 app.use("/api/admin/analytics", createAdminRouter(db));
+app.use("/api/admin/db", createAdminDbRouter(db, { dbPath: DB_PATH, scrapeJobs }));
 
 // ═══════════════════════════════════════════════════════════════
 // SETTINGS

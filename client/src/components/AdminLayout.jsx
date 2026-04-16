@@ -2,7 +2,7 @@
 import { useTheme } from "../styles/theme.jsx";
 import { AdminPanel } from "../panels/AdminPanel.jsx";
 
-export default function AdminLayout({ user, onLogout }) {
+export default function AdminLayout({ user, onLogout, children }) {
   const { theme } = useTheme();
 
   return (
@@ -53,7 +53,7 @@ export default function AdminLayout({ user, onLogout }) {
       </div>
 
       {/* Admin content */}
-      <AdminPanel/>
+      {children ?? <AdminPanel/>}
     </div>
   );
 }
