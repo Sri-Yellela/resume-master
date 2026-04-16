@@ -706,6 +706,52 @@ db.pragma("busy_timeout = 5000");
         );
       `
     },
+    {
+      id: "026_backfill_scraped_jobs_profile_tag",
+      sql: `
+        -- Tag scraped_jobs to the active profile of the user whose
+        -- search_query matches, using user_job_searches as the link.
+        -- Not perfect for historical data but far better than NULL.
+        UPDATE scraped_jobs
+        SET domain_profile_id = (
+          SELECT dp.id
+          FROM user_job_searches ujs
+          JOIN domain_profiles dp
+            ON dp.user_id = ujs.user_id
+            AND dp.is_active = 1
+          WHERE LOWER(ujs.search_query) = LOWER(scraped_jobs.search_query)
+          LIMIT 1
+        )
+        WHERE domain_profile_id IS NULL;
+      `,
+    },
+    {
+      id: "027_backfill_user_jobs_profile_tag",
+      sql: `
+        -- Pull domain_profile_id from the scraped_job onto any user_jobs
+        -- rows that are still NULL-tagged but whose scraped_job is now tagged.
+        UPDATE user_jobs
+        SET domain_profile_id = (
+          SELECT sj.domain_profile_id
+          FROM scraped_jobs sj
+          WHERE sj.job_id = user_jobs.job_id
+            AND sj.domain_profile_id IS NOT NULL
+          LIMIT 1
+        )
+        WHERE domain_profile_id IS NULL
+          AND job_id IN (
+            SELECT job_id FROM scraped_jobs WHERE domain_profile_id IS NOT NULL
+          );
+
+        -- Remove any remaining NULL-tagged user_jobs that couldn't be matched
+        -- and are not applied jobs (safe to drop — they'd never appear anyway).
+        DELETE FROM user_jobs
+        WHERE domain_profile_id IS NULL
+          AND job_id NOT IN (
+            SELECT job_id FROM job_applications WHERE user_id = user_jobs.user_id
+          );
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -1106,12 +1152,16 @@ async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
   return items;
 }
 
-async function scrapeJobs(query, apifyToken, scrapeParams = {}, userId = null) {
+async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId = null) {
   const employmentTypes = scrapeParams.employmentTypes?.length ? scrapeParams.employmentTypes : ["full-time"];
   // TITLE RELEVANCE: if jobTitles array supplied (profile-driven), check against all targets.
   // Otherwise fall back to single-query isTitleRelevantNew.
   // Edit isTitleRelevantToProfile() in services/searchQueryBuilder.js to change matching logic.
   const profileTitles = scrapeParams.jobTitles?.length ? scrapeParams.jobTitles : null;
+  // Derive userId from domainProfileId for ATS scoring and usage tracking
+  const userId = domainProfileId
+    ? (db.prepare("SELECT user_id FROM domain_profiles WHERE id=?").get(domainProfileId)?.user_id ?? null)
+    : null;
   console.log(`[scrape] "${query}" — HarvestAPI (${profileTitles ? profileTitles.length + " profile titles" : "single query"})`);
   let rawItems = [];
   try {
@@ -1135,6 +1185,22 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, userId = null) {
     if (item.applyUrl) {
       const applyDomain = extractDomain(item.applyUrl);
       if (applyDomain && applyDomain.includes("linkedin.com")) { cntNoApply++; return false; }
+    }
+    // Post-scrape contract filter — catches what Apify's filter misses
+    // (staffing agency postings often slip through the API's employmentType param)
+    if (!employmentTypes.includes("contract") && !employmentTypes.includes("temporary")) {
+      const textCheck = [
+        item.title,
+        item.jobType,
+        item.contractType,
+        item.description?.slice(0, 200),
+      ].join(" ").toLowerCase();
+      const contractSignals = [
+        "contract", "contractor", "contract-to-hire",
+        "c2h", "c2c", "corp-to-corp", "w2 contract",
+        "temporary", "temp-to-perm",
+      ];
+      if (contractSignals.some(s => textCheck.includes(s))) { cntNotFT++; return false; }
     }
     if (!isEmploymentTypeWanted(item, employmentTypes)) { cntNotFT++; return false; }
     const titleOk = profileTitles
@@ -1172,8 +1238,8 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, userId = null) {
      ghost_score, years_experience, min_years_exp, max_years_exp, exp_raw,
      is_frequent_repost, _hash, scraped_at, source_platform,
      salary_min, salary_max, salary_currency, applicant_count, company_icon_url,
-     employment_type)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     employment_type, domain_profile_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   const insertMany = db.transaction((jobs) => {
@@ -1215,6 +1281,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, userId = null) {
         item.applicantCount || null,
         item.companyLogoUrl || null,
         empType,
+        domainProfileId,
       );
       if (result.changes > 0) inserted++;
     });
@@ -1368,12 +1435,16 @@ cron.schedule("0 2 * * *", () => {
 });
 
 cron.schedule("0 7 * * *", async () => {
-  const last = db.prepare("SELECT search_query FROM user_job_searches ORDER BY last_scraped_at DESC LIMIT 1").get();
+  const last = db.prepare(`
+    SELECT ujs.search_query, ujs.user_id, dp.id as profile_id
+    FROM user_job_searches ujs
+    JOIN domain_profiles dp ON dp.user_id = ujs.user_id AND dp.is_active = 1
+    ORDER BY ujs.last_scraped_at DESC LIMIT 1
+  `).get();
   if (!last) return;
-  // Borrow any user's Apify token for the daily background refresh
   const recent = db.prepare(
-    "SELECT apify_token FROM users WHERE apify_token IS NOT NULL LIMIT 1"
-  ).get();
+    "SELECT apify_token FROM users WHERE id=?"
+  ).get(last.user_id);
   if (!recent?.apify_token) {
     console.log("[cron] Skipping daily re-scrape — no user Apify token available");
     return;
@@ -1384,7 +1455,7 @@ cron.schedule("0 7 * * *", async () => {
       employmentTypes: ["full-time"],
       location:        "United States",
       postedLimit:     "24h",
-    });
+    }, last.profile_id);
   }
   catch(e) { console.error("[cron]", e.message); }
 });
@@ -2571,7 +2642,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   setImmediate(async () => {
     const scrapeStart = Date.now();
     try {
-      const scrapeResult = await scrapeJobs(query, token, scrapeParams, scrapeUserId);
+      const scrapeResult = await scrapeJobs(query, token, scrapeParams, activeProfile?.id ?? null);
 
       // Tag newly inserted scraped_jobs rows with the active profile id
       if (activeProfile) {
