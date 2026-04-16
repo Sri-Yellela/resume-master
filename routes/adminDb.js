@@ -23,6 +23,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
           sj.posted_at, sj.scraped_at, sj.ghost_score, sj.ats_score,
           sj.domain_profile_id, sj.source_platform, sj.applicant_count,
           sj.min_years_exp, sj.max_years_exp,
+          sj.description, sj.description_html,
           dp.profile_name, dp.role_family,
           dp.user_id as profile_owner_user_id,
           u.username as profile_owner_username,
@@ -42,7 +43,19 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       sql += ` ORDER BY sj.scraped_at DESC LIMIT ?`;
       params.push(limit);
 
-      const jobs = db.prepare(sql).all(...params);
+      const DESC_LIMIT = 10000;
+      const jobs = db.prepare(sql).all(...params).map(job => {
+        const out = { ...job };
+        if (out.description && out.description.length > DESC_LIMIT) {
+          out.description = out.description.slice(0, DESC_LIMIT);
+          out.description_truncated = true;
+        }
+        if (out.description_html && out.description_html.length > DESC_LIMIT) {
+          out.description_html = out.description_html.slice(0, DESC_LIMIT);
+          out.description_truncated = true;
+        }
+        return out;
+      });
 
       const totalCount = db.prepare("SELECT COUNT(*) as c FROM scraped_jobs").get().c;
       const nullProfileCount = db.prepare(
@@ -111,6 +124,82 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       const walMode = db.prepare("PRAGMA journal_mode").get();
 
       res.json({ tables, migrations, dbSizeBytes, walMode: walMode?.journal_mode === "wal" });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Route 2c: Full schema export (for copy/download) ─────────
+  router.get("/schema/export", requireAdmin, (req, res) => {
+    try {
+      const tableNames = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`
+      ).all().map(t => t.name);
+
+      const createStatements = db.prepare(
+        `SELECT name, type, sql FROM sqlite_master
+         WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%'
+         ORDER BY type DESC, name ASC`
+      ).all();
+
+      let dbSizeBytes = 0;
+      if (dbPath) { try { dbSizeBytes = fs.statSync(dbPath).size; } catch {} }
+      const fmtBytes = b => b > 1e6 ? (b/1e6).toFixed(1)+" MB" : b > 1e3 ? (b/1e3).toFixed(1)+" KB" : b+" B";
+
+      let migrations = [];
+      try { migrations = db.prepare("SELECT * FROM schema_migrations ORDER BY applied_at ASC").all(); } catch {}
+
+      const generatedAt = new Date().toISOString();
+      const bar = "═".repeat(55);
+      const lines = [
+        bar,
+        "RESUME MASTER — FULL DB SCHEMA EXPORT",
+        `Generated: ${generatedAt}`,
+        `DB Size: ${fmtBytes(dbSizeBytes)}`,
+        bar,
+        "",
+      ];
+
+      let totalRows = 0;
+      for (const name of tableNames) {
+        const rowCount = db.prepare(`SELECT COUNT(*) as c FROM "${name}"`).get().c;
+        totalRows += rowCount;
+        const createRow = createStatements.find(r => r.name === name && r.type === "table");
+        lines.push(`[TABLE: ${name} — ${rowCount} rows]`);
+        if (createRow?.sql) lines.push(createRow.sql + ";");
+        lines.push("");
+      }
+
+      // Indexes section
+      const indexes = createStatements.filter(r => r.type === "index" && r.sql);
+      if (indexes.length) {
+        lines.push(bar);
+        lines.push("INDEXES");
+        lines.push(bar);
+        lines.push("");
+        for (const idx of indexes) {
+          lines.push(idx.sql + ";");
+        }
+        lines.push("");
+      }
+
+      if (migrations.length) {
+        lines.push(bar);
+        lines.push("MIGRATION HISTORY");
+        lines.push(bar);
+        for (const m of migrations) {
+          const ts = m.applied_at
+            ? new Date(m.applied_at * 1000).toISOString().slice(0, 19).replace("T", " ")
+            : "unknown";
+          lines.push(`${m.id} — applied ${ts}`);
+        }
+        lines.push("");
+      }
+
+      res.json({
+        schema: lines.join("\n"),
+        generatedAt,
+        tableCount: tableNames.length,
+        totalRows,
+      });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

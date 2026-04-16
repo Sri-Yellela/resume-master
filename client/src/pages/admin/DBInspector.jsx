@@ -98,6 +98,7 @@ function ScrapeMonitorTab({ theme }) {
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(null);
   const [filterUser, setFilterUser] = useState("");
+  const [copied, setCopied] = useState(null); // 'text' | 'html' | null
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -202,7 +203,89 @@ function ScrapeMonitorTab({ theme }) {
                 {isExp && (
                   <div style={{ padding:"16px 20px", background:theme.surfaceHigh,
                                 borderTop:`1px solid ${theme.border}` }}>
-                    <KeyValueGrid data={job} theme={theme} highlight={["domain_profile_id","ats_score"]}/>
+                    <KeyValueGrid
+                      data={(() => {
+                        const { description, description_html, description_truncated, ...rest } = job;
+                        return rest;
+                      })()}
+                      theme={theme}
+                      highlight={["domain_profile_id","ats_score"]}
+                    />
+
+                    {/* Description section */}
+                    <div style={{
+                      marginTop:16,
+                      borderTop:`1px solid ${theme.border}`,
+                      paddingTop:12,
+                    }}>
+                      <div style={{
+                        display:"flex", justifyContent:"space-between",
+                        alignItems:"center", marginBottom:8,
+                      }}>
+                        <span style={{
+                          fontSize:11, fontWeight:600, textTransform:"uppercase",
+                          letterSpacing:"0.08em", color:theme.textMuted,
+                        }}>
+                          Job Description
+                        </span>
+                        <div style={{ display:"flex", gap:8 }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(job.description || "");
+                              setCopied("text");
+                              setTimeout(() => setCopied(null), 2000);
+                            }}
+                            style={{
+                              fontSize:11, padding:"3px 10px", borderRadius:6,
+                              border:`1px solid ${theme.border}`,
+                              background: copied === "text" ? "#4ade8022" : theme.surface,
+                              color: copied === "text" ? "#4ade80" : theme.textMuted,
+                              cursor:"pointer",
+                            }}>
+                            {copied === "text" ? "✓ Copied" : "Copy Text"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(job.description_html || "");
+                              setCopied("html");
+                              setTimeout(() => setCopied(null), 2000);
+                            }}
+                            style={{
+                              fontSize:11, padding:"3px 10px", borderRadius:6,
+                              border:`1px solid ${theme.border}`,
+                              background: copied === "html" ? "#4ade8022" : theme.surface,
+                              color: copied === "html" ? "#4ade80" : theme.textMuted,
+                              cursor:"pointer",
+                            }}>
+                            {copied === "html" ? "✓ Copied" : "Copy HTML"}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{
+                        maxHeight:200, overflowY:"auto",
+                        fontSize:12, lineHeight:1.6, color:theme.textMuted,
+                        background:theme.bg, borderRadius:8,
+                        padding:"10px 12px", whiteSpace:"pre-wrap",
+                        fontFamily:"monospace",
+                        border:`1px solid ${theme.border}`,
+                      }}>
+                        {job.description
+                          ? job.description
+                          : <span style={{ color:theme.textDim, fontStyle:"italic" }}>
+                              No description available
+                            </span>
+                        }
+                      </div>
+
+                      {job.description_truncated && (
+                        <div style={{ fontSize:11, color:"#d97706", marginTop:4 }}>
+                          Description truncated at 10,000 chars. Copy button copies full text.
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -226,6 +309,7 @@ function SchemaExplorerTab({ theme }) {
   const [selected, setSelected] = useState(null);
   const [recentRows, setRecentRows] = useState(null);
   const [recentLoading, setRecentLoading] = useState(false);
+  const [schemaCopied, setSchemaCopied] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -257,8 +341,59 @@ function SchemaExplorerTab({ theme }) {
 
   const fkCols = new Set((selected?.foreignKeys || []).map(fk => fk.from));
 
+  const fetchSchemaExport = async () => {
+    const res = await fetch("/api/admin/db/schema/export", { credentials:"include" });
+    return res.json();
+  };
+
   return (
-    <div style={{ display:"flex", gap:0, height:"calc(100vh - 220px)", minHeight:400 }}>
+    <div>
+    {/* Controls bar */}
+    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:16 }}>
+      <button
+        type="button"
+        onClick={async () => {
+          try {
+            const d = await fetchSchemaExport();
+            await navigator.clipboard.writeText(d.schema);
+            setSchemaCopied(true);
+            setTimeout(() => setSchemaCopied(false), 3000);
+          } catch(e) { console.error("Schema copy failed:", e); }
+        }}
+        style={{
+          display:"flex", alignItems:"center", gap:6,
+          padding:"6px 14px", borderRadius:8,
+          border:`1px solid ${schemaCopied ? "#4ade8066" : theme.border}`,
+          background: schemaCopied ? "#4ade8018" : theme.surfaceHigh,
+          color: schemaCopied ? "#4ade80" : theme.text,
+          cursor:"pointer", fontSize:12, fontWeight:600, transition:"all 0.2s",
+        }}>
+        {schemaCopied ? "✓ Schema Copied!" : "📋 Copy Full Schema"}
+      </button>
+      <button
+        type="button"
+        onClick={async () => {
+          try {
+            const d = await fetchSchemaExport();
+            const blob = new Blob([d.schema], { type:"text/plain" });
+            const url = URL.createObjectURL(blob);
+            Object.assign(document.createElement("a"), {
+              href: url,
+              download: `resume_master_schema_${new Date().toISOString().slice(0,10)}.sql`,
+            }).click();
+            URL.revokeObjectURL(url);
+          } catch(e) { console.error("Schema download failed:", e); }
+        }}
+        style={{
+          padding:"6px 14px", borderRadius:8,
+          border:`1px solid ${theme.border}`,
+          background:theme.surfaceHigh, color:theme.text,
+          cursor:"pointer", fontSize:12,
+        }}>
+        ⬇ Download .sql
+      </button>
+    </div>
+    <div style={{ display:"flex", gap:0, height:"calc(100vh - 260px)", minHeight:400 }}>
       {/* Left sidebar */}
       <div style={{
         width:220, flexShrink:0, borderRight:`1px solid ${theme.border}`,
@@ -453,6 +588,7 @@ function SchemaExplorerTab({ theme }) {
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }
