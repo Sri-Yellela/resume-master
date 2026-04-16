@@ -752,6 +752,106 @@ db.pragma("busy_timeout = 5000");
           );
       `,
     },
+    {
+      id: "028_remove_irrelevant_swe_jobs",
+      sql: `
+        -- Remove from user_jobs any job tagged to an engineering profile
+        -- whose title contains no SWE-relevant keyword. These were incorrectly
+        -- inserted when the title relevance filter was broken and then backfilled.
+        DELETE FROM user_jobs
+        WHERE domain_profile_id IN (
+          SELECT id FROM domain_profiles WHERE role_family = 'engineering'
+        )
+        AND job_id IN (
+          SELECT job_id FROM scraped_jobs
+          WHERE (
+            LOWER(title) NOT LIKE '%engineer%'
+            AND LOWER(title) NOT LIKE '%developer%'
+            AND LOWER(title) NOT LIKE '%software%'
+            AND LOWER(title) NOT LIKE '%programmer%'
+            AND LOWER(title) NOT LIKE '%devops%'
+            AND LOWER(title) NOT LIKE '%sre%'
+            AND LOWER(title) NOT LIKE '%architect%'
+            AND LOWER(title) NOT LIKE '%data%'
+            AND LOWER(title) NOT LIKE '%machine learning%'
+            AND LOWER(title) NOT LIKE '%ml%'
+            AND LOWER(title) NOT LIKE '%ai%'
+            AND LOWER(title) NOT LIKE '%backend%'
+            AND LOWER(title) NOT LIKE '%frontend%'
+            AND LOWER(title) NOT LIKE '%fullstack%'
+            AND LOWER(title) NOT LIKE '%full stack%'
+            AND LOWER(title) NOT LIKE '%platform%'
+            AND LOWER(title) NOT LIKE '%infrastructure%'
+            AND LOWER(title) NOT LIKE '%cloud%'
+            AND LOWER(title) NOT LIKE '%systems%'
+            AND LOWER(title) NOT LIKE '%technical%'
+            AND LOWER(title) NOT LIKE '%technology%'
+            AND LOWER(title) NOT LIKE '%security%'
+            AND LOWER(title) NOT LIKE '%analyst%'
+            AND LOWER(title) NOT LIKE '%scientist%'
+          )
+        )
+        AND job_id NOT IN (
+          SELECT job_id FROM job_applications WHERE user_id = user_jobs.user_id
+        );
+
+        -- Also purge from scraped_jobs if no user has applied to them
+        DELETE FROM scraped_jobs
+        WHERE domain_profile_id IN (
+          SELECT id FROM domain_profiles WHERE role_family = 'engineering'
+        )
+        AND (
+          LOWER(title) NOT LIKE '%engineer%'
+          AND LOWER(title) NOT LIKE '%developer%'
+          AND LOWER(title) NOT LIKE '%software%'
+          AND LOWER(title) NOT LIKE '%programmer%'
+          AND LOWER(title) NOT LIKE '%devops%'
+          AND LOWER(title) NOT LIKE '%architect%'
+          AND LOWER(title) NOT LIKE '%data%'
+          AND LOWER(title) NOT LIKE '%machine learning%'
+          AND LOWER(title) NOT LIKE '%platform%'
+          AND LOWER(title) NOT LIKE '%infrastructure%'
+          AND LOWER(title) NOT LIKE '%cloud%'
+          AND LOWER(title) NOT LIKE '%systems%'
+          AND LOWER(title) NOT LIKE '%technical%'
+          AND LOWER(title) NOT LIKE '%security%'
+          AND LOWER(title) NOT LIKE '%analyst%'
+          AND LOWER(title) NOT LIKE '%scientist%'
+        )
+        AND job_id NOT IN (SELECT DISTINCT job_id FROM job_applications);
+      `,
+    },
+    {
+      id: "029_remove_irrelevant_pm_jobs",
+      sql: `
+        -- Remove from user_jobs any job tagged to a PM profile
+        -- whose title contains no PM-relevant keyword.
+        DELETE FROM user_jobs
+        WHERE domain_profile_id IN (
+          SELECT id FROM domain_profiles WHERE role_family = 'pm'
+        )
+        AND job_id IN (
+          SELECT job_id FROM scraped_jobs
+          WHERE (
+            LOWER(title) NOT LIKE '%project%'
+            AND LOWER(title) NOT LIKE '%program%'
+            AND LOWER(title) NOT LIKE '%product%'
+            AND LOWER(title) NOT LIKE '%manager%'
+            AND LOWER(title) NOT LIKE '%coordinator%'
+            AND LOWER(title) NOT LIKE '%director%'
+            AND LOWER(title) NOT LIKE '%lead%'
+            AND LOWER(title) NOT LIKE '%agile%'
+            AND LOWER(title) NOT LIKE '%scrum%'
+            AND LOWER(title) NOT LIKE '%pmo%'
+            AND LOWER(title) NOT LIKE '%delivery%'
+            AND LOWER(title) NOT LIKE '%operations%'
+          )
+        )
+        AND job_id NOT IN (
+          SELECT job_id FROM job_applications WHERE user_id = user_jobs.user_id
+        );
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -1207,6 +1307,26 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
       ? isTitleRelevantToProfile(item.title, profileTitles)
       : isTitleRelevantNew(item.title, query);
     if (!titleOk) { cntIrrelevant++; return false; }
+    // Profile-aware title guard: second pass using profile's target_titles tokens.
+    // Runs after the generic relevance check to catch cross-domain bleed
+    // (e.g. "Nurse Educator" passing isTitleRelevantNew for a SWE profile).
+    if (domainProfileId) {
+      const profileRow = db.prepare(
+        "SELECT target_titles FROM domain_profiles WHERE id=?"
+      ).get(domainProfileId);
+      const targetTitles = JSON.parse(profileRow?.target_titles || "[]");
+      if (targetTitles.length > 0) {
+        const titleLower = item.title.toLowerCase();
+        const STOP = new Set(["the","and","for","with","senior","junior","staff","lead"]);
+        const matches = targetTitles.some(target => {
+          const tokens = target.toLowerCase()
+            .split(/[\s/\-]+/)
+            .filter(w => w.length > 2 && !STOP.has(w));
+          return tokens.length === 0 || tokens.every(t => titleLower.includes(t));
+        });
+        if (!matches) { cntIrrelevant++; return false; }
+      }
+    }
     if (isReposted(item))                      { cntRepost++;     return false; }
     if (ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }) >= 4) { cntGhost++; return false; }
     if (thisRunIds.has(item.jobId))            { cntDup++;        return false; }
