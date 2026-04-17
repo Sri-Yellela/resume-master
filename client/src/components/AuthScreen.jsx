@@ -125,12 +125,24 @@ function AuthModal({ onLogin }) {
   const [step1,   setStep1]   = useState({ username:"", password:"", confirmPassword:"", apify_token:"" });
   // Registration step 2
   const [step2,   setStep2]   = useState({ first_name:"", middle_name:"", last_name:"", name_suffix:"", email:"", phone:"" });
+  const [reset,   setReset]   = useState({ email:"", otp:"", password:"", confirmPassword:"", token:"" });
+  const [resetSent, setResetSent] = useState(false);
   const [error,   setError]   = useState("");
+  const [notice,  setNotice]  = useState("");
   const [loading, setLoading] = useState(false);
 
   const setL  = (k,v) => setLoginF(f => ({ ...f, [k]:v }));
   const setS1 = (k,v) => setStep1(f => ({ ...f, [k]:v }));
   const setS2 = (k,v) => setStep2(f => ({ ...f, [k]:v }));
+  const setR  = (k,v) => setReset(f => ({ ...f, [k]:v }));
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("resetToken");
+    if (!token) return;
+    setReset(f => ({ ...f, token }));
+    setTab("forgot");
+    setResetSent(true);
+  }, []);
 
   // Warn before tab close while on step 2 (data would be lost)
   useEffect(() => {
@@ -141,7 +153,7 @@ function AuthModal({ onLogin }) {
   }, [tab, regStep]);
 
   const handleLogin = async e => {
-    e.preventDefault(); setError(""); setLoading(true);
+    e.preventDefault(); setError(""); setNotice(""); setLoading(true);
     try {
       const d = await api("/api/auth/login", { method:"POST", body:JSON.stringify({ username:login.username, password:login.password }) });
       if (d.user) onLogin(d.user);
@@ -151,7 +163,7 @@ function AuthModal({ onLogin }) {
   };
 
   const handleStep1 = e => {
-    e.preventDefault(); setError("");
+    e.preventDefault(); setError(""); setNotice("");
     if (!step1.username.trim() || !step1.password) return setError("Username and password are required");
     if (step1.password.length < 8) return setError("Password must be at least 8 characters");
     if (step1.password !== step1.confirmPassword) return setError("Passwords do not match");
@@ -161,7 +173,7 @@ function AuthModal({ onLogin }) {
   };
 
   const handleRegister = async e => {
-    e.preventDefault(); setError(""); setLoading(true);
+    e.preventDefault(); setError(""); setNotice(""); setLoading(true);
     try {
       const d = await api("/api/auth/register", { method:"POST", body:JSON.stringify({
         username: step1.username.trim(),
@@ -178,6 +190,41 @@ function AuthModal({ onLogin }) {
       }) });
       if (d.user) onLogin(d.user);
       else setError(d.error || "Registration failed");
+    } catch(err) { setError(err.message); }
+    setLoading(false);
+  };
+
+  const handlePasswordResetRequest = async e => {
+    e.preventDefault(); setError(""); setNotice(""); setLoading(true);
+    try {
+      const d = await api("/api/auth/password-reset/request", {
+        method:"POST",
+        body:JSON.stringify({ email:reset.email }),
+      });
+      setResetSent(true);
+      if (d.message) setNotice(d.message);
+    } catch(err) { setError(err.message); }
+    setLoading(false);
+  };
+
+  const handlePasswordResetConfirm = async e => {
+    e.preventDefault(); setError(""); setNotice("");
+    if (!reset.token) return setError("Open the reset link from your email first.");
+    if (!reset.otp.trim()) return setError("OTP is required");
+    if (reset.password.length < 8) return setError("Password must be at least 8 characters");
+    if (reset.password !== reset.confirmPassword) return setError("Passwords do not match");
+    setLoading(true);
+    try {
+      await api("/api/auth/password-reset/confirm", {
+        method:"POST",
+        body:JSON.stringify({ token:reset.token, otp:reset.otp.trim(), password:reset.password }),
+      });
+      setTab("login");
+      setReset({ email:"", otp:"", password:"", confirmPassword:"", token:"" });
+      setResetSent(false);
+      setLoginF(f => ({ ...f, password:"" }));
+      setNotice("Password reset. Sign in with your new password.");
+      window.history.replaceState({}, "", window.location.pathname);
     } catch(err) { setError(err.message); }
     setLoading(false);
   };
@@ -204,7 +251,7 @@ function AuthModal({ onLogin }) {
                     background:mode==="dark"?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",
                     borderRadius:999, padding:4 }}>
         {["login","register"].map(t => (
-          <button key={t} onClick={() => { setTab(t); setRegStep(1); setError(""); }}
+          <button key={t} onClick={() => { setTab(t); setRegStep(1); setError(""); setNotice(""); }}
             style={{ flex:1, padding:"7px 0", borderRadius:999, border:"none",
                      fontWeight:700, fontSize:12, cursor:"pointer",
                      background: tab===t ? theme.accent : "transparent",
@@ -222,12 +269,71 @@ function AuthModal({ onLogin }) {
           <input style={inputStyle} placeholder="Password" type="password" value={login.password}
             onChange={e=>setL("password",e.target.value)}/>
           {error && <div style={{ color:theme.danger, fontSize:12 }}>{error}</div>}
+          {notice && <div style={{ color:theme.success, fontSize:12 }}>{notice}</div>}
           <button type="submit" disabled={loading}
             style={{ width:"100%", padding:"12px 0", borderRadius:999, border:"none",
                      background:theme.gradAccent, color:"white", fontWeight:800,
                      fontSize:14, cursor:"pointer", marginTop:4,
                      opacity:loading?0.7:1, transition:"opacity 0.2s" }}>
             {loading ? "Signing in…" : "Sign In →"}
+          </button>
+          <button type="button"
+            onClick={() => { setTab("forgot"); setError(""); setNotice(""); }}
+            style={{ background:"none", border:"none", color:theme.accentText,
+                     fontSize:12, fontWeight:700, cursor:"pointer", padding:4 }}>
+            Forgot password?
+          </button>
+        </form>
+
+      ) : tab === "forgot" ? (
+        <form onSubmit={reset.token ? handlePasswordResetConfirm : handlePasswordResetRequest}
+          style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          <div style={{ fontSize:11, color:theme.textDim, fontWeight:600,
+                        textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:2 }}>
+            Password reset
+          </div>
+          {!resetSent && !reset.token && (
+            <input style={inputStyle} placeholder="Email" type="email" value={reset.email}
+              onChange={e=>setR("email",e.target.value)} autoFocus/>
+          )}
+          {resetSent && !reset.token && (
+            <div style={{ fontSize:11, color:theme.textMuted, lineHeight:1.6,
+                          padding:"10px 12px", background:theme.surfaceHigh,
+                          borderRadius:10, border:`1px solid ${theme.border}` }}>
+              Check your email for the reset link and OTP. This page will finish the reset after you open the link.
+            </div>
+          )}
+          {reset.token && (
+            <>
+              <div style={{ fontSize:11, color:theme.textMuted, lineHeight:1.6,
+                            padding:"10px 12px", background:theme.surfaceHigh,
+                            borderRadius:10, border:`1px solid ${theme.border}` }}>
+                Enter the OTP from your email and choose a new password.
+              </div>
+              <input style={inputStyle} placeholder="Email OTP" value={reset.otp}
+                onChange={e=>setR("otp",e.target.value)}/>
+              <input style={inputStyle} placeholder="New password (min 8 chars)" type="password" value={reset.password}
+                onChange={e=>setR("password",e.target.value)}/>
+              <input style={inputStyle} placeholder="Confirm new password" type="password" value={reset.confirmPassword}
+                onChange={e=>setR("confirmPassword",e.target.value)}/>
+            </>
+          )}
+          {error && <div style={{ color:theme.danger, fontSize:12 }}>{error}</div>}
+          {notice && <div style={{ color:theme.success, fontSize:12 }}>{notice}</div>}
+          {(!resetSent || reset.token) && (
+            <button type="submit" disabled={loading}
+              style={{ width:"100%", padding:"12px 0", borderRadius:999, border:"none",
+                       background:theme.gradAccent, color:"white", fontWeight:800,
+                       fontSize:14, cursor:"pointer", marginTop:4,
+                       opacity:loading?0.7:1, transition:"opacity 0.2s" }}>
+              {loading ? "Working..." : (reset.token ? "Reset Password" : "Send Reset Email")}
+            </button>
+          )}
+          <button type="button"
+            onClick={() => { setTab("login"); setError(""); setNotice(""); }}
+            style={{ background:"none", border:"none", color:theme.textMuted,
+                     fontSize:12, fontWeight:700, cursor:"pointer", padding:4 }}>
+            Back to sign in
           </button>
         </form>
 

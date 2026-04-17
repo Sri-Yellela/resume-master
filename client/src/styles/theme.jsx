@@ -29,6 +29,8 @@ export const THEMES = {
     bg:           "var(--bg-page)",
     surface:      "var(--bg-card)",
     surfaceHigh:  "var(--bg-panel)",
+    menuSurface:  "var(--bg-menu)",
+    modalSurface: "var(--bg-modal)",
     backdrop:     "var(--bg-blur)",
     backdropCard: "var(--bg-blur-sm)",
     // Solid hex fallbacks for alpha-concatenation (TopBar pillBg)
@@ -91,6 +93,8 @@ export const THEMES = {
     bg:           "var(--bg-page)",
     surface:      "var(--bg-card)",
     surfaceHigh:  "var(--bg-panel)",
+    menuSurface:  "var(--bg-menu)",
+    modalSurface: "var(--bg-modal)",
     backdrop:     "var(--bg-blur)",
     backdropCard: "var(--bg-blur-sm)",
     // Solid hex fallbacks for alpha-concatenation (TopBar pillBg)
@@ -253,7 +257,11 @@ export function ThemeProvider({ children }) {
           --bg-page:      rgba(255,255,255,0.72);
           --bg-card:      rgba(255,255,255,0.60);
           --bg-panel:     rgba(245,245,247,0.65);
+          --bg-menu:      rgba(255,255,255,0.98);
+          --bg-modal:     rgba(255,255,255,0.97);
           --bg-input:     rgba(255,255,255,0.55);
+          --popover:      0 0% 100%;
+          --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.04);
           --bg-blur:      blur(40px) saturate(180%);
           --bg-blur-sm:   blur(20px) saturate(160%);
@@ -272,7 +280,11 @@ export function ThemeProvider({ children }) {
           --bg-page:      rgba(255,255,255,0.72);
           --bg-card:      rgba(255,255,255,0.60);
           --bg-panel:     rgba(245,245,247,0.65);
+          --bg-menu:      rgba(255,255,255,0.98);
+          --bg-modal:     rgba(255,255,255,0.97);
           --bg-input:     rgba(255,255,255,0.55);
+          --popover:      0 0% 100%;
+          --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.04);
           --bg-blur:      blur(40px) saturate(180%);
           --bg-blur-sm:   blur(20px) saturate(160%);
@@ -290,7 +302,11 @@ export function ThemeProvider({ children }) {
           --bg-page:      rgba(0,0,0,0.72);
           --bg-card:      rgba(28,28,30,0.60);
           --bg-panel:     rgba(44,44,46,0.65);
+          --bg-menu:      rgba(28,28,30,0.98);
+          --bg-modal:     rgba(28,28,30,0.97);
           --bg-input:     rgba(44,44,46,0.55);
+          --popover:      240 4% 11%;
+          --popover-foreground: 0 0% 96%;
           --bg-hover:     rgba(255,255,255,0.04);
           --bg-blur:      blur(40px) saturate(180%);
           --bg-blur-sm:   blur(20px) saturate(160%);
@@ -308,7 +324,11 @@ export function ThemeProvider({ children }) {
           --bg-page:      rgba(255,255,255,0.45);
           --bg-card:      rgba(255,255,255,0.35);
           --bg-panel:     rgba(245,245,247,0.40);
+          --bg-menu:      rgba(255,255,255,0.98);
+          --bg-modal:     rgba(255,255,255,0.97);
           --bg-input:     rgba(255,255,255,0.30);
+          --popover:      0 0% 100%;
+          --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.03);
           --bg-blur:      blur(60px) saturate(200%);
           --bg-blur-sm:   blur(30px) saturate(180%);
@@ -326,7 +346,11 @@ export function ThemeProvider({ children }) {
           --bg-page:      rgba(0,0,0,0.45);
           --bg-card:      rgba(28,28,30,0.35);
           --bg-panel:     rgba(44,44,46,0.40);
+          --bg-menu:      rgba(28,28,30,0.98);
+          --bg-modal:     rgba(28,28,30,0.97);
           --bg-input:     rgba(44,44,46,0.35);
+          --popover:      240 4% 11%;
+          --popover-foreground: 0 0% 96%;
           --bg-hover:     rgba(255,255,255,0.03);
           --bg-blur:      blur(60px) saturate(200%);
           --bg-blur-sm:   blur(30px) saturate(180%);
@@ -339,7 +363,11 @@ export function ThemeProvider({ children }) {
           --bg-page:      #ffffff;
           --bg-card:      #ffffff;
           --bg-panel:     #f5f5f7;
+          --bg-menu:      #ffffff;
+          --bg-modal:     #ffffff;
           --bg-input:     #f0f0f2;
+          --popover:      0 0% 100%;
+          --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.04);
           --bg-blur:      none;
           --bg-blur-sm:   none;
@@ -352,7 +380,11 @@ export function ThemeProvider({ children }) {
           --bg-page:      #000000;
           --bg-card:      #1c1c1e;
           --bg-panel:     #2c2c2e;
+          --bg-menu:      #1c1c1e;
+          --bg-modal:     #1c1c1e;
           --bg-input:     #2c2c2e;
+          --popover:      240 4% 11%;
+          --popover-foreground: 0 0% 96%;
           --bg-hover:     rgba(255,255,255,0.04);
           --bg-blur:      none;
           --bg-blur-sm:   none;

@@ -15,6 +15,7 @@ import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
 import JobsPanel                 from "./panels/JobsPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
+import { PlansPanel }            from "./panels/PlansPanel.jsx";
 import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
@@ -31,6 +32,7 @@ import { TermsPage }       from "./pages/marketing/TermsPage.jsx";
 
 const APP_TABS = [
   { id: "jobs",     label: "Jobs",     icon: "💼" },
+  { id: "plans",    label: "Plans",    icon: "↑" },
   { id: "database", label: "Database", icon: "🗃" },
 ];
 
@@ -149,6 +151,7 @@ function AppDashboard({ authUser, setAuthUser }) {
                   isActive={activeTab === "jobs"}/>
               </div>
               {activeTab === "database" && <DatabasePanel user={authUser}/>}
+              {activeTab === "plans"    && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
               {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
             </div>
           </AppShell>

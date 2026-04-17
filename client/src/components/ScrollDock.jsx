@@ -71,7 +71,7 @@ function DropPanel({ children, style = {}, theme }) {
   return (
     <div style={{
       position: "absolute", top: "calc(100% + 10px)", right: 0,
-      background: theme.surface, border: `1px solid ${theme.border}`,
+      background: theme.menuSurface || theme.surface, border: `1px solid ${theme.border}`,
       borderRadius: 12, boxShadow: theme.shadowLg,
       zIndex: 9999, minWidth: 240, padding: "8px 0",
       backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",

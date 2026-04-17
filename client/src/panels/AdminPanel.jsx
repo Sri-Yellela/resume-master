@@ -624,6 +624,7 @@ function ContactMessagesSection({ theme }) {
 export function AdminPanel() {
   const { theme } = useTheme();
   const [users,    setUsers]    = useState([]);
+  const [upgradeRequests, setUpgradeRequests] = useState([]);
   const [backups,  setBackups]  = useState([]);
   const [newU,     setNewU]     = useState({ username:"", password:"", isAdmin:false });
   const [status,   setStatus]   = useState("");
@@ -634,10 +635,11 @@ export function AdminPanel() {
   // Top-level tab: "system" | "usage" | "users_analytics" | "cache"
   const [topTab, setTopTab] = useState("system");
 
-  useEffect(() => { loadUsers(); loadBackups(); }, []);
+  useEffect(() => { loadUsers(); loadBackups(); loadUpgradeRequests(); }, []);
 
   const loadUsers   = () => api("/api/admin/users").then(setUsers).catch(() => {});
   const loadBackups = () => api("/api/admin/backups").then(setBackups).catch(() => {});
+  const loadUpgradeRequests = () => api("/api/admin/upgrade-requests").then(setUpgradeRequests).catch(() => {});
 
   const createUser = async e => {
     e.preventDefault();
@@ -654,6 +656,21 @@ export function AdminPanel() {
     if (!confirm("Delete this user and all their data?")) return;
     await api(`/api/admin/users/${id}`, { method:"DELETE" });
     setUsers(u => u.filter(x => x.id !== id));
+  };
+
+  const grantPlan = async (userId, planTier) => {
+    await api(`/api/admin/users/${userId}/plan`, {
+      method:"PATCH",
+      body:JSON.stringify({ planTier }),
+    });
+    loadUsers();
+    loadUpgradeRequests();
+  };
+
+  const grantUpgradeRequest = async (id) => {
+    await api(`/api/admin/upgrade-requests/${id}/grant`, { method:"PATCH" });
+    loadUsers();
+    loadUpgradeRequests();
   };
 
   const triggerBackup = async () => {
@@ -832,12 +849,34 @@ export function AdminPanel() {
                 </div>
 
                 {/* User table */}
+                {upgradeRequests.filter(r => r.status === "pending").length > 0 && (
+                  <div className="rm-card" style={{ marginBottom:24 }}>
+                    <div style={{ fontWeight:700, fontSize:14, color:theme.text, marginBottom:12 }}>
+                      Pending Upgrade Requests
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {upgradeRequests.filter(r => r.status === "pending").map(r => (
+                        <div key={r.id} style={{ display:"flex", alignItems:"center", gap:10,
+                                                 padding:"8px 10px", border:`1px solid ${theme.border}`,
+                                                 borderRadius:8 }}>
+                          <span style={{ flex:1, fontSize:12 }}>
+                            <strong>{r.username}</strong> requests {r.requested_tier}
+                          </span>
+                          <button className="rm-btn rm-btn-primary rm-btn-sm"
+                            onClick={() => grantUpgradeRequest(r.id)}>
+                            Grant
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
                               borderRadius:16, overflow:"hidden" }}>
                   <table style={{ width:"100%", borderCollapse:"collapse" }}>
                     <thead>
                       <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}` }}>
-                        {["Username","Role","Mode","Created","Actions"].map(h => (
+                        {["Username","Role","Plan","Mode","Created","Actions"].map(h => (
                           <th key={h} style={thStyle}>{h}</th>
                         ))}
                       </tr>
@@ -860,6 +899,9 @@ export function AdminPanel() {
                             </span>
                           </td>
                           <td style={{ padding:"12px 14px", fontSize:12, color:theme.textMuted }}>
+                            {u.plan_tier || "BASIC"}
+                          </td>
+                          <td style={{ padding:"12px 14px", fontSize:12, color:theme.textMuted }}>
                             {u.apply_mode}
                           </td>
                           <td style={{ padding:"12px 14px", fontSize:11, color:theme.textDim }}>
@@ -867,6 +909,16 @@ export function AdminPanel() {
                           </td>
                           <td style={{ padding:"12px 14px" }}>
                             <div style={{ display:"flex", gap:6 }}>
+                              {!u.is_admin && (
+                                <select value={u.plan_tier || "BASIC"} onChange={e => grantPlan(u.id, e.target.value)}
+                                  style={{ background:theme.surfaceHigh, color:theme.text,
+                                           border:`1px solid ${theme.border}`, borderRadius:6,
+                                           fontSize:11, padding:"4px 6px" }}>
+                                  <option value="BASIC">Basic</option>
+                                  <option value="PLUS">Plus</option>
+                                  <option value="PRO">Pro</option>
+                                </select>
+                              )}
                               {!u.is_admin && (
                                 <button className="rm-btn rm-btn-ghost rm-btn-sm"
                                   style={{ color:theme.danger, borderColor:theme.danger+"44" }}

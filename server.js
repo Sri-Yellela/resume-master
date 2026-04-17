@@ -12,7 +12,6 @@ import passport       from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import session        from "express-session";
 import SQLiteStoreFactory from "connect-sqlite3";
-import bcrypt         from "bcryptjs";
 import chromium    from "@sparticuz/chromium";
 import puppeteer   from "puppeteer-core";
 import multer         from "multer";
@@ -32,6 +31,11 @@ import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
 import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
+import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
+import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
+import { sendPasswordResetEmail } from "./services/emailService.js";
+import { allowedModesForTier, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
+import { loadSimpleApplyProfile, localAtsScore, upsertSimpleApplyProfile } from "./services/simpleApplyProfile.js";
 
 // ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
@@ -40,6 +44,7 @@ const ANTHROPIC_KEY  = process.env.ANTHROPIC_KEY  || "";
 // Each user stores their own token in the DB (users.apify_token).
 // The cron job borrows the most recently active user's token.
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
+const PASSWORD_RESET_SECRET = process.env.PASSWORD_RESET_SECRET || SESSION_SECRET;
 const ADMIN_USER     = process.env.ADMIN_USER     || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const CACHE_TTL_MS        = 12 * 60 * 60 * 1000;
@@ -1007,6 +1012,64 @@ db.pragma("busy_timeout = 5000");
            OR LOWER(title) LIKE '%business intelligence%';
       `,
     },
+    {
+      id: "032_password_reset_tokens",
+      sql: `
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          email TEXT NOT NULL,
+          token_hash TEXT NOT NULL UNIQUE,
+          otp_hash TEXT NOT NULL,
+          expires_at INTEGER NOT NULL,
+          used_at INTEGER,
+          requested_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          request_ip TEXT,
+          user_agent TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_password_reset_user
+          ON password_reset_tokens(user_id, used_at, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_password_reset_expires
+          ON password_reset_tokens(expires_at);
+      `,
+    },
+    {
+      id: "033_plan_tiers_and_simple_apply_profile",
+      sql: `
+        ALTER TABLE users ADD COLUMN plan_tier TEXT NOT NULL DEFAULT 'BASIC';
+        UPDATE users
+        SET plan_tier = CASE
+          WHEN apply_mode = 'CUSTOM_SAMPLER' THEN 'PRO'
+          WHEN apply_mode = 'TAILORED' THEN 'PLUS'
+          ELSE 'BASIC'
+        END;
+
+        CREATE TABLE IF NOT EXISTS plan_upgrade_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          requested_tier TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          requested_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          decided_at INTEGER,
+          decided_by INTEGER REFERENCES users(id),
+          notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_plan_upgrade_requests_status
+          ON plan_upgrade_requests(status, requested_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_upgrade_one_pending
+          ON plan_upgrade_requests(user_id) WHERE status = 'pending';
+
+        CREATE TABLE IF NOT EXISTS simple_apply_profiles (
+          user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          titles_json TEXT NOT NULL DEFAULT '[]',
+          keywords_json TEXT NOT NULL DEFAULT '[]',
+          skills_json TEXT NOT NULL DEFAULT '[]',
+          search_terms_json TEXT NOT NULL DEFAULT '[]',
+          source_hash TEXT,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -1049,7 +1112,7 @@ loadAllPrompts();
 const adminExists = db.prepare("SELECT id FROM users WHERE username=?").get(ADMIN_USER);
 if (!adminExists) {
   db.prepare("INSERT INTO users (username,password_hash,is_admin) VALUES (?,?,1)")
-    .run(ADMIN_USER, bcrypt.hashSync(ADMIN_PASSWORD, 10));
+    .run(ADMIN_USER, hashPassword(ADMIN_PASSWORD));
 }
 
 // ── Anthropic ─────────────────────────────────────────────────
@@ -1983,19 +2046,70 @@ const SStore = new SQLiteStore({ db:"sessions.db", dir:path.join(__dirname,"data
 
 passport.use(new LocalStrategy((username, password, done) => {
   const user = db.prepare("SELECT * FROM users WHERE username=?").get(username);
-  if (!user || !bcrypt.compareSync(password, user.password_hash))
+  if (!user || !verifyPassword(password, user.password_hash))
     return done(null, false, { message:"Invalid credentials." });
-  return done(null, { id:user.id, username:user.username, isAdmin:!!user.is_admin, applyMode:user.apply_mode, domainProfileComplete:!!user.domain_profile_complete });
+  return done(null, {
+    id:user.id,
+    username:user.username,
+    isAdmin:!!user.is_admin,
+    applyMode:user.apply_mode,
+    planTier:normalisePlanTier(user.plan_tier),
+    domainProfileComplete:!!user.domain_profile_complete,
+  });
 }));
 passport.serializeUser((user, done) => done(null, user.id));
 passport.deserializeUser((id, done) => {
-  const user = db.prepare("SELECT id,username,is_admin,apply_mode,domain_profile_complete FROM users WHERE id=?").get(id);
-  user ? done(null, { id:user.id, username:user.username, isAdmin:!!user.is_admin, applyMode:user.apply_mode, domainProfileComplete:!!user.domain_profile_complete })
+  const user = db.prepare("SELECT id,username,is_admin,apply_mode,plan_tier,domain_profile_complete FROM users WHERE id=?").get(id);
+  user ? done(null, {
+    id:user.id,
+    username:user.username,
+    isAdmin:!!user.is_admin,
+    applyMode:user.apply_mode,
+    planTier:normalisePlanTier(user.plan_tier),
+    domainProfileComplete:!!user.domain_profile_complete,
+  })
        : done(new Error("User not found"));
 });
 
 function requireAuth(req, res, next)  { if (req.isAuthenticated()) return next(); res.status(401).json({ error:"Unauthorized." }); }
 function requireAdmin(req, res, next) { if (req.isAuthenticated()&&req.user.isAdmin) return next(); res.status(403).json({ error:"Forbidden." }); }
+
+function publicUser(user) {
+  const planTier = normalisePlanTier(user.planTier || user.plan_tier);
+  return {
+    id:user.id,
+    username:user.username,
+    isAdmin:!!(user.isAdmin ?? user.is_admin),
+    applyMode:user.applyMode || user.apply_mode,
+    planTier,
+    allowedModes: allowedModesForTier(planTier),
+    domainProfileComplete:!!(user.domainProfileComplete ?? user.domain_profile_complete),
+  };
+}
+
+function requireModeEntitlement(req, res, mode = req.user?.applyMode) {
+  const planTier = normalisePlanTier(req.user?.planTier);
+  if (canUseMode(planTier, mode)) return true;
+  res.status(403).json({
+    error: "upgrade_required",
+    message: `${mode} requires the ${planForMode(mode)} plan.`,
+    requiredTier: planForMode(mode),
+    planTier,
+  });
+  return false;
+}
+
+function requirePlan(req, res, requiredTier) {
+  const planTier = normalisePlanTier(req.user?.planTier);
+  if (hasPlanAtLeast(planTier, requiredTier)) return true;
+  res.status(403).json({
+    error: "upgrade_required",
+    message: `This feature requires the ${requiredTier} plan.`,
+    requiredTier,
+    planTier,
+  });
+  return false;
+}
 
 // assertUserOwns — use this when fetching a record by ID WITHOUT user_id in the
 // WHERE clause, then verifying ownership. Returns the row on success; sends the
@@ -2105,14 +2219,15 @@ app.post("/api/auth/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     if (err)   return next(err);
     if (!user) return res.status(401).json({ error:info?.message||"Invalid credentials." });
-    req.logIn(user, e => e ? next(e) : res.json({ ok:true, user:{ id:user.id, username:user.username, isAdmin:user.isAdmin, applyMode:user.applyMode, domainProfileComplete:user.domainProfileComplete } }));
+    req.logIn(user, e => e ? next(e) : res.json({ ok:true, user:publicUser(user) }));
   })(req, res, next);
 });
 
 app.post("/api/auth/register", (req, res) => {
   const { username, password, profile={}, apifyToken } = req.body;
   if (!username||!password) return res.status(400).json({ error:"username and password required" });
-  if (password.length < 8)  return res.status(400).json({ error:"password must be at least 8 characters" });
+  const passwordError = validatePassword(password);
+  if (passwordError)       return res.status(400).json({ error:passwordError });
   if (!profile.email)       return res.status(400).json({ error:"email is required" });
   if (!profile.first_name)  return res.status(400).json({ error:"first name is required" });
   if (!profile.last_name)   return res.status(400).json({ error:"last name is required" });
@@ -2126,8 +2241,8 @@ app.post("/api/auth/register", (req, res) => {
   ].filter(Boolean).join(" ");
 
   try {
-    db.prepare("INSERT INTO users (username,password_hash,is_admin,apply_mode) VALUES (?,?,0,'TAILORED')")
-      .run(username, bcrypt.hashSync(password, 10));
+    db.prepare("INSERT INTO users (username,password_hash,is_admin,apply_mode,plan_tier) VALUES (?,?,0,'SIMPLE','BASIC')")
+      .run(username, hashPassword(password));
     const newUser = db.prepare("SELECT id FROM users WHERE username=?").get(username);
     db.prepare(`INSERT INTO user_profile
       (user_id,full_name,first_name,middle_name,last_name,name_suffix,
@@ -2152,21 +2267,73 @@ app.post("/api/auth/register", (req, res) => {
         profile.clearance_level||null, profile.visa_type||null, profile.work_auth||null
       );
     db.prepare("UPDATE users SET apify_token=? WHERE id=?").run(apifyToken||null, newUser.id);
-    const sessionUser = { id:newUser.id, username, isAdmin:false, applyMode:"TAILORED", domainProfileComplete:false };
+    const sessionUser = { id:newUser.id, username, isAdmin:false, applyMode:"SIMPLE", planTier:"BASIC", domainProfileComplete:false };
     req.logIn(sessionUser, e => {
       if (e) return res.status(500).json({ error:"Account created but login failed. Please sign in." });
-      res.json({ ok:true, user:sessionUser });
+      res.json({ ok:true, user:publicUser(sessionUser) });
     });
   } catch(e) {
     res.status(400).json({ error:e.message.includes("UNIQUE")?"Username already taken.":e.message });
   }
 });
 
+app.post("/api/auth/password-reset/request", async (req, res) => {
+  const email = String(req.body?.email || "").trim();
+  const generic = {
+    ok: true,
+    message: "If an account exists for that email, a reset link and OTP have been sent.",
+  };
+  if (!email) return res.json(generic);
+
+  try {
+    const throttleSince = Math.floor(Date.now() / 1000) - 10 * 60;
+    const recentRequests = db.prepare(`
+      SELECT COUNT(*) as c
+      FROM password_reset_tokens
+      WHERE requested_at > ?
+        AND (request_ip = ? OR email = LOWER(?))
+    `).get(throttleSince, req.ip, email).c;
+    if (recentRequests >= 5) return res.json(generic);
+
+    const user = findUserForPasswordReset(db, email);
+    if (user) {
+      const reset = createPasswordReset(db, user, {
+        pepper: PASSWORD_RESET_SECRET,
+        requestIp: req.ip,
+        userAgent: req.get("user-agent") || null,
+      });
+      const baseUrl = process.env.APP_BASE_URL || `${req.protocol}://${req.get("host")}`;
+      const resetUrl = `${baseUrl.replace(/\/$/, "")}/login?resetToken=${encodeURIComponent(reset.token)}`;
+      await sendPasswordResetEmail({
+        to: user.email,
+        resetUrl,
+        otp: reset.otp,
+        expiresAt: reset.expiresAt,
+      });
+    }
+  } catch(e) {
+    console.error("[password-reset] request failed:", e.message);
+  }
+  res.json(generic);
+});
+
+app.post("/api/auth/password-reset/confirm", (req, res) => {
+  const result = consumePasswordReset(db, {
+    token: req.body?.token,
+    otp: req.body?.otp,
+    password: req.body?.password,
+  }, {
+    pepper: PASSWORD_RESET_SECRET,
+  });
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  res.json({ ok: true });
+});
+
 app.post("/api/auth/logout", (req, res) => req.logout(() => res.json({ ok:true })));
 
 app.get("/api/auth/me", (req, res) =>
   req.isAuthenticated()
-    ? res.json({ authenticated:true, user:{ id:req.user.id, username:req.user.username, isAdmin:req.user.isAdmin, applyMode:req.user.applyMode, domainProfileComplete:req.user.domainProfileComplete } })
+    ? res.json({ authenticated:true, user:publicUser(req.user) })
     : res.json({ authenticated:false })
 );
 
@@ -2309,14 +2476,17 @@ app.post("/api/admin/backups/restore", requireAdmin, (req, res) => {
 // ADMIN USER MANAGEMENT
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/admin/users", requireAdmin, (req, res) => {
-  res.json(db.prepare("SELECT id,username,is_admin,apply_mode,created_at FROM users ORDER BY created_at DESC").all());
+  res.json(db.prepare("SELECT id,username,is_admin,apply_mode,plan_tier,created_at FROM users ORDER BY created_at DESC").all());
 });
 app.post("/api/admin/users", requireAdmin, (req, res) => {
-  const { username, password, isAdmin } = req.body;
+  const { username, password, isAdmin, planTier } = req.body;
   if (!username||!password) return res.status(400).json({ error:"username and password required" });
+  const passwordError = validatePassword(password);
+  if (passwordError) return res.status(400).json({ error:passwordError });
+  const tier = normalisePlanTier(planTier || "BASIC");
   try {
-    db.prepare("INSERT INTO users (username,password_hash,is_admin) VALUES (?,?,?)")
-      .run(username, bcrypt.hashSync(password,10), isAdmin?1:0);
+    db.prepare("INSERT INTO users (username,password_hash,is_admin,apply_mode,plan_tier) VALUES (?,?,?,?,?)")
+      .run(username, hashPassword(password), isAdmin?1:0, allowedModesForTier(tier)[0], tier);
     const u = db.prepare("SELECT id FROM users WHERE username=?").get(username);
     db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(u.id);
     res.json({ ok:true });
@@ -2331,9 +2501,45 @@ app.delete("/api/admin/users/:id", requireAdmin, (req, res) => {
 app.patch("/api/admin/users/:id/password", requireAdmin, (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error:"password required" });
+  const passwordError = validatePassword(password);
+  if (passwordError) return res.status(400).json({ error:passwordError });
   db.prepare("UPDATE users SET password_hash=? WHERE id=?")
-    .run(bcrypt.hashSync(password,10), parseInt(req.params.id));
+    .run(hashPassword(password), parseInt(req.params.id));
   res.json({ ok:true });
+});
+app.patch("/api/admin/users/:id/plan", requireAdmin, (req, res) => {
+  const userId = parseInt(req.params.id);
+  const tier = normalisePlanTier(req.body?.planTier);
+  const mode = allowedModesForTier(tier)[0];
+  db.prepare("UPDATE users SET plan_tier=?, apply_mode=? WHERE id=?").run(tier, mode, userId);
+  db.prepare(`
+    UPDATE plan_upgrade_requests
+    SET status='approved', decided_at=unixepoch(), decided_by=?
+    WHERE user_id=? AND status='pending'
+  `).run(req.user.id, userId);
+  res.json({ ok:true, planTier:tier, applyMode:mode });
+});
+app.get("/api/admin/upgrade-requests", requireAdmin, (_req, res) => {
+  const rows = db.prepare(`
+    SELECT pur.*, u.username, u.plan_tier
+    FROM plan_upgrade_requests pur
+    JOIN users u ON u.id = pur.user_id
+    ORDER BY pur.status = 'pending' DESC, pur.requested_at DESC
+  `).all();
+  res.json(rows);
+});
+app.patch("/api/admin/upgrade-requests/:id/grant", requireAdmin, (req, res) => {
+  const request = db.prepare("SELECT * FROM plan_upgrade_requests WHERE id=?").get(parseInt(req.params.id));
+  if (!request) return res.status(404).json({ error:"Not found" });
+  const tier = normalisePlanTier(request.requested_tier);
+  const mode = allowedModesForTier(tier)[0];
+  db.prepare("UPDATE users SET plan_tier=?, apply_mode=? WHERE id=?").run(tier, mode, request.user_id);
+  db.prepare(`
+    UPDATE plan_upgrade_requests
+    SET status='approved', decided_at=unixepoch(), decided_by=?
+    WHERE id=?
+  `).run(req.user.id, request.id);
+  res.json({ ok:true, userId:request.user_id, planTier:tier, applyMode:mode });
 });
 app.get("/api/admin/users/:id/profile", requireAdmin, (req, res) => {
   res.json(db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(parseInt(req.params.id))||{});
@@ -2354,6 +2560,7 @@ app.patch("/api/settings/apply-mode", requireAuth, (req, res) => {
   const { mode } = req.body;
   if (!["SIMPLE","TAILORED","CUSTOM_SAMPLER"].includes(mode))
     return res.status(400).json({ error:"Invalid mode" });
+  if (!requireModeEntitlement(req, res, mode)) return;
   db.prepare("UPDATE users SET apply_mode=? WHERE id=?").run(mode, req.user.id);
   res.json({ ok:true, mode });
 });
@@ -2369,8 +2576,49 @@ app.delete("/api/settings/apify-token", requireAuth, (req, res) => {
   res.json({ ok:true });
 });
 app.get("/api/settings", requireAuth, (req, res) => {
-  const u = db.prepare("SELECT apply_mode,apify_token FROM users WHERE id=?").get(req.user.id);
-  res.json({ applyMode:u?.apply_mode, hasApifyToken:!!u?.apify_token });
+  const u = db.prepare("SELECT apply_mode,plan_tier,apify_token FROM users WHERE id=?").get(req.user.id);
+  const planTier = normalisePlanTier(u?.plan_tier);
+  res.json({
+    applyMode:u?.apply_mode,
+    planTier,
+    allowedModes: allowedModesForTier(planTier),
+    hasApifyToken:!!u?.apify_token,
+  });
+});
+
+app.get("/api/plans", requireAuth, (req, res) => {
+  const row = db.prepare("SELECT plan_tier, apply_mode FROM users WHERE id=?").get(req.user.id);
+  const planTier = normalisePlanTier(row?.plan_tier);
+  const pending = db.prepare(`
+    SELECT * FROM plan_upgrade_requests
+    WHERE user_id=? AND status='pending'
+    ORDER BY requested_at DESC LIMIT 1
+  `).get(req.user.id);
+  res.json({
+    planTier,
+    applyMode: row?.apply_mode,
+    allowedModes: allowedModesForTier(planTier),
+    nextPlan: nextPlan(planTier),
+    pendingRequest: pending || null,
+  });
+});
+
+app.post("/api/plans/request-upgrade", requireAuth, (req, res) => {
+  const row = db.prepare("SELECT plan_tier FROM users WHERE id=?").get(req.user.id);
+  const current = normalisePlanTier(row?.plan_tier);
+  const requested = normalisePlanTier(req.body?.requestedTier || nextPlan(current));
+  if (!nextPlan(current)) return res.status(400).json({ error:"Already on highest plan" });
+  if (requested === current) return res.status(400).json({ error:"Already on this plan" });
+  if (!["PLUS","PRO"].includes(requested)) return res.status(400).json({ error:"Invalid upgrade tier" });
+  try {
+    db.prepare(`
+      INSERT INTO plan_upgrade_requests (user_id, requested_tier, notes)
+      VALUES (?, ?, ?)
+    `).run(req.user.id, requested, req.body?.notes || null);
+  } catch(e) {
+    if (!e.message.includes("UNIQUE")) throw e;
+  }
+  res.json({ ok:true, requestedTier:requested });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -2403,11 +2651,13 @@ app.post("/api/profile", requireAuth, (req, res) => {
 // AUTOFILL
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/autofill", requireAuth, (req, res) => {
+  if (!requireModeEntitlement(req, res)) return;
   db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
   const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
   res.json(buildAutofillPayload(profile, req.user.applyMode));
 });
 app.get("/api/extension/autofill", requireAuth, (req, res) => {
+  if (!requireModeEntitlement(req, res)) return;
   db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
   const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
   res.json({ ok:true, mode:req.user.applyMode, ...buildAutofillPayload(profile, req.user.applyMode) });
@@ -2527,6 +2777,9 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
   ];
   const filterParams = [roleKey];
+  const simpleProfile = req.user.applyMode === "SIMPLE"
+    ? loadSimpleApplyProfile(db, userId)
+    : null;
 
   // req.query.role is legacy search-query state. Visibility is now governed by
   // the shared job_role_map role key, not by the exact query that first scraped it.
@@ -2612,6 +2865,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     yoeLow:   "sj.years_experience ASC",
   };
   const orderBy = sortMap[sort] || sortMap.dateDesc;
+  const localAtsSort = sort === "atsLocal" && req.user.applyMode === "SIMPLE";
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const baseJoin = `
@@ -2635,7 +2889,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
      ${where}
      ORDER BY CASE WHEN (uj.visited IS NOT NULL AND uj.visited = 1) THEN 1 ELSE 0 END ASC, ${orderBy}
      LIMIT ? OFFSET ?`
-  ).all(userId, userId, ...filterParams, pageSize, offset);
+  ).all(userId, userId, ...filterParams, localAtsSort ? 500 : pageSize, localAtsSort ? 0 : offset);
 
   // Filter clearance-required jobs for non-cleared users
   const profile = db.prepare("SELECT has_clearance FROM user_profile WHERE user_id=?").get(userId) || {};
@@ -2644,6 +2898,14 @@ app.get("/api/jobs", requireAuth, (req, res) => {
       const d = (j.description || "").toLowerCase();
       return !d.includes("security clearance required") && !d.includes("ts/sci") && !d.includes("secret clearance");
     });
+  }
+  if (req.user.applyMode === "SIMPLE") {
+    rows = rows.map(j => ({ ...j, local_ats_score: localAtsScore(j, simpleProfile, roleKey) }));
+    if (localAtsSort) {
+      rows = rows
+        .sort((a, b) => (b.local_ats_score - a.local_ats_score) || ((b.scraped_at || 0) - (a.scraped_at || 0)))
+        .slice(offset, offset + pageSize);
+    }
   }
 
   const appliedCoSet = new Set(
@@ -2684,6 +2946,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     disliked:             !!j.disliked,
     companyAppliedBefore: appliedCoSet.has((j.company || "").toLowerCase()),
     baseAtsScore:         j.base_ats_score ?? null,   // ATS of base resume vs JD (from scrape time)
+    localAtsScore:        j.local_ats_score ?? null,
     resumeAtsScore:       j.resume_ats_score ?? null, // ATS of generated tailored resume vs JD
     recruiterData:        null,
     enrichmentAvailable:  false,
@@ -2703,6 +2966,80 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
   const bmProfile   = db.prepare("SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
   if (!bmProfile) return res.json({ jobs: [], threshold, total: 0 });
   const roleKey = roleKeyForProfile(bmProfile);
+  if (req.user.applyMode === "SIMPLE") {
+    const simpleProfile = loadSimpleApplyProfile(db, userId);
+    let jobs = db.prepare(`
+      SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
+        sj.ats_score as base_ats_score,
+        r.ats_score as resume_ats_score
+      FROM scraped_jobs sj
+      JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
+      LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+      LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
+      WHERE (uj.applied IS NULL OR uj.applied = 0)
+        AND (uj.disliked IS NULL OR uj.disliked = 0)
+        AND (
+          (sj.posted_at IS NOT NULL AND sj.posted_at != ''
+            AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
+          OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
+        )
+      ORDER BY sj.scraped_at DESC
+      LIMIT 500
+    `).all(roleKey, userId, userId);
+    jobs = jobs
+      .map(j => ({ ...j, local_ats_score: localAtsScore(j, simpleProfile, roleKey) }))
+      .filter(j => j.local_ats_score >= threshold)
+      .sort((a, b) => (b.local_ats_score - a.local_ats_score) || ((b.scraped_at || 0) - (a.scraped_at || 0)))
+      .slice(0, limit);
+    if (jobs.length < 5) {
+      threshold = 60;
+      jobs = db.prepare(`
+        SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
+          sj.ats_score as base_ats_score,
+          r.ats_score as resume_ats_score
+        FROM scraped_jobs sj
+        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
+        LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+        LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
+        WHERE (uj.applied IS NULL OR uj.applied = 0)
+          AND (uj.disliked IS NULL OR uj.disliked = 0)
+          AND (
+            (sj.posted_at IS NOT NULL AND sj.posted_at != ''
+              AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
+            OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
+          )
+        ORDER BY sj.scraped_at DESC
+        LIMIT 500
+      `).all(roleKey, userId, userId)
+        .map(j => ({ ...j, local_ats_score: localAtsScore(j, simpleProfile, roleKey) }))
+        .filter(j => j.local_ats_score >= threshold)
+        .sort((a, b) => (b.local_ats_score - a.local_ats_score) || ((b.scraped_at || 0) - (a.scraped_at || 0)))
+        .slice(0, limit);
+    }
+    return res.json({
+      jobs: jobs.map(j => ({
+        jobId:        j.job_id,
+        company:      j.company,
+        title:        j.title,
+        location:     j.location,
+        workType:     j.work_type,
+        url:          j.url,
+        applyUrl:     j.apply_url,
+        description:  j.description,
+        postedAt:     j.posted_at,
+        applicantCount: j.applicant_count,
+        companyIconUrl: j.company_icon_url,
+        baseAtsScore: j.base_ats_score,
+        localAtsScore: j.local_ats_score,
+        resumeAtsScore: j.resume_ats_score,
+        visited:      !!j.visited,
+        starred:      !!j.starred,
+      })),
+      threshold,
+      total: jobs.length,
+      localFirst: true,
+    });
+  }
   const bestMatchQuery = (thresh) => db.prepare(`
     SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
       sj.ats_score as base_ats_score,
@@ -2861,10 +3198,21 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   const activeProfile = db.prepare(
     "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
   ).get(req.user.id);
-  const profileJobTitles = activeProfile
+  let profileJobTitles = activeProfile
     ? buildApifyQueriesFromProfile(activeProfile)
     : null;
   const query = normaliseRole(rawQuery);
+  if (req.user.applyMode === "SIMPLE") {
+    let simpleProfile = loadSimpleApplyProfile(db, req.user.id);
+    if (!simpleProfile) {
+      const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
+      if (base?.content) simpleProfile = upsertSimpleApplyProfile(db, req.user.id, base.content);
+    }
+    const terms = (simpleProfile?.searchTerms || []).slice(0, 4);
+    if (terms.length) {
+      profileJobTitles = [...new Set([...(profileJobTitles || [query]), ...terms])].slice(0, 10);
+    }
+  }
 
   // employmentTypes — array of HarvestAPI-accepted strings; default full-time
   const rawEmpTypes = Array.isArray(req.body.employmentTypes) ? req.body.employmentTypes : [];
@@ -3057,6 +3405,7 @@ app.get("/api/jobs/:id/recruiter", requireAuth, (_req, res) => {
 
 // ── Keyword analysis for a job (no generated resume needed) ──────
 app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
+  if (!requirePlan(req, res, "PLUS")) return;
   const userId = req.user.id;
   const jobId  = req.params.id;
   const { resumeText } = req.body;
@@ -3175,7 +3524,31 @@ app.post("/api/base-resume", requireAuth, (req, res) => {
   db.prepare(`INSERT INTO base_resume (user_id,content,name,updated_at) VALUES (?,?,?,unixepoch())
     ON CONFLICT(user_id) DO UPDATE SET content=excluded.content,name=excluded.name,updated_at=excluded.updated_at`)
     .run(req.user.id, content, name||"resume.txt");
+  if (req.user.applyMode === "SIMPLE") {
+    const profiles = db.prepare("SELECT target_titles FROM domain_profiles WHERE user_id=?").all(req.user.id);
+    const roleTitles = profiles.flatMap(p => {
+      try { return JSON.parse(p.target_titles || "[]"); } catch { return []; }
+    });
+    upsertSimpleApplyProfile(db, req.user.id, content, roleTitles);
+  }
   res.json({ ok:true });
+});
+app.get("/api/simple-apply/profile", requireAuth, (req, res) => {
+  let profile = loadSimpleApplyProfile(db, req.user.id);
+  if (!profile) {
+    const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
+    if (base?.content) profile = upsertSimpleApplyProfile(db, req.user.id, base.content);
+  }
+  res.json(profile || { titles: [], keywords: [], skills: [], searchTerms: [] });
+});
+app.post("/api/simple-apply/profile/refresh", requireAuth, (req, res) => {
+  const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
+  if (!base?.content) return res.status(400).json({ error:"No base resume uploaded" });
+  const profiles = db.prepare("SELECT target_titles FROM domain_profiles WHERE user_id=?").all(req.user.id);
+  const roleTitles = profiles.flatMap(p => {
+    try { return JSON.parse(p.target_titles || "[]"); } catch { return []; }
+  });
+  res.json(upsertSimpleApplyProfile(db, req.user.id, base.content, roleTitles));
 });
 // ENHANCE GATING: one free per account lifetime.
 // enhance_used is set server-side on API call, not on adoption.
@@ -3194,6 +3567,7 @@ app.get("/api/base-resume/enhance-status", requireAuth, (req, res) => {
 
 // POST /api/base-resume/enhance — one-time free enhancement
 app.post("/api/base-resume/enhance", requireAuth, async (req, res) => {
+  if (!requirePlan(req, res, "PLUS")) return;
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
 
   const user = db.prepare("SELECT enhance_used, enhance_paid FROM users WHERE id=?").get(req.user.id);
@@ -3361,6 +3735,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   if (!job||!resumeText) return res.status(400).json({ error:"job and resumeText required" });
   const mode = req.user.applyMode;
   if (mode==="SIMPLE") return res.status(400).json({ error:"Generate not available in SIMPLE mode" });
+  if (!requireModeEntitlement(req, res, mode)) return;
   if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured on server." });
 
   // Guard: reject obviously empty or template-placeholder resume content

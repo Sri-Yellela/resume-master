@@ -375,9 +375,9 @@ function SettingsGear({ theme, onTabChange }) {
 
 // ── Apply modes ───────────────────────────────────────────────
 const APPLY_MODES = [
-  { value: "SIMPLE",         label: "Simple",         icon: "⚡", desc: "Job board only — no generation" },
-  { value: "TAILORED",       label: "Tailored",        icon: "✦", desc: "Rewrite bullets, fixed employers" },
-  { value: "CUSTOM_SAMPLER", label: "Custom Sampler",  icon: "⚙", desc: "Full customisation, JD-driven companies" },
+  { value: "SIMPLE",         label: "Simple",         tier:"BASIC", icon: "⚡", desc: "Job board only — no generation" },
+  { value: "TAILORED",       label: "Tailored",        tier:"PLUS",  icon: "✦", desc: "Rewrite bullets, fixed employers" },
+  { value: "CUSTOM_SAMPLER", label: "Custom Sampler",  tier:"PRO",   icon: "⚙", desc: "Full customisation, JD-driven companies" },
 ];
 
 // ── User avatar + full menu ────────────────────────────────────
@@ -391,6 +391,8 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
   const { accentId, setAccentId, ACCENT_OPTIONS, isDark, toggleMode, bgMode, setBgMode, BG_MODES } = useTheme();
 
   const currentMode = user?.applyMode || "TAILORED";
+  const allowedModes = user?.allowedModes || [currentMode];
+  const visibleModes = APPLY_MODES.filter(m => allowedModes.includes(m.value));
 
   const selectMode = async (val) => {
     try {
@@ -536,7 +538,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                            letterSpacing: "0.08em", color: theme.textDim, marginBottom: 6 }}>
               Apply Mode
             </div>
-            {APPLY_MODES.map(m => (
+            {visibleModes.map(m => (
               <button key={m.value} onClick={() => selectMode(m.value)}
                 onMouseEnter={e => e.currentTarget.style.background = theme.surfaceHigh}
                 onMouseLeave={e => e.currentTarget.style.background = m.value === currentMode ? theme.accentMuted : "transparent"}
@@ -552,6 +554,10 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                 {m.value === currentMode && <span style={{ color: theme.accent, fontWeight: 700 }}>✓</span>}
               </button>
             ))}
+            <button onClick={() => { setOpen(false); onTabChange?.("plans"); }}
+              style={{ ...menuItemStyle, marginTop:4, color:theme.accentText, fontWeight:700 }}>
+              Request upgrade
+            </button>
           </div>
 
           {/* Resume widget */}
@@ -587,7 +593,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                   </button>
                 )}
               </div>
-              {resumeWidget.text && !resumeWidget.uploading && !resumeWidget.enhanceUsed && (
+              {user?.planTier !== "BASIC" && resumeWidget.text && !resumeWidget.uploading && !resumeWidget.enhanceUsed && (
                 <button
                   onClick={() => resumeWidget.onEnhance?.()}
                   disabled={resumeWidget.enhancing}
@@ -850,6 +856,7 @@ export default function TopBar({
             <option value="compLow">Pay ↑</option>
             <option value="yoeLow">Exp ↑</option>
             <option value="yoeHigh">Exp ↓</option>
+            {user?.applyMode === "SIMPLE" && <option value="atsLocal">ATS Sort</option>}
           </select>
           {/* Local search — expands on focus */}
           <input

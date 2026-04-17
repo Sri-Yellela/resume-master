@@ -1128,6 +1128,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setScrapeError("");
     setRoleFilter(q.toLowerCase());
     setSearchInput(q);
+    fetchJobs(1);
+    return;
     // AUTO-SCRAPE: silently trigger background scrape if local results < THRESHOLD (50)
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
@@ -1562,7 +1564,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             {profileMenuOpen && (
               <div style={{
                 position: "absolute", top: "calc(100% + 4px)", left: 0,
-                background: theme.surface, border: `1px solid ${theme.border}`,
+                background: theme.menuSurface || theme.surface, border: `1px solid ${theme.border}`,
                 borderRadius: 8, boxShadow: theme.shadowXl, minWidth: 180,
                 zIndex: 200, overflow: "hidden",
               }}>
@@ -1676,6 +1678,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           <option value="compLow">Pay ↑</option>
           <option value="yoeLow">Exp ↑</option>
           <option value="yoeHigh">Exp ↓</option>
+          {applyMode === "SIMPLE" && <option value="atsLocal">ATS Sort</option>}
         </select>
 
         {/* Local search — live client-side, every keystroke */}
@@ -1771,7 +1774,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center",
         }}>
           <div style={{
-            background:theme.surface, borderRadius:8, width:"min(92vw, 760px)",
+            background:theme.modalSurface || theme.surface, borderRadius:8, width:"min(92vw, 760px)",
             maxHeight:"85vh", overflowY:"auto", padding:0,
             border:`1px solid ${theme.border}`, boxShadow:"0 24px 64px rgba(0,0,0,0.35)",
           }}>

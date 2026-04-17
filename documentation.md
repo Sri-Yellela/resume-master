@@ -473,6 +473,10 @@ File location: `C:\Users\sriye\resume-master\.env` (local) or Railway Variables 
 | `ADMIN_USER` | Yes | Admin username |
 | `ADMIN_PASSWORD` | Yes | Admin password (min 8 chars) |
 | `SESSION_SECRET` | Yes | 64-char random string for session signing |
+| `PASSWORD_RESET_SECRET` | Recommended | Separate HMAC secret for password reset token and OTP hashes; falls back to `SESSION_SECRET` |
+| `APP_BASE_URL` | Recommended | Public app origin used in password reset links, for example `https://your-app.example` |
+| `RESEND_API_KEY` | For email | Sends password reset email through Resend; without it, reset email contents are logged in dev |
+| `PASSWORD_RESET_FROM` | No | From address for reset emails when `RESEND_API_KEY` is configured |
 | `PORT` | No | Default 3001 |
 | `NODE_ENV` | No | Set to `production` on Railway — enables secure cookies |
 
