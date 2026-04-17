@@ -81,10 +81,19 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
           }
           if (result.status === "submitted") {
             db.prepare(`
-              INSERT INTO user_jobs (user_id, job_id, applied, updated_at)
-              VALUES (?, ?, 1, unixepoch())
+              INSERT INTO user_jobs (user_id, job_id, domain_profile_id, applied, updated_at)
+              VALUES (
+                ?, ?,
+                (
+                  SELECT sj.domain_profile_id
+                  FROM scraped_jobs sj
+                  JOIN domain_profiles dp ON dp.id = sj.domain_profile_id
+                  WHERE sj.job_id = ? AND dp.user_id = ?
+                ),
+                1, unixepoch()
+              )
               ON CONFLICT(user_id, job_id) DO UPDATE SET applied = 1, updated_at = unixepoch()
-            `).run(req.user.id, String(jobId));
+            `).run(req.user.id, String(jobId), String(jobId), req.user.id);
           }
         }
         return res.json({ ok: true, ...result });

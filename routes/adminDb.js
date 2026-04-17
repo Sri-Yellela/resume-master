@@ -252,6 +252,8 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
           CASE
             WHEN uj.domain_profile_id IS NULL THEN 'NULL_TAG'
             WHEN dp.user_id != ? THEN 'WRONG_USER_PROFILE'
+            WHEN sj.domain_profile_id IS NULL THEN 'SCRAPED_JOB_NULL_PROFILE'
+            WHEN sj.domain_profile_id != uj.domain_profile_id THEN 'SCRAPED_USER_PROFILE_MISMATCH'
             WHEN uj.domain_profile_id != ? THEN 'WRONG_PROFILE_FOR_USER'
             ELSE 'CORRECT'
           END as status
@@ -387,13 +389,14 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         JOIN scraped_jobs sj ON sj.job_id = uj.job_id
         WHERE uj.user_id = ?
         AND uj.domain_profile_id = ?
+        AND sj.domain_profile_id = ?
         AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
               AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
              OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
         AND (uj.disliked IS NULL OR uj.disliked = 0)
         AND (uj.applied IS NULL OR uj.applied = 0)
         AND (uj.resume_generated IS NULL OR uj.resume_generated = 0)
-      `).get(userId, activeProfile.id, sevenDaysAgo, sevenDaysAgo).c;
+      `).get(userId, activeProfile.id, activeProfile.id, sevenDaysAgo, sevenDaysAgo).c;
 
       const sampleResults = db.prepare(`
         SELECT sj.title, sj.company, sj.search_query, uj.domain_profile_id,
@@ -402,6 +405,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         JOIN scraped_jobs sj ON sj.job_id = uj.job_id
         WHERE uj.user_id = ?
         AND uj.domain_profile_id = ?
+        AND sj.domain_profile_id = ?
         AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
               AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
              OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
@@ -409,11 +413,12 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         AND (uj.applied IS NULL OR uj.applied = 0)
         AND (uj.resume_generated IS NULL OR uj.resume_generated = 0)
         ORDER BY sj.scraped_at DESC LIMIT 20
-      `).all(userId, activeProfile.id, sevenDaysAgo, sevenDaysAgo);
+      `).all(userId, activeProfile.id, activeProfile.id, sevenDaysAgo, sevenDaysAgo);
 
       // Get all user_jobs to classify filtered-out ones
       const allUserJobs = db.prepare(`
         SELECT sj.job_id, sj.title, sj.company, sj.search_query,
+          sj.domain_profile_id as scraped_domain_profile_id,
           uj.domain_profile_id, uj.disliked, uj.applied, uj.resume_generated,
           sj.posted_at, sj.scraped_at
         FROM user_jobs uj
@@ -428,6 +433,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       for (const job of allUserJobs) {
         let reason = null;
         if (job.domain_profile_id !== activeProfile.id) reason = "wrong_profile";
+        else if (job.scraped_domain_profile_id !== activeProfile.id) reason = "scraped_profile_mismatch";
         else if (job.applied) reason = "applied";
         else if (job.disliked) reason = "disliked";
         else if (job.resume_generated) reason = "resume_generated";
@@ -447,6 +453,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
 
       const conditions = [
         `uj.domain_profile_id = ${activeProfile.id}  — active profile: "${activeProfile.profile_name}"`,
+        `sj.domain_profile_id = ${activeProfile.id}`,
         `posted_at or scraped_at > ${new Date(sevenDaysAgo * 1000).toISOString().slice(0, 10)}  (7 days)`,
         `uj.disliked = 0`,
         `uj.applied = 0`,
@@ -458,6 +465,7 @@ FROM user_jobs uj
 JOIN scraped_jobs sj ON sj.job_id = uj.job_id
 WHERE uj.user_id = ${userId}
   AND uj.domain_profile_id = ${activeProfile.id}
+  AND sj.domain_profile_id = ${activeProfile.id}
   AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
         AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
        OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))
@@ -496,7 +504,15 @@ ORDER BY sj.scraped_at DESC;`;
         DELETE FROM user_jobs
         WHERE user_id = ?
         AND applied = 0
-        AND (domain_profile_id IS NULL OR domain_profile_id != ?)
+        AND (
+          domain_profile_id IS NULL
+          OR domain_profile_id != ?
+          OR NOT EXISTS (
+            SELECT 1 FROM scraped_jobs sj
+            WHERE sj.job_id = user_jobs.job_id
+              AND sj.domain_profile_id = user_jobs.domain_profile_id
+          )
+        )
       `).run(userId, activeProfile?.id ?? -1);
 
       res.json({ removed: result.changes, preserved });
@@ -535,7 +551,11 @@ ORDER BY sj.scraped_at DESC;`;
     try {
       const user = db.prepare("SELECT apify_token FROM users WHERE id=?").get(userId);
       if (!user?.apify_token) return res.status(400).json({ error: "User has no apify_token configured" });
-      scrapeJobs(query, user.apify_token, {}, userId).catch(console.error);
+      const activeProfile = db.prepare(
+        "SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1"
+      ).get(userId);
+      if (!activeProfile) return res.status(400).json({ error: "User has no active domain profile" });
+      scrapeJobs(query, user.apify_token, {}, activeProfile.id).catch(console.error);
       res.json({ ok: true, scraping: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

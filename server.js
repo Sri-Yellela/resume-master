@@ -852,6 +852,92 @@ db.pragma("busy_timeout = 5000");
         );
       `,
     },
+    {
+      id: "030_repair_profile_isolation_contamination",
+      sql: `
+        -- Repair non-applied profile contamination left by legacy active-profile
+        -- and user_job_searches backfills. Applied rows are preserved in
+        -- job_applications and hidden from active boards by applied filters.
+
+        DELETE FROM user_jobs
+        WHERE applied = 0
+          AND (
+            domain_profile_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1 FROM domain_profiles dp
+              WHERE dp.id = user_jobs.domain_profile_id
+                AND dp.user_id = user_jobs.user_id
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM scraped_jobs sj
+              WHERE sj.job_id = user_jobs.job_id
+                AND sj.domain_profile_id = user_jobs.domain_profile_id
+            )
+          );
+
+        UPDATE scraped_jobs
+        SET domain_profile_id = NULL
+        WHERE domain_profile_id IN (SELECT id FROM domain_profiles WHERE role_family = 'engineering')
+          AND job_id NOT IN (SELECT DISTINCT job_id FROM job_applications)
+          AND LOWER(title) NOT LIKE '%engineer%'
+          AND LOWER(title) NOT LIKE '%developer%'
+          AND LOWER(title) NOT LIKE '%software%'
+          AND LOWER(title) NOT LIKE '%programmer%'
+          AND LOWER(title) NOT LIKE '%devops%'
+          AND LOWER(title) NOT LIKE '%sre%'
+          AND LOWER(title) NOT LIKE '%architect%'
+          AND LOWER(title) NOT LIKE '%backend%'
+          AND LOWER(title) NOT LIKE '%frontend%'
+          AND LOWER(title) NOT LIKE '%fullstack%'
+          AND LOWER(title) NOT LIKE '%full stack%'
+          AND LOWER(title) NOT LIKE '%platform%'
+          AND LOWER(title) NOT LIKE '%infrastructure%'
+          AND LOWER(title) NOT LIKE '%cloud%'
+          AND LOWER(title) NOT LIKE '%systems%'
+          AND LOWER(title) NOT LIKE '%security%';
+
+        UPDATE scraped_jobs
+        SET domain_profile_id = NULL
+        WHERE domain_profile_id IN (SELECT id FROM domain_profiles WHERE role_family = 'pm')
+          AND job_id NOT IN (SELECT DISTINCT job_id FROM job_applications)
+          AND LOWER(title) NOT LIKE '%project%'
+          AND LOWER(title) NOT LIKE '%program%'
+          AND LOWER(title) NOT LIKE '%product%'
+          AND LOWER(title) NOT LIKE '%manager%'
+          AND LOWER(title) NOT LIKE '%coordinator%'
+          AND LOWER(title) NOT LIKE '%director%'
+          AND LOWER(title) NOT LIKE '%lead%'
+          AND LOWER(title) NOT LIKE '%agile%'
+          AND LOWER(title) NOT LIKE '%scrum%'
+          AND LOWER(title) NOT LIKE '%pmo%'
+          AND LOWER(title) NOT LIKE '%delivery%'
+          AND LOWER(title) NOT LIKE '%operations%';
+
+        UPDATE scraped_jobs
+        SET domain_profile_id = NULL
+        WHERE domain_profile_id IN (SELECT id FROM domain_profiles WHERE role_family = 'data')
+          AND job_id NOT IN (SELECT DISTINCT job_id FROM job_applications)
+          AND LOWER(title) NOT LIKE '%data%'
+          AND LOWER(title) NOT LIKE '%analytics%'
+          AND LOWER(title) NOT LIKE '%analyst%'
+          AND LOWER(title) NOT LIKE '%scientist%'
+          AND LOWER(title) NOT LIKE '%machine learning%'
+          AND LOWER(title) NOT LIKE '%ml%'
+          AND LOWER(title) NOT LIKE '%ai%'
+          AND LOWER(title) NOT LIKE '%business intelligence%'
+          AND LOWER(title) NOT LIKE '%bi%'
+          AND LOWER(title) NOT LIKE '%research%'
+          AND LOWER(title) NOT LIKE '%quantitative%';
+
+        DELETE FROM user_jobs
+        WHERE applied = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM scraped_jobs sj
+            WHERE sj.job_id = user_jobs.job_id
+              AND sj.domain_profile_id = user_jobs.domain_profile_id
+          );
+      `,
+    },
     // Add future migrations here — never edit existing ones
   ];
 
@@ -1404,6 +1490,13 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         domainProfileId,
       );
       if (result.changes > 0) inserted++;
+      else if (domainProfileId) {
+        db.prepare(`
+          UPDATE scraped_jobs
+          SET domain_profile_id = ?
+          WHERE job_id = ? AND domain_profile_id IS NULL
+        `).run(domainProfileId, jobId);
+      }
     });
     return inserted;
   });
@@ -1844,6 +1937,25 @@ function assertUserOwns(row, userId, res) {
   return row;
 }
 
+function resolveUserJobDomainProfileId(userId, jobId) {
+  const existing = db.prepare(`
+    SELECT uj.domain_profile_id
+    FROM user_jobs uj
+    JOIN domain_profiles dp ON dp.id = uj.domain_profile_id AND dp.user_id = uj.user_id
+    JOIN scraped_jobs sj ON sj.job_id = uj.job_id AND sj.domain_profile_id = uj.domain_profile_id
+    WHERE uj.user_id=? AND uj.job_id=?
+  `).get(userId, String(jobId));
+  if (existing?.domain_profile_id) return existing.domain_profile_id;
+
+  const scraped = db.prepare(`
+    SELECT sj.domain_profile_id
+    FROM scraped_jobs sj
+    JOIN domain_profiles dp ON dp.id = sj.domain_profile_id
+    WHERE sj.job_id = ? AND dp.user_id = ?
+  `).get(String(jobId), userId);
+  return scraped?.domain_profile_id ?? null;
+}
+
 // ── Express ───────────────────────────────────────────────────
 const app = express();
 // Active scrapes: key = "userId:query", value = { startedAt, done }
@@ -2207,9 +2319,9 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
   const userId = req.user.id;
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
   const facetProfile = db.prepare("SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
-  const profileCond  = facetProfile
-    ? `AND uj.domain_profile_id = ${facetProfile.id}`
-    : `AND uj.domain_profile_id IS NOT NULL`;
+  if (!facetProfile) {
+    return res.json({ workType:{}, employmentType:{}, category:{}, postedAge:{}, salaryRange:null, total:0 });
+  }
   const rows = db.prepare(`
     SELECT sj.work_type, sj.employment_type, sj.category,
            sj.scraped_at, sj.posted_at, sj.salary_min, sj.salary_max
@@ -2220,8 +2332,9 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
       AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
            OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
-      ${profileCond}
-  `).all(userId, sevenDaysAgo, sevenDaysAgo);
+      AND uj.domain_profile_id = ?
+      AND sj.domain_profile_id = ?
+  `).all(userId, sevenDaysAgo, sevenDaysAgo, facetProfile.id, facetProfile.id);
 
   const workType = {}, empType = {}, category = {}, postedAge = {};
   const salaries = [];
@@ -2332,12 +2445,13 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   // ──────────────────────────────────────────────────────
   const conditions = [
     `uj.domain_profile_id = ?`,
+    `sj.domain_profile_id = ?`,
     `((sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo}) OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))`,
     `(uj.disliked IS NULL OR uj.disliked = 0)`,
     `(uj.applied IS NULL OR uj.applied = 0)`,
     `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
   ];
-  const filterParams = [activeProfile.id];
+  const filterParams = [activeProfile.id, activeProfile.id];
 
   const role = (req.query.role || "").trim().toLowerCase();
   if (role) { conditions.push(`LOWER(sj.search_query) = ?`); filterParams.push(role); }
@@ -2511,9 +2625,7 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
 
   const bmProfile   = db.prepare("SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
-  const bmProfileCond = bmProfile
-    ? `AND uj.domain_profile_id = ${bmProfile.id}`
-    : `AND uj.domain_profile_id IS NOT NULL`;
+  if (!bmProfile) return res.json({ jobs: [], threshold, total: 0 });
   const bestMatchQuery = (thresh) => db.prepare(`
     SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
       sj.ats_score as base_ats_score,
@@ -2529,10 +2641,11 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
           AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
         OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
       )
-      ${bmProfileCond}
+      AND uj.domain_profile_id = ?
+      AND sj.domain_profile_id = ?
     ORDER BY sj.ats_score DESC
     LIMIT ?
-  `).all(userId, userId, thresh, limit);
+  `).all(userId, userId, thresh, bmProfile.id, bmProfile.id, limit);
 
   let jobs = bestMatchQuery(threshold);
 
@@ -2586,6 +2699,12 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
 
   const sinceSeconds = Math.floor(since / 1000);
   const userId = req.user.id;
+  const activeProfile = db.prepare(
+    "SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1"
+  ).get(userId);
+  if (!activeProfile) {
+    return res.json({ jobs: [], scraping: stillScraping, total: 0 });
+  }
 
   const rows = db.prepare(`
     SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked
@@ -2595,9 +2714,11 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
       AND sj.scraped_at > ?
       AND (uj.disliked  IS NULL OR uj.disliked  = 0)
       AND (uj.applied   IS NULL OR uj.applied   = 0)
+      AND uj.domain_profile_id = ?
+      AND sj.domain_profile_id = ?
     ORDER BY sj.scraped_at DESC
     LIMIT 50
-  `).all(userId, qRaw, sinceSeconds);
+  `).all(userId, qRaw, sinceSeconds, activeProfile.id, activeProfile.id);
 
   const jobs = rows.map(j => ({
     jobId:           j.job_id,
@@ -2725,11 +2846,13 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     WHERE LOWER(sj.search_query) = ?
       AND sj.scraped_at > ?
+      AND uj.domain_profile_id = ?
+      AND sj.domain_profile_id = ?
       AND uj.visited = 0
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND sj.ghost_score < 4
-  `).get(req.user.id, query.toLowerCase(), sevenDaysAgo);
+  `).get(req.user.id, query.toLowerCase(), sevenDaysAgo, activeProfile?.id ?? -1, activeProfile?.id ?? -1);
 
   const THRESHOLD = 50;
   const hasEnough = (existingCount?.cnt || 0) >= THRESHOLD;
@@ -2832,40 +2955,43 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
 // ── Visited / Starred flags ────────────────────────────────────
 app.patch("/api/jobs/:id/visited", requireAuth, (req, res) => {
   const jobId = req.params.id;
+  const profileId = resolveUserJobDomainProfileId(req.user.id, jobId);
   db.prepare(`
-    INSERT INTO user_jobs (user_id, job_id, visited, updated_at)
-    VALUES (?, ?, 1, unixepoch())
+    INSERT INTO user_jobs (user_id, job_id, domain_profile_id, visited, updated_at)
+    VALUES (?, ?, ?, 1, unixepoch())
     ON CONFLICT(user_id, job_id) DO UPDATE SET visited = 1, updated_at = unixepoch()
-  `).run(req.user.id, jobId);
+  `).run(req.user.id, jobId, profileId);
   res.json({ ok:true });
 });
 
 app.patch("/api/jobs/:id/starred", requireAuth, (req, res) => {
   const jobId = req.params.id;
+  const profileId = resolveUserJobDomainProfileId(req.user.id, jobId);
   const current = db.prepare(
     "SELECT starred FROM user_jobs WHERE user_id = ? AND job_id = ?"
   ).get(req.user.id, jobId);
   const newStarred = current ? (current.starred ? 0 : 1) : 1;
   db.prepare(`
-    INSERT INTO user_jobs (user_id, job_id, starred, disliked, updated_at)
-    VALUES (?, ?, ?, 0, unixepoch())
+    INSERT INTO user_jobs (user_id, job_id, domain_profile_id, starred, disliked, updated_at)
+    VALUES (?, ?, ?, ?, 0, unixepoch())
     ON CONFLICT(user_id, job_id) DO UPDATE SET starred = ?, disliked = 0, updated_at = unixepoch()
-  `).run(req.user.id, jobId, newStarred, newStarred);
+  `).run(req.user.id, jobId, profileId, newStarred, newStarred);
   emitToUser(req.user.id, { type: "job_flag", jobId, starred: !!newStarred });
   res.json({ ok:true, starred: !!newStarred });
 });
 
 app.patch("/api/jobs/:id/disliked", requireAuth, (req, res) => {
   const jobId = req.params.id;
+  const profileId = resolveUserJobDomainProfileId(req.user.id, jobId);
   const current = db.prepare(
     "SELECT disliked FROM user_jobs WHERE user_id = ? AND job_id = ?"
   ).get(req.user.id, jobId);
   const newDisliked = current ? (current.disliked ? 0 : 1) : 1;
   db.prepare(`
-    INSERT INTO user_jobs (user_id, job_id, disliked, starred, updated_at)
-    VALUES (?, ?, ?, 0, unixepoch())
+    INSERT INTO user_jobs (user_id, job_id, domain_profile_id, disliked, starred, updated_at)
+    VALUES (?, ?, ?, ?, 0, unixepoch())
     ON CONFLICT(user_id, job_id) DO UPDATE SET disliked = ?, starred = 0, updated_at = unixepoch()
-  `).run(req.user.id, jobId, newDisliked, newDisliked);
+  `).run(req.user.id, jobId, profileId, newDisliked, newDisliked);
   emitToUser(req.user.id, { type: "job_flag", jobId, disliked: !!newDisliked });
   res.json({ ok:true, disliked: !!newDisliked });
 });
@@ -2959,6 +3085,10 @@ ${resumeText}`;
 // ── Pending jobs (resume generated but not yet applied or disliked) ──
 app.get("/api/jobs/pending", requireAuth, (req, res) => {
   const userId = req.user.id;
+  const activeProfile = db.prepare(
+    "SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1"
+  ).get(userId);
+  if (!activeProfile) return res.json([]);
   const rows = db.prepare(`
     SELECT sj.*, uj.starred, uj.applied, uj.disliked, uj.visited, uj.resume_generated,
            r.ats_score, r.ats_report, r.html as resume_html, r.apply_mode
@@ -2968,8 +3098,10 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
     WHERE uj.resume_generated = 1
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
+      AND uj.domain_profile_id = ?
+      AND sj.domain_profile_id = ?
     ORDER BY uj.updated_at DESC
-  `).all(userId, userId);
+  `).all(userId, userId, activeProfile.id, activeProfile.id);
   res.json(rows);
 });
 
@@ -3442,12 +3574,13 @@ ${resumeStripped}`;
       .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,formattedHtml,atsScore,JSON.stringify(atsReport));
 
     // Phase 1C: mark resume_generated in user_jobs
+    const userJobProfileId = resolveUserJobDomainProfileId(req.user.id, String(jobId));
     db.prepare(`
-      INSERT INTO user_jobs (user_id, job_id, resume_generated, updated_at)
-      VALUES (?, ?, 1, unixepoch())
+      INSERT INTO user_jobs (user_id, job_id, domain_profile_id, resume_generated, updated_at)
+      VALUES (?, ?, ?, 1, unixepoch())
       ON CONFLICT(user_id, job_id) DO UPDATE SET
         resume_generated = 1, updated_at = unixepoch()
-    `).run(req.user.id, String(jobId));
+    `).run(req.user.id, String(jobId), userJobProfileId);
 
     emitToUser(req.user.id, { type: "resume_generated", jobId: String(jobId), atsScore });
     insertNotification(req.user.id, "resume_generated",
@@ -3530,11 +3663,12 @@ app.post("/api/applications", requireAuth, (req, res) => {
         applied_at=excluded.applied_at`)
       .run(req.user.id,jobId,company,role,jobUrl||null,source||null,location||null,applyMode||null,resumeFile||null,notes||null);
     // Sync applied flag to user_jobs
+    const userJobProfileId = resolveUserJobDomainProfileId(req.user.id, jobId);
     db.prepare(`
-      INSERT INTO user_jobs (user_id, job_id, applied, updated_at)
-      VALUES (?, ?, 1, unixepoch())
+      INSERT INTO user_jobs (user_id, job_id, domain_profile_id, applied, updated_at)
+      VALUES (?, ?, ?, 1, unixepoch())
       ON CONFLICT(user_id, job_id) DO UPDATE SET applied = 1, updated_at = unixepoch()
-    `).run(req.user.id, jobId);
+    `).run(req.user.id, jobId, userJobProfileId);
     res.json({ ok:true });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
@@ -3949,11 +4083,12 @@ app.get("/api/debug/verify-isolation", requireAuth, (req, res) => {
     "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
   ).get(userId);
   const wrongJobs = profile ? db.prepare(`
-    SELECT sj.title, uj.domain_profile_id
+    SELECT sj.title, uj.domain_profile_id, sj.domain_profile_id as scraped_domain_profile_id
     FROM user_jobs uj JOIN scraped_jobs sj ON sj.job_id=uj.job_id
-    WHERE uj.user_id=? AND uj.domain_profile_id != ?
+    WHERE uj.user_id=?
+      AND (uj.domain_profile_id != ? OR sj.domain_profile_id != ?)
     LIMIT 10
-  `).all(userId, profile.id) : [];
+  `).all(userId, profile.id, profile.id) : [];
   const totalJobs   = db.prepare("SELECT COUNT(*) as c FROM user_jobs WHERE user_id=?").get(userId);
   const profileJobs = profile
     ? db.prepare("SELECT COUNT(*) as c FROM user_jobs WHERE user_id=? AND domain_profile_id=?").get(userId, profile.id)
