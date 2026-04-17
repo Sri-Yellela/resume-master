@@ -7,6 +7,7 @@ const ACCENT = "#F5E642";
 const TABS = [
   { id: "scrape",   label: "Scrape Monitor" },
   { id: "schema",   label: "Schema Explorer" },
+  { id: "tables",   label: "Table Browser" },
   { id: "pool",     label: "User Pool" },
   { id: "trace",    label: "Job Trace" },
   { id: "simulate", label: "Query Simulator" },
@@ -78,15 +79,155 @@ function KeyValueGrid({ data, theme, highlight }) {
     <div style={{ display:"grid", gridTemplateColumns:"160px 1fr", gap:"2px 8px", fontSize:11 }}>
       {Object.entries(data).map(([k, v]) => (
         <div key={k} style={{ display:"contents" }}>
-          <div style={{ color:theme.textMuted, fontWeight:700, padding:"3px 0",
+          <div style={{ fontWeight:700, padding:"3px 0",
                         color: highlight?.includes(k) ? ACCENT : theme.textMuted }}>{k}</div>
-          <div style={{ color:theme.text, padding:"3px 0", wordBreak:"break-all",
+          <div style={{ padding:"3px 0", wordBreak:"break-all",
                         color: highlight?.includes(k) ? ACCENT : theme.text }}>
             {v == null ? <span style={{color:theme.textMuted}}>NULL</span>
                        : String(v).length > 200 ? String(v).slice(0,200)+"…" : String(v)}
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function SchemaMapView({ theme }) {
+  const [graph, setGraph] = useState(null);
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 20, y: 20 });
+  const [drag, setDrag] = useState(null);
+
+  useEffect(() => {
+    api("/api/admin/db/schema/graph").then(setGraph).catch(e => setError(e.message));
+  }, []);
+
+  if (error) return <ErrBox msg={error} theme={theme}/>;
+  if (!graph) return <Spinner theme={theme}/>;
+
+  const nodeW = 220;
+  const colGap = 280;
+  const rowGap = 210;
+  const positions = {};
+  graph.tables.forEach((t, i) => {
+    positions[t.name] = {
+      x: (i % 4) * colGap,
+      y: Math.floor(i / 4) * rowGap,
+    };
+  });
+
+  const related = new Set();
+  if (selected) {
+    related.add(selected);
+    graph.relationships.forEach(r => {
+      if (r.fromTable === selected) related.add(r.toTable);
+      if (r.toTable === selected) related.add(r.fromTable);
+    });
+  }
+
+  const onWheel = (e) => {
+    e.preventDefault();
+    setScale(s => Math.min(1.8, Math.max(0.45, s + (e.deltaY > 0 ? -0.08 : 0.08))));
+  };
+
+  return (
+    <div
+      onWheel={onWheel}
+      onMouseDown={e => setDrag({ x:e.clientX, y:e.clientY, ox:offset.x, oy:offset.y })}
+      onMouseMove={e => {
+        if (!drag) return;
+        setOffset({ x: drag.ox + e.clientX - drag.x, y: drag.oy + e.clientY - drag.y });
+      }}
+      onMouseUp={() => setDrag(null)}
+      onMouseLeave={() => setDrag(null)}
+      style={{
+        height:"calc(100vh - 290px)", minHeight:460, overflow:"hidden",
+        border:`1px solid ${theme.border}`, borderRadius:10, background:theme.surface,
+        position:"relative", cursor:drag ? "grabbing" : "grab",
+      }}
+    >
+      <div style={{
+        position:"absolute", top:10, right:10, zIndex:3,
+        display:"flex", gap:6, alignItems:"center",
+      }}>
+        <button onClick={() => setScale(s => Math.min(1.8, s + 0.1))}
+          style={{ padding:"4px 9px", borderRadius:6, border:`1px solid ${theme.border}`,
+                   background:theme.surfaceHigh, color:theme.text, cursor:"pointer" }}>+</button>
+        <button onClick={() => setScale(s => Math.max(0.45, s - 0.1))}
+          style={{ padding:"4px 9px", borderRadius:6, border:`1px solid ${theme.border}`,
+                   background:theme.surfaceHigh, color:theme.text, cursor:"pointer" }}>-</button>
+        <button onClick={() => { setScale(1); setOffset({ x:20, y:20 }); }}
+          style={{ padding:"4px 9px", borderRadius:6, border:`1px solid ${theme.border}`,
+                   background:theme.surfaceHigh, color:theme.text, cursor:"pointer", fontSize:11 }}>Reset</button>
+      </div>
+
+      <div style={{
+        transform:`translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+        transformOrigin:"0 0", position:"absolute", inset:0,
+      }}>
+        <svg width="1600" height="1600" style={{ position:"absolute", inset:0, overflow:"visible" }}>
+          {graph.relationships.map(r => {
+            const a = positions[r.fromTable], b = positions[r.toTable];
+            if (!a || !b) return null;
+            const active = !selected || related.has(r.fromTable) || related.has(r.toTable);
+            return (
+              <line key={r.id}
+                x1={a.x + nodeW} y1={a.y + 48}
+                x2={b.x} y2={b.y + 48}
+                stroke={active ? ACCENT : theme.border}
+                strokeWidth={active ? 2 : 1}
+                opacity={active ? 0.75 : 0.25}
+              />
+            );
+          })}
+        </svg>
+
+        {graph.tables.map(t => {
+          const p = positions[t.name];
+          const active = !selected || related.has(t.name);
+          return (
+            <div key={t.name}
+              onMouseDown={e => e.stopPropagation()}
+              onClick={() => setSelected(selected === t.name ? null : t.name)}
+              style={{
+                position:"absolute", left:p.x, top:p.y, width:nodeW,
+                border:`1px solid ${selected === t.name ? ACCENT : theme.border}`,
+                borderRadius:8, background:theme.bg, opacity:active ? 1 : 0.35,
+                boxShadow:selected === t.name ? `0 0 0 2px ${ACCENT}33` : "none",
+                overflow:"hidden", cursor:"pointer",
+              }}
+            >
+              <div style={{
+                padding:"8px 10px", background:theme.surfaceHigh,
+                borderBottom:`1px solid ${theme.border}`, fontWeight:900, fontSize:12,
+                display:"flex", justifyContent:"space-between", gap:8,
+              }}>
+                <span>{t.name}</span>
+                <span style={{ color:theme.textMuted, fontSize:10 }}>{fmt(t.rowCount)}</span>
+              </div>
+              <div style={{ maxHeight:145, overflow:"hidden", padding:"5px 0" }}>
+                {t.columns.slice(0, 8).map(c => (
+                  <div key={c.name} style={{
+                    display:"grid", gridTemplateColumns:"16px 1fr auto",
+                    gap:5, padding:"2px 10px", fontSize:10,
+                  }}>
+                    <span style={{ color:c.primaryKey ? ACCENT : theme.textMuted }}>{c.primaryKey ? "PK" : ""}</span>
+                    <span style={{ color:c.primaryKey ? ACCENT : theme.text }}>{c.name}</span>
+                    <span style={{ color:theme.textMuted }}>{c.type || ""}</span>
+                  </div>
+                ))}
+                {t.columns.length > 8 && (
+                  <div style={{ padding:"3px 10px", color:theme.textMuted, fontSize:10 }}>
+                    +{t.columns.length - 8} more
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -310,6 +451,7 @@ function SchemaExplorerTab({ theme }) {
   const [recentRows, setRecentRows] = useState(null);
   const [recentLoading, setRecentLoading] = useState(false);
   const [schemaCopied, setSchemaCopied] = useState(false);
+  const [schemaView, setSchemaView] = useState("tables");
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -350,6 +492,18 @@ function SchemaExplorerTab({ theme }) {
     <div>
     {/* Controls bar */}
     <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:16 }}>
+      {["tables","map"].map(v => (
+        <button key={v} type="button" onClick={() => setSchemaView(v)}
+          style={{
+            padding:"6px 14px", borderRadius:8,
+            border:`1px solid ${schemaView === v ? ACCENT : theme.border}`,
+            background:schemaView === v ? ACCENT : theme.surfaceHigh,
+            color:schemaView === v ? "#0f0f0f" : theme.text,
+            cursor:"pointer", fontSize:12, fontWeight:700,
+          }}>
+          {v === "tables" ? "Tables" : "Map View"}
+        </button>
+      ))}
       <button
         type="button"
         onClick={async () => {
@@ -393,6 +547,7 @@ function SchemaExplorerTab({ theme }) {
         ⬇ Download .sql
       </button>
     </div>
+    {schemaView === "map" ? <SchemaMapView theme={theme}/> : (
     <div style={{ display:"flex", gap:0, height:"calc(100vh - 260px)", minHeight:400 }}>
       {/* Left sidebar */}
       <div style={{
@@ -589,6 +744,7 @@ function SchemaExplorerTab({ theme }) {
         )}
       </div>
     </div>
+    )}
     </div>
   );
 }
@@ -884,6 +1040,13 @@ function JobTraceTab({ theme, initialJobId }) {
                   {data.scraped_job.domain_profile_id ?? "NULL"}
                 </Pill>
               </div>
+              {data.role_mappings?.length > 0 && (
+                <div style={{ marginBottom:8, display:"flex", gap:5, flexWrap:"wrap" }}>
+                  {data.role_mappings.map(r => (
+                    <Pill key={r.role_key} color={ACCENT}>{r.role_key}</Pill>
+                  ))}
+                </div>
+              )}
               <KeyValueGrid
                 data={{
                   job_id: data.scraped_job.job_id,
@@ -1291,6 +1454,117 @@ function QuerySimulatorTab({ theme }) {
 }
 
 // ── Main DBInspector ──────────────────────────────────────────
+function TableBrowserTab({ theme }) {
+  const [tables, setTables] = useState([]);
+  const [selected, setSelected] = useState("");
+  const [data, setData] = useState(null);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    api("/api/admin/db/tables").then(d => {
+      const list = d.tables || [];
+      setTables(list);
+      if (list.length && !selected) setSelected(list[0].name);
+    }).catch(e => setError(e.message));
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    setLoading(true); setError(null);
+    api(`/api/admin/db/table-data/${selected}?page=${page}&pageSize=25`)
+      .then(setData)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [selected, page]);
+
+  const cols = data?.columns?.map(c => c.name) || [];
+
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"240px 1fr", gap:18 }}>
+      <div style={{ border:`1px solid ${theme.border}`, borderRadius:10, overflow:"hidden" }}>
+        <div style={{ padding:"10px 12px", background:theme.surfaceHigh,
+                      fontSize:10, fontWeight:800, textTransform:"uppercase",
+                      letterSpacing:"0.07em", color:theme.textMuted }}>
+          Tables
+        </div>
+        <div style={{ maxHeight:"calc(100vh - 250px)", overflowY:"auto" }}>
+          {tables.map(t => (
+            <button key={t.name}
+              onClick={() => { setSelected(t.name); setPage(1); }}
+              style={{
+                width:"100%", display:"flex", justifyContent:"space-between",
+                padding:"8px 12px", border:"none", borderTop:`1px solid ${theme.border}`,
+                background:selected === t.name ? ACCENT+"22" : "transparent",
+                color:theme.text, cursor:"pointer", textAlign:"left", fontSize:12,
+              }}>
+              <span style={{ fontWeight:selected === t.name ? 800 : 500 }}>{t.name}</span>
+              <span style={{ color:theme.textMuted }}>{fmt(t.rowCount)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+          <div>
+            <div style={{ fontSize:18, fontWeight:900 }}>{selected || "Select a table"}</div>
+            {data && <div style={{ fontSize:11, color:theme.textMuted }}>
+              {fmt(data.total)} rows · page {data.page} of {data.totalPages || 1}
+            </div>}
+          </div>
+          <div style={{ flex:1 }}/>
+          <button disabled={!data || page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}
+            style={{ padding:"5px 12px", borderRadius:6, border:`1px solid ${theme.border}`,
+                     background:theme.surfaceHigh, color:theme.text, cursor:"pointer",
+                     opacity:!data || page <= 1 ? 0.5 : 1 }}>
+            Prev
+          </button>
+          <button disabled={!data || page >= data.totalPages} onClick={() => setPage(p => p + 1)}
+            style={{ padding:"5px 12px", borderRadius:6, border:`1px solid ${theme.border}`,
+                     background:theme.surfaceHigh, color:theme.text, cursor:"pointer",
+                     opacity:!data || page >= data.totalPages ? 0.5 : 1 }}>
+            Next
+          </button>
+        </div>
+
+        <ErrBox msg={error} theme={theme}/>
+        {loading && <Spinner theme={theme}/>}
+        {data && !loading && (
+          <div style={{ border:`1px solid ${theme.border}`, borderRadius:10, overflow:"auto",
+                        maxHeight:"calc(100vh - 245px)" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+              <thead>
+                <tr style={{ background:theme.surfaceHigh, position:"sticky", top:0 }}>
+                  {cols.map(c => (
+                    <th key={c} style={{ padding:"7px 9px", textAlign:"left",
+                                         borderBottom:`1px solid ${theme.border}`,
+                                         color:theme.textMuted, whiteSpace:"nowrap" }}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((row, i) => (
+                  <tr key={i} style={{ borderBottom:`1px solid ${theme.border}` }}>
+                    {cols.map(c => (
+                      <td key={c} style={{ padding:"6px 9px", maxWidth:260,
+                                           whiteSpace:"nowrap", overflow:"hidden",
+                                           textOverflow:"ellipsis", color:theme.text }}>
+                        {row[c] == null ? <span style={{ color:theme.textMuted }}>NULL</span> : String(row[c])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DBInspector() {
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState("scrape");
@@ -1375,6 +1649,7 @@ export default function DBInspector() {
       <div key={refreshKey}>
         {activeTab === "scrape" && <ScrapeMonitorTab theme={theme}/>}
         {activeTab === "schema" && <SchemaExplorerTab theme={theme}/>}
+        {activeTab === "tables" && <TableBrowserTab theme={theme}/>}
         {activeTab === "pool" && <UserPoolTab theme={theme}/>}
         {activeTab === "trace" && <JobTraceTab theme={theme} initialJobId={traceJobId}/>}
         {activeTab === "simulate" && <QuerySimulatorTab theme={theme}/>}

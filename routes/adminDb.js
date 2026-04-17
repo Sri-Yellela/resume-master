@@ -10,6 +10,22 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
     next();
   }
 
+  function roleKeyForProfile(profile) {
+    return String(profile?.role_family || profile?.domain || "general").trim().toLowerCase();
+  }
+
+  function tableNames() {
+    return db.prepare(
+      `SELECT name FROM sqlite_master
+       WHERE type='table' AND name NOT LIKE 'sqlite_%'
+       ORDER BY name`
+    ).all().map(t => t.name);
+  }
+
+  function assertReadableTable(table) {
+    return tableNames().includes(table);
+  }
+
   // ── Route 1: Scrape Monitor ───────────────────────────────────
   router.get("/scrape-monitor", requireAdmin, (req, res) => {
     try {
@@ -127,6 +143,37 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  router.get("/schema/graph", requireAdmin, (req, res) => {
+    try {
+      const names = tableNames();
+      const nodes = names.map(name => {
+        const columns = db.prepare(`PRAGMA table_info("${name}")`).all().map(c => ({
+          name: c.name,
+          type: c.type,
+          notnull: c.notnull === 1,
+          primaryKey: c.pk > 0,
+          defaultValue: c.dflt_value,
+        }));
+        const rowCount = db.prepare(`SELECT COUNT(*) as c FROM "${name}"`).get().c;
+        return { id: name, name, rowCount, columns };
+      });
+      const edges = [];
+      for (const name of names) {
+        const fks = db.prepare(`PRAGMA foreign_key_list("${name}")`).all();
+        for (const fk of fks) {
+          edges.push({
+            id: `${name}.${fk.from}->${fk.table}.${fk.to}`,
+            fromTable: name,
+            fromColumn: fk.from,
+            toTable: fk.table,
+            toColumn: fk.to,
+          });
+        }
+      }
+      res.json({ tables: nodes, relationships: edges });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ── Route 2c: Full schema export (for copy/download) ─────────
   router.get("/schema/export", requireAdmin, (req, res) => {
     try {
@@ -207,13 +254,47 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
   const ALLOWED_TABLES = new Set([
     "scraped_jobs", "user_jobs", "domain_profiles", "usage_events", "scrape_events",
     "users", "user_job_searches", "resumes", "job_applications", "schema_migrations",
-    "user_limits", "cache_events",
+    "user_limits", "cache_events", "job_role_map", "user_job_views",
   ]);
   router.get("/table-rows/:table", requireAdmin, (req, res) => {
     const table = req.params.table;
     if (!ALLOWED_TABLES.has(table)) return res.status(400).json({ error: "Table not allowed" });
     try {
       res.json(db.prepare(`SELECT * FROM "${table}" ORDER BY rowid DESC LIMIT 10`).all());
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.get("/tables", requireAdmin, (_req, res) => {
+    try {
+      const tables = tableNames().map(name => {
+        const rowCount = db.prepare(`SELECT COUNT(*) as c FROM "${name}"`).get().c;
+        const columns = db.prepare(`PRAGMA table_info("${name}")`).all();
+        return { name, rowCount, columns };
+      });
+      res.json({ tables });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.get("/table-data/:table", requireAdmin, (req, res) => {
+    const table = req.params.table;
+    if (!assertReadableTable(table)) return res.status(400).json({ error: "Table not allowed" });
+    try {
+      const page = Math.max(1, parseInt(req.query.page || "1"));
+      const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize || "25")));
+      const offset = (page - 1) * pageSize;
+      const total = db.prepare(`SELECT COUNT(*) as c FROM "${table}"`).get().c;
+      const columns = db.prepare(`PRAGMA table_info("${table}")`).all();
+      const rows = db.prepare(`SELECT * FROM "${table}" ORDER BY rowid DESC LIMIT ? OFFSET ?`)
+        .all(pageSize, offset);
+      res.json({
+        table,
+        columns,
+        rows,
+        total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize),
+      });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -289,6 +370,10 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         WHERE uj.job_id = ?
       `).all(jobId);
 
+      const roleMappings = db.prepare(`
+        SELECT * FROM job_role_map WHERE job_id = ? ORDER BY role_key
+      `).all(jobId);
+
       let resumes = [];
       try {
         resumes = db.prepare("SELECT * FROM resumes WHERE job_id = ?").all(jobId);
@@ -328,6 +413,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       res.json({
         scraped_job: scrapedJob,
         user_jobs: userJobs,
+        role_mappings: roleMappings,
         resumes,
         applications,
         domain_profile: domainProfile,
@@ -365,10 +451,11 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       }
 
       const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+      const roleKey = roleKeyForProfile(activeProfile);
 
       const sessionSyncWouldAdd = db.prepare(`
         SELECT COUNT(*) as c FROM scraped_jobs sj
-        WHERE sj.domain_profile_id = ?
+        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
         AND (
           (sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
@@ -378,34 +465,33 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
           SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
         )
         AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ?)
-      `).get(activeProfile.id, sevenDaysAgo, sevenDaysAgo, userId, userId).c;
+      `).get(roleKey, sevenDaysAgo, sevenDaysAgo, userId, userId).c;
 
-      const totalJobsInPool = db.prepare(
-        "SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ?"
-      ).get(userId).c;
+      const totalJobsInPool = db.prepare(`
+        SELECT COUNT(*) as c FROM scraped_jobs sj
+        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
+      `).get(roleKey).c;
 
       const passingCount = db.prepare(`
-        SELECT COUNT(*) as c FROM user_jobs uj
-        JOIN scraped_jobs sj ON sj.job_id = uj.job_id
-        WHERE uj.user_id = ?
-        AND uj.domain_profile_id = ?
-        AND sj.domain_profile_id = ?
+        SELECT COUNT(*) as c FROM scraped_jobs sj
+        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
+        LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+        WHERE 1 = 1
         AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
               AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
              OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
         AND (uj.disliked IS NULL OR uj.disliked = 0)
         AND (uj.applied IS NULL OR uj.applied = 0)
         AND (uj.resume_generated IS NULL OR uj.resume_generated = 0)
-      `).get(userId, activeProfile.id, activeProfile.id, sevenDaysAgo, sevenDaysAgo).c;
+      `).get(roleKey, userId, sevenDaysAgo, sevenDaysAgo).c;
 
       const sampleResults = db.prepare(`
-        SELECT sj.title, sj.company, sj.search_query, uj.domain_profile_id,
+        SELECT sj.title, sj.company, sj.search_query, jrm.role_key,
           sj.posted_at, sj.scraped_at, sj.ats_score
-        FROM user_jobs uj
-        JOIN scraped_jobs sj ON sj.job_id = uj.job_id
-        WHERE uj.user_id = ?
-        AND uj.domain_profile_id = ?
-        AND sj.domain_profile_id = ?
+        FROM scraped_jobs sj
+        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
+        LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+        WHERE 1 = 1
         AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
               AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
              OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
@@ -413,28 +499,27 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         AND (uj.applied IS NULL OR uj.applied = 0)
         AND (uj.resume_generated IS NULL OR uj.resume_generated = 0)
         ORDER BY sj.scraped_at DESC LIMIT 20
-      `).all(userId, activeProfile.id, activeProfile.id, sevenDaysAgo, sevenDaysAgo);
+      `).all(roleKey, userId, sevenDaysAgo, sevenDaysAgo);
 
       // Get all user_jobs to classify filtered-out ones
       const allUserJobs = db.prepare(`
         SELECT sj.job_id, sj.title, sj.company, sj.search_query,
-          sj.domain_profile_id as scraped_domain_profile_id,
+          jrm.role_key,
           uj.domain_profile_id, uj.disliked, uj.applied, uj.resume_generated,
           sj.posted_at, sj.scraped_at
-        FROM user_jobs uj
-        JOIN scraped_jobs sj ON sj.job_id = uj.job_id
-        WHERE uj.user_id = ?
+        FROM scraped_jobs sj
+        JOIN job_role_map jrm ON jrm.job_id = sj.job_id
+        LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+        WHERE jrm.role_key = ?
         LIMIT 1000
-      `).all(userId);
+      `).all(userId, roleKey);
 
       const sampleFiltered = [];
       const filterReasonCounts = {};
 
       for (const job of allUserJobs) {
         let reason = null;
-        if (job.domain_profile_id !== activeProfile.id) reason = "wrong_profile";
-        else if (job.scraped_domain_profile_id !== activeProfile.id) reason = "scraped_profile_mismatch";
-        else if (job.applied) reason = "applied";
+        if (job.applied) reason = "applied";
         else if (job.disliked) reason = "disliked";
         else if (job.resume_generated) reason = "resume_generated";
         else {
@@ -452,20 +537,18 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       }
 
       const conditions = [
-        `uj.domain_profile_id = ${activeProfile.id}  — active profile: "${activeProfile.profile_name}"`,
-        `sj.domain_profile_id = ${activeProfile.id}`,
+        `jrm.role_key = ${roleKey}  — active profile: "${activeProfile.profile_name}"`,
         `posted_at or scraped_at > ${new Date(sevenDaysAgo * 1000).toISOString().slice(0, 10)}  (7 days)`,
         `uj.disliked = 0`,
         `uj.applied = 0`,
         `uj.resume_generated = 0`,
       ];
 
-      const rawSql = `SELECT sj.*, uj.domain_profile_id, uj.disliked, uj.applied, uj.resume_generated
-FROM user_jobs uj
-JOIN scraped_jobs sj ON sj.job_id = uj.job_id
-WHERE uj.user_id = ${userId}
-  AND uj.domain_profile_id = ${activeProfile.id}
-  AND sj.domain_profile_id = ${activeProfile.id}
+      const rawSql = `SELECT sj.*, jrm.role_key, uj.disliked, uj.applied, uj.resume_generated
+FROM scraped_jobs sj
+JOIN job_role_map jrm ON jrm.job_id = sj.job_id
+LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ${userId}
+WHERE jrm.role_key = '${roleKey}'
   AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
         AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
        OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))
@@ -493,8 +576,9 @@ ORDER BY sj.scraped_at DESC;`;
     const userId = parseInt(req.params.userId);
     try {
       const activeProfile = db.prepare(
-        "SELECT id FROM domain_profiles WHERE user_id = ? AND is_active = 1"
+        "SELECT * FROM domain_profiles WHERE user_id = ? AND is_active = 1"
       ).get(userId);
+      const roleKey = activeProfile ? roleKeyForProfile(activeProfile) : "";
 
       const preserved = db.prepare(
         "SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ? AND applied = 1"
@@ -508,12 +592,12 @@ ORDER BY sj.scraped_at DESC;`;
           domain_profile_id IS NULL
           OR domain_profile_id != ?
           OR NOT EXISTS (
-            SELECT 1 FROM scraped_jobs sj
-            WHERE sj.job_id = user_jobs.job_id
-              AND sj.domain_profile_id = user_jobs.domain_profile_id
+            SELECT 1 FROM job_role_map jrm
+            WHERE jrm.job_id = user_jobs.job_id
+              AND jrm.role_key = ?
           )
         )
-      `).run(userId, activeProfile?.id ?? -1);
+      `).run(userId, activeProfile?.id ?? -1, roleKey);
 
       res.json({ removed: result.changes, preserved });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -524,16 +608,17 @@ ORDER BY sj.scraped_at DESC;`;
     const userId = parseInt(req.params.userId);
     try {
       const activeProfile = db.prepare(
-        "SELECT id FROM domain_profiles WHERE user_id = ? AND is_active = 1"
+        "SELECT * FROM domain_profiles WHERE user_id = ? AND is_active = 1"
       ).get(userId);
 
       if (!activeProfile) return res.json({ tagged: 0, stillNull: 0, error: "No active profile" });
+      const roleKey = roleKeyForProfile(activeProfile);
 
       const tagged = db.prepare(`
         UPDATE user_jobs SET domain_profile_id = ?
         WHERE user_id = ? AND domain_profile_id IS NULL
-        AND job_id IN (SELECT job_id FROM scraped_jobs WHERE domain_profile_id = ?)
-      `).run(activeProfile.id, userId, activeProfile.id);
+        AND job_id IN (SELECT job_id FROM job_role_map WHERE role_key = ?)
+      `).run(activeProfile.id, userId, roleKey);
 
       const stillNull = db.prepare(
         "SELECT COUNT(*) as c FROM user_jobs WHERE user_id = ? AND domain_profile_id IS NULL"
@@ -577,6 +662,7 @@ ORDER BY sj.scraped_at DESC;`;
   // ── Utility: Export table as CSV ──────────────────────────────
   const EXPORT_ALLOWED = new Set([
     "scraped_jobs", "user_jobs", "domain_profiles", "usage_events", "scrape_events",
+    "job_role_map", "user_job_views",
   ]);
   router.get("/export/:table", requireAdmin, (req, res) => {
     const table = req.params.table;
