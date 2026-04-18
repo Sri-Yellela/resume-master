@@ -275,7 +275,7 @@ function QuickActions({ theme, onTabChange }) {
 
   const actions = [
     { icon: "🔍", label: "Search new role", action: () => { onTabChange?.("jobs"); setOpen(false); } },
-    { icon: "⚡", label: "Best match",       action: () => { onTabChange?.("jobs"); setOpen(false); } },
+    { icon: "⚡", label: "ATS sort",       action: () => { onTabChange?.("jobs"); setOpen(false); } },
     { icon: "📄", label: "Export PDF",       action: () => { window.print(); setOpen(false); } },
   ];
 
@@ -373,14 +373,6 @@ function SettingsGear({ theme, onTabChange }) {
   );
 }
 
-// ── Apply modes ───────────────────────────────────────────────
-const APPLY_MODES = [
-  { value: "SIMPLE",         label: "Simple",         tier:"BASIC", icon: "⚡", desc: "Job board only — no generation" },
-  { value: "TAILORED",       label: "Tailored",        tier:"PLUS",  icon: "✦", desc: "Rewrite bullets, fixed employers" },
-  { value: "CUSTOM_SAMPLER", label: "Custom Sampler",  tier:"PRO",   icon: "⚙", desc: "Full customisation, JD-driven companies" },
-];
-
-// ── User avatar + full menu ────────────────────────────────────
 function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget }) {
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
@@ -389,17 +381,11 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
   const [tokenMsg,    setTokenMsg]    = useState("");
   const triggerRef = useRef(null);
   const { accentId, setAccentId, ACCENT_OPTIONS, bgMode, setBgMode, BG_MODES } = useTheme();
-
-  const currentMode = user?.applyMode || "SIMPLE";
-  const allowedModes = user?.allowedModes || [currentMode];
-  const visibleModes = APPLY_MODES.filter(m => allowedModes.includes(m.value));
-
-  const selectMode = async (val) => {
-    try {
-      await api("/api/settings/apply-mode", { method: "PATCH", body: JSON.stringify({ mode: val }) });
-      if (onUserChange) onUserChange(u => ({ ...u, applyMode: val }));
-    } catch {}
-  };
+  const planTier = user?.planTier || "BASIC";
+  const planLabel = planTier === "PRO" ? "Pro" : planTier === "PLUS" ? "Plus" : "Basic";
+  const consoleLabel = planTier === "PRO" ? "Custom Sampler Console"
+    : planTier === "PLUS" ? "Tailored Console"
+    : "Simple Apply Console";
 
   const saveToken = async () => {
     if (!tokenInput.trim()) return;
@@ -517,34 +503,19 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
             </div>
           </div>
 
-          {/* Apply mode */}
+          {/* Plan */}
           <div style={{ padding: "8px 16px", borderBottom: `1px solid ${theme.border}` }}>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
                            letterSpacing: "0.08em", color: theme.textDim, marginBottom: 6 }}>
-              Apply Mode
+              Plan
             </div>
-            {visibleModes.map(m => (
-              <button key={m.value} onClick={() => selectMode(m.value)}
-                onMouseEnter={e => e.currentTarget.style.background = theme.surfaceHigh}
-                onMouseLeave={e => e.currentTarget.style.background = m.value === currentMode ? theme.accentMuted : "transparent"}
-                style={{
-                  background: m.value === currentMode ? theme.accentMuted : "transparent",
-                  padding: "6px 0", cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: 10,
-                  border: "none", width: "100%", textAlign: "left",
-                  fontSize: 13, color: theme.text,
-                }}>
-                <span style={{ fontWeight: 700 }}>{m.icon} {m.label}</span>
-                <span style={{ fontSize: 10, color: theme.textDim, flex: 1 }}>{m.desc}</span>
-                {m.value === currentMode && <span style={{ color: theme.accent, fontWeight: 700 }}>✓</span>}
-              </button>
-            ))}
+            <div style={{ fontSize: 13, color: theme.text, fontWeight: 700 }}>{planLabel}</div>
+            <div style={{ fontSize: 11, color: theme.textDim, marginTop: 2 }}>{consoleLabel}</div>
             <button onClick={() => { setOpen(false); onTabChange?.("plans"); }}
               style={{ ...menuItemStyle, marginTop:4, color:theme.accentText, fontWeight:700 }}>
-              Request upgrade
+              View Plans
             </button>
           </div>
-
           {/* Resume widget */}
           {resumeWidget && (
             <div style={{ padding: "10px 16px 12px", borderBottom: `1px solid ${theme.border}` }}>
@@ -841,7 +812,7 @@ export default function TopBar({
             <option value="compLow">Pay ↑</option>
             <option value="yoeLow">Exp ↑</option>
             <option value="yoeHigh">Exp ↓</option>
-            {user?.applyMode === "SIMPLE" && <option value="atsLocal">ATS Sort</option>}
+            {user?.planTier === "BASIC" && <option value="atsScore">ATS Sort</option>}
           </select>
           {/* Local search — expands on focus */}
           <input

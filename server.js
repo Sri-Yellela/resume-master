@@ -35,7 +35,7 @@ import { hashPassword, verifyPassword, validatePassword } from "./services/authS
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
 import { allowedModesForTier, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
-import { loadSimpleApplyProfile, localAtsScore, upsertSimpleApplyProfile } from "./services/simpleApplyProfile.js";
+import { loadSimpleApplyProfile, upsertSimpleApplyProfile } from "./services/simpleApplyProfile.js";
 
 // ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
@@ -1136,6 +1136,96 @@ db.pragma("busy_timeout = 5000");
               ON dp.id = user_jobs.domain_profile_id
              AND jrm.role_key = LOWER(COALESCE(NULLIF(dp.role_family, ''), dp.domain))
             WHERE jrm.job_id = user_jobs.job_id
+          );
+      `,
+    },
+    {
+      id: "036_console_tier_profile_repair",
+      sql: `
+        UPDATE users
+        SET plan_tier = 'BASIC'
+        WHERE plan_tier IS NULL
+           OR plan_tier NOT IN ('BASIC','PLUS','PRO');
+
+        UPDATE users
+        SET apply_mode = CASE plan_tier
+          WHEN 'PRO' THEN 'CUSTOM_SAMPLER'
+          WHEN 'PLUS' THEN 'TAILORED'
+          ELSE 'SIMPLE'
+        END
+        WHERE apply_mode IS NULL
+           OR apply_mode NOT IN ('SIMPLE','TAILORED','CUSTOM_SAMPLER')
+           OR (plan_tier = 'BASIC' AND apply_mode != 'SIMPLE')
+           OR (plan_tier = 'PLUS' AND apply_mode != 'TAILORED')
+           OR (plan_tier = 'PRO' AND apply_mode != 'CUSTOM_SAMPLER');
+
+        DELETE FROM job_role_map
+        WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs);
+
+        DELETE FROM job_role_map
+        WHERE role_key = 'engineering'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%engineer%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%developer%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%software%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%programmer%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%devops%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%sre%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%architect%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%backend%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%frontend%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%fullstack%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%full stack%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%platform%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%infrastructure%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%cloud%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%systems%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%security%';
+
+        DELETE FROM job_role_map
+        WHERE role_key = 'pm'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%project%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%program%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%product%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%manager%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%coordinator%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%director%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%agile%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%scrum%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%pmo%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%delivery%';
+
+        DELETE FROM job_role_map
+        WHERE role_key = 'data'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%data%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%analytics%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%analyst%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%scientist%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%machine learning%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%ml%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%ai%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%business intelligence%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%bi%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%research%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%quantitative%';
+
+        DELETE FROM user_jobs
+        WHERE applied = 0
+          AND (
+            domain_profile_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1 FROM domain_profiles dp
+              WHERE dp.id = user_jobs.domain_profile_id
+                AND dp.user_id = user_jobs.user_id
+            )
+            OR NOT EXISTS (
+              SELECT 1
+              FROM domain_profiles dp
+              JOIN job_role_map jrm
+                ON jrm.job_id = user_jobs.job_id
+               AND jrm.role_key = LOWER(COALESCE(NULLIF(dp.role_family, ''), dp.domain))
+              WHERE dp.id = user_jobs.domain_profile_id
+                AND dp.user_id = user_jobs.user_id
+            )
           );
       `,
     },
@@ -2275,30 +2365,34 @@ function assignJobRoleMap(jobId, profile, matchedBy = "profile_scrape", confiden
 }
 
 function resolveUserJobDomainProfileId(userId, jobId) {
+  const userActiveProfile = db.prepare(
+    "SELECT * FROM domain_profiles WHERE user_id = ? AND is_active = 1"
+  ).get(userId);
+  if (!userActiveProfile) return null;
+  const activeRoleKey = roleKeyForProfile(userActiveProfile);
+
   const existing = db.prepare(`
     SELECT uj.domain_profile_id
     FROM user_jobs uj
-    JOIN domain_profiles dp ON dp.id = uj.domain_profile_id AND dp.user_id = uj.user_id
-    JOIN scraped_jobs sj ON sj.job_id = uj.job_id AND sj.domain_profile_id = uj.domain_profile_id
+    JOIN domain_profiles dp ON dp.id = uj.domain_profile_id AND dp.user_id = uj.user_id AND dp.is_active = 1
+    JOIN job_role_map jrm ON jrm.job_id = uj.job_id AND jrm.role_key = ?
+    JOIN scraped_jobs sj ON sj.job_id = uj.job_id
     WHERE uj.user_id=? AND uj.job_id=?
-  `).get(userId, String(jobId));
+      AND ${roleTitleSql("sj.title", activeRoleKey)}
+  `).get(activeRoleKey, userId, String(jobId));
   if (existing?.domain_profile_id) return existing.domain_profile_id;
 
   const activeProfile = db.prepare(`
     SELECT dp.*
     FROM domain_profiles dp
     JOIN job_role_map jrm ON jrm.role_key = LOWER(COALESCE(NULLIF(dp.role_family, ''), dp.domain))
+    JOIN scraped_jobs sj ON sj.job_id = jrm.job_id
     WHERE dp.user_id = ? AND dp.is_active = 1 AND jrm.job_id = ?
+      AND ${roleTitleSql("sj.title", activeRoleKey)}
   `).get(userId, String(jobId));
   if (activeProfile?.id) return activeProfile.id;
 
-  const scraped = db.prepare(`
-    SELECT sj.domain_profile_id
-    FROM scraped_jobs sj
-    JOIN domain_profiles dp ON dp.id = sj.domain_profile_id
-    WHERE sj.job_id = ? AND dp.user_id = ?
-  `).get(String(jobId), userId);
-  return scraped?.domain_profile_id ?? null;
+  return null;
 }
 
 // ── Express ───────────────────────────────────────────────────
@@ -2703,13 +2797,9 @@ app.use("/api/admin/db", createAdminDbRouter(db, { dbPath: DB_PATH, scrapeJobs }
 // SETTINGS
 // ═══════════════════════════════════════════════════════════════
 app.patch("/api/settings/apply-mode", requireAuth, (req, res) => {
-  const { mode } = req.body;
-  if (!["SIMPLE","TAILORED","CUSTOM_SAMPLER"].includes(mode))
-    return res.status(400).json({ error:"Invalid mode" });
-  if (!requireModeEntitlement(req, res, mode)) return;
-  db.prepare("UPDATE users SET apply_mode=? WHERE id=?").run(mode, req.user.id);
-  req.user.applyMode = mode;
-  res.json({ ok:true, mode });
+  res.status(410).json({
+    error: "Plan controls the active console. Use Plans to request a tier change.",
+  });
 });
 // Save user's personal Apify token (per-user — no server-level token exists)
 app.patch("/api/settings/apify-token", requireAuth, (req, res) => {
@@ -2833,14 +2923,14 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
            sj.scraped_at, sj.posted_at, sj.salary_min, sj.salary_max
     FROM scraped_jobs sj
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     WHERE (uj.disliked IS NULL OR uj.disliked = 0)
       AND (uj.applied  IS NULL OR uj.applied  = 0)
       AND ${roleTitleSql("sj.title", roleKey)}
       AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
            OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
-  `).all(roleKey, userId, sevenDaysAgo, sevenDaysAgo);
+  `).all(roleKey, userId, facetProfile.id, sevenDaysAgo, sevenDaysAgo);
 
   const workType = {}, empType = {}, category = {}, postedAge = {};
   const salaries = [];
@@ -2931,9 +3021,6 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
   ];
   const filterParams = [roleKey];
-  const simpleProfile = req.user.applyMode === "SIMPLE"
-    ? loadSimpleApplyProfile(db, userId)
-    : null;
 
   // req.query.role is legacy search-query state. Visibility is now governed by
   // the shared job_role_map role key, not by the exact query that first scraped it.
@@ -3017,20 +3104,20 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     compLow:  "CAST(sj.compensation AS REAL) ASC",
     yoeHigh:  "sj.years_experience DESC",
     yoeLow:   "sj.years_experience ASC",
+    atsScore: "CASE WHEN sj.ats_score IS NULL THEN 1 ELSE 0 END ASC, sj.ats_score DESC, sj.scraped_at DESC",
   };
   const orderBy = sortMap[sort] || sortMap.dateDesc;
-  const localAtsSort = sort === "atsLocal" && req.user.applyMode === "SIMPLE";
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const baseJoin = `
     FROM scraped_jobs sj
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id
-    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
   `;
 
   const countRow = db.prepare(
     `SELECT COUNT(*) as cnt ${baseJoin} ${where}`
-  ).get(userId, ...filterParams);
+  ).get(userId, activeProfile.id, ...filterParams);
   const total = countRow?.cnt || 0;
 
   let rows = db.prepare(
@@ -3043,7 +3130,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
      ${where}
      ORDER BY CASE WHEN (uj.visited IS NOT NULL AND uj.visited = 1) THEN 1 ELSE 0 END ASC, ${orderBy}
      LIMIT ? OFFSET ?`
-  ).all(userId, userId, ...filterParams, localAtsSort ? 500 : pageSize, localAtsSort ? 0 : offset);
+  ).all(userId, activeProfile.id, userId, ...filterParams, pageSize, offset);
 
   // Filter clearance-required jobs for non-cleared users
   const profile = db.prepare("SELECT has_clearance FROM user_profile WHERE user_id=?").get(userId) || {};
@@ -3053,15 +3140,6 @@ app.get("/api/jobs", requireAuth, (req, res) => {
       return !d.includes("security clearance required") && !d.includes("ts/sci") && !d.includes("secret clearance");
     });
   }
-  if (req.user.applyMode === "SIMPLE") {
-    rows = rows.map(j => ({ ...j, local_ats_score: localAtsScore(j, simpleProfile, roleKey) }));
-    if (localAtsSort) {
-      rows = rows
-        .sort((a, b) => (b.local_ats_score - a.local_ats_score) || ((b.scraped_at || 0) - (a.scraped_at || 0)))
-        .slice(offset, offset + pageSize);
-    }
-  }
-
   const appliedCoSet = new Set(
     db.prepare("SELECT LOWER(company) as co FROM job_applications WHERE user_id=?")
       .all(userId).map(a => a.co)
@@ -3100,152 +3178,12 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     disliked:             !!j.disliked,
     companyAppliedBefore: appliedCoSet.has((j.company || "").toLowerCase()),
     baseAtsScore:         j.base_ats_score ?? null,   // ATS of base resume vs JD (from scrape time)
-    localAtsScore:        j.local_ats_score ?? null,
     resumeAtsScore:       j.resume_ats_score ?? null, // ATS of generated tailored resume vs JD
     recruiterData:        null,
     enrichmentAvailable:  false,
   }));
 
   res.json({ jobs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
-});
-
-// GET /api/jobs/best-match — jobs where base resume already scores well
-// Returns jobs ordered by base_ats_score DESC for the user's active profile pool.
-app.get("/api/jobs/best-match", requireAuth, (req, res) => {
-  const userId = req.user.id;
-  let threshold = parseInt(req.query.threshold || "70");
-  const limit   = Math.min(50, Math.max(1, parseInt(req.query.limit || "20")));
-  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
-
-  const bmProfile   = db.prepare("SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
-  if (!bmProfile) return res.json({ jobs: [], threshold, total: 0 });
-  const roleKey = roleKeyForProfile(bmProfile);
-  if (req.user.applyMode === "SIMPLE") {
-    const simpleProfile = loadSimpleApplyProfile(db, userId);
-    let jobs = db.prepare(`
-      SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
-        sj.ats_score as base_ats_score,
-        r.ats_score as resume_ats_score
-      FROM scraped_jobs sj
-      JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-      LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
-      LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
-      WHERE (uj.applied IS NULL OR uj.applied = 0)
-        AND (uj.disliked IS NULL OR uj.disliked = 0)
-        AND ${roleTitleSql("sj.title", roleKey)}
-        AND (
-          (sj.posted_at IS NOT NULL AND sj.posted_at != ''
-            AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
-          OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
-        )
-      ORDER BY sj.scraped_at DESC
-      LIMIT 500
-    `).all(roleKey, userId, userId);
-    jobs = jobs
-      .map(j => ({ ...j, local_ats_score: localAtsScore(j, simpleProfile, roleKey) }))
-      .filter(j => j.local_ats_score >= threshold)
-      .sort((a, b) => (b.local_ats_score - a.local_ats_score) || ((b.scraped_at || 0) - (a.scraped_at || 0)))
-      .slice(0, limit);
-    if (jobs.length < 5) {
-      threshold = 60;
-      jobs = db.prepare(`
-        SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
-          sj.ats_score as base_ats_score,
-          r.ats_score as resume_ats_score
-        FROM scraped_jobs sj
-        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-        LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
-        LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
-        WHERE (uj.applied IS NULL OR uj.applied = 0)
-          AND (uj.disliked IS NULL OR uj.disliked = 0)
-          AND ${roleTitleSql("sj.title", roleKey)}
-          AND (
-            (sj.posted_at IS NOT NULL AND sj.posted_at != ''
-              AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
-            OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
-          )
-        ORDER BY sj.scraped_at DESC
-        LIMIT 500
-      `).all(roleKey, userId, userId)
-        .map(j => ({ ...j, local_ats_score: localAtsScore(j, simpleProfile, roleKey) }))
-        .filter(j => j.local_ats_score >= threshold)
-        .sort((a, b) => (b.local_ats_score - a.local_ats_score) || ((b.scraped_at || 0) - (a.scraped_at || 0)))
-        .slice(0, limit);
-    }
-    return res.json({
-      jobs: jobs.map(j => ({
-        jobId:        j.job_id,
-        company:      j.company,
-        title:        j.title,
-        location:     j.location,
-        workType:     j.work_type,
-        url:          j.url,
-        applyUrl:     j.apply_url,
-        description:  j.description,
-        postedAt:     j.posted_at,
-        applicantCount: j.applicant_count,
-        companyIconUrl: j.company_icon_url,
-        baseAtsScore: j.base_ats_score,
-        localAtsScore: j.local_ats_score,
-        resumeAtsScore: j.resume_ats_score,
-        visited:      !!j.visited,
-        starred:      !!j.starred,
-      })),
-      threshold,
-      total: jobs.length,
-      localFirst: true,
-    });
-  }
-  const bestMatchQuery = (thresh) => db.prepare(`
-    SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
-      sj.ats_score as base_ats_score,
-      r.ats_score as resume_ats_score
-    FROM scraped_jobs sj
-    JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
-    LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
-    WHERE sj.ats_score >= ?
-      AND ${roleTitleSql("sj.title", roleKey)}
-      AND (uj.applied IS NULL OR uj.applied = 0)
-      AND (uj.disliked IS NULL OR uj.disliked = 0)
-      AND (
-        (sj.posted_at IS NOT NULL AND sj.posted_at != ''
-          AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
-        OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo})
-      )
-    ORDER BY sj.ats_score DESC
-    LIMIT ?
-  `).all(roleKey, userId, userId, thresh, limit);
-
-  let jobs = bestMatchQuery(threshold);
-
-  // Lower threshold to 60 if fewer than 5 results
-  if (jobs.length < 5) {
-    threshold = 60;
-    jobs = bestMatchQuery(threshold);
-  }
-
-  res.json({
-    jobs: jobs.map(j => ({
-      jobId:        j.job_id,
-      company:      j.company,
-      title:        j.title,
-      location:     j.location,
-      workType:     j.work_type,
-      url:          j.url,
-      applyUrl:     j.apply_url,
-      description:  j.description,
-      postedAt:     j.posted_at,
-      applicantCount: j.applicant_count,
-      companyIconUrl: j.company_icon_url,
-      baseAtsScore: j.base_ats_score,
-      resumeAtsScore: j.resume_ats_score,
-      visited:      !!j.visited,
-      starred:      !!j.starred,
-    })),
-    threshold,
-    total: jobs.length,
-  });
 });
 
 // GET /api/jobs/poll — returns new jobs since <since> ms timestamp + scraping status
@@ -3281,7 +3219,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked
     FROM scraped_jobs sj
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     WHERE LOWER(sj.search_query) = ?
       AND ${roleTitleSql("sj.title", roleKey)}
       AND sj.scraped_at > ?
@@ -3289,7 +3227,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
       AND (uj.applied   IS NULL OR uj.applied   = 0)
     ORDER BY sj.scraped_at DESC
     LIMIT 50
-  `).all(roleKey, userId, qRaw, sinceSeconds);
+  `).all(roleKey, userId, activeProfile.id, qRaw, sinceSeconds);
 
   const jobs = rows.map(j => ({
     jobId:           j.job_id,
@@ -3427,14 +3365,14 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   const existingCount = db.prepare(`
     SELECT COUNT(*) as cnt FROM scraped_jobs sj
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     WHERE sj.scraped_at > ?
       AND ${roleTitleSql("sj.title", scrapeRoleKey)}
       AND (uj.visited IS NULL OR uj.visited = 0)
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND sj.ghost_score < 4
-  `).get(scrapeRoleKey, req.user.id, sevenDaysAgo);
+  `).get(scrapeRoleKey, req.user.id, activeProfile.id, sevenDaysAgo);
 
   const THRESHOLD = 50;
   const hasEnough = (existingCount?.cnt || 0) >= THRESHOLD;
@@ -3518,6 +3456,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
 app.patch("/api/jobs/:id/visited", requireAuth, (req, res) => {
   const jobId = req.params.id;
   const profileId = resolveUserJobDomainProfileId(req.user.id, jobId);
+  if (!profileId) return res.status(404).json({ error:"Job not available for active profile" });
   db.prepare(`
     INSERT INTO user_jobs (user_id, job_id, domain_profile_id, visited, updated_at)
     VALUES (?, ?, ?, 1, unixepoch())
@@ -3529,6 +3468,7 @@ app.patch("/api/jobs/:id/visited", requireAuth, (req, res) => {
 app.patch("/api/jobs/:id/starred", requireAuth, (req, res) => {
   const jobId = req.params.id;
   const profileId = resolveUserJobDomainProfileId(req.user.id, jobId);
+  if (!profileId) return res.status(404).json({ error:"Job not available for active profile" });
   const current = db.prepare(
     "SELECT starred FROM user_jobs WHERE user_id = ? AND job_id = ?"
   ).get(req.user.id, jobId);
@@ -3545,6 +3485,7 @@ app.patch("/api/jobs/:id/starred", requireAuth, (req, res) => {
 app.patch("/api/jobs/:id/disliked", requireAuth, (req, res) => {
   const jobId = req.params.id;
   const profileId = resolveUserJobDomainProfileId(req.user.id, jobId);
+  if (!profileId) return res.status(404).json({ error:"Job not available for active profile" });
   const current = db.prepare(
     "SELECT disliked FROM user_jobs WHERE user_id = ? AND job_id = ?"
   ).get(req.user.id, jobId);
@@ -3658,14 +3599,14 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
            r.ats_score, r.ats_report, r.html as resume_html, r.apply_mode
     FROM scraped_jobs sj
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
     WHERE uj.resume_generated = 1
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND ${roleTitleSql("sj.title", roleKey)}
     ORDER BY uj.updated_at DESC
-  `).all(roleKey, userId, userId);
+  `).all(roleKey, userId, activeProfile.id, userId);
   res.json(rows);
 });
 
@@ -4165,12 +4106,14 @@ ${resumeStripped}`;
 
     // Phase 1C: mark resume_generated in user_jobs
     const userJobProfileId = resolveUserJobDomainProfileId(req.user.id, String(jobId));
-    db.prepare(`
-      INSERT INTO user_jobs (user_id, job_id, domain_profile_id, resume_generated, updated_at)
-      VALUES (?, ?, ?, 1, unixepoch())
-      ON CONFLICT(user_id, job_id) DO UPDATE SET
-        resume_generated = 1, updated_at = unixepoch()
-    `).run(req.user.id, String(jobId), userJobProfileId);
+    if (userJobProfileId) {
+      db.prepare(`
+        INSERT INTO user_jobs (user_id, job_id, domain_profile_id, resume_generated, updated_at)
+        VALUES (?, ?, ?, 1, unixepoch())
+        ON CONFLICT(user_id, job_id) DO UPDATE SET
+          resume_generated = 1, updated_at = unixepoch()
+      `).run(req.user.id, String(jobId), userJobProfileId);
+    }
 
     emitToUser(req.user.id, { type: "resume_generated", jobId: String(jobId), atsScore });
     insertNotification(req.user.id, "resume_generated",
@@ -4254,11 +4197,13 @@ app.post("/api/applications", requireAuth, (req, res) => {
       .run(req.user.id,jobId,company,role,jobUrl||null,source||null,location||null,applyMode||null,resumeFile||null,notes||null);
     // Sync applied flag to user_jobs
     const userJobProfileId = resolveUserJobDomainProfileId(req.user.id, jobId);
-    db.prepare(`
-      INSERT INTO user_jobs (user_id, job_id, domain_profile_id, applied, updated_at)
-      VALUES (?, ?, ?, 1, unixepoch())
-      ON CONFLICT(user_id, job_id) DO UPDATE SET applied = 1, updated_at = unixepoch()
-    `).run(req.user.id, jobId, userJobProfileId);
+    if (userJobProfileId) {
+      db.prepare(`
+        INSERT INTO user_jobs (user_id, job_id, domain_profile_id, applied, updated_at)
+        VALUES (?, ?, ?, 1, unixepoch())
+        ON CONFLICT(user_id, job_id) DO UPDATE SET applied = 1, updated_at = unixepoch()
+      `).run(req.user.id, jobId, userJobProfileId);
+    }
     res.json({ ok:true });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });

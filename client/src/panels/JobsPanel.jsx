@@ -748,12 +748,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [enhanceResult,  setEnhanceResult]  = useState(null); // { original, enhanced, delta }
   const [enhanceModalOpen, setEnhanceModalOpen] = useState(false);
 
-  // Best Match view
-  const [bestMatchView,   setBestMatchView]   = useState(false);
-  const [bestMatchJobs,   setBestMatchJobs]   = useState([]);
-  const [bestMatchThresh, setBestMatchThresh] = useState(70);
-  const [bestMatchLoading,setBestMatchLoading]= useState(false);
-
   // Filter panel
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -1278,22 +1272,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setEnhanceModalOpen(false);
   }, [enhanceResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Best Match: show jobs where base resume already scores well ──
-  const handleBestMatch = useCallback(async () => {
-    setBestMatchLoading(true);
-    try {
-      const d = await api("/api/jobs/best-match");
-      setBestMatchJobs(d.jobs || []);
-      setBestMatchThresh(d.threshold || 70);
-      setBestMatchView(true);
-    } catch(e) {
-      console.warn("[bestMatch]", e.message);
-    } finally {
-      setBestMatchLoading(false);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Smart search ──────────────────────────────────────────
   const handleSmartSearch = useCallback(async () => {
     if (!resumeText) {
       setSmartSearchError("Upload your base resume first — smart search extracts the best query from it.");
@@ -1623,7 +1601,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
       {/* ── Unified toolbar — hidden when dock is active (scrollProgress ≥ 0.5) ── */}
       {/* Row A: tabs | filters | sort | local-search | job count */}
-      {/* Row B (wraps): search input | Search | Best Match | resume upload */}
+      {/* Row B (wraps): search input | Search | resume upload */}
       {scrollProgress < 0.5 && <div style={{
         background:theme.surface, borderBottom:`1px solid ${theme.border}`,
         padding:"10px 20px", display:"flex", alignItems:"center", gap:8,
@@ -1678,13 +1656,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           <option value="compLow">Pay ↑</option>
           <option value="yoeLow">Exp ↑</option>
           <option value="yoeHigh">Exp ↓</option>
-          {applyMode === "SIMPLE" && <option value="atsLocal">ATS Sort</option>}
+          {applyMode === "SIMPLE" && <option value="atsScore">ATS Sort</option>}
         </select>
 
         {/* Local search — live client-side, every keystroke */}
         <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
           onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
-          placeholder="Search all jobs…"
+          placeholder="Filter loaded jobs…"
           style={{ flex:1, minWidth:140, height:34, padding:"0 12px",
                    borderRadius:2, border:`1px solid ${theme.border}`,
                    background:theme.surface, color:theme.text,
@@ -1721,7 +1699,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                          pointerEvents:"none" }}>🔍</span>
           <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
             onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
-            placeholder="Search role — e.g. ML Engineer, SWE…"
+            placeholder={applyMode === "SIMPLE" ? "ATS search role — e.g. ML Engineer, SWE…" : "Search role — e.g. ML Engineer, SWE…"}
             style={{ width:"100%", height:38, paddingLeft:38, paddingRight:14,
                      borderRadius:2, border:`1px solid ${theme.border}`,
                      background:theme.surface, color:theme.text,
@@ -1743,12 +1721,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : "Set the role and show matching jobs already in the local pool"}>
           {buttonLabel}
         </LucyBtn>
-        <LucyBtn onClick={handleBestMatch} disabled={bestMatchLoading || scraping}
-                  accent={theme.surfaceHigh}
-                  title="Rank local pooled jobs using your Simple Apply profile and available ATS scores">
-          {bestMatchLoading ? "Finding…" : "✦ Local Best Match"}
-        </LucyBtn>
-
         {smartSearchError && (
           <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
             ✗ {smartSearchError}
@@ -1850,101 +1822,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ── Best Match view ─────────────────────────────────── */}
-      {bestMatchView && (
-        <div style={{
-          position:"absolute", inset:0, zIndex:400,
-          background:theme.surface, overflowY:"auto",
-          display:"flex", flexDirection:"column",
-        }}>
-          <div style={{
-            padding:"16px 20px", borderBottom:`1px solid ${theme.border}`,
-            display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:12,
-          }}>
-            <div>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                             fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase" }}>
-                Your Best Matches
-              </div>
-              <div style={{ fontSize:12, color:theme.textMuted, marginTop:3 }}>
-                Local pooled roles ranked from your Simple Apply profile and available ATS scores ({bestMatchThresh}+)
-              </div>
-              <div style={{ fontSize:11, color:theme.textDim, marginTop:2 }}>
-                Use Refresh Search when you want to fetch more listings from LinkedIn.
-              </div>
-            </div>
-            <button onClick={() => setBestMatchView(false)}
-              style={{ background:"none", border:"none", cursor:"pointer",
-                       fontSize:18, color:theme.textMuted, flexShrink:0 }}>✕</button>
-          </div>
-
-          {bestMatchJobs.length === 0 ? (
-            <div style={{ padding:40, textAlign:"center", color:theme.textMuted, fontSize:13 }}>
-              No strong local matches yet. Refresh Search to fetch more roles or update your base resume profile.
-            </div>
-          ) : (
-            <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:8 }}>
-              {bestMatchJobs.map(job => {
-                const atsScore = job.baseAtsScore;
-                const atsBg = atsScore >= 80 ? "#dcfce7" : atsScore >= 60 ? "#fef9c3" : "#fee2e2";
-                const atsFg = atsScore >= 80 ? "#166534" : atsScore >= 60 ? "#854d0e" : "#991b1b";
-                return (
-                  <div key={job.jobId} style={{
-                    border:`1px solid ${theme.border}`, borderRadius:6,
-                    padding:"14px 16px", background:theme.surfaceHigh,
-                    display:"flex", alignItems:"center", gap:12,
-                  }}>
-                    {/* ATS score badge — large */}
-                    {atsScore != null && (
-                      <div style={{
-                        background:atsBg, color:atsFg,
-                        borderRadius:8, padding:"8px 12px", textAlign:"center",
-                        flexShrink:0, minWidth:56,
-                      }}>
-                        <div style={{ fontSize:20, fontWeight:800, lineHeight:1 }}>{atsScore}</div>
-                        <div style={{ fontSize:9, fontWeight:700, letterSpacing:"0.04em", marginTop:2 }}>ATS</div>
-                      </div>
-                    )}
-                    {/* Job info */}
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontWeight:700, fontSize:13, color:theme.text,
-                                     overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {job.title}
-                      </div>
-                      <div style={{ fontSize:12, color:theme.textMuted, marginTop:2 }}>
-                        {job.company}{job.location ? ` · ${job.location}` : ""}
-                      </div>
-                    </div>
-                    {/* Actions */}
-                    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                      {job.applyUrl && (
-                        <a href={job.applyUrl} target="_blank" rel="noreferrer"
-                          style={{
-                            padding:"6px 14px", borderRadius:4, fontSize:11, fontWeight:700,
-                            background:theme.accent, color:"#fff", textDecoration:"none",
-                            border:`1.5px solid ${theme.accent}`,
-                          }}>
-                          Apply
-                        </a>
-                      )}
-                      <button
-                        onClick={() => { setBestMatchView(false); }}
-                        style={{
-                          padding:"6px 12px", borderRadius:4, fontSize:11, fontWeight:700,
-                          background:"transparent", color:theme.textMuted,
-                          border:`1.5px solid ${theme.border}`, cursor:"pointer",
-                        }}>
-                        View Job
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 

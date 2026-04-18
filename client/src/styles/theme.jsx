@@ -232,12 +232,12 @@ export function ThemeProvider({ children }) {
             radial-gradient(ellipse 50% 40% at 80% 15%, rgba(200,120,255,0.25) 0%, transparent 70%),
             radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,200,150,0.30) 0%, transparent 70%);
           background-attachment: fixed;
-          --bg-page:      rgba(255,255,255,0.72);
-          --bg-card:      rgba(255,255,255,0.82);
-          --bg-panel:     rgba(245,245,247,0.88);
+          --bg-page:      rgba(255,255,255,0.64);
+          --bg-card:      rgba(255,255,255,0.68);
+          --bg-panel:     rgba(245,248,252,0.72);
           --bg-menu:      rgba(255,255,255,0.98);
           --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.88);
+          --bg-input:     rgba(255,255,255,0.78);
           --popover:      0 0% 100%;
           --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.04);
@@ -255,12 +255,12 @@ export function ThemeProvider({ children }) {
             radial-gradient(ellipse 50% 40% at 80% 15%, rgba(200,120,255,0.25) 0%, transparent 70%),
             radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,200,150,0.30) 0%, transparent 70%);
           background-attachment: fixed;
-          --bg-page:      rgba(255,255,255,0.72);
-          --bg-card:      rgba(255,255,255,0.82);
-          --bg-panel:     rgba(245,245,247,0.88);
+          --bg-page:      rgba(255,255,255,0.64);
+          --bg-card:      rgba(255,255,255,0.68);
+          --bg-panel:     rgba(245,248,252,0.72);
           --bg-menu:      rgba(255,255,255,0.98);
           --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.88);
+          --bg-input:     rgba(255,255,255,0.78);
           --popover:      0 0% 100%;
           --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.04);
@@ -299,12 +299,12 @@ export function ThemeProvider({ children }) {
             radial-gradient(ellipse 50% 40% at 80% 15%, rgba(180,90,255,0.40) 0%, transparent 70%),
             radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,180,100,0.45) 0%, transparent 70%);
           background-attachment: fixed;
-          --bg-page:      rgba(255,255,255,0.68);
-          --bg-card:      rgba(255,255,255,0.84);
-          --bg-panel:     rgba(245,245,247,0.90);
+          --bg-page:      rgba(255,255,255,0.48);
+          --bg-card:      rgba(255,255,255,0.58);
+          --bg-panel:     rgba(245,248,252,0.64);
           --bg-menu:      rgba(255,255,255,0.98);
           --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.90);
+          --bg-input:     rgba(255,255,255,0.72);
           --popover:      0 0% 100%;
           --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.03);

@@ -20,7 +20,7 @@ const SKILL_HINTS = [
   "javascript","typescript","react","node","python","java","sql","postgres","sqlite",
   "aws","azure","gcp","docker","kubernetes","terraform","linux","api","rest","graphql",
   "machine learning","tensorflow","pytorch","pandas","spark","tableau","power bi",
-  "agile","scrum","jira","roadmap","stakeholder","budget","risk","timeline",
+  "agile","scrum","jira","roadmap","budget","risk","timeline",
 ];
 
 function compactUnique(items, max) {
@@ -104,47 +104,4 @@ export function loadSimpleApplyProfile(db, userId) {
     sourceHash: row.source_hash,
     updatedAt: row.updated_at,
   };
-}
-
-export function localAtsScore(job, profile, roleKey) {
-  if (!job) return 0;
-  const text = [
-    job.title, job.company, job.category, job.search_query, job.description,
-    job.location, job.work_type, job.employment_type,
-  ].join(" ").toLowerCase();
-  const title = String(job.title || "").toLowerCase();
-  const keywords = profile?.keywords || [];
-  const titles = profile?.titles || [];
-  let score = 0;
-  let titleMatched = false;
-
-  for (const t of titles) {
-    const parts = t.split(/\s+/).filter(Boolean);
-    if (parts.length && parts.every(p => title.includes(p))) {
-      titleMatched = true;
-      score += 30;
-      break;
-    }
-  }
-  if (!titleMatched && roleKey && title.includes(String(roleKey).toLowerCase())) score += 12;
-
-  let keywordScore = 0;
-  for (const kw of keywords) {
-    if (text.includes(kw)) keywordScore += kw.includes(" ") ? 4 : 2;
-  }
-  score += Math.min(24, keywordScore);
-  if (roleKey && text.includes(String(roleKey).toLowerCase())) score += 6;
-  if (job.ats_score != null) score += Math.round(Number(job.ats_score) * 0.25);
-  if (job.work_type === "remote") score += 3;
-  if ((job.employment_type || "full-time") === "full-time") score += 4;
-  if (job.min_years_exp != null && Number(job.min_years_exp) <= 5) score += 5;
-  if (job.max_years_exp != null && Number(job.max_years_exp) >= 2) score += 2;
-  if (job.ghost_score != null) score -= Number(job.ghost_score) * 4;
-  if (job.is_frequent_repost) score -= 8;
-
-  const now = Math.floor(Date.now() / 1000);
-  const posted = parseInt(job.posted_at || "", 10) || job.scraped_at || now;
-  const ageDays = Math.max(0, (now - posted) / 86400);
-  score += Math.max(0, 12 - Math.round(ageDays * 2));
-  return Math.max(0, Math.min(100, Math.round(score)));
 }

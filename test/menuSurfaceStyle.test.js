@@ -22,8 +22,7 @@ test("plans entry lives in profile menu, not main app tabs", () => {
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
 
-  const appTabsBlock = app.match(/const APP_TABS = \[[\s\S]*?\];/)?.[0] || "";
-  assert.doesNotMatch(appTabsBlock, /plans/);
+  assert.doesNotMatch(app, /id:"plans"|id:\s*"plans"/);
   assert.match(topBar, /onTabChange\?\.\("plans"\)/);
 });
 
@@ -44,8 +43,23 @@ test("light theme surfaces and text tokens are readable", () => {
   assert.match(theme, /text:\s+"#111827"/);
   assert.match(theme, /textMuted:\s+"#374151"/);
   assert.match(theme, /border:\s+"#d1d5db"/);
-  assert.match(theme, /--bg-card:\s+rgba\(255,255,255,0\.82\)/);
-  assert.match(theme, /--bg-panel:\s+rgba\(245,245,247,0\.90\)/);
-  assert.match(theme, /--bg-input:\s+rgba\(255,255,255,0\.90\)/);
+  assert.match(theme, /--bg-card:\s+rgba\(255,255,255,0\.68\)/);
+  assert.match(theme, /--bg-card:\s+rgba\(255,255,255,0\.58\)/);
+  assert.match(theme, /--bg-panel:\s+rgba\(245,248,252,0\.64\)/);
+  assert.match(theme, /--bg-input:\s+rgba\(255,255,255,0\.72\)/);
   assert.match(theme, /--bg-card:\s+#ffffff/);
+});
+
+test("console switching is plan-owned and local match UI is removed", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+  const scrollDock = fs.readFileSync("client/src/components/ScrollDock.jsx", "utf8");
+  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+
+  assert.match(server, /Plan controls the active console/);
+  assert.doesNotMatch(topBar, /APPLY_MODES|Apply Mode|\/api\/settings\/apply-mode/);
+  assert.doesNotMatch(topBar, /Best match|bestMatch/);
+  assert.doesNotMatch(scrollDock, /Best match|bestMatch/);
+  assert.doesNotMatch(jobsPanel, /Best Match|bestMatch|\/api\/jobs\/best-match|atsLocal/);
+  assert.match(jobsPanel, /value="atsScore">ATS Sort/);
 });
