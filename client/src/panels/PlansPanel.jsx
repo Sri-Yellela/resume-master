@@ -9,7 +9,7 @@ const PLAN_LABELS = {
 };
 
 const PLAN_COPY = {
-  BASIC: "Simple Apply and local job matching.",
+  BASIC: "Simple Apply with ATS Search and ATS Sort.",
   PLUS: "Tailored resumes and resume enhancement.",
   PRO: "Custom Sampler workflows.",
 };
@@ -19,24 +19,29 @@ export function PlansPanel({ user, onUserChange }) {
   const [plan, setPlan] = useState(null);
   const [status, setStatus] = useState("");
 
-  const load = () => api("/api/plans").then(setPlan).catch(e => setStatus(e.message));
+  const load = () => api("/api/plans").then(d => {
+    setPlan(d);
+    if (d?.planTier && d?.applyMode && onUserChange) {
+      onUserChange(u => u ? ({ ...u, planTier:d.planTier, applyMode:d.applyMode, allowedModes:d.allowedModes || [d.applyMode] }) : u);
+    }
+  }).catch(e => setStatus(e.message));
   useEffect(() => { load(); }, []);
 
-  const requestUpgrade = async () => {
-    if (!plan?.nextPlan) return;
+  const requestPlanChange = async (tier) => {
+    if (!tier) return;
     setStatus("");
     try {
       await api("/api/plans/request-upgrade", {
         method:"POST",
-        body:JSON.stringify({ requestedTier: plan.nextPlan }),
+        body:JSON.stringify({ requestedTier: tier }),
       });
-      setStatus("Upgrade request sent.");
+      setStatus("Plan change request sent.");
       load();
     } catch(e) { setStatus(e.message); }
   };
 
   const current = plan?.planTier || user?.planTier || "BASIC";
-  const next = plan?.nextPlan;
+  const changeOptions = plan?.changeOptions || (plan?.nextPlan ? [plan.nextPlan] : []);
 
   return (
     <div style={{ flex:1, overflowY:"auto", padding:24, background:theme.bg }}>
@@ -51,7 +56,7 @@ export function PlansPanel({ user, onUserChange }) {
         </div>
 
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))", gap:12 }}>
-          {[current, next].filter(Boolean).map(tier => (
+          {[current, ...changeOptions].filter(Boolean).map(tier => (
             <div key={tier} style={{
               border:`1px solid ${tier === current ? theme.accent : theme.border}`,
               background:theme.surface,
@@ -67,15 +72,15 @@ export function PlansPanel({ user, onUserChange }) {
                   Active
                 </div>
               )}
-              {tier === next && !plan?.pendingRequest && (
-                <button onClick={requestUpgrade}
+              {tier !== current && !plan?.pendingRequest && (
+                <button onClick={() => requestPlanChange(tier)}
                   style={{ marginTop:14, border:"none", borderRadius:6, padding:"9px 14px",
                            background:theme.accent, color:"#0f0f0f", cursor:"pointer",
                            fontWeight:800 }}>
-                  Request upgrade
+                  Request {tier === "BASIC" ? "downgrade" : "change"}
                 </button>
               )}
-              {tier === next && plan?.pendingRequest && (
+              {tier !== current && plan?.pendingRequest?.requested_tier === tier && (
                 <div style={{ marginTop:12, fontSize:11, color:theme.warning, fontWeight:700 }}>
                   Request pending
                 </div>

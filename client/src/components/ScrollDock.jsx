@@ -307,7 +307,7 @@ function QuickActions({ theme, onTabChange }) {
   const actions = [
     { icon: "🔍", label: "Search new role", action: () => { onTabChange?.("jobs"); setOpen(false); } },
     { icon: "✨", label: "Enhance resume", action: () => { onTabChange?.("jobs"); setOpen(false); } },
-    { icon: "⚡", label: "Best match", action: () => { onTabChange?.("jobs"); setOpen(false); } },
+    { icon: "⚡", label: "ATS sort", action: () => { onTabChange?.("jobs"); setOpen(false); } },
     { icon: "📄", label: "Export PDF", action: () => { window.print(); setOpen(false); } },
   ];
 

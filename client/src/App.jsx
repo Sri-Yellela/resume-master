@@ -1,10 +1,11 @@
 // REVAMP v1 — App.jsx
 import { useState, useEffect, useCallback } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { api }                   from "./lib/api.js";
 import { useTheme }              from "./styles/theme.jsx";
 import { useViewport }           from "./hooks/useViewport.js";
 import { useInactivityLogout }   from "./hooks/useInactivityLogout.js";
+import { useSyncEvents }         from "./hooks/useSyncEvents.js";
 import AuthScreen                from "./components/AuthScreen.jsx";
 import AdminLayout               from "./components/AdminLayout.jsx";
 import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
@@ -12,10 +13,10 @@ import DBInspector               from "./pages/admin/DBInspector.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import { AppScrollProvider, useAppScroll } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
-import JobsPanel                 from "./panels/JobsPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
 import { PlansPanel }            from "./panels/PlansPanel.jsx";
+import { SimpleApplyConsole, TailoredConsole, CustomSamplerConsole } from "./consoles/PlanConsoles.jsx";
 import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
@@ -30,13 +31,20 @@ import { FAQPage }         from "./pages/marketing/FAQPage.jsx";
 import { PrivacyPage }     from "./pages/marketing/PrivacyPage.jsx";
 import { TermsPage }       from "./pages/marketing/TermsPage.jsx";
 
-const APP_TABS = [
-  { id: "jobs",     label: "Jobs",     icon: "💼" },
-  { id: "database", label: "Database", icon: "🗃" },
-];
+const CONSOLE_BY_PLAN = {
+  BASIC: { route:"simple-apply", label:"Simple Apply", icon:"SA", applyMode:"SIMPLE" },
+  PLUS:  { route:"tailored", label:"Tailored", icon:"TR", applyMode:"TAILORED" },
+  PRO:   { route:"custom-sampler", label:"Custom Sampler", icon:"CS", applyMode:"CUSTOM_SAMPLER" },
+};
 
+const CONSOLE_ROUTES = new Set(Object.values(CONSOLE_BY_PLAN).map(c => c.route));
+
+function planTier(user) {
+  const tier = String(user?.planTier || "BASIC").toUpperCase();
+  return CONSOLE_BY_PLAN[tier] ? tier : "BASIC";
+}
 // AppShell: inside AppScrollProvider — drives dynamic paddingTop + tab visibility
-function AppShell({ theme, isMobile, activeTab, handlePanelChange, children }) {
+function AppShell({ theme, isMobile, activeTab, handlePanelChange, appTabs, children }) {
   const { progress: p } = useAppScroll();
   const paddingTop = Math.round(52 * (1 - p));
   const showTabs   = p < 0.5;
@@ -50,7 +58,7 @@ function AppShell({ theme, isMobile, activeTab, handlePanelChange, children }) {
           padding: isMobile ? "0 12px" : "0 20px",
           flexShrink: 0,
         }}>
-          {APP_TABS.map(t => {
+          {appTabs.map(t => {
             const isActive = activeTab === t.id;
             return (
               <button key={t.id} onClick={() => handlePanelChange(t.id)}
@@ -87,9 +95,19 @@ function AppDashboard({ authUser, setAuthUser }) {
   const { theme } = useTheme();
   const { mode: vpMode } = useViewport();
   const isMobile = vpMode === "mobile" || vpMode === "tablet";
-  const [activeTab,          setActiveTab]          = useState("jobs");
+  const location = useLocation();
+  const navigate = useNavigate();
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
   const [resumeWidget,       setResumeWidget]       = useState(null);
+  const consoleConfig = CONSOLE_BY_PLAN[planTier(authUser)];
+  const consolePath = `/app/${consoleConfig.route}`;
+  const routeKey = location.pathname.replace(/^\/app\/?/, "") || "";
+  const activeTab = CONSOLE_ROUTES.has(routeKey) || routeKey === "" ? "console" : routeKey;
+  const renderRoute = activeTab === "console" ? consoleConfig.route : routeKey;
+  const appTabs = [
+    { id:"console", label:consoleConfig.label, icon:consoleConfig.icon },
+    { id:"database", label:"Database", icon:"DB" },
+  ];
 
   const handleLogout = useCallback(async () => {
     try { await api("/api/auth/logout", { method:"POST" }); } catch {}
@@ -97,15 +115,43 @@ function AppDashboard({ authUser, setAuthUser }) {
   }, [setAuthUser]);
 
   const handlePanelChange = useCallback((tab) => {
-    if (tab === "jobs" && activeTab !== "jobs") setJobBoardRefreshKey(k => k + 1);
-    setActiveTab(tab);
-  }, [activeTab]);
+    if (tab === "jobs" || tab === "console") {
+      if (activeTab !== "console") setJobBoardRefreshKey(k => k + 1);
+      navigate(consolePath);
+      return;
+    }
+    if (["database","plans","profile"].includes(tab)) {
+      navigate(`/app/${tab}`);
+    }
+  }, [activeTab, consolePath, navigate]);
 
   const handleProfileActivate = useCallback(() => {
     setJobBoardRefreshKey(k => k + 1);
   }, []);
 
   useInactivityLogout(handleLogout, true);
+
+  useSyncEvents({
+    plan_updated: ({ planTier, applyMode }) => {
+      setAuthUser(u => u ? ({ ...u, planTier, applyMode, allowedModes:[applyMode] }) : u);
+      const nextConsole = CONSOLE_BY_PLAN[planTier] || CONSOLE_BY_PLAN.BASIC;
+      navigate(`/app/${nextConsole.route}`, { replace:true });
+    },
+  });
+
+  useEffect(() => {
+    if (!routeKey || routeKey === "jobs") {
+      navigate(consolePath, { replace:true });
+      return;
+    }
+    if (CONSOLE_ROUTES.has(routeKey) && routeKey !== consoleConfig.route) {
+      navigate(consolePath, { replace:true });
+      return;
+    }
+    if (!CONSOLE_ROUTES.has(routeKey) && !["database","plans","profile"].includes(routeKey)) {
+      navigate(consolePath, { replace:true });
+    }
+  }, [routeKey, consoleConfig.route, consolePath, navigate]);
 
   useEffect(() => {
     const handleVisibility = async () => {
@@ -140,18 +186,27 @@ function AppDashboard({ authUser, setAuthUser }) {
           />
 
           {/* AppShell: reads scroll progress for dynamic paddingTop + tab visibility */}
-          <AppShell theme={theme} isMobile={isMobile} activeTab={activeTab} handlePanelChange={handlePanelChange}>
+          <AppShell theme={theme} isMobile={isMobile} activeTab={activeTab} handlePanelChange={handlePanelChange} appTabs={appTabs}>
             {/* Panels */}
             <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-              <div style={{ display: activeTab === "jobs" ? "flex" : "none",
-                            flex: 1, flexDirection: "column", overflow: "hidden" }}>
-                <JobsPanel user={authUser} onUserChange={setAuthUser}
+              {renderRoute === "simple-apply" && (
+                <SimpleApplyConsole user={authUser} onUserChange={setAuthUser}
                   refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
-                  isActive={activeTab === "jobs"}/>
-              </div>
-              {activeTab === "database" && <DatabasePanel user={authUser}/>}
-              {activeTab === "plans"    && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
-              {activeTab === "profile"  && <ProfilePanel  user={authUser}/>}
+                  isActive={activeTab === "console"}/>
+              )}
+              {renderRoute === "tailored" && (
+                <TailoredConsole user={authUser} onUserChange={setAuthUser}
+                  refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
+                  isActive={activeTab === "console"}/>
+              )}
+              {renderRoute === "custom-sampler" && (
+                <CustomSamplerConsole user={authUser} onUserChange={setAuthUser}
+                  refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
+                  isActive={activeTab === "console"}/>
+              )}
+              {renderRoute === "database" && <DatabasePanel user={authUser}/>}
+              {renderRoute === "plans"    && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
+              {renderRoute === "profile"  && <ProfilePanel  user={authUser}/>}
             </div>
           </AppShell>
         </div>
@@ -239,7 +294,7 @@ function AppRouter() {
       }/>
 
       {/* User app — redirect admin to /admin */}
-      <Route path="/app" element={
+      <Route path="/app/*" element={
         !authUser
           ? <Navigate to="/login" replace/>
           : authUser.isAdmin

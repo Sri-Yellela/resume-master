@@ -2826,6 +2826,7 @@ app.get("/api/settings", requireAuth, (req, res) => {
 app.get("/api/plans", requireAuth, (req, res) => {
   const row = db.prepare("SELECT plan_tier, apply_mode FROM users WHERE id=?").get(req.user.id);
   const planTier = normalisePlanTier(row?.plan_tier);
+  const changeOptions = ["BASIC","PLUS","PRO"].filter(tier => tier !== planTier);
   const pending = db.prepare(`
     SELECT * FROM plan_upgrade_requests
     WHERE user_id=? AND status='pending'
@@ -2836,6 +2837,7 @@ app.get("/api/plans", requireAuth, (req, res) => {
     applyMode: row?.apply_mode,
     allowedModes: allowedModesForTier(planTier),
     nextPlan: nextPlan(planTier),
+    changeOptions,
     pendingRequest: pending || null,
   });
 });
@@ -2844,16 +2846,13 @@ app.post("/api/plans/request-upgrade", requireAuth, (req, res) => {
   const row = db.prepare("SELECT plan_tier FROM users WHERE id=?").get(req.user.id);
   const current = normalisePlanTier(row?.plan_tier);
   const requested = normalisePlanTier(req.body?.requestedTier || nextPlan(current));
-  const next = nextPlan(current);
-  if (!next) return res.status(400).json({ error:"Already on highest plan" });
   if (requested === current) return res.status(400).json({ error:"Already on this plan" });
-  if (requested !== next) return res.status(400).json({ error:`Next available upgrade is ${next}` });
   const pending = db.prepare(`
     SELECT * FROM plan_upgrade_requests
     WHERE user_id=? AND status='pending'
     ORDER BY requested_at DESC LIMIT 1
   `).get(req.user.id);
-  if (pending) return res.status(409).json({ error:"Upgrade request already pending", pendingRequest:pending });
+  if (pending) return res.status(409).json({ error:"Plan change request already pending", pendingRequest:pending });
   try {
     db.prepare(`
       INSERT INTO plan_upgrade_requests (user_id, requested_tier, notes)
