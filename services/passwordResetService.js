@@ -30,7 +30,7 @@ export function createPasswordReset(db, user, options = {}) {
       WHERE user_id = ? AND used_at IS NULL
     `).run(now, user.id);
 
-    db.prepare(`
+    const result = db.prepare(`
       INSERT INTO password_reset_tokens
         (user_id, email, token_hash, otp_hash, expires_at, requested_at, request_ip, user_agent)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -44,10 +44,11 @@ export function createPasswordReset(db, user, options = {}) {
       options.requestIp || null,
       options.userAgent || null,
     );
+    return result.lastInsertRowid;
   });
 
-  insert();
-  return { token, otp, expiresAt };
+  const id = insert();
+  return { id, token, otp, expiresAt };
 }
 
 export function consumePasswordReset(db, { token, otp, password }, options = {}) {

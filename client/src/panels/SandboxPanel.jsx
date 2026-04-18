@@ -20,7 +20,7 @@ const RESUME_PAGE_WIDTH  = 794;  // A4 at 96dpi
 const RESUME_PAGE_HEIGHT = 1123; // A4 at 96dpi
 
 export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
-  const { theme, mode } = useTheme();
+  const { theme, isDark } = useTheme();
   const [exporting,   setExporting]   = useState(false);
   const [exportError, setExportError] = useState("");
   const [dirty,       setDirty]       = useState(false);
@@ -207,7 +207,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
                 flex:1,
                 overflowX: "hidden",  // never horizontal scroll
                 overflowY: "auto",    // one clean vertical scrollbar
-                background: mode==="dark" ? theme.bg : theme.surfaceHigh,
+                background: isDark ? theme.bg : theme.surfaceHigh,
                 padding: "4px",
                 boxSizing: "border-box",
               }}

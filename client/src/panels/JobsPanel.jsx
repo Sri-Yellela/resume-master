@@ -788,7 +788,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const jobCountRef    = useRef(0);
   const displayJobsRef = useRef([]);
   jobCountRef.current = jobs.length;
-  const applyMode = user?.applyMode || "TAILORED";
+  const applyMode = user?.applyMode || "SIMPLE";
 
   // Apply initial A+B defaults (30/70) once on mount.
   // The visibility-change effect below doesn't fire on first render because
@@ -1518,12 +1518,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   const isLastPage = currentPage >= totalPages;
 
-  // BUTTON STATES: 'Set Role' = save role + DB lookup.
-  // 'Search New' = trigger fresh Apify scrape.
+  // BUTTON STATES: 'Set Role' = save role + local DB lookup.
+  // 'Refresh Search' = explicit Apify scrape/refresh.
   // To change labels edit the buttonLabel derived value below.
   const roleIsSet = !!roleFilter &&
     searchInput.trim().toLowerCase() === roleFilter.trim();
-  const buttonLabel = scraping ? "Searching…" : roleIsSet ? "Search New" : "Set Role";
+  const buttonLabel = scraping ? "Searching…" : roleIsSet ? "Refresh Search" : "Set Role";
 
   // Panel sizing is handled by react-resizable-panels + getPanelDefaults().
   // See the getPanelDefaults() function above for default size rules.
@@ -1740,12 +1740,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         <LucyBtn
           onClick={() => roleIsSet ? handleSearch() : handleSetRole()}
           disabled={scraping || bgLoading}
-          title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : undefined}>
+          title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : "Set the role and show matching jobs already in the local pool"}>
           {buttonLabel}
         </LucyBtn>
         <LucyBtn onClick={handleBestMatch} disabled={bestMatchLoading || scraping}
-                  accent={theme.surfaceHigh}>
-          {bestMatchLoading ? "Finding…" : "✦ Best Match"}
+                  accent={theme.surfaceHigh}
+                  title="Rank local pooled jobs using your Simple Apply profile and available ATS scores">
+          {bestMatchLoading ? "Finding…" : "✦ Local Best Match"}
         </LucyBtn>
 
         {smartSearchError && (
@@ -1869,10 +1870,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 Your Best Matches
               </div>
               <div style={{ fontSize:12, color:theme.textMuted, marginTop:3 }}>
-                Roles where your current resume already scores {bestMatchThresh}+
+                Local pooled roles ranked from your Simple Apply profile and available ATS scores ({bestMatchThresh}+)
               </div>
               <div style={{ fontSize:11, color:theme.textDim, marginTop:2 }}>
-                Apply directly or generate a tailored resume to score even higher.
+                Use Refresh Search when you want to fetch more listings from LinkedIn.
               </div>
             </div>
             <button onClick={() => setBestMatchView(false)}
@@ -1882,7 +1883,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
           {bestMatchJobs.length === 0 ? (
             <div style={{ padding:40, textAlign:"center", color:theme.textMuted, fontSize:13 }}>
-              No strong matches yet. Search for more roles or try the Resume Enhancer to improve your base resume score.
+              No strong local matches yet. Refresh Search to fetch more roles or update your base resume profile.
             </div>
           ) : (
             <div style={{ padding:"12px 16px", display:"flex", flexDirection:"column", gap:8 }}>

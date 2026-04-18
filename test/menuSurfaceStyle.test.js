@@ -17,3 +17,35 @@ test("floating menus use near-opaque readable surfaces", () => {
   assert.match(jobsPanel, /theme\.menuSurface \|\| theme\.surface/);
   assert.match(jobsPanel, /theme\.modalSurface \|\| theme\.surface/);
 });
+
+test("plans entry lives in profile menu, not main app tabs", () => {
+  const app = fs.readFileSync("client/src/App.jsx", "utf8");
+  const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+
+  const appTabsBlock = app.match(/const APP_TABS = \[[\s\S]*?\];/)?.[0] || "";
+  assert.doesNotMatch(appTabsBlock, /plans/);
+  assert.match(topBar, /onTabChange\?\.\("plans"\)/);
+});
+
+test("legacy light dark mode toggle is removed while bg themes remain", () => {
+  const theme = fs.readFileSync("client/src/styles/theme.jsx", "utf8");
+  const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+
+  assert.doesNotMatch(theme, /localStorage\.getItem\("rm_theme_mode"\)|localStorage\.setItem\("rm_theme_mode"/);
+  assert.doesNotMatch(theme, /toggleMode|setTheme|themeName/);
+  assert.match(theme, /isDarkBgMode/);
+  assert.match(theme, /BG_MODES/);
+  assert.doesNotMatch(topBar, /Light Mode|Dark Mode|toggleMode/);
+});
+
+test("light theme surfaces and text tokens are readable", () => {
+  const theme = fs.readFileSync("client/src/styles/theme.jsx", "utf8");
+
+  assert.match(theme, /text:\s+"#111827"/);
+  assert.match(theme, /textMuted:\s+"#374151"/);
+  assert.match(theme, /border:\s+"#d1d5db"/);
+  assert.match(theme, /--bg-card:\s+rgba\(255,255,255,0\.82\)/);
+  assert.match(theme, /--bg-panel:\s+rgba\(245,245,247,0\.90\)/);
+  assert.match(theme, /--bg-input:\s+rgba\(255,255,255,0\.90\)/);
+  assert.match(theme, /--bg-card:\s+#ffffff/);
+});

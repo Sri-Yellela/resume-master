@@ -38,3 +38,26 @@ test("local ATS score prefers matching Simple Apply pooled jobs", () => {
   }, profile, "engineering");
   assert.ok(matching > weak);
 });
+
+test("local ATS score does not let generic overlap beat a strong title match", () => {
+  const profile = deriveSimpleApplyProfile("Software Engineer React Node TypeScript AWS SQL Agile Jira leadership");
+  const strongTitle = localAtsScore({
+    title: "Software Engineer",
+    description: "backend services and APIs",
+    search_query: "software engineer",
+    employment_type: "full-time",
+    work_type: "hybrid",
+    scraped_at: Math.floor(Date.now() / 1000),
+    ghost_score: 0,
+  }, profile, "engineering");
+  const broadOverlap = localAtsScore({
+    title: "Project Manager",
+    description: "Agile Jira leadership stakeholder communication strategy",
+    search_query: "project manager",
+    employment_type: "full-time",
+    work_type: "remote",
+    scraped_at: Math.floor(Date.now() / 1000),
+    ghost_score: 0,
+  }, profile, "engineering");
+  assert.ok(strongTitle > broadOverlap);
+});

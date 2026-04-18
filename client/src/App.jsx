@@ -32,7 +32,6 @@ import { TermsPage }       from "./pages/marketing/TermsPage.jsx";
 
 const APP_TABS = [
   { id: "jobs",     label: "Jobs",     icon: "💼" },
-  { id: "plans",    label: "Plans",    icon: "↑" },
   { id: "database", label: "Database", icon: "🗃" },
 ];
 

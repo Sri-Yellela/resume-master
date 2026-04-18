@@ -334,7 +334,7 @@ function DetailModal({ modal, onClose, theme }) {
 
 // ── Main panel ────────────────────────────────────────────────
 export function DatabasePanel({ user }) {
-  const { theme, mode } = useTheme();
+  const { theme, isDark } = useTheme();
   const [activeSheet,  setActiveSheet]  = useState("applications");
   const [apps,         setApps]         = useState([]);
   const [resumes,      setResumes]      = useState([]);
@@ -402,7 +402,7 @@ export function DatabasePanel({ user }) {
   }, []);
 
   const generateForSaved = useCallback(async (job, force = false) => {
-    const applyMode = user?.applyMode || "TAILORED";
+    const applyMode = user?.applyMode || "SIMPLE";
     if (applyMode === "SIMPLE") { alert("Generation disabled in Simple mode."); return; }
     if (!baseResume) { alert("Upload your base resume in the Jobs tab first."); return; }
     setGenLoading(p => ({...p, [job.jobId]: true}));
@@ -421,7 +421,7 @@ export function DatabasePanel({ user }) {
     await api("/api/applications", { method:"POST", body:JSON.stringify({
       jobId:job.jobId, company:job.company, role:job.title,
       jobUrl:job.url, source:job.source, location:job.location,
-      applyMode:user?.applyMode||"TAILORED", resumeFile:filename + ".pdf",
+      applyMode:user?.applyMode||"SIMPLE", resumeFile:filename + ".pdf",
     }) }).catch(()=>{});
   }, [user]);
 
@@ -586,7 +586,7 @@ export function DatabasePanel({ user }) {
 
       {/* ── Header ── */}
       <div style={{
-        background: mode==="light" ? "rgba(255,255,255,0.92)" : "rgba(17,17,17,0.92)",  /* intentional translucent surface */
+        background: isDark ? "rgba(17,17,17,0.92)" : "rgba(255,255,255,0.96)",
         backdropFilter:"blur(16px)",
         borderBottom:`1px solid ${theme.border}`,
         display:"flex", alignItems:"stretch", flexShrink:0,
@@ -697,8 +697,8 @@ export function DatabasePanel({ user }) {
       {activeSheet === "saved" && (
         <SavedJobsPane
           jobs={savedJobs} generated={savedGen} genLoading={genLoading}
-          applyMode={user?.applyMode || "TAILORED"} hasResume={!!baseResume}
-          theme={theme} mode={mode}
+          applyMode={user?.applyMode || "SIMPLE"} hasResume={!!baseResume}
+          theme={theme} isDark={isDark}
           onGenerate={(job, force) => generateForSaved(job, force)}
           onExport={(job, html) => exportSavedPdf(job, html)}
           onUnsave={unsaveJob}
@@ -710,7 +710,7 @@ export function DatabasePanel({ user }) {
       {activeSheet === "pending" && (
         <PendingJobsPane
           jobs={pendingJobs}
-          theme={theme} mode={mode}
+          theme={theme} isDark={isDark}
           onRefresh={loadPending}
           onDislike={async (jobId) => {
             await api(`/api/jobs/${jobId}/disliked`, { method:"PATCH" }).catch(()=>{});
@@ -938,8 +938,7 @@ export function DatabasePanel({ user }) {
 }
 
 // ── Pending Apply pane ────────────────────────────────────────
-function PendingJobsPane({ jobs, theme, mode, onRefresh, onDislike }) {
-  const isDark = mode === "dark";
+function PendingJobsPane({ jobs, theme, isDark, onRefresh, onDislike }) {
   if (jobs.length === 0) return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
                   alignItems:"center", justifyContent:"center", gap:12, padding:40 }}>
@@ -986,8 +985,7 @@ function PendingJobsPane({ jobs, theme, mode, onRefresh, onDislike }) {
 
 // ── Saved Jobs pane ───────────────────────────────────────────
 function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
-                          theme, mode, onGenerate, onExport, onUnsave, onRefresh }) {
-  const isDark = mode === "dark";
+                          theme, isDark, onGenerate, onExport, onUnsave, onRefresh }) {
 
   if (jobs.length === 0) return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",

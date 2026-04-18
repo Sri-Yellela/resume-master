@@ -5,6 +5,8 @@ const STOP_WORDS = new Set([
   "have","has","had","will","can","our","their","they","them","using","use","used","work",
   "team","teams","role","roles","job","jobs","resume","experience","responsible","including",
   "based","within","across","through","about","over","under","than","then","also","such",
+  "business","management","support","professional","services","solutions","customer","client",
+  "stakeholder","stakeholders","communication","collaboration","leadership","strategy",
 ]);
 
 const TITLE_HINTS = [
@@ -26,7 +28,7 @@ function compactUnique(items, max) {
   const out = [];
   for (const item of items) {
     const value = String(item || "").trim().toLowerCase();
-    if (!value || seen.has(value)) continue;
+    if (!value || value.length > 60 || seen.has(value)) continue;
     seen.add(value);
     out.push(value);
     if (out.length >= max) break;
@@ -114,25 +116,35 @@ export function localAtsScore(job, profile, roleKey) {
   const keywords = profile?.keywords || [];
   const titles = profile?.titles || [];
   let score = 0;
+  let titleMatched = false;
 
   for (const t of titles) {
     const parts = t.split(/\s+/).filter(Boolean);
-    if (parts.length && parts.every(p => title.includes(p))) score += 18;
+    if (parts.length && parts.every(p => title.includes(p))) {
+      titleMatched = true;
+      score += 30;
+      break;
+    }
   }
+  if (!titleMatched && roleKey && title.includes(String(roleKey).toLowerCase())) score += 12;
+
+  let keywordScore = 0;
   for (const kw of keywords) {
-    if (text.includes(kw)) score += kw.includes(" ") ? 5 : 3;
+    if (text.includes(kw)) keywordScore += kw.includes(" ") ? 4 : 2;
   }
-  if (roleKey && text.includes(String(roleKey).toLowerCase())) score += 8;
-  if (job.ats_score != null) score += Math.round(Number(job.ats_score) * 0.35);
+  score += Math.min(24, keywordScore);
+  if (roleKey && text.includes(String(roleKey).toLowerCase())) score += 6;
+  if (job.ats_score != null) score += Math.round(Number(job.ats_score) * 0.25);
   if (job.work_type === "remote") score += 3;
   if ((job.employment_type || "full-time") === "full-time") score += 4;
-  if (job.min_years_exp != null && Number(job.min_years_exp) <= 5) score += 4;
+  if (job.min_years_exp != null && Number(job.min_years_exp) <= 5) score += 5;
+  if (job.max_years_exp != null && Number(job.max_years_exp) >= 2) score += 2;
   if (job.ghost_score != null) score -= Number(job.ghost_score) * 4;
   if (job.is_frequent_repost) score -= 8;
 
   const now = Math.floor(Date.now() / 1000);
   const posted = parseInt(job.posted_at || "", 10) || job.scraped_at || now;
   const ageDays = Math.max(0, (now - posted) / 86400);
-  score += Math.max(0, 10 - Math.round(ageDays));
+  score += Math.max(0, 12 - Math.round(ageDays * 2));
   return Math.max(0, Math.min(100, Math.round(score)));
 }

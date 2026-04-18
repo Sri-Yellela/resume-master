@@ -65,7 +65,7 @@ export default function AdminLoginPage({ onLogin }) {
         </div>
 
         <form onSubmit={handleLogin} style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          <input style={inputStyle} placeholder="Username" value={form.username}
+          <input style={inputStyle} placeholder="Username or email" value={form.username}
             onChange={e => setForm(f => ({ ...f, username:e.target.value }))} autoFocus/>
           <input style={inputStyle} placeholder="Password" type="password" value={form.password}
             onChange={e => setForm(f => ({ ...f, password:e.target.value }))}/>

@@ -38,11 +38,11 @@ export const THEMES = {
     surfaceBase:  "#ffffff",
     // ─────────────────────────────────────────────────────────
     overlay:      "rgba(0,0,0,0.04)",
-    border:       "#e5e5e5",
-    borderStrong: "#c0c0c0",
-    text:         "#0f0f0f",
-    textMuted:    "#3d3d3d",
-    textDim:      "#4B5563",
+    border:       "#d1d5db",
+    borderStrong: "#9ca3af",
+    text:         "#111827",
+    textMuted:    "#374151",
+    textDim:      "#4b5563",
     accent:       "#A8D8EA",
     accentMuted:  "#e8f6fb",
     accentText:   "#1a6a8a",
@@ -71,10 +71,10 @@ export const THEMES = {
     colorSecondary: "#1a6a8a",
     colorAccent:    "#1a6a8a",
     colorSurface:   "var(--bg-card)",
-    colorBorder:    "#e5e5e5",
-    colorText:      "#0f0f0f",
-    colorMuted:     "#3d3d3d",
-    colorDim:       "#4B5563",
+    colorBorder:    "#d1d5db",
+    colorText:      "#111827",
+    colorMuted:     "#374151",
+    colorDim:       "#4b5563",
     colorCard:      "var(--bg-panel)",
     colorInputBg:   "var(--bg-input)",
     colorTag:       "#e8f6fb",
@@ -83,7 +83,7 @@ export const THEMES = {
     gradHover:      "rgba(0,0,0,0.04)",
     glowPrimary:    "0 0 0 3px #A8D8EA44",
     shimmer1:       "rgba(245,245,247,0.65)",
-    shimmer2:       "#e5e5e5",
+    shimmer2:       "#d1d5db",
     radiusPill:     "999px",
     radiusCard:     "16px",
     radiusInput:    "10px",
@@ -154,19 +154,13 @@ export const THEMES = {
   },
 };
 
-// Legacy multi-theme names all map to dark
-export const LEGACY_MAP = { ember:"dark", aurora:"dark", forest:"dark", studio:"dark", light:"light", dark:"dark" };
-
 export const ThemeContext = createContext(null);
 
-export function ThemeProvider({ children }) {
-  const [mode, setMode] = useState(() => {
-    const saved = localStorage.getItem("rm_theme_mode");
-    if (saved === "light" || saved === "dark") return saved;
-    const legacySaved = localStorage.getItem("rm_theme");
-    return LEGACY_MAP[legacySaved] || "light";
-  });
+export function isDarkBgMode(id) {
+  return ["glass-dark", "high-glass-dark", "solid-black"].includes(id);
+}
 
+export function ThemeProvider({ children }) {
   const [bgMode, setBgModeRaw] = useState(() => {
     return localStorage.getItem("rm-bg-mode") || "glass-light";
   });
@@ -196,43 +190,27 @@ export function ThemeProvider({ children }) {
   }, [bgMode]);
 
   const accentOpt = ACCENT_OPTIONS.find(a => a.id === accentId) || ACCENT_OPTIONS[0];
+  const isDark = isDarkBgMode(bgMode);
+  const mode = isDark ? "dark" : "light";
   const baseTheme = THEMES[mode] || THEMES.light;
   const theme = {
     ...baseTheme,
     accent:      accentOpt.color,
-    accentMuted: mode === "dark" ? accentOpt.mutedDark : accentOpt.mutedLight,
-    accentText:  mode === "dark" ? accentOpt.textDark  : accentOpt.textLight,
+    accentMuted: isDark ? accentOpt.mutedDark : accentOpt.mutedLight,
+    accentText:  isDark ? accentOpt.textDark  : accentOpt.textLight,
     gradAccent:  accentOpt.color,
     glowPrimary: `0 0 0 3px ${accentOpt.color}44`,
     colorPrimary:   accentOpt.color,
-    colorSecondary: mode === "dark" ? accentOpt.textDark : accentOpt.textLight,
-    colorAccent:    mode === "dark" ? accentOpt.textDark : accentOpt.textLight,
-    colorTag:       mode === "dark" ? accentOpt.mutedDark : accentOpt.mutedLight,
-  };
-
-  const toggleMode = () => {
-    const next = mode === "light" ? "dark" : "light";
-    setMode(next);
-    localStorage.setItem("rm_theme_mode", next);
-  };
-
-  // Legacy setTheme compat
-  const setTheme = (name) => {
-    const mapped = LEGACY_MAP[name] || "dark";
-    setMode(mapped);
-    localStorage.setItem("rm_theme_mode", mapped);
+    colorSecondary: isDark ? accentOpt.textDark : accentOpt.textLight,
+    colorAccent:    isDark ? accentOpt.textDark : accentOpt.textLight,
+    colorTag:       isDark ? accentOpt.mutedDark : accentOpt.mutedLight,
   };
 
   return (
     <ThemeContext.Provider value={{
       theme,
       tokens: theme,
-      mode,
-      isDark: mode === "dark",
-      isLight: mode === "light",
-      toggleMode,
-      setTheme,
-      themeName: mode,
+      isDark,
       THEMES,
       accentId,
       setAccentId,
@@ -255,11 +233,11 @@ export function ThemeProvider({ children }) {
             radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,200,150,0.30) 0%, transparent 70%);
           background-attachment: fixed;
           --bg-page:      rgba(255,255,255,0.72);
-          --bg-card:      rgba(255,255,255,0.60);
-          --bg-panel:     rgba(245,245,247,0.65);
+          --bg-card:      rgba(255,255,255,0.82);
+          --bg-panel:     rgba(245,245,247,0.88);
           --bg-menu:      rgba(255,255,255,0.98);
           --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.55);
+          --bg-input:     rgba(255,255,255,0.88);
           --popover:      0 0% 100%;
           --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.04);
@@ -278,11 +256,11 @@ export function ThemeProvider({ children }) {
             radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,200,150,0.30) 0%, transparent 70%);
           background-attachment: fixed;
           --bg-page:      rgba(255,255,255,0.72);
-          --bg-card:      rgba(255,255,255,0.60);
-          --bg-panel:     rgba(245,245,247,0.65);
+          --bg-card:      rgba(255,255,255,0.82);
+          --bg-panel:     rgba(245,245,247,0.88);
           --bg-menu:      rgba(255,255,255,0.98);
           --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.55);
+          --bg-input:     rgba(255,255,255,0.88);
           --popover:      0 0% 100%;
           --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.04);
@@ -321,18 +299,18 @@ export function ThemeProvider({ children }) {
             radial-gradient(ellipse 50% 40% at 80% 15%, rgba(180,90,255,0.40) 0%, transparent 70%),
             radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,180,100,0.45) 0%, transparent 70%);
           background-attachment: fixed;
-          --bg-page:      rgba(255,255,255,0.45);
-          --bg-card:      rgba(255,255,255,0.35);
-          --bg-panel:     rgba(245,245,247,0.40);
+          --bg-page:      rgba(255,255,255,0.68);
+          --bg-card:      rgba(255,255,255,0.84);
+          --bg-panel:     rgba(245,245,247,0.90);
           --bg-menu:      rgba(255,255,255,0.98);
           --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.30);
+          --bg-input:     rgba(255,255,255,0.90);
           --popover:      0 0% 100%;
           --popover-foreground: 0 0% 6%;
           --bg-hover:     rgba(0,0,0,0.03);
           --bg-blur:      blur(60px) saturate(200%);
           --bg-blur-sm:   blur(30px) saturate(180%);
-          --border-glass: rgba(255,255,255,0.50);
+          --border-glass: rgba(0,0,0,0.10);
         }
 
         /* ══ High Glass Dark ══ */

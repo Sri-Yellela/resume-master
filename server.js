@@ -146,7 +146,7 @@ db.pragma("busy_timeout = 5000");
           username TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL,
           is_admin INTEGER NOT NULL DEFAULT 0,
-          apply_mode TEXT NOT NULL DEFAULT 'TAILORED',
+          apply_mode TEXT NOT NULL DEFAULT 'SIMPLE',
           apify_token TEXT,
           created_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
@@ -177,7 +177,7 @@ db.pragma("busy_timeout = 5000");
           company TEXT NOT NULL,
           role TEXT NOT NULL,
           category TEXT,
-          apply_mode TEXT NOT NULL DEFAULT 'TAILORED',
+          apply_mode TEXT NOT NULL DEFAULT 'SIMPLE',
           html TEXT NOT NULL,
           ats_score INTEGER,
           ats_report TEXT,
@@ -1068,6 +1068,75 @@ db.pragma("busy_timeout = 5000");
           source_hash TEXT,
           updated_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
+      `,
+    },
+    {
+      id: "034_plan_reset_and_profile_repair",
+      sql: `
+        UPDATE users
+        SET plan_tier = 'BASIC'
+        WHERE plan_tier IS NULL
+           OR plan_tier NOT IN ('BASIC','PLUS','PRO');
+
+        UPDATE users
+        SET apply_mode = CASE plan_tier
+          WHEN 'PRO' THEN 'CUSTOM_SAMPLER'
+          WHEN 'PLUS' THEN 'TAILORED'
+          ELSE 'SIMPLE'
+        END
+        WHERE apply_mode IS NULL
+           OR apply_mode NOT IN ('SIMPLE','TAILORED','CUSTOM_SAMPLER')
+           OR (plan_tier = 'BASIC' AND apply_mode != 'SIMPLE')
+           OR (plan_tier = 'PLUS' AND apply_mode != 'TAILORED')
+           OR (plan_tier = 'PRO' AND apply_mode != 'CUSTOM_SAMPLER');
+
+        DELETE FROM password_reset_tokens
+        WHERE used_at IS NOT NULL
+           OR expires_at <= unixepoch() - 86400;
+
+        DELETE FROM user_jobs
+        WHERE applied = 0
+          AND (
+            domain_profile_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1 FROM domain_profiles dp
+              WHERE dp.id = user_jobs.domain_profile_id
+                AND dp.user_id = user_jobs.user_id
+            )
+          );
+      `,
+    },
+    {
+      id: "035_prune_stale_role_maps",
+      sql: `
+        DELETE FROM job_role_map
+        WHERE role_key = 'engineering'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%engineer%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%developer%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%software%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%programmer%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%devops%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%sre%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%architect%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%backend%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%frontend%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%fullstack%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%full stack%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%platform%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%infrastructure%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%cloud%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%systems%'
+          AND LOWER((SELECT title FROM scraped_jobs sj WHERE sj.job_id = job_role_map.job_id)) NOT LIKE '%security%';
+
+        DELETE FROM user_jobs
+        WHERE applied = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM job_role_map jrm
+            JOIN domain_profiles dp
+              ON dp.id = user_jobs.domain_profile_id
+             AND jrm.role_key = LOWER(COALESCE(NULLIF(dp.role_family, ''), dp.domain))
+            WHERE jrm.job_id = user_jobs.job_id
+          );
       `,
     },
   ];
@@ -2045,7 +2114,15 @@ const SQLiteStore = SQLiteStoreFactory(session);
 const SStore = new SQLiteStore({ db:"sessions.db", dir:path.join(__dirname,"data") });
 
 passport.use(new LocalStrategy((username, password, done) => {
-  const user = db.prepare("SELECT * FROM users WHERE username=?").get(username);
+  const login = String(username || "").trim();
+  const user = db.prepare(`
+    SELECT u.*
+    FROM users u
+    LEFT JOIN user_profile up ON up.user_id = u.id
+    WHERE u.username = ?
+       OR LOWER(up.email) = LOWER(?)
+    LIMIT 1
+  `).get(login, login);
   if (!user || !verifyPassword(password, user.password_hash))
     return done(null, false, { message:"Invalid credentials." });
   return done(null, {
@@ -2076,13 +2153,17 @@ function requireAdmin(req, res, next) { if (req.isAuthenticated()&&req.user.isAd
 
 function publicUser(user) {
   const planTier = normalisePlanTier(user.planTier || user.plan_tier);
+  const allowedModes = allowedModesForTier(planTier);
+  const applyMode = allowedModes.includes(user.applyMode || user.apply_mode)
+    ? (user.applyMode || user.apply_mode)
+    : allowedModes[0];
   return {
     id:user.id,
     username:user.username,
     isAdmin:!!(user.isAdmin ?? user.is_admin),
-    applyMode:user.applyMode || user.apply_mode,
+    applyMode,
     planTier,
-    allowedModes: allowedModesForTier(planTier),
+    allowedModes,
     domainProfileComplete:!!(user.domainProfileComplete ?? user.domain_profile_complete),
   };
 }
@@ -2127,6 +2208,53 @@ function assertUserOwns(row, userId, res) {
 
 function roleKeyForProfile(profile) {
   return String(profile?.role_family || profile?.domain || "general").trim().toLowerCase();
+}
+
+function roleTitleSql(column, roleKey) {
+  if (roleKey === "engineering") return `(
+    LOWER(${column}) LIKE '%engineer%'
+    OR LOWER(${column}) LIKE '%developer%'
+    OR LOWER(${column}) LIKE '%software%'
+    OR LOWER(${column}) LIKE '%programmer%'
+    OR LOWER(${column}) LIKE '%devops%'
+    OR LOWER(${column}) LIKE '%sre%'
+    OR LOWER(${column}) LIKE '%architect%'
+    OR LOWER(${column}) LIKE '%backend%'
+    OR LOWER(${column}) LIKE '%frontend%'
+    OR LOWER(${column}) LIKE '%fullstack%'
+    OR LOWER(${column}) LIKE '%full stack%'
+    OR LOWER(${column}) LIKE '%platform%'
+    OR LOWER(${column}) LIKE '%infrastructure%'
+    OR LOWER(${column}) LIKE '%cloud%'
+    OR LOWER(${column}) LIKE '%systems%'
+    OR LOWER(${column}) LIKE '%security%'
+  )`;
+  if (roleKey === "pm") return `(
+    LOWER(${column}) LIKE '%project%'
+    OR LOWER(${column}) LIKE '%program%'
+    OR LOWER(${column}) LIKE '%product%'
+    OR LOWER(${column}) LIKE '%manager%'
+    OR LOWER(${column}) LIKE '%coordinator%'
+    OR LOWER(${column}) LIKE '%director%'
+    OR LOWER(${column}) LIKE '%agile%'
+    OR LOWER(${column}) LIKE '%scrum%'
+    OR LOWER(${column}) LIKE '%pmo%'
+    OR LOWER(${column}) LIKE '%delivery%'
+  )`;
+  if (roleKey === "data") return `(
+    LOWER(${column}) LIKE '%data%'
+    OR LOWER(${column}) LIKE '%analytics%'
+    OR LOWER(${column}) LIKE '%analyst%'
+    OR LOWER(${column}) LIKE '%scientist%'
+    OR LOWER(${column}) LIKE '%machine learning%'
+    OR LOWER(${column}) LIKE '%ml%'
+    OR LOWER(${column}) LIKE '%ai%'
+    OR LOWER(${column}) LIKE '%business intelligence%'
+    OR LOWER(${column}) LIKE '%bi%'
+    OR LOWER(${column}) LIKE '%research%'
+    OR LOWER(${column}) LIKE '%quantitative%'
+  )`;
+  return "1 = 1";
 }
 
 function assignJobRoleMap(jobId, profile, matchedBy = "profile_scrape", confidence = 1.0) {
@@ -2304,12 +2432,21 @@ app.post("/api/auth/password-reset/request", async (req, res) => {
       });
       const baseUrl = process.env.APP_BASE_URL || `${req.protocol}://${req.get("host")}`;
       const resetUrl = `${baseUrl.replace(/\/$/, "")}/login?resetToken=${encodeURIComponent(reset.token)}`;
-      await sendPasswordResetEmail({
-        to: user.email,
-        resetUrl,
-        otp: reset.otp,
-        expiresAt: reset.expiresAt,
-      });
+      let mailResult = null;
+      try {
+        mailResult = await sendPasswordResetEmail({
+          to: user.email,
+          resetUrl,
+          otp: reset.otp,
+          expiresAt: reset.expiresAt,
+        });
+      } catch(e) {
+        console.error("[password-reset] email send failed:", e.message);
+      }
+      if (!mailResult?.ok) {
+        db.prepare("UPDATE password_reset_tokens SET used_at=unixepoch() WHERE id=?").run(reset.id);
+        console.warn("[password-reset] email send skipped or failed for configured user");
+      }
     }
   } catch(e) {
     console.error("[password-reset] request failed:", e.message);
@@ -2509,7 +2646,9 @@ app.patch("/api/admin/users/:id/password", requireAdmin, (req, res) => {
 });
 app.patch("/api/admin/users/:id/plan", requireAdmin, (req, res) => {
   const userId = parseInt(req.params.id);
-  const tier = normalisePlanTier(req.body?.planTier);
+  const rawTier = String(req.body?.planTier || "").toUpperCase();
+  if (!["BASIC","PLUS","PRO"].includes(rawTier)) return res.status(400).json({ error:"Invalid plan tier" });
+  const tier = normalisePlanTier(rawTier);
   const mode = allowedModesForTier(tier)[0];
   db.prepare("UPDATE users SET plan_tier=?, apply_mode=? WHERE id=?").run(tier, mode, userId);
   db.prepare(`
@@ -2517,6 +2656,7 @@ app.patch("/api/admin/users/:id/plan", requireAdmin, (req, res) => {
     SET status='approved', decided_at=unixepoch(), decided_by=?
     WHERE user_id=? AND status='pending'
   `).run(req.user.id, userId);
+  emitToUser(userId, { type:"plan_updated", planTier:tier, applyMode:mode });
   res.json({ ok:true, planTier:tier, applyMode:mode });
 });
 app.get("/api/admin/upgrade-requests", requireAdmin, (_req, res) => {
@@ -2529,7 +2669,7 @@ app.get("/api/admin/upgrade-requests", requireAdmin, (_req, res) => {
   res.json(rows);
 });
 app.patch("/api/admin/upgrade-requests/:id/grant", requireAdmin, (req, res) => {
-  const request = db.prepare("SELECT * FROM plan_upgrade_requests WHERE id=?").get(parseInt(req.params.id));
+  const request = db.prepare("SELECT * FROM plan_upgrade_requests WHERE id=? AND status='pending'").get(parseInt(req.params.id));
   if (!request) return res.status(404).json({ error:"Not found" });
   const tier = normalisePlanTier(request.requested_tier);
   const mode = allowedModesForTier(tier)[0];
@@ -2539,6 +2679,12 @@ app.patch("/api/admin/upgrade-requests/:id/grant", requireAdmin, (req, res) => {
     SET status='approved', decided_at=unixepoch(), decided_by=?
     WHERE id=?
   `).run(req.user.id, request.id);
+  db.prepare(`
+    UPDATE plan_upgrade_requests
+    SET status='superseded', decided_at=unixepoch(), decided_by=?
+    WHERE user_id=? AND status='pending'
+  `).run(req.user.id, request.user_id);
+  emitToUser(request.user_id, { type:"plan_updated", planTier:tier, applyMode:mode });
   res.json({ ok:true, userId:request.user_id, planTier:tier, applyMode:mode });
 });
 app.get("/api/admin/users/:id/profile", requireAdmin, (req, res) => {
@@ -2562,6 +2708,7 @@ app.patch("/api/settings/apply-mode", requireAuth, (req, res) => {
     return res.status(400).json({ error:"Invalid mode" });
   if (!requireModeEntitlement(req, res, mode)) return;
   db.prepare("UPDATE users SET apply_mode=? WHERE id=?").run(mode, req.user.id);
+  req.user.applyMode = mode;
   res.json({ ok:true, mode });
 });
 // Save user's personal Apify token (per-user — no server-level token exists)
@@ -2607,17 +2754,22 @@ app.post("/api/plans/request-upgrade", requireAuth, (req, res) => {
   const row = db.prepare("SELECT plan_tier FROM users WHERE id=?").get(req.user.id);
   const current = normalisePlanTier(row?.plan_tier);
   const requested = normalisePlanTier(req.body?.requestedTier || nextPlan(current));
-  if (!nextPlan(current)) return res.status(400).json({ error:"Already on highest plan" });
+  const next = nextPlan(current);
+  if (!next) return res.status(400).json({ error:"Already on highest plan" });
   if (requested === current) return res.status(400).json({ error:"Already on this plan" });
-  if (!["PLUS","PRO"].includes(requested)) return res.status(400).json({ error:"Invalid upgrade tier" });
+  if (requested !== next) return res.status(400).json({ error:`Next available upgrade is ${next}` });
+  const pending = db.prepare(`
+    SELECT * FROM plan_upgrade_requests
+    WHERE user_id=? AND status='pending'
+    ORDER BY requested_at DESC LIMIT 1
+  `).get(req.user.id);
+  if (pending) return res.status(409).json({ error:"Upgrade request already pending", pendingRequest:pending });
   try {
     db.prepare(`
       INSERT INTO plan_upgrade_requests (user_id, requested_tier, notes)
       VALUES (?, ?, ?)
     `).run(req.user.id, requested, req.body?.notes || null);
-  } catch(e) {
-    if (!e.message.includes("UNIQUE")) throw e;
-  }
+  } catch(e) { return res.status(400).json({ error:e.message }); }
   res.json({ ok:true, requestedTier:requested });
 });
 
@@ -2684,6 +2836,7 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     WHERE (uj.disliked IS NULL OR uj.disliked = 0)
       AND (uj.applied  IS NULL OR uj.applied  = 0)
+      AND ${roleTitleSql("sj.title", roleKey)}
       AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
            OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
@@ -2771,6 +2924,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   // ──────────────────────────────────────────────────────
   const conditions = [
     `jrm.role_key = ?`,
+    roleTitleSql("sj.title", roleKey),
     `((sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo}) OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))`,
     `(uj.disliked IS NULL OR uj.disliked = 0)`,
     `(uj.applied IS NULL OR uj.applied = 0)`,
@@ -2978,6 +3132,7 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
       LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
       WHERE (uj.applied IS NULL OR uj.applied = 0)
         AND (uj.disliked IS NULL OR uj.disliked = 0)
+        AND ${roleTitleSql("sj.title", roleKey)}
         AND (
           (sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
@@ -3003,6 +3158,7 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
         LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
         WHERE (uj.applied IS NULL OR uj.applied = 0)
           AND (uj.disliked IS NULL OR uj.disliked = 0)
+          AND ${roleTitleSql("sj.title", roleKey)}
           AND (
             (sj.posted_at IS NOT NULL AND sj.posted_at != ''
               AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
@@ -3049,6 +3205,7 @@ app.get("/api/jobs/best-match", requireAuth, (req, res) => {
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
     WHERE sj.ats_score >= ?
+      AND ${roleTitleSql("sj.title", roleKey)}
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND (
@@ -3126,6 +3283,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     WHERE LOWER(sj.search_query) = ?
+      AND ${roleTitleSql("sj.title", roleKey)}
       AND sj.scraped_at > ?
       AND (uj.disliked  IS NULL OR uj.disliked  = 0)
       AND (uj.applied   IS NULL OR uj.applied   = 0)
@@ -3271,6 +3429,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     WHERE sj.scraped_at > ?
+      AND ${roleTitleSql("sj.title", scrapeRoleKey)}
       AND (uj.visited IS NULL OR uj.visited = 0)
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
@@ -3504,6 +3663,7 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
     WHERE uj.resume_generated = 1
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
+      AND ${roleTitleSql("sj.title", roleKey)}
     ORDER BY uj.updated_at DESC
   `).all(roleKey, userId, userId);
   res.json(rows);

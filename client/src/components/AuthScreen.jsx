@@ -116,7 +116,7 @@ function PosterCard({ company, index }) {
 
 // ── Auth modal ────────────────────────────────────────────────
 function AuthModal({ onLogin }) {
-  const { theme, mode } = useTheme();
+  const { theme, isDark } = useTheme();
   const [tab,     setTab]   = useState("login");
   const [regStep, setRegStep] = useState(1);
   // Login form
@@ -248,14 +248,14 @@ function AuthModal({ onLogin }) {
 
       {/* Tab switcher */}
       <div style={{ display:"flex", gap:4, marginBottom:28,
-                    background:mode==="dark"?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",
+                    background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",
                     borderRadius:999, padding:4 }}>
         {["login","register"].map(t => (
           <button key={t} onClick={() => { setTab(t); setRegStep(1); setError(""); setNotice(""); }}
             style={{ flex:1, padding:"7px 0", borderRadius:999, border:"none",
                      fontWeight:700, fontSize:12, cursor:"pointer",
                      background: tab===t ? theme.accent : "transparent",
-                     color: tab===t ? "white" : theme.textMuted,
+                     color: tab===t ? "#0f0f0f" : theme.textMuted,
                      transition:"all 0.2s" }}>
             {t === "login" ? "Sign In" : "Create Account"}
           </button>
@@ -264,7 +264,7 @@ function AuthModal({ onLogin }) {
 
       {tab === "login" ? (
         <form onSubmit={handleLogin} style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          <input style={inputStyle} placeholder="Username" value={login.username}
+          <input style={inputStyle} placeholder="Username or email" value={login.username}
             onChange={e=>setL("username",e.target.value)} autoFocus/>
           <input style={inputStyle} placeholder="Password" type="password" value={login.password}
             onChange={e=>setL("password",e.target.value)}/>
@@ -430,7 +430,7 @@ function AuthModal({ onLogin }) {
 
 // ── Main AuthScreen ───────────────────────────────────────────
 export default function AuthScreen({ onLogin }) {
-  const { theme, mode } = useTheme();
+  const { theme } = useTheme();
   const { mode: vpMode } = useViewport();
   const isMobile = vpMode === "mobile" || vpMode === "tablet";
   const col1 = COMPANY_POSTERS.slice(0, 8);

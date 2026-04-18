@@ -58,10 +58,38 @@ function activeProfileRows(db, userId, activeProfileId) {
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     WHERE 1 = 1
+      AND (
+        LOWER(sj.title) LIKE '%engineer%'
+        OR LOWER(sj.title) LIKE '%developer%'
+        OR LOWER(sj.title) LIKE '%software%'
+        OR LOWER(sj.title) LIKE '%backend%'
+        OR LOWER(sj.title) LIKE '%frontend%'
+        OR LOWER(sj.title) LIKE '%platform%'
+      )
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
     ORDER BY sj.job_id
   `).all(roleKey, userId);
+}
+
+function engineeringTitleRows(db, userId) {
+  return db.prepare(`
+    SELECT sj.job_id
+    FROM scraped_jobs sj
+    JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = 'engineering'
+    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    WHERE (
+      LOWER(sj.title) LIKE '%engineer%'
+      OR LOWER(sj.title) LIKE '%developer%'
+      OR LOWER(sj.title) LIKE '%software%'
+      OR LOWER(sj.title) LIKE '%backend%'
+      OR LOWER(sj.title) LIKE '%frontend%'
+      OR LOWER(sj.title) LIKE '%platform%'
+    )
+      AND (uj.applied IS NULL OR uj.applied = 0)
+      AND (uj.disliked IS NULL OR uj.disliked = 0)
+    ORDER BY sj.job_id
+  `).all(userId);
 }
 
 test("active profile query uses shared role map instead of user-owned scraped tags", () => {
@@ -151,4 +179,19 @@ test("profile title relevance rejects obvious cross-domain titles", () => {
     isTitleRelevantToProfile("Data Scientist", ["Data Scientist", "Data Analyst"]),
     true
   );
+});
+
+test("engineering pool excludes stale PM jobs even if legacy role map is wrong", () => {
+  const db = setupDb();
+  db.exec(`
+    INSERT INTO users VALUES (1, 'a');
+    INSERT INTO scraped_jobs VALUES
+      ('swe-ok', 'Backend Software Engineer', 'Acme', 'software engineer', 10, 1000, NULL),
+      ('pm-stale', 'Project Manager', 'Acme', 'project manager', 11, 1000, NULL);
+    INSERT INTO job_role_map VALUES
+      ('swe-ok', 'engineering', 'engineering', 'engineering'),
+      ('pm-stale', 'engineering', 'engineering', 'engineering');
+  `);
+
+  assert.deepEqual(engineeringTitleRows(db, 1).map(r => r.job_id), ["swe-ok"]);
 });

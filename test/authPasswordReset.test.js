@@ -45,6 +45,26 @@ test("password verification is case-sensitive", () => {
   assert.equal(verifyPassword("CORRECTHORSE1", hash), false);
 });
 
+test("login lookup supports username and email while password remains case-sensitive", () => {
+  const db = setupDb();
+  const lookup = (login, password) => {
+    const user = db.prepare(`
+      SELECT u.*
+      FROM users u
+      LEFT JOIN user_profile up ON up.user_id = u.id
+      WHERE u.username = ?
+         OR LOWER(up.email) = LOWER(?)
+      LIMIT 1
+    `).get(String(login || "").trim(), String(login || "").trim());
+    return !!user && verifyPassword(password, user.password_hash);
+  };
+
+  assert.equal(lookup("casey", "SecretCase1"), true);
+  assert.equal(lookup("casey@example.com", "SecretCase1"), true);
+  assert.equal(lookup("CASEY@example.com", "SecretCase1"), true);
+  assert.equal(lookup("casey@example.com", "secretcase1"), false);
+});
+
 test("password reset consumes a matching token and OTP once", () => {
   const db = setupDb();
   const user = findUserForPasswordReset(db, "casey@example.com");

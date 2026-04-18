@@ -10,6 +10,14 @@ function bestMatchRows(db, userId, roleKey, threshold = 70) {
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
     LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
     WHERE sj.ats_score >= ?
+      AND (
+        LOWER(sj.title) LIKE '%engineer%'
+        OR LOWER(sj.title) LIKE '%developer%'
+        OR LOWER(sj.title) LIKE '%software%'
+        OR LOWER(sj.title) LIKE '%backend%'
+        OR LOWER(sj.title) LIKE '%frontend%'
+        OR LOWER(sj.title) LIKE '%platform%'
+      )
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
     ORDER BY sj.ats_score DESC
@@ -45,12 +53,15 @@ test("Best Match ranks by shared base ATS score and preserves user state filteri
       ('job-a', 'Software Engineer', 82),
       ('job-b', 'Backend Engineer', 94),
       ('job-c', 'Project Manager', 99),
-      ('job-d', 'Frontend Engineer', 88);
+      ('job-d', 'Frontend Engineer', 88),
+      ('job-e', 'Unclassified Software Engineer', 96),
+      ('job-f', 'Project Manager', 97);
     INSERT INTO job_role_map VALUES
       ('job-a', 'engineering'),
       ('job-b', 'engineering'),
       ('job-c', 'pm'),
-      ('job-d', 'engineering');
+      ('job-d', 'engineering'),
+      ('job-f', 'engineering');
     INSERT INTO resumes VALUES (1, 'job-a', 99);
     INSERT INTO user_jobs VALUES (1, 'job-d', 0, 1);
   `);
