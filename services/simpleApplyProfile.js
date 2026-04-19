@@ -105,3 +105,25 @@ export function loadSimpleApplyProfile(db, userId) {
     updatedAt: row.updated_at,
   };
 }
+
+export function loadOrCreateSimpleApplyProfile(db, userId, roleTitles = []) {
+  const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
+  const profile = loadSimpleApplyProfile(db, userId);
+  if (!base?.content) return profile;
+  const sourceHash = crypto.createHash("sha256").update(String(base.content || "")).digest("hex");
+  if (profile?.sourceHash === sourceHash) return profile;
+  return upsertSimpleApplyProfile(db, userId, base.content, roleTitles);
+}
+
+export function buildAtsResumeBasis(resumeText, signalProfile = null) {
+  const signals = signalProfile
+    ? [
+        signalProfile.titles?.length ? `Likely titles: ${signalProfile.titles.join(", ")}` : "",
+        signalProfile.skills?.length ? `Skills/tools: ${signalProfile.skills.join(", ")}` : "",
+        signalProfile.keywords?.length ? `Keywords: ${signalProfile.keywords.slice(0, 18).join(", ")}` : "",
+      ].filter(Boolean).join("\n")
+    : "";
+  return signals
+    ? `STORED USER SIGNALS:\n${signals}\n\nBASE RESUME TEXT:\n${resumeText || ""}`
+    : String(resumeText || "");
+}

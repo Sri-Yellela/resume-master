@@ -87,7 +87,7 @@ function StepIndicator({ current, total }) {
 }
 
 // ── Main wizard ───────────────────────────────────────────────
-export default function DomainProfileWizard({ onComplete, onDismiss, bannerText }) {
+export default function DomainProfileWizard({ onComplete, onDismiss, bannerText, initialDomainKey = null }) {
   const { theme } = useTheme();
   const [step,       setStep]       = useState(1);
   const [domains,    setDomains]    = useState([]);
@@ -121,6 +121,10 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
       .catch(() => { setLoadingDomains(false); setDomainsError(true); });
   };
   useEffect(() => { loadDomains(); }, []);
+
+  useEffect(() => {
+    if (initialDomainKey && !domainKey) setDomainKey(initialDomainKey);
+  }, [initialDomainKey, domainKey]);
 
   // When domain is selected, fetch its metadata and pre-select all chips
   useEffect(() => {

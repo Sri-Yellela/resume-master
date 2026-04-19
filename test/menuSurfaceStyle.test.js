@@ -32,7 +32,9 @@ test("top-right account controls are consolidated into avatar menu", () => {
 
   assert.match(topBar, /function UserAvatarMenu/);
   assert.match(topBar, /Job Profile/);
-  assert.match(topBar, /onActivateProfile\?\.\(p\.id\)/);
+  assert.match(topBar, /<select/);
+  assert.match(topBar, /onActivateProfile\?\.\(Number\(e\.target\.value\)\)/);
+  assert.match(topBar, /\+ Add Profile/);
   assert.match(topBar, /Accent Color/);
   assert.match(topBar, /Background/);
   assert.match(topBar, /Apify Token/);
@@ -52,7 +54,25 @@ test("jobs surface profile switcher is disabled and profile menu supports deleti
   assert.doesNotMatch(jobsPanel, /Profile switcher bar/);
   assert.match(topBar, /method: "DELETE"/);
   assert.match(topBar, /Delete profile/);
+  assert.match(topBar, /Cannot delete your only profile/);
   assert.match(scrollDock, /method: "DELETE"/);
+});
+
+test("profile menus use viewport scrolling and dropdown actions", () => {
+  const dockPortal = fs.readFileSync("client/src/components/DockPortal.jsx", "utf8");
+  const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+  const scrollDock = fs.readFileSync("client/src/components/ScrollDock.jsx", "utf8");
+
+  assert.match(dockPortal, /maxHeight:\s+`min\(\$\{maxH\}px, calc\(100vh - 24px\)\)`/);
+  assert.match(dockPortal, /overflowY:\s+"auto"/);
+  assert.match(dockPortal, /overflowX:\s+"hidden"/);
+  assert.match(dockPortal, /zIndex:\s+10000/);
+  assert.match(scrollDock, /maxHeight:\s+"calc\(100vh - 24px\)"/);
+  assert.match(scrollDock, /overflowY:\s+"auto"/);
+  assert.match(topBar, /const activeProfile = profiles\?\.find/);
+  assert.match(topBar, /title="Select active profile"/);
+  assert.match(topBar, /activeProfile && onDeleteProfile\?\.\(activeProfile\.id\)/);
+  assert.doesNotMatch(topBar, /display:\s+"none"/);
 });
 
 test("legacy light dark mode toggle is removed while bg themes remain", () => {
@@ -98,6 +118,8 @@ test("critical UI copy has no mojibake literals", () => {
     "client/src/panels/JobsPanel.jsx",
     "client/src/panels/AdminPanel.jsx",
     "client/src/lib/api.js",
+    "client/src/components/TopBar.jsx",
+    "client/src/components/DockPortal.jsx",
   ];
   const stripComments = text => text
     .replace(/\/\*[\s\S]*?\*\//g, "")

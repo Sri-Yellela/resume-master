@@ -16,7 +16,7 @@ export function DockPortal({ children, anchorRect, theme, onClose, style = {} })
   const panelWidth = (style.minWidth != null ? Number(style.minWidth) : 0) || 260;
   const pos = getPortalPosition(anchorRect, panelWidth);
   const vh = typeof window !== "undefined" ? window.innerHeight : 800;
-  const maxH = Math.max(200, vh - anchorRect.bottom - 20);
+  const maxH = Math.max(220, vh - 24);
 
   return createPortal(
     <>
@@ -31,16 +31,17 @@ export function DockPortal({ children, anchorRect, theme, onClose, style = {} })
         position: "fixed",
         top: pos.top,
         left: pos.left,
-        zIndex: 2000,
+        zIndex: 10000,
         background: theme?.menuSurface || theme?.surface || "rgba(20,20,20,0.98)",
         border: `1px solid ${theme?.border || "rgba(255,255,255,0.1)"}`,
         borderRadius: 12,
         boxShadow: theme?.shadowLg || "0 8px 32px rgba(0,0,0,0.3)",
         backdropFilter: "blur(20px)",
         WebkitBackdropFilter: "blur(20px)",
-        padding: "8px 0",
-        maxHeight: maxH,
+        padding: "8px 0 16px",
+        maxHeight: `min(${maxH}px, calc(100vh - 24px))`,
         overflowY: "auto",
+        overflowX: "hidden",
         ...style,
       }}>
         {children}

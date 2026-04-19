@@ -276,9 +276,9 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
     setTokenSaving(true);
     try {
       await api("/api/settings/apify-token", { method: "PATCH", body: JSON.stringify({ token: tokenInput.trim() }) });
-      setTokenMsg("✓ Saved");
+      setTokenMsg("Saved");
       setTokenInput("");
-    } catch(e) { setTokenMsg("✗ " + e.message); }
+    } catch(e) { setTokenMsg("Error: " + e.message); }
     setTokenSaving(false);
     setTimeout(() => setTokenMsg(""), 3000);
   };
@@ -288,6 +288,9 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
     color: theme.text, background: "transparent", border: "none",
     display: "block", width: "100%", textAlign: "left",
   };
+  const activeProfile = profiles?.find(p => p.is_active) || profiles?.[0] || null;
+  const canDeleteProfile = (profiles?.length || 0) > 1;
+  const canAddProfile = (profiles?.length || 0) < 4;
 
   return (
     <div style={{ position: "relative" }}>
@@ -312,7 +315,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
 
       {open && rect && (
         <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
-          style={{ minWidth: 280 }}>
+          style={{ minWidth: 320, maxWidth: "calc(100vw - 24px)" }}>
           {/* PROFILE nav */}
           <div style={{ padding: "10px 16px 8px", borderBottom: `1px solid ${theme.border}` }}>
             <button
@@ -329,7 +332,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
               PROFILE
             </button>
             <div style={{ fontSize: 10, color: theme.textDim, marginTop: 2 }}>
-              {user?.username} · {user?.isAdmin ? "Administrator" : "Member"}
+              {user?.username} - {user?.isAdmin ? "Administrator" : "Member"}
             </div>
           </div>
 
@@ -339,41 +342,55 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                              letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
                 Job Profile
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {profiles.map(p => (
-                  <div key={p.id}
-                    onClick={() => { onActivateProfile?.(p.id); setOpen(false); }}
-                    onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
-                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10, width: "100%",
-                      background: "transparent", border: "none", borderRadius: 6,
-                      padding: "7px 8px", cursor: "pointer", fontSize: 12,
-                      color: theme.text, textAlign: "left",
-                    }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                                    background: p.is_active ? theme.accent : theme.border }}/>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {p.profile_name}
-                    </span>
-                    {p.is_active && (
-                      <span style={{ fontSize: 10, color: theme.accent, fontWeight: 700 }}>✓</span>
-                    )}
-                    {profiles.length > 1 && (
-                      <button
-                        title="Delete profile"
-                        onClick={(e) => { e.stopPropagation(); onDeleteProfile?.(p.id); }}
-                        style={{
-                          border: "none", background: "transparent",
-                          color: theme.danger || "#dc2626", cursor: "pointer",
-                          fontSize: 13, fontWeight: 800, padding: "0 2px",
-                        }}>
-                        x
-                      </button>
-                    )}
-                  </div>
-                ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <select
+                  value={activeProfile?.id || ""}
+                  onChange={e => onActivateProfile?.(Number(e.target.value))}
+                  title="Select active profile"
+                  style={{
+                    flex: 1, minWidth: 0, height: 34, padding: "0 10px",
+                    borderRadius: 6, border: `1px solid ${theme.border}`,
+                    background: theme.surface, color: theme.text, fontSize: 12,
+                    outline: "none",
+                  }}>
+                  {profiles.map(p => (
+                    <option key={p.id} value={p.id}>{p.profile_name}</option>
+                  ))}
+                </select>
+                <button
+                  title={canDeleteProfile ? "Delete profile" : "Cannot delete your only profile"}
+                  disabled={!activeProfile || !canDeleteProfile}
+                  onClick={() => activeProfile && onDeleteProfile?.(activeProfile.id)}
+                  style={{
+                    height: 34, padding: "0 10px", borderRadius: 6, flexShrink: 0,
+                    border: `1px solid ${canDeleteProfile ? "#dc262644" : theme.border}`,
+                    background: canDeleteProfile ? "#fef2f2" : theme.surfaceHigh,
+                    color: canDeleteProfile ? "#dc2626" : theme.textDim,
+                    cursor: canDeleteProfile ? "pointer" : "not-allowed",
+                    fontSize: 12, fontWeight: 700,
+                  }}>
+                  Delete
+                </button>
               </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                            gap: 8, marginTop: 8 }}>
+                <div style={{ fontSize: 10, color: theme.textDim }}>
+                  {profiles.length}/4 profiles
+                </div>
+                <button
+                  disabled={!canAddProfile}
+                  onClick={() => { if (canAddProfile) { setOpen(false); onTabChange?.("profile"); } }}
+                  style={{
+                    background: canAddProfile ? theme.accent : theme.surfaceHigh,
+                    color: canAddProfile ? "#0f0f0f" : theme.textDim,
+                    border: "none", borderRadius: 6, padding: "6px 10px",
+                    cursor: canAddProfile ? "pointer" : "not-allowed",
+                    fontSize: 12, fontWeight: 800,
+                  }}>
+                  + Add Profile
+                </button>
+              </div>
+
             </div>
           )}
 
@@ -424,7 +441,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                       display: "flex", alignItems: "center", justifyContent: "center",
                       background: "rgba(0,0,0,0.25)", color: "#fff",
                       fontSize: 14, fontWeight: 700,
-                    }}>✓</span>
+                    }}>On</span>
                   )}
                 </button>
               ))}
@@ -444,6 +461,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
               View Plans
             </button>
           </div>
+
           {/* Resume widget */}
           {resumeWidget && (
             <div style={{ padding: "10px 16px 12px", borderBottom: `1px solid ${theme.border}` }}>
@@ -462,18 +480,18 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                     color: resumeWidget.uploading ? "#d97706" : resumeWidget.text ? "#16a34a" : theme.textMuted,
                     fontFamily: "'DM Sans',system-ui",
                   }}>
-                  {resumeWidget.uploading ? "⏳ Parsing…"
+                  {resumeWidget.uploading ? "Parsing..."
                     : resumeWidget.text
-                      ? `✓ ${(resumeWidget.fileName || "").length > 24
-                          ? (resumeWidget.fileName || "").slice(0, 24) + "…"
+                      ? `${(resumeWidget.fileName || "").length > 24
+                          ? (resumeWidget.fileName || "").slice(0, 24) + "..."
                           : resumeWidget.fileName}`
-                    : "📄 Upload Resume"}
+                    : "Upload Resume"}
                 </button>
                 {resumeWidget.text && !resumeWidget.uploading && (
                   <button onClick={() => resumeWidget.onClear?.()}
                     style={{ background: "none", border: "none", color: "#dc2626",
                              cursor: "pointer", fontSize: 12, padding: "4px 6px", flexShrink: 0 }}>
-                    ✕
+                    x
                   </button>
                 )}
               </div>
@@ -489,7 +507,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                     fontSize: 11, fontWeight: 700, fontFamily: "'DM Sans',system-ui",
                     opacity: resumeWidget.enhancing ? 0.7 : 1,
                   }}>
-                  {resumeWidget.enhancing ? "⏳ Rewriting for better ATS…" : "✨ Enhance Resume"}
+                  {resumeWidget.enhancing ? "Rewriting for better ATS..." : "Enhance Resume"}
                 </button>
               )}
             </div>
@@ -505,7 +523,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
               <input
                 value={tokenInput} onChange={e => setTokenInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && saveToken()}
-                placeholder="apify_api_…" type="password"
+                placeholder="apify_api_..." type="password"
                 style={{
                   flex: 1, height: 32, padding: "0 10px",
                   border: `1px solid ${tokenInput && !tokenInput.startsWith("apify_api_") ? "#dc2626" : theme.border}`,
@@ -519,12 +537,12 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                   padding: "0 12px", cursor: "pointer", fontSize: 11,
                   fontWeight: 700, flexShrink: 0,
                 }}>
-                {tokenSaving ? "…" : "Save"}
+                {tokenSaving ? "..." : "Save"}
               </button>
             </div>
             {tokenMsg && (
               <div style={{ fontSize: 10, marginTop: 4,
-                             color: tokenMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>
+                             color: tokenMsg === "Saved" ? "#16a34a" : "#dc2626" }}>
                 {tokenMsg}
               </div>
             )}
@@ -576,7 +594,10 @@ export default function TopBar({
     if (scrolled) hoverTimerRef.current = setTimeout(() => setHovered(false), 100);
   }, [scrolled]);
 
-  const { boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy } = useJobBoard() || {};
+  const {
+    boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
+    setActiveProfileId, deleteProfileCache,
+  } = useJobBoard() || {};
 
   const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
   useEffect(() => {
@@ -587,19 +608,39 @@ export default function TopBar({
 
   // Domain profiles for docked pill switcher
   const [profiles, setProfiles] = useState([]);
-  useEffect(() => {
+  const loadProfiles = useCallback(() => {
     if (!user) return;
     api("/api/domain-profiles")
-      .then(d => setProfiles(Array.isArray(d) ? d : []))
+      .then(d => {
+        const rows = Array.isArray(d) ? d : [];
+        setProfiles(rows);
+        const active = rows.find(p => p.is_active) || rows[0];
+        if (active) setActiveProfileId?.(active.id);
+      })
       .catch(() => {});
-  }, [user]);
+  }, [user, setActiveProfileId]);
+
+  useEffect(() => { loadProfiles(); }, [loadProfiles]);
+
+  useSyncEvents({
+    profile_switched: ({ profileId }) => {
+      if (profileId) setActiveProfileId?.(Number(profileId));
+      loadProfiles();
+    },
+  });
 
   const activateProfile = async (id) => {
+    const prev = profiles;
+    setProfiles(ps => ps.map(pr => ({ ...pr, is_active: pr.id === id ? 1 : 0 })));
+    setActiveProfileId?.(id);
+    onProfileActivate?.(id);
     try {
       await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
-      setProfiles(ps => ps.map(pr => ({ ...pr, is_active: pr.id === id ? 1 : 0 })));
-      onProfileActivate?.();
-    } catch {}
+    } catch {
+      setProfiles(prev);
+      const active = prev.find(p => p.is_active) || prev[0];
+      if (active) setActiveProfileId?.(active.id);
+    }
   };
 
   const deleteProfile = async (id) => {
@@ -609,9 +650,13 @@ export default function TopBar({
     if (!confirm(`Delete job profile "${profile.profile_name}"?`)) return;
     try {
       await api(`/api/domain-profiles/${id}`, { method: "DELETE" });
+      deleteProfileCache?.(id);
       const next = await api("/api/domain-profiles");
-      setProfiles(Array.isArray(next) ? next : []);
-      onProfileActivate?.();
+      const rows = Array.isArray(next) ? next : [];
+      setProfiles(rows);
+      const active = rows.find(p => p.is_active) || rows[0];
+      if (active) setActiveProfileId?.(active.id);
+      onProfileActivate?.(active?.id);
     } catch(e) {
       alert(e.message || "Could not delete profile");
     }

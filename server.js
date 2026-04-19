@@ -35,7 +35,11 @@ import { hashPassword, verifyPassword, validatePassword } from "./services/authS
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
 import { allowedModesForTier, canUseAPlusResume, canUseGenerate, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
-import { loadSimpleApplyProfile, upsertSimpleApplyProfile } from "./services/simpleApplyProfile.js";
+import {
+  buildAtsResumeBasis,
+  loadOrCreateSimpleApplyProfile,
+  upsertSimpleApplyProfile,
+} from "./services/simpleApplyProfile.js";
 
 // ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
@@ -2044,11 +2048,16 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   // Score new jobs against the user's base resume using Haiku.
   // Non-fatal — job is still inserted if scoring fails.
   if (userId && ANTHROPIC_KEY) {
-    setImmediate(async () => {
+    enqueueAtsScoreWork(`scrape:${userId}:${query}`, async () => {
       try {
         const baseResumeRow = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
         const baseResumeText = baseResumeRow?.content;
         if (!baseResumeText) return; // No base resume — skip scoring
+        const profileTitles = domainProfile ? (() => {
+          try { return JSON.parse(domainProfile.target_titles || "[]"); } catch { return []; }
+        })() : [];
+        const simpleProfile = loadOrCreateSimpleApplyProfile(db, userId, profileTitles);
+        const atsResumeBasis = buildAtsResumeBasis(baseResumeText, simpleProfile);
 
         // Find newly inserted jobs that have no ats_score yet
         const newlyInserted = classified.filter(item => {
@@ -2072,7 +2081,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
                 max_tokens: 900,
                 system: ATS_SYSTEM_PROMPT,
                 messages: [{ role: "user", content:
-                  `JOB DESCRIPTION:\n${item.description || item.title}\n\nRESUME TEXT:\n${baseResumeText}` }],
+                  `JOB DESCRIPTION:\n${item.description || item.title}\n\n${atsResumeBasis}` }],
               });
               const raw = scoreMsg.content.map(b => b.text || "").join("")
                 .replace(/```json|```/g, "").trim();
@@ -2742,9 +2751,32 @@ function resolveUserJobDomainProfileId(userId, jobId) {
 
 // ── Express ───────────────────────────────────────────────────
 const app = express();
-// Active scrapes: key = "userId:query", value = { startedAt, done }
+// Active scrapes: key = "userId:profileId:query", value = { startedAt, done }
 // Polled by GET /api/jobs/poll to determine if a background scrape is still running.
 const activeScrapes = new Map();
+const atsScoreQueue = [];
+let atsScoreQueueRunning = false;
+
+function enqueueAtsScoreWork(label, worker) {
+  atsScoreQueue.push({ label, worker });
+  if (atsScoreQueueRunning) return;
+  atsScoreQueueRunning = true;
+  setImmediate(async () => {
+    while (atsScoreQueue.length) {
+      const item = atsScoreQueue.shift();
+      try {
+        await item.worker();
+      } catch(e) {
+        console.warn(`[ats-queue] ${item.label || "job"} failed:`, e.message);
+      }
+    }
+    atsScoreQueueRunning = false;
+  });
+}
+
+function scrapeStateKey(userId, profileId, query) {
+  return `${userId}:${profileId || "none"}:${String(query || "").toLowerCase()}`;
+}
 
 // SYNC CLIENTS: in-memory SSE registry.
 // Clients reconnect on server restart automatically.
@@ -3600,10 +3632,6 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     if (v.startedAt < staleCutoff) activeScrapes.delete(k);
   }
 
-  const scrapeKey    = `${req.user.id}:${qRaw}`;
-  const scrapeState  = activeScrapes.get(scrapeKey);
-  const stillScraping = !!(scrapeState && !scrapeState.done);
-
   const sinceSeconds = Math.floor(since / 1000);
   const userId = req.user.id;
   const activeProfile = db.prepare(
@@ -3620,6 +3648,9 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     });
   }
   const roleKey = roleKeyForProfile(activeProfile);
+  const scrapeKey = scrapeStateKey(userId, activeProfile.id, qRaw);
+  const scrapeState  = activeScrapes.get(scrapeKey);
+  const stillScraping = !!(scrapeState && !scrapeState.done);
 
   const rows = db.prepare(`
     SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked
@@ -3733,11 +3764,10 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     ? buildApifyQueriesFromProfile(activeProfile)
     : null;
   const query = normaliseRole(rawQuery);
-  let simpleProfile = loadSimpleApplyProfile(db, req.user.id);
-  if (!simpleProfile) {
-    const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
-    if (base?.content) simpleProfile = upsertSimpleApplyProfile(db, req.user.id, base.content);
-  }
+  const activeProfileTitles = (() => {
+    try { return JSON.parse(activeProfile.target_titles || "[]"); } catch { return []; }
+  })();
+  const simpleProfile = loadOrCreateSimpleApplyProfile(db, req.user.id, activeProfileTitles);
   const terms = (simpleProfile?.searchTerms || []).slice(0, 4);
   if (terms.length) {
     profileJobTitles = [...new Set([...(profileJobTitles || [query]), ...terms])].slice(0, 10);
@@ -3793,6 +3823,8 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
 
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
   const scrapeRoleKey = roleKeyForProfile(activeProfile);
+  const scrapeUserId = req.user.id;
+  const scrapeKey = scrapeStateKey(scrapeUserId, activeProfile.id, query);
 
   // DB-first: count fresh unvisited quality jobs for this role
   const existingCount = db.prepare(`
@@ -3809,6 +3841,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
 
   const THRESHOLD = 50;
   const hasEnough = (existingCount?.cnt || 0) >= THRESHOLD;
+  const inFlightScrape = activeScrapes.get(scrapeKey);
 
   if (hasEnough) {
     console.log(`[scrape] DB-first: ${existingCount.cnt} jobs for "${query}" — skipping scrape`);
@@ -3824,6 +3857,20 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     });
   }
 
+  if (inFlightScrape && !inFlightScrape.done) {
+    console.log(`[scrape] Reusing active scrape for "${query}" on profile ${activeProfile.id}`);
+    return res.json({
+      ok:true,
+      count:0,
+      localCount: existingCount?.cnt || 0,
+      scrapedAt: inFlightScrape.startedAt,
+      query,
+      scraping:true,
+      queued:true,
+      deduped:true,
+    });
+  }
+
   console.log(`[scrape] DB-first: only ${existingCount?.cnt||0} jobs for "${query}" — triggering background scrape`);
 
   // Respond immediately — HarvestAPI takes 2–5 min; Railway timeout is 30s
@@ -3836,8 +3883,6 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     scraping:true,
   });
 
-  const scrapeUserId = req.user.id;
-  const scrapeKey = `${scrapeUserId}:${query.toLowerCase()}`;
   activeScrapes.set(scrapeKey, { startedAt: Date.now(), done: false });
 
   // Background scrape — runs after response is flushed
@@ -4007,6 +4052,8 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
 
+  const signalProfile = loadOrCreateSimpleApplyProfile(db, userId);
+  const resumeBasis = buildAtsResumeBasis(resumeText, signalProfile);
   const jobDescription = job.description || job.title;
   const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
 Company: ${job.company}
@@ -4016,7 +4063,7 @@ Full description:
 ${jobDescription}
 
 RESUME TEXT (check which JD keywords appear here):
-${resumeText}`;
+${resumeBasis}`;
 
   const t0 = Date.now();
   try {
@@ -4093,21 +4140,15 @@ app.post("/api/base-resume", requireAuth, (req, res) => {
   db.prepare(`INSERT INTO base_resume (user_id,content,name,updated_at) VALUES (?,?,?,unixepoch())
     ON CONFLICT(user_id) DO UPDATE SET content=excluded.content,name=excluded.name,updated_at=excluded.updated_at`)
     .run(req.user.id, content, name||"resume.txt");
-  if (req.user.applyMode === "SIMPLE") {
-    const profiles = db.prepare("SELECT target_titles FROM domain_profiles WHERE user_id=?").all(req.user.id);
-    const roleTitles = profiles.flatMap(p => {
-      try { return JSON.parse(p.target_titles || "[]"); } catch { return []; }
-    });
-    upsertSimpleApplyProfile(db, req.user.id, content, roleTitles);
-  }
+  const profiles = db.prepare("SELECT target_titles FROM domain_profiles WHERE user_id=?").all(req.user.id);
+  const roleTitles = profiles.flatMap(p => {
+    try { return JSON.parse(p.target_titles || "[]"); } catch { return []; }
+  });
+  upsertSimpleApplyProfile(db, req.user.id, content, roleTitles);
   res.json({ ok:true });
 });
 app.get("/api/simple-apply/profile", requireAuth, (req, res) => {
-  let profile = loadSimpleApplyProfile(db, req.user.id);
-  if (!profile) {
-    const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
-    if (base?.content) profile = upsertSimpleApplyProfile(db, req.user.id, base.content);
-  }
+  const profile = loadOrCreateSimpleApplyProfile(db, req.user.id);
   res.json(profile || { titles: [], keywords: [], skills: [], searchTerms: [] });
 });
 app.post("/api/simple-apply/profile/refresh", requireAuth, (req, res) => {
@@ -4184,14 +4225,16 @@ Return ONLY the improved resume text with no commentary, preamble, or explanatio
 
     // Score both against a generic template to calculate delta
     const templateJd = "Software Engineer, Product Manager, Data Scientist, Data Engineer, Machine Learning Engineer";
+    const scoreSignalProfile = loadOrCreateSimpleApplyProfile(db, req.user.id);
     const scoreFor = async (resumeContent) => {
       try {
+        const resumeBasis = buildAtsResumeBasis(resumeContent, scoreSignalProfile);
         const scoreMsg = await anthropic.messages.create({
           model: "claude-haiku-4-5-20251001",
           max_tokens: 900,
           system: ATS_SYSTEM_PROMPT,
           messages: [{ role: "user", content:
-            `JOB DESCRIPTION:\n${templateJd}\n\nRESUME TEXT:\n${resumeContent}` }],
+            `JOB DESCRIPTION:\n${templateJd}\n\n${resumeBasis}` }],
         });
         const raw = scoreMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
         return JSON.parse(raw);
@@ -4233,13 +4276,16 @@ app.patch("/api/base-resume/adopt-enhanced", requireAuth, async (req, res) => {
     UPDATE base_resume SET content = enhanced_content, updated_at = unixepoch()
     WHERE user_id = ?
   `).run(req.user.id);
+  upsertSimpleApplyProfile(db, req.user.id, row.enhanced_content);
 
   // Background: re-score all user's jobs against the new enhanced resume
   const userId = req.user.id;
-  setImmediate(async () => {
+  enqueueAtsScoreWork(`adopt-enhanced:${userId}`, async () => {
     try {
       const newContent = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId)?.content;
       if (!newContent) return;
+      const signalProfile = loadOrCreateSimpleApplyProfile(db, userId);
+      const atsResumeBasis = buildAtsResumeBasis(newContent, signalProfile);
 
       const jobsToRescore = db.prepare(`
         SELECT sj.job_id, sj.description, sj.title, sj.company FROM scraped_jobs sj
@@ -4258,7 +4304,7 @@ app.patch("/api/base-resume/adopt-enhanced", requireAuth, async (req, res) => {
               max_tokens: 900,
               system: ATS_SYSTEM_PROMPT,
               messages: [{ role: "user", content:
-                `JOB DESCRIPTION:\n${job.description}\n\nRESUME TEXT:\n${newContent}` }],
+                `JOB DESCRIPTION:\n${job.description}\n\n${atsResumeBasis}` }],
             });
             const raw = scoreMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
             const report = JSON.parse(raw);

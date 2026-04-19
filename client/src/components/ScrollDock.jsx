@@ -73,7 +73,8 @@ function DropPanel({ children, style = {}, theme }) {
       position: "absolute", top: "calc(100% + 10px)", right: 0,
       background: theme.menuSurface || theme.surface, border: `1px solid ${theme.border}`,
       borderRadius: 12, boxShadow: theme.shadowLg,
-      zIndex: 9999, minWidth: 240, padding: "8px 0",
+      zIndex: 9999, minWidth: 240, padding: "8px 0 16px",
+      maxHeight: "calc(100vh - 24px)", overflowY: "auto", overflowX: "hidden",
       backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
       ...style,
     }}>
@@ -463,7 +464,8 @@ function DockSettingsPanel({ theme }) {
           background: `${theme.surface}f5`,
           backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
           border: `1px solid ${theme.border}`,
-          borderRadius: 12, boxShadow: theme.shadowLg, padding: 16,
+          borderRadius: 12, boxShadow: theme.shadowLg, padding: "16px 16px 24px",
+          maxHeight: "calc(100vh - 84px)", overflowY: "auto", overflowX: "hidden",
         }}>
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -584,6 +586,9 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onPr
   const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
 
   const initial = (user?.username || "U")[0].toUpperCase();
+  const activeProfile = profiles.find(p => p.is_active) || profiles[0] || null;
+  const canDeleteProfile = profiles.length > 1;
+  const canAddProfile = profiles.length < 4;
 
   useEffect(() => {
     if (!user) return;
@@ -651,7 +656,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onPr
               PROFILE
             </button>
             <div style={{ fontSize: 10, color: theme.textDim, marginTop: 2 }}>
-              {user?.username} · {user?.isAdmin ? "Administrator" : "Member"}
+              {user?.username} - {user?.isAdmin ? "Administrator" : "Member"}
             </div>
           </div>
 
@@ -661,37 +666,53 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onPr
                              letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
                 Job Profile
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {profiles.map(p => (
-                  <div key={p.id} onClick={() => activateProfile(p.id)}
-                    onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
-                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10, width: "100%",
-                      background: "transparent", border: "none", borderRadius: 6,
-                      padding: "7px 8px", cursor: "pointer", fontSize: 12,
-                      color: theme.text, textAlign: "left",
-                    }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                                    background: p.is_active ? theme.accent : theme.border }}/>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {p.profile_name}
-                    </span>
-                    {profiles.length > 1 && (
-                      <button
-                        title="Delete profile"
-                        onClick={(e) => { e.stopPropagation(); deleteProfile(p.id); }}
-                        style={{
-                          border: "none", background: "transparent",
-                          color: theme.danger || "#dc2626", cursor: "pointer",
-                          fontSize: 13, fontWeight: 800, padding: "0 2px",
-                        }}>
-                        x
-                      </button>
-                    )}
-                    {p.is_active && <span style={{ fontSize: 10, color: theme.accent, fontWeight: 700 }}>✓</span>}
-                  </div>
-                ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <select
+                  value={activeProfile?.id || ""}
+                  onChange={e => activateProfile(Number(e.target.value))}
+                  title="Select active profile"
+                  style={{
+                    flex: 1, minWidth: 0, height: 34, padding: "0 10px",
+                    borderRadius: 6, border: `1px solid ${theme.border}`,
+                    background: theme.surface, color: theme.text, fontSize: 12,
+                    outline: "none",
+                  }}>
+                  {profiles.map(p => (
+                    <option key={p.id} value={p.id}>{p.profile_name}</option>
+                  ))}
+                </select>
+                <button
+                  title={canDeleteProfile ? "Delete profile" : "Cannot delete your only profile"}
+                  disabled={!activeProfile || !canDeleteProfile}
+                  onClick={() => activeProfile && deleteProfile(activeProfile.id)}
+                  style={{
+                    height: 34, padding: "0 10px", borderRadius: 6, flexShrink: 0,
+                    border: `1px solid ${canDeleteProfile ? "#dc262644" : theme.border}`,
+                    background: canDeleteProfile ? "#fef2f2" : theme.surfaceHigh,
+                    color: canDeleteProfile ? "#dc2626" : theme.textDim,
+                    cursor: canDeleteProfile ? "pointer" : "not-allowed",
+                    fontSize: 12, fontWeight: 700,
+                  }}>
+                  Delete
+                </button>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                            gap: 8, marginTop: 8 }}>
+                <div style={{ fontSize: 10, color: theme.textDim }}>
+                  {profiles.length}/4 profiles
+                </div>
+                <button
+                  disabled={!canAddProfile}
+                  onClick={() => { if (canAddProfile) { setOpen(false); onTabChange?.("profile"); } }}
+                  style={{
+                    background: canAddProfile ? theme.accent : theme.surfaceHigh,
+                    color: canAddProfile ? "#0f0f0f" : theme.textDim,
+                    border: "none", borderRadius: 6, padding: "6px 10px",
+                    cursor: canAddProfile ? "pointer" : "not-allowed",
+                    fontSize: 12, fontWeight: 800,
+                  }}>
+                  + Add Profile
+                </button>
               </div>
             </div>
           )}
