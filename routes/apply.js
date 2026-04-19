@@ -273,16 +273,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
     const mode = req.body?.mode === "manual" ? "manual" : "auto";
     const toolType = req.body?.tool === "a_plus_resume" ? "a_plus_resume" : "generate";
 
-    const duplicate = db.prepare(`
+    const duplicates = db.prepare(`
       SELECT arj.job_id
       FROM apply_run_jobs arj
       JOIN apply_runs ar ON ar.id = arj.run_id
       WHERE arj.user_id=? AND arj.job_id IN (${jobIds.map(() => "?").join(",")})
         AND arj.status IN ('queued','preparing','generating_resume','ats_review','applying')
     `).all(req.user.id, ...jobIds).map(r => r.job_id);
-    const duplicateSet = new Set(duplicate);
+    const duplicateSet = new Set(duplicates);
     const queueIds = jobIds.filter(id => !duplicateSet.has(id));
-    if (!queueIds.length) return res.status(409).json({ error: "All selected jobs are already queued or running.", duplicates: duplicate });
+    if (!queueIds.length) return res.status(409).json({ error: "All selected jobs are already queued or running.", duplicates });
 
     const runInfo = db.transaction(() => {
       const run = db.prepare("INSERT INTO apply_runs (user_id, mode, tool_type, status, total_jobs) VALUES (?, ?, ?, 'queued', ?)")

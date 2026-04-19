@@ -28,6 +28,12 @@ test("apply queue routes expose async run, detail, and review endpoints", () => 
   assert.match(applyRoute, /const APPLY_WORKER_LIMIT = 2/);
 });
 
+test("apply queue duplicate list uses the defined variable consistently", () => {
+  assert.match(applyRoute, /const duplicates = db\.prepare/);
+  assert.match(applyRoute, /const duplicateSet = new Set\(duplicates\)/);
+  assert.doesNotMatch(applyRoute, /const duplicate = db\.prepare/);
+});
+
 test("auto apply gates ATS below 80 into review instead of submitting", () => {
   assert.match(applyRoute, /ATS_AUTO_APPLY_THRESHOLD = 80/);
   assert.match(applyRoute, /ats_below_threshold/);

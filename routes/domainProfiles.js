@@ -65,9 +65,19 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
   // ── GET /api/domain-profiles ──────────────────────────────────
   // Returns all profiles for the authenticated user.
   router.get("/", (req, res) => {
-    const rows = db.prepare(`
+    let rows = db.prepare(`
       SELECT * FROM domain_profiles WHERE user_id = ? ORDER BY is_active DESC, created_at ASC
     `).all(req.user.id);
+    if (rows.length && !rows.some(r => r.is_active)) {
+      db.prepare("UPDATE domain_profiles SET is_active=1, updated_at=unixepoch() WHERE id=? AND user_id=?")
+        .run(rows[0].id, req.user.id);
+      try { db.prepare("UPDATE users SET domain_profile_complete=1 WHERE id=?").run(req.user.id); } catch {}
+      rows = db.prepare(`
+        SELECT * FROM domain_profiles WHERE user_id = ? ORDER BY is_active DESC, created_at ASC
+      `).all(req.user.id);
+    } else {
+      try { db.prepare("UPDATE users SET domain_profile_complete=? WHERE id=?").run(rows.length ? 1 : 0, req.user.id); } catch {}
+    }
     res.json(rows.map(r => ({
       ...r,
       target_titles:      JSON.parse(r.target_titles      || "[]"),

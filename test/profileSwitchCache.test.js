@@ -26,7 +26,7 @@ test("profile menu switches optimistically and invalidates deleted profile cache
 test("jobs panel restores profile cache and guards stale profile responses", () => {
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 
-  assert.match(jobsPanel, /const activeProfileKey = activeProfileId \|\| activeDomainProfile\?\.id \|\| null/);
+  assert.match(jobsPanel, /const activeProfileKey = activeDomainProfile\?\.id \|\| null/);
   assert.match(jobsPanel, /const cached = getProfileCache\?\.\(nextKey\)/);
   assert.match(jobsPanel, /applyProfileSnapshot\(cached\)/);
   assert.match(jobsPanel, /readProfileUiCache\(nextKey\)/);

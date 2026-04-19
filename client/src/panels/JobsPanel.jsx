@@ -851,6 +851,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [domainProfiles,   setDomainProfiles]   = useState([]);
   const [profileWizardOpen, setProfileWizardOpen] = useState(false);
   const [profileWizardIntent, setProfileWizardIntent] = useState(null);
+  const [searchIntentPrompt, setSearchIntentPrompt] = useState(null);
   // Increments when active profile changes — triggers job board refetch
   const [profileSwitchKey, setProfileSwitchKey] = useState(0);
 
@@ -917,7 +918,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       || domainProfiles[0]
       || null
   ), [domainProfiles, activeProfileId]);
-  const activeProfileKey = activeProfileId || activeDomainProfile?.id || null;
+  const activeProfileKey = activeDomainProfile?.id || null;
 
   // Load domain profiles on mount and seed the shared active profile id.
   useEffect(() => {
@@ -978,6 +979,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const jobsFetchSeqRef = useRef(0);
   const nextFetchPageRef = useRef(1);
   const pendingIntentSearchRef = useRef(null);
+  const searchIntentResolveRef = useRef(null);
 
   const makeProfileSnapshot = useCallback((overrides = {}) => ({
     jobs,
@@ -1273,6 +1275,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // -- Fetch jobs — never clears board before data arrives ------
   const fetchJobs = useCallback(async (page = 1, mergeMode = false) => {
     if (boardTab === "pending") { fetchPending(); return; }
+    if (!activeDomainProfile) {
+      setJobs([]);
+      setTotalJobs(0);
+      setTotalPages(0);
+      setScrapeError("Create a job search profile to load matching jobs.");
+      return;
+    }
     const requestProfileKey = activeProfileKeyRef.current;
     const requestSeq = ++jobsFetchSeqRef.current;
     setBgLoading(true);
@@ -1282,6 +1291,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (requestProfileKey !== activeProfileKeyRef.current || requestSeq !== jobsFetchSeqRef.current) return;
       if (d.needsProfileSetup) {
         setScrapeError("Create a job search profile to load matching jobs.");
+      }
+      if (d.needsBaseResume) {
+        setScrapeError("Upload your base resume before loading search defaults.");
       }
       const incoming = d.jobs || [];
       if (mergeMode) {
@@ -1322,7 +1334,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     } finally {
       if (requestSeq === jobsFetchSeqRef.current) setBgLoading(false);
     }
-  }, [buildParams, boardTab, fetchPending, jobs, makeProfileSnapshot, setProfileCache]);
+  }, [activeDomainProfile, buildParams, boardTab, fetchPending, jobs, makeProfileSnapshot, setProfileCache]);
 
   // -- Boot --------------------------------------------------
   useEffect(() => {
@@ -1336,6 +1348,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setJobs(jr.jobs || []);
       setTotalJobs(jr.total || 0);
       setTotalPages(jr.totalPages || 0);
+      if (jr.needsProfileSetup) setScrapeError("Create a job search profile to load matching jobs.");
+      if (jr.needsBaseResume) setScrapeError("Upload your base resume before loading search defaults.");
       setCategories(cats || []);
       if (rr.content) { setResumeText(rr.content); setFileName(rr.name || "Saved resume"); }
       if (gr?.length) {
@@ -1419,6 +1433,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           setScrapeError("Create a job search profile to load matching jobs.");
           return;
         }
+        if (pollData.needsBaseResume) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setScraping(false);
+          setPollStatus("idle");
+          setScrapeError("Upload your base resume before searching jobs.");
+          return;
+        }
         if (pollData.scrapeUnavailable && pollData.message) {
           setScrapeError(pollData.message);
         }
@@ -1462,6 +1484,18 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setActiveProfileId?.(profileId);
     setProfileSwitchKey(k => k + 1);
   }, [setActiveProfileId]);
+
+  const askSearchIntent = useCallback((prompt) => new Promise(resolve => {
+    searchIntentResolveRef.current = resolve;
+    setSearchIntentPrompt(prompt);
+  }), []);
+
+  const closeSearchIntentPrompt = useCallback((accepted) => {
+    const resolve = searchIntentResolveRef.current;
+    searchIntentResolveRef.current = null;
+    setSearchIntentPrompt(null);
+    resolve?.(accepted);
+  }, []);
 
   const addToApplyQueue = useCallback((job) => {
     if (!job?.jobId) return;
@@ -1521,12 +1555,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     if (!intent) return true;
 
     if (intent.existingProfile) {
-      const ok = confirm(
-        `This search looks like ${intent.label}. Switch to "${intent.existingProfile.profile_name}" for this search?`
-      );
+      const ok = await askSearchIntent({
+        title: "Switch Profile?",
+        body: `This search looks like ${intent.label}. Switch to "${intent.existingProfile.profile_name}" for this search?`,
+        confirmLabel: "Switch and Search",
+        cancelLabel: "Cancel Search",
+      });
       if (!ok) {
-        setScrapeError(`Searching under "${activeDomainProfile?.profile_name || "current profile"}". Results may be constrained by that profile.`);
-        return true;
+        setScrapeError(`Search canceled. Switch profiles or refine the query to avoid wrong-profile results.`);
+        return false;
       }
       try {
         await activateProfileForSearch(intent.existingProfile.id);
@@ -1539,25 +1576,39 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
     const canAddProfile = domainProfiles.length < 4;
     if (!canAddProfile) {
-      setScrapeError(`This search looks like ${intent.label}, but you already have 4 profiles. Searching under the current profile.`);
-      return true;
+      setScrapeError(`This search looks like ${intent.label}, but you already have 4 profiles. Search canceled to avoid wrong-profile results.`);
+      return false;
     }
 
-    const ok = confirm(`This search fits ${intent.label}. Add that profile before searching?`);
+    const ok = await askSearchIntent({
+      title: "Add Matching Profile?",
+      body: `This search fits ${intent.label}. Add that profile before searching?`,
+      confirmLabel: "Add Profile",
+      cancelLabel: "Cancel Search",
+    });
     if (!ok) {
-      setScrapeError(`Searching under "${activeDomainProfile?.profile_name || "current profile"}". Results may be constrained by that profile.`);
-      return true;
+      setScrapeError(`Search canceled. Add the matching profile or refine the query to continue.`);
+      return false;
     }
     pendingIntentSearchRef.current = query;
     setProfileWizardIntent(intent);
     setProfileWizardOpen(true);
     return false;
-  }, [activeDomainProfile, activateProfileForSearch, domainProfiles]);
+  }, [activeDomainProfile, activateProfileForSearch, askSearchIntent, domainProfiles]);
 
   // Set active role — immediately shows DB results, then auto-scrapes if count < threshold
   const handleSetRole = useCallback(async (overrideQuery, options = {}) => {
     const q = (overrideQuery || searchInput).trim();
     if (!q) return;
+    if (!activeDomainProfile) {
+      setScrapeError("Create a job search profile before setting a search role.");
+      setProfileWizardOpen(true);
+      return;
+    }
+    if (!resumeText.trim()) {
+      setScrapeError("Upload your base resume before setting a search role.");
+      return;
+    }
     if (!options.skipProfileIntent) {
       const aligned = await ensureSearchProfileAlignment(q);
       if (!aligned) return;
@@ -1579,12 +1630,21 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         setTimeout(() => setResultsUpToDate(false), 2000);
       }
     } catch {} // silent — DB results already shown
-  }, [searchInput, startPollLoop, ensureSearchProfileAlignment]);
+  }, [activeDomainProfile, resumeText, searchInput, startPollLoop, ensureSearchProfileAlignment]);
 
   // -- Scrape / search ---------------------------------------
   const handleSearch = useCallback(async (overrideQuery, options = {}) => {
     const q = (overrideQuery || searchInput).trim();
     if (!q) return;
+    if (!activeDomainProfile) {
+      setScrapeError("Create a job search profile before searching jobs.");
+      setProfileWizardOpen(true);
+      return;
+    }
+    if (!resumeText.trim()) {
+      setScrapeError("Upload your base resume before searching jobs.");
+      return;
+    }
     if (!options.skipProfileIntent) {
       const aligned = await ensureSearchProfileAlignment(q);
       if (!aligned) return;
@@ -1596,6 +1656,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
       if (result.needsProfileSetup) {
         setScrapeError(result.error || "Create a job search profile to search jobs.");
+        return;
+      }
+      if (result.needsBaseResume) {
+        setScrapeError(result.error || "Upload your base resume before searching jobs.");
         return;
       }
       if (result.missingToken) {
@@ -1638,13 +1702,22 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setRoleFilter(roleQ);
     } catch(e) { setScrapeError(e.message); }
     finally { if (!managedByPoller) setScraping(false); }
-  }, [searchInput, fetchJobs, jobs.length, sortBy, startPollLoop, ensureSearchProfileAlignment]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeDomainProfile, resumeText, searchInput, fetchJobs, jobs.length, sortBy, startPollLoop, ensureSearchProfileAlignment]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Pull / Check-for-new: DB-first, then scrape if quota unmet -
   // Merges new jobs into the board; removes visited entries.
   const handlePullRefresh = useCallback(async () => {
     const q = (searchInput || roleFilter).trim();
     if (!q) return;
+    if (!activeDomainProfile) {
+      setScrapeError("Create a job search profile before checking for jobs.");
+      setProfileWizardOpen(true);
+      return;
+    }
+    if (!resumeText.trim()) {
+      setScrapeError("Upload your base resume before checking for jobs.");
+      return;
+    }
     if (scraping || bgLoading) return;
     setScrapeError(""); setScrapeNewCount(0);
     setScraping(true);
@@ -1653,6 +1726,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
       if (result.needsProfileSetup) {
         setScrapeError(result.error || "Create a job search profile to search jobs.");
+        return;
+      }
+      if (result.needsBaseResume) {
+        setScrapeError(result.error || "Upload your base resume before searching jobs.");
         return;
       }
       if (result.missingToken) {
@@ -1983,6 +2060,21 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const roleIsSet = !!roleFilter &&
     searchInput.trim().toLowerCase() === roleFilter.trim();
   const buttonLabel = scraping ? "Searching…" : roleIsSet ? "Refresh Search" : "Set Role";
+  const setupBlock = !activeDomainProfile
+    ? {
+        title: "Create a job profile",
+        body: "Search and grouped jobs need an active profile so results stay in the right role family.",
+        actionLabel: "Add Profile",
+        onAction: () => setProfileWizardOpen(true),
+      }
+    : !resumeText.trim()
+      ? {
+          title: "Upload your base resume",
+          body: "Search defaults and ATS sorting use extracted signals from your base resume.",
+          actionLabel: "Upload Resume",
+          onAction: () => fileRef.current?.click(),
+        }
+      : null;
 
   // Panel sizing is handled by react-resizable-panels + getPanelDefaults().
   // See the getPanelDefaults() function above for default size rules.
@@ -2016,6 +2108,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             setProfileWizardIntent(null);
             setProfileWizardOpen(false);
           }}
+        />
+      )}
+
+      {searchIntentPrompt && (
+        <SearchIntentDialog
+          theme={theme}
+          prompt={searchIntentPrompt}
+          onConfirm={() => closeSearchIntentPrompt(true)}
+          onCancel={() => closeSearchIntentPrompt(false)}
         />
       )}
 
@@ -2337,7 +2438,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       )}
 
       {/* â”€â”€ MOBILE / TABLET: single-pane + bottom nav â”€â”€ */}
-      {isMobile && (
+      {setupBlock ? (
+        <SetupGateNotice theme={theme} {...setupBlock} />
+      ) : isMobile && (
         <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", position:"relative" }}>
           {/* Full-screen job detail overlay for mobile */}
           {selectedJob && (() => {
@@ -2446,7 +2549,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       )}
 
       {/* â”€â”€ PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) â”€â”€ */}
-      {(isWide || (isPortrait && !isMobile)) && (
+      {!setupBlock && (isWide || (isPortrait && !isMobile)) && (
         <div style={{ flex:1, overflow:"hidden", display:"flex" }}>
         <PanelGroup orientation="horizontal" style={{ flex: 1, overflow: "hidden" }}>
 
@@ -2770,6 +2873,65 @@ function EmptyState({ theme }) {
       </div>
       <div style={{ fontSize:12, textAlign:"center", color:th.textDim, maxWidth:320, lineHeight:1.8 }}>
         LinkedIn + Indeed - full-time only - deduplicated - ghost jobs filtered
+      </div>
+    </div>
+  );
+}
+
+function SetupGateNotice({ theme, title, body, actionLabel, onAction }) {
+  return (
+    <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
+                  padding:32, background:theme.bg }}>
+      <div style={{ width:"min(92vw, 520px)", border:`1px solid ${theme.border}`,
+                    background:theme.surface, borderRadius:8, padding:24,
+                    boxShadow:"0 16px 40px rgba(0,0,0,0.12)" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                      fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase",
+                      color:theme.text, marginBottom:8 }}>
+          {title}
+        </div>
+        <div style={{ fontSize:13, lineHeight:1.6, color:theme.textMuted, marginBottom:18 }}>
+          {body}
+        </div>
+        <button onClick={onAction}
+          style={{ border:"none", borderRadius:6, padding:"10px 16px",
+                   background:theme.accent, color:"#0f0f0f", fontWeight:800,
+                   cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif",
+                   letterSpacing:"0.06em", textTransform:"uppercase" }}>
+          {actionLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SearchIntentDialog({ theme, prompt, onConfirm, onCancel }) {
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:750, background:"rgba(0,0,0,0.48)",
+                  display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div role="dialog" aria-modal="true" style={{ width:"min(92vw, 460px)",
+        background:theme.modalSurface || theme.surface, border:`1px solid ${theme.border}`,
+        borderRadius:8, boxShadow:"0 24px 72px rgba(0,0,0,0.32)", padding:22 }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                      fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase",
+                      color:theme.text, marginBottom:8 }}>
+          {prompt.title}
+        </div>
+        <div style={{ fontSize:13, lineHeight:1.6, color:theme.textMuted, marginBottom:20 }}>
+          {prompt.body}
+        </div>
+        <div style={{ display:"flex", justifyContent:"flex-end", gap:10, flexWrap:"wrap" }}>
+          <button onClick={onCancel}
+            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
+                     background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
+            {prompt.cancelLabel || "Cancel"}
+          </button>
+          <button onClick={onConfirm}
+            style={{ border:"none", borderRadius:6, padding:"8px 12px",
+                     background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
+            {prompt.confirmLabel || "Continue"}
+          </button>
+        </div>
       </div>
     </div>
   );

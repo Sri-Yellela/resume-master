@@ -335,12 +335,12 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
             </div>
           </div>
 
-          {profiles?.length > 0 && (
-            <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-                             letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
-                Job Profile
-              </div>
+          <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
+              Job Profile
+            </div>
+            {profiles?.length > 0 ? (
               <ProfileSelectorDropdown
                 theme={theme}
                 profiles={profiles}
@@ -349,8 +349,15 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                 onDelete={onDeleteProfile}
                 onAdd={() => { setOpen(false); onTabChange?.("profile"); }}
               />
-            </div>
-          )}
+            ) : (
+              <button onClick={() => { setOpen(false); onTabChange?.("profile"); }}
+                style={{ width:"100%", border:`1px solid ${theme.border}`, borderRadius:6,
+                         background:theme.surfaceHigh, color:theme.text, padding:"8px 10px",
+                         cursor:"pointer", textAlign:"left", fontSize:12, fontWeight:700 }}>
+                Add your first job profile
+              </button>
+            )}
+          </div>
 
           {/* Accent color */}
           <div style={{ padding: "10px 16px 8px", borderBottom: `1px solid ${theme.border}` }}>

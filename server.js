@@ -2753,6 +2753,41 @@ function roleTitleSql(column, roleKey) {
   return "1 = 1";
 }
 
+function userHasBaseResume(userId) {
+  const row = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
+  return !!String(row?.content || "").trim();
+}
+
+function parseProfileArray(value) {
+  if (Array.isArray(value)) return value;
+  try { return JSON.parse(value || "[]"); } catch { return []; }
+}
+
+function profileTitleSql(column, profile) {
+  const targetTitles = parseProfileArray(profile?.target_titles);
+  if (!targetTitles.length) return { sql: "1 = 1", params: [] };
+  const stopWords = new Set([
+    "the","and","for","with","ing","a","an","of","in","at","by","to","or",
+    "senior","junior","staff","principal","lead","entry","level","mid",
+    "ii","iii","iv","i","engineer","engineering",
+  ]);
+  const clauses = [];
+  const params = [];
+  for (const rawTitle of targetTitles) {
+    const tokens = String(rawTitle || "").toLowerCase()
+      .split(/[\s,/\-()]+/)
+      .map(w => w.trim())
+      .filter(w => w.length > 2 && !stopWords.has(w))
+      .slice(0, 4);
+    if (!tokens.length) continue;
+    clauses.push(`(${tokens.map(() => `LOWER(${column}) LIKE ?`).join(" AND ")})`);
+    params.push(...tokens.map(token => `%${token}%`));
+  }
+  return clauses.length
+    ? { sql: `(${clauses.join(" OR ")})`, params }
+    : { sql: "1 = 1", params: [] };
+}
+
 function assignJobRoleMap(jobId, profile, matchedBy = "profile_scrape", confidence = 1.0) {
   if (!jobId || !profile) return;
   db.prepare(`
@@ -3459,6 +3494,17 @@ app.get("/api/jobs", requireAuth, (req, res) => {
       reason: "no_active_profile",
     });
   }
+  if (!userHasBaseResume(userId)) {
+    return res.json({
+      jobs: [],
+      total: 0,
+      totalPages: 0,
+      page,
+      pageSize,
+      needsBaseResume: true,
+      reason: "no_base_resume",
+    });
+  }
 
   // ── Session sync: populate user_jobs from active
   // domain profile only ──────────────────────────────────
@@ -3483,6 +3529,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   // If no profile: return empty results.
   // ──────────────────────────────────────────────────────
   const activeProfile = sessionActiveProfile;
+  const activeProfileTitleFilter = profileTitleSql("sj.title", activeProfile);
 
   if (!activeProfile) {
     return res.json({
@@ -3498,12 +3545,13 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const conditions = [
     `jrm.role_key = ?`,
     roleTitleSql("sj.title", roleKey),
+    activeProfileTitleFilter.sql,
     `((sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo}) OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))`,
     `(uj.disliked IS NULL OR uj.disliked = 0)`,
     `(uj.applied IS NULL OR uj.applied = 0)`,
     `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
   ];
-  const filterParams = [roleKey];
+  const filterParams = [roleKey, ...activeProfileTitleFilter.params];
 
   // req.query.role is legacy search-query state. Visibility is now governed by
   // the shared job_role_map role key, not by the exact query that first scraped it.
@@ -3699,7 +3747,17 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
       reason: "no_active_profile",
     });
   }
+  if (!userHasBaseResume(userId)) {
+    return res.json({
+      jobs: [],
+      scraping: false,
+      total: 0,
+      needsBaseResume: true,
+      reason: "no_base_resume",
+    });
+  }
   const roleKey = roleKeyForProfile(activeProfile);
+  const pollProfileTitleFilter = profileTitleSql("sj.title", activeProfile);
   const scrapeKey = scrapeStateKey(userId, activeProfile.id, qRaw);
   const scrapeState  = activeScrapes.get(scrapeKey);
   const stillScraping = !!(scrapeState && !scrapeState.done);
@@ -3711,12 +3769,13 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     WHERE LOWER(sj.search_query) = ?
       AND ${roleTitleSql("sj.title", roleKey)}
+      AND ${pollProfileTitleFilter.sql}
       AND sj.scraped_at > ?
       AND (uj.disliked  IS NULL OR uj.disliked  = 0)
       AND (uj.applied   IS NULL OR uj.applied   = 0)
     ORDER BY sj.scraped_at DESC
     LIMIT 50
-  `).all(roleKey, userId, activeProfile.id, qRaw, sinceSeconds);
+  `).all(roleKey, userId, activeProfile.id, qRaw, ...pollProfileTitleFilter.params, sinceSeconds);
 
   const jobs = rows.map(j => ({
     jobId:           j.job_id,
@@ -3812,6 +3871,19 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       scraping: false,
     });
   }
+  if (!userHasBaseResume(req.user.id)) {
+    const query = normaliseRole(rawQuery);
+    return res.json({
+      ok: false,
+      jobs: [],
+      total: 0,
+      needsBaseResume: true,
+      reason: "no_base_resume",
+      error: "Upload your base resume before searching jobs.",
+      query,
+      scraping: false,
+    });
+  }
   let profileJobTitles = activeProfile
     ? buildApifyQueriesFromProfile(activeProfile)
     : null;
@@ -3875,6 +3947,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
 
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
   const scrapeRoleKey = roleKeyForProfile(activeProfile);
+  const scrapeProfileTitleFilter = profileTitleSql("sj.title", activeProfile);
   const scrapeUserId = req.user.id;
   const scrapeKey = scrapeStateKey(scrapeUserId, activeProfile.id, query);
 
@@ -3885,11 +3958,12 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     WHERE sj.scraped_at > ?
       AND ${roleTitleSql("sj.title", scrapeRoleKey)}
+      AND ${scrapeProfileTitleFilter.sql}
       AND (uj.visited IS NULL OR uj.visited = 0)
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND sj.ghost_score < 4
-  `).get(scrapeRoleKey, req.user.id, activeProfile.id, sevenDaysAgo);
+  `).get(scrapeRoleKey, req.user.id, activeProfile.id, sevenDaysAgo, ...scrapeProfileTitleFilter.params);
 
   const THRESHOLD = 50;
   const hasEnough = (existingCount?.cnt || 0) >= THRESHOLD;
@@ -4160,6 +4234,7 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
   ).get(userId);
   if (!activeProfile) return res.json([]);
   const roleKey = roleKeyForProfile(activeProfile);
+  const pendingProfileTitleFilter = profileTitleSql("sj.title", activeProfile);
   const rows = db.prepare(`
     SELECT sj.*, uj.starred, uj.applied, uj.disliked, uj.visited, uj.resume_generated,
            r.ats_score, r.ats_report, r.html as resume_html, r.apply_mode
@@ -4172,8 +4247,9 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND ${roleTitleSql("sj.title", roleKey)}
+      AND ${pendingProfileTitleFilter.sql}
     ORDER BY uj.updated_at DESC
-  `).all(roleKey, userId, activeProfile.id, userId);
+  `).all(roleKey, userId, activeProfile.id, userId, ...pendingProfileTitleFilter.params);
   res.json(rows);
 });
 
