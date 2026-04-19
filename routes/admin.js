@@ -71,6 +71,22 @@ export function createAdminRouter(db) {
         GROUP BY event_type ORDER BY count DESC LIMIT 8
       `).all(from, to);
 
+      const actionCosts = db.prepare(`
+        SELECT event_type,
+          COALESCE(event_subtype, '') as event_subtype,
+          COUNT(*) as calls,
+          COALESCE(SUM(input_tokens),0) as input_tokens,
+          COALESCE(SUM(output_tokens),0) as output_tokens,
+          COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
+          COALESCE(SUM(cache_creation_tokens),0) as cache_creation_tokens,
+          COALESCE(SUM(cost_usd),0) as cost
+        FROM usage_events
+        WHERE created_at BETWEEN ? AND ?
+          AND event_type IN ('resume_generate','resume_format','ats_score','classifier')
+        GROUP BY event_type, COALESCE(event_subtype, '')
+        ORDER BY cost DESC
+      `).all(from, to);
+
       const topModels = db.prepare(`
         SELECT model,
           COUNT(*) as count,
@@ -96,6 +112,7 @@ export function createAdminRouter(db) {
           ? atsStats.avg_after - atsStats.avg_before : null,
         topEventTypes,
         topModels,
+        actionCosts,
       });
     } catch(e) { res.status(500).json({ error: e.message }); }
   });
@@ -226,12 +243,61 @@ export function createAdminRouter(db) {
   });
 
   // ── Cache performance ─────────────────────────────────────────
+  // Recent model-call usage ledger for the admin Usage panel.
+  router.get("/model-calls", requireAdmin, (req, res) => {
+    const { from, to } = getRange(req.query);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize || "50")));
+    const offset = Math.max(0, parseInt(req.query.offset || "0"));
+    const modelEventTypes = [
+      "resume_generate", "resume_format", "ats_score", "resume_enhance",
+      "classifier", "apply_automation", "pdf_export",
+    ];
+    try {
+      const rows = db.prepare(`
+        SELECT
+          ue.id,
+          ue.created_at,
+          ue.user_id,
+          COALESCE(u.username, 'User #' || ue.user_id) as username,
+          ue.event_type,
+          ue.event_subtype,
+          ue.model,
+          ue.input_tokens,
+          ue.output_tokens,
+          ue.cache_read_tokens,
+          ue.cache_creation_tokens,
+          ue.cached,
+          ue.cost_usd,
+          ue.duration_ms,
+          ue.job_id,
+          ue.company,
+          ue.success,
+          ue.error_text,
+          CASE
+            WHEN COALESCE(ue.cache_read_tokens,0) > 0 AND COALESCE(ue.input_tokens,0) > 0 THEN 'partial'
+            WHEN COALESCE(ue.cache_read_tokens,0) > 0 THEN 'warm'
+            WHEN COALESCE(ue.cache_creation_tokens,0) > 0 THEN 'cold_write'
+            ELSE 'cold'
+          END as cache_state
+        FROM usage_events ue
+        LEFT JOIN users u ON u.id = ue.user_id
+        WHERE ue.created_at BETWEEN ? AND ?
+          AND ue.model IS NOT NULL
+          AND ue.event_type IN (${modelEventTypes.map(() => "?").join(",")})
+        ORDER BY ue.created_at DESC, ue.id DESC
+        LIMIT ? OFFSET ?
+      `).all(from, to, ...modelEventTypes, pageSize, offset);
+      res.json({ rows, pageSize, offset });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
   router.get("/cache", requireAdmin, (req, res) => {
     const { from, to } = getRange(req.query);
     try {
       const overall = db.prepare(`
         SELECT
           SUM(CASE WHEN event_type='cache_hit'  THEN 1 ELSE 0 END) as hits,
+          SUM(CASE WHEN event_type='cache_partial'  THEN 1 ELSE 0 END) as partials,
           SUM(CASE WHEN event_type='cache_miss' THEN 1 ELSE 0 END) as misses,
           SUM(CASE WHEN event_type='cache_write' THEN 1 ELSE 0 END) as writes,
           COALESCE(SUM(tokens_saved),0) as total_tokens_saved,
@@ -243,7 +309,9 @@ export function createAdminRouter(db) {
       const byLayer = db.prepare(`
         SELECT layer,
           SUM(CASE WHEN event_type='cache_hit' THEN 1 ELSE 0 END) as hits,
+          SUM(CASE WHEN event_type='cache_partial' THEN 1 ELSE 0 END) as partials,
           SUM(CASE WHEN event_type='cache_miss' THEN 1 ELSE 0 END) as misses,
+          SUM(CASE WHEN event_type='cache_write' THEN 1 ELSE 0 END) as writes,
           COALESCE(SUM(tokens_saved),0) as tokens_saved,
           COALESCE(SUM(cost_saved_usd),0) as cost_saved
         FROM cache_events WHERE created_at BETWEEN ? AND ?
@@ -254,24 +322,49 @@ export function createAdminRouter(db) {
         SELECT domain_module,
           COUNT(*) as calls,
           SUM(CASE WHEN event_type='cache_hit' THEN 1 ELSE 0 END) as hits,
+          SUM(CASE WHEN event_type='cache_partial' THEN 1 ELSE 0 END) as partials,
+          SUM(CASE WHEN event_type='cache_miss' THEN 1 ELSE 0 END) as misses,
+          SUM(CASE WHEN event_type='cache_write' THEN 1 ELSE 0 END) as writes,
           COALESCE(SUM(cost_saved_usd),0) as cost_saved
         FROM cache_events WHERE domain_module IS NOT NULL AND created_at BETWEEN ? AND ?
         GROUP BY domain_module ORDER BY calls DESC
       `).all(from, to);
 
-      const recentHitRate = db.prepare(`
-        SELECT CAST(SUM(CASE WHEN event_type='cache_hit' THEN 1 ELSE 0 END) AS REAL) / MAX(1,COUNT(*)) as rate
+      const callLevel = db.prepare(`
+        SELECT
+          COUNT(*) as total_calls,
+          SUM(CASE WHEN cache_read_tokens > 0 AND input_tokens = 0 THEN 1 ELSE 0 END) as warm_calls,
+          SUM(CASE WHEN cache_read_tokens > 0 AND input_tokens > 0 THEN 1 ELSE 0 END) as partial_calls,
+          SUM(CASE WHEN cache_creation_tokens > 0 AND cache_read_tokens = 0 THEN 1 ELSE 0 END) as write_calls,
+          SUM(CASE WHEN cache_read_tokens = 0 AND cache_creation_tokens = 0 THEN 1 ELSE 0 END) as cold_calls,
+          COALESCE(SUM(input_tokens),0) as input_tokens,
+          COALESCE(SUM(output_tokens),0) as output_tokens,
+          COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
+          COALESCE(SUM(cache_creation_tokens),0) as cache_creation_tokens
+        FROM usage_events
+        WHERE created_at BETWEEN ? AND ? AND model IS NOT NULL
+      `).get(from, to);
+
+      const recentPartialOrWarmRate = db.prepare(`
+        SELECT CAST(SUM(CASE WHEN event_type IN ('cache_hit','cache_partial') THEN 1 ELSE 0 END) AS REAL) / MAX(1,COUNT(*)) as rate
         FROM cache_events WHERE created_at >= ?
       `).get(Math.floor(Date.now()/1000) - 7*86400).rate || 0;
 
+      const cacheDenom = (callLevel.input_tokens || 0) + (callLevel.cache_read_tokens || 0) + (callLevel.cache_creation_tokens || 0);
+
       res.json({
         totalCacheHits: overall.hits || 0,
+        totalCachePartials: overall.partials || 0,
         totalCacheMisses: overall.misses || 0,
         totalCacheWrites: overall.writes || 0,
-        hitRate: overall.total > 0 ? (overall.hits || 0) / overall.total : 0,
+        hitRate: overall.total > 0 ? ((overall.hits || 0) + (overall.partials || 0)) / overall.total : 0,
+        fullHitRate: overall.total > 0 ? (overall.hits || 0) / overall.total : 0,
+        partialHitRate: overall.total > 0 ? (overall.partials || 0) / overall.total : 0,
         totalTokensSaved: overall.total_tokens_saved,
         totalCostSaved: overall.total_cost_saved,
-        warmthScore: Math.round(recentHitRate * 100),
+        cacheReadTokenRatio: cacheDenom > 0 ? (callLevel.cache_read_tokens || 0) / cacheDenom : 0,
+        callLevel,
+        warmthScore: Math.round(recentPartialOrWarmRate * 100),
         byLayer, byDomain,
       });
     } catch(e) { res.status(500).json({ error: e.message }); }

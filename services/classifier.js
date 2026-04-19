@@ -23,7 +23,7 @@ const MODEL_ID = "claude-haiku-4-5-20251001";
 
 // TO CHANGE DOMAIN MAPPING: edit the derivation logic in getDomainModuleKey()
 // below AND add/remove a corresponding file in prompts/layer2_domains/
-export async function classify(anthropic, resumeText, jdText) {
+export async function classify(anthropic, resumeText, jdText, options = {}) {
   const prompt = `Classify this resume and job description combination.
 
 Resume (first 2000 chars):
@@ -48,6 +48,7 @@ Reply ONLY with valid JSON matching this exact schema. No markdown fences, no ex
     max_tokens: 400,
     messages: [{ role: "user", content: prompt }],
   });
+  try { options.onUsage?.(msg.usage, MODEL_ID); } catch {}
 
   const raw = msg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(raw);

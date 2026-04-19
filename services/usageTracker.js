@@ -27,6 +27,23 @@ function calcCost(model, usage = {}) {
   );
 }
 
+function cacheState(usage = {}) {
+  const inputTokens = usage?.input_tokens || 0;
+  const cacheReadTokens = usage?.cache_read_input_tokens || 0;
+  const cacheCreationTokens = usage?.cache_creation_tokens || 0;
+  if (cacheReadTokens > 0 && inputTokens > 0) return "partial";
+  if (cacheReadTokens > 0) return "warm";
+  if (cacheCreationTokens > 0) return "cold_write";
+  return "cold";
+}
+
+function cacheEventTypeForState(state) {
+  if (state === "warm") return "cache_hit";
+  if (state === "partial") return "cache_partial";
+  if (state === "cold_write") return "cache_write";
+  return "cache_miss";
+}
+
 export function trackApiCall(db, {
   userId, eventType, eventSubtype,
   model, usage,
@@ -39,7 +56,8 @@ export function trackApiCall(db, {
     const cost = calcCost(model, usage || {});
     const cacheReadTokens     = usage?.cache_read_input_tokens || 0;
     const cacheCreationTokens = usage?.cache_creation_tokens   || 0;
-    const cached = (usage?.input_tokens || 0) === 0 && cacheReadTokens > 0 ? 1 : 0;
+    const state = cacheState(usage || {});
+    const cached = cacheReadTokens > 0 ? 1 : 0;
 
     db.prepare(`INSERT INTO usage_events (
       user_id, event_type, event_subtype, input_tokens,
@@ -58,8 +76,24 @@ export function trackApiCall(db, {
       success ? 1 : 0, errorText || null
     );
 
-    // Record cache event for layer-level analysis
-    if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
+    console.info("[usage] model_call", JSON.stringify({
+      userId,
+      eventType,
+      eventSubtype: eventSubtype || null,
+      model,
+      inputTokens: usage?.input_tokens || 0,
+      outputTokens: usage?.output_tokens || 0,
+      cacheReadTokens,
+      cacheCreationTokens,
+      cacheState: state,
+      costUsd: Number(cost.toFixed(6)),
+      durationMs: durationMs || null,
+      jobId: jobId || null,
+      success: !!success,
+    }));
+
+    // Record one cache-state event per model call so misses and partial hits are visible.
+    if (model) {
       const p = ANTHROPIC_PRICING[model];
       const tokensSaved = cacheReadTokens;
       const costSaved = p ? cacheReadTokens * (p.input - p.cache_read) : 0;
@@ -69,7 +103,7 @@ export function trackApiCall(db, {
       ) VALUES (?,?,?,?,?,?,?,?)`)
       .run(
         userId,
-        cacheReadTokens > 0 ? 'cache_hit' : 'cache_write',
+        cacheEventTypeForState(state),
         domainModule ? 'layer2_domain' : 'layer1_global',
         domainModule || null,
         cacheCreationTokens || cacheReadTokens,

@@ -4297,7 +4297,19 @@ ${cachedResumeText}`;
       console.log(`[generate] domain from profile: ${activeDomainProfile.profile_name} → ${domainModuleKey}`);
     } else {
       try {
-        const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "");
+        const classifierStart = Date.now();
+        const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "", {
+          onUsage: (usage, model) => trackApiCall(db, {
+            userId: req.user.id,
+            eventType: "classifier",
+            eventSubtype: mode,
+            model,
+            usage,
+            durationMs: Date.now() - classifierStart,
+            jobId: String(jobId),
+            company: job.company,
+          }),
+        });
         const qualKey = resolveFromClassifier(classifierResult, profile?.qualification_key);
         domainModuleKey = getDomainModuleKey(qualKey, classifierResult.roleFamily, classifierResult.domain);
       } catch(e) {
@@ -4732,7 +4744,17 @@ app.post("/api/smart-search", requireAuth, async (req, res) => {
   if (!resumeText) return res.status(400).json({ error: "resumeText required" });
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
   try {
-    const classifierResult = await classify(anthropic, resumeText, "");
+    const classifierStart = Date.now();
+    const classifierResult = await classify(anthropic, resumeText, "", {
+      onUsage: (usage, model) => trackApiCall(db, {
+        userId: req.user.id,
+        eventType: "classifier",
+        eventSubtype: "profile_setup",
+        model,
+        usage,
+        durationMs: Date.now() - classifierStart,
+      }),
+    });
     const qualKey    = resolveFromClassifier(classifierResult);
     const qualTemplates = getSearchQueryTemplates(qualKey);
     const canonical  = normaliseRole(classifierResult.searchQueries?.[0] || "");

@@ -114,18 +114,21 @@ function UsageTab({ theme }) {
   const [to,   setTo]   = useState(Math.floor(Date.now()/1000) + 86400);
   const [overview, setOverview] = useState(null);
   const [timeseries, setTimeseries] = useState({});
+  const [modelCalls, setModelCalls] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [ov, tsResumes, tsCost] = await Promise.all([
+      const [ov, tsResumes, tsCost, calls] = await Promise.all([
         api(`/api/admin/analytics/overview?from=${from}&to=${to}`),
         api(`/api/admin/analytics/timeseries?from=${from}&to=${to}&metric=resumes&granularity=day`),
         api(`/api/admin/analytics/timeseries?from=${from}&to=${to}&metric=cost&granularity=day`),
+        api(`/api/admin/analytics/model-calls?from=${from}&to=${to}&pageSize=40`),
       ]);
       setOverview(ov);
       setTimeseries({ resumes: tsResumes, cost: tsCost });
+      setModelCalls(calls.rows || []);
     } catch(e) { console.error(e); }
     setLoading(false);
   }, [from, to]);
@@ -140,6 +143,9 @@ function UsageTab({ theme }) {
   const fmtNum = n => n == null ? "—" : n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}k` : String(Math.round(n));
   const fmtUsd = n => n == null ? "—" : `$${Number(n).toFixed(4)}`;
   const fmtPct = n => n == null ? "—" : `${(n*100).toFixed(1)}%`;
+
+  const fmtDate = ts => ts ? new Date(ts*1000).toLocaleString() : "â€”";
+  const shortModel = model => (model || "â€”").replace("claude-", "").replace("-20250514", "").replace("-20251001", "");
 
   const cacheColor = overview.cacheHitRate >= 0.7 ? "#16a34a" : overview.cacheHitRate >= 0.4 ? "#d97706" : "#dc2626";
 
@@ -197,6 +203,89 @@ function UsageTab({ theme }) {
           </div>
         </div>
       )}
+
+      {overview.actionCosts?.length > 0 && (
+        <div style={{ background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:12, padding:16 }}>
+          <div style={{ fontSize:12, fontWeight:700, marginBottom:12, color:theme.text }}>Cost by Generation Action</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+            {overview.actionCosts.map((row, idx) => {
+              const label = row.event_subtype ? `${row.event_type} / ${row.event_subtype}` : row.event_type;
+              const maxCost = overview.actionCosts[0]?.cost || 1;
+              const totalTokens = (row.input_tokens || 0) + (row.output_tokens || 0)
+                + (row.cache_read_tokens || 0) + (row.cache_creation_tokens || 0);
+              return (
+                <div key={`${row.event_type}-${row.event_subtype}-${idx}`} style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <div style={{ width:220, fontSize:12, color:theme.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                    {label}
+                  </div>
+                  <div style={{ flex:1, height:7, background:theme.surfaceHigh, borderRadius:999 }}>
+                    <div style={{ height:7, borderRadius:999, background:"#dc2626",
+                                  width: `${Math.min(100, (row.cost / maxCost) * 100)}%` }}/>
+                  </div>
+                  <div style={{ width:55, textAlign:"right", fontSize:11, color:theme.textMuted }}>{row.calls} calls</div>
+                  <div style={{ width:80, textAlign:"right", fontSize:11, color:theme.textMuted }}>{fmtNum(totalTokens)} tok</div>
+                  <div style={{ width:76, textAlign:"right", fontSize:11, color:"#dc2626" }}>{fmtUsd(row.cost)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{ background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:12, overflow:"hidden" }}>
+        <div style={{ padding:"12px 16px", borderBottom:`1px solid ${theme.border}` }}>
+          <div style={{ fontSize:12, fontWeight:700, color:theme.text }}>Generation / Model Call Usage</div>
+          <div style={{ fontSize:11, color:theme.textMuted, marginTop:3 }}>
+            Most recent tracked model calls. Cache state is derived from stored token fields.
+          </div>
+        </div>
+        <div style={{ overflowX:"auto" }}>
+          <div style={{ minWidth:920 }}>
+            <div style={{
+              display:"grid",
+              gridTemplateColumns:"150px 120px 140px 150px repeat(4, 86px) 76px 90px",
+              gap:8, padding:"9px 14px", background:theme.surfaceHigh,
+              fontSize:10, fontWeight:700, textTransform:"uppercase",
+              letterSpacing:"0.06em", color:theme.textMuted,
+            }}>
+              <div>Time</div><div>User</div><div>Action</div><div>Model</div>
+              <div>Input</div><div>Output</div><div>Cache Read</div><div>Cache Create</div>
+              <div>Cache</div><div>Cost</div>
+            </div>
+            {modelCalls.length === 0 ? (
+              <div style={{ padding:"18px 16px", fontSize:12, color:theme.textMuted }}>
+                No tracked model calls in this date range.
+              </div>
+            ) : modelCalls.map(call => (
+              <div key={call.id} style={{
+                display:"grid",
+                gridTemplateColumns:"150px 120px 140px 150px repeat(4, 86px) 76px 90px",
+                gap:8, padding:"9px 14px", borderTop:`1px solid ${theme.border}`,
+                fontSize:11, alignItems:"center", color:theme.textMuted,
+              }}>
+                <div>{fmtDate(call.created_at)}</div>
+                <div style={{ color:theme.text, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {call.username}
+                </div>
+                <div style={{ color:theme.text }}>{call.event_subtype || call.event_type}</div>
+                <div title={call.model || ""}>{shortModel(call.model)}</div>
+                <div>{fmtNum(call.input_tokens || 0)}</div>
+                <div>{fmtNum(call.output_tokens || 0)}</div>
+                <div>{fmtNum(call.cache_read_tokens || 0)}</div>
+                <div>{fmtNum(call.cache_creation_tokens || 0)}</div>
+                <div style={{
+                  color: call.cache_state === "warm" || call.cache_state === "partial" ? "#16a34a"
+                    : call.cache_state === "cold_write" ? "#d97706" : theme.textMuted,
+                  fontWeight:700,
+                }}>
+                  {call.cache_state || (call.cached ? "warm" : "cold")}
+                </div>
+                <div style={{ color:"#dc2626" }}>{fmtUsd(call.cost_usd || 0)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -427,7 +516,7 @@ function CacheTab({ theme }) {
   const fmtUsd = n => `$${Number(n||0).toFixed(4)}`;
   return (
     <div style={{ padding:20, display:"flex", flexDirection:"column", gap:16 }}>
-      {/* Warmth score */}
+      {/* Cache-state summary */}
       <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
                     borderRadius:12, padding:20, display:"flex", alignItems:"center", gap:20 }}>
         <div style={{ textAlign:"center" }}>
@@ -435,12 +524,14 @@ function CacheTab({ theme }) {
                         color: data.warmthScore >= 70 ? "#16a34a" : data.warmthScore >= 40 ? "#d97706" : "#dc2626" }}>
             {data.warmthScore}
           </div>
-          <div style={{ fontSize:10, color:theme.textMuted, fontWeight:700 }}>WARMTH SCORE</div>
+          <div style={{ fontSize:10, color:theme.textMuted, fontWeight:700 }}>CACHE READ CALLS</div>
         </div>
         <div>
           <div style={{ fontSize:13, color:theme.text, lineHeight:1.6 }}>
-            {fmtPct(data.hitRate)} of recent generation calls hit a cached prompt layer,
-            saving {fmtUsd(data.totalCostSaved)} this period.
+            {fmtPct(data.hitRate)} of recorded model calls had some cache read tokens.
+            Full warm calls: {fmtPct(data.fullHitRate || 0)}. Partial cache calls: {fmtPct(data.partialHitRate || 0)}.
+            Cache writes: {data.totalCacheWrites || 0}. Cold calls: {data.totalCacheMisses || 0}.
+            Token cache-read ratio: {fmtPct(data.cacheReadTokenRatio || 0)}.
           </div>
           <div style={{ fontSize:11, color:theme.textMuted, marginTop:4 }}>
             {data.totalCacheHits} hits · {data.totalCacheMisses} misses · {(data.totalTokensSaved||0).toLocaleString()} tokens saved
@@ -458,6 +549,8 @@ function CacheTab({ theme }) {
                                          borderTop:`1px solid ${theme.border}`, fontSize:12 }}>
               <div style={{ width:160, color:theme.text, fontWeight:600 }}>{l.layer || "unknown"}</div>
               <div style={{ color:theme.textMuted }}>{l.hits} hits</div>
+              <div style={{ color:theme.textMuted }}>{l.partials || 0} partial</div>
+              <div style={{ color:theme.textMuted }}>{l.writes || 0} writes</div>
               <div style={{ color:theme.textMuted }}>{l.misses} misses</div>
               <div style={{ color:theme.textMuted }}>{l.hits + l.misses > 0 ? fmtPct(l.hits / (l.hits + l.misses)) : "—"}</div>
               <div style={{ color:"#16a34a" }}>{fmtUsd(l.cost_saved)}</div>
@@ -477,6 +570,9 @@ function CacheTab({ theme }) {
               <div style={{ width:160, color:theme.text, fontWeight:600 }}>{d.domain_module}</div>
               <div style={{ color:theme.textMuted }}>{d.calls} calls</div>
               <div style={{ color:theme.textMuted }}>{d.hits} hits</div>
+              <div style={{ color:theme.textMuted }}>{d.partials || 0} partial</div>
+              <div style={{ color:theme.textMuted }}>{d.writes || 0} writes</div>
+              <div style={{ color:theme.textMuted }}>{d.misses || 0} cold</div>
               <div style={{ color:theme.textMuted }}>{d.calls > 0 ? fmtPct(d.hits / d.calls) : "—"}</div>
               <div style={{ color:"#16a34a" }}>{fmtUsd(d.cost_saved)}</div>
             </div>
