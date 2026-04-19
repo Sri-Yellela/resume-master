@@ -21,20 +21,20 @@
   },
   "mle": {
     "canonical": "Machine Learning Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["ML Engineer", "Applied ML Engineer", "Applied Scientist"]
   },
   "ml engineer": {
     "canonical": "Machine Learning Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["ML Engineer", "Applied ML Engineer"]
   },
   "ml": {
     "canonical": "Machine Learning Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["Machine Learning Engineer", "ML Engineer"]
   },
   "ds": {
@@ -51,8 +51,8 @@
   },
   "mle intern": {
     "canonical": "Machine Learning Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["ML Engineer Intern", "Machine Learning Intern"]
   },
   "sde": {
@@ -441,50 +441,50 @@
   },
   "nlp engineer": {
     "canonical": "NLP Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["Natural Language Processing Engineer", "ML Engineer NLP", "Conversational AI Engineer"]
   },
   "cv engineer": {
     "canonical": "Computer Vision Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["Computer Vision Scientist", "ML Engineer Computer Vision"]
   },
   "computer vision": {
     "canonical": "Computer Vision Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["Computer Vision Scientist", "ML Engineer"]
   },
   "ai engineer": {
     "canonical": "AI Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["Applied AI Engineer", "Generative AI Engineer", "LLM Engineer"]
   },
   "genai": {
     "canonical": "Generative AI Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["AI Engineer", "LLM Engineer", "Applied AI Engineer"]
   },
   "gen ai": {
     "canonical": "Generative AI Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["AI Engineer", "LLM Engineer", "Generative AI Specialist"]
   },
   "llm": {
     "canonical": "LLM Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["Large Language Model Engineer", "AI Engineer", "Generative AI Engineer"]
   },
   "rl engineer": {
     "canonical": "Reinforcement Learning Engineer",
-    "roleFamily": "engineering",
-    "domain": "it_digital",
+    "roleFamily": "data",
+    "domain": "data",
     "searchVariants": ["RL Research Engineer", "ML Engineer Reinforcement Learning"]
   },
   "fp&a": {

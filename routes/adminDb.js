@@ -14,6 +14,20 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
     return String(profile?.role_family || profile?.domain || "general").trim().toLowerCase();
   }
 
+  function roleKeyForTitle(title) {
+    const t = String(title || "").toLowerCase();
+    if (/\b(machine learning|ml engineer|ai engineer|artificial intelligence|llm|genai|generative ai|data scientist|data engineer|analytics engineer)\b/.test(t)) return "data";
+    if (/\b(project manager|program manager|product manager|scrum master|pmo|delivery manager|project coordinator|product owner)\b/.test(t)) return "pm";
+    if (/\b(engineer|developer|software|platform|infrastructure|sre|devops|systems|firmware|embedded|driver|bsp|kernel)\b/.test(t)) return "engineering";
+    if (/\b(data|analytics|analyst|scientist|business intelligence|bi)\b/.test(t)) return "data";
+    return "general";
+  }
+
+  const VALID_REVIEW_ROLE_KEYS = new Set([
+    "engineering", "data", "pm", "finance", "hr", "design",
+    "legal", "operations", "healthcare", "marketing", "general",
+  ]);
+
   function tableNames() {
     return db.prepare(
       `SELECT name FROM sqlite_master
@@ -172,6 +186,97 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       }
       res.json({ tables: nodes, relationships: edges });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.get("/job-review", requireAdmin, (req, res) => {
+    try {
+      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || "100")));
+      const q = String(req.query.q || "").trim().toLowerCase();
+      const roleKey = String(req.query.roleKey || "").trim().toLowerCase();
+      const params = [];
+      const where = [];
+      if (q) {
+        where.push(`(LOWER(sj.title) LIKE ? OR LOWER(sj.company) LIKE ? OR LOWER(sj.search_query) LIKE ?)`);
+        const pat = `%${q}%`;
+        params.push(pat, pat, pat);
+      }
+      if (roleKey === "unclassified") {
+        where.push(`NOT EXISTS (SELECT 1 FROM job_role_map jrm2 WHERE jrm2.job_id = sj.job_id)`);
+      } else if (roleKey) {
+        where.push(`EXISTS (SELECT 1 FROM job_role_map jrm2 WHERE jrm2.job_id = sj.job_id AND jrm2.role_key = ?)`);
+        params.push(roleKey);
+      }
+
+      const jobs = db.prepare(`
+        SELECT sj.job_id, sj.title, sj.company, sj.search_query, sj.source_platform,
+               sj.posted_at, sj.scraped_at, sj.domain_profile_id,
+               dp.profile_name, dp.role_family as profile_role_family,
+               GROUP_CONCAT(jrm.role_key) as role_keys,
+               GROUP_CONCAT(jrm.matched_by) as matched_by
+        FROM scraped_jobs sj
+        LEFT JOIN domain_profiles dp ON dp.id = sj.domain_profile_id
+        LEFT JOIN job_role_map jrm ON jrm.job_id = sj.job_id
+        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+        GROUP BY sj.job_id
+        ORDER BY sj.scraped_at DESC
+        LIMIT ?
+      `).all(...params, limit).map(row => ({
+        ...row,
+        suggestedRoleKey: roleKeyForTitle(row.title),
+        role_keys: row.role_keys ? row.role_keys.split(",") : [],
+      }));
+
+      const profiles = db.prepare(`
+        SELECT id, profile_name, role_family, domain, user_id
+        FROM domain_profiles
+        ORDER BY role_family, profile_name
+      `).all();
+      res.json({ jobs, profiles });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.post("/job-review/reassign", requireAdmin, (req, res) => {
+    try {
+      const jobId = String(req.body?.jobId || "").trim();
+      const roleKey = String(req.body?.roleKey || "").trim().toLowerCase();
+      const domainProfileId = req.body?.domainProfileId ? parseInt(req.body.domainProfileId) : null;
+      if (!jobId) return res.status(400).json({ error: "jobId required" });
+      const job = db.prepare("SELECT job_id FROM scraped_jobs WHERE job_id=?").get(jobId);
+      if (!job) return res.status(404).json({ error: "Job not found" });
+
+      if (roleKey === "unclassified") {
+        db.prepare("DELETE FROM job_role_map WHERE job_id=?").run(jobId);
+        db.prepare("UPDATE scraped_jobs SET domain_profile_id=NULL WHERE job_id=?").run(jobId);
+        db.prepare("UPDATE user_jobs SET domain_profile_id=NULL WHERE job_id=? AND applied=0").run(jobId);
+        return res.json({ ok: true, jobId, roleKey: "unclassified" });
+      }
+      if (!VALID_REVIEW_ROLE_KEYS.has(roleKey)) return res.status(400).json({ error: "Invalid roleKey" });
+
+      let profile = null;
+      if (domainProfileId) {
+        profile = db.prepare("SELECT * FROM domain_profiles WHERE id=?").get(domainProfileId);
+        if (!profile) return res.status(400).json({ error: "domainProfileId not found" });
+      }
+      db.prepare("DELETE FROM job_role_map WHERE job_id=?").run(jobId);
+      db.prepare(`
+        INSERT INTO job_role_map
+          (job_id, role_key, role_family, domain, source_profile_id, confidence, matched_by)
+        VALUES (?, ?, ?, ?, ?, 1.0, 'manual_review')
+      `).run(
+        jobId,
+        roleKey,
+        profile?.role_family || roleKey,
+        profile?.domain || roleKey,
+        profile?.id || null,
+      );
+      db.prepare("UPDATE scraped_jobs SET domain_profile_id=? WHERE job_id=?")
+        .run(profile?.id || null, jobId);
+      if (profile?.id) {
+        db.prepare("UPDATE user_jobs SET domain_profile_id=? WHERE job_id=? AND applied=0")
+          .run(profile.id, jobId);
+      }
+      res.json({ ok: true, jobId, roleKey, domainProfileId: profile?.id || null });
+    } catch(e) { res.status(500).json({ error: e.message }); }
   });
 
   // ── Route 2c: Full schema export (for copy/download) ─────────

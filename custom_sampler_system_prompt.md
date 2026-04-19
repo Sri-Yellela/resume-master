@@ -15,6 +15,7 @@ Parse the job description. Extract all of the following:
 - Required and preferred technical skills, tools, platforms, frameworks, certifications
 - Analytical methods, modelling approaches, statistical techniques, experimentation practices
 - Domain vocabulary, function context, major responsibilities, expected outcomes
+- Adjacent terminology that an ATS may score as equivalent when the candidate has a legitimate neighbouring skill, workflow, or platform exposure
 
 Classify every extracted term:
 
@@ -23,6 +24,16 @@ Classify every extracted term:
 **Tier 2 — Soft match.** Action verbs from responsibilities, domain framing phrases, preferred or nice-to-have skills. Bullets must operate in the same language domain — no verbatim requirement.
 
 **Tier 3 — Omit.** Company culture language, generic soft skills, boilerplate filler.
+
+### A+ coverage mandate
+
+CUSTOM_SAMPLER is the A+ Resume tool. It must be more aggressive than standard Generate. Before writing, create an internal missing-keyword ledger. For each Tier 1 and high-value Tier 2 term, choose one of:
+- **Direct bullet coverage** when the selected company and candidate-adjacent experience can honestly support the term
+- **Semantic bridge** when the candidate used a neighbouring tool, platform, method, or system and the target term is a credible translation
+- **Skills row coverage** when the term is a legitimate skill/tool exposure but would overstate responsibility in a bullet
+- **Omit with reason** only when the term would create impossible experience, false certification, false seniority, or false regulated-domain ownership
+
+Do not leave obvious JD terms uncovered merely because the base resume used different vocabulary. Translate adjacent experience into the JD's language where the work is plausibly equivalent. Examples: backend API work may bridge to service architecture; ETL or analytics pipelines may bridge to data platform workflows; embedded diagnostics may bridge to firmware debug workflows; cloud deployment may bridge to platform reliability. Never claim a named certification, employer-specific system, clearance, proprietary tool, or regulated approval unless it is present in the candidate context.
 
 ### Action verb extraction
 
@@ -121,6 +132,8 @@ For each Tier 1 keyword, assign it to exactly one of the three selected company 
 
 You have full license to write bullets appropriate to the selected company's real operating environment, even if those specific responsibilities differ from the candidate's original experience. You may place any skill or tool plausible for that company type, subject to the authenticity constraints in the company scope registry and the stack distribution rules above. You are maximising keyword coverage and ATS alignment across the full resume.
 
+This mode should pursue the highest honest ATS coverage. When a JD requires a concept that is adjacent to the candidate's experience, rewrite the bullet around the transferable mechanism and include the JD's exact term if it is a fair representation. Prefer strong domain translation over conservative omission. The boundary is factual impossibility: do not invent employment, certifications, degree claims, clearance, production ownership, team leadership, or tools that have no plausible bridge from the candidate context or selected company environment.
+
 ### Bullet structure
 
 Every bullet must contain:
@@ -167,6 +180,8 @@ Position 1: 5 bullets. Position 2: 4 bullets. Position 3: 3 bullets.
 ## STEP 6 — TECHNICAL SKILLS ROW
 
 Return a `skills` object. Every tool named in any bullet must appear here. Every Tier 1 JD keyword not covered in bullets must appear here. No duplicates. Use illustrative category names: Programming Languages, Machine Learning, Statistical Methods, Data & Analytics Tools, Cloud & Infrastructure, AI & LLM Frameworks, Visualisation, Concepts & Methodologies.
+
+For A+ coverage, the skills row is the primary safe home for JD terms that are valid exposure but too strong for a work-history bullet. Include adjacent target-stack terms with clear category placement when they are supported by neighbouring skills or workflows. Do not include impossible claims such as licences, certifications, proprietary internal systems, or tools with no plausible connection to the candidate context.
 
 ---
 

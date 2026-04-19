@@ -601,6 +601,20 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onPr
     setOpen(false);
   };
 
+  const deleteProfile = async (id) => {
+    const profile = profiles.find(p => p.id === id);
+    if (!profile || profiles.length <= 1) return;
+    if (!confirm(`Delete job profile "${profile.profile_name}"?`)) return;
+    try {
+      await api(`/api/domain-profiles/${id}`, { method: "DELETE" });
+      const next = await api("/api/domain-profiles");
+      setProfiles(Array.isArray(next) ? next : []);
+      onProfileActivate?.(id);
+    } catch(e) {
+      alert(e.message || "Could not delete profile");
+    }
+  };
+
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
@@ -649,7 +663,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onPr
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {profiles.map(p => (
-                  <button key={p.id} onClick={() => activateProfile(p.id)}
+                  <div key={p.id} onClick={() => activateProfile(p.id)}
                     onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                     style={{
@@ -663,8 +677,20 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onPr
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {p.profile_name}
                     </span>
+                    {profiles.length > 1 && (
+                      <button
+                        title="Delete profile"
+                        onClick={(e) => { e.stopPropagation(); deleteProfile(p.id); }}
+                        style={{
+                          border: "none", background: "transparent",
+                          color: theme.danger || "#dc2626", cursor: "pointer",
+                          fontSize: 13, fontWeight: 800, padding: "0 2px",
+                        }}>
+                        x
+                      </button>
+                    )}
                     {p.is_active && <span style={{ fontSize: 10, color: theme.accent, fontWeight: 700 }}>✓</span>}
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>

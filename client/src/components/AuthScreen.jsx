@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { api } from "../lib/api.js";
+import { api, setAuthContext } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
 import { Footer } from "./Footer.jsx";
@@ -156,7 +156,7 @@ function AuthModal({ onLogin }) {
     e.preventDefault(); setError(""); setNotice(""); setLoading(true);
     try {
       const d = await api("/api/auth/login", { method:"POST", body:JSON.stringify({ username:login.username, password:login.password }) });
-      if (d.user) onLogin(d.user);
+      if (d.user) { setAuthContext(d.authContext); onLogin(d.user); }
       else setError(d.error || "Login failed");
     } catch(err) { setError(err.message); }
     setLoading(false);
@@ -188,7 +188,7 @@ function AuthModal({ onLogin }) {
           phone:       step2.phone.trim() || undefined,
         },
       }) });
-      if (d.user) onLogin(d.user);
+      if (d.user) { setAuthContext(d.authContext); onLogin(d.user); }
       else setError(d.error || "Registration failed");
     } catch(err) { setError(err.message); }
     setLoading(false);

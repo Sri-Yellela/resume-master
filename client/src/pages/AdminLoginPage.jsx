@@ -1,7 +1,7 @@
 // client/src/pages/AdminLoginPage.jsx
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api.js";
+import { api, setAuthContext } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 
 export default function AdminLoginPage({ onLogin }) {
@@ -21,6 +21,7 @@ export default function AdminLoginPage({ onLogin }) {
         if (!d.user.isAdmin) {
           setError("This login is for admin access only. Use the main login page.");
         } else {
+          setAuthContext(d.authContext);
           onLogin(d.user);
         }
       } else {

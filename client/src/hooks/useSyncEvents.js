@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { authContextQuery } from "../lib/api.js";
 
 /**
  * useSyncEvents — subscribes to /api/sync/events (SSE) and dispatches
@@ -21,7 +22,8 @@ export function useSyncEvents(handlers) {
 
     function connect() {
       if (closed) return;
-      es = new EventSource("/api/sync/events", { withCredentials: true });
+      const qs = authContextQuery();
+      es = new EventSource(`/api/sync/events${qs ? `?${qs}` : ""}`, { withCredentials: true });
 
       es.onmessage = (e) => {
         try {

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
+import fs from "node:fs";
 import { isTitleRelevantToProfile } from "../services/searchQueryBuilder.js";
 
 function setupDb() {
@@ -194,4 +195,13 @@ test("engineering pool excludes stale PM jobs even if legacy role map is wrong",
   `);
 
   assert.deepEqual(engineeringTitleRows(db, 1).map(r => r.job_id), ["swe-ok"]);
+});
+
+test("engineering title filter excludes ML/AI and PM-management contamination", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+
+  assert.match(server, /NOT LIKE '%machine learning%'/);
+  assert.match(server, /NOT LIKE '%ai engineer%'/);
+  assert.match(server, /NOT LIKE '%project manager%'/);
+  assert.match(server, /NOT LIKE '%product manager%'/);
 });

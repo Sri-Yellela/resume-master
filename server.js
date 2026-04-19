@@ -1255,6 +1255,89 @@ db.pragma("busy_timeout = 5000");
           ON domain_profile_requests(user_id, created_at);
       `,
     },
+    {
+      id: "038_role_map_ml_pm_repair",
+      sql: `
+        DELETE FROM job_role_map
+        WHERE role_key = 'engineering'
+          AND job_id IN (
+            SELECT job_id FROM scraped_jobs
+            WHERE LOWER(title) LIKE '%machine learning%'
+               OR LOWER(title) LIKE '%ml engineer%'
+               OR LOWER(title) LIKE '%ai engineer%'
+               OR LOWER(title) LIKE '%artificial intelligence%'
+               OR LOWER(title) LIKE '%llm%'
+               OR LOWER(title) LIKE '%genai%'
+               OR LOWER(title) LIKE '%generative ai%'
+               OR LOWER(title) LIKE '%project manager%'
+               OR LOWER(title) LIKE '%program manager%'
+               OR LOWER(title) LIKE '%product manager%'
+               OR LOWER(title) LIKE '%project coordinator%'
+               OR LOWER(title) LIKE '%scrum master%'
+               OR LOWER(title) LIKE '%pmo%'
+          );
+
+        INSERT OR IGNORE INTO job_role_map
+          (job_id, role_key, role_family, domain, confidence, matched_by)
+        SELECT job_id, 'data', 'data', 'data', 0.95, 'ml_ai_repair'
+        FROM scraped_jobs
+        WHERE LOWER(title) LIKE '%machine learning%'
+           OR LOWER(title) LIKE '%ml engineer%'
+           OR LOWER(title) LIKE '%ai engineer%'
+           OR LOWER(title) LIKE '%artificial intelligence%'
+           OR LOWER(title) LIKE '%llm%'
+           OR LOWER(title) LIKE '%genai%'
+           OR LOWER(title) LIKE '%generative ai%';
+
+        INSERT OR IGNORE INTO job_role_map
+          (job_id, role_key, role_family, domain, confidence, matched_by)
+        SELECT job_id, 'pm', 'pm', 'pm_general', 0.95, 'pm_repair'
+        FROM scraped_jobs
+        WHERE LOWER(title) LIKE '%project manager%'
+           OR LOWER(title) LIKE '%program manager%'
+           OR LOWER(title) LIKE '%product manager%'
+           OR LOWER(title) LIKE '%project coordinator%'
+           OR LOWER(title) LIKE '%scrum master%'
+           OR LOWER(title) LIKE '%pmo%';
+      `,
+    },
+    {
+      id: "039_resume_version_tool_artifacts",
+      sql: `
+        ALTER TABLE resume_versions ADD COLUMN tool_type TEXT NOT NULL DEFAULT 'generate';
+        ALTER TABLE resume_versions ADD COLUMN is_kept INTEGER NOT NULL DEFAULT 0;
+        UPDATE resume_versions
+        SET tool_type = CASE
+          WHEN EXISTS (
+            SELECT 1 FROM resumes r
+            WHERE r.user_id = resume_versions.user_id
+              AND r.job_id = resume_versions.job_id
+              AND r.apply_mode = 'CUSTOM_SAMPLER'
+          ) THEN 'a_plus_resume'
+          ELSE 'generate'
+        END
+        WHERE tool_type IS NULL OR tool_type = '';
+      `,
+    },
+    {
+      id: "040_tab_scoped_auth_contexts",
+      sql: `
+        CREATE TABLE IF NOT EXISTS auth_contexts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          token_hash TEXT NOT NULL UNIQUE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          expires_at INTEGER NOT NULL,
+          revoked_at INTEGER,
+          user_agent TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_auth_contexts_user
+          ON auth_contexts(user_id, revoked_at, expires_at);
+        CREATE INDEX IF NOT EXISTS idx_auth_contexts_expiry
+          ON auth_contexts(expires_at, revoked_at);
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -2274,6 +2357,64 @@ passport.deserializeUser((id, done) => {
        : done(new Error("User not found"));
 });
 
+function hydrateAuthUser(id) {
+  const user = db.prepare("SELECT id,username,is_admin,apply_mode,plan_tier,domain_profile_complete FROM users WHERE id=?").get(id);
+  if (!user) return null;
+  return {
+    id:user.id,
+    username:user.username,
+    isAdmin:!!user.is_admin,
+    applyMode:user.apply_mode,
+    planTier:normalisePlanTier(user.plan_tier),
+    domainProfileComplete:!!user.domain_profile_complete,
+  };
+}
+
+function authContextHash(token) {
+  return crypto.createHash("sha256").update(String(token || ""), "utf8").digest("hex");
+}
+
+function issueAuthContext(userId, req) {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare("DELETE FROM auth_contexts WHERE expires_at <= ? OR revoked_at IS NOT NULL").run(now - 86400);
+  db.prepare(`
+    INSERT INTO auth_contexts (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(authContextHash(token), userId, now, now, now + 7 * 24 * 60 * 60, req.get("user-agent") || null);
+  return token;
+}
+
+function getRequestAuthContextToken(req) {
+  const header = req.get("x-rm-auth-context");
+  return header || req.query?.authContext || null;
+}
+
+function bindAuthContext(req, _res, next) {
+  const token = getRequestAuthContextToken(req);
+  if (!token) return next();
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const row = db.prepare(`
+      SELECT ac.user_id
+      FROM auth_contexts ac
+      WHERE ac.token_hash = ?
+        AND ac.revoked_at IS NULL
+        AND ac.expires_at > ?
+      LIMIT 1
+    `).get(authContextHash(token), now);
+    if (!row) return next();
+    const user = hydrateAuthUser(row.user_id);
+    if (!user) return next();
+    req.user = user;
+    req.authContextToken = token;
+    db.prepare("UPDATE auth_contexts SET last_seen_at=? WHERE token_hash=?").run(now, authContextHash(token));
+  } catch(e) {
+    console.warn("[auth-context] bind failed:", e.message);
+  }
+  next();
+}
+
 function requireAuth(req, res, next)  { if (req.isAuthenticated()) return next(); res.status(401).json({ error:"Unauthorized." }); }
 function requireAdmin(req, res, next) { if (req.isAuthenticated()&&req.user.isAdmin) return next(); res.status(403).json({ error:"Forbidden." }); }
 
@@ -2357,7 +2498,7 @@ function roleKeyForProfile(profile) {
 }
 
 function roleTitleSql(column, roleKey) {
-  if (roleKey === "engineering") return `(
+  if (roleKey === "engineering") return `((
     LOWER(${column}) LIKE '%engineer%'
     OR LOWER(${column}) LIKE '%developer%'
     OR LOWER(${column}) LIKE '%software%'
@@ -2374,6 +2515,20 @@ function roleTitleSql(column, roleKey) {
     OR LOWER(${column}) LIKE '%cloud%'
     OR LOWER(${column}) LIKE '%systems%'
     OR LOWER(${column}) LIKE '%security%'
+  )
+    AND LOWER(${column}) NOT LIKE '%machine learning%'
+    AND LOWER(${column}) NOT LIKE '%ml engineer%'
+    AND LOWER(${column}) NOT LIKE '%ai engineer%'
+    AND LOWER(${column}) NOT LIKE '%artificial intelligence%'
+    AND LOWER(${column}) NOT LIKE '%llm%'
+    AND LOWER(${column}) NOT LIKE '%genai%'
+    AND LOWER(${column}) NOT LIKE '%generative ai%'
+    AND LOWER(${column}) NOT LIKE '%project manager%'
+    AND LOWER(${column}) NOT LIKE '%program manager%'
+    AND LOWER(${column}) NOT LIKE '%product manager%'
+    AND LOWER(${column}) NOT LIKE '%project coordinator%'
+    AND LOWER(${column}) NOT LIKE '%scrum master%'
+    AND LOWER(${column}) NOT LIKE '%pmo%'
   )`;
   if (roleKey === "pm") return `(
     LOWER(${column}) LIKE '%project%'
@@ -2486,6 +2641,7 @@ app.use(session({
 }));
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(bindAuthContext);
 
 const CLIENT_DIST = path.join(__dirname,"client","dist");
 if (fs.existsSync(CLIENT_DIST)) app.use(express.static(CLIENT_DIST));
@@ -2497,7 +2653,7 @@ app.post("/api/auth/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     if (err)   return next(err);
     if (!user) return res.status(401).json({ error:info?.message||"Invalid credentials." });
-    req.logIn(user, e => e ? next(e) : res.json({ ok:true, user:publicUser(user) }));
+    req.logIn(user, e => e ? next(e) : res.json({ ok:true, user:publicUser(user), authContext:issueAuthContext(user.id, req) }));
   })(req, res, next);
 });
 
@@ -2548,7 +2704,7 @@ app.post("/api/auth/register", (req, res) => {
     const sessionUser = { id:newUser.id, username, isAdmin:false, applyMode:"SIMPLE", planTier:"BASIC", domainProfileComplete:false };
     req.logIn(sessionUser, e => {
       if (e) return res.status(500).json({ error:"Account created but login failed. Please sign in." });
-      res.json({ ok:true, user:publicUser(sessionUser) });
+      res.json({ ok:true, user:publicUser(sessionUser), authContext:issueAuthContext(newUser.id, req) });
     });
   } catch(e) {
     res.status(400).json({ error:e.message.includes("UNIQUE")?"Username already taken.":e.message });
@@ -2616,7 +2772,15 @@ app.post("/api/auth/password-reset/confirm", (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/auth/logout", (req, res) => req.logout(() => res.json({ ok:true })));
+app.post("/api/auth/logout", (req, res) => {
+  const token = getRequestAuthContextToken(req);
+  if (token) {
+    db.prepare("UPDATE auth_contexts SET revoked_at=unixepoch() WHERE token_hash=?")
+      .run(authContextHash(token));
+    return res.json({ ok:true, scoped:true });
+  }
+  req.logout(() => res.json({ ok:true }));
+});
 
 app.get("/api/auth/me", (req, res) =>
   req.isAuthenticated()
@@ -3998,6 +4162,8 @@ app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) 
 // ═══════════════════════════════════════════════════════════════
 // GENERATE
 // ═══════════════════════════════════════════════════════════════
+const generationInFlight = new Set();
+
 app.post("/api/generate", requireAuth, async (req, res) => {
   const { jobId, job, resumeText, forceRegen } = req.body;
   // Strip excluded companies from employer list before any processing
@@ -4019,9 +4185,16 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   }
 
   const existing = db.prepare("SELECT * FROM resumes WHERE user_id=? AND job_id=?").get(req.user.id, String(jobId));
+  const existingVersion = db.prepare(`
+    SELECT * FROM resume_versions
+    WHERE user_id=? AND job_id=? AND tool_type=?
+    ORDER BY version DESC, created_at DESC
+    LIMIT 1
+  `).get(req.user.id, String(jobId), tool);
+  const cachedArtifact = existingVersion || (existing?.apply_mode === mode ? existing : null);
 
   // Limit check only applies to new generation (not cache hits)
-  if (!existing || forceRegen) {
+  if (!cachedArtifact || forceRegen) {
     const limitCheck = checkLimit(db, req.user.id, "resume_generate");
     if (!limitCheck.allowed) {
       return res.status(429).json({
@@ -4030,9 +4203,9 @@ app.post("/api/generate", requireAuth, async (req, res) => {
       });
     }
   }
-  if (existing && !forceRegen) {
+  if (cachedArtifact && !forceRegen) {
     try {
-      const cachedResumeText = existing.html
+      const cachedResumeText = cachedArtifact.html
         .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
         .replace(/<[^>]+>/g, " ")
         .replace(/\s+/g, " ")
@@ -4057,13 +4230,17 @@ ${cachedResumeText}`;
       });
       const rawFresh = freshScore.content.map(b=>b.text||"").join("")
         .replace(/```json|```/g,"").trim();
-      let freshReport = null, freshScoreVal = existing.ats_score;
+      let freshReport = null, freshScoreVal = cachedArtifact.ats_score;
       try {
         freshReport   = JSON.parse(rawFresh);
         freshScoreVal = freshReport.score;
         db.prepare(
           "UPDATE resumes SET ats_score=?,ats_report=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?"
         ).run(freshScoreVal, JSON.stringify(freshReport), req.user.id, String(jobId));
+        if (existingVersion) {
+          db.prepare("UPDATE resume_versions SET ats_score=?,ats_report=? WHERE id=?")
+            .run(freshScoreVal, JSON.stringify(freshReport), existingVersion.id);
+        }
       } catch {}
       trackApiCall(db, {
         userId: req.user.id, eventType: "ats_score", eventSubtype: mode,
@@ -4072,17 +4249,23 @@ ${cachedResumeText}`;
         atsScoreAfter: freshScoreVal,
       });
       return res.json({
-        html:existing.html,
+        html:cachedArtifact.html,
         atsScore:freshScoreVal,
-        atsReport:freshReport || JSON.parse(existing.ats_report||"null"),
+        atsReport:freshReport || JSON.parse(cachedArtifact.ats_report||"null"),
         cached:true,
+        tool,
+        toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate",
+        version: cachedArtifact.version || existingVersion?.version || null,
       });
     } catch {
       return res.json({
-        html:existing.html,
-        atsScore:existing.ats_score,
-        atsReport:JSON.parse(existing.ats_report||"null"),
+        html:cachedArtifact.html,
+        atsScore:cachedArtifact.ats_score,
+        atsReport:JSON.parse(cachedArtifact.ats_report||"null"),
         cached:true,
+        tool,
+        toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate",
+        version: cachedArtifact.version || existingVersion?.version || null,
       });
     }
   }
@@ -4099,6 +4282,11 @@ ${cachedResumeText}`;
   const activeDomainProfile = db.prepare(
     "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
   ).get(req.user.id);
+  const inFlightKey = `${req.user.id}:${String(jobId)}:${tool}`;
+  if (generationInFlight.has(inFlightKey)) {
+    return res.status(409).json({ error:"Resume generation already in progress for this job and tool.", inFlight:true, tool });
+  }
+  generationInFlight.add(inFlightKey);
 
   try {
     // New layered prompt flow
@@ -4262,16 +4450,19 @@ ${resumeStripped}`;
       atsScoreAfter: atsScore,
     });
 
-    const version = existing
-      ? (db.prepare("SELECT MAX(version) as v FROM resume_versions WHERE user_id=? AND job_id=?").get(req.user.id,String(jobId))?.v||0)+1
-      : 1;
-    db.prepare("INSERT INTO resume_versions (user_id,job_id,company,role,category,html,ats_score,ats_report,version) VALUES (?,?,?,?,?,?,?,?,?)")
-      .run(req.user.id,String(jobId),job.company,job.title,job.category,formattedHtml,atsScore,JSON.stringify(atsReport),version);
-    db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
-      ON CONFLICT(user_id,job_id) DO UPDATE SET html=excluded.html,role=excluded.role,category=excluded.category,
-      apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,updated_at=excluded.updated_at`)
-      .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,formattedHtml,atsScore,JSON.stringify(atsReport));
+    const version = (db.prepare("SELECT MAX(version) as v FROM resume_versions WHERE user_id=? AND job_id=?")
+      .get(req.user.id,String(jobId))?.v || 0) + 1;
+    const keptExists = !!db.prepare("SELECT 1 FROM resume_versions WHERE user_id=? AND job_id=? AND is_kept=1 LIMIT 1")
+      .get(req.user.id, String(jobId));
+    db.prepare("INSERT INTO resume_versions (user_id,job_id,company,role,category,html,ats_score,ats_report,tool_type,is_kept,version) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+      .run(req.user.id,String(jobId),job.company,job.title,job.category,formattedHtml,atsScore,JSON.stringify(atsReport),tool,0,version);
+    if (!keptExists) {
+      db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
+        ON CONFLICT(user_id,job_id) DO UPDATE SET html=excluded.html,role=excluded.role,category=excluded.category,
+        apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,updated_at=excluded.updated_at`)
+        .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,formattedHtml,atsScore,JSON.stringify(atsReport));
+    }
 
     // Phase 1C: mark resume_generated in user_jobs
     const userJobProfileId = resolveUserJobDomainProfileId(req.user.id, String(jobId));
@@ -4288,19 +4479,50 @@ ${resumeStripped}`;
     insertNotification(req.user.id, "resume_generated",
       `Resume ready for ${job.company}${atsScore != null ? ` (ATS: ${atsScore})` : ""}`,
       { jobId: String(jobId), company: job.company, atsScore });
-    res.json({ html: formattedHtml, atsScore, atsReport, cached:false, version });
+    res.json({ html: formattedHtml, atsScore, atsReport, cached:false, version, tool, toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate" });
   } catch(e) { res.status(500).json({ error:e.message }); }
+  finally { generationInFlight.delete(inFlightKey); }
 });
 
 // ═══════════════════════════════════════════════════════════════
 // SANDBOX + PDF
 // ═══════════════════════════════════════════════════════════════
 app.post("/api/resumes/:jobId/html", requireAuth, (req, res) => {
-  const { html } = req.body;
+  const { html, tool, version } = req.body;
   if (!html) return res.status(400).json({ error:"html required" });
   db.prepare("UPDATE resumes SET html=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?")
     .run(html, req.user.id, req.params.jobId);
+  if (tool || version) {
+    db.prepare(`
+      UPDATE resume_versions SET html=?
+      WHERE user_id=? AND job_id=?
+        AND (? IS NULL OR tool_type=?)
+        AND (? IS NULL OR version=?)
+    `).run(html, req.user.id, req.params.jobId, tool || null, tool || null, version || null, version || null);
+  }
   res.json({ ok:true });
+});
+app.post("/api/resumes/:jobId/keep", requireAuth, (req, res) => {
+  const tool = req.body?.tool === "a_plus_resume" ? "a_plus_resume" : "generate";
+  const version = Number.isFinite(Number(req.body?.version)) ? Number(req.body.version) : null;
+  const row = db.prepare(`
+    SELECT * FROM resume_versions
+    WHERE user_id=? AND job_id=? AND tool_type=?
+      AND (? IS NULL OR version=?)
+    ORDER BY version DESC, created_at DESC
+    LIMIT 1
+  `).get(req.user.id, req.params.jobId, tool, version, version);
+  if (!row) return res.status(404).json({ error:"Resume artifact not found" });
+  const mode = tool === "a_plus_resume" ? "CUSTOM_SAMPLER" : "TAILORED";
+  db.prepare("UPDATE resume_versions SET is_kept=0 WHERE user_id=? AND job_id=?")
+    .run(req.user.id, req.params.jobId);
+  db.prepare("UPDATE resume_versions SET is_kept=1 WHERE id=?").run(row.id);
+  db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
+    ON CONFLICT(user_id,job_id) DO UPDATE SET company=excluded.company,role=excluded.role,category=excluded.category,
+    apply_mode=excluded.apply_mode,html=excluded.html,ats_score=excluded.ats_score,ats_report=excluded.ats_report,updated_at=excluded.updated_at`)
+    .run(req.user.id, req.params.jobId, row.company, row.role, row.category, mode, row.html, row.ats_score, row.ats_report);
+  res.json({ ok:true, tool, version: row.version, applyMode: mode });
 });
 app.post("/api/export-pdf", requireAuth, (_req, res) => {
   res.status(503).json({ error: "Server-side PDF export is not available. Use client-side print instead.", useClientSide: true });

@@ -38,17 +38,18 @@ function CompanyIcon({ company, iconUrl, size = 44 }) {
   );
 }
 
-function ActionBtn({ onClick, title, children, accent = "#0284c7", theme, active }) {
+function ActionBtn({ onClick, title, children, accent = "#0284c7", theme, active, disabled = false }) {
   const [hov, setHov] = useState(false);
   return (
-    <button title={title} onClick={onClick}
+    <button title={title} onClick={disabled ? undefined : onClick} disabled={disabled}
       onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{
         display:"flex", alignItems:"center", gap:5,
         padding:"6px 12px", borderRadius:4, border:`1px solid ${active || hov ? accent : theme.border}`,
         background: active ? accent+"22" : hov ? accent+"11" : "transparent",
         color: active || hov ? accent : theme.textMuted,
-        cursor:"pointer", fontSize:11, fontWeight:600,
+        cursor: disabled ? "not-allowed" : "pointer", fontSize:11, fontWeight:600,
+        opacity: disabled ? 0.55 : 1,
         transition:"all 0.15s", flexShrink:0,
       }}>
       {children}
@@ -119,6 +120,8 @@ export default function JobDetailPanel({
       ? (job.maxYearsExp != null ? `${job.minYearsExp}–${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
       : null;
   const atsScore = g?.atsScore;
+  const generateLoading = st === "generate";
+  const aPlusLoading = st === "a_plus_resume";
   const atsBg = atsScore >= 80 ? "#dcfce7" : atsScore >= 60 ? "#fef9c3" : "#fee2e2";
   const atsFg = atsScore >= 80 ? "#166534" : atsScore >= 60 ? "#854d0e" : "#991b1b";
 
@@ -181,14 +184,14 @@ export default function JobDetailPanel({
       }}>
         {canUseGenerate && onGenerate && (
           <ActionBtn onClick={() => onGenerate(done && g?.html !== "__exists__")}
-            title={done ? "Regenerate resume" : "Generate resume"} accent={theme.accent} theme={theme}>
-            {st ? "⏳" : done ? "↻ Regen" : "✦ Generate"}
+            title={done ? "Regenerate resume" : "Generate resume"} accent={theme.accent} theme={theme} disabled={!!st}>
+            {generateLoading ? "⏳ Generating" : done ? "↻ Regen" : "✦ Generate"}
           </ActionBtn>
         )}
         {canUseAPlusResume && onAPlusResume && (
           <ActionBtn onClick={() => onAPlusResume(done && g?.html !== "__exists__")}
-            title={done ? "Rebuild A+ Resume" : "A+ Resume"} accent="#16a34a" theme={theme}>
-            A+ Resume
+            title={done ? "Rebuild A+ Resume" : "A+ Resume"} accent="#16a34a" theme={theme} disabled={!!st}>
+            {aPlusLoading ? "⏳ Building A+" : "A+ Resume"}
           </ActionBtn>
         )}
         {done && g?.html !== "__exists__" && (

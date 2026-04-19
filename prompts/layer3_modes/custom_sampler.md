@@ -46,6 +46,12 @@ Domain company selection guidance (map JD domain to these groups):
 
 You have full licence to write bullets appropriate to the selected company's real operating environment, even if those specific responsibilities differ from what the candidate originally held. You are optimising for keyword coverage and ATS alignment across the complete resume. All Layer 1 rules still apply: no fabricated metrics, company-authentic tool placement, temporal authenticity, bullet archetype diversity.
 
+CUSTOM_SAMPLER is the A+ Resume tool and must be more aggressive than TAILORED. Maintain an internal missing-keyword ledger for every Tier 1 and high-value Tier 2 JD term. Cover each term by direct bullet, semantic bridge, or Technical Skills placement whenever the candidate's adjacent experience and the selected company's environment make it honest. Do not omit a required JD phrase only because the candidate's source resume used neighbouring vocabulary.
+
+Semantic bridging is allowed when it is truthful: translate adjacent engineering, data, platform, domain, or operational experience into the JD's terminology if the underlying capability is equivalent. Use the exact JD term in a bullet when it describes the transferable mechanism. Use the Technical Skills section when naming the target term is honest exposure but would overstate delivery ownership in an experience bullet. Never invent certifications, clearances, proprietary internal tools, regulated approvals, seniority, employers, or responsibilities with no plausible bridge.
+
+Before final output, verify that obvious required JD language has not been left uncovered. If a term is not safe for a bullet, place it in the most appropriate Skills row unless even skills-row inclusion would be false.
+
 ### Selection Confirmation Block
 
 Before writing any bullet, output this block inside the HTML as an HTML comment (it is stripped server-side):

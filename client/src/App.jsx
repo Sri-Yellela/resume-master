@@ -1,7 +1,7 @@
 // REVAMP v1 — App.jsx
 import { useState, useEffect, useCallback } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { api }                   from "./lib/api.js";
+import { api, setAuthContext }   from "./lib/api.js";
 import { useTheme }              from "./styles/theme.jsx";
 import { useViewport }           from "./hooks/useViewport.js";
 import { useInactivityLogout }   from "./hooks/useInactivityLogout.js";
@@ -100,6 +100,7 @@ function AppDashboard({ authUser, setAuthUser }) {
 
   const handleLogout = useCallback(async () => {
     try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+    setAuthContext("");
     setAuthUser(null);
   }, [setAuthUser]);
 
@@ -196,6 +197,7 @@ function AppRouter() {
 
   const handleAdminLogout = useCallback(async () => {
     try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+    setAuthContext("");
     setAuthUser(null);
   }, []);
 

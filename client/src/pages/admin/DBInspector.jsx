@@ -1,6 +1,6 @@
 // client/src/pages/admin/DBInspector.jsx — Admin DB diagnostic tool
 import { useState, useEffect, useRef, useCallback } from "react";
-import { api } from "../../lib/api.js";
+import { api, authHeaders } from "../../lib/api.js";
 import { useTheme } from "../../styles/theme.jsx";
 
 const ACCENT = "#F5E642";
@@ -9,6 +9,7 @@ const TABS = [
   { id: "schema",   label: "Schema Explorer" },
   { id: "tables",   label: "Table Browser" },
   { id: "pool",     label: "User Pool" },
+  { id: "review",   label: "Job Review" },
   { id: "trace",    label: "Job Trace" },
   { id: "simulate", label: "Query Simulator" },
 ];
@@ -484,7 +485,7 @@ function SchemaExplorerTab({ theme }) {
   const fkCols = new Set((selected?.foreignKeys || []).map(fk => fk.from));
 
   const fetchSchemaExport = async () => {
-    const res = await fetch("/api/admin/db/schema/export", { credentials:"include" });
+    const res = await fetch("/api/admin/db/schema/export", { credentials:"include", headers:authHeaders() });
     return res.json();
   };
 
@@ -1565,6 +1566,140 @@ function TableBrowserTab({ theme }) {
   );
 }
 
+function JobReviewTab({ theme }) {
+  const [data, setData] = useState({ jobs: [], profiles: [] });
+  const [query, setQuery] = useState("");
+  const [roleKey, setRoleKey] = useState("");
+  const [saving, setSaving] = useState(null);
+  const [error, setError] = useState(null);
+  const [status, setStatus] = useState("");
+
+  const load = useCallback(() => {
+    const params = new URLSearchParams({ limit: "100" });
+    if (query.trim()) params.set("q", query.trim());
+    if (roleKey) params.set("roleKey", roleKey);
+    setError(null);
+    api(`/api/admin/db/job-review?${params.toString()}`)
+      .then(setData)
+      .catch(e => setError(e.message));
+  }, [query, roleKey]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const reassign = async (job, nextRoleKey, profileId = "") => {
+    setSaving(job.job_id); setStatus("");
+    try {
+      await api("/api/admin/db/job-review/reassign", {
+        method: "POST",
+        body: JSON.stringify({
+          jobId: job.job_id,
+          roleKey: nextRoleKey,
+          domainProfileId: profileId || null,
+        }),
+      });
+      setStatus(`Updated ${job.title}`);
+      load();
+    } catch(e) {
+      setError(e.message);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const roleOptions = ["", "engineering", "data", "pm", "finance", "hr", "design", "operations", "marketing", "general", "unclassified"];
+  const profilesByRole = () => data.profiles || [];
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+        <input value={query} onChange={e => setQuery(e.target.value)}
+          placeholder="Search title, company, query"
+          style={{ padding:"7px 10px", borderRadius:6, border:`1px solid ${theme.border}`,
+                   background:theme.surface, color:theme.text, minWidth:240 }}/>
+        <select value={roleKey} onChange={e => setRoleKey(e.target.value)}
+          style={{ padding:"7px 10px", borderRadius:6, border:`1px solid ${theme.border}`,
+                   background:theme.surface, color:theme.text }}>
+          {roleOptions.map(r => <option key={r || "all"} value={r}>{r || "all roles"}</option>)}
+        </select>
+        <button onClick={load}
+          style={{ background:ACCENT, color:"#0f0f0f", border:"none", borderRadius:6,
+                   padding:"7px 14px", fontWeight:800, cursor:"pointer" }}>
+          Refresh
+        </button>
+        {status && <span style={{ fontSize:12, color:theme.textMuted }}>{status}</span>}
+      </div>
+      <ErrBox msg={error} theme={theme}/>
+      <div style={{ border:`1px solid ${theme.border}`, borderRadius:10, overflow:"auto" }}>
+        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+          <thead>
+            <tr style={{ background:theme.surfaceHigh }}>
+              {["Job", "Current", "Suggested", "Assign", "Profile", ""].map(h => (
+                <th key={h} style={{ padding:"8px 10px", textAlign:"left", color:theme.textMuted,
+                                      borderBottom:`1px solid ${theme.border}` }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(data.jobs || []).map(job => {
+              const currentRole = (job.role_keys || []).join(", ") || "unclassified";
+              const selectedId = job.domain_profile_id || "";
+              return (
+                <tr key={job.job_id} style={{ borderBottom:`1px solid ${theme.border}` }}>
+                  <td style={{ padding:"8px 10px", color:theme.text, minWidth:260 }}>
+                    <div style={{ fontWeight:800 }}>{job.title}</div>
+                    <div style={{ color:theme.textMuted }}>{job.company} - {job.search_query || "no query"}</div>
+                  </td>
+                  <td style={{ padding:"8px 10px" }}>
+                    <Pill color={currentRole === "unclassified" ? "#dc2626" : ACCENT}>{currentRole}</Pill>
+                    {job.profile_name && <div style={{ marginTop:4, color:theme.textMuted }}>{job.profile_name}</div>}
+                  </td>
+                  <td style={{ padding:"8px 10px" }}>
+                    <Pill color={job.suggestedRoleKey === "data" ? "#16a34a" : "#0ea5e9"}>{job.suggestedRoleKey}</Pill>
+                  </td>
+                  <td style={{ padding:"8px 10px" }}>
+                    <select defaultValue={job.suggestedRoleKey}
+                      onChange={e => { job._nextRoleKey = e.target.value; }}
+                      style={{ padding:"5px 8px", borderRadius:6, border:`1px solid ${theme.border}`,
+                               background:theme.surface, color:theme.text }}>
+                      {roleOptions.filter(Boolean).map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding:"8px 10px" }}>
+                    <select defaultValue={selectedId}
+                      onChange={e => { job._nextProfileId = e.target.value; }}
+                      style={{ padding:"5px 8px", borderRadius:6, border:`1px solid ${theme.border}`,
+                               background:theme.surface, color:theme.text, maxWidth:220 }}>
+                      <option value="">No specific profile</option>
+                      {profilesByRole().map(p => (
+                        <option key={p.id} value={p.id}>{p.profile_name}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={{ padding:"8px 10px", whiteSpace:"nowrap" }}>
+                    <button disabled={saving === job.job_id}
+                      onClick={() => reassign(job, job._nextRoleKey || job.suggestedRoleKey, job._nextProfileId ?? selectedId)}
+                      style={{ background:ACCENT, color:"#0f0f0f", border:"none", borderRadius:6,
+                               padding:"5px 10px", fontWeight:800, cursor:"pointer", opacity:saving === job.job_id ? 0.5 : 1 }}>
+                      Save
+                    </button>
+                    <button disabled={saving === job.job_id}
+                      onClick={() => reassign(job, "unclassified", "")}
+                      style={{ marginLeft:6, background:"transparent", color:"#dc2626",
+                               border:"1px solid #dc262666", borderRadius:6,
+                               padding:"5px 10px", fontWeight:800, cursor:"pointer" }}>
+                      Hide
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function DBInspector() {
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState("scrape");
@@ -1651,6 +1786,7 @@ export default function DBInspector() {
         {activeTab === "schema" && <SchemaExplorerTab theme={theme}/>}
         {activeTab === "tables" && <TableBrowserTab theme={theme}/>}
         {activeTab === "pool" && <UserPoolTab theme={theme}/>}
+        {activeTab === "review" && <JobReviewTab theme={theme}/>}
         {activeTab === "trace" && <JobTraceTab theme={theme} initialJobId={traceJobId}/>}
         {activeTab === "simulate" && <QuerySimulatorTab theme={theme}/>}
       </div>

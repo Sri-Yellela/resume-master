@@ -1,15 +1,54 @@
 // client/src/lib/api.js
 
+const AUTH_CONTEXT_KEY = "rm_auth_context";
+
+export function getAuthContext() {
+  try { return sessionStorage.getItem(AUTH_CONTEXT_KEY) || ""; }
+  catch { return ""; }
+}
+
+export function setAuthContext(token) {
+  try {
+    if (token) sessionStorage.setItem(AUTH_CONTEXT_KEY, token);
+    else sessionStorage.removeItem(AUTH_CONTEXT_KEY);
+  } catch {}
+}
+
+export function authHeaders(headers = {}) {
+  const token = getAuthContext();
+  return token ? { "X-RM-Auth-Context": token, ...headers } : headers;
+}
+
+export function authContextQuery() {
+  const token = getAuthContext();
+  return token ? `authContext=${encodeURIComponent(token)}` : "";
+}
+
 export async function api(path, opts = {}) {
+  const bodyIsForm = typeof FormData !== "undefined" && opts.body instanceof FormData;
+  const headers = authHeaders({
+    ...(bodyIsForm ? {} : { "Content-Type": "application/json" }),
+    ...(opts.headers || {}),
+  });
   const r = await fetch(path, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     ...opts,
+    headers,
   });
-  if (r.status === 401) throw Object.assign(new Error("Unauthorized"), { status: 401 });
+  if (r.status === 401) throw Object.assign(new Error("Session expired. Sign in again."), { status: 401 });
+  if (r.status === 429) {
+    const payload = await r.json().catch(() => ({}));
+    throw Object.assign(new Error(payload.error || "Too many requests. Try again shortly."), { status: 429, payload });
+  }
+  if (r.status >= 500) {
+    const payload = await r.json().catch(() => ({}));
+    throw Object.assign(new Error(payload.error || "Service temporarily unavailable. Try again shortly."), { status: r.status, payload });
+  }
   const ct = r.headers.get("content-type") || "";
   if (ct.includes("application/pdf") || ct.includes("spreadsheetml") || ct.includes("octet-stream")) return r;
-  return r.json();
+  const payload = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(payload.error || `Request failed (${r.status})`), { status: r.status, payload });
+  return payload;
 }
 
 export async function downloadBlob(blob, filename) {

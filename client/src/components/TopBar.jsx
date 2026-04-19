@@ -257,7 +257,7 @@ function QuickActions({ theme, onTabChange }) {
   );
 }
 
-function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget, profiles, onActivateProfile }) {
+function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget, profiles, onActivateProfile, onDeleteProfile }) {
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
   const [tokenInput,  setTokenInput]  = useState("");
@@ -341,7 +341,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {profiles.map(p => (
-                  <button key={p.id}
+                  <div key={p.id}
                     onClick={() => { onActivateProfile?.(p.id); setOpen(false); }}
                     onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}
@@ -359,7 +359,19 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                     {p.is_active && (
                       <span style={{ fontSize: 10, color: theme.accent, fontWeight: 700 }}>✓</span>
                     )}
-                  </button>
+                    {profiles.length > 1 && (
+                      <button
+                        title="Delete profile"
+                        onClick={(e) => { e.stopPropagation(); onDeleteProfile?.(p.id); }}
+                        style={{
+                          border: "none", background: "transparent",
+                          color: theme.danger || "#dc2626", cursor: "pointer",
+                          fontSize: 13, fontWeight: 800, padding: "0 2px",
+                        }}>
+                        x
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -590,6 +602,21 @@ export default function TopBar({
     } catch {}
   };
 
+  const deleteProfile = async (id) => {
+    const profile = profiles.find(p => p.id === id);
+    if (!profile) return;
+    if (profiles.length <= 1) return;
+    if (!confirm(`Delete job profile "${profile.profile_name}"?`)) return;
+    try {
+      await api(`/api/domain-profiles/${id}`, { method: "DELETE" });
+      const next = await api("/api/domain-profiles");
+      setProfiles(Array.isArray(next) ? next : []);
+      onProfileActivate?.();
+    } catch(e) {
+      alert(e.message || "Could not delete profile");
+    }
+  };
+
   // ── Geometry interpolation ──
   const [ar, ag, ab] = hexToRgb(theme.accent);
 
@@ -663,6 +690,7 @@ export default function TopBar({
               resumeWidget={resumeWidget}
               profiles={profiles}
               onActivateProfile={activateProfile}
+              onDeleteProfile={deleteProfile}
             />
           )}
         </div>

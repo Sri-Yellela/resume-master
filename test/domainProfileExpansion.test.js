@@ -46,6 +46,13 @@ test("role aliases cover low-level and debug-oriented engineering searches", () 
   assert.ok(firmwareQueries.includes("Firmware Developer"));
 });
 
+test("ML and AI aliases map to Data instead of Engineering", () => {
+  for (const key of ["mle", "ml engineer", "ml", "ai engineer", "genai", "llm"]) {
+    assert.equal(aliases[key].roleFamily, "data");
+    assert.equal(aliases[key].domain, "data");
+  }
+});
+
 test("unsupported role request flow has backend storage and routes", () => {
   assert.match(serverSource, /CREATE TABLE IF NOT EXISTS domain_profile_requests/);
   assert.match(serverSource, /\/api\/admin\/domain-profile-requests/);

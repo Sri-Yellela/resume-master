@@ -174,6 +174,8 @@ export default function JobCard({
     : "linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(200,200,200,0.06) 100%)";
 
   const hasDesc    = !!(job.description || job.descriptionHtml);
+  const generateLoading = st === "generate";
+  const aPlusLoading = st === "a_plus_resume";
   const hasSalary  = job.salaryMin != null || job.salaryMax != null;
   const salaryStr  = hasSalary
     ? [job.salaryMin, job.salaryMax].filter(Boolean).map(v =>
@@ -434,14 +436,14 @@ export default function JobCard({
               <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
                 disabled={!!st} theme={theme}
                 onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
-                {st ? "⏳" : done ? "↻" : "✦"}
+                {generateLoading ? "⏳" : done ? "↻" : "✦"}
               </IconBtn>
             )}
             {canUseAPlusResume && onAPlusResume && showApplyButton && (
               <IconBtn bg="#16a34a" title={done ? "Rebuild A+ Resume" : "A+ Resume"}
                 disabled={!!st} theme={theme}
                 onClick={e => { e.stopPropagation(); onAPlusResume(done && g?.html !== "__exists__"); }}>
-                A+
+                {aPlusLoading ? "⏳" : "A+"}
               </IconBtn>
             )}
 
@@ -516,7 +518,7 @@ export default function JobCard({
                   style={{ border:"none", borderRadius:6, padding:"8px 12px",
                            background:theme.accent, color:"#0f0f0f", cursor:st ? "not-allowed" : "pointer",
                            fontSize:12, fontWeight:800 }}>
-                  {done ? "Regenerate" : "Generate"}
+                  {generateLoading ? "Generating..." : done ? "Regenerate" : "Generate"}
                 </button>
               )}
               {canUseAPlusResume && onAPlusResume && (
@@ -525,7 +527,7 @@ export default function JobCard({
                   style={{ border:"none", borderRadius:6, padding:"8px 12px",
                            background:"#16a34a", color:"#fff", cursor:st ? "not-allowed" : "pointer",
                            fontSize:12, fontWeight:800 }}>
-                  A+ Resume
+                  {aPlusLoading ? "Building A+..." : "A+ Resume"}
                 </button>
               )}
             </div>

@@ -25,13 +25,21 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const [exportError, setExportError] = useState("");
   const [dirty,       setDirty]       = useState(false);
   const [saveMsg,     setSaveMsg]     = useState("");
+  const [selectedTool, setSelectedTool] = useState(entry?.activeTool || entry?.tool || "generate");
+  const variants = entry?.variants || null;
+  const variantKeys = variants ? Object.keys(variants) : [];
+  const activeEntry = variants?.[selectedTool] || entry;
 
   const frameRef     = useRef(null);
   const containerRef = useRef(null);  // outer scroll container, observed by ResizeObserver
   const innerRef     = useRef(null);  // scale host — transform applied directly to DOM
   const scaleRef     = useRef(1);     // current scale value — never stored in state
 
-  useEffect(() => { setDirty(false); setExportError(""); }, [entry?.html]);
+  useEffect(() => {
+    setSelectedTool(entry?.activeTool || entry?.tool || "generate");
+    setDirty(false);
+    setExportError("");
+  }, [entry?.html, entry?.activeTool, entry?.tool]);
 
   // Apply scale directly to the DOM node — no state update, no re-render, no flicker.
   const applyScale = (s) => {
@@ -43,7 +51,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   };
 
   // Compute initial scale synchronously, then observe for changes.
-  // Dependency [entry?.html] ensures scale recalculates when new resume arrives.
+  // Dependency [activeEntry?.html] ensures scale recalculates when new resume arrives.
   useEffect(() => {
     // Compute initial scale immediately — avoids scale-1 flash before RO fires
     if (containerRef.current) {
@@ -58,18 +66,18 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     });
     if (containerRef.current) ro.observe(containerRef.current);
     return () => ro.disconnect();
-  }, [entry?.html]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeEntry?.html]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getCurrentHtml = () => {
-    if (!frameRef.current) return entry?.html || "";
+    if (!frameRef.current) return activeEntry?.html || "";
     const doc = frameRef.current.contentDocument;
-    return doc ? doc.documentElement.outerHTML : entry?.html || "";
+    return doc ? doc.documentElement.outerHTML : activeEntry?.html || "";
   };
 
   const save = async () => {
     const html = getCurrentHtml();
     try {
-      if (onSave) await onSave(html);
+      if (onSave) await onSave(html, activeEntry);
       setDirty(false);
       setSaveMsg("✓ Saved");
     } catch {
@@ -82,17 +90,17 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     const html = getCurrentHtml();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([html], { type:"text/html" }));
-    a.download = `Resume_${(entry?.company||"resume").replace(/\s+/g,"_")}.html`;
+    a.download = `Resume_${(activeEntry?.company||"resume").replace(/\s+/g,"_")}.html`;
     a.click();
   };
 
   const exportPdf = async () => {
-    if (!entry?.html || exporting) return;
+    if (!activeEntry?.html || exporting) return;
     setExporting(true);
     setExportError("");
     try {
       const html = getCurrentHtml();
-      await onExport?.(null, html, entry?.company);
+      await onExport?.(null, html, activeEntry?.company, activeEntry);
     } catch(e) {
       setExportError("PDF export failed: " + e.message);
     } finally { setExporting(false); }
@@ -124,12 +132,12 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
       `}</style>
 
       {/* Generating skeleton */}
-      {entry?.generating && (
+      {activeEntry?.generating && (
         <div style={{ flex:1, padding:"24px 20px", display:"flex", flexDirection:"column", gap:12 }}>
           <div style={{ fontSize:11, fontWeight:700, color:theme.accent,
                         display:"flex", alignItems:"center", gap:8 }}>
             <span style={{ display:"inline-block", animation:"spin 0.8s linear infinite" }}>↻</span>
-            {entry?.stage || "Generating…"}
+            {activeEntry?.stage || "Generating…"}
           </div>
           {[90,75,85,60,80,70,65,88,55,78].map((w,i) => (
             <div key={i} style={{
@@ -144,12 +152,12 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
       )}
 
       {/* Error state */}
-      {entry?.error && !entry?.generating && (
+      {activeEntry?.error && !activeEntry?.generating && (
         <div style={{ flex:1, padding:24, display:"flex", flexDirection:"column",
                       alignItems:"center", justifyContent:"center", gap:12, textAlign:"center" }}>
           <div style={{ fontSize:32 }}>⚠</div>
           <div style={{ fontSize:13, color:theme.text, fontWeight:700 }}>Generation failed</div>
-          <div style={{ fontSize:12, color:theme.textMuted }}>{entry.error}</div>
+          <div style={{ fontSize:12, color:theme.textMuted }}>{activeEntry.error}</div>
           <button onClick={onClose}
             style={{ marginTop:8, padding:"7px 20px", borderRadius:999,
                      background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
@@ -160,7 +168,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
       )}
 
       {/* Normal sandbox UI — only when not generating/errored */}
-      {!entry?.generating && !entry?.error && (
+      {!activeEntry?.generating && !activeEntry?.error && (
         <>
           {/* Toolbar */}
           <div style={{
@@ -172,16 +180,31 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
             {entry && (
               <span style={{ fontSize:11, color:theme.textMuted,
                              borderLeft:`1px solid ${theme.border}`, paddingLeft:10 }}>
-                {entry.company} — {entry.title}
+                {activeEntry.company} — {activeEntry.title}
               </span>
+            )}
+            {variantKeys.length > 1 && (
+              <div style={{ display:"flex", gap:4, borderLeft:`1px solid ${theme.border}`, paddingLeft:10 }}>
+                {variantKeys.map(tool => (
+                  <button key={tool} onClick={() => setSelectedTool(tool)}
+                    style={{
+                      ...btnStyle(),
+                      padding:"4px 8px",
+                      color:selectedTool === tool ? theme.accent : theme.textMuted,
+                      borderColor:selectedTool === tool ? theme.accent : theme.border,
+                    }}>
+                    {variants[tool]?.toolLabel || (tool === "a_plus_resume" ? "A+ Resume" : "Generate")}
+                  </button>
+                ))}
+              </div>
             )}
             {dirty && <span style={{ fontSize:10, color:theme.warning, fontWeight:700 }}>● unsaved</span>}
             {saveMsg && <span style={{ fontSize:10, fontWeight:700,
               color: saveMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>{saveMsg}</span>}
             <div style={{ flex:1 }}/>
-            <button style={btnStyle()} onClick={save} disabled={!entry?.html}>💾 Save{dirty?"*":""}</button>
-            <button style={btnStyle()} onClick={downloadHtml} disabled={!entry?.html}>⬇ HTML</button>
-            <button style={btnStyle()} onClick={exportPdf} disabled={!entry?.html||exporting}>
+            <button style={btnStyle()} onClick={save} disabled={!activeEntry?.html}>💾 Save{dirty?"*":""}</button>
+            <button style={btnStyle()} onClick={downloadHtml} disabled={!activeEntry?.html}>⬇ HTML</button>
+            <button style={btnStyle()} onClick={exportPdf} disabled={!activeEntry?.html||exporting}>
               {exporting ? "⏳ Exporting…" : "🖨 PDF"}
             </button>
             {exportError && (
@@ -191,7 +214,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
               style={{ ...btnStyle(), color:theme.danger, borderColor:theme.dangerMuted }}>✕</button>
           </div>
 
-          {!entry ? (
+          {!activeEntry ? (
             <div style={{ flex:1, display:"flex", flexDirection:"column",
                           alignItems:"center", justifyContent:"center", gap:12,
                           color:theme.textMuted }}>
@@ -229,7 +252,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
               >
                 <iframe
                   ref={frameRef}
-                  srcDoc={entry.html}
+                  srcDoc={activeEntry.html}
                   onLoad={handleFrameLoad}
                   style={{
                     width:    RESUME_PAGE_WIDTH  + "px",

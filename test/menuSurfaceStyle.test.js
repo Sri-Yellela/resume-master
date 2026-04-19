@@ -14,7 +14,6 @@ test("floating menus use near-opaque readable surfaces", () => {
   assert.match(theme, /--popover:\s+240 4% 11%/);
   assert.match(dockPortal, /theme\?\.menuSurface/);
   assert.match(scrollDock, /theme\.menuSurface \|\| theme\.surface/);
-  assert.match(jobsPanel, /theme\.menuSurface \|\| theme\.surface/);
   assert.match(jobsPanel, /theme\.modalSurface \|\| theme\.surface/);
 });
 
@@ -42,6 +41,18 @@ test("top-right account controls are consolidated into avatar menu", () => {
   assert.doesNotMatch(scrollDock, /<ProfileSwitcher|<DockSettingsPanel/);
   assert.match(scrollDock, /Job Profile/);
   assert.doesNotMatch(consoles, /Shared console|title="Jobs"|eyebrow=/);
+});
+
+test("jobs surface profile switcher is disabled and profile menu supports deletion", () => {
+  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+  const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+  const scrollDock = fs.readFileSync("client/src/components/ScrollDock.jsx", "utf8");
+
+  assert.doesNotMatch(jobsPanel, /Profile:/);
+  assert.doesNotMatch(jobsPanel, /Profile switcher bar/);
+  assert.match(topBar, /method: "DELETE"/);
+  assert.match(topBar, /Delete profile/);
+  assert.match(scrollDock, /method: "DELETE"/);
 });
 
 test("legacy light dark mode toggle is removed while bg themes remain", () => {
