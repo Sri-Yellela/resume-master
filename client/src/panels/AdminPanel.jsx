@@ -625,6 +625,7 @@ export function AdminPanel() {
   const { theme } = useTheme();
   const [users,    setUsers]    = useState([]);
   const [upgradeRequests, setUpgradeRequests] = useState([]);
+  const [profileRequests, setProfileRequests] = useState([]);
   const [backups,  setBackups]  = useState([]);
   const [newU,     setNewU]     = useState({ username:"", password:"", isAdmin:false });
   const [status,   setStatus]   = useState("");
@@ -635,11 +636,12 @@ export function AdminPanel() {
   // Top-level tab: "system" | "usage" | "users_analytics" | "cache"
   const [topTab, setTopTab] = useState("system");
 
-  useEffect(() => { loadUsers(); loadBackups(); loadUpgradeRequests(); }, []);
+  useEffect(() => { loadUsers(); loadBackups(); loadUpgradeRequests(); loadProfileRequests(); }, []);
 
   const loadUsers   = () => api("/api/admin/users").then(setUsers).catch(() => {});
   const loadBackups = () => api("/api/admin/backups").then(setBackups).catch(() => {});
   const loadUpgradeRequests = () => api("/api/admin/upgrade-requests").then(setUpgradeRequests).catch(() => {});
+  const loadProfileRequests = () => api("/api/admin/domain-profile-requests").then(setProfileRequests).catch(() => {});
 
   const createUser = async e => {
     e.preventDefault();
@@ -671,6 +673,14 @@ export function AdminPanel() {
     await api(`/api/admin/upgrade-requests/${id}/grant`, { method:"PATCH" });
     loadUsers();
     loadUpgradeRequests();
+  };
+
+  const updateProfileRequestStatus = async (id, status) => {
+    await api(`/api/admin/domain-profile-requests/${id}/status`, {
+      method:"PATCH",
+      body:JSON.stringify({ status }),
+    });
+    loadProfileRequests();
   };
 
   const triggerBackup = async () => {
@@ -865,6 +875,41 @@ export function AdminPanel() {
                           <button className="rm-btn rm-btn-primary rm-btn-sm"
                             onClick={() => grantUpgradeRequest(r.id)}>
                             Grant
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {profileRequests.filter(r => r.status === "pending").length > 0 && (
+                  <div className="rm-card" style={{ marginBottom:24 }}>
+                    <div style={{ fontWeight:700, fontSize:14, color:theme.text, marginBottom:12 }}>
+                      Other Job Profile Requests
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {profileRequests.filter(r => r.status === "pending").map(r => (
+                        <div key={r.id} style={{ display:"flex", alignItems:"flex-start", gap:10,
+                                                 padding:"10px", border:`1px solid ${theme.border}`,
+                                                 borderRadius:8 }}>
+                          <span style={{ flex:1, fontSize:12, color:theme.textMuted, lineHeight:1.5 }}>
+                            <strong style={{ color:theme.text }}>{r.username}</strong> requests{" "}
+                            <strong style={{ color:theme.text }}>{r.desired_title}</strong>
+                            {r.role_family ? ` (${r.role_family})` : ""}
+                            {(r.target_titles || []).length > 0 && (
+                              <span> - aliases: {(r.target_titles || []).slice(0, 4).join(", ")}</span>
+                            )}
+                            {(r.skills || []).length > 0 && (
+                              <span> - skills: {(r.skills || []).slice(0, 4).join(", ")}</span>
+                            )}
+                            {r.notes ? <span> - note: {r.notes}</span> : null}
+                          </span>
+                          <button className="rm-btn rm-btn-ghost rm-btn-sm"
+                            onClick={() => updateProfileRequestStatus(r.id, "reviewing")}>
+                            Review
+                          </button>
+                          <button className="rm-btn rm-btn-primary rm-btn-sm"
+                            onClick={() => updateProfileRequestStatus(r.id, "resolved")}>
+                            Resolve
                           </button>
                         </div>
                       ))}

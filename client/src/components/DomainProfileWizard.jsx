@@ -98,6 +98,11 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
   const [keywords,   setKeywords]   = useState(new Set());
   const [verbs,      setVerbs]      = useState(new Set());
   const [tools,      setTools]      = useState(new Set());
+  const [industries, setIndustries] = useState(new Set());
+  const [otherRoleTitle, setOtherRoleTitle] = useState("");
+  const [otherRoleFamily, setOtherRoleFamily] = useState("");
+  const [otherWorkPreference, setOtherWorkPreference] = useState("");
+  const [otherNotes, setOtherNotes] = useState("");
   const [aiChips,    setAiChips]    = useState(null);
   const [loadingAi,  setLoadingAi]  = useState(false);
   const [profileName, setProfileName] = useState("");
@@ -105,6 +110,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
   const [error,         setError]         = useState("");
   const [loadingDomains, setLoadingDomains] = useState(true);
   const [domainsError,   setDomainsError]   = useState(false);
+  const isOtherProfile = domainKey === "other_profile_request";
 
   // Load domain list on mount
   const loadDomains = () => {
@@ -121,11 +127,16 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
     if (!domainKey) return;
     api(`/api/domain-profiles/metadata/${domainKey}`).then(meta => {
       setDomainMeta(meta);
-      setTitles(new Set(meta.suggestedTitles));
+      setTitles(new Set(meta.requestOnly ? [] : meta.suggestedTitles));
       setKeywords(new Set(meta.keywords));
       setVerbs(new Set(meta.actionVerbs));
       setTools(new Set(meta.tools));
-      setProfileName(meta.label);
+      setProfileName(meta.requestOnly ? "" : meta.label);
+      setIndustries(new Set());
+      setOtherRoleTitle("");
+      setOtherRoleFamily("");
+      setOtherWorkPreference("");
+      setOtherNotes("");
       setAiChips(null);
     }).catch(() => {});
   }, [domainKey]);
@@ -167,17 +178,42 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
 
   const save = async () => {
     if (!profileName.trim()) { setError("Profile name is required"); return; }
+    if (isOtherProfile && !otherRoleTitle.trim()) {
+      setError("Desired role title is required");
+      return;
+    }
     setSaving(true); setError("");
     try {
+      if (isOtherProfile) {
+        await api("/api/domain-profiles/requests", {
+          method: "POST",
+          body: JSON.stringify({
+            desired_title: otherRoleTitle.trim(),
+            role_family: otherRoleFamily.trim(),
+            target_titles: [...new Set([otherRoleTitle.trim(), ...titles].filter(Boolean))],
+            skills: [...keywords],
+            tools: [...tools],
+            industries: [...industries],
+            keywords: [...keywords],
+            seniority,
+            work_preference: otherWorkPreference.trim(),
+            notes: otherNotes.trim(),
+          }),
+        });
+      }
       const profile = await api("/api/domain-profiles", {
         method: "POST",
         body: JSON.stringify({
           profile_name:      profileName.trim(),
-          role_family:       domainMeta?.roleFamily || "general",
-          domain:            domainKey || "general",
+          role_family:       isOtherProfile ? "general" : (domainMeta?.roleFamily || "general"),
+          domain:            isOtherProfile ? "general" : (domainKey || "general"),
           seniority,
-          target_titles:     [...titles],
-          selected_keywords: [...keywords],
+          target_titles:     isOtherProfile
+            ? [...new Set([otherRoleTitle.trim(), ...titles].filter(Boolean))]
+            : [...titles],
+          selected_keywords: isOtherProfile
+            ? [...new Set([...keywords, otherRoleFamily.trim()].filter(Boolean))]
+            : [...keywords],
           selected_verbs:    [...verbs],
           selected_tools:    [...tools],
         }),
@@ -191,6 +227,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
   const canNext = () => {
     if (step === 1) return !!domainKey;
     if (step === 2) return !!seniority;
+    if (step === 3 && isOtherProfile) return !!otherRoleTitle.trim();
     return true;
   };
 
@@ -282,7 +319,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                 What type of roles are you targeting?
               </div>
               <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 20 }}>
-                Select the domain that best fits your career focus. You can add up to 4 profiles total.
+                Select the domain that best fits your career focus, including software, firmware, embedded, systems, and specialist engineering roles. You can add up to 4 profiles total.
               </div>
               {loadingDomains ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "24px 0",
@@ -372,8 +409,52 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                 Which roles are you open to?
               </div>
               <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 20 }}>
-                All pre-selected. Deselect any that don't fit. We'll search for all selected titles.
+                {isOtherProfile
+                  ? "Tell us the role you want supported and any title aliases we should search for."
+                  : "All pre-selected. Deselect any that don't fit. We'll search for all selected titles."}
               </div>
+              {isOtherProfile && (
+                <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMuted, marginBottom: 4 }}>
+                      Desired role title
+                    </div>
+                    <input
+                      value={otherRoleTitle}
+                      onChange={e => {
+                        const value = e.target.value;
+                        setOtherRoleTitle(value);
+                        if (!profileName.trim() || profileName.startsWith("Other: ")) {
+                          setProfileName(value ? `Other: ${value}` : "");
+                        }
+                      }}
+                      placeholder="e.g. Robotics Controls Engineer"
+                      style={{
+                        width: "100%", padding: "9px 12px", borderRadius: 8,
+                        border: `1px solid ${theme.border}`, background: theme.bg,
+                        color: theme.text, fontSize: 13, outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMuted, marginBottom: 4 }}>
+                      Broad role family or category
+                    </div>
+                    <input
+                      value={otherRoleFamily}
+                      onChange={e => setOtherRoleFamily(e.target.value)}
+                      placeholder="e.g. robotics, controls, technical writing, research engineering"
+                      style={{
+                        width: "100%", padding: "9px 12px", borderRadius: 8,
+                        border: `1px solid ${theme.border}`, background: theme.bg,
+                        color: theme.text, fontSize: 13, outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {[...titles].concat(
                   (domainMeta?.suggestedTitles || []).filter(t => !titles.has(t))
@@ -422,6 +503,58 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                   <ChipAddInput placeholder={placeholder} onAdd={v => addToSet(setter, v)} />
                 </div>
               ))}
+              {isOtherProfile && (
+                <>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMuted,
+                                  textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                      Preferred Industries / Domains
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {[...industries].map(chip => (
+                        <Chip key={chip} label={chip} selected={industries.has(chip)}
+                          onToggle={() => toggleSet(setIndustries, chip)} />
+                      ))}
+                    </div>
+                    <ChipAddInput placeholder="Add an industry or domain..." onAdd={v => addToSet(setIndustries, v)} />
+                  </div>
+                  <div style={{ display: "grid", gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMuted, marginBottom: 4 }}>
+                        Location / work preference
+                      </div>
+                      <input
+                        value={otherWorkPreference}
+                        onChange={e => setOtherWorkPreference(e.target.value)}
+                        placeholder="e.g. remote, hybrid in Austin, open to relocation"
+                        style={{
+                          width: "100%", padding: "9px 12px", borderRadius: 8,
+                          border: `1px solid ${theme.border}`, background: theme.bg,
+                          color: theme.text, fontSize: 13, outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: theme.textMuted, marginBottom: 4 }}>
+                        Notes for support
+                      </div>
+                      <textarea
+                        value={otherNotes}
+                        onChange={e => setOtherNotes(e.target.value)}
+                        placeholder="Anything we should know about this role, titles, tools, or search support."
+                        rows={3}
+                        style={{
+                          width: "100%", padding: "9px 12px", borderRadius: 8,
+                          border: `1px solid ${theme.border}`, background: theme.bg,
+                          color: theme.text, fontSize: 13, outline: "none",
+                          boxSizing: "border-box", resize: "vertical",
+                        }}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
               <button
                 type="button"
                 onClick={loadAiChips}
@@ -445,7 +578,9 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                 Name this profile
               </div>
               <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 20 }}>
-                Give it a name that identifies this search focus. You can rename it any time.
+                {isOtherProfile
+                  ? "This creates a search profile and sends your role details for support review."
+                  : "Give it a name that identifies this search focus. You can rename it any time."}
               </div>
               <input
                 value={profileName}
@@ -467,6 +602,11 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
                   <strong style={{ color: theme.text }}>Domain:</strong> {domainMeta?.label || domainKey}
                 </div>
+                {isOtherProfile && (
+                  <div style={{ fontSize: 12, color: theme.textMuted }}>
+                    <strong style={{ color: theme.text }}>Requested role:</strong> {otherRoleTitle || "Not set"}
+                  </div>
+                )}
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
                   <strong style={{ color: theme.text }}>Seniority:</strong>{" "}
                   {["junior","mid","senior","executive"].includes(seniority)
@@ -536,13 +676,13 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText 
             <button
               type="button"
               onClick={save}
-              disabled={saving || !profileName.trim()}
+              disabled={saving || !profileName.trim() || (isOtherProfile && !otherRoleTitle.trim())}
               style={{
                 padding: "8px 28px", borderRadius: 6, border: "none",
-                background: (saving || !profileName.trim()) ? theme.surfaceHigh : theme.accent,
-                color: (saving || !profileName.trim()) ? theme.textMuted : "#0f0f0f",
+                background: (saving || !profileName.trim() || (isOtherProfile && !otherRoleTitle.trim())) ? theme.surfaceHigh : theme.accent,
+                color: (saving || !profileName.trim() || (isOtherProfile && !otherRoleTitle.trim())) ? theme.textMuted : "#0f0f0f",
                 fontSize: 13, fontWeight: 700,
-                cursor: (saving || !profileName.trim()) ? "default" : "pointer",
+                cursor: (saving || !profileName.trim() || (isOtherProfile && !otherRoleTitle.trim())) ? "default" : "pointer",
               }}
             >
               {saving ? "Saving…" : "Create Profile"}

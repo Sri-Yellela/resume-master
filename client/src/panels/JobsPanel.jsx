@@ -976,6 +976,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     try {
       const qs = buildParams(page);
       const d = await api(`/api/jobs?${qs}`);
+      if (d.needsProfileSetup) {
+        setScrapeError("Create a job search profile to load matching jobs.");
+      }
       const incoming = d.jobs || [];
       if (mergeMode) {
         setJobs(prev => {
@@ -1084,6 +1087,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         const qs = new URLSearchParams({ since: String(pollSince), query: roleQ });
         const pollData = await api(`/api/jobs/poll?${qs.toString()}`);
         failCount = 0;
+        if (pollData.needsProfileSetup) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setScraping(false);
+          setPollStatus("idle");
+          setScrapeError("Create a job search profile to load matching jobs.");
+          return;
+        }
+        if (pollData.scrapeUnavailable && pollData.message) {
+          setScrapeError(pollData.message);
+        }
 
         const newJobs = (pollData.jobs || []).filter(j => !seenIds.has(j.jobId));
         if (newJobs.length > 0) {
@@ -1150,6 +1164,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     let managedByPoller = false;
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
+      if (result.needsProfileSetup) {
+        setScrapeError(result.error || "Create a job search profile to search jobs.");
+        return;
+      }
       if (result.missingToken) {
         setScrapeError("No Apify token set. Add it via avatar → Apify Token.");
         return;
@@ -1201,6 +1219,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     let managedByPoller = false;
     try {
       const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
+      if (result.needsProfileSetup) {
+        setScrapeError(result.error || "Create a job search profile to search jobs.");
+        return;
+      }
       if (result.missingToken) {
         setScrapeError("No Apify token — add it in avatar → Apify Token.");
         return;

@@ -1229,6 +1229,32 @@ db.pragma("busy_timeout = 5000");
           );
       `,
     },
+    {
+      id: "037_domain_profile_requests",
+      sql: `
+        CREATE TABLE IF NOT EXISTS domain_profile_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          desired_title TEXT NOT NULL,
+          role_family TEXT,
+          target_titles_json TEXT NOT NULL DEFAULT '[]',
+          skills_json TEXT NOT NULL DEFAULT '[]',
+          tools_json TEXT NOT NULL DEFAULT '[]',
+          industries_json TEXT NOT NULL DEFAULT '[]',
+          keywords_json TEXT NOT NULL DEFAULT '[]',
+          seniority TEXT,
+          work_preference TEXT,
+          notes TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_domain_profile_requests_status
+          ON domain_profile_requests(status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_domain_profile_requests_user
+          ON domain_profile_requests(user_id, created_at);
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -1645,7 +1671,11 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     rawItems = await scrapeHarvestAPI(query, apifyToken, scrapeParams);
     console.log(`[scrape] HarvestAPI: ${rawItems.length} raw items`);
   } catch(e) {
-    console.warn("[scrape] HarvestAPI failed:", e.message);
+    if (isExternalScrapeQuotaError(e)) {
+      console.warn("[scrape] HarvestAPI quota exhausted:", e.message);
+    } else {
+      console.warn("[scrape] HarvestAPI failed:", e.message);
+    }
     throw e;
   }
 
@@ -1966,7 +1996,13 @@ cron.schedule("0 7 * * *", async () => {
       postedLimit:     "24h",
     }, last.profile_id);
   }
-  catch(e) { console.error("[cron]", e.message); }
+  catch(e) {
+    if (isExternalScrapeQuotaError(e)) {
+      console.warn("[cron] Daily re-scrape skipped: external scrape quota exhausted");
+    } else {
+      console.error("[cron]", e.message);
+    }
+  }
 });
 
 // ── Prompt injection ──────────────────────────────────────────
@@ -2801,6 +2837,35 @@ app.patch("/api/admin/upgrade-requests/:id/grant", requireAdmin, (req, res) => {
   emitToUser(request.user_id, { type:"plan_updated", planTier:tier, applyMode:mode });
   res.json({ ok:true, userId:request.user_id, planTier:tier, applyMode:mode });
 });
+app.get("/api/admin/domain-profile-requests", requireAdmin, (_req, res) => {
+  const rows = db.prepare(`
+    SELECT dpr.*, u.username
+    FROM domain_profile_requests dpr
+    JOIN users u ON u.id = dpr.user_id
+    ORDER BY dpr.status = 'pending' DESC, dpr.created_at DESC
+  `).all();
+  res.json(rows.map(r => ({
+    ...r,
+    target_titles: JSON.parse(r.target_titles_json || "[]"),
+    skills: JSON.parse(r.skills_json || "[]"),
+    tools: JSON.parse(r.tools_json || "[]"),
+    industries: JSON.parse(r.industries_json || "[]"),
+    keywords: JSON.parse(r.keywords_json || "[]"),
+  })));
+});
+app.patch("/api/admin/domain-profile-requests/:id/status", requireAdmin, (req, res) => {
+  const status = String(req.body?.status || "").trim();
+  if (!["pending","reviewing","resolved","dismissed"].includes(status)) {
+    return res.status(400).json({ error:"Invalid status" });
+  }
+  const result = db.prepare(`
+    UPDATE domain_profile_requests
+    SET status=?, updated_at=unixepoch()
+    WHERE id=?
+  `).run(status, parseInt(req.params.id));
+  if (!result.changes) return res.status(404).json({ error:"Not found" });
+  res.json({ ok:true, status });
+});
 app.get("/api/admin/users/:id/profile", requireAdmin, (req, res) => {
   res.json(db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(parseInt(req.params.id))||{});
 });
@@ -3001,7 +3066,16 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   ).get(userId);
 
   if (!sessionActiveProfile) {
-    return res.json({ jobs: [], total: 0, totalPages: 0, page, pageSize });
+    console.warn(`[jobs] user ${userId} requested jobs without an active profile`);
+    return res.json({
+      jobs: [],
+      total: 0,
+      totalPages: 0,
+      page,
+      pageSize,
+      needsProfileSetup: true,
+      reason: "no_active_profile",
+    });
   }
 
   // ── Session sync: populate user_jobs from active
@@ -3238,7 +3312,14 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
   ).get(userId);
   if (!activeProfile) {
-    return res.json({ jobs: [], scraping: stillScraping, total: 0 });
+    console.warn(`[jobs] poll for "${qRaw}" has no active profile for user ${userId}`);
+    return res.json({
+      jobs: [],
+      scraping: false,
+      total: 0,
+      needsProfileSetup: true,
+      reason: "no_active_profile",
+    });
   }
   const roleKey = roleKeyForProfile(activeProfile);
 
@@ -3287,12 +3368,27 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     disliked:        !!j.disliked,
   }));
 
-  res.json({ jobs, scraping: stillScraping, total: jobs.length });
+  res.json({
+    jobs,
+    scraping: stillScraping,
+    total: jobs.length,
+    scrapeUnavailable: !!scrapeState?.error,
+    scrapeError: scrapeState?.error || null,
+    message: scrapeState?.message || null,
+  });
 });
 
 const VALID_EMP_TYPES       = new Set(["full-time","part-time","contract","internship","temporary"]);
 const VALID_WORKPLACE_TYPES = new Set(["remote","hybrid","office"]);
 const VALID_POSTED_LIMITS   = new Set(["24h","1w","1m"]);
+
+function isExternalScrapeQuotaError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return msg.includes("monthly usage hard limit exceeded")
+      || msg.includes("usage hard limit exceeded")
+      || msg.includes("quota")
+      || msg.includes("limit exceeded");
+}
 
 // Map UI workType string → Apify workplaceType array
 function mapWorkplaceTypes(workType) {
@@ -3321,6 +3417,20 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   const activeProfile = db.prepare(
     "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
   ).get(req.user.id);
+  if (!activeProfile) {
+    const query = normaliseRole(rawQuery);
+    console.warn(`[jobs] user ${req.user.id} requested scrape for "${query}" without an active profile`);
+    return res.json({
+      ok: false,
+      jobs: [],
+      total: 0,
+      needsProfileSetup: true,
+      reason: "no_active_profile",
+      error: "Create a job search profile before searching for jobs.",
+      query,
+      scraping: false,
+    });
+  }
   let profileJobTitles = activeProfile
     ? buildApifyQueriesFromProfile(activeProfile)
     : null;
@@ -3384,7 +3494,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   `).run(req.user.id, query.toLowerCase());
 
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
-  const scrapeRoleKey = activeProfile ? roleKeyForProfile(activeProfile) : "";
+  const scrapeRoleKey = roleKeyForProfile(activeProfile);
 
   // DB-first: count fresh unvisited quality jobs for this role
   const existingCount = db.prepare(`
@@ -3406,13 +3516,27 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     console.log(`[scrape] DB-first: ${existingCount.cnt} jobs for "${query}" — skipping scrape`);
     // Sync pool jobs not yet in user_jobs (profile-isolated)
     // Only sync if user has an active profile — no fallback to search_query matching
-    return res.json({ ok:true, count:0, scrapedAt:Date.now(), query, fromCache:true });
+    return res.json({
+      ok:true,
+      count:0,
+      localCount: existingCount.cnt,
+      scrapedAt:Date.now(),
+      query,
+      fromCache:true,
+    });
   }
 
   console.log(`[scrape] DB-first: only ${existingCount?.cnt||0} jobs for "${query}" — triggering background scrape`);
 
   // Respond immediately — HarvestAPI takes 2–5 min; Railway timeout is 30s
-  res.json({ ok:true, count:0, scrapedAt:Date.now(), query, scraping:true });
+  res.json({
+    ok:true,
+    count:0,
+    localCount: existingCount?.cnt || 0,
+    scrapedAt:Date.now(),
+    query,
+    scraping:true,
+  });
 
   const scrapeUserId = req.user.id;
   const scrapeKey = `${scrapeUserId}:${query.toLowerCase()}`;
@@ -3462,6 +3586,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       }
       console.log(`[scrape] Background scrape complete for "${query}"`);
     } catch(e) {
+      const quotaExceeded = isExternalScrapeQuotaError(e);
       trackScrape(db, {
         userId: scrapeUserId, searchQuery: query,
         rawCount: 0, filteredCount: 0, insertedCount: 0,
@@ -3469,10 +3594,29 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
         durationMs: Date.now() - scrapeStart,
         success: false, errorText: e.message,
       });
-      console.error(`[scrape] Background scrape failed for "${query}":`, e.message);
+      if (quotaExceeded) {
+        console.warn(`[scrape] External scrape quota exhausted for "${query}": ${e.message}`);
+        activeScrapes.set(scrapeKey, {
+          ...(activeScrapes.get(scrapeKey) || {}),
+          done: true,
+          error: "scrape_quota_exhausted",
+          message: "Search is running local-only because the external scrape quota is exhausted.",
+        });
+      } else {
+        console.error(`[scrape] Background scrape failed for "${query}":`, e.message);
+        activeScrapes.set(scrapeKey, {
+          ...(activeScrapes.get(scrapeKey) || {}),
+          done: true,
+          error: "scrape_failed",
+          message: "External scrape failed. Local jobs remain available.",
+        });
+      }
     } finally {
       const existing = activeScrapes.get(scrapeKey) || {};
-      activeScrapes.set(scrapeKey, { ...existing, done: true });
+      activeScrapes.set(scrapeKey, {
+        ...existing,
+        done: true,
+      });
     }
   });
 });

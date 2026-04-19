@@ -12,7 +12,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // (e.g. Railway container filesystem restrictions). Update this when the
 // DOMAIN_METADATA_REGISTRY.json file changes.
 const BUILTIN_REGISTRY = {
-  engineering: { label:"Software Engineering", roleFamily:"engineering", suggestedTitles:["Software Engineer","Backend Engineer","Frontend Engineer","Full Stack Engineer","Software Developer","Site Reliability Engineer","Platform Engineer","Staff Engineer"], keywords:["distributed systems","microservices","REST APIs","system design","cloud infrastructure","CI/CD","kubernetes","docker","scalability","reliability","performance optimisation","code review","technical leadership","agile","object oriented"], actionVerbs:["Built","Designed","Deployed","Migrated","Refactored","Optimised","Implemented","Automated","Architected","Scaled","Shipped","Debugged","Instrumented","Integrated","Reduced"], tools:["Python","Java","Go","TypeScript","React","Node.js","PostgreSQL","Redis","Kafka","AWS","GCP","Azure","Terraform","Git","Kubernetes","Docker","Spark","Airflow"] },
+  engineering: { label:"Software Engineering", roleFamily:"engineering", suggestedTitles:["Software Engineer","Backend Engineer","Frontend Engineer","Full Stack Engineer","Software Developer","Site Reliability Engineer","Platform Engineer","Systems Software Engineer","Staff Engineer","Performance Engineer"], keywords:["distributed systems","microservices","REST APIs","system design","cloud infrastructure","CI/CD","kubernetes","docker","scalability","reliability","performance optimisation","code review","technical leadership","agile","object oriented","concurrency","multithreading","test automation","database internals","security engineering"], actionVerbs:["Built","Designed","Deployed","Migrated","Refactored","Optimised","Implemented","Automated","Architected","Scaled","Shipped","Debugged","Instrumented","Integrated","Reduced"], tools:["Python","Java","Go","TypeScript","React","Node.js","PostgreSQL","Redis","Kafka","AWS","GCP","Azure","Terraform","Git","Kubernetes","Docker","Spark","Airflow","Linux","gdb","C++"] },
+  engineering_embedded_firmware: { label:"Firmware, Embedded & Device Software", roleFamily:"engineering", suggestedTitles:["Firmware Engineer","Embedded Software Engineer","Embedded Systems Engineer","Device Driver Engineer","BSP Engineer","Board Support Package Engineer","RTOS Engineer","Hardware Debug Engineer","Firmware Debug Engineer","SoC Bring-Up Engineer","Chip Bring-Up Engineer","Post-Silicon Validation Engineer"], keywords:["embedded software","firmware development","embedded C","embedded C++","RTOS","device drivers","kernel drivers","board bring-up","BSP","hardware software co-debug","registers and memory","peripherals","JTAG debugging","protocol debugging","low-level diagnostics","real-time systems","bootloaders","silicon validation","post-silicon validation","SoC bring-up"], actionVerbs:["Developed","Debugged","Validated","Brought Up","Instrumented","Integrated","Diagnosed","Optimised","Verified","Traced","Automated","Tested","Ported","Profiled","Resolved"], tools:["C","C++","Python","RTOS","Linux kernel","Zephyr","FreeRTOS","JTAG","OpenOCD","TRACE32","Lauterbach","gdb","LLDB","Oscilloscope","Logic analyzer","UART","SPI","I2C","CAN","Git"] },
+  engineering_systems_low_level: { label:"Systems, Platform & Performance Engineering", roleFamily:"engineering", suggestedTitles:["Systems Software Engineer","Platform Software Engineer","Operating Systems Engineer","Kernel Engineer","Compiler Engineer","Software Tools Engineer","Performance Engineer","Systems Performance Engineer","Infrastructure Engineer","Distributed Systems Engineer"], keywords:["operating systems","kernel development","compiler engineering","software tools","distributed systems","database internals","concurrency","multithreading","synchronization","memory management","performance profiling","latency optimisation","runtime systems","debug tooling","systems performance","load testing","observability","networking"], actionVerbs:["Architected","Built","Optimised","Profiled","Instrumented","Debugged","Scaled","Reduced","Benchmarked","Implemented","Automated","Refactored","Stabilised","Diagnosed","Shipped"], tools:["C","C++","Rust","Go","Python","Linux","gdb","perf","eBPF","Valgrind","LLVM","GCC","Kubernetes","Docker","Kafka","PostgreSQL","Redis","Prometheus","Grafana","Git"] },
+  engineering_specialist: { label:"Engineering Specialties", roleFamily:"engineering", suggestedTitles:["Android Engineer","Mobile Engineer","Computer Vision Engineer","Graphics Engineer","Audio Video Engineer","Payments Engineer","Security Engineer","Test Automation Engineer","UI Engineer","Wireless Software Engineer"], keywords:["advanced algorithms","android development","audio video systems","payments platforms","compilers and tools","computer vision","graphics and imaging","information retrieval","data mining","internationalization","security and cryptography","test automation","UI implementation","web applications","multi-tier systems","windows development","wireless applications","performance tuning"], actionVerbs:["Built","Designed","Optimised","Implemented","Automated","Integrated","Validated","Secured","Profiled","Shipped","Debugged","Scaled","Tested","Refactored","Launched"], tools:["Kotlin","Swift","C++","Python","OpenCV","CUDA","OpenGL","Vulkan","FFmpeg","Android Studio","Xcode","React","TypeScript","Playwright","Selenium","Windows",".NET","Wireshark","Git"] },
+  other_profile_request: { label:"Other Job Profile", roleFamily:"general", requestOnly:true, suggestedTitles:["Request support for another role"], keywords:[], actionVerbs:["Managed","Led","Built","Analysed","Delivered"], tools:[] },
   data: { label:"Data Science & Analytics", roleFamily:"data", suggestedTitles:["Data Scientist","Data Analyst","ML Engineer","Analytics Engineer","Research Scientist","Quantitative Analyst","Business Intelligence Analyst","Data Engineer"], keywords:["machine learning","statistical modelling","A/B testing","data pipelines","feature engineering","model deployment","experimentation","SQL","data warehousing","ETL","business intelligence","predictive modelling","NLP","deep learning","data visualisation","hypothesis testing"], actionVerbs:["Analysed","Modelled","Forecasted","Built","Deployed","Evaluated","Identified","Quantified","Surfaced","Synthesised","Designed","Implemented","Optimised","Automated","Presented"], tools:["Python","R","SQL","TensorFlow","PyTorch","Spark","Airflow","dbt","Tableau","Looker","BigQuery","Snowflake","Databricks","MLflow","Pandas","scikit-learn","Jupyter"] },
   pm_general: { label:"Product Management", roleFamily:"pm", suggestedTitles:["Product Manager","Senior Product Manager","Associate Product Manager","Group Product Manager","Director of Product","Technical Product Manager","Principal Product Manager"], keywords:["product roadmap","user research","go-to-market","stakeholder management","product strategy","OKRs","KPIs","product lifecycle","prioritisation","agile","scrum","sprint planning","product vision","market analysis","customer discovery","cross-functional","feature definition"], actionVerbs:["Led","Launched","Defined","Prioritised","Delivered","Aligned","Drove","Partnered","Coordinated","Influenced","Managed","Shipped","Analysed","Identified","Presented"], tools:["Jira","Confluence","Figma","Amplitude","Mixpanel","Looker","SQL","Tableau","ProductBoard","Roadmunk","Linear","Asana","Notion","Miro","Excel","PowerPoint"] },
   pm_construction: { label:"Construction Project Management", roleFamily:"pm", suggestedTitles:["Project Coordinator","Project Manager","Construction Project Manager","Assistant Project Manager","Construction Manager","Site Manager","Program Manager","Owner's Representative"], keywords:["RFIs","submittals","change orders","procurement","subcontractor management","schedule management","budget management","project closeout","punch list","commissioning","contract administration","scope management","quality control","safety compliance","stakeholder reporting","bid process","LEED","value engineering"], actionVerbs:["Managed","Coordinated","Procured","Oversaw","Delivered","Negotiated","Monitored","Reviewed","Facilitated","Implemented","Resolved","Tracked","Commissioned","Inspected","Reported"], tools:["Procore","Bluebeam","AutoCAD","Revit","PlanGrid","Microsoft Project","Primavera P6","BIM 360","CoConstruct","Buildertrend","Excel","PowerPoint","Smartsheet","Egnyte"] },
@@ -45,6 +49,14 @@ function getRegistry() {
   console.warn("[domain-registry] JSON file not found — using built-in registry");
   _registry = BUILTIN_REGISTRY;
   return _registry;
+}
+
+function cleanStringArray(value, limit = 20) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(v => String(v || "").trim())
+    .filter(Boolean)
+    .slice(0, limit);
 }
 
 export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {}) {
@@ -104,6 +116,41 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
       selected_verbs:    JSON.parse(row.selected_verbs    || "[]"),
       selected_tools:    JSON.parse(row.selected_tools    || "[]"),
     });
+  });
+
+  // Store unsupported-role requests for product/admin review. The user may
+  // still create a generic profile from the same wizard submission.
+  router.post("/requests", (req, res) => {
+    const desiredTitle = String(req.body?.desired_title || "").trim();
+    if (!desiredTitle) return res.status(400).json({ error: "desired_title required" });
+
+    const roleFamily = String(req.body?.role_family || "").trim() || null;
+    const seniority = String(req.body?.seniority || "").trim() || null;
+    const workPreference = String(req.body?.work_preference || "").trim() || null;
+    const notes = String(req.body?.notes || "").trim() || null;
+
+    const result = db.prepare(`
+      INSERT INTO domain_profile_requests
+        (user_id, desired_title, role_family, target_titles_json,
+         skills_json, tools_json, industries_json, keywords_json,
+         seniority, work_preference, notes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      req.user.id,
+      desiredTitle,
+      roleFamily,
+      JSON.stringify(cleanStringArray(req.body?.target_titles)),
+      JSON.stringify(cleanStringArray(req.body?.skills)),
+      JSON.stringify(cleanStringArray(req.body?.tools)),
+      JSON.stringify(cleanStringArray(req.body?.industries)),
+      JSON.stringify(cleanStringArray(req.body?.keywords)),
+      seniority,
+      workPreference,
+      notes,
+    );
+
+    const row = db.prepare("SELECT * FROM domain_profile_requests WHERE id=?").get(result.lastInsertRowid);
+    res.json({ ok: true, request: row });
   });
 
   // ── PUT /api/domain-profiles/:id ──────────────────────────────

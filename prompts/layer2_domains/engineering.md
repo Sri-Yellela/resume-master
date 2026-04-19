@@ -22,7 +22,7 @@
 
 ### A. DOMAIN CONTEXT
 
-Software engineers design, build, and operate systems that process data, serve users, or coordinate workflows. Success is measured by system reliability, latency, throughput, and the velocity at which the team ships quality code. The vocabulary is technical and precise: engineers name specific languages, frameworks, cloud services, and operational practices. Seniority signals in resumes include system scale (users served, data volume, request rate), cross-team influence, and ownership of critical infrastructure or product decisions.
+Software engineers design, build, validate, debug, and operate systems that process data, serve users, coordinate workflows, or control hardware. Success is measured by system reliability, latency, throughput, correctness, observability, and the velocity at which the team ships quality code. The vocabulary is technical and precise: engineers name specific languages, frameworks, cloud services, operating systems, hardware interfaces, debug tools, and operational practices. Seniority signals in resumes include system scale (users served, data volume, request rate), low-level ownership (drivers, kernels, firmware, bring-up, validation), cross-team influence, and ownership of critical infrastructure or product decisions.
 
 ### B. CANONICAL TOOL REGISTRY
 
@@ -55,6 +55,11 @@ Use this registry to verify company-authentic tool placement. Only assign a tool
 - **MongoDB:** JavaScript/Python/Java, Atlas, Realm, document database, aggregation pipelines
 - **Cloudflare:** Rust/Go/TypeScript, edge computing, Workers, DDoS mitigation, CDN
 - **Okta:** Java/Node, OAuth 2.0, SAML, OIDC, identity platform
+- **NVIDIA:** C/C++, CUDA, Linux, driver and kernel work, graphics, compute runtimes, performance profiling, silicon validation, simulation/emulation debug
+- **Qualcomm:** C/C++, embedded Linux, RTOS, wireless protocols, modem/connectivity software, device drivers, firmware, post-silicon validation, JTAG and trace tooling
+- **Intel:** C/C++, Linux kernel, compiler/toolchain work, firmware, platform software, CPU architecture, performance engineering, hardware/software debug
+- **AMD:** C/C++, Linux, GPU drivers, firmware, graphics and compute stacks, performance profiling, silicon bring-up, validation workflows
+- **Tesla:** C/C++, Python, embedded Linux, RTOS, robotics/autonomy systems, hardware/software co-debug, diagnostics, test automation, board bring-up
 
 ### C. TIER 1 KEYWORD CLASSES
 
@@ -69,11 +74,16 @@ Use this registry to verify company-authentic tool placement. Only assign a tool
 - Security and compliance frameworks
 - ML/AI frameworks (only if in JD)
 - System design concepts (distributed systems, consensus, CAP theorem, etc.)
+- Firmware and embedded systems (embedded C/C++, RTOS, bootloaders, BSP, device drivers)
+- Hardware/software debug (JTAG, OpenOCD, TRACE32, gdb, probes, trace, registers, memory, peripherals)
+- Silicon and board workflows (SoC bring-up, board bring-up, validation, post-silicon, simulation, emulation)
+- Low-level systems (operating systems, kernels, compilers, runtimes, concurrency, synchronization, memory management)
+- Engineering specialties (graphics, imaging, audio/video, wireless, payments, information retrieval, cryptography, test automation, UI implementation)
 
 ### D. ACTION VERB POOL
 
-Built, Designed, Reduced, Migrated, Refactored, Automated, Optimised, Deployed, Implemented, Instrumented, Architected, Containerised, Provisioned, Debugged, Profiled, Benchmarked, Scaled, Integrated, Modularised, Secured, Monitored, Orchestrated, Sharded, Replicated, Partitioned, Load-tested, Diagnosed, Shipped, Merged, Released
+Built, Designed, Reduced, Migrated, Refactored, Automated, Optimised, Deployed, Implemented, Instrumented, Architected, Containerised, Provisioned, Debugged, Profiled, Benchmarked, Scaled, Integrated, Modularised, Secured, Monitored, Orchestrated, Sharded, Replicated, Partitioned, Load-tested, Diagnosed, Shipped, Merged, Released, Validated, Verified, Traced, Ported, Stabilised
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with the exact target role title and a specific year count. Name the primary language/stack and the system class (distributed systems, ML platform, data infrastructure, etc.). Use infrastructure and system vocabulary native to the JD. Close with a sentence about the business domain or product area the candidate has most experience in, framed using the JD's functional language.
+Open with the exact target role title and a specific year count. Name the primary language/stack and the system class (distributed systems, ML platform, data infrastructure, firmware, embedded software, drivers, platform software, validation, etc.). Use infrastructure, systems, hardware, or debug vocabulary native to the JD. Close with a sentence about the business domain or product area the candidate has most experience in, framed using the JD's functional language.

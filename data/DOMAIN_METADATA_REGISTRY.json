@@ -6,14 +6,17 @@
       "Software Engineer", "Backend Engineer",
       "Frontend Engineer", "Full Stack Engineer",
       "Software Developer", "Site Reliability Engineer",
-      "Platform Engineer", "Staff Engineer"
+      "Platform Engineer", "Systems Software Engineer",
+      "Staff Engineer", "Performance Engineer"
     ],
     "keywords": [
       "distributed systems", "microservices", "REST APIs",
       "system design", "cloud infrastructure", "CI/CD",
       "kubernetes", "docker", "scalability", "reliability",
       "performance optimisation", "code review",
-      "technical leadership", "agile", "object oriented"
+      "technical leadership", "agile", "object oriented",
+      "concurrency", "multithreading", "test automation",
+      "database internals", "security engineering"
     ],
     "actionVerbs": [
       "Built", "Designed", "Deployed", "Migrated",
@@ -25,8 +28,128 @@
       "Python", "Java", "Go", "TypeScript", "React",
       "Node.js", "PostgreSQL", "Redis", "Kafka",
       "AWS", "GCP", "Azure", "Terraform", "Git",
-      "Kubernetes", "Docker", "Spark", "Airflow"
+      "Kubernetes", "Docker", "Spark", "Airflow",
+      "Linux", "gdb", "C++"
     ]
+  },
+  "engineering_embedded_firmware": {
+    "label": "Firmware, Embedded & Device Software",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Firmware Engineer", "Embedded Software Engineer",
+      "Embedded Systems Engineer", "Device Driver Engineer",
+      "BSP Engineer", "Board Support Package Engineer",
+      "RTOS Engineer", "Hardware Debug Engineer",
+      "Firmware Debug Engineer", "SoC Bring-Up Engineer",
+      "Chip Bring-Up Engineer", "Post-Silicon Validation Engineer"
+    ],
+    "keywords": [
+      "embedded software", "firmware development",
+      "embedded C", "embedded C++", "RTOS",
+      "device drivers", "kernel drivers", "board bring-up",
+      "BSP", "hardware software co-debug",
+      "registers and memory", "peripherals",
+      "JTAG debugging", "protocol debugging",
+      "low-level diagnostics", "real-time systems",
+      "bootloaders", "silicon validation",
+      "post-silicon validation", "SoC bring-up"
+    ],
+    "actionVerbs": [
+      "Developed", "Debugged", "Validated", "Brought Up",
+      "Instrumented", "Integrated", "Diagnosed", "Optimised",
+      "Verified", "Traced", "Automated", "Tested",
+      "Ported", "Profiled", "Resolved"
+    ],
+    "tools": [
+      "C", "C++", "Python", "RTOS", "Linux kernel",
+      "Zephyr", "FreeRTOS", "JTAG", "OpenOCD",
+      "TRACE32", "Lauterbach", "gdb", "LLDB",
+      "Oscilloscope", "Logic analyzer", "UART", "SPI",
+      "I2C", "CAN", "Git"
+    ]
+  },
+  "engineering_systems_low_level": {
+    "label": "Systems, Platform & Performance Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Systems Software Engineer", "Platform Software Engineer",
+      "Operating Systems Engineer", "Kernel Engineer",
+      "Compiler Engineer", "Software Tools Engineer",
+      "Performance Engineer", "Systems Performance Engineer",
+      "Infrastructure Engineer", "Distributed Systems Engineer"
+    ],
+    "keywords": [
+      "operating systems", "kernel development",
+      "compiler engineering", "software tools",
+      "distributed systems", "database internals",
+      "concurrency", "multithreading",
+      "synchronization", "memory management",
+      "performance profiling", "latency optimisation",
+      "runtime systems", "debug tooling",
+      "systems performance", "load testing",
+      "observability", "networking"
+    ],
+    "actionVerbs": [
+      "Architected", "Built", "Optimised", "Profiled",
+      "Instrumented", "Debugged", "Scaled", "Reduced",
+      "Benchmarked", "Implemented", "Automated",
+      "Refactored", "Stabilised", "Diagnosed", "Shipped"
+    ],
+    "tools": [
+      "C", "C++", "Rust", "Go", "Python",
+      "Linux", "gdb", "perf", "eBPF", "Valgrind",
+      "LLVM", "GCC", "Kubernetes", "Docker",
+      "Kafka", "PostgreSQL", "Redis", "Prometheus",
+      "Grafana", "Git"
+    ]
+  },
+  "engineering_specialist": {
+    "label": "Engineering Specialties",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Android Engineer", "Mobile Engineer",
+      "Computer Vision Engineer", "Graphics Engineer",
+      "Audio Video Engineer", "Payments Engineer",
+      "Security Engineer", "Test Automation Engineer",
+      "UI Engineer", "Wireless Software Engineer"
+    ],
+    "keywords": [
+      "advanced algorithms", "android development",
+      "audio video systems", "payments platforms",
+      "compilers and tools", "computer vision",
+      "graphics and imaging", "information retrieval",
+      "data mining", "internationalization",
+      "security and cryptography", "test automation",
+      "UI implementation", "web applications",
+      "multi-tier systems", "windows development",
+      "wireless applications", "performance tuning"
+    ],
+    "actionVerbs": [
+      "Built", "Designed", "Optimised", "Implemented",
+      "Automated", "Integrated", "Validated", "Secured",
+      "Profiled", "Shipped", "Debugged", "Scaled",
+      "Tested", "Refactored", "Launched"
+    ],
+    "tools": [
+      "Kotlin", "Swift", "C++", "Python", "OpenCV",
+      "CUDA", "OpenGL", "Vulkan", "FFmpeg",
+      "Android Studio", "Xcode", "React", "TypeScript",
+      "Playwright", "Selenium", "Windows", ".NET",
+      "Wireshark", "Git"
+    ]
+  },
+  "other_profile_request": {
+    "label": "Other Job Profile",
+    "roleFamily": "general",
+    "requestOnly": true,
+    "suggestedTitles": [
+      "Request support for another role"
+    ],
+    "keywords": [],
+    "actionVerbs": [
+      "Managed", "Led", "Built", "Analysed", "Delivered"
+    ],
+    "tools": []
   },
   "data": {
     "label": "Data Science & Analytics",

@@ -172,14 +172,146 @@
   "embedded": {
     "canonical": "Embedded Systems Engineer",
     "roleFamily": "engineering",
-    "domain": "it_digital",
-    "searchVariants": ["Firmware Engineer", "Embedded Software Engineer"]
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Firmware Engineer", "Embedded Software Engineer", "Embedded Engineer", "RTOS Engineer"]
   },
   "firmware": {
     "canonical": "Firmware Engineer",
     "roleFamily": "engineering",
-    "domain": "it_digital",
-    "searchVariants": ["Embedded Software Engineer", "Embedded Systems Engineer"]
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Embedded Software Engineer", "Embedded Systems Engineer", "Firmware Developer"]
+  },
+  "embedded software": {
+    "canonical": "Embedded Software Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Firmware Engineer", "Embedded Systems Engineer", "RTOS Engineer"]
+  },
+  "firmware engineer": {
+    "canonical": "Firmware Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Embedded Software Engineer", "Firmware Developer", "Embedded Engineer"]
+  },
+  "systems software": {
+    "canonical": "Systems Software Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_systems_low_level",
+    "searchVariants": ["System Software Engineer", "Platform Software Engineer", "Kernel Engineer"]
+  },
+  "platform software": {
+    "canonical": "Platform Software Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_systems_low_level",
+    "searchVariants": ["Systems Software Engineer", "Infrastructure Engineer", "Runtime Engineer"]
+  },
+  "device driver": {
+    "canonical": "Device Driver Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Driver Engineer", "Kernel Driver Engineer", "Embedded Driver Engineer"]
+  },
+  "driver engineer": {
+    "canonical": "Device Driver Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Device Driver Engineer", "Kernel Driver Engineer", "Embedded Driver Engineer"]
+  },
+  "bsp": {
+    "canonical": "BSP Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Board Support Package Engineer", "Embedded Linux Engineer", "Firmware Engineer"]
+  },
+  "board support package": {
+    "canonical": "Board Support Package Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["BSP Engineer", "Embedded Linux Engineer", "Device Driver Engineer"]
+  },
+  "silicon validation": {
+    "canonical": "Silicon Validation Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Post-Silicon Validation Engineer", "Validation Engineer", "SoC Validation Engineer"]
+  },
+  "post silicon validation": {
+    "canonical": "Post-Silicon Validation Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Silicon Validation Engineer", "SoC Validation Engineer", "Hardware Validation Engineer"]
+  },
+  "post-silicon validation": {
+    "canonical": "Post-Silicon Validation Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Silicon Validation Engineer", "SoC Validation Engineer", "Hardware Validation Engineer"]
+  },
+  "soc bring-up": {
+    "canonical": "SoC Bring-Up Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Chip Bring-Up Engineer", "Post-Silicon Bring-Up Engineer", "Silicon Validation Engineer"]
+  },
+  "chip bring-up": {
+    "canonical": "Chip Bring-Up Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["SoC Bring-Up Engineer", "Post-Silicon Bring-Up Engineer", "Silicon Validation Engineer"]
+  },
+  "debug tools": {
+    "canonical": "Debug Tools Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Software Tools Engineer", "Firmware Debug Engineer", "Systems Tools Engineer"]
+  },
+  "hardware debug": {
+    "canonical": "Hardware Debug Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Firmware Debug Engineer", "Silicon Debug Engineer", "Validation Engineer"]
+  },
+  "firmware debug": {
+    "canonical": "Firmware Debug Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Hardware Debug Engineer", "Debug Tools Engineer", "Embedded Debug Engineer"]
+  },
+  "performance engineer": {
+    "canonical": "Performance Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_systems_low_level",
+    "searchVariants": ["Systems Performance Engineer", "Performance Software Engineer", "Performance Analyst"]
+  },
+  "compiler engineer": {
+    "canonical": "Compiler Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_systems_low_level",
+    "searchVariants": ["Compilers Engineer", "LLVM Engineer", "Programming Languages Engineer"]
+  },
+  "software tools": {
+    "canonical": "Software Tools Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_systems_low_level",
+    "searchVariants": ["Developer Tools Engineer", "Debug Tools Engineer", "Build Tools Engineer"]
+  },
+  "graphics engineer": {
+    "canonical": "Graphics Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_specialist",
+    "searchVariants": ["Rendering Engineer", "Graphics Software Engineer", "Imaging Engineer"]
+  },
+  "audio video": {
+    "canonical": "Audio Video Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_specialist",
+    "searchVariants": ["Multimedia Engineer", "Video Engineer", "Audio Software Engineer"]
+  },
+  "wireless software": {
+    "canonical": "Wireless Software Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_specialist",
+    "searchVariants": ["Wireless Engineer", "Connectivity Engineer", "Protocol Software Engineer"]
   },
   "security engineer": {
     "canonical": "Security Engineer",
