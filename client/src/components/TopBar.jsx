@@ -198,75 +198,6 @@ function NotificationsBell({ theme }) {
   );
 }
 
-// ── Profile switcher (shown in docked pill) ───────────────────
-function ProfileSwitcher({ theme, profiles, onActivate }) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState(null);
-  const triggerRef = useRef(null);
-
-  const active = profiles.find(p => p.is_active);
-  if (!profiles.length) return null;
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        ref={triggerRef}
-        onClick={() => {
-          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
-          setOpen(o => !o);
-        }}
-        title="Switch profile"
-        style={{
-          background: "transparent", border: "none", cursor: "pointer",
-          padding: "4px 10px", borderRadius: 8,
-          display: "flex", alignItems: "center", gap: 5,
-          color: theme.textMuted, fontSize: 12, fontWeight: 600,
-          transition: "color 0.15s", maxWidth: 130, overflow: "hidden",
-        }}
-        onMouseEnter={e => e.currentTarget.style.color = theme.text}
-        onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%",
-                        background: theme.accent, flexShrink: 0 }}/>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis",
-                        whiteSpace: "nowrap", maxWidth: 110 }}>
-          {active?.profile_name || "Profile"}
-        </span>
-        <span style={{ fontSize: 9 }}>▾</span>
-      </button>
-
-      {open && rect && (
-        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
-          style={{ minWidth: 200 }}>
-          <div style={{ padding: "6px 14px 8px", fontSize: 10, fontWeight: 700,
-                         textTransform: "uppercase", letterSpacing: "0.08em", color: theme.textDim }}>
-            Switch Profile
-          </div>
-          {profiles.map(p => (
-            <button key={p.id}
-              onClick={() => { onActivate(p.id); setOpen(false); }}
-              onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
-              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-              style={{
-                display: "flex", alignItems: "center", gap: 10, width: "100%",
-                background: "transparent", border: "none", padding: "8px 14px",
-                cursor: "pointer", fontSize: 13, color: theme.text, textAlign: "left",
-              }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                              background: p.is_active ? theme.accent : theme.border }}/>
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {p.profile_name}
-              </span>
-              {p.is_active && (
-                <span style={{ fontSize: 10, color: theme.accent, fontWeight: 700 }}>✓</span>
-              )}
-            </button>
-          ))}
-        </DockPortal>
-      )}
-    </div>
-  );
-}
-
 // ── Quick actions ─────────────────────────────────────────────
 function QuickActions({ theme, onTabChange }) {
   const [open, setOpen] = useState(false);
@@ -326,54 +257,7 @@ function QuickActions({ theme, onTabChange }) {
   );
 }
 
-// ── Settings gear ─────────────────────────────────────────────
-function SettingsGear({ theme, onTabChange }) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState(null);
-  const triggerRef = useRef(null);
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        ref={triggerRef}
-        onClick={() => {
-          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
-          setOpen(o => !o);
-        }}
-        title="Settings"
-        style={{
-          background: "transparent", border: "none", cursor: "pointer",
-          width: 32, height: 32, borderRadius: 6, flexShrink: 0,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: theme.textMuted, fontSize: 15,
-          transition: "color 0.15s, background 0.15s",
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.color = theme.text; }}
-        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.textMuted; }}>
-        ⚙
-      </button>
-
-      {open && rect && (
-        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
-          style={{ minWidth: 180 }}>
-          <button
-            onClick={() => { onTabChange?.("profile"); setOpen(false); }}
-            onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
-            onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-            style={{
-              display: "flex", alignItems: "center", gap: 10, width: "100%",
-              background: "transparent", border: "none", padding: "9px 14px",
-              cursor: "pointer", fontSize: 13, color: theme.text, textAlign: "left",
-            }}>
-            ✦ Profile Settings
-          </button>
-        </DockPortal>
-      )}
-    </div>
-  );
-}
-
-function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget }) {
+function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget, profiles, onActivateProfile }) {
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
   const [tokenInput,  setTokenInput]  = useState("");
@@ -448,6 +332,38 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
               {user?.username} · {user?.isAdmin ? "Administrator" : "Member"}
             </div>
           </div>
+
+          {profiles?.length > 0 && (
+            <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                             letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
+                Job Profile
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {profiles.map(p => (
+                  <button key={p.id}
+                    onClick={() => { onActivateProfile?.(p.id); setOpen(false); }}
+                    onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%",
+                      background: "transparent", border: "none", borderRadius: 6,
+                      padding: "7px 8px", cursor: "pointer", fontSize: 12,
+                      color: theme.text, textAlign: "left",
+                    }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                                    background: p.is_active ? theme.accent : theme.border }}/>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.profile_name}
+                    </span>
+                    {p.is_active && (
+                      <span style={{ fontSize: 10, color: theme.accent, fontWeight: 700 }}>✓</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Accent color */}
           <div style={{ padding: "10px 16px 8px", borderBottom: `1px solid ${theme.border}` }}>
@@ -734,26 +650,19 @@ export default function TopBar({
         {/* Logo — "R" always visible, "esume Master" collapses */}
         <AnimatedLucyLogo theme={theme} progress={p}/>
 
-        {/* Center: profile switcher — only shown when docked */}
-        {scrolled && profiles.length > 0 && (
-          <>
-            <Divider theme={theme}/>
-            <ProfileSwitcher theme={theme} profiles={profiles} onActivate={activateProfile}/>
-          </>
-        )}
-
         {/* Right: utility icons */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           {scrolled && <Divider theme={theme}/>}
           {user && <NotificationsBell theme={theme}/>}
           {user && <QuickActions theme={theme} onTabChange={onTabChange}/>}
-          <SettingsGear theme={theme} onTabChange={onTabChange}/>
           {scrolled && <Divider theme={theme}/>}
           {user && (
             <UserAvatarMenu
               theme={theme} user={user} onLogout={onLogout}
               onTabChange={onTabChange} onUserChange={onUserChange}
               resumeWidget={resumeWidget}
+              profiles={profiles}
+              onActivateProfile={activateProfile}
             />
           )}
         </div>

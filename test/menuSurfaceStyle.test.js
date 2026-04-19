@@ -26,6 +26,24 @@ test("plans entry lives in profile menu, not main app tabs", () => {
   assert.match(topBar, /onTabChange\?\.\("plans"\)/);
 });
 
+test("top-right account controls are consolidated into avatar menu", () => {
+  const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+  const scrollDock = fs.readFileSync("client/src/components/ScrollDock.jsx", "utf8");
+  const consoles = fs.readFileSync("client/src/consoles/PlanConsoles.jsx", "utf8");
+
+  assert.match(topBar, /function UserAvatarMenu/);
+  assert.match(topBar, /Job Profile/);
+  assert.match(topBar, /onActivateProfile\?\.\(p\.id\)/);
+  assert.match(topBar, /Accent Color/);
+  assert.match(topBar, /Background/);
+  assert.match(topBar, /Apify Token/);
+  assert.match(topBar, /onTabChange\?\.\("profile"\)/);
+  assert.doesNotMatch(topBar, /function SettingsGear|<SettingsGear|function ProfileSwitcher|<ProfileSwitcher/);
+  assert.doesNotMatch(scrollDock, /<ProfileSwitcher|<DockSettingsPanel/);
+  assert.match(scrollDock, /Job Profile/);
+  assert.doesNotMatch(consoles, /Shared console|title="Jobs"|eyebrow=/);
+});
+
 test("legacy light dark mode toggle is removed while bg themes remain", () => {
   const theme = fs.readFileSync("client/src/styles/theme.jsx", "utf8");
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");

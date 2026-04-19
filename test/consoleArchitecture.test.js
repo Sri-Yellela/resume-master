@@ -11,8 +11,8 @@ test("app routes users into one shared jobs console", () => {
   assert.match(app, /label:"Jobs"/);
   assert.match(app, /<Route path="\/app\/\*"/);
   assert.match(consoles, /function JobsConsole/);
-  assert.match(consoles, /title="Jobs"/);
   assert.match(consoles, /consoleKind="jobs"/);
+  assert.doesNotMatch(consoles, /Shared console|ATS Search, ATS Sort, saved jobs/);
   assert.doesNotMatch(consoles, /Tailored Console|Custom Sampler Console|Simple Apply Console/);
 });
 

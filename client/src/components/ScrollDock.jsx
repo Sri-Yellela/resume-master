@@ -576,13 +576,30 @@ function DockSettingsPanel({ theme }) {
 }
 
 // ── User Avatar (app variant) ─────────────────────────────────
-function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange }) {
+function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onProfileActivate }) {
   const [open, setOpen] = useState(false);
+  const [profiles, setProfiles] = useState([]);
   const ref = useRef(null);
   useClickOutside(ref, () => setOpen(false));
   const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
 
   const initial = (user?.username || "U")[0].toUpperCase();
+
+  useEffect(() => {
+    if (!user) return;
+    api("/api/domain-profiles")
+      .then(d => setProfiles(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [user]);
+
+  const activateProfile = async (id) => {
+    try {
+      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
+      setProfiles(ps => ps.map(p => ({ ...p, is_active: p.id === id ? 1 : 0 })));
+      onProfileActivate?.(id);
+    } catch {}
+    setOpen(false);
+  };
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -623,6 +640,35 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange }) {
               {user?.username} · {user?.isAdmin ? "Administrator" : "Member"}
             </div>
           </div>
+
+          {profiles.length > 0 && (
+            <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                             letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
+                Job Profile
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {profiles.map(p => (
+                  <button key={p.id} onClick={() => activateProfile(p.id)}
+                    onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%",
+                      background: "transparent", border: "none", borderRadius: 6,
+                      padding: "7px 8px", cursor: "pointer", fontSize: 12,
+                      color: theme.text, textAlign: "left",
+                    }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                                    background: p.is_active ? theme.accent : theme.border }}/>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.profile_name}
+                    </span>
+                    {p.is_active && <span style={{ fontSize: 10, color: theme.accent, fontWeight: 700 }}>✓</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Accent color */}
           <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
@@ -893,16 +939,13 @@ function AppDockBar({ user, onLogout, onTabChange, activeTab, onUserChange, onPr
         {/* App dock items */}
         {user && (
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <ProfileSwitcher theme={theme} onProfileActivate={onProfileActivate} onTabChange={onTabChange}/>
-            <DockDivider theme={theme}/>
             <NotificationsBell theme={theme}/>
             <DockDivider theme={theme}/>
             <QuickActions theme={theme} onTabChange={onTabChange}/>
             <DockDivider theme={theme}/>
-            {dockEnabled && <DockSettingsPanel theme={theme}/>}
-            {dockEnabled && <DockDivider theme={theme}/>}
             <UserAvatarMenu theme={theme} user={user} onLogout={onLogout}
-              onTabChange={onTabChange} onUserChange={onUserChange}/>
+              onTabChange={onTabChange} onUserChange={onUserChange}
+              onProfileActivate={onProfileActivate}/>
           </div>
         )}
       </div>
