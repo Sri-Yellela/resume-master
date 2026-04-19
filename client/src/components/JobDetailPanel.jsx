@@ -74,6 +74,7 @@ export default function JobDetailPanel({
   onDislike,
   onAts,
   onResume,
+  onQueueApply,
 }) {
   if (!job) return null;
 
@@ -208,6 +209,11 @@ export default function JobDetailPanel({
           <ActionBtn onClick={() => handleAutoApply("semi")} title="Open pre-filled form in browser"
             accent={theme.accent} theme={theme} active={applyLoading}>
             {applyLoading ? "⏳" : "↗ Apply"}
+          </ActionBtn>
+        )}
+        {(job.applyUrl || job.url) && onQueueApply && (
+          <ActionBtn onClick={() => onQueueApply(job)} title="Add this job to the auto-apply queue" accent="#16a34a" theme={theme}>
+            Queue Auto
           </ActionBtn>
         )}
         {(job.applyUrl || job.url) && !semiActive && (

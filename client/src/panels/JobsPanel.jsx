@@ -857,6 +857,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // Live scrape status
   const [scrapeError,    setScrapeError]    = useState("");
   const [scrapeNewCount, setScrapeNewCount] = useState(0);
+  const [applyQueue, setApplyQueue] = useState([]);
+  const [applyRuns, setApplyRuns] = useState([]);
+  const [applyQueueMsg, setApplyQueueMsg] = useState("");
 
   // LIVE POLLING: polls /api/jobs/poll every 4s during active scrape.
   // Stops when scraping:false returned or after 3 consecutive failures.
@@ -1459,6 +1462,41 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setActiveProfileId?.(profileId);
     setProfileSwitchKey(k => k + 1);
   }, [setActiveProfileId]);
+
+  const addToApplyQueue = useCallback((job) => {
+    if (!job?.jobId) return;
+    setApplyQueue(prev => prev.some(item => item.jobId === job.jobId) ? prev : [...prev, job]);
+    setApplyQueueMsg(`${job.company || "Job"} queued for auto apply.`);
+    setTimeout(() => setApplyQueueMsg(""), 3000);
+  }, []);
+
+  const removeFromApplyQueue = useCallback((jobId) => {
+    setApplyQueue(prev => prev.filter(item => item.jobId !== jobId));
+  }, []);
+
+  const loadApplyRuns = useCallback(async () => {
+    try {
+      const data = await api("/api/apply/runs");
+      setApplyRuns(Array.isArray(data.runs) ? data.runs : []);
+    } catch {}
+  }, []);
+
+  useEffect(() => { if (user) loadApplyRuns(); }, [user, loadApplyRuns]);
+
+  const startApplyRun = useCallback(async (mode = "auto") => {
+    if (!applyQueue.length) return;
+    try {
+      const data = await api("/api/apply/runs", {
+        method: "POST",
+        body: JSON.stringify({ jobIds: applyQueue.map(job => job.jobId), mode, tool: canUseAPlusResume ? A_PLUS_TOOL : GENERATE_TOOL }),
+      });
+      setApplyQueue([]);
+      setApplyQueueMsg(`${data.queued?.length || 0} job${data.queued?.length === 1 ? "" : "s"} started in ${mode === "manual" ? "manual review" : "auto apply"} mode.`);
+      loadApplyRuns();
+    } catch(e) {
+      setApplyQueueMsg(e.message || "Could not start apply run.");
+    }
+  }, [applyQueue, canUseAPlusResume, loadApplyRuns]);
 
   const deleteDomainProfile = useCallback(async (profileId) => {
     const profile = domainProfiles.find(p => p.id === profileId);
@@ -2145,6 +2183,43 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           </div>
         )}
 
+        {(applyQueue.length > 0 || applyQueueMsg || applyRuns.length > 0) && (
+          <div style={{ flexBasis:"100%", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
+                        padding:"8px 10px", border:`1px solid ${theme.border}`,
+                        background:theme.surfaceHigh, borderRadius:6 }}>
+            <strong style={{ fontSize:12, color:theme.text }}>Apply Queue</strong>
+            {applyQueue.map(job => (
+              <span key={job.jobId} style={{ display:"inline-flex", alignItems:"center", gap:5,
+                                             padding:"3px 7px", borderRadius:4,
+                                             background:theme.surface, color:theme.text, fontSize:11 }}>
+                {job.company || job.title}
+                <button onClick={() => removeFromApplyQueue(job.jobId)}
+                  style={{ border:"none", background:"transparent", color:theme.textDim, cursor:"pointer", padding:0 }}>x</button>
+              </span>
+            ))}
+            {applyQueue.length > 0 && (
+              <>
+                <button onClick={() => startApplyRun("auto")}
+                  style={{ border:"none", borderRadius:6, padding:"6px 10px", background:theme.accent,
+                           color:"#0f0f0f", fontWeight:800, cursor:"pointer", fontSize:12 }}>
+                  Run Auto Apply
+                </button>
+                <button onClick={() => startApplyRun("manual")}
+                  style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"6px 10px",
+                           background:theme.surface, color:theme.text, fontWeight:700, cursor:"pointer", fontSize:12 }}>
+                  Autofill for Review
+                </button>
+              </>
+            )}
+            {applyQueueMsg && <span style={{ fontSize:11, color:theme.accentText }}>{applyQueueMsg}</span>}
+            {applyRuns[0] && !applyQueue.length && (
+              <span style={{ fontSize:11, color:theme.textMuted }}>
+                Last run: {applyRuns[0].status} - {applyRuns[0].submittedCount} submitted, {applyRuns[0].heldCount} review, {applyRuns[0].failedCount} failed
+              </span>
+            )}
+          </div>
+        )}
+
       </div>}
       {/* Hidden file input â€” always mounted so TopBar resume upload button works even when toolbar is hidden */}
       <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
@@ -2284,6 +2359,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                   onDislike={() => toggleDislike?.(selectedJob.jobId)}
                   onAts={() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setSelectedJob(null); }}
                   onResume={() => generate(selectedJob, false)}
+                  onQueueApply={addToApplyQueue}
                 />
               </div>
             );
@@ -2428,6 +2504,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     onDislike={() => toggleDislike?.(selectedJob.jobId)}
                     onAts={() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); }}
                     onResume={() => generate(selectedJob, false)}
+                    onQueueApply={addToApplyQueue}
                   />
                 </Panel>
               </>

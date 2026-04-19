@@ -358,7 +358,8 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
   // ── Route 2b: Recent rows for a table ────────────────────────
   const ALLOWED_TABLES = new Set([
     "scraped_jobs", "user_jobs", "domain_profiles", "usage_events", "scrape_events",
-    "users", "user_job_searches", "resumes", "job_applications", "schema_migrations",
+    "users", "user_job_searches", "resumes", "job_applications", "apply_runs",
+    "apply_run_jobs", "apply_job_logs", "schema_migrations",
     "user_limits", "cache_events", "job_role_map", "user_job_views",
   ]);
   router.get("/table-rows/:table", requireAdmin, (req, res) => {
@@ -767,7 +768,7 @@ ORDER BY sj.scraped_at DESC;`;
   // ── Utility: Export table as CSV ──────────────────────────────
   const EXPORT_ALLOWED = new Set([
     "scraped_jobs", "user_jobs", "domain_profiles", "usage_events", "scrape_events",
-    "job_role_map", "user_job_views",
+    "job_role_map", "user_job_views", "apply_runs", "apply_run_jobs", "apply_job_logs",
   ]);
   router.get("/export/:table", requireAdmin, (req, res) => {
     const table = req.params.table;

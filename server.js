@@ -1474,6 +1474,58 @@ db.pragma("busy_timeout = 5000");
           ON resume_versions(user_id, job_id, tool_type, ats_cache_key);
       `,
     },
+    {
+      id: "042_apply_runs_queue",
+      sql: `
+        CREATE TABLE IF NOT EXISTS apply_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          mode TEXT NOT NULL DEFAULT 'auto',
+          tool_type TEXT,
+          status TEXT NOT NULL DEFAULT 'queued',
+          total_jobs INTEGER NOT NULL DEFAULT 0,
+          submitted_count INTEGER NOT NULL DEFAULT 0,
+          held_count INTEGER NOT NULL DEFAULT 0,
+          failed_count INTEGER NOT NULL DEFAULT 0,
+          started_at INTEGER,
+          finished_at INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE TABLE IF NOT EXISTS apply_run_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_id INTEGER NOT NULL REFERENCES apply_runs(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          job_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'queued',
+          reason_code TEXT,
+          reason_detail TEXT,
+          ats_score INTEGER,
+          resume_id INTEGER,
+          resume_file TEXT,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          locked_at INTEGER,
+          started_at INTEGER,
+          finished_at INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(run_id, job_id)
+        );
+        CREATE TABLE IF NOT EXISTS apply_job_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_id INTEGER,
+          run_job_id INTEGER,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          job_id TEXT,
+          level TEXT NOT NULL DEFAULT 'info',
+          event TEXT NOT NULL,
+          message TEXT,
+          details_json TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_apply_runs_user_status ON apply_runs(user_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_apply_run_jobs_user_status ON apply_run_jobs(user_id, status, created_at);
+        CREATE INDEX IF NOT EXISTS idx_apply_logs_run ON apply_job_logs(run_id, run_job_id, created_at);
+      `,
+    },
   ];
 
   const applied = new Set(

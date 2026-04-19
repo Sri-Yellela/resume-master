@@ -228,7 +228,11 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         (process.env.LOCALAPPDATA || "") + "\\Google\\Chrome\\Application\\chrome.exe",
       ];
       executablePath = winPaths.find(p => { try { return fs.existsSync(p); } catch { return false; } });
-      if (!executablePath) throw new Error("Chrome not found on Windows.");
+      if (!executablePath) {
+        const err = new Error("Chrome not found on Windows. Install Chrome or use the direct job link for manual review.");
+        err.reasonCode = "browser_unavailable";
+        throw err;
+      }
       launchArgs = ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu"];
     } else {
       executablePath = await chromium.executablePath();
@@ -330,7 +334,13 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     let ss = { base64: null, path: null };
     try { if (page) ss = await takeScreenshot(page, jobId); } catch {}
     try { if (browser) await browser.close(); } catch {}
-    return { status: "error", error: e.message, screenshotBase64: ss.base64, screenshotPath: ss.path };
+    return {
+      status: "error",
+      error: e.message,
+      reasonCode: e.reasonCode || (String(e.message || "").toLowerCase().includes("timeout") ? "browser_timeout" : "browser_error"),
+      screenshotBase64: ss.base64,
+      screenshotPath: ss.path,
+    };
   }
 }
 
