@@ -8,6 +8,7 @@ import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { api } from "../lib/api.js";
 import { DockPortal } from "./DockPortal.jsx";
+import ProfileSelectorDropdown from "./ProfileSelectorDropdown.jsx";
 
 // ── Inject slideDown keyframe once ────────────────────────────
 function injectKeyframes() {
@@ -289,8 +290,6 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
     display: "block", width: "100%", textAlign: "left",
   };
   const activeProfile = profiles?.find(p => p.is_active) || profiles?.[0] || null;
-  const canDeleteProfile = (profiles?.length || 0) > 1;
-  const canAddProfile = (profiles?.length || 0) < 4;
 
   return (
     <div style={{ position: "relative" }}>
@@ -342,55 +341,14 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                              letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
                 Job Profile
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <select
-                  value={activeProfile?.id || ""}
-                  onChange={e => onActivateProfile?.(Number(e.target.value))}
-                  title="Select active profile"
-                  style={{
-                    flex: 1, minWidth: 0, height: 34, padding: "0 10px",
-                    borderRadius: 6, border: `1px solid ${theme.border}`,
-                    background: theme.surface, color: theme.text, fontSize: 12,
-                    outline: "none",
-                  }}>
-                  {profiles.map(p => (
-                    <option key={p.id} value={p.id}>{p.profile_name}</option>
-                  ))}
-                </select>
-                <button
-                  title={canDeleteProfile ? "Delete profile" : "Cannot delete your only profile"}
-                  disabled={!activeProfile || !canDeleteProfile}
-                  onClick={() => activeProfile && onDeleteProfile?.(activeProfile.id)}
-                  style={{
-                    height: 34, padding: "0 10px", borderRadius: 6, flexShrink: 0,
-                    border: `1px solid ${canDeleteProfile ? "#dc262644" : theme.border}`,
-                    background: canDeleteProfile ? "#fef2f2" : theme.surfaceHigh,
-                    color: canDeleteProfile ? "#dc2626" : theme.textDim,
-                    cursor: canDeleteProfile ? "pointer" : "not-allowed",
-                    fontSize: 12, fontWeight: 700,
-                  }}>
-                  Delete
-                </button>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                            gap: 8, marginTop: 8 }}>
-                <div style={{ fontSize: 10, color: theme.textDim }}>
-                  {profiles.length}/4 profiles
-                </div>
-                <button
-                  disabled={!canAddProfile}
-                  onClick={() => { if (canAddProfile) { setOpen(false); onTabChange?.("profile"); } }}
-                  style={{
-                    background: canAddProfile ? theme.accent : theme.surfaceHigh,
-                    color: canAddProfile ? "#0f0f0f" : theme.textDim,
-                    border: "none", borderRadius: 6, padding: "6px 10px",
-                    cursor: canAddProfile ? "pointer" : "not-allowed",
-                    fontSize: 12, fontWeight: 800,
-                  }}>
-                  + Add Profile
-                </button>
-              </div>
-
+              <ProfileSelectorDropdown
+                theme={theme}
+                profiles={profiles}
+                activeProfile={activeProfile}
+                onActivate={onActivateProfile}
+                onDelete={onDeleteProfile}
+                onAdd={() => { setOpen(false); onTabChange?.("profile"); }}
+              />
             </div>
           )}
 
@@ -796,6 +754,18 @@ export default function TopBar({
             <option value="yoeHigh">Exp ↓</option>
             <option value="atsScore">ATS Sort</option>
           </select>
+          {profiles.length > 0 && (
+            <ProfileSelectorDropdown
+              theme={theme}
+              profiles={profiles}
+              activeProfile={profiles.find(p => p.is_active) || profiles[0]}
+              onActivate={activateProfile}
+              onDelete={deleteProfile}
+              onAdd={() => onTabChange?.("profile")}
+              compact
+              title="Switch profile"
+            />
+          )}
           {/* Local search — expands on focus */}
           <input
             value={localSearch || ""}
@@ -808,7 +778,7 @@ export default function TopBar({
               height: 26, padding: "4px 10px", borderRadius: 4,
               border: `1px solid ${theme.border}`, background: theme.surface,
               color: theme.text, fontSize: 12, outline: "none",
-              width: searchFocused ? 180 : 120,
+              width: searchFocused ? 150 : 96,
               transition: "width 0.2s ease",
             }}/>
           {localSearch && (

@@ -10,9 +10,11 @@ import JobDetailPanel from "../components/JobDetailPanel.jsx";
 import SandboxPanel from "./SandboxPanel.jsx";
 import { ATSPanel } from "./ATSPanel.jsx";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
+import ProfileSelectorDropdown from "../components/ProfileSelectorDropdown.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { useAppScroll } from "../contexts/AppScrollContext.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
+import ROLE_ALIAS_MAP from "../../../data/ROLE_ALIAS_MAP.json";
 
 const USER_TEXT   = "#0f0f0f";   // black text on accent
 const PROFILE_UI_CACHE_KEY = "rm_jobs_profile_ui_v1";
@@ -502,25 +504,52 @@ function FiltersPanel({
 }
 
 // -- Aliases (mirrors server normaliser) -----------------------
-const ALIASES = {
-  "swe":"Software Engineer","software dev":"Software Engineer",
-  "mle":"Machine Learning Engineer","ml":"Machine Learning Engineer",
-  "ds":"Data Scientist","sde":"Software Engineer",
-  "frontend":"Frontend Engineer","front end":"Frontend Engineer",
-  "backend":"Backend Engineer","back end":"Backend Engineer",
-  "fullstack":"Full Stack Engineer","full stack":"Full Stack Engineer",
-  "devops":"DevOps Engineer","sre":"Site Reliability Engineer",
-  "pm":"Product Manager","tpm":"Technical Program Manager","em":"Engineering Manager",
-  "de":"Data Engineer","ai engineer":"AI Engineer",
-  "genai":"Generative AI Engineer","gen ai":"Generative AI Engineer","llm":"LLM Engineer",
+const ALIASES = Object.fromEntries(
+  Object.entries(ROLE_ALIAS_MAP).map(([alias, entry]) => [alias, entry.canonical])
+);
+
+const ROLE_FAMILY_DOMAIN_FALLBACK = {
+  data: "data",
+  pm: "pm_general",
+  finance: "finance",
+  marketing: "marketing",
+  hr: "hr",
+  design: "design",
+  legal: "legal",
+  operations: "operations",
 };
+
+function intentDomainForAlias(entry) {
+  if (!entry) return "general";
+  if (entry.domain && entry.domain !== "it_digital") return entry.domain;
+  if (entry.roleFamily === "general" && entry.domain) return entry.domain;
+  return ROLE_FAMILY_DOMAIN_FALLBACK[entry.roleFamily] || entry.roleFamily || "general";
+}
+
+function mergeIntentTerms(baseIntents) {
+  const byDomain = new Map(baseIntents.map(intent => [intent.domainKey, { ...intent, terms: [...intent.terms] }]));
+  for (const [alias, entry] of Object.entries(ROLE_ALIAS_MAP)) {
+    const domainKey = intentDomainForAlias(entry);
+    const current = byDomain.get(domainKey) || {
+      domainKey,
+      label: entry.roleFamily ? `${entry.roleFamily[0].toUpperCase()}${entry.roleFamily.slice(1)} Roles` : "Supported Roles",
+      terms: [],
+    };
+    current.terms.push(alias, entry.canonical, ...(entry.searchVariants || []));
+    byDomain.set(domainKey, current);
+  }
+  return [...byDomain.values()].map(intent => ({
+    ...intent,
+    terms: [...new Set(intent.terms.map(normaliseIntentText).filter(Boolean))],
+  }));
+}
 
 // Search/profile intent guard:
 // /api/scrape normalises the typed query, but the outbound provider call uses
 // the active domain profile's target_titles. Strong cross-profile signals are
 // intercepted here so searches run under the intended profile only after user
 // confirmation.
-const SEARCH_PROFILE_INTENTS = [
+const BASE_SEARCH_PROFILE_INTENTS = [
   {
     domainKey: "engineering_embedded_firmware",
     label: "Firmware, Embedded & Device Software",
@@ -578,6 +607,8 @@ const SEARCH_PROFILE_INTENTS = [
     terms: ["ux designer", "product designer", "ui/ux", "ux researcher"],
   },
 ];
+
+const SEARCH_PROFILE_INTENTS = mergeIntentTerms(BASE_SEARCH_PROFILE_INTENTS);
 
 function normaliseIntentText(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9+]+/g, " ").replace(/\s+/g, " ").trim();
@@ -671,7 +702,10 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
           cursor:"pointer", fontSize:10, fontWeight:700,
           color:theme.accentText, letterSpacing:"0.06em", textTransform:"uppercase",
         }}>
-          ? Check for new jobs
+          <span style={{ display:"inline-block", width:10, height:10,
+                         border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
+                         borderRadius:"50%", marginRight:6, verticalAlign:"-2px" }}/>
+          Check for new jobs
         </div>
       )}
       {refreshing && (
@@ -682,7 +716,9 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
           fontSize:10, fontWeight:700, color:theme.accentText,
           letterSpacing:"0.06em", textTransform:"uppercase",
         }}>
-          <span style={{ display:"inline-block", animation:"spin 0.8s linear infinite" }}>?</span>
+          <span style={{ display:"inline-block", width:10, height:10,
+                         border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
+                         borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
           Checking…
         </div>
       )}
@@ -868,7 +904,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // Board tabs — shared via JobBoardContext so TopBar compact row can drive them
   const {
     boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
-    activeProfileId, setActiveProfileId, getProfileCache, setProfileCache,
+    activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
   } = useJobBoard();
   const [pendingJobs, setPendingJobs] = useState([]);
 
@@ -1423,6 +1459,24 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setActiveProfileId?.(profileId);
     setProfileSwitchKey(k => k + 1);
   }, [setActiveProfileId]);
+
+  const deleteDomainProfile = useCallback(async (profileId) => {
+    const profile = domainProfiles.find(p => p.id === profileId);
+    if (!profile || domainProfiles.length <= 1) return;
+    if (!confirm(`Delete job profile "${profile.profile_name}"?`)) return;
+    try {
+      await api(`/api/domain-profiles/${profileId}`, { method: "DELETE" });
+      deleteProfileCache?.(profileId);
+      const next = await api("/api/domain-profiles");
+      const rows = Array.isArray(next) ? next : [];
+      setDomainProfiles(rows);
+      const active = rows.find(p => p.is_active) || rows[0];
+      if (active) setActiveProfileId?.(active.id);
+      setProfileSwitchKey(k => k + 1);
+    } catch(e) {
+      setScrapeError(e.message || "Could not delete profile.");
+    }
+  }, [deleteProfileCache, domainProfiles, setActiveProfileId]);
 
   const ensureSearchProfileAlignment = useCallback(async (query) => {
     const intent = detectSearchProfileIntent(query, domainProfiles, activeDomainProfile);
@@ -2008,11 +2062,21 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           <option value="atsScore">ATS Sort</option>
         </select>
 
+        <ProfileSelectorDropdown
+          theme={theme}
+          profiles={domainProfiles}
+          activeProfile={activeDomainProfile}
+          onActivate={activateProfileForSearch}
+          onDelete={deleteDomainProfile}
+          onAdd={() => setProfileWizardOpen(true)}
+          title="Switch profile"
+        />
+
         {/* Local search â€” live client-side, every keystroke */}
         <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
           onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
           placeholder="Filter loaded jobs..."
-          style={{ flex:1, minWidth:140, height:34, padding:"0 12px",
+          style={{ flex:"0 1 220px", minWidth:120, height:34, padding:"0 12px",
                    borderRadius:2, border:`1px solid ${theme.border}`,
                    background:theme.surface, color:theme.text,
                    fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none" }}/>
@@ -2043,13 +2107,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
         {/* Scrape query input */}
         <div style={{ position:"relative", flex:1, minWidth:200 }}>
-          <span style={{ position:"absolute", left:12, top:"50%",
-                         transform:"translateY(-50%)", fontSize:14, color:theme.textDim,
-                         pointerEvents:"none" }}>Search</span>
           <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
             onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
             placeholder="ATS search role, e.g. ML Engineer, SWE..."
-            style={{ width:"100%", height:38, paddingLeft:38, paddingRight:14,
+            style={{ width:"100%", height:38, paddingLeft:14, paddingRight:14,
                      borderRadius:2, border:`1px solid ${theme.border}`,
                      background:theme.surface, color:theme.text,
                      fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",

@@ -17,8 +17,11 @@ test("frontend detects strong cross-profile search intent before scrape", () => 
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 
   assert.match(jobsPanel, /SEARCH_PROFILE_INTENTS/);
+  assert.match(jobsPanel, /ROLE_ALIAS_MAP/);
+  assert.match(jobsPanel, /mergeIntentTerms\(BASE_SEARCH_PROFILE_INTENTS\)/);
   assert.match(jobsPanel, /engineering_embedded_firmware/);
   assert.match(jobsPanel, /"firmware"/);
+  assert.match(jobsPanel, /intentDomainForAlias/);
   assert.match(jobsPanel, /detectSearchProfileIntent\(query, domainProfiles, activeDomainProfile\)/);
   assert.match(jobsPanel, /This search looks like \$\{intent\.label\}/);
   assert.match(jobsPanel, /Switch to "\$\{intent\.existingProfile\.profile_name\}" for this search/);

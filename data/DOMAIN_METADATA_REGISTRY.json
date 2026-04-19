@@ -49,7 +49,9 @@
       "device drivers", "kernel drivers", "board bring-up",
       "BSP", "hardware software co-debug",
       "registers and memory", "peripherals",
-      "JTAG debugging", "protocol debugging",
+      "JTAG debugging", "Lauterbach TRACE32 debugging",
+      "T32 debugging", "PCIe debugging", "protocol debugging",
+      "SPI protocol", "I2C protocol",
       "low-level diagnostics", "real-time systems",
       "bootloaders", "silicon validation",
       "post-silicon validation", "SoC bring-up"
@@ -63,9 +65,9 @@
     "tools": [
       "C", "C++", "Python", "RTOS", "Linux kernel",
       "Zephyr", "FreeRTOS", "JTAG", "OpenOCD",
-      "TRACE32", "Lauterbach", "gdb", "LLDB",
+      "TRACE32", "T32", "Lauterbach", "LTB", "gdb", "LLDB",
       "Oscilloscope", "Logic analyzer", "UART", "SPI",
-      "I2C", "CAN", "Git"
+      "I2C", "PCIe", "CAN", "Git"
     ]
   },
   "engineering_systems_low_level": {

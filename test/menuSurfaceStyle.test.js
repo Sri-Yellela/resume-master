@@ -27,14 +27,15 @@ test("plans entry lives in profile menu, not main app tabs", () => {
 
 test("top-right account controls are consolidated into avatar menu", () => {
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+  const profileSelector = fs.readFileSync("client/src/components/ProfileSelectorDropdown.jsx", "utf8");
   const scrollDock = fs.readFileSync("client/src/components/ScrollDock.jsx", "utf8");
   const consoles = fs.readFileSync("client/src/consoles/PlanConsoles.jsx", "utf8");
 
   assert.match(topBar, /function UserAvatarMenu/);
   assert.match(topBar, /Job Profile/);
-  assert.match(topBar, /<select/);
-  assert.match(topBar, /onActivateProfile\?\.\(Number\(e\.target\.value\)\)/);
-  assert.match(topBar, /\+ Add Profile/);
+  assert.match(topBar, /ProfileSelectorDropdown/);
+  assert.match(topBar, /onActivateProfile/);
+  assert.match(profileSelector, /\+ Add Profile/);
   assert.match(topBar, /Accent Color/);
   assert.match(topBar, /Background/);
   assert.match(topBar, /Apify Token/);
@@ -45,16 +46,21 @@ test("top-right account controls are consolidated into avatar menu", () => {
   assert.doesNotMatch(consoles, /Shared console|title="Jobs"|eyebrow=/);
 });
 
-test("jobs surface profile switcher is disabled and profile menu supports deletion", () => {
+test("jobs surface has compact profile selector and profile menu supports deletion", () => {
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
   const scrollDock = fs.readFileSync("client/src/components/ScrollDock.jsx", "utf8");
+  const profileSelector = fs.readFileSync("client/src/components/ProfileSelectorDropdown.jsx", "utf8");
 
   assert.doesNotMatch(jobsPanel, /Profile:/);
   assert.doesNotMatch(jobsPanel, /Profile switcher bar/);
+  assert.match(jobsPanel, /<ProfileSelectorDropdown/);
+  assert.match(jobsPanel, /flex:"0 1 220px"/);
   assert.match(topBar, /method: "DELETE"/);
-  assert.match(topBar, /Delete profile/);
-  assert.match(topBar, /Cannot delete your only profile/);
+  assert.doesNotMatch(topBar, />\s*Delete\s*<\/button>/);
+  assert.match(profileSelector, /onDelete\?\.\(profile\.id\)/);
+  assert.match(profileSelector, /e\.stopPropagation\(\)/);
+  assert.match(profileSelector, /Cannot delete your only profile/);
   assert.match(scrollDock, /method: "DELETE"/);
 });
 
@@ -63,16 +69,26 @@ test("profile menus use viewport scrolling and dropdown actions", () => {
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
   const scrollDock = fs.readFileSync("client/src/components/ScrollDock.jsx", "utf8");
 
-  assert.match(dockPortal, /maxHeight:\s+`min\(\$\{maxH\}px, calc\(100vh - 24px\)\)`/);
+  assert.match(dockPortal, /vh - pos\.top - 12/);
+  assert.match(dockPortal, /calc\(100vh - \$\{pos\.top \+ 12\}px\)/);
   assert.match(dockPortal, /overflowY:\s+"auto"/);
   assert.match(dockPortal, /overflowX:\s+"hidden"/);
   assert.match(dockPortal, /zIndex:\s+10000/);
   assert.match(scrollDock, /maxHeight:\s+"calc\(100vh - 24px\)"/);
   assert.match(scrollDock, /overflowY:\s+"auto"/);
   assert.match(topBar, /const activeProfile = profiles\?\.find/);
-  assert.match(topBar, /title="Select active profile"/);
-  assert.match(topBar, /activeProfile && onDeleteProfile\?\.\(activeProfile\.id\)/);
+  assert.match(topBar, /title="Switch profile"/);
   assert.doesNotMatch(topBar, /display:\s+"none"/);
+});
+
+test("search toolbar removes redundant label and checking-jobs icon is a spinner", () => {
+  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+
+  assert.doesNotMatch(jobsPanel, />Search<\/span>\s*<input value=\{searchInput\}/);
+  assert.match(jobsPanel, /placeholder="ATS search role/);
+  assert.match(jobsPanel, /Checking/);
+  assert.match(jobsPanel, /animation:"spin 0\.8s linear infinite"/);
+  assert.doesNotMatch(jobsPanel, />\?<\/span>\s*[\r\n\s]*Checking/);
 });
 
 test("legacy light dark mode toggle is removed while bg themes remain", () => {

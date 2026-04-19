@@ -277,6 +277,54 @@
     "domain": "engineering_embedded_firmware",
     "searchVariants": ["Hardware Debug Engineer", "Debug Tools Engineer", "Embedded Debug Engineer"]
   },
+  "trace32": {
+    "canonical": "Firmware Debug Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Lauterbach TRACE32 Engineer", "Hardware Debug Engineer", "Embedded Debug Engineer"]
+  },
+  "t32": {
+    "canonical": "Firmware Debug Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["TRACE32 Engineer", "Lauterbach Debug Engineer", "Hardware Debug Engineer"]
+  },
+  "lauterbach": {
+    "canonical": "Firmware Debug Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["TRACE32 Engineer", "Hardware Debug Engineer", "Embedded Debug Engineer"]
+  },
+  "ltb": {
+    "canonical": "Firmware Debug Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Lauterbach Engineer", "TRACE32 Engineer", "Hardware Debug Engineer"]
+  },
+  "jtag": {
+    "canonical": "Hardware Debug Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Firmware Debug Engineer", "Embedded Debug Engineer", "Validation Engineer"]
+  },
+  "pcie": {
+    "canonical": "Firmware Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["PCIe Firmware Engineer", "Device Driver Engineer", "Hardware Debug Engineer"]
+  },
+  "spi": {
+    "canonical": "Firmware Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Embedded Software Engineer", "Device Driver Engineer", "Board Bring-Up Engineer"]
+  },
+  "i2c": {
+    "canonical": "Firmware Engineer",
+    "roleFamily": "engineering",
+    "domain": "engineering_embedded_firmware",
+    "searchVariants": ["Embedded Software Engineer", "Device Driver Engineer", "Board Bring-Up Engineer"]
+  },
   "performance engineer": {
     "canonical": "Performance Engineer",
     "roleFamily": "engineering",

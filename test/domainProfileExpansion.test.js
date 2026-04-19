@@ -27,9 +27,12 @@ test("engineering profile registry includes firmware, systems, specialist, and o
   }
 
   const embeddedTools = registry.engineering_embedded_firmware.tools;
-  for (const tool of ["JTAG", "OpenOCD", "TRACE32", "RTOS"]) {
+  for (const tool of ["JTAG", "OpenOCD", "TRACE32", "T32", "Lauterbach", "LTB", "SPI", "I2C", "PCIe", "RTOS"]) {
     assert.ok(embeddedTools.includes(tool), `${tool} should seed firmware profiles`);
   }
+  const embeddedKeywords = registry.engineering_embedded_firmware.keywords.join(" ");
+  assert.match(embeddedKeywords, /Lauterbach TRACE32 debugging/);
+  assert.match(embeddedKeywords, /PCIe debugging/);
 });
 
 test("role aliases cover low-level and debug-oriented engineering searches", () => {
@@ -37,8 +40,12 @@ test("role aliases cover low-level and debug-oriented engineering searches", () 
   assert.equal(normaliseRole("bsp"), "BSP Engineer");
   assert.equal(normaliseRole("soc bring-up"), "SoC Bring-Up Engineer");
   assert.equal(normaliseRole("compiler engineer"), "Compiler Engineer");
+  assert.equal(normaliseRole("trace32"), "Firmware Debug Engineer");
+  assert.equal(normaliseRole("t32"), "Firmware Debug Engineer");
+  assert.equal(normaliseRole("ltb"), "Firmware Debug Engineer");
 
   assert.equal(aliases["hardware debug"].domain, "engineering_embedded_firmware");
+  assert.equal(aliases["pcie"].domain, "engineering_embedded_firmware");
   assert.equal(aliases["performance engineer"].domain, "engineering_systems_low_level");
 
   const firmwareQueries = buildApifyQueries("Firmware Engineer");

@@ -9,6 +9,7 @@ import { useScrollCollapsed } from "../hooks/useScrollCollapsed.js";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { useAppScroll } from "../contexts/AppScrollContext.jsx";
 import { api } from "../lib/api.js";
+import ProfileSelectorDropdown from "./ProfileSelectorDropdown.jsx";
 
 // ── Logo (nested-box Lucy brand mark) ────────────────────────
 function LucyLogo({ theme, mini = false }) {
@@ -587,8 +588,6 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onPr
 
   const initial = (user?.username || "U")[0].toUpperCase();
   const activeProfile = profiles.find(p => p.is_active) || profiles[0] || null;
-  const canDeleteProfile = profiles.length > 1;
-  const canAddProfile = profiles.length < 4;
 
   useEffect(() => {
     if (!user) return;
@@ -666,54 +665,14 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, onPr
                              letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
                 Job Profile
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <select
-                  value={activeProfile?.id || ""}
-                  onChange={e => activateProfile(Number(e.target.value))}
-                  title="Select active profile"
-                  style={{
-                    flex: 1, minWidth: 0, height: 34, padding: "0 10px",
-                    borderRadius: 6, border: `1px solid ${theme.border}`,
-                    background: theme.surface, color: theme.text, fontSize: 12,
-                    outline: "none",
-                  }}>
-                  {profiles.map(p => (
-                    <option key={p.id} value={p.id}>{p.profile_name}</option>
-                  ))}
-                </select>
-                <button
-                  title={canDeleteProfile ? "Delete profile" : "Cannot delete your only profile"}
-                  disabled={!activeProfile || !canDeleteProfile}
-                  onClick={() => activeProfile && deleteProfile(activeProfile.id)}
-                  style={{
-                    height: 34, padding: "0 10px", borderRadius: 6, flexShrink: 0,
-                    border: `1px solid ${canDeleteProfile ? "#dc262644" : theme.border}`,
-                    background: canDeleteProfile ? "#fef2f2" : theme.surfaceHigh,
-                    color: canDeleteProfile ? "#dc2626" : theme.textDim,
-                    cursor: canDeleteProfile ? "pointer" : "not-allowed",
-                    fontSize: 12, fontWeight: 700,
-                  }}>
-                  Delete
-                </button>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                            gap: 8, marginTop: 8 }}>
-                <div style={{ fontSize: 10, color: theme.textDim }}>
-                  {profiles.length}/4 profiles
-                </div>
-                <button
-                  disabled={!canAddProfile}
-                  onClick={() => { if (canAddProfile) { setOpen(false); onTabChange?.("profile"); } }}
-                  style={{
-                    background: canAddProfile ? theme.accent : theme.surfaceHigh,
-                    color: canAddProfile ? "#0f0f0f" : theme.textDim,
-                    border: "none", borderRadius: 6, padding: "6px 10px",
-                    cursor: canAddProfile ? "pointer" : "not-allowed",
-                    fontSize: 12, fontWeight: 800,
-                  }}>
-                  + Add Profile
-                </button>
-              </div>
+              <ProfileSelectorDropdown
+                theme={theme}
+                profiles={profiles}
+                activeProfile={activeProfile}
+                onActivate={activateProfile}
+                onDelete={deleteProfile}
+                onAdd={() => { setOpen(false); onTabChange?.("profile"); }}
+              />
             </div>
           )}
 
