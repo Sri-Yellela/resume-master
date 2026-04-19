@@ -104,6 +104,127 @@ function sanitiseEmployers(employers) {
   );
 }
 
+const ATS_SCORE_PROMPT_VERSION = "ats-score-v1";
+
+const RESUME_STYLE_BLOCK = `<style>
+:root {
+  --color-bg: #ffffff;
+  --color-text: #1a1a1a;
+  --color-muted: #3d3d3d;
+  --color-rule: #6b6b6b;
+  --fs-body: 8.5pt;
+  --fs-name: 9pt;
+  --fs-section: 8pt;
+  --page-w: 8.5in;
+  --margin-x: 0.55in;
+  --margin-top: 0.45in;
+  --margin-bot: 0.45in;
+  --gap-section: 9pt;
+  --gap-entry: 6pt;
+  --gap-inline: 2pt;
+  --lh-body: 1.42;
+  --lh-bullets: 1.38;
+}
+body { background: var(--color-bg); color: var(--color-text); font-family: 'Garamond','EB Garamond',Georgia,serif; font-size: var(--fs-body); line-height: var(--lh-body); margin: var(--margin-top) var(--margin-x) var(--margin-bot); max-width: var(--page-w); }
+.header { text-align: center; margin-bottom: 6pt; }
+.header .name { font-size: var(--fs-name); font-weight: bold; text-transform: uppercase; letter-spacing: 0.22em; line-height: 1.1; }
+.header .tagline { color: var(--color-muted); letter-spacing: 0.04em; font-size: var(--fs-body); }
+.header .contact { font-size: var(--fs-body); }
+.header .contact a { color: inherit; text-decoration: none; }
+.section-title { font-size: var(--fs-section); font-weight: bold; text-transform: uppercase; letter-spacing: 0.18em; color: var(--color-text); border-bottom: 0.5pt solid var(--color-rule); padding-bottom: 1pt; margin-top: var(--gap-section); margin-bottom: 4pt; }
+.entry { margin-bottom: var(--gap-entry); page-break-inside: avoid; }
+.entry-header { display: flex; justify-content: space-between; align-items: baseline; }
+.entry-org { font-weight: bold; }
+.entry-meta { font-style: italic; color: var(--color-muted); font-weight: normal; }
+.sep { font-style: normal; font-weight: normal; color: var(--color-muted); }
+.entry-date { color: var(--color-muted); white-space: nowrap; margin-left: 8pt; flex-shrink: 0; font-size: var(--fs-body); }
+.entry-role { font-style: italic; color: var(--color-muted); margin-bottom: var(--gap-inline); }
+.tech-line { font-size: calc(var(--fs-body) - 0.4pt); color: var(--color-muted); margin-bottom: var(--gap-inline); }
+ul.bullets { list-style: none; padding-left: 0.9em; margin: var(--gap-inline) 0 0 0; }
+ul.bullets li { position: relative; font-size: var(--fs-body); line-height: var(--lh-bullets); margin-bottom: 1.6pt; text-align: justify; }
+ul.bullets li::before { content: "•"; position: absolute; left: -0.85em; }
+.skills-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
+.skill-label { font-weight: bold; white-space: nowrap; padding-right: 12pt; width: 1%; vertical-align: top; padding: 1.2pt 12pt 1.2pt 0; }
+.skill-values { color: var(--color-text); padding: 1.2pt 0; }
+@media print {
+  body { margin: var(--margin-top) var(--margin-x) var(--margin-bot); }
+  .entry { page-break-inside: avoid; }
+  .section-title { page-break-after: avoid; }
+}
+</style>`;
+
+function hashText(value) {
+  return crypto.createHash("sha256").update(String(value || "")).digest("hex");
+}
+
+function stripResumeHtml(html) {
+  return String(html || "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<!-- A_PLUS SELECTION[\s\S]*?-->/gi, "")
+    .replace(/<!-- CUSTOM_SAMPLER SELECTION[\s\S]*?-->/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function jobAtsSource(job = {}) {
+  return [
+    job.company || "",
+    job.title || "",
+    job.category || "",
+    job.description || job.title || "",
+  ].join("\n");
+}
+
+function buildAtsCacheKey(html, job) {
+  return hashText([
+    ATS_SCORE_PROMPT_VERSION,
+    hashText(stripResumeHtml(html)),
+    hashText(jobAtsSource(job)),
+  ].join(":"));
+}
+
+function parseJsonMaybe(text, fallback = null) {
+  try { return JSON.parse(text || "null"); } catch { return fallback; }
+}
+
+function legacyModeForTool(tool) {
+  return tool === "a_plus_resume" ? "CUSTOM_SAMPLER" : "TAILORED";
+}
+
+function promptModeForTool(tool) {
+  return tool === "a_plus_resume" ? "A_PLUS" : "GENERATE";
+}
+
+function eventSubtypeForTool(tool) {
+  return tool === "a_plus_resume" ? "A_PLUS" : "GENERATE";
+}
+
+function displayModeForPrompt(mode) {
+  const key = String(mode || "").toUpperCase();
+  if (key === "CUSTOM_SAMPLER" || key === "A_PLUS") return "A+";
+  return "Generate";
+}
+
+function normalizeResumeHtml(html) {
+  let out = String(html || "").replace(/```html|```/g, "").trim();
+  out = out.replace(/<!-- A_PLUS SELECTION[\s\S]*?-->/gi, "").trim();
+  out = out.replace(/<!-- CUSTOM_SAMPLER SELECTION[\s\S]*?-->/gi, "").trim();
+  if (!/^<html[\s>]/i.test(out)) out = `<html><head></head><body>${out}</body></html>`;
+  if (/<style[^>]*>[\s\S]*?<\/style>/i.test(out)) {
+    out = out.replace(/<style[^>]*>[\s\S]*?<\/style>/i, RESUME_STYLE_BLOCK);
+  } else if (/<head[^>]*>/i.test(out)) {
+    out = out.replace(/<head[^>]*>/i, match => `${match}\n${RESUME_STYLE_BLOCK}`);
+  } else {
+    out = out.replace(/^<html[^>]*>/i, match => `${match}<head>${RESUME_STYLE_BLOCK}</head>`);
+  }
+  if (!/Save and submit as PDF/.test(out)) {
+    out = out.replace(/<\/html>\s*$/i, "<!-- Save and submit as PDF (print to PDF from browser). Do not submit as image PDF, Google Docs link, or scanned document. -->\n</html>");
+  }
+  return out;
+}
+
 const NON_FULLTIME_TERMS = [
   "intern","internship","co-op","coop","contract","contractor",
   "temporary","temp","part-time","part time","freelance","seasonal",
@@ -1338,6 +1459,17 @@ db.pragma("busy_timeout = 5000");
           ON auth_contexts(expires_at, revoked_at);
       `,
     },
+    {
+      id: "041_resume_ats_cache_metadata",
+      sql: `
+        ALTER TABLE resumes ADD COLUMN ats_cache_key TEXT;
+        ALTER TABLE resumes ADD COLUMN ats_prompt_version TEXT;
+        ALTER TABLE resume_versions ADD COLUMN ats_cache_key TEXT;
+        ALTER TABLE resume_versions ADD COLUMN ats_prompt_version TEXT;
+        CREATE INDEX IF NOT EXISTS idx_resume_versions_ats_cache
+          ON resume_versions(user_id, job_id, tool_type, ats_cache_key);
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -2092,11 +2224,13 @@ cron.schedule("0 7 * * *", async () => {
 // domainProfile is the active domain_profiles row (or null).
 // When supplied, profile keywords/verbs/tools are injected as Tier 1 signal.
 function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainProfile = null) {
-  const userLocation = mode === "CUSTOM_SAMPLER" ? "" : (profile?.location||"");
+  const isAPlus = mode === "CUSTOM_SAMPLER" || mode === "A_PLUS";
+  const isGenerate = mode === "TAILORED" || mode === "GENERATE";
+  const userLocation = isAPlus ? "" : (profile?.location||"");
   let employerBlock  = "";
   // Apply exclusion list before injecting employer names into prompt
   const safeEmployers = sanitiseEmployers(employers);
-  if (mode === "TAILORED" && safeEmployers?.length >= 2)
+  if (isGenerate && safeEmployers?.length >= 2)
     employerBlock = `**Employer 1 (fixed):** ${safeEmployers[0]}\n**Employer 2 (fixed):** ${safeEmployers[1]}\n`;
 
   const candidateName = profile?.full_name ||
@@ -2119,7 +2253,7 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
 
   return `## RUNTIME INPUTS
 
-**Mode:** ${mode}
+**Mode:** ${displayModeForPrompt(mode)}
 **Candidate full name:** ${candidateName}
 **Phone:** ${profile?.phone||""}
 **Email:** ${profile?.email||""}
@@ -3443,7 +3577,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     disliked:             !!j.disliked,
     companyAppliedBefore: appliedCoSet.has((j.company || "").toLowerCase()),
     baseAtsScore:         j.base_ats_score ?? null,   // ATS of base resume vs JD (from scrape time)
-    resumeAtsScore:       j.resume_ats_score ?? null, // ATS of generated tailored resume vs JD
+    resumeAtsScore:       j.resume_ats_score ?? null, // ATS of generated resume vs JD
     recruiterData:        null,
     enrichmentAvailable:  false,
   }));
@@ -3935,6 +4069,7 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
     JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
     WHERE uj.resume_generated = 1
+      AND r.html IS NOT NULL
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND ${roleTitleSql("sj.title", roleKey)}
@@ -4171,7 +4306,9 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   if (!job||!resumeText) return res.status(400).json({ error:"job and resumeText required" });
   const tool = req.body?.tool === "a_plus_resume" ? "a_plus_resume" : "generate";
   if (!requireToolEntitlement(req, res, tool)) return;
-  const mode = tool === "a_plus_resume" ? "CUSTOM_SAMPLER" : "TAILORED";
+  const mode = legacyModeForTool(tool);
+  const promptMode = promptModeForTool(tool);
+  const eventSubtype = eventSubtypeForTool(tool);
   if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured on server." });
 
   // Guard: reject obviously empty or template-placeholder resume content
@@ -4204,12 +4341,34 @@ app.post("/api/generate", requireAuth, async (req, res) => {
     }
   }
   if (cachedArtifact && !forceRegen) {
+    const cachedAtsKey = buildAtsCacheKey(cachedArtifact.html, job);
+    const cachedReport = parseJsonMaybe(cachedArtifact.ats_report, null);
+    const hasStoredScore = cachedArtifact.ats_score != null && cachedReport;
+    if (hasStoredScore && (!cachedArtifact.ats_cache_key || (
+      cachedArtifact.ats_cache_key === cachedAtsKey &&
+      (!cachedArtifact.ats_prompt_version || cachedArtifact.ats_prompt_version === ATS_SCORE_PROMPT_VERSION)
+    ))) {
+      if (!cachedArtifact.ats_cache_key) {
+        db.prepare("UPDATE resumes SET ats_cache_key=?,ats_prompt_version=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?")
+          .run(cachedAtsKey, ATS_SCORE_PROMPT_VERSION, req.user.id, String(jobId));
+        if (existingVersion) {
+          db.prepare("UPDATE resume_versions SET ats_cache_key=?,ats_prompt_version=? WHERE id=?")
+            .run(cachedAtsKey, ATS_SCORE_PROMPT_VERSION, existingVersion.id);
+        }
+      }
+      return res.json({
+        html:cachedArtifact.html,
+        atsScore:cachedArtifact.ats_score,
+        atsReport:cachedReport,
+        cached:true,
+        atsCached:true,
+        tool,
+        toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate",
+        version: cachedArtifact.version || existingVersion?.version || null,
+      });
+    }
     try {
-      const cachedResumeText = cachedArtifact.html
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+      const cachedResumeText = stripResumeHtml(cachedArtifact.html);
       const jobDescription = job.description || job.title;
       const freshAtsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
 Company: ${job.company}
@@ -4235,15 +4394,15 @@ ${cachedResumeText}`;
         freshReport   = JSON.parse(rawFresh);
         freshScoreVal = freshReport.score;
         db.prepare(
-          "UPDATE resumes SET ats_score=?,ats_report=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?"
-        ).run(freshScoreVal, JSON.stringify(freshReport), req.user.id, String(jobId));
+          "UPDATE resumes SET ats_score=?,ats_report=?,ats_cache_key=?,ats_prompt_version=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?"
+        ).run(freshScoreVal, JSON.stringify(freshReport), cachedAtsKey, ATS_SCORE_PROMPT_VERSION, req.user.id, String(jobId));
         if (existingVersion) {
-          db.prepare("UPDATE resume_versions SET ats_score=?,ats_report=? WHERE id=?")
-            .run(freshScoreVal, JSON.stringify(freshReport), existingVersion.id);
+          db.prepare("UPDATE resume_versions SET ats_score=?,ats_report=?,ats_cache_key=?,ats_prompt_version=? WHERE id=?")
+            .run(freshScoreVal, JSON.stringify(freshReport), cachedAtsKey, ATS_SCORE_PROMPT_VERSION, existingVersion.id);
         }
       } catch {}
       trackApiCall(db, {
-        userId: req.user.id, eventType: "ats_score", eventSubtype: mode,
+        userId: req.user.id, eventType: "ats_score", eventSubtype,
         model: "claude-haiku-4-5-20251001", usage: freshScore.usage,
         durationMs: Date.now() - t0, jobId: String(jobId), company: job.company,
         atsScoreAfter: freshScoreVal,
@@ -4253,6 +4412,7 @@ ${cachedResumeText}`;
         atsScore:freshScoreVal,
         atsReport:freshReport || JSON.parse(cachedArtifact.ats_report||"null"),
         cached:true,
+        atsCached:false,
         tool,
         toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate",
         version: cachedArtifact.version || existingVersion?.version || null,
@@ -4263,6 +4423,7 @@ ${cachedResumeText}`;
         atsScore:cachedArtifact.ats_score,
         atsReport:JSON.parse(cachedArtifact.ats_report||"null"),
         cached:true,
+        atsCached:true,
         tool,
         toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate",
         version: cachedArtifact.version || existingVersion?.version || null,
@@ -4302,7 +4463,7 @@ ${cachedResumeText}`;
           onUsage: (usage, model) => trackApiCall(db, {
             userId: req.user.id,
             eventType: "classifier",
-            eventSubtype: mode,
+            eventSubtype,
             model,
             usage,
             durationMs: Date.now() - classifierStart,
@@ -4316,8 +4477,8 @@ ${cachedResumeText}`;
         console.warn("[generate] classifier failed, using general domain:", e.message);
       }
     }
-    const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, mode, employers, activeDomainProfile);
-    const { systemBlocks } = assemblePrompt(domainModuleKey, mode, runtimeInputs);
+    const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, promptMode, employers, activeDomainProfile);
+    const { systemBlocks } = assemblePrompt(domainModuleKey, promptMode, runtimeInputs);
 
     const genStart = Date.now();
     const resumeMsg = await anthropic.messages.create({
@@ -4327,7 +4488,7 @@ ${cachedResumeText}`;
       messages: [{ role: "user", content: runtimeInputs }],
     });
     trackApiCall(db, {
-      userId: req.user.id, eventType: "resume_generate", eventSubtype: mode,
+      userId: req.user.id, eventType: "resume_generate", eventSubtype,
       model: "claude-sonnet-4-20250514", usage: resumeMsg.usage,
       durationMs: Date.now() - genStart, jobId: String(jobId), company: job.company,
       domainModule: domainModuleKey,
@@ -4337,7 +4498,8 @@ ${cachedResumeText}`;
     // ── Formatting pass — apply visual design template via Haiku ──
     // The generation step produces content. This step applies the exact
     // CSS/HTML template spec as a deterministic formatting layer.
-    let formattedHtml = html;
+    let formattedHtml = normalizeResumeHtml(html);
+    if (process.env.RESUME_MASTER_LLM_FORMAT === "1") {
     try {
       const FORMATTING_SYSTEM = `You are a resume HTML formatter. You receive a resume in any HTML format and reformat it to exactly match the design specification below. You output ONLY the final HTML — no commentary, no markdown fences, no explanation.
 
@@ -4415,7 +4577,7 @@ RULES:
         messages: [{ role: "user", content: `Reformat this resume HTML to match the design specification exactly. Preserve all content:\n\n${html}` }],
       });
       trackApiCall(db, {
-        userId: req.user.id, eventType: "resume_format", eventSubtype: mode,
+        userId: req.user.id, eventType: "resume_format", eventSubtype,
         model: "claude-haiku-4-5-20251001", usage: formatMsg.usage,
         durationMs: Date.now() - fmtStart,
       });
@@ -4426,12 +4588,10 @@ RULES:
       // formattedHtml stays as original html — graceful fallback
     }
 
+    }
+
     const jobDescription = job.description || job.title;
-    const resumeStripped = formattedHtml
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const resumeStripped = stripResumeHtml(formattedHtml);
 
     const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
 Company: ${job.company}
@@ -4455,8 +4615,9 @@ ${resumeStripped}`;
       const raw = scoreMsg.content.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
       atsReport = JSON.parse(raw); atsScore = atsReport.score;
     } catch {}
+    const atsCacheKey = buildAtsCacheKey(formattedHtml, job);
     trackApiCall(db, {
-      userId: req.user.id, eventType: "ats_score", eventSubtype: mode,
+      userId: req.user.id, eventType: "ats_score", eventSubtype,
       model: "claude-haiku-4-5-20251001", usage: scoreMsg.usage,
       durationMs: Date.now() - atsStart, jobId: String(jobId), company: job.company,
       atsScoreAfter: atsScore,
@@ -4466,14 +4627,15 @@ ${resumeStripped}`;
       .get(req.user.id,String(jobId))?.v || 0) + 1;
     const keptExists = !!db.prepare("SELECT 1 FROM resume_versions WHERE user_id=? AND job_id=? AND is_kept=1 LIMIT 1")
       .get(req.user.id, String(jobId));
-    db.prepare("INSERT INTO resume_versions (user_id,job_id,company,role,category,html,ats_score,ats_report,tool_type,is_kept,version) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-      .run(req.user.id,String(jobId),job.company,job.title,job.category,formattedHtml,atsScore,JSON.stringify(atsReport),tool,0,version);
+    db.prepare("INSERT INTO resume_versions (user_id,job_id,company,role,category,html,ats_score,ats_report,tool_type,is_kept,version,ats_cache_key,ats_prompt_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(req.user.id,String(jobId),job.company,job.title,job.category,formattedHtml,atsScore,JSON.stringify(atsReport),tool,0,version,atsCacheKey,ATS_SCORE_PROMPT_VERSION);
     if (!keptExists) {
-      db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
+      db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,ats_cache_key,ats_prompt_version,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
         ON CONFLICT(user_id,job_id) DO UPDATE SET html=excluded.html,role=excluded.role,category=excluded.category,
-        apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,updated_at=excluded.updated_at`)
-        .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,formattedHtml,atsScore,JSON.stringify(atsReport));
+        apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,
+        ats_cache_key=excluded.ats_cache_key,ats_prompt_version=excluded.ats_prompt_version,updated_at=excluded.updated_at`)
+        .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,formattedHtml,atsScore,JSON.stringify(atsReport),atsCacheKey,ATS_SCORE_PROMPT_VERSION);
     }
 
     // Phase 1C: mark resume_generated in user_jobs
@@ -4502,11 +4664,11 @@ ${resumeStripped}`;
 app.post("/api/resumes/:jobId/html", requireAuth, (req, res) => {
   const { html, tool, version } = req.body;
   if (!html) return res.status(400).json({ error:"html required" });
-  db.prepare("UPDATE resumes SET html=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?")
+  db.prepare("UPDATE resumes SET html=?,ats_cache_key=NULL,ats_prompt_version=NULL,updated_at=unixepoch() WHERE user_id=? AND job_id=?")
     .run(html, req.user.id, req.params.jobId);
   if (tool || version) {
     db.prepare(`
-      UPDATE resume_versions SET html=?
+      UPDATE resume_versions SET html=?, ats_cache_key=NULL, ats_prompt_version=NULL
       WHERE user_id=? AND job_id=?
         AND (? IS NULL OR tool_type=?)
         AND (? IS NULL OR version=?)
@@ -4525,15 +4687,16 @@ app.post("/api/resumes/:jobId/keep", requireAuth, (req, res) => {
     LIMIT 1
   `).get(req.user.id, req.params.jobId, tool, version, version);
   if (!row) return res.status(404).json({ error:"Resume artifact not found" });
-  const mode = tool === "a_plus_resume" ? "CUSTOM_SAMPLER" : "TAILORED";
+  const mode = legacyModeForTool(tool);
   db.prepare("UPDATE resume_versions SET is_kept=0 WHERE user_id=? AND job_id=?")
     .run(req.user.id, req.params.jobId);
   db.prepare("UPDATE resume_versions SET is_kept=1 WHERE id=?").run(row.id);
-  db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
+  db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,ats_cache_key,ats_prompt_version,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
     ON CONFLICT(user_id,job_id) DO UPDATE SET company=excluded.company,role=excluded.role,category=excluded.category,
-    apply_mode=excluded.apply_mode,html=excluded.html,ats_score=excluded.ats_score,ats_report=excluded.ats_report,updated_at=excluded.updated_at`)
-    .run(req.user.id, req.params.jobId, row.company, row.role, row.category, mode, row.html, row.ats_score, row.ats_report);
+    apply_mode=excluded.apply_mode,html=excluded.html,ats_score=excluded.ats_score,ats_report=excluded.ats_report,
+    ats_cache_key=excluded.ats_cache_key,ats_prompt_version=excluded.ats_prompt_version,updated_at=excluded.updated_at`)
+    .run(req.user.id, req.params.jobId, row.company, row.role, row.category, mode, row.html, row.ats_score, row.ats_report, row.ats_cache_key, row.ats_prompt_version);
   res.json({ ok:true, tool, version: row.version, applyMode: mode });
 });
 app.post("/api/export-pdf", requireAuth, (_req, res) => {
@@ -4952,7 +5115,7 @@ app.post("/api/standalone/ats", standaloneRateLimit("ats", 1, 3), standaloneUplo
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/standalone/generate — tailored resume (no main-app auth)
+// POST /api/standalone/generate — Generate resume (no main-app auth)
 app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), standaloneUpload.single("resume"), async (req, res) => {
   const jdText = req.body?.jd_text || "";
   if (!req.file || !jdText.trim()) return res.status(400).json({ error: "resume PDF and jd_text required" });
@@ -4973,8 +5136,8 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     } catch {}
 
     const fakeJob = { title: "Role", company: "Company", description: jdText, category: "", stack: "" };
-    const runtimeInputs = buildRuntimeInputs({}, fakeJob, resumeText, "TAILORED", []);
-    const { systemBlocks } = assemblePrompt(domainModuleKey, "TAILORED", runtimeInputs);
+    const runtimeInputs = buildRuntimeInputs({}, fakeJob, resumeText, "GENERATE", []);
+    const { systemBlocks } = assemblePrompt(domainModuleKey, "GENERATE", runtimeInputs);
 
     const resumeMsg = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",

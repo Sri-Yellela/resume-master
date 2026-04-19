@@ -29,7 +29,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
 
     // Build autofill payload from stored profile using shared server-side builder.
     // This gives full field coverage (40+ variants), phone/URL normalization,
-    // CUSTOM_SAMPLER location stripping, and EEO dropdown fields.
+    // A+ location stripping and EEO dropdown fields.
     db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
     const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id) || {};
     const autofillData = buildAutofillPayload(profile, req.user.applyMode);

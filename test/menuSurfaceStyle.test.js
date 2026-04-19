@@ -92,3 +92,19 @@ test("tool access is plan-owned and local match UI is removed", () => {
   assert.doesNotMatch(jobsPanel, /Best Match|bestMatch|\/api\/jobs\/best-match|atsLocal/);
   assert.match(jobsPanel, /value="atsScore">ATS Sort/);
 });
+
+test("critical UI copy has no mojibake literals", () => {
+  const files = [
+    "client/src/panels/JobsPanel.jsx",
+    "client/src/panels/AdminPanel.jsx",
+    "client/src/lib/api.js",
+  ];
+  const stripComments = text => text
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+
+  for (const file of files) {
+    const source = stripComments(fs.readFileSync(file, "utf8"));
+    assert.doesNotMatch(source, /â|Ã|Â|�/u, file);
+  }
+});

@@ -33,15 +33,29 @@ test("download/export marks the selected artifact as kept for downstream use", (
 });
 
 test("A+ prompt overlay requires stronger honest ATS coverage", () => {
-  const standalone = fs.readFileSync("custom_sampler_system_prompt.md", "utf8");
-  const layered = fs.readFileSync("prompts/layer3_modes/custom_sampler.md", "utf8");
+  const layered = fs.readFileSync("prompts/layer3_modes/a_plus.md", "utf8");
 
-  assert.match(standalone, /A\+ coverage mandate/);
-  assert.match(standalone, /missing-keyword ledger/);
-  assert.match(standalone, /Semantic bridge/);
-  assert.match(layered, /CUSTOM_SAMPLER is the A\+ Resume tool/);
-  assert.match(layered, /more aggressive than TAILORED/);
+  assert.match(layered, /A\+ Coverage Mandate/);
+  assert.match(layered, /missing-keyword ledger/);
+  assert.match(layered, /Semantic bridge/);
+  assert.match(layered, /A\+ Resume is more aggressive than Generate/);
   assert.match(layered, /Technical Skills placement/);
+});
+
+test("cached artifacts reuse stored ATS reports and deterministic formatting by default", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  assert.match(server, /041_resume_ats_cache_metadata/);
+  assert.match(server, /ATS_SCORE_PROMPT_VERSION/);
+  assert.match(server, /buildAtsCacheKey/);
+  assert.match(server, /atsCached:true/);
+  assert.match(server, /normalizeResumeHtml\(html\)/);
+  assert.match(server, /RESUME_MASTER_LLM_FORMAT === "1"/);
+  assert.doesNotMatch(server, /let formattedHtml = html;\s*try \{/);
+});
+
+test("prompt assembler caches stable mode overlays", () => {
+  const assembler = fs.readFileSync("services/promptAssembler.js", "utf8");
+  assert.match(assembler, /\.\.\.\(layer3Text \? \{ cache_control: \{ type: "ephemeral" \} \} : \{\}\)/);
 });
 
 test("admin job review remains narrow to classification reassignment", () => {
@@ -52,4 +66,19 @@ test("admin job review remains narrow to classification reassignment", () => {
   assert.match(dbInspector, /JobReviewTab/);
   assert.doesNotMatch(adminDb, /UPDATE scraped_jobs SET title|UPDATE scraped_jobs SET company|UPDATE scraped_jobs SET description/);
   assert.doesNotMatch(dbInspector, /textarea[^>]+description|name="title"|name="company"/);
+});
+
+test("resume sandbox distinguishes idle, error, and missing artifact states", () => {
+  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+  const sandbox = fs.readFileSync("client/src/panels/SandboxPanel.jsx", "utf8");
+  const server = fs.readFileSync("server.js", "utf8");
+
+  assert.match(jobsPanel, /No generated artifact yet\. Keep the pre-generation state neutral\./);
+  assert.doesNotMatch(jobsPanel, /No resume data found/);
+  assert.match(jobsPanel, /status:"loading"/);
+  assert.match(jobsPanel, /status:"error"/);
+  assert.match(jobsPanel, /status:"missing", missing:true/);
+  assert.match(sandbox, /Resume artifact missing/);
+  assert.match(sandbox, /activeEntry\?\.error && !activeEntry\?\.missing/);
+  assert.match(server, /uj\.resume_generated = 1\s+AND r\.html IS NOT NULL/);
 });

@@ -42,7 +42,7 @@ function buildScrapeParams({ workType, ageFilter, locationFilter, employmentType
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function ago(ts) {
-  if (!ts) return "â€”";
+  if (!ts) return "-";
   const d = Date.now() - new Date(ts).getTime();
   if (d < 3600000)  return `${Math.floor(d/60000)}m`;
   if (d < 86400000) return `${Math.floor(d/3600000)}h`;
@@ -89,6 +89,7 @@ function buildArtifact(job, data, tool) {
     tool: t,
     toolLabel: data.toolLabel || TOOL_LABELS[t],
     version: data.version || null,
+    status: "success",
   };
 }
 
@@ -117,7 +118,7 @@ function PlatformLogo({ platform, size = 20, theme }) {
   const p = (platform || "").toLowerCase();
   if (p === "linkedin") return <LinkedInLogo size={size}/>;
   if (p === "indeed")   return <IndeedLogo size={size}/>;
-  return <span style={{ fontSize:size*0.5, color:theme?.textMuted||"#888" }}>â—†</span>;
+  return <span style={{ fontSize:size*0.5, color:theme?.textMuted||"#888" }}>◆</span>;
 }
 
 // â”€â”€ Company icon with monogram fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -176,7 +177,7 @@ function WorkBadge({ t, theme }) {
   return (
     <span style={{ background:theme?.surfaceHigh, color:theme?.textMuted, padding:"2px 8px",
                    borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
-      {t || "â€”"}
+      {t || "-"}
     </span>
   );
 }
@@ -207,7 +208,7 @@ function ResumeBadge({ onClick, loading }) {
                borderRadius:999, fontSize:10, fontWeight:700,
                cursor:"pointer", border:"1px solid #A8D8EA44",
                display:"inline-flex", alignItems:"center", gap:3 }}>
-      {loading ? "â³" : "ðŸ“„"} Resume
+      {loading ? "Loading" : "Resume"}
     </span>
   );
 }
@@ -326,7 +327,7 @@ function FiltersPanel({
             Filters
           </span>
           <button onClick={onClose} style={{ background:"none", border:"none",
-                                             cursor:"pointer", fontSize:18, color:theme.textMuted }}>âœ•</button>
+                                             cursor:"pointer", fontSize:18, color:theme.textMuted }}>x</button>
         </div>
 
         <div>
@@ -411,7 +412,7 @@ function FiltersPanel({
 
         <div>
           <div style={labelStyle}>
-            Years of Experience: {minYoe || 0}â€“{maxYoe || "Any"}
+            Years of Experience: {minYoe || 0}-{maxYoe || "Any"}
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
             <input type="number" min={0} max={30} placeholder="Min"
@@ -876,6 +877,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         jobId:     selectedJob.jobId,
         tool:      selectedJob.apply_mode === "CUSTOM_SAMPLER" ? A_PLUS_TOOL : GENERATE_TOOL,
         toolLabel: selectedJob.apply_mode === "CUSTOM_SAMPLER" ? TOOL_LABELS[A_PLUS_TOOL] : TOOL_LABELS[GENERATE_TOOL],
+        status:    "success",
       };
       setGenerated(p => ({ ...p, [key]: entry }));
       openSandbox({ ...entry });
@@ -884,19 +886,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       return;
     }
 
-    // Fallback: resume exists in DB (generated[key] = __exists__) — fetch on demand
-    if (generated[key]?.html) {
+    // Fallback: resume exists in DB (generated[key] = __exists__) - fetch on demand
+    if (generated[key]?.html === "__exists__") {
       generateActual(selectedJob, false, true);
       return;
     }
 
-    // No resume data found — show error in sandbox
-    openSandbox({
-      generating: false,
-      error: "Resume data not found — try regenerating.",
-      company: selectedJob.company,
-      title:   selectedJob.title,
-    });
+    // No generated artifact yet. Keep the pre-generation state neutral.
   }, [selectedJob?.jobId, boardTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleResumeClear = useCallback(() => {
@@ -1036,7 +1032,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (rr.content) { setResumeText(rr.content); setFileName(rr.name || "Saved resume"); }
       if (gr?.length) {
         const map = {};
-        gr.forEach(r => { map[r.job_id] = { html:"__exists__", atsScore:r.ats_score,
+        gr.forEach(r => { map[r.job_id] = { html:"__exists__", status:"exists", atsScore:r.ats_score,
           atsReport:r.ats_report, company:r.company, title:r.role,
           jobId:r.job_id, tool:r.apply_mode === "CUSTOM_SAMPLER" ? A_PLUS_TOOL : GENERATE_TOOL,
           toolLabel:r.apply_mode === "CUSTOM_SAMPLER" ? TOOL_LABELS[A_PLUS_TOOL] : TOOL_LABELS[GENERATE_TOOL] }; });
@@ -1186,7 +1182,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         return;
       }
       if (result.missingToken) {
-        setScrapeError("No Apify token set. Add it via avatar ? Apify Token.");
+        setScrapeError("No Apify token set. Add it via avatar > Apify Token.");
         return;
       }
       if (result.limitReached) {
@@ -1241,7 +1237,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         return;
       }
       if (result.missingToken) {
-        setScrapeError("No Apify token — add it in avatar ? Apify Token.");
+        setScrapeError("No Apify token - add it in avatar > Apify Token.");
         return;
       }
       if (result.limitReached) {
@@ -1377,13 +1373,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         setGenerated(p => ({ ...p, [key]: entry }));
         openSandbox({ ...entry, company: entry.company, title: entry.title });
         openAtsPanel({ score: d.ats_score, report: d.atsReport, company: d.company, title: d.role });
-      } catch(e) { setSandbox({ generating: false, error: e.message, company: job.company, title: job.title }); }
+      } catch(e) {
+        setSandbox({ generating: false, status:"missing", missing:true, error: e.message, company: job.company, title: job.title });
+      }
       finally { setLoading(p => { const n = {...p}; delete n[key]; return n; }); }
       return;
     }
 
     // Open sandbox with skeleton state immediately
-    openSandbox({ generating: true, company: job.company, title: job.title, jobId:key, tool, toolLabel:TOOL_LABELS[tool] });
+    openSandbox({ generating: true, status:"loading", company: job.company, title: job.title, jobId:key, tool, toolLabel:TOOL_LABELS[tool] });
 
     // Cycle through generation stages
     const stages = [
@@ -1409,7 +1407,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       const d = await api("/api/generate", { method:"POST",
         body:JSON.stringify({ jobId:key, job, resumeText, forceRegen:force, tool }) });
       if (d.limitReached) {
-        setSandbox({ generating: false, error: d.error, company: job.company, title: job.title });
+        setSandbox({ generating: false, status:"error", error: d.error, company: job.company, title: job.title });
         return; // don't throw, just show error in sandbox panel
       }
       if (d.error) throw new Error(d.error);
@@ -1418,7 +1416,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       openSandbox(mergeArtifact(generated[key], artifact));
       openAtsPanel({ score:d.atsScore, report:d.atsReport, company:job.company, title:job.title });
     } catch(e) {
-      setSandbox({ generating: false, error: e.message, company: job.company, title: job.title });
+      setSandbox({ generating: false, status:"error", error: e.message, company: job.company, title: job.title });
     }
     finally {
       if (genTimerRef.current) { clearInterval(genTimerRef.current); genTimerRef.current = null; }
@@ -1618,7 +1616,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         {/* Board tabs */}
         <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
                       border:`2px solid ${theme.borderStrong}`, borderRadius:2 }}>
-          {[["all","All Jobs"],["saved","Saved â˜…"],["pending","Pending"]].map(([id,lbl]) => (
+          {[["all","All Jobs"],["saved","Saved ★"],["pending","Pending"]].map(([id,lbl]) => (
             <button key={id} onClick={() => setBoardTab(id)}
               style={{
                 padding:"6px 16px", border:"none", cursor:"pointer",
@@ -1647,7 +1645,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             cursor:"pointer", color: filtersOpen ? "#0f0f0f" : theme.text,
             transition:"background 0.15s",
           }}>
-          â–¤ Filters
+          Filters
         </button>
 
         {/* Sort */}
@@ -1658,17 +1656,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                    fontFamily:"'DM Sans',system-ui", cursor:"pointer" }}>
           <option value="dateDesc">Newest</option>
           <option value="dateAsc">Oldest</option>
-          <option value="compHigh">Pay â†“</option>
-          <option value="compLow">Pay â†‘</option>
-          <option value="yoeLow">Exp â†‘</option>
-          <option value="yoeHigh">Exp â†“</option>
+          <option value="compHigh">Pay high to low</option>
+          <option value="compLow">Pay low to high</option>
+          <option value="yoeLow">Exp low to high</option>
+          <option value="yoeHigh">Exp high to low</option>
           <option value="atsScore">ATS Sort</option>
         </select>
 
         {/* Local search â€” live client-side, every keystroke */}
         <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
           onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
-          placeholder="Filter loaded jobsâ€¦"
+          placeholder="Filter loaded jobs..."
           style={{ flex:1, minWidth:140, height:34, padding:"0 12px",
                    borderRadius:2, border:`1px solid ${theme.border}`,
                    background:theme.surface, color:theme.text,
@@ -1676,7 +1674,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         {localSearch && (
           <button onClick={() => setLocalSearch("")}
             style={{ background:"none", border:"none", color:theme.textDim,
-                     cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>âœ•</button>
+                     cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>x</button>
         )}
 
         {/* Background loading indicator + job count */}
@@ -1702,10 +1700,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         <div style={{ position:"relative", flex:1, minWidth:200 }}>
           <span style={{ position:"absolute", left:12, top:"50%",
                          transform:"translateY(-50%)", fontSize:14, color:theme.textDim,
-                         pointerEvents:"none" }}>ðŸ”</span>
+                         pointerEvents:"none" }}>Search</span>
           <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
             onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
-            placeholder="ATS search role â€” e.g. ML Engineer, SWEâ€¦"
+            placeholder="ATS search role, e.g. ML Engineer, SWE..."
             style={{ width:"100%", height:38, paddingLeft:38, paddingRight:14,
                      borderRadius:2, border:`1px solid ${theme.border}`,
                      background:theme.surface, color:theme.text,
@@ -1729,14 +1727,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         </LucyBtn>
         {smartSearchError && (
           <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
-            âœ— {smartSearchError}
+            Error: {smartSearchError}
             <button onClick={() => setSmartSearchError("")} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:"#991b1b" }}>Dismiss</button>
           </div>
         )}
 
         {uploadError && (
           <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
-            âœ— {uploadError}
+            Error: {uploadError}
             <button onClick={() => setUploadError("")} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:"#991b1b" }}>Dismiss</button>
           </div>
         )}
@@ -1770,7 +1768,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                                   fontWeight:700, marginLeft:4 }}>
                     {enhanceResult.delta > 0 ? "+" : ""}{enhanceResult.delta} points
                   </span>
-                  {" "}({enhanceResult.original?.atsScore ?? "â€”"} â†’ {enhanceResult.enhanced?.atsScore ?? "â€”"})
+                  {" "}({enhanceResult.original?.atsScore ?? "-"}{" -> "}{enhanceResult.enhanced?.atsScore ?? "-"})
                 </div>
               )}
             </div>
@@ -1945,9 +1943,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           <div style={{ display:"flex", borderTop:`1px solid ${theme.border}`,
                         background:theme.surface, flexShrink:0 }}>
             {[
-              { id:"jobs",   label:"Jobs",   icon:"ðŸ’¼" },
-              { id:"editor", label:"Resume", icon:"âœ" },
-              { id:"ats",    label:"ATS",    icon:"ðŸ“Š" },
+              { id:"jobs",   label:"Jobs",   icon:"Jobs" },
+              { id:"editor", label:"Resume", icon:"Edit" },
+              { id:"ats",    label:"ATS",    icon:"ATS" },
             ].map(({ id, label, icon }) => (
               <button key={id} onClick={() => setMobilePane(id)}
                 style={{
@@ -2074,7 +2072,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                   ))}
                   <button onClick={closeAtsPanel} title="Close panel"
                     style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
-                             color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>âœ•</button>
+                             color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>x</button>
                 </div>
                 <div style={{ flex:1, overflowY:"auto" }}>
                   {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText}/>}
@@ -2152,8 +2150,8 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                              background:theme.accent, animation:"pulse 1.5s ease-in-out infinite" }}/>
               <span style={{ fontSize:11, color:theme.accentText, fontWeight:600 }}>
                 {pollNewCount > 0
-                  ? `Fetchingâ€¦ ${pollNewCount} new job${pollNewCount !== 1 ? "s" : ""} found so far`
-                  : "Fetching new jobsâ€¦"}
+                  ? `Fetching... ${pollNewCount} new job${pollNewCount !== 1 ? "s" : ""} found so far`
+                  : "Fetching new jobs..."}
               </span>
             </div>
           )}
@@ -2164,10 +2162,10 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                           background:"#dcfce7", border:"1px solid #86efac",
                           display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <span style={{ fontSize:11, fontWeight:700, color:"#166534" }}>
-                âœ“ Scrape complete â€” {scrapeNewCount} new job{scrapeNewCount !== 1 ? "s" : ""} added
+                Scrape complete - {scrapeNewCount} new job{scrapeNewCount !== 1 ? "s" : ""} added
               </span>
               <button onClick={onClearScrapeNew} style={{ background:"none", border:"none",
-                cursor:"pointer", color:"#166534", fontSize:13 }}>âœ•</button>
+                cursor:"pointer", color:"#166534", fontSize:13 }}>x</button>
             </div>
           )}
 
@@ -2176,7 +2174,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
             <div style={{ margin:"6px 16px 0", padding:"6px 12px", borderRadius:4,
                           background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
                           fontSize:11, color:theme.textMuted }}>
-              âœ“ Results up to date
+              Results up to date
             </div>
           )}
 
@@ -2186,7 +2184,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                           background:"#fee2e2", border:"1px solid #fca5a5",
                           display:"flex", alignItems:"center", justifyContent:"space-between" }}>
               <span style={{ fontSize:12, color:"#991b1b" }}>
-                âœ— {scrapeError}
+                Error: {scrapeError}
               </span>
               <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                 {pollStatus === "error" && onRetryPoll && (
@@ -2198,7 +2196,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                   </button>
                 )}
                 <button onClick={onClearScrapeError} style={{ background:"none", border:"none",
-                  cursor:"pointer", color:"#991b1b", fontSize:14 }}>âœ•</button>
+                  cursor:"pointer", color:"#991b1b", fontSize:14 }}>x</button>
               </div>
             </div>
           )}
@@ -2255,14 +2253,14 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                            gap:8, padding:"16px 20px", borderTop:`1px solid ${theme.border}` }}>
               <LucyBtn onClick={() => goPage(currentPage-1)}
                         disabled={currentPage <= 1} accent={theme.surfaceHigh}>
-                â† Prev
+                Prev
               </LucyBtn>
               <span style={{ fontSize:12, color:theme.textMuted }}>
                 Page {currentPage} of {totalPages}
               </span>
               <LucyBtn onClick={() => goPage(currentPage+1)}
                         disabled={currentPage >= totalPages} accent={theme.surfaceHigh}>
-                Next â†’
+                Next
               </LucyBtn>
             </div>
           )}
@@ -2282,13 +2280,13 @@ function EmptyState({ theme }) {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
                   justifyContent:"center", gap:16, padding:40, color:th.textDim }}>
-      <div style={{ fontSize:56 }}>ðŸ”</div>
+      <div style={{ fontSize:56 }}>Search</div>
       <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
                     fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase", color:th.text }}>
         Search for a role above
       </div>
       <div style={{ fontSize:12, textAlign:"center", color:th.textDim, maxWidth:320, lineHeight:1.8 }}>
-        LinkedIn + Indeed Â· full-time only Â· deduplicated Â· ghost jobs filtered
+        LinkedIn + Indeed - full-time only - deduplicated - ghost jobs filtered
       </div>
     </div>
   );

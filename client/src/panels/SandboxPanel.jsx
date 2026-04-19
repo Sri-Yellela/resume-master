@@ -151,8 +151,26 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
         </div>
       )}
 
+      {/* Missing artifact state */}
+      {activeEntry?.missing && !activeEntry?.generating && (
+        <div style={{ flex:1, padding:24, display:"flex", flexDirection:"column",
+                      alignItems:"center", justifyContent:"center", gap:12, textAlign:"center" }}>
+          <div style={{ fontSize:13, color:theme.text, fontWeight:700 }}>Resume artifact missing</div>
+          <div style={{ fontSize:12, color:theme.textMuted }}>
+            This resume was expected from a previous run, but the stored artifact could not be loaded.
+          </div>
+          {activeEntry.error && <div style={{ fontSize:11, color:theme.textDim }}>{activeEntry.error}</div>}
+          <button onClick={onClose}
+            style={{ marginTop:8, padding:"7px 20px", borderRadius:999,
+                     background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
+                     cursor:"pointer", fontSize:12, color:theme.text }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Error state */}
-      {activeEntry?.error && !activeEntry?.generating && (
+      {activeEntry?.error && !activeEntry?.missing && !activeEntry?.generating && (
         <div style={{ flex:1, padding:24, display:"flex", flexDirection:"column",
                       alignItems:"center", justifyContent:"center", gap:12, textAlign:"center" }}>
           <div style={{ fontSize:32 }}>⚠</div>

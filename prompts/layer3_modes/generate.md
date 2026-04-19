@@ -1,19 +1,6 @@
-<!--
-  What this file does:
-    TAILORED mode overlay — appended after Layer 1 and Layer 2 for TAILORED generation calls.
-    Contains only rules specific to TAILORED mode that Layer 1 does not already cover.
+<!-- Generate resume overlay. Keep this as the mode delta only. -->
 
-  What to change here if intent changes:
-    If TAILORED behaviour needs to diverge from CUSTOM_SAMPLER, edit here.
-    Do NOT add global rules here — those belong in layer1_global_rules.md.
-    Do NOT add domain-specific rules here — those belong in layer2_domains/.
-
-  Depends on:
-    - layer1_global_rules.md (must be consistent with it — this is an overlay, not a replacement)
-    - services/promptAssembler.js (loads this file for mode="TAILORED")
--->
-
-## TAILORED MODE RULES
+## GENERATE MODE RULES
 
 ### Candidate Experience Grounding
 

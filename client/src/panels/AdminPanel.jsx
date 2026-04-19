@@ -8,6 +8,12 @@ import { useTheme } from "../styles/theme.jsx";
 const ADMIN_ACCENT = "#F5E642";
 const ADMIN_TEXT   = "#0f0f0f";
 
+function displayEventSubtype(value) {
+  if (value === "CUSTOM_SAMPLER" || value === "A_PLUS") return "A+";
+  if (value === "TAILORED" || value === "GENERATE") return "Generate";
+  return value;
+}
+
 // ── DateRange presets ─────────────────────────────────────────
 function DateRange({ from, to, onFromChange, onToChange }) {
   const { theme } = useTheme();
@@ -144,8 +150,8 @@ function UsageTab({ theme }) {
   const fmtUsd = n => n == null ? "—" : `$${Number(n).toFixed(4)}`;
   const fmtPct = n => n == null ? "—" : `${(n*100).toFixed(1)}%`;
 
-  const fmtDate = ts => ts ? new Date(ts*1000).toLocaleString() : "â€”";
-  const shortModel = model => (model || "â€”").replace("claude-", "").replace("-20250514", "").replace("-20251001", "");
+  const fmtDate = ts => ts ? new Date(ts*1000).toLocaleString() : "-";
+  const shortModel = model => (model || "-").replace("claude-", "").replace("-20250514", "").replace("-20251001", "");
 
   const cacheColor = overview.cacheHitRate >= 0.7 ? "#16a34a" : overview.cacheHitRate >= 0.4 ? "#d97706" : "#dc2626";
 
@@ -209,7 +215,8 @@ function UsageTab({ theme }) {
           <div style={{ fontSize:12, fontWeight:700, marginBottom:12, color:theme.text }}>Cost by Generation Action</div>
           <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
             {overview.actionCosts.map((row, idx) => {
-              const label = row.event_subtype ? `${row.event_type} / ${row.event_subtype}` : row.event_type;
+              const subtypeLabel = displayEventSubtype(row.event_subtype);
+              const label = subtypeLabel ? `${row.event_type} / ${subtypeLabel}` : row.event_type;
               const maxCost = overview.actionCosts[0]?.cost || 1;
               const totalTokens = (row.input_tokens || 0) + (row.output_tokens || 0)
                 + (row.cache_read_tokens || 0) + (row.cache_creation_tokens || 0);
@@ -267,7 +274,7 @@ function UsageTab({ theme }) {
                 <div style={{ color:theme.text, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                   {call.username}
                 </div>
-                <div style={{ color:theme.text }}>{call.event_subtype || call.event_type}</div>
+                <div style={{ color:theme.text }}>{displayEventSubtype(call.event_subtype) || call.event_type}</div>
                 <div title={call.model || ""}>{shortModel(call.model)}</div>
                 <div>{fmtNum(call.input_tokens || 0)}</div>
                 <div>{fmtNum(call.output_tokens || 0)}</div>

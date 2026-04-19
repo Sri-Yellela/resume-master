@@ -47,7 +47,7 @@ const TIERS = [
     features: [
       "Everything in Plus",
       "A+ Resume tool on expanded job cards",
-      "Custom sampler resume workflow",
+      "A+ resume workflow",
       "Admin-approved access changes",
     ],
     cta: "Request upgrade",

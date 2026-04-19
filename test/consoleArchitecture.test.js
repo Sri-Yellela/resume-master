@@ -13,7 +13,7 @@ test("app routes users into one shared jobs console", () => {
   assert.match(consoles, /function JobsConsole/);
   assert.match(consoles, /consoleKind="jobs"/);
   assert.doesNotMatch(consoles, /Shared console|ATS Search, ATS Sort, saved jobs/);
-  assert.doesNotMatch(consoles, /Tailored Console|Custom Sampler Console|Simple Apply Console/);
+  assert.doesNotMatch(consoles, /Generate Console|A\+ Console|Baseline Console/);
 });
 
 test("plan updates refresh console state without mode switching", () => {
@@ -28,7 +28,7 @@ test("plan updates refresh console state without mode switching", () => {
   assert.match(plans, /Request \{tier === "BASIC" \? "downgrade" : "upgrade"\}/);
   assert.match(server, /changeOptions/);
   assert.match(server, /function requireToolEntitlement/);
-  assert.match(server, /tool === "a_plus_resume" \? "CUSTOM_SAMPLER" : "TAILORED"/);
+  assert.match(server, /function legacyModeForTool/);
   assert.doesNotMatch(server, /Next available upgrade|Already on highest plan/);
   assert.doesNotMatch(topBar, /APPLY_MODES|Apply Mode|\/api\/settings\/apply-mode/);
 });

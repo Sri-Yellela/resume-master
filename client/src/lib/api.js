@@ -24,6 +24,36 @@ export function authContextQuery() {
   return token ? `authContext=${encodeURIComponent(token)}` : "";
 }
 
+const MOJIBAKE_REPLACEMENTS = [
+  [new RegExp("\\u00e2\\u20ac\\u201d", "g"), "-"],
+  [new RegExp("\\u00e2\\u20ac\\u201c", "g"), "-"],
+  [new RegExp("\\u00e2\\u20ac\\u00a6", "g"), "..."],
+  [new RegExp("\\u00e2\\u2020\\u2019", "g"), "->"],
+  [new RegExp("\\u00e2\\u2020\\u0090", "g"), "<-"],
+  [new RegExp("\\u00e2\\u0153\\u201c", "g"), "✓"],
+  [new RegExp("\\u00e2\\u0153\\u2014", "g"), "x"],
+  [new RegExp("\\u00e2\\u0153\\u2022", "g"), "x"],
+  [new RegExp("\\u00e2\\u02dc\\u2026", "g"), "★"],
+  [new RegExp("\\u00c2\\u00b7", "g"), "·"],
+  [new RegExp("\\u00c3\\u2014", "g"), "x"],
+  [new RegExp("\\u00c3\\u00a2\\u00e2\\u201a\\u00ac\\u00e2\\u20ac\\u009d", "g"), "-"],
+];
+
+export function cleanUiText(value) {
+  if (typeof value !== "string") return value;
+  return MOJIBAKE_REPLACEMENTS.reduce((text, [pattern, replacement]) =>
+    text.replace(pattern, replacement), value);
+}
+
+function cleanPayload(value) {
+  if (typeof value === "string") return cleanUiText(value);
+  if (Array.isArray(value)) return value.map(cleanPayload);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, val]) => [key, cleanPayload(val)]));
+  }
+  return value;
+}
+
 export async function api(path, opts = {}) {
   const bodyIsForm = typeof FormData !== "undefined" && opts.body instanceof FormData;
   const headers = authHeaders({
@@ -48,7 +78,7 @@ export async function api(path, opts = {}) {
   if (ct.includes("application/pdf") || ct.includes("spreadsheetml") || ct.includes("octet-stream")) return r;
   const payload = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(payload.error || `Request failed (${r.status})`), { status: r.status, payload });
-  return payload;
+  return cleanPayload(payload);
 }
 
 export async function downloadBlob(blob, filename) {

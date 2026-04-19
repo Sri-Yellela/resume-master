@@ -73,7 +73,7 @@ The current deployment target is Railway (single Node.js instance + persistent v
 ```
 resume-master/
 ├── server.js                        # All backend logic — single file
-├── resume_masterprompt.md           # Static master prompt loaded at startup
+├── prompts/                         # Active layered prompt architecture
 ├── package.json                     # Server dependencies + npm scripts
 ├── .env                             # Secrets — never commit
 ├── .env.example                     # Template for .env
@@ -136,7 +136,7 @@ All tables live in `data/resume_master.db`. Schema is managed by `scripts/migrat
 | username | TEXT UNIQUE | Login identifier |
 | password_hash | TEXT | bcrypt hash |
 | is_admin | INTEGER | 0=user, 1=admin |
-| apply_mode | TEXT | SIMPLE \| TAILORED \| CUSTOM_SAMPLER |
+| apply_mode | TEXT | SIMPLE \| TAILORED \| CUSTOM_SAMPLER. Legacy compatibility values mapped to Generate/A+ in active surfaces. |
 | apify_token | TEXT | Optional personal Apify token |
 | created_at | INTEGER | Unix timestamp |
 
@@ -148,7 +148,7 @@ One row per user. Used for resume header injection and autofill.
 | user_id | INTEGER FK | References users(id) CASCADE |
 | full_name, email, phone | TEXT | Personal info |
 | linkedin_url, github_url | TEXT | URLs |
-| location | TEXT | "City, State" — used in TAILORED mode |
+| location | TEXT | "City, State" - used in Generate mode |
 | address_line1/2, city, state, zip, country | TEXT | Full address for autofill |
 | gender, ethnicity, veteran_status, disability_status | TEXT | EEO fields |
 | requires_sponsorship, has_clearance | INTEGER | Boolean flags |
@@ -219,7 +219,7 @@ All routes are prefixed `/api/`. All except auth routes require a valid session 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/settings` | Get apply_mode, hasCustomToken |
-| PATCH | `/api/settings/apply-mode` | `{mode}` — SIMPLE/TAILORED/CUSTOM_SAMPLER |
+| PATCH | `/api/settings/apply-mode` | `{mode}` - legacy SIMPLE/TAILORED/CUSTOM_SAMPLER values retained for compatibility |
 | PATCH | `/api/settings/apify-token` | `{token}` — save personal Apify token |
 
 ### Profile
@@ -299,17 +299,17 @@ All routes are prefixed `/api/`. All except auth routes require a valid session 
 | Mode | Employers | What changes |
 |---|---|---|
 | SIMPLE | N/A | No generation. Job board only. Generate button hidden. |
-| TAILORED | Fixed — from base resume | Bullets rewritten to match JD. Employer names, locations rigid. User real location in header. |
-| CUSTOM_SAMPLER | JD-driven — selected from Company Registry | Full company + bullet customisation. Max 1 FAANG. User location blank in header. Employer locations omitted. |
+| Generate | Fixed - from base resume | Bullets rewritten to match JD. Employer names and locations stay grounded in the base resume. User real location appears in the header. |
+| A+ | JD-driven - selected from Company Registry | Full company + bullet customisation. Max 1 FAANG. User location blank in header. Employer locations omitted. |
 
-### Master prompt structure (resume_masterprompt.md)
+### Active Prompt Structure
 
-The master prompt is a static markdown file loaded once at server startup. It is never regenerated — only runtime inputs are injected at generation time. This enables Anthropic's static prompt caching discount.
+Prompts are loaded from `prompts/layer1_global_rules.md`, `prompts/layer2_domains/*.md`, and `prompts/layer3_modes/*.md` at server startup. Static layers are cached where possible; runtime inputs are injected per generation.
 
 Sections:
 - **RUNTIME INPUTS** — injected dynamically: mode, candidate info, JD, base resume
 - **Section 0** — JD analysis: tier 1/2/3 keyword extraction, skill distribution plan
-- **Section 0B** — Company selection rules (TAILORED vs CUSTOM_SAMPLER)
+- **Layer 3** - Generate and A+ mode overlays
 - **Section 0C** — Tech stack and narrative rules: company-authentic placement, bullet archetype diversity, AI placement rule, dynamic bullet count (16–22 total)
 - **Section 1** — Factual integrity: no fabricated metrics, no inflated ownership
 - **Section 1A** — Company Scope Registry: 35+ companies with authentic tech scope descriptions
@@ -367,8 +367,8 @@ Application form on any ATS platform
 ```
 
 ### Location rules by mode
-- **TAILORED**: user's real `location` field from profile included in field_map
-- **CUSTOM_SAMPLER**: location field is blank — user fills address manually (resume location also blank)
+- **Generate**: user's real `location` field from profile included in field_map
+- **A+**: location field is blank - user fills address manually (resume location also blank)
 
 ### ATS platform support
 content.js detects the ATS from `window.location.hostname` and applies a label-based field mapper:
@@ -562,7 +562,7 @@ The LLM will have full context on: the stack, file structure, DB schema, API rou
 - `import "dotenv/config"` must be the first line of `server.js`
 - All panel exports except App/TopBar/AuthScreen are named exports `{ }` not defaults
 - Never delete `data/resume_master.db` — use `npm run backup` and the admin restore panel
-- The master prompt (`resume_masterprompt.md`) is static — only runtime inputs are injected per generation
+- The layered prompts under `prompts/` are static - only runtime inputs are injected per generation
 - Ghost job filtering is always on — `hideGhost=true&hideFlag=true` hardcoded in frontend requests
 - `connect-sqlite3` replaced `better-sqlite3-session-store` (unpublished package)
 - `multer` is v2 (v1 had security vulnerabilities)

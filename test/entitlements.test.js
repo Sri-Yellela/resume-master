@@ -15,7 +15,7 @@ test("plan tiers expose only their entitled apply mode", () => {
   assert.deepEqual(allowedModesForTier("PRO"), ["CUSTOM_SAMPLER"]);
 });
 
-test("custom sampler requires Pro and lower tiers cannot select it", () => {
+test("A+ requires Pro and lower tiers cannot select it", () => {
   assert.equal(canUseMode("BASIC", "CUSTOM_SAMPLER"), false);
   assert.equal(canUseMode("PLUS", "CUSTOM_SAMPLER"), false);
   assert.equal(canUseMode("PRO", "CUSTOM_SAMPLER"), true);

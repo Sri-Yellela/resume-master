@@ -101,7 +101,7 @@ test("admin analytics exposes recent model-call token usage", async () => {
     trackApiCall(db, {
       userId: 1,
       eventType: "resume_generate",
-      eventSubtype: "CUSTOM_SAMPLER",
+      eventSubtype: "A_PLUS",
       model: "claude-sonnet-4-20250514",
       usage: {
         input_tokens: 1200,
@@ -119,7 +119,7 @@ test("admin analytics exposes recent model-call token usage", async () => {
     assert.equal(data.rows.length, 1);
     assert.equal(data.rows[0].username, "admin");
     assert.equal(data.rows[0].event_type, "resume_generate");
-    assert.equal(data.rows[0].event_subtype, "CUSTOM_SAMPLER");
+    assert.equal(data.rows[0].event_subtype, "A_PLUS");
     assert.equal(data.rows[0].input_tokens, 1200);
     assert.equal(data.rows[0].output_tokens, 800);
     assert.equal(data.rows[0].cache_read_tokens, 24000);
@@ -144,28 +144,28 @@ test("admin cache analytics distinguish warm partial writes and cold misses", as
     trackApiCall(db, {
       userId: 1,
       eventType: "resume_generate",
-      eventSubtype: "TAILORED",
+      eventSubtype: "GENERATE",
       model: "claude-sonnet-4-20250514",
       usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 900, cache_creation_tokens: 0 },
     });
     trackApiCall(db, {
       userId: 1,
       eventType: "resume_generate",
-      eventSubtype: "TAILORED",
+      eventSubtype: "GENERATE",
       model: "claude-sonnet-4-20250514",
       usage: { input_tokens: 0, output_tokens: 50, cache_read_input_tokens: 1000, cache_creation_tokens: 0 },
     });
     trackApiCall(db, {
       userId: 1,
       eventType: "resume_format",
-      eventSubtype: "TAILORED",
+      eventSubtype: "GENERATE",
       model: "claude-haiku-4-5-20251001",
       usage: { input_tokens: 600, output_tokens: 300, cache_read_input_tokens: 0, cache_creation_tokens: 400 },
     });
     trackApiCall(db, {
       userId: 1,
       eventType: "ats_score",
-      eventSubtype: "TAILORED",
+      eventSubtype: "GENERATE",
       model: "claude-haiku-4-5-20251001",
       usage: { input_tokens: 300, output_tokens: 90, cache_read_input_tokens: 0, cache_creation_tokens: 0 },
     });
@@ -195,7 +195,7 @@ test("classifier tracking is wired into generation classifier call sites", () =>
   const classifier = fs.readFileSync("services/classifier.js", "utf8");
   assert.match(classifier, /options\.onUsage/);
   assert.match(server, /eventType:\s*"classifier"/);
-  assert.match(server, /eventSubtype:\s*mode/);
+  assert.match(server, /eventSubtype,/);
   assert.match(server, /eventSubtype:\s*"profile_setup"/);
 });
 
