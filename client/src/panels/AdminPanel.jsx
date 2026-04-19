@@ -876,7 +876,7 @@ export function AdminPanel() {
                   <table style={{ width:"100%", borderCollapse:"collapse" }}>
                     <thead>
                       <tr style={{ background:theme.surfaceHigh, borderBottom:`1px solid ${theme.border}` }}>
-                        {["Username","Role","Plan","Mode","Created","Actions"].map(h => (
+                        {["Username","Role","Plan","Tools","Created","Actions"].map(h => (
                           <th key={h} style={thStyle}>{h}</th>
                         ))}
                       </tr>
@@ -902,7 +902,11 @@ export function AdminPanel() {
                             {u.plan_tier || "BASIC"}
                           </td>
                           <td style={{ padding:"12px 14px", fontSize:12, color:theme.textMuted }}>
-                            {u.apply_mode}
+                            {(u.plan_tier || "BASIC") === "PRO"
+                              ? "Generate + A+ Resume"
+                              : (u.plan_tier || "BASIC") === "PLUS"
+                                ? "Generate"
+                                : "Baseline console"}
                           </td>
                           <td style={{ padding:"12px 14px", fontSize:11, color:theme.textDim }}>
                             {new Date(u.created_at * 1000).toLocaleDateString()}

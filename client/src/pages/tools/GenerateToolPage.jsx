@@ -36,7 +36,7 @@ export function GenerateToolPage() {
     if (!result?.html) return;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([result.html], { type: "text/html" }));
-    a.download = "tailored_resume.html";
+    a.download = "generated_resume.html";
     a.click();
   };
 
@@ -50,7 +50,7 @@ export function GenerateToolPage() {
         <h1 style={{ fontSize: "clamp(28px, 5vw, 44px)", fontWeight: 900,
                      fontFamily: "'Barlow Condensed', sans-serif",
                      letterSpacing: "-1px", marginBottom: 10, color: theme.text }}>
-          Get a tailored resume for any job in 30 seconds
+          Generate a focused resume for any job in 30 seconds
         </h1>
         <p style={{ fontSize: 15, color: theme.textMuted, marginBottom: 36, lineHeight: 1.6 }}>
           Upload your resume and a job description. Our AI rewrites it to beat ATS filters.

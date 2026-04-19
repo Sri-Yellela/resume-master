@@ -16,7 +16,7 @@ const FAQS = [
   { q: "What is an ATS score?",
     a: "An ATS (Applicant Tracking System) score measures how well your resume matches the job description based on keywords, skills, and language. Most large companies filter resumes by ATS score before a human sees them." },
   { q: "Can I use my own resume?",
-    a: "Yes. You upload your base resume once. We use it as the foundation for every tailored resume we generate." },
+    a: "Yes. You upload your base resume once. Generate and A+ Resume use it as the foundation for plan-gated resume tools." },
   { q: "What happens to my data if I cancel?",
     a: "Your data remains accessible until you delete your account. We do not delete data on cancellation." },
 ];

@@ -1,8 +1,15 @@
 import JobsPanel from "../panels/JobsPanel.jsx";
 import { useTheme } from "../styles/theme.jsx";
 
-function consoleUser(user, applyMode) {
-  return { ...user, applyMode, allowedModes: [applyMode] };
+function toolModeForPlan(planTier) {
+  const tier = String(planTier || "BASIC").toUpperCase();
+  if (tier === "PRO") return "CUSTOM_SAMPLER";
+  if (tier === "PLUS") return "TAILORED";
+  return "SIMPLE";
+}
+
+function consoleUser(user) {
+  return { ...user, applyMode: toolModeForPlan(user?.planTier) };
 }
 
 function ConsoleFrame({ title, eyebrow, description, children }) {
@@ -34,38 +41,14 @@ function ConsoleFrame({ title, eyebrow, description, children }) {
   );
 }
 
-export function SimpleApplyConsole(props) {
+export function JobsConsole(props) {
   return (
     <ConsoleFrame
-      title="Simple Apply Console"
-      eyebrow="Basic"
-      description="ATS Search fetches listings, ATS Sort orders saved scores, and Set Role uses the local pool first."
+      title="Jobs"
+      eyebrow="Shared console"
+      description="ATS Search, ATS Sort, saved jobs, and upgrade-gated resume tools all run from one console."
     >
-      <JobsPanel {...props} user={consoleUser(props.user, "SIMPLE")} consoleKind="simple-apply"/>
-    </ConsoleFrame>
-  );
-}
-
-export function TailoredConsole(props) {
-  return (
-    <ConsoleFrame
-      title="Tailored Console"
-      eyebrow="Plus"
-      description="Generate tailored resumes from selected jobs. Console changes are handled from Plans."
-    >
-      <JobsPanel {...props} user={consoleUser(props.user, "TAILORED")} consoleKind="tailored"/>
-    </ConsoleFrame>
-  );
-}
-
-export function CustomSamplerConsole(props) {
-  return (
-    <ConsoleFrame
-      title="Custom Sampler Console"
-      eyebrow="Pro"
-      description="Use the full custom sampler workflow for JD-driven resume generation."
-    >
-      <JobsPanel {...props} user={consoleUser(props.user, "CUSTOM_SAMPLER")} consoleKind="custom-sampler"/>
+      <JobsPanel {...props} user={consoleUser(props.user)} consoleKind="jobs"/>
     </ConsoleFrame>
   );
 }

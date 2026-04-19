@@ -145,7 +145,10 @@ export default function JobCard({
   done,               // has generated resume
   st,                 // loading state string
   applyMode,
+  canUseGenerate = applyMode !== "SIMPLE",
+  canUseAPlusResume = false,
   onGenerate,
+  onAPlusResume,
   onViewSandbox,
   onExport,
   onVisit,
@@ -427,11 +430,18 @@ export default function JobCard({
             )}
 
             {/* Generate */}
-            {applyMode !== "SIMPLE" && onGenerate && showApplyButton && (
+            {canUseGenerate && onGenerate && showApplyButton && (
               <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
                 disabled={!!st} theme={theme}
                 onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
                 {st ? "⏳" : done ? "↻" : "✦"}
+              </IconBtn>
+            )}
+            {canUseAPlusResume && onAPlusResume && showApplyButton && (
+              <IconBtn bg="#16a34a" title={done ? "Rebuild A+ Resume" : "A+ Resume"}
+                disabled={!!st} theme={theme}
+                onClick={e => { e.stopPropagation(); onAPlusResume(done && g?.html !== "__exists__"); }}>
+                A+
               </IconBtn>
             )}
 
@@ -498,6 +508,29 @@ export default function JobCard({
           </div>
 
           {/* Recruiter section — coming soon */}
+          {(canUseGenerate || canUseAPlusResume) && showApplyButton && (
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
+              {canUseGenerate && onGenerate && (
+                <button onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}
+                  disabled={!!st}
+                  style={{ border:"none", borderRadius:6, padding:"8px 12px",
+                           background:theme.accent, color:"#0f0f0f", cursor:st ? "not-allowed" : "pointer",
+                           fontSize:12, fontWeight:800 }}>
+                  {done ? "Regenerate" : "Generate"}
+                </button>
+              )}
+              {canUseAPlusResume && onAPlusResume && (
+                <button onClick={e => { e.stopPropagation(); onAPlusResume(done && g?.html !== "__exists__"); }}
+                  disabled={!!st}
+                  style={{ border:"none", borderRadius:6, padding:"8px 12px",
+                           background:"#16a34a", color:"#fff", cursor:st ? "not-allowed" : "pointer",
+                           fontSize:12, fontWeight:800 }}>
+                  A+ Resume
+                </button>
+              )}
+            </div>
+          )}
+
           <div style={{
             borderTop: `1px dashed ${theme.border}`,
             paddingTop: 8, marginTop: 4,

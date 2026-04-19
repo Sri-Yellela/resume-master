@@ -1,6 +1,6 @@
 // PosterBanner.jsx — adapted from EventsCarousel.tsx (no supabase, static data)
 const POSTER_CARDS = [
-  { icon:"📊", headline:"ATS-Optimised Resumes", sub:"Tailored to every job description" },
+  { icon:"📊", headline:"ATS-Optimised Resumes", sub:"Generated from the job description" },
   { icon:"🎯", headline:"Land Your Next Role",   sub:"Intelligent resume generation" },
   { icon:"🚀", headline:"Apply Smarter",          sub:"Not harder — let AI do the heavy lifting" },
   { icon:"📈", headline:"Track Every Application",sub:"Never lose a lead again" },

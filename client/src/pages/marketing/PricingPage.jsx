@@ -6,55 +6,52 @@ import { Footer } from "../../components/Footer.jsx";
 
 const TIERS = [
   {
-    name: "Free",
-    price: "$0",
-    period: "/month",
+    name: "Basic",
+    price: "Included",
+    period: "",
     badge: null,
     recommended: false,
     comingSoon: false,
     features: [
-      "5 resume generations per month",
-      "10 job scrapes per month",
-      "ATS keyword analysis",
-      "Resume history",
+      "Shared jobs console",
+      "Baseline Simple Apply workflow",
+      "ATS Search and ATS Sort",
+      "Profile-isolated saved jobs",
     ],
     cta: "Get started free",
     ctaLink: "/login",
   },
   {
-    name: "Pro",
-    price: "$19",
-    period: "/month",
-    badge: "Most popular",
+    name: "Plus",
+    price: "Request",
+    period: "",
+    badge: "Generate",
     recommended: true,
     comingSoon: false,
     features: [
-      "Unlimited resume generations",
-      "Unlimited job scrapes",
-      "ATS scoring and analysis",
-      "Apply automation",
-      "Resume version history",
-      "Priority support",
+      "Everything in Basic",
+      "Generate tool on expanded job cards",
+      "Focused resumes from selected jobs",
+      "Resume history and preview",
     ],
-    cta: "Start free trial",
+    cta: "Request upgrade",
     ctaLink: "/login",
   },
   {
-    name: "Teams",
-    price: "Contact us",
+    name: "Pro",
+    price: "Request",
     period: "",
-    badge: "Coming soon",
+    badge: "A+ Resume",
     recommended: false,
-    comingSoon: true,
+    comingSoon: false,
     features: [
-      "Everything in Pro",
-      "Team dashboard",
-      "Shared resume templates",
-      "Admin controls",
-      "Custom integrations",
+      "Everything in Plus",
+      "A+ Resume tool on expanded job cards",
+      "Custom sampler resume workflow",
+      "Admin-approved access changes",
     ],
-    cta: "Contact us",
-    ctaLink: "/contact",
+    cta: "Request upgrade",
+    ctaLink: "/login",
   },
 ];
 
@@ -73,7 +70,7 @@ export function PricingPage() {
         </h1>
         <p style={{ fontSize: 16, color: theme.textMuted, lineHeight: 1.6, marginBottom: 48,
                      textAlign: "center" }}>
-          Start free. Upgrade when you're ready.
+          Start in the shared jobs console. Request upgrades from Plans when you need more tools.
         </p>
 
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center" }}>
@@ -138,7 +135,7 @@ export function PricingPage() {
 
         <p style={{ textAlign: "center", fontSize: 13, color: theme.textDim,
                      marginTop: 32, lineHeight: 1.6 }}>
-          Free plan limits are enforced automatically. Upgrade anytime — no contracts.
+          Upgrade requests are handled through Plans and granted by an admin while paid upgrades are being prepared.
         </p>
       </main>
       <Footer/>

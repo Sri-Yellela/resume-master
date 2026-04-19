@@ -182,7 +182,7 @@ export function ApplyToolPage() {
             {[
               { title: "Job Discovery",        desc: "Find fresh roles matched to your domain profile" },
               { title: "ATS Scoring",          desc: "See your score before you apply" },
-              { title: "AI Resume Generator", desc: "Tailored resume per job in 30 seconds" },
+              { title: "AI Resume Generator", desc: "Focused resume per job in 30 seconds" },
             ].map(f => (
               <div key={f.title} style={{ padding: 20, borderRadius: 8, border: `1px solid ${theme.border}`, background: theme.bg }}>
                 <div style={{ fontWeight: 700, marginBottom: 6, color: theme.text }}>{f.title}</div>

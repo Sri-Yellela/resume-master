@@ -134,7 +134,7 @@ const APP_COLS = [
   { key:"role",       label:"Role",         editable:true,  width:190, sortable:true  },
   { key:"location",   label:"Location",     editable:true,  width:120, sortable:true  },
   { key:"source",     label:"Source",       editable:false, width:85,  sortable:true  },
-  { key:"apply_mode", label:"Mode",         editable:false, width:105, sortable:true  },
+  { key:"apply_mode", label:"Tool",         editable:false, width:105, sortable:true  },
   { key:"applied_at", label:"Date Applied", editable:true,  width:130, sortable:true, isDate:true },
   { key:"resume_file",label:"Resume File",  editable:false, width:200, sortable:false },
   { key:"job_url",    label:"Job URL",      editable:false, width:60,  sortable:false },
@@ -146,7 +146,7 @@ const RES_COLS = [
   { key:"role",       label:"Role",     editable:false, width:200, sortable:true  },
   { key:"category",   label:"Category", editable:false, width:155, sortable:true  },
   { key:"ats_score",  label:"ATS",      editable:false, width:60,  sortable:true  },
-  { key:"apply_mode", label:"Mode",     editable:false, width:110, sortable:true  },
+  { key:"apply_mode", label:"Tool",     editable:false, width:110, sortable:true  },
   { key:"updated_at", label:"Updated",  editable:false, width:100, sortable:true  },
 ];
 
@@ -158,6 +158,12 @@ function fmtDate(val) {
     return `${m}/${d}/${y}`;
   }
   return val;
+}
+
+function fmtTool(val) {
+  if (val === "CUSTOM_SAMPLER") return "A+ Resume";
+  if (val === "TAILORED") return "Generate";
+  return "Baseline";
 }
 
 function isoToUnix(iso) {
@@ -401,14 +407,15 @@ export function DatabasePanel({ user }) {
     } catch {}
   }, []);
 
-  const generateForSaved = useCallback(async (job, force = false) => {
-    const applyMode = user?.applyMode || "SIMPLE";
-    if (applyMode === "SIMPLE") { alert("Generation disabled in Simple mode."); return; }
+  const generateForSaved = useCallback(async (job, force = false, tool = "generate") => {
+    const planTier = String(user?.planTier || "BASIC").toUpperCase();
+    if (planTier === "BASIC") { alert("Upgrade from Plans to unlock Generate."); return; }
+    if (tool === "a_plus_resume" && planTier !== "PRO") { alert("Upgrade from Plans to unlock A+ Resume."); return; }
     if (!baseResume) { alert("Upload your base resume in the Jobs tab first."); return; }
     setGenLoading(p => ({...p, [job.jobId]: true}));
     try {
       const d = await api("/api/generate", { method:"POST",
-        body:JSON.stringify({ jobId:job.jobId, job, resumeText:baseResume, forceRegen:force }) });
+        body:JSON.stringify({ jobId:job.jobId, job, resumeText:baseResume, forceRegen:force, tool }) });
       if (d.error) throw new Error(d.error);
       setSavedGen(p => ({...p, [job.jobId]:{ html:d.html, atsScore:d.atsScore }}));
     } catch(e) { alert("Generation failed: " + e.message); }
@@ -697,9 +704,9 @@ export function DatabasePanel({ user }) {
       {activeSheet === "saved" && (
         <SavedJobsPane
           jobs={savedJobs} generated={savedGen} genLoading={genLoading}
-          applyMode={user?.applyMode || "SIMPLE"} hasResume={!!baseResume}
+          applyMode={user?.applyMode || "SIMPLE"} planTier={user?.planTier || "BASIC"} hasResume={!!baseResume}
           theme={theme} isDark={isDark}
-          onGenerate={(job, force) => generateForSaved(job, force)}
+          onGenerate={(job, force, tool) => generateForSaved(job, force, tool)}
           onExport={(job, html) => exportSavedPdf(job, html)}
           onUnsave={unsaveJob}
           onRefresh={loadSaved}
@@ -856,7 +863,7 @@ export function DatabasePanel({ user }) {
                         </td>
                       );
 
-                      const display = c.key === "applied_at" ? fmtDate(raw) : raw;
+                      const display = c.key === "applied_at" ? fmtDate(raw) : c.key === "apply_mode" ? fmtTool(raw) : raw;
                       return (
                         <td key={c.key}
                           style={{ padding:"12px 14px", fontSize:12,
@@ -984,7 +991,7 @@ function PendingJobsPane({ jobs, theme, isDark, onRefresh, onDislike }) {
 }
 
 // ── Saved Jobs pane ───────────────────────────────────────────
-function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
+function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasResume,
                           theme, isDark, onGenerate, onExport, onUnsave, onRefresh }) {
 
   if (jobs.length === 0) return (
@@ -993,7 +1000,7 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
       <div style={{ fontSize:40 }}>★</div>
       <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No saved jobs yet</div>
       <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:300, lineHeight:1.8 }}>
-        Star jobs on the Jobs board to save them here. You can generate tailored resumes and export PDFs from this panel.
+        Star jobs on the Jobs board to save them here. Generate and A+ Resume access is controlled by your plan.
       </div>
       <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
     </div>
@@ -1040,7 +1047,10 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, hasResume,
               done={done}
               st={st}
               applyMode={applyMode}
+              canUseGenerate={String(planTier || "BASIC").toUpperCase() !== "BASIC"}
+              canUseAPlusResume={String(planTier || "BASIC").toUpperCase() === "PRO"}
               onGenerate={() => onGenerate(job, done && g?.html !== "__exists__")}
+              onAPlusResume={() => onGenerate(job, done && g?.html !== "__exists__", "a_plus_resume")}
               onExport={() => done && g?.html !== "__exists__" && onExport(job, g.html)}
               onVisit={() => job.url && window.open(job.url, "_blank", "noreferrer")}
               onStar={() => onUnsave(job.jobId)}

@@ -50,13 +50,13 @@ test("light theme surfaces and text tokens are readable", () => {
   assert.match(theme, /--bg-card:\s+#ffffff/);
 });
 
-test("console switching is plan-owned and local match UI is removed", () => {
+test("tool access is plan-owned and local match UI is removed", () => {
   const server = fs.readFileSync("server.js", "utf8");
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
   const scrollDock = fs.readFileSync("client/src/components/ScrollDock.jsx", "utf8");
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 
-  assert.match(server, /Plan controls the active console/);
+  assert.match(server, /Plans control tool access/);
   assert.doesNotMatch(topBar, /APPLY_MODES|Apply Mode|\/api\/settings\/apply-mode/);
   assert.doesNotMatch(topBar, /Best match|bestMatch/);
   assert.doesNotMatch(scrollDock, /Best match|bestMatch/);

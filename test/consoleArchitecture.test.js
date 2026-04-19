@@ -2,22 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-test("app routes users into dedicated plan consoles", () => {
+test("app routes users into one shared jobs console", () => {
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
   const consoles = fs.readFileSync("client/src/consoles/PlanConsoles.jsx", "utf8");
 
-  assert.match(app, /CONSOLE_BY_PLAN/);
-  assert.match(app, /route:"simple-apply"/);
-  assert.match(app, /route:"tailored"/);
-  assert.match(app, /route:"custom-sampler"/);
+  assert.match(app, /CONSOLE_ROUTE = "jobs"/);
+  assert.match(app, /LEGACY_CONSOLE_ROUTES/);
+  assert.match(app, /label:"Jobs"/);
   assert.match(app, /<Route path="\/app\/\*"/);
-  assert.match(app, /CONSOLE_ROUTES\.has\(routeKey\) && routeKey !== consoleConfig\.route/);
-  assert.match(consoles, /function SimpleApplyConsole/);
-  assert.match(consoles, /function TailoredConsole/);
-  assert.match(consoles, /function CustomSamplerConsole/);
-  assert.match(consoles, /user=\{consoleUser\(props\.user, "SIMPLE"\)\}/);
-  assert.match(consoles, /user=\{consoleUser\(props\.user, "TAILORED"\)\}/);
-  assert.match(consoles, /user=\{consoleUser\(props\.user, "CUSTOM_SAMPLER"\)\}/);
+  assert.match(consoles, /function JobsConsole/);
+  assert.match(consoles, /title="Jobs"/);
+  assert.match(consoles, /consoleKind="jobs"/);
+  assert.doesNotMatch(consoles, /Tailored Console|Custom Sampler Console|Simple Apply Console/);
 });
 
 test("plan updates refresh console state without mode switching", () => {
@@ -27,10 +23,12 @@ test("plan updates refresh console state without mode switching", () => {
   const server = fs.readFileSync("server.js", "utf8");
 
   assert.match(app, /plan_updated/);
-  assert.match(app, /allowedModes:\[applyMode\]/);
+  assert.match(app, /navigate\(consolePath/);
   assert.match(plans, /requestPlanChange/);
-  assert.match(plans, /Request \{tier === "BASIC" \? "downgrade" : "change"\}/);
+  assert.match(plans, /Request \{tier === "BASIC" \? "downgrade" : "upgrade"\}/);
   assert.match(server, /changeOptions/);
+  assert.match(server, /function requireToolEntitlement/);
+  assert.match(server, /tool === "a_plus_resume" \? "CUSTOM_SAMPLER" : "TAILORED"/);
   assert.doesNotMatch(server, /Next available upgrade|Already on highest plan/);
   assert.doesNotMatch(topBar, /APPLY_MODES|Apply Mode|\/api\/settings\/apply-mode/);
 });

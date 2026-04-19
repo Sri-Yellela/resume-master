@@ -7,8 +7,8 @@ import { Footer } from "../../components/Footer.jsx";
 const FEATURES = [
   {
     icon: "✦",
-    title: "AI Resume Generation",
-    body: "Tailored resumes generated in seconds. Our AI reads the job description, matches your experience, and writes bullets that hit every keyword the ATS is looking for.",
+    title: "Generate",
+    body: "Plus unlocks Generate inside expanded job cards. The tool reads the job description, matches your experience, and drafts a focused resume.",
   },
   {
     icon: "🎯",
@@ -18,7 +18,7 @@ const FEATURES = [
   {
     icon: "🔍",
     title: "Job Discovery",
-    body: "Scrape fresh job listings directly from LinkedIn. Filter by role, location, work type, and seniority. Your pipeline, always fresh.",
+    body: "Basic starts in one shared jobs console with ATS Search, ATS Sort, role filters, and profile-isolated listings.",
   },
   {
     icon: "⚡",
@@ -27,8 +27,8 @@ const FEATURES = [
   },
   {
     icon: "📋",
-    title: "Resume History",
-    body: "Every resume you generate is saved. Revisit, reuse, and track your applications in one place.",
+    title: "A+ Resume",
+    body: "Pro unlocks A+ Resume inside expanded job cards for deeper JD-driven resume generation.",
   },
 ];
 
@@ -46,7 +46,7 @@ export function FeaturesPage() {
           Everything you need to land the interview
         </h1>
         <p style={{ fontSize: 16, color: theme.textMuted, lineHeight: 1.6, marginBottom: 56, maxWidth: 560 }}>
-          Resume Master brings together every tool you need for a modern job search — from AI resume writing to automated applications.
+          Resume Master starts with one jobs console. Upgrades add Generate and A+ Resume where you already review jobs.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
           {FEATURES.map((f, i) => (
@@ -88,7 +88,7 @@ export function FeaturesPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
             {[
               { path: "/tools/ats",      title: "ATS Scorer",       desc: "Score your resume against any job description.", limit: "3 free scores / month" },
-              { path: "/tools/generate", title: "Resume Generator", desc: "Get a tailored resume for any job in 30 seconds.", limit: "2 free resumes / month" },
+              { path: "/tools/generate", title: "Resume Generator", desc: "Generate a focused resume for any job in 30 seconds.", limit: "2 free resumes / month" },
               { path: "/tools/apply",    title: "Auto Apply",       desc: "Fill applications at any job portal automatically.", limit: "2 free runs / month (sign in required)" },
             ].map(t => (
               <div key={t.path} style={{

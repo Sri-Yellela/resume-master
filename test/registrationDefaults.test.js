@@ -10,8 +10,9 @@ test("registration defaults new users to Basic Simple Apply", () => {
 
   assert.match(server, /apply_mode,plan_tier\) VALUES \(\?,\?,0,'SIMPLE','BASIC'\)/);
   assert.match(server, /applyMode:"SIMPLE", planTier:"BASIC"/);
-  assert.match(topBar, /Simple Apply Console/);
+  assert.match(topBar, /Baseline jobs console/);
   assert.doesNotMatch(topBar, /Apply Mode|APPLY_MODES|\/api\/settings\/apply-mode/);
   assert.match(jobsPanel, /applyMode = user\?\.applyMode \|\| "SIMPLE"/);
+  assert.match(jobsPanel, /canUseGenerate = planTier === "PLUS" \|\| planTier === "PRO"/);
   assert.doesNotMatch(databasePanel, /applyMode=\{user\?\.applyMode \|\| "TAILORED"\}/);
 });

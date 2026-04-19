@@ -9,9 +9,9 @@ const PLAN_LABELS = {
 };
 
 const PLAN_COPY = {
-  BASIC: "Simple Apply with ATS Search and ATS Sort.",
-  PLUS: "Tailored resumes and resume enhancement.",
-  PRO: "Custom Sampler workflows.",
+  BASIC: "Shared jobs console with baseline Simple Apply, ATS Search, and ATS Sort.",
+  PLUS: "Unlock Generate on expanded job cards.",
+  PRO: "Unlock Generate and A+ Resume on expanded job cards.",
 };
 
 export function PlansPanel({ user, onUserChange }) {
@@ -52,7 +52,7 @@ export function PlansPanel({ user, onUserChange }) {
           Plans
         </div>
         <div style={{ color:theme.textMuted, marginBottom:20 }}>
-          Current plan: <strong style={{ color:theme.text }}>{PLAN_LABELS[current]}</strong>
+          Current plan: <strong style={{ color:theme.text }}>{PLAN_LABELS[current]}</strong>. Plans control tool access in the shared jobs console.
         </div>
 
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))", gap:12 }}>
@@ -77,7 +77,7 @@ export function PlansPanel({ user, onUserChange }) {
                   style={{ marginTop:14, border:"none", borderRadius:6, padding:"9px 14px",
                            background:theme.accent, color:"#0f0f0f", cursor:"pointer",
                            fontWeight:800 }}>
-                  Request {tier === "BASIC" ? "downgrade" : "change"}
+                  Request {tier === "BASIC" ? "downgrade" : "upgrade"}
                 </button>
               )}
               {tier !== current && plan?.pendingRequest?.requested_tier === tier && (

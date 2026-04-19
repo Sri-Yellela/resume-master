@@ -10,7 +10,7 @@ const SECTIONS = [
   },
   {
     title: "How We Use Your Data",
-    body: `Your data is used exclusively to provide the Resume Master service: generating tailored resumes, performing ATS analysis, scraping and displaying job listings, and tracking your application history. We do not use your resume content or job data to train AI models. AI calls are made to the Anthropic API (Claude) on your behalf; your resume text is sent to Anthropic only during active generation or analysis requests.`,
+    body: `Your data is used exclusively to provide the Resume Master service: powering plan-gated resume tools, performing ATS analysis, scraping and displaying job listings, and tracking your application history. We do not use your resume content or job data to train AI models. AI calls are made to the Anthropic API (Claude) on your behalf; your resume text is sent to Anthropic only during active generation or analysis requests.`,
   },
   {
     title: "Data Storage and Security",

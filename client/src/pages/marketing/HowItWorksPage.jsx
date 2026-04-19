@@ -7,9 +7,9 @@ const STEPS = [
   { n: 1, title: "Upload your base resume",
     body: "We extract your experience, skills, and history. This is your foundation — we do the rest." },
   { n: 2, title: "Search for roles",
-    body: "Type any role. We pull fresh listings from LinkedIn and surface the best matches for your background." },
-  { n: 3, title: "Generate a tailored resume",
-    body: "Click Generate. Our AI rewrites your resume for the specific job description, hitting every required keyword while keeping your story authentic." },
+    body: "Type any role. ATS Search and ATS Sort run in the shared jobs console." },
+  { n: 3, title: "Use unlocked tools",
+    body: "Plus adds Generate on expanded job cards. Pro adds A+ Resume for deeper JD-driven resume generation." },
   { n: 4, title: "Review your ATS score",
     body: "See your match score instantly. Green keywords you already cover, red keywords to watch." },
   { n: 5, title: "Apply",
@@ -30,7 +30,7 @@ export function HowItWorksPage() {
           From job listing to submitted application in minutes
         </h1>
         <p style={{ fontSize: 16, color: theme.textMuted, lineHeight: 1.6, marginBottom: 56, maxWidth: 560 }}>
-          Five simple steps. No résumé tailoring by hand. No form-filling marathons.
+          One jobs console. Simple Apply is built in, and upgrades add tools when you need them.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
           {STEPS.map((s, i) => (

@@ -783,6 +783,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const displayJobsRef = useRef([]);
   jobCountRef.current = jobs.length;
   const applyMode = user?.applyMode || "SIMPLE";
+  const planTier = String(user?.planTier || "BASIC").toUpperCase();
+  const canUseGenerate = planTier === "PLUS" || planTier === "PRO";
+  const canUseAPlusResume = planTier === "PRO";
 
   // Apply initial A+B defaults (30/70) once on mount.
   // The visibility-change effect below doesn't fire on first render because
@@ -1313,8 +1316,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, []);
 
   // ── Generate (actual logic) ───────────────────────────────
-  const generateActual = useCallback(async (job, force = false, skipCompanyCheck = false) => {
-    if (applyMode === "SIMPLE") { return; }
+  const generateActual = useCallback(async (job, force = false, skipCompanyCheck = false, tool = "generate") => {
+    if (tool === "a_plus_resume" ? !canUseAPlusResume : !canUseGenerate) { return; }
     if (!resumeText)            { return; }
     const key = job.jobId, existing = generated[key];
     if (existing?.html && existing.html !== "__exists__" && !force) {
@@ -1362,7 +1365,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setLoading(p => ({ ...p, [key]:"generating" }));
     try {
       const d = await api("/api/generate", { method:"POST",
-        body:JSON.stringify({ jobId:key, job, resumeText, forceRegen:force }) });
+        body:JSON.stringify({ jobId:key, job, resumeText, forceRegen:force, tool }) });
       if (d.limitReached) {
         setSandbox({ generating: false, error: d.error, company: job.company, title: job.title });
         return; // don't throw, just show error in sandbox panel
@@ -1380,11 +1383,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setGenStage("");
       setLoading(p => { const n = {...p}; delete n[key]; return n; });
     }
-  }, [resumeText, generated, applyMode, openSandbox]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [resumeText, generated, canUseGenerate, canUseAPlusResume, openSandbox]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Generate (with company-reuse check) ──────────────────
-  const generate = useCallback(async (job, force = false) => {
-    if (applyMode === "SIMPLE") { return; }
+  const generate = useCallback(async (job, force = false, tool = "generate") => {
+    if (tool === "a_plus_resume" ? !canUseAPlusResume : !canUseGenerate) { return; }
     if (!resumeText)            { return; }
     // Company check: if we have a prior resume for this company and this is a fresh generate (not force),
     // show the reuse modal instead of generating.
@@ -1394,12 +1397,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         v.company?.toLowerCase() === (job.company || "").toLowerCase()
       );
       if (priorEntry && !generated[job.jobId]?.html) {
-        setCompanyReuseTarget({ job, priorEntry });
+        setCompanyReuseTarget({ job, priorEntry, tool });
         return;
       }
     }
-    await generateActual(job, force, false);
-  }, [generated, generateActual, resumeText, applyMode]);
+    await generateActual(job, force, false, tool);
+  }, [generated, generateActual, resumeText, canUseGenerate, canUseAPlusResume]);
 
   const saveSandboxHtml = useCallback(async html => {
     if (!sandbox) return;
@@ -1656,7 +1659,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           <option value="compLow">Pay ↑</option>
           <option value="yoeLow">Exp ↑</option>
           <option value="yoeHigh">Exp ↓</option>
-          {applyMode === "SIMPLE" && <option value="atsScore">ATS Sort</option>}
+          <option value="atsScore">ATS Sort</option>
         </select>
 
         {/* Local search — live client-side, every keystroke */}
@@ -1699,7 +1702,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                          pointerEvents:"none" }}>🔍</span>
           <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
             onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
-            placeholder={applyMode === "SIMPLE" ? "ATS search role — e.g. ML Engineer, SWE…" : "Search role — e.g. ML Engineer, SWE…"}
+            placeholder="ATS search role — e.g. ML Engineer, SWE…"
             style={{ width:"100%", height:38, paddingLeft:38, paddingRight:14,
                      borderRadius:2, border:`1px solid ${theme.border}`,
                      background:theme.surface, color:theme.text,
@@ -1843,9 +1846,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             }
           }}
           onGenerateNew={() => {
-            const { job } = companyReuseTarget;
+            const { job, tool } = companyReuseTarget;
             setCompanyReuseTarget(null);
-            generateActual(job, false, true);
+            generateActual(job, false, true, tool);
           }}
           onCancel={() => setCompanyReuseTarget(null)}
         />
@@ -1863,8 +1866,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 <JobDetailPanel
                   job={selectedJob} theme={theme} isDark={isDark}
                   g={g2} done={done2} st={st2} applyMode={applyMode}
+                  canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
                   onClose={() => setSelectedJob(null)}
                   onGenerate={force => generate(selectedJob, force)}
+                  onAPlusResume={force => generate(selectedJob, force, "a_plus_resume")}
                   onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setMobilePane("editor"); setSelectedJob(null); }}
                   onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
                   onVisit={() => visitUrl(selectedJob)}
@@ -1887,7 +1892,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 resultsUpToDate={resultsUpToDate}
                 onRetryPoll={handlePullRefresh}
                 generated={generated} loading={loading}
-                applyMode={applyMode} theme={theme} isDark={isDark}
+                applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+                theme={theme} isDark={isDark}
                 totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
                 generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
                 visitUrl={visitUrl} toggleStar={toggleStar} openAtsPanel={openAtsPanel}
@@ -1975,7 +1981,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               resultsUpToDate={resultsUpToDate}
               onRetryPoll={handlePullRefresh}
               generated={generated} loading={loading}
-              applyMode={applyMode} theme={theme} isDark={isDark}
+              applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+              theme={theme} isDark={isDark}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
@@ -2003,8 +2010,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                   <JobDetailPanel
                     job={selectedJob} theme={theme} isDark={isDark}
                     g={g2} done={done2} st={st2} applyMode={applyMode}
+                    canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
                     onClose={() => setSelectedJob(null)}
                     onGenerate={force => generate(selectedJob, force)}
+                    onAPlusResume={force => generate(selectedJob, force, "a_plus_resume")}
                     onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); }}
                     onExport={() => exportAndTrack(selectedJob, g2?.html, selectedJob.company)}
                     onVisit={() => visitUrl(selectedJob)}
@@ -2115,7 +2124,7 @@ function ResizeHandle({ theme: themeProp }) {
 // ── Jobs column (shared across layout modes) ──────────────────
 function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrapeNew, onClearScrapeError,
                       pollStatus, pollNewCount, resultsUpToDate, onRetryPoll,
-                      generated, loading, applyMode, theme, isDark,
+                      generated, loading, applyMode, canUseGenerate, canUseAPlusResume, theme, isDark,
                       totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, toggleDislike, openAtsPanel,
@@ -2199,6 +2208,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
               <JobCard
                 key={key} job={job} g={g} done={done} st={st}
                 applyMode={applyMode}
+                canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
                 theme={theme} isDark={isDark}
                 showDislike={true}
                 showApplyButton={!compact}
@@ -2207,6 +2217,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                 onSelect={onJobSelect ? () => onJobSelect(job) : undefined}
                 cardTier={cardTier}
                 onGenerate={force => generate(job, force)}
+                onAPlusResume={force => generate(job, force, "a_plus_resume")}
                 onViewSandbox={() => {
                   const entry = {...g, company:g.company||job.company, title:g.title||job.title};
                   openSandbox(entry);

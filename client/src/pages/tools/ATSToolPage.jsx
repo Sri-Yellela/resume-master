@@ -150,7 +150,7 @@ export function ATSToolPage() {
             }}>
               Want to fix these gaps?{" "}
               <Link to="/tools/generate" style={{ color: theme.accent, fontWeight: 700, textDecoration: "none" }}>
-                Generate a tailored resume →
+                Generate a focused resume →
               </Link>
             </div>
           </div>

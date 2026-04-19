@@ -34,7 +34,7 @@ import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, isTitle
 import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
-import { allowedModesForTier, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
+import { allowedModesForTier, canUseAPlusResume, canUseGenerate, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
 import { loadSimpleApplyProfile, upsertSimpleApplyProfile } from "./services/simpleApplyProfile.js";
 
 // ── Config ────────────────────────────────────────────────────
@@ -2254,6 +2254,10 @@ function publicUser(user) {
     applyMode,
     planTier,
     allowedModes,
+    capabilities: {
+      canUseGenerate: canUseGenerate(planTier),
+      canUseAPlusResume: canUseAPlusResume(planTier),
+    },
     domainProfileComplete:!!(user.domainProfileComplete ?? user.domain_profile_complete),
   };
 }
@@ -2265,6 +2269,22 @@ function requireModeEntitlement(req, res, mode = req.user?.applyMode) {
     error: "upgrade_required",
     message: `${mode} requires the ${planForMode(mode)} plan.`,
     requiredTier: planForMode(mode),
+    planTier,
+  });
+  return false;
+}
+
+function requireToolEntitlement(req, res, tool) {
+  const planTier = normalisePlanTier(req.user?.planTier);
+  const allowed = tool === "a_plus_resume"
+    ? canUseAPlusResume(planTier)
+    : canUseGenerate(planTier);
+  if (allowed) return true;
+  const requiredTier = tool === "a_plus_resume" ? "PRO" : "PLUS";
+  res.status(403).json({
+    error: "upgrade_required",
+    message: `${tool === "a_plus_resume" ? "A+ Resume" : "Generate"} requires the ${requiredTier} plan.`,
+    requiredTier,
     planTier,
   });
   return false;
@@ -2798,7 +2818,7 @@ app.use("/api/admin/db", createAdminDbRouter(db, { dbPath: DB_PATH, scrapeJobs }
 // ═══════════════════════════════════════════════════════════════
 app.patch("/api/settings/apply-mode", requireAuth, (req, res) => {
   res.status(410).json({
-    error: "Plan controls the active console. Use Plans to request a tier change.",
+    error: "Plans control tool access. The jobs console is shared for every user.",
   });
 });
 // Save user's personal Apify token (per-user — no server-level token exists)
@@ -2819,6 +2839,10 @@ app.get("/api/settings", requireAuth, (req, res) => {
     applyMode:u?.apply_mode,
     planTier,
     allowedModes: allowedModesForTier(planTier),
+    capabilities: {
+      canUseGenerate: canUseGenerate(planTier),
+      canUseAPlusResume: canUseAPlusResume(planTier),
+    },
     hasApifyToken:!!u?.apify_token,
   });
 });
@@ -2836,6 +2860,10 @@ app.get("/api/plans", requireAuth, (req, res) => {
     planTier,
     applyMode: row?.apply_mode,
     allowedModes: allowedModesForTier(planTier),
+    capabilities: {
+      canUseGenerate: canUseGenerate(planTier),
+      canUseAPlusResume: canUseAPlusResume(planTier),
+    },
     nextPlan: nextPlan(planTier),
     changeOptions,
     pendingRequest: pending || null,
@@ -3297,16 +3325,14 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     ? buildApifyQueriesFromProfile(activeProfile)
     : null;
   const query = normaliseRole(rawQuery);
-  if (req.user.applyMode === "SIMPLE") {
-    let simpleProfile = loadSimpleApplyProfile(db, req.user.id);
-    if (!simpleProfile) {
-      const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
-      if (base?.content) simpleProfile = upsertSimpleApplyProfile(db, req.user.id, base.content);
-    }
-    const terms = (simpleProfile?.searchTerms || []).slice(0, 4);
-    if (terms.length) {
-      profileJobTitles = [...new Set([...(profileJobTitles || [query]), ...terms])].slice(0, 10);
-    }
+  let simpleProfile = loadSimpleApplyProfile(db, req.user.id);
+  if (!simpleProfile) {
+    const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
+    if (base?.content) simpleProfile = upsertSimpleApplyProfile(db, req.user.id, base.content);
+  }
+  const terms = (simpleProfile?.searchTerms || []).slice(0, 4);
+  if (terms.length) {
+    profileJobTitles = [...new Set([...(profileJobTitles || [query]), ...terms])].slice(0, 10);
   }
 
   // employmentTypes — array of HarvestAPI-accepted strings; default full-time
@@ -3833,9 +3859,9 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   // Strip excluded companies from employer list before any processing
   const employers = sanitiseEmployers(req.body.employers);
   if (!job||!resumeText) return res.status(400).json({ error:"job and resumeText required" });
-  const mode = req.user.applyMode;
-  if (mode==="SIMPLE") return res.status(400).json({ error:"Generate not available in SIMPLE mode" });
-  if (!requireModeEntitlement(req, res, mode)) return;
+  const tool = req.body?.tool === "a_plus_resume" ? "a_plus_resume" : "generate";
+  if (!requireToolEntitlement(req, res, tool)) return;
+  const mode = tool === "a_plus_resume" ? "CUSTOM_SAMPLER" : "TAILORED";
   if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured on server." });
 
   // Guard: reject obviously empty or template-placeholder resume content

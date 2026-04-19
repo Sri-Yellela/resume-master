@@ -25,6 +25,14 @@ export function canUseMode(tier, mode) {
   return allowedModesForTier(tier).includes(mode);
 }
 
+export function canUseGenerate(tier) {
+  return hasPlanAtLeast(tier, "PLUS");
+}
+
+export function canUseAPlusResume(tier) {
+  return hasPlanAtLeast(tier, "PRO");
+}
+
 export function hasPlanAtLeast(tier, requiredTier) {
   return PLAN_TIERS.indexOf(normalisePlanTier(tier)) >= PLAN_TIERS.indexOf(normalisePlanTier(requiredTier));
 }

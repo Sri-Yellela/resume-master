@@ -61,8 +61,11 @@ export default function JobDetailPanel({
   theme, isDark,
   g, done, st,
   applyMode,
+  canUseGenerate = applyMode !== "SIMPLE",
+  canUseAPlusResume = false,
   onClose,
   onGenerate,
+  onAPlusResume,
   onViewSandbox,
   onExport,
   onVisit,
@@ -176,10 +179,16 @@ export default function JobDetailPanel({
         padding:"8px 14px", borderBottom:`1px solid ${theme.border}`,
         flexShrink:0, background:theme.surface,
       }}>
-        {applyMode !== "SIMPLE" && onGenerate && (
+        {canUseGenerate && onGenerate && (
           <ActionBtn onClick={() => onGenerate(done && g?.html !== "__exists__")}
             title={done ? "Regenerate resume" : "Generate resume"} accent={theme.accent} theme={theme}>
             {st ? "⏳" : done ? "↻ Regen" : "✦ Generate"}
+          </ActionBtn>
+        )}
+        {canUseAPlusResume && onAPlusResume && (
+          <ActionBtn onClick={() => onAPlusResume(done && g?.html !== "__exists__")}
+            title={done ? "Rebuild A+ Resume" : "A+ Resume"} accent="#16a34a" theme={theme}>
+            A+ Resume
           </ActionBtn>
         )}
         {done && g?.html !== "__exists__" && (

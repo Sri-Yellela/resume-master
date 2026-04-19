@@ -491,8 +491,8 @@ export default function AuthScreen({ onLogin }) {
           {/* Subtitle */}
           <p style={{ fontSize: isMobile ? 13 : 15, color:theme.textMuted, lineHeight:1.6,
                       marginBottom: isMobile ? 24 : 36, maxWidth:420 }}>
-            AI-tailored resumes, real-time job scraping, one-click autofill.<br/>
-            Match every job description with a perfectly tailored resume.
+            Start with the shared jobs console, ATS Search, and Simple Apply.<br/>
+            Upgrade from Plans when you need Generate or A+ Resume.
           </p>
 
           {/* Auth modal */}

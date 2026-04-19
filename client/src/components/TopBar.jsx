@@ -383,9 +383,9 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
   const { accentId, setAccentId, ACCENT_OPTIONS, bgMode, setBgMode, BG_MODES } = useTheme();
   const planTier = user?.planTier || "BASIC";
   const planLabel = planTier === "PRO" ? "Pro" : planTier === "PLUS" ? "Plus" : "Basic";
-  const consoleLabel = planTier === "PRO" ? "Custom Sampler Console"
-    : planTier === "PLUS" ? "Tailored Console"
-    : "Simple Apply Console";
+  const toolLabel = planTier === "PRO" ? "Generate + A+ Resume"
+    : planTier === "PLUS" ? "Generate"
+    : "Baseline jobs console";
 
   const saveToken = async () => {
     if (!tokenInput.trim()) return;
@@ -510,7 +510,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
               Plan
             </div>
             <div style={{ fontSize: 13, color: theme.text, fontWeight: 700 }}>{planLabel}</div>
-            <div style={{ fontSize: 11, color: theme.textDim, marginTop: 2 }}>{consoleLabel}</div>
+            <div style={{ fontSize: 11, color: theme.textDim, marginTop: 2 }}>{toolLabel}</div>
             <button onClick={() => { setOpen(false); onTabChange?.("plans"); }}
               style={{ ...menuItemStyle, marginTop:4, color:theme.accentText, fontWeight:700 }}>
               View Plans
@@ -812,7 +812,7 @@ export default function TopBar({
             <option value="compLow">Pay ↑</option>
             <option value="yoeLow">Exp ↑</option>
             <option value="yoeHigh">Exp ↓</option>
-            {user?.planTier === "BASIC" && <option value="atsScore">ATS Sort</option>}
+            <option value="atsScore">ATS Sort</option>
           </select>
           {/* Local search — expands on focus */}
           <input
