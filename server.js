@@ -31,6 +31,7 @@ import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
 import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, buildProfileSearchTerms, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
+import { getRoleKeyForProfile as _getRoleKeyForProfile, ROLE_TITLE_SQL, classifyForIngest, getRoleFamilyDomainForKey } from "./services/jobClassifier.js";
 import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
@@ -1590,6 +1591,253 @@ db.pragma("busy_timeout = 5000");
           ON user_integrations(provider, provider_user_id);
       `,
     },
+    {
+      // Repair: firmware/embedded jobs were bulk-assigned role_key='engineering' by
+      // the title_heuristic in migration 031 and were never corrected.  This migration:
+      //   1. Adds role_key='engineering_embedded_firmware' for jobs scraped under
+      //      firmware domain profiles.
+      //   2. Adds role_key='engineering_embedded_firmware' for jobs whose title
+      //      clearly indicates firmware/embedded work (title heuristic).
+      //   3. Removes the stale role_key='engineering' entries that arrived via the
+      //      generic title_heuristic for those same jobs — so SWE users never see
+      //      them even if roleKeyForProfile returns 'engineering'.
+      //   Jobs that were explicitly scraped under a SWE profile (matched_by =
+      //   'profile_scrape') keep their 'engineering' entry so they remain visible
+      //   to the scraping user; the roleTitleSql firmware exclusions still prevent
+      //   them from surfacing in SWE results for other users.
+      id: "045_firmware_role_map_repair",
+      sql: `
+        INSERT OR IGNORE INTO job_role_map
+          (job_id, role_key, role_family, domain, confidence, matched_by)
+        SELECT jrm.job_id,
+               'engineering_embedded_firmware',
+               'engineering',
+               'engineering_embedded_firmware',
+               0.95,
+               'firmware_profile_repair'
+        FROM job_role_map jrm
+        JOIN domain_profiles dp ON dp.id = jrm.source_profile_id
+        WHERE jrm.role_key = 'engineering'
+          AND dp.domain = 'engineering_embedded_firmware';
+
+        INSERT OR IGNORE INTO job_role_map
+          (job_id, role_key, role_family, domain, confidence, matched_by)
+        SELECT job_id,
+               'engineering_embedded_firmware',
+               'engineering',
+               'engineering_embedded_firmware',
+               0.9,
+               'firmware_title_repair'
+        FROM scraped_jobs
+        WHERE LOWER(title) LIKE '%firmware%'
+           OR LOWER(title) LIKE '%embedded%'
+           OR LOWER(title) LIKE '%bsp%'
+           OR LOWER(title) LIKE '%device driver%'
+           OR LOWER(title) LIKE '%silicon validation%'
+           OR LOWER(title) LIKE '%post-silicon%'
+           OR LOWER(title) LIKE '%post silicon%'
+           OR LOWER(title) LIKE '%soc bring%'
+           OR LOWER(title) LIKE '%board bring%'
+           OR LOWER(title) LIKE '%chip bring%'
+           OR LOWER(title) LIKE '%bootloader%'
+           OR LOWER(title) LIKE '%rtos%'
+           OR LOWER(title) LIKE '% bios %'
+           OR LOWER(title) LIKE 'bios %'
+           OR LOWER(title) LIKE '%uefi%';
+
+        DELETE FROM job_role_map
+        WHERE role_key = 'engineering'
+          AND matched_by = 'title_heuristic'
+          AND job_id IN (
+            SELECT job_id FROM scraped_jobs
+            WHERE LOWER(title) LIKE '%firmware%'
+               OR LOWER(title) LIKE '%embedded%'
+               OR LOWER(title) LIKE '%bsp%'
+               OR LOWER(title) LIKE '%device driver%'
+               OR LOWER(title) LIKE '%silicon validation%'
+               OR LOWER(title) LIKE '%post-silicon%'
+               OR LOWER(title) LIKE '%post silicon%'
+               OR LOWER(title) LIKE '%soc bring%'
+               OR LOWER(title) LIKE '%board bring%'
+               OR LOWER(title) LIKE '%chip bring%'
+               OR LOWER(title) LIKE '%bootloader%'
+               OR LOWER(title) LIKE '%rtos%'
+               OR LOWER(title) LIKE '% bios %'
+               OR LOWER(title) LIKE 'bios %'
+               OR LOWER(title) LIKE '%uefi%'
+          );
+      `,
+    },
+    {
+      // Repair: data scientist / data engineer / analytics engineer titles
+      // were incorrectly assigned role_key='engineering' in two ways:
+      //   1. Scraped under an engineering profile (assignJobRoleMap => 'engineering')
+      //   2. Title matched '%engineer%' / '%developer%' in migration 031 heuristic
+      // Migration 038 already handled ML/AI/PM titles.  This migration extends that
+      // repair to cover data-family specialty titles that were missed.
+      //
+      // Only removes heuristic and profile-scrape engineering entries — manual_review
+      // entries are preserved (admin override must win).
+      id: "046_data_specialty_role_repair",
+      sql: `
+        INSERT OR IGNORE INTO job_role_map
+          (job_id, role_key, role_family, domain, confidence, matched_by)
+        SELECT job_id, 'data', 'data', 'data', 0.95, 'data_specialty_repair'
+        FROM scraped_jobs
+        WHERE LOWER(title) LIKE '%data scientist%'
+           OR LOWER(title) LIKE '%data engineer%'
+           OR LOWER(title) LIKE '%analytics engineer%'
+           OR LOWER(title) LIKE '%research scientist%'
+           OR LOWER(title) LIKE '%applied scientist%'
+           OR LOWER(title) LIKE '%ml platform engineer%'
+           OR LOWER(title) LIKE '%mlops engineer%';
+
+        DELETE FROM job_role_map
+        WHERE role_key = 'engineering'
+          AND matched_by IN ('title_heuristic', 'legacy_domain_profile_id',
+                             'duplicate_profile_scrape', 'profile_scrape')
+          AND job_id IN (
+            SELECT job_id FROM scraped_jobs
+            WHERE LOWER(title) LIKE '%data scientist%'
+               OR LOWER(title) LIKE '%data engineer%'
+               OR LOWER(title) LIKE '%analytics engineer%'
+               OR LOWER(title) LIKE '%research scientist%'
+               OR LOWER(title) LIKE '%applied scientist%'
+               OR LOWER(title) LIKE '%ml platform engineer%'
+               OR LOWER(title) LIKE '%mlops engineer%'
+          );
+      `,
+    },
+    {
+      // 047 — Repair existing orphaned jobs that have no job_role_map entry.
+      //
+      // These are jobs that were scraped without a domainProfile (admin scrapes,
+      // profiles deleted post-scrape, or pre-046 legacy ingests) and therefore
+      // fell through the assignJobRoleMap() guard.  The ingest-time classifier
+      // now handles new orphans; this migration back-fills the historical gap
+      // using the same high-confidence title patterns.
+      //
+      // Only assigns role_key when the title strongly matches a single family.
+      // Preserves manual_review entries — admin overrides are never touched.
+      id: "047_orphaned_job_classifier_repair",
+      sql: `
+        INSERT OR IGNORE INTO job_role_map
+          (job_id, role_key, role_family, domain, confidence, matched_by)
+        SELECT sj.job_id,
+               CASE
+                 WHEN LOWER(sj.title) LIKE '%firmware engineer%'
+                   OR LOWER(sj.title) LIKE '%embedded systems engineer%'
+                   OR LOWER(sj.title) LIKE '%bsp engineer%'
+                   OR LOWER(sj.title) LIKE '%uefi engineer%'
+                   OR LOWER(sj.title) LIKE '%device driver engineer%'
+                   OR LOWER(sj.title) LIKE '%bootloader engineer%'
+                   OR LOWER(sj.title) LIKE '%rtos engineer%'
+                 THEN 'engineering_embedded_firmware'
+                 WHEN LOWER(sj.title) LIKE '%machine learning engineer%'
+                   OR LOWER(sj.title) LIKE '%data scientist%'
+                   OR LOWER(sj.title) LIKE '%data engineer%'
+                   OR LOWER(sj.title) LIKE '%analytics engineer%'
+                   OR LOWER(sj.title) LIKE '%ml engineer%'
+                   OR LOWER(sj.title) LIKE '%ai engineer%'
+                   OR LOWER(sj.title) LIKE '%research scientist%'
+                   OR LOWER(sj.title) LIKE '%applied scientist%'
+                 THEN 'data'
+                 WHEN LOWER(sj.title) LIKE '%product manager%'
+                   OR LOWER(sj.title) LIKE '%project manager%'
+                   OR LOWER(sj.title) LIKE '%program manager%'
+                   OR LOWER(sj.title) LIKE '%scrum master%'
+                   OR LOWER(sj.title) LIKE '%product owner%'
+                 THEN 'pm'
+                 WHEN LOWER(sj.title) LIKE '%software engineer%'
+                   OR LOWER(sj.title) LIKE '%backend engineer%'
+                   OR LOWER(sj.title) LIKE '%frontend engineer%'
+                   OR LOWER(sj.title) LIKE '%full stack engineer%'
+                   OR LOWER(sj.title) LIKE '%devops engineer%'
+                   OR LOWER(sj.title) LIKE '%site reliability engineer%'
+                   OR LOWER(sj.title) LIKE '%software developer%'
+                   OR LOWER(sj.title) LIKE '%platform engineer%'
+                   OR LOWER(sj.title) LIKE '%mobile engineer%'
+                 THEN 'engineering'
+               END AS role_key,
+               CASE
+                 WHEN LOWER(sj.title) LIKE '%firmware engineer%'
+                   OR LOWER(sj.title) LIKE '%embedded systems engineer%'
+                   OR LOWER(sj.title) LIKE '%bsp engineer%'
+                   OR LOWER(sj.title) LIKE '%uefi engineer%'
+                   OR LOWER(sj.title) LIKE '%device driver engineer%'
+                   OR LOWER(sj.title) LIKE '%bootloader engineer%'
+                   OR LOWER(sj.title) LIKE '%rtos engineer%'
+                 THEN 'engineering'
+                 WHEN LOWER(sj.title) LIKE '%machine learning engineer%'
+                   OR LOWER(sj.title) LIKE '%data scientist%'
+                   OR LOWER(sj.title) LIKE '%data engineer%'
+                   OR LOWER(sj.title) LIKE '%analytics engineer%'
+                   OR LOWER(sj.title) LIKE '%ml engineer%'
+                   OR LOWER(sj.title) LIKE '%ai engineer%'
+                   OR LOWER(sj.title) LIKE '%research scientist%'
+                   OR LOWER(sj.title) LIKE '%applied scientist%'
+                 THEN 'data'
+                 ELSE role_key
+               END AS role_family,
+               CASE
+                 WHEN LOWER(sj.title) LIKE '%firmware engineer%'
+                   OR LOWER(sj.title) LIKE '%embedded systems engineer%'
+                   OR LOWER(sj.title) LIKE '%bsp engineer%'
+                   OR LOWER(sj.title) LIKE '%uefi engineer%'
+                   OR LOWER(sj.title) LIKE '%device driver engineer%'
+                   OR LOWER(sj.title) LIKE '%bootloader engineer%'
+                   OR LOWER(sj.title) LIKE '%rtos engineer%'
+                 THEN 'engineering_embedded_firmware'
+                 WHEN LOWER(sj.title) LIKE '%software engineer%'
+                   OR LOWER(sj.title) LIKE '%backend engineer%'
+                   OR LOWER(sj.title) LIKE '%frontend engineer%'
+                   OR LOWER(sj.title) LIKE '%full stack engineer%'
+                   OR LOWER(sj.title) LIKE '%devops engineer%'
+                   OR LOWER(sj.title) LIKE '%site reliability engineer%'
+                   OR LOWER(sj.title) LIKE '%software developer%'
+                   OR LOWER(sj.title) LIKE '%platform engineer%'
+                   OR LOWER(sj.title) LIKE '%mobile engineer%'
+                 THEN 'it_digital'
+                 ELSE role_key
+               END AS domain,
+               0.85 AS confidence,
+               'orphan_repair' AS matched_by
+        FROM scraped_jobs sj
+        LEFT JOIN job_role_map jrm ON jrm.job_id = sj.job_id
+        WHERE jrm.job_id IS NULL
+          AND (
+            LOWER(sj.title) LIKE '%firmware engineer%'
+            OR LOWER(sj.title) LIKE '%embedded systems engineer%'
+            OR LOWER(sj.title) LIKE '%bsp engineer%'
+            OR LOWER(sj.title) LIKE '%uefi engineer%'
+            OR LOWER(sj.title) LIKE '%device driver engineer%'
+            OR LOWER(sj.title) LIKE '%bootloader engineer%'
+            OR LOWER(sj.title) LIKE '%rtos engineer%'
+            OR LOWER(sj.title) LIKE '%machine learning engineer%'
+            OR LOWER(sj.title) LIKE '%data scientist%'
+            OR LOWER(sj.title) LIKE '%data engineer%'
+            OR LOWER(sj.title) LIKE '%analytics engineer%'
+            OR LOWER(sj.title) LIKE '%ml engineer%'
+            OR LOWER(sj.title) LIKE '%ai engineer%'
+            OR LOWER(sj.title) LIKE '%research scientist%'
+            OR LOWER(sj.title) LIKE '%applied scientist%'
+            OR LOWER(sj.title) LIKE '%product manager%'
+            OR LOWER(sj.title) LIKE '%project manager%'
+            OR LOWER(sj.title) LIKE '%program manager%'
+            OR LOWER(sj.title) LIKE '%scrum master%'
+            OR LOWER(sj.title) LIKE '%product owner%'
+            OR LOWER(sj.title) LIKE '%software engineer%'
+            OR LOWER(sj.title) LIKE '%backend engineer%'
+            OR LOWER(sj.title) LIKE '%frontend engineer%'
+            OR LOWER(sj.title) LIKE '%full stack engineer%'
+            OR LOWER(sj.title) LIKE '%devops engineer%'
+            OR LOWER(sj.title) LIKE '%site reliability engineer%'
+            OR LOWER(sj.title) LIKE '%software developer%'
+            OR LOWER(sj.title) LIKE '%platform engineer%'
+            OR LOWER(sj.title) LIKE '%mobile engineer%'
+          );
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -2185,6 +2433,42 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   });
 
   const inserted = insertMany(classified);
+
+  // ── Conservative ingest-time classification for orphaned jobs ─────────────
+  // Jobs scraped without a domainProfile (admin scrapes, deleted profiles, etc.)
+  // have no job_role_map entry and are invisible to profile-based search flows.
+  // Assign a role_key only when classifyForIngest() returns >= 0.75 confidence.
+  // Low-confidence jobs remain unclassified for later LLM scoring or admin review.
+  {
+    const orphanInsert = db.prepare(`
+      INSERT OR IGNORE INTO job_role_map
+        (job_id, role_key, role_family, domain, confidence, matched_by)
+      VALUES (?, ?, ?, ?, ?, 'ingest_classifier')
+    `);
+    const classifyOrphans = db.transaction((jobs) => {
+      let cnt = 0;
+      for (const item of jobs) {
+        if (item._domainProfileId) continue; // already handled by assignJobRoleMap
+        const existing = db.prepare(
+          "SELECT 1 FROM job_role_map WHERE job_id = ?"
+        ).get(item.jobId);
+        if (existing) continue; // already has a role_map entry
+        const result = classifyForIngest(item.title, item.description || "");
+        if (!result) continue;
+        const { role_family, domain } = getRoleFamilyDomainForKey(result.roleKey);
+        orphanInsert.run(item.jobId, result.roleKey, role_family, domain, result.confidence);
+        cnt++;
+      }
+      return cnt;
+    });
+    // Only run for scrapes that had no domainProfile
+    if (!domainProfileId) {
+      const orphansClassified = classifyOrphans(classified.map(it => ({ ...it, _domainProfileId: domainProfileId })));
+      if (orphansClassified > 0) {
+        console.log(`[scrape] ingest_classifier assigned role_key to ${orphansClassified} orphaned jobs`);
+      }
+    }
+  }
 
   // ── ATS scoring for newly inserted jobs (D1) ──────────────────────────────
   // Score new jobs against the user's base resume using Haiku.
@@ -3137,8 +3421,22 @@ function assertUserOwns(row, userId, res) {
   return row;
 }
 
+// Canonical role-key derivation — delegates to services/jobClassifier.js.
+// To change the mapping logic, edit getRoleKeyForProfile() in that module.
 function roleKeyForProfile(profile) {
-  return String(profile?.role_family || profile?.domain || "general").trim().toLowerCase();
+  const family = String(profile?.role_family || "").trim().toLowerCase();
+  const domain = String(profile?.domain    || "").trim().toLowerCase();
+  // engineering_embedded_firmware is the only engineering sub-domain with a
+  // strict, non-overlapping title set.  Use the domain itself as the role key
+  // so firmware profiles get their own isolated bucket in job_role_map and
+  // never share the broad "engineering" key with standard SWE profiles.
+  // engineering_systems_low_level and engineering_specialist intentionally
+  // stay on the shared "engineering" key — their title sets overlap too much
+  // with SWE to warrant a separate bucket without a full re-scrape.
+  if (family === "engineering" && domain === "engineering_embedded_firmware") {
+    return "engineering_embedded_firmware";
+  }
+  return _getRoleKeyForProfile(profile);
 }
 
 function roleTitleSql(column, roleKey) {
@@ -3160,6 +3458,21 @@ function roleTitleSql(column, roleKey) {
     OR LOWER(${column}) LIKE '%systems%'
     OR LOWER(${column}) LIKE '%security%'
   )
+    AND LOWER(${column}) NOT LIKE '%firmware%'
+    AND LOWER(${column}) NOT LIKE '%embedded%'
+    AND LOWER(${column}) NOT LIKE '%device driver%'
+    AND LOWER(${column}) NOT LIKE '%bsp%'
+    AND LOWER(${column}) NOT LIKE '%silicon validation%'
+    AND LOWER(${column}) NOT LIKE '%post-silicon%'
+    AND LOWER(${column}) NOT LIKE '%post silicon%'
+    AND LOWER(${column}) NOT LIKE '%soc bring%'
+    AND LOWER(${column}) NOT LIKE '%board bring%'
+    AND LOWER(${column}) NOT LIKE '%chip bring%'
+    AND LOWER(${column}) NOT LIKE '%bootloader%'
+    AND LOWER(${column}) NOT LIKE '%rtos%'
+    AND LOWER(${column}) NOT LIKE '% bios %'
+    AND LOWER(${column}) NOT LIKE 'bios %'
+    AND LOWER(${column}) NOT LIKE '%uefi%'
     AND LOWER(${column}) NOT LIKE '%machine learning%'
     AND LOWER(${column}) NOT LIKE '%ml engineer%'
     AND LOWER(${column}) NOT LIKE '%ai engineer%'
@@ -3167,6 +3480,9 @@ function roleTitleSql(column, roleKey) {
     AND LOWER(${column}) NOT LIKE '%llm%'
     AND LOWER(${column}) NOT LIKE '%genai%'
     AND LOWER(${column}) NOT LIKE '%generative ai%'
+    AND LOWER(${column}) NOT LIKE '%data scientist%'
+    AND LOWER(${column}) NOT LIKE '%data engineer%'
+    AND LOWER(${column}) NOT LIKE '%analytics engineer%'
     AND LOWER(${column}) NOT LIKE '%project manager%'
     AND LOWER(${column}) NOT LIKE '%program manager%'
     AND LOWER(${column}) NOT LIKE '%product manager%'
@@ -3174,30 +3490,224 @@ function roleTitleSql(column, roleKey) {
     AND LOWER(${column}) NOT LIKE '%scrum master%'
     AND LOWER(${column}) NOT LIKE '%pmo%'
   )`;
-  if (roleKey === "pm") return `(
-    LOWER(${column}) LIKE '%project%'
-    OR LOWER(${column}) LIKE '%program%'
-    OR LOWER(${column}) LIKE '%product%'
-    OR LOWER(${column}) LIKE '%manager%'
+  // Firmware / Embedded / Device-level roles — kept strictly separate from SWE.
+  // Matches the canonical firmware title set from DOMAIN_METADATA_REGISTRY.json
+  // and ROLE_ALIAS_MAP.json (engineering_embedded_firmware domain).
+  if (roleKey === "engineering_embedded_firmware") return `(
+    LOWER(${column}) LIKE '%firmware%'
+    OR LOWER(${column}) LIKE '%embedded%'
+    OR LOWER(${column}) LIKE '%device driver%'
+    OR LOWER(${column}) LIKE '%bsp%'
+    OR LOWER(${column}) LIKE '%silicon validation%'
+    OR LOWER(${column}) LIKE '%post-silicon%'
+    OR LOWER(${column}) LIKE '%post silicon%'
+    OR LOWER(${column}) LIKE '%soc bring%'
+    OR LOWER(${column}) LIKE '%board bring%'
+    OR LOWER(${column}) LIKE '%chip bring%'
+    OR LOWER(${column}) LIKE '%bootloader%'
+    OR LOWER(${column}) LIKE '%rtos%'
+    OR LOWER(${column}) LIKE '% bios %'
+    OR LOWER(${column}) LIKE 'bios %'
+    OR LOWER(${column}) LIKE '%uefi%'
+    OR LOWER(${column}) LIKE '%hardware debug%'
+    OR LOWER(${column}) LIKE '%debug tools%'
+  )`;
+  if (roleKey === "pm") return `((
+    LOWER(${column}) LIKE '%product manager%'
+    OR LOWER(${column}) LIKE '%project manager%'
+    OR LOWER(${column}) LIKE '%program manager%'
+    OR LOWER(${column}) LIKE '%scrum master%'
+    OR LOWER(${column}) LIKE '%product owner%'
+    OR LOWER(${column}) LIKE '%delivery manager%'
+    OR LOWER(${column}) LIKE '%release manager%'
+    OR LOWER(${column}) LIKE '%agile%'
+    OR LOWER(${column}) LIKE '%pmo%'
+    OR LOWER(${column}) LIKE '%product lead%'
+    OR LOWER(${column}) LIKE '%project coordinator%'
+    OR LOWER(${column}) LIKE '%program coordinator%'
+    OR LOWER(${column}) LIKE '% manager%'
     OR LOWER(${column}) LIKE '%coordinator%'
     OR LOWER(${column}) LIKE '%director%'
-    OR LOWER(${column}) LIKE '%agile%'
-    OR LOWER(${column}) LIKE '%scrum%'
-    OR LOWER(${column}) LIKE '%pmo%'
+    OR LOWER(${column}) LIKE '%project%'
+    OR LOWER(${column}) LIKE '%program%'
+    OR LOWER(${column}) LIKE '%product%'
     OR LOWER(${column}) LIKE '%delivery%'
+  )
+    AND LOWER(${column}) NOT LIKE '%product designer%'
+    AND LOWER(${column}) NOT LIKE '%product design%'
+    AND LOWER(${column}) NOT LIKE '%art director%'
+    AND LOWER(${column}) NOT LIKE '%creative director%'
+    AND LOWER(${column}) NOT LIKE '%design director%'
+    AND LOWER(${column}) NOT LIKE '%finance director%'
+    AND LOWER(${column}) NOT LIKE '%hr director%'
+    AND LOWER(${column}) NOT LIKE '%sales director%'
+    AND LOWER(${column}) NOT LIKE '%marketing director%'
   )`;
   if (roleKey === "data") return `(
-    LOWER(${column}) LIKE '%data%'
-    OR LOWER(${column}) LIKE '%analytics%'
-    OR LOWER(${column}) LIKE '%analyst%'
-    OR LOWER(${column}) LIKE '%scientist%'
+    LOWER(${column}) LIKE '%data scientist%'
+    OR LOWER(${column}) LIKE '%data engineer%'
+    OR LOWER(${column}) LIKE '%analytics engineer%'
     OR LOWER(${column}) LIKE '%machine learning%'
-    OR LOWER(${column}) LIKE '%ml%'
-    OR LOWER(${column}) LIKE '%ai%'
+    OR LOWER(${column}) LIKE '%ml engineer%'
+    OR LOWER(${column}) LIKE '%ai engineer%'
+    OR LOWER(${column}) LIKE '%artificial intelligence%'
+    OR LOWER(${column}) LIKE '%llm%'
+    OR LOWER(${column}) LIKE '%genai%'
+    OR LOWER(${column}) LIKE '%generative ai%'
     OR LOWER(${column}) LIKE '%business intelligence%'
-    OR LOWER(${column}) LIKE '%bi%'
-    OR LOWER(${column}) LIKE '%research%'
+    OR LOWER(${column}) LIKE '%nlp engineer%'
     OR LOWER(${column}) LIKE '%quantitative%'
+    OR LOWER(${column}) LIKE '%data analyst%'
+    OR LOWER(${column}) LIKE '%bi analyst%'
+    OR LOWER(${column}) LIKE '%research scientist%'
+    OR LOWER(${column}) LIKE '%applied scientist%'
+    OR LOWER(${column}) LIKE '% analyst%'
+    OR LOWER(${column}) LIKE '%analytics%'
+    OR LOWER(${column}) LIKE '%scientist%'
+    OR LOWER(${column}) LIKE '%data%'
+  )`;
+  // HR / People Operations
+  if (roleKey === "hr") return `(
+    LOWER(${column}) LIKE '%recruiter%'
+    OR LOWER(${column}) LIKE '%talent acquisition%'
+    OR LOWER(${column}) LIKE '%human resources%'
+    OR LOWER(${column}) LIKE '%hrbp%'
+    OR LOWER(${column}) LIKE '%hr business%'
+    OR LOWER(${column}) LIKE '%hr manager%'
+    OR LOWER(${column}) LIKE '%hr director%'
+    OR LOWER(${column}) LIKE '%hr generalist%'
+    OR LOWER(${column}) LIKE '%hr specialist%'
+    OR LOWER(${column}) LIKE '%hr analyst%'
+    OR LOWER(${column}) LIKE '%hr coordinator%'
+    OR LOWER(${column}) LIKE '%people ops%'
+    OR LOWER(${column}) LIKE '%people operations%'
+    OR LOWER(${column}) LIKE '%compensation%'
+    OR LOWER(${column}) LIKE '% hr %'
+    OR LOWER(${column}) LIKE 'hr %'
+    OR LOWER(${column}) LIKE '%learning and development%'
+    OR LOWER(${column}) LIKE '%learning & development%'
+    OR LOWER(${column}) LIKE '%workforce%'
+    OR LOWER(${column}) LIKE '%employee relations%'
+    OR LOWER(${column}) LIKE '%total rewards%'
+  )`;
+  // Finance / Accounting / Investment
+  if (roleKey === "finance") return `(
+    LOWER(${column}) LIKE '%financial analyst%'
+    OR LOWER(${column}) LIKE '%investment bank%'
+    OR LOWER(${column}) LIKE '%fp&a%'
+    OR LOWER(${column}) LIKE '%treasury%'
+    OR LOWER(${column}) LIKE '%credit analyst%'
+    OR LOWER(${column}) LIKE '%risk analyst%'
+    OR LOWER(${column}) LIKE '%controller%'
+    OR LOWER(${column}) LIKE '%cfo%'
+    OR LOWER(${column}) LIKE '%auditor%'
+    OR LOWER(${column}) LIKE '%tax analyst%'
+    OR LOWER(${column}) LIKE '%tax manager%'
+    OR LOWER(${column}) LIKE '%portfolio manager%'
+    OR LOWER(${column}) LIKE '%asset manager%'
+    OR LOWER(${column}) LIKE '%underwriter%'
+    OR LOWER(${column}) LIKE '%loan officer%'
+    OR LOWER(${column}) LIKE '%actuary%'
+    OR LOWER(${column}) LIKE '%equity research%'
+    OR LOWER(${column}) LIKE '%budget analyst%'
+    OR LOWER(${column}) LIKE '%revenue analyst%'
+    OR LOWER(${column}) LIKE '% finance%'
+    OR LOWER(${column}) LIKE '%financial%'
+    OR LOWER(${column}) LIKE '%accounting%'
+  )`;
+  // Design / UX / UI / Creative
+  if (roleKey === "design") return `(
+    LOWER(${column}) LIKE '%ux designer%'
+    OR LOWER(${column}) LIKE '%ui designer%'
+    OR LOWER(${column}) LIKE '%ux/ui%'
+    OR LOWER(${column}) LIKE '%ui/ux%'
+    OR LOWER(${column}) LIKE '%product designer%'
+    OR LOWER(${column}) LIKE '%graphic designer%'
+    OR LOWER(${column}) LIKE '%visual designer%'
+    OR LOWER(${column}) LIKE '%interaction designer%'
+    OR LOWER(${column}) LIKE '%ux researcher%'
+    OR LOWER(${column}) LIKE '%user researcher%'
+    OR LOWER(${column}) LIKE '%design researcher%'
+    OR LOWER(${column}) LIKE '%motion designer%'
+    OR LOWER(${column}) LIKE '%creative director%'
+    OR LOWER(${column}) LIKE '%design director%'
+    OR LOWER(${column}) LIKE '%design lead%'
+    OR LOWER(${column}) LIKE '%brand designer%'
+    OR LOWER(${column}) LIKE '%content designer%'
+    OR LOWER(${column}) LIKE '%service designer%'
+  )`;
+  // Marketing / Growth / Brand / Content
+  if (roleKey === "marketing") return `(
+    LOWER(${column}) LIKE '%marketing manager%'
+    OR LOWER(${column}) LIKE '%marketing director%'
+    OR LOWER(${column}) LIKE '%marketing analyst%'
+    OR LOWER(${column}) LIKE '%seo%'
+    OR LOWER(${column}) LIKE '%sem%'
+    OR LOWER(${column}) LIKE '%growth market%'
+    OR LOWER(${column}) LIKE '%demand gen%'
+    OR LOWER(${column}) LIKE '%brand manager%'
+    OR LOWER(${column}) LIKE '%content market%'
+    OR LOWER(${column}) LIKE '%content strategist%'
+    OR LOWER(${column}) LIKE '%social media manager%'
+    OR LOWER(${column}) LIKE '%product marketing%'
+    OR LOWER(${column}) LIKE '%email marketing%'
+    OR LOWER(${column}) LIKE '%digital marketing%'
+    OR LOWER(${column}) LIKE '%performance marketing%'
+    OR LOWER(${column}) LIKE '%paid media%'
+  )`;
+  // Legal / Compliance / Regulatory
+  if (roleKey === "legal") return `(
+    LOWER(${column}) LIKE '%attorney%'
+    OR LOWER(${column}) LIKE '%counsel%'
+    OR LOWER(${column}) LIKE '%paralegal%'
+    OR LOWER(${column}) LIKE '%compliance officer%'
+    OR LOWER(${column}) LIKE '%compliance manager%'
+    OR LOWER(${column}) LIKE '%legal director%'
+    OR LOWER(${column}) LIKE '%legal analyst%'
+    OR LOWER(${column}) LIKE '%regulatory affairs%'
+    OR LOWER(${column}) LIKE '%patent attorney%'
+    OR LOWER(${column}) LIKE '%ip attorney%'
+    OR LOWER(${column}) LIKE '%ip counsel%'
+    OR LOWER(${column}) LIKE '%litigation%'
+    OR LOWER(${column}) LIKE '% legal %'
+    OR LOWER(${column}) LIKE 'legal %'
+  )`;
+  // Operations / Supply Chain / Logistics / Procurement
+  if (roleKey === "operations") return `(
+    LOWER(${column}) LIKE '%operations manager%'
+    OR LOWER(${column}) LIKE '%supply chain%'
+    OR LOWER(${column}) LIKE '%logistics manager%'
+    OR LOWER(${column}) LIKE '%logistics coordinator%'
+    OR LOWER(${column}) LIKE '%procurement manager%'
+    OR LOWER(${column}) LIKE '%procurement analyst%'
+    OR LOWER(${column}) LIKE '%manufacturing engineer%'
+    OR LOWER(${column}) LIKE '%industrial engineer%'
+    OR LOWER(${column}) LIKE '%quality engineer%'
+    OR LOWER(${column}) LIKE '%quality manager%'
+    OR LOWER(${column}) LIKE '%fulfillment manager%'
+    OR LOWER(${column}) LIKE '%warehouse manager%'
+    OR LOWER(${column}) LIKE '%inventory manager%'
+    OR LOWER(${column}) LIKE '%vendor manager%'
+    OR LOWER(${column}) LIKE '%scm analyst%'
+  )`;
+  // Healthcare / Clinical / Medical
+  if (roleKey === "healthcare") return `(
+    LOWER(${column}) LIKE '%registered nurse%'
+    OR LOWER(${column}) LIKE '%nurse practitioner%'
+    OR LOWER(${column}) LIKE '%physician assistant%'
+    OR LOWER(${column}) LIKE '%pharmacist%'
+    OR LOWER(${column}) LIKE '%physical therapist%'
+    OR LOWER(${column}) LIKE '%occupational therapist%'
+    OR LOWER(${column}) LIKE '%medical assistant%'
+    OR LOWER(${column}) LIKE '%clinical nurse%'
+    OR LOWER(${column}) LIKE '%radiolog%'
+    OR LOWER(${column}) LIKE '%medical director%'
+    OR LOWER(${column}) LIKE '%clinical director%'
+    OR LOWER(${column}) LIKE '%healthcare administrator%'
+    OR LOWER(${column}) LIKE '%hospital administrator%'
+    OR LOWER(${column}) LIKE '%patient care%'
+    OR LOWER(${column}) LIKE '%clinical research%'
+    OR LOWER(${column}) LIKE '%clinical coordinator%'
   )`;
   return "1 = 1";
 }

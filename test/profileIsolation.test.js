@@ -197,11 +197,140 @@ test("engineering pool excludes stale PM jobs even if legacy role map is wrong",
   assert.deepEqual(engineeringTitleRows(db, 1).map(r => r.job_id), ["swe-ok"]);
 });
 
-test("engineering title filter excludes ML/AI and PM-management contamination", () => {
+test("engineering title filter excludes ML/AI, PM, and data-specialty contamination", () => {
   const server = fs.readFileSync("server.js", "utf8");
 
   assert.match(server, /NOT LIKE '%machine learning%'/);
   assert.match(server, /NOT LIKE '%ai engineer%'/);
   assert.match(server, /NOT LIKE '%project manager%'/);
   assert.match(server, /NOT LIKE '%product manager%'/);
+  // data specialty titles must also be excluded from SWE pool
+  assert.match(server, /NOT LIKE '%data scientist%'/);
+  assert.match(server, /NOT LIKE '%data engineer%'/);
+  assert.match(server, /NOT LIKE '%analytics engineer%'/);
+});
+
+test("engineering title filter excludes firmware and embedded role contamination", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+
+  assert.match(server, /NOT LIKE '%firmware%'/);
+  assert.match(server, /NOT LIKE '%embedded%'/);
+  assert.match(server, /NOT LIKE '%device driver%'/);
+  assert.match(server, /NOT LIKE '%bsp%'/);
+  assert.match(server, /NOT LIKE '%silicon validation%'/);
+  assert.match(server, /NOT LIKE '%post-silicon%'/);
+  assert.match(server, /NOT LIKE '%bootloader%'/);
+  assert.match(server, /NOT LIKE '%rtos%'/);
+  assert.match(server, /NOT LIKE '%uefi%'/);
+});
+
+test("roleTitleSql engineering_embedded_firmware case exists and covers firmware titles", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+
+  assert.match(server, /roleKey === "engineering_embedded_firmware"/);
+  assert.match(server, /LIKE '%firmware%'/);
+  assert.match(server, /LIKE '%embedded%'/);
+  assert.match(server, /LIKE '%bsp%'/);
+  assert.match(server, /LIKE '%silicon validation%'/);
+  assert.match(server, /LIKE '%bootloader%'/);
+  assert.match(server, /LIKE '%hardware debug%'/);
+});
+
+test("roleKeyForProfile returns engineering_embedded_firmware for firmware domain profiles", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+
+  assert.match(server, /domain === "engineering_embedded_firmware"/);
+  assert.match(server, /return "engineering_embedded_firmware"/);
+});
+
+test("engineering pool with role_key=engineering excludes firmware-titled jobs via title filter", () => {
+  const db = setupDb();
+  db.exec(`
+    INSERT INTO users VALUES (1, 'a');
+    INSERT INTO scraped_jobs VALUES
+      ('swe-ok',      'Software Engineer',          'Acme', 'software engineer', 10, 1000, NULL),
+      ('fe-ok',       'Frontend Developer',          'Acme', 'frontend developer', 10, 1000, NULL),
+      ('fw-bad',      'Firmware Engineer',           'Acme', 'software engineer', 10, 1000, NULL),
+      ('emb-bad',     'Embedded Systems Engineer',   'Acme', 'software engineer', 10, 1000, NULL),
+      ('bsp-bad',     'BSP Engineer',                'Acme', 'software engineer', 10, 1000, NULL),
+      ('bios-bad',    'BIOS Software Engineer',      'Acme', 'software engineer', 10, 1000, NULL),
+      ('driver-bad',  'Device Driver Engineer',      'Acme', 'software engineer', 10, 1000, NULL);
+    INSERT INTO job_role_map VALUES
+      ('swe-ok',      'engineering', 'engineering', 'engineering'),
+      ('fe-ok',       'engineering', 'engineering', 'engineering'),
+      ('fw-bad',      'engineering', 'engineering', 'engineering'),
+      ('emb-bad',     'engineering', 'engineering', 'engineering'),
+      ('bsp-bad',     'engineering', 'engineering', 'engineering'),
+      ('bios-bad',    'engineering', 'engineering', 'engineering'),
+      ('driver-bad',  'engineering', 'engineering', 'engineering');
+  `);
+
+  // Simulate the server-side query for a SWE user:
+  // role_key = 'engineering' AND roleTitleSql exclusions applied
+  const rows = db.prepare(`
+    SELECT sj.job_id
+    FROM scraped_jobs sj
+    JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = 'engineering'
+    WHERE (
+      LOWER(sj.title) LIKE '%engineer%'
+      OR LOWER(sj.title) LIKE '%developer%'
+      OR LOWER(sj.title) LIKE '%software%'
+      OR LOWER(sj.title) LIKE '%backend%'
+      OR LOWER(sj.title) LIKE '%frontend%'
+      OR LOWER(sj.title) LIKE '%platform%'
+    )
+      AND LOWER(sj.title) NOT LIKE '%firmware%'
+      AND LOWER(sj.title) NOT LIKE '%embedded%'
+      AND LOWER(sj.title) NOT LIKE '%device driver%'
+      AND LOWER(sj.title) NOT LIKE '%bsp%'
+      AND LOWER(sj.title) NOT LIKE '% bios %'
+      AND LOWER(sj.title) NOT LIKE 'bios %'
+      AND LOWER(sj.title) NOT LIKE '%uefi%'
+    ORDER BY sj.job_id
+  `).all();
+
+  const ids = rows.map(r => r.job_id);
+  assert.ok(ids.includes("swe-ok"),  "SWE job should be visible");
+  assert.ok(ids.includes("fe-ok"),   "Frontend job should be visible");
+  assert.ok(!ids.includes("fw-bad"),     "Firmware Engineer must be excluded");
+  assert.ok(!ids.includes("emb-bad"),    "Embedded Systems Engineer must be excluded");
+  assert.ok(!ids.includes("bsp-bad"),    "BSP Engineer must be excluded");
+  assert.ok(!ids.includes("bios-bad"),   "BIOS Software Engineer must be excluded");
+  assert.ok(!ids.includes("driver-bad"), "Device Driver Engineer must be excluded");
+});
+
+test("firmware pool with role_key=engineering_embedded_firmware surfaces firmware jobs only", () => {
+  const db = setupDb();
+  db.exec(`
+    INSERT INTO users VALUES (1, 'a');
+    INSERT INTO scraped_jobs VALUES
+      ('swe-job',  'Software Engineer',        'Acme', 'software engineer', 10, 1000, NULL),
+      ('fw-job',   'Firmware Engineer',         'Acme', 'firmware engineer', 20, 1000, NULL),
+      ('emb-job',  'Embedded Systems Engineer', 'Acme', 'firmware engineer', 20, 1000, NULL),
+      ('bsp-job',  'BSP Engineer',              'Acme', 'firmware engineer', 20, 1000, NULL);
+    INSERT INTO job_role_map VALUES
+      ('swe-job', 'engineering',                'engineering', 'it_digital'),
+      ('fw-job',  'engineering_embedded_firmware', 'engineering', 'engineering_embedded_firmware'),
+      ('emb-job', 'engineering_embedded_firmware', 'engineering', 'engineering_embedded_firmware'),
+      ('bsp-job', 'engineering_embedded_firmware', 'engineering', 'engineering_embedded_firmware');
+  `);
+
+  const rows = db.prepare(`
+    SELECT sj.job_id
+    FROM scraped_jobs sj
+    JOIN job_role_map jrm ON jrm.job_id = sj.job_id
+      AND jrm.role_key = 'engineering_embedded_firmware'
+    WHERE (
+      LOWER(sj.title) LIKE '%firmware%'
+      OR LOWER(sj.title) LIKE '%embedded%'
+      OR LOWER(sj.title) LIKE '%bsp%'
+    )
+    ORDER BY sj.job_id
+  `).all();
+
+  const ids = rows.map(r => r.job_id);
+  assert.ok(!ids.includes("swe-job"), "SWE job must not appear in firmware pool");
+  assert.ok(ids.includes("fw-job"),   "Firmware job must appear in firmware pool");
+  assert.ok(ids.includes("emb-job"),  "Embedded job must appear in firmware pool");
+  assert.ok(ids.includes("bsp-job"),  "BSP job must appear in firmware pool");
 });

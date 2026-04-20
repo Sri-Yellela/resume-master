@@ -32,3 +32,50 @@ test("frontend handles missing profile and local-only scrape unavailable respons
   assert.match(jobsPanel, /pollData\.scrapeUnavailable/);
   assert.match(jobsPanel, /Create a job search profile/);
 });
+
+test("roleTitleSql engineering excludes all firmware/embedded keyword families", () => {
+  const engStart = server.indexOf('if (roleKey === "engineering") return');
+  assert.ok(engStart > 0, "engineering roleTitleSql case must exist");
+  // Find the closing of the engineering block by locating the next roleKey check
+  const nextCase = server.indexOf('if (roleKey === "engineering_embedded_firmware")', engStart);
+  assert.ok(nextCase > engStart, "engineering_embedded_firmware case must follow engineering case");
+
+  const engBlock = server.slice(engStart, nextCase);
+  assert.match(engBlock, /NOT LIKE '%firmware%'/, "must exclude firmware");
+  assert.match(engBlock, /NOT LIKE '%embedded%'/, "must exclude embedded");
+  assert.match(engBlock, /NOT LIKE '%device driver%'/, "must exclude device driver");
+  assert.match(engBlock, /NOT LIKE '%bsp%'/, "must exclude bsp");
+  assert.match(engBlock, /NOT LIKE '%silicon validation%'/, "must exclude silicon validation");
+  assert.match(engBlock, /NOT LIKE '%post-silicon%'/, "must exclude post-silicon");
+  assert.match(engBlock, /NOT LIKE '%bootloader%'/, "must exclude bootloader");
+  assert.match(engBlock, /NOT LIKE '%rtos%'/, "must exclude rtos");
+  assert.match(engBlock, /NOT LIKE '%uefi%'/, "must exclude uefi");
+});
+
+test("roleTitleSql engineering_embedded_firmware case covers the canonical firmware title set", () => {
+  const fwStart = server.indexOf('if (roleKey === "engineering_embedded_firmware") return');
+  assert.ok(fwStart > 0, "engineering_embedded_firmware roleTitleSql case must exist");
+  const pmCase = server.indexOf('if (roleKey === "pm") return', fwStart);
+  const fwBlock = server.slice(fwStart, pmCase);
+
+  assert.match(fwBlock, /LIKE '%firmware%'/);
+  assert.match(fwBlock, /LIKE '%embedded%'/);
+  assert.match(fwBlock, /LIKE '%bsp%'/);
+  assert.match(fwBlock, /LIKE '%silicon validation%'/);
+  assert.match(fwBlock, /LIKE '%bootloader%'/);
+  assert.match(fwBlock, /LIKE '%rtos%'/);
+  assert.match(fwBlock, /LIKE '%uefi%'/);
+  assert.match(fwBlock, /LIKE '%hardware debug%'/);
+});
+
+test("roleKeyForProfile returns domain for engineering_embedded_firmware profiles", () => {
+  assert.match(server, /domain === "engineering_embedded_firmware"/);
+  assert.match(server, /return "engineering_embedded_firmware"/);
+});
+
+test("migration 045 firmware repair exists and includes title-heuristic cleanup", () => {
+  assert.match(server, /045_firmware_role_map_repair/);
+  assert.match(server, /firmware_profile_repair/);
+  assert.match(server, /firmware_title_repair/);
+  assert.match(server, /matched_by = 'title_heuristic'/);
+});

@@ -32,6 +32,20 @@ ${resumeText.slice(0, 2000)}
 Job Description (first 1500 chars):
 ${(jdText || "").slice(0, 1500)}
 
+IMPORTANT classification rules:
+- Use "data" for machine learning, AI/ML, data science, data engineering, analytics engineering, LLM, GenAI, NLP, computer vision, quantitative research roles. Do NOT classify these as "engineering".
+- Use "engineering" ONLY for general software/web/backend/frontend/platform/infrastructure/cloud/devops/SRE roles.
+- Use "engineering" for firmware, embedded, BSP, RTOS, UEFI, silicon validation, device driver roles IF the domain is "it_digital". For these roles, prefer domain="it_digital" so the system can route them to the correct sub-bucket.
+- Use "pm" for product managers, project managers, program managers, scrum masters, product owners. Do NOT classify PM roles as "engineering" even if they require technical background.
+- Use "hr" for recruiting, talent acquisition, HR business partners, people operations, compensation, L&D roles.
+- Use "finance" for financial analysts, investment banking, FP&A, treasury, credit, audit, accounting roles.
+- Use "design" for UX, UI, product design, graphic design, user research roles.
+- Use "marketing" for marketing managers, SEO/SEM, growth, brand, content, social media, PMM roles.
+- Use "legal" for attorneys, counsel, compliance officers, paralegal, regulatory affairs roles.
+- Use "operations" for supply chain, logistics, procurement, manufacturing, quality, fulfillment roles.
+- Broad/shared skills like Python, SQL, cloud, APIs, automation, testing do NOT change the roleFamily — use the role title and domain-specific context to decide.
+- If genuinely ambiguous, prefer "general" over a wrong specific category.
+
 Reply ONLY with valid JSON matching this exact schema. No markdown fences, no explanation:
 {
   "roleFamily": "<one of: engineering | pm | finance | hr | design | data | legal | operations | general>",

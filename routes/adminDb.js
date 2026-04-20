@@ -1,6 +1,7 @@
 // routes/adminDb.js — DB Inspector API routes for admin diagnostics
 import { Router } from "express";
 import fs from "fs";
+import { classifyTitle } from "../services/jobClassifier.js";
 
 export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
   const router = Router();
@@ -14,12 +15,15 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
     return String(profile?.role_family || profile?.domain || "general").trim().toLowerCase();
   }
 
+  // roleKeyForTitle — admin suggestion for un/misclassified jobs.
+  // Uses the modular classifier (services/jobClassifier.js) so admin hints
+  // stay consistent with the system-wide classification engine.
+  // Low-confidence results return "general" to avoid wrong suggestions.
   function roleKeyForTitle(title) {
-    const t = String(title || "").toLowerCase();
-    if (/\b(machine learning|ml engineer|ai engineer|artificial intelligence|llm|genai|generative ai|data scientist|data engineer|analytics engineer)\b/.test(t)) return "data";
-    if (/\b(project manager|program manager|product manager|scrum master|pmo|delivery manager|project coordinator|product owner)\b/.test(t)) return "pm";
-    if (/\b(engineer|developer|software|platform|infrastructure|sre|devops|systems|firmware|embedded|driver|bsp|kernel)\b/.test(t)) return "engineering";
-    if (/\b(data|analytics|analyst|scientist|business intelligence|bi)\b/.test(t)) return "data";
+    const result = classifyTitle(String(title || ""));
+    // Only surface confident classifications as suggestions
+    if (result.confidence >= 0.65) return result.roleKey;
+    // Firmware anchors always have high confidence; fall through to general otherwise
     return "general";
   }
 
