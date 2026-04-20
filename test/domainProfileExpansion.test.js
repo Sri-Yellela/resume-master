@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { normaliseRole, buildApifyQueries } from "../services/searchQueryBuilder.js";
+import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, buildProfileSearchTerms, isTitleRelevantToProfile } from "../services/searchQueryBuilder.js";
 
 const registry = JSON.parse(fs.readFileSync("data/DOMAIN_METADATA_REGISTRY.json", "utf8"));
 const aliases = JSON.parse(fs.readFileSync("data/ROLE_ALIAS_MAP.json", "utf8"));
@@ -51,6 +51,40 @@ test("role aliases cover low-level and debug-oriented engineering searches", () 
   const firmwareQueries = buildApifyQueries("Firmware Engineer");
   assert.ok(firmwareQueries.includes("Embedded Software Engineer"));
   assert.ok(firmwareQueries.includes("Firmware Developer"));
+});
+
+test("firmware profile search terms stay title-like and precise", () => {
+  const profile = {
+    domain: "engineering_embedded_firmware",
+    seniority: "senior",
+    profile_name: "Firmware Engineer",
+    target_titles: JSON.stringify([
+      "Firmware Engineer",
+      "Embedded Software Engineer",
+      "Device Driver Engineer",
+      "BSP Engineer",
+      "Firmware Debug Engineer",
+      "Hardware Debug Engineer",
+      "Post-Silicon Validation Engineer",
+    ]),
+  };
+  const profileQueries = buildApifyQueriesFromProfile(profile);
+  assert.ok(profileQueries.includes("Firmware Engineer"));
+  assert.ok(profileQueries.includes("Embedded Software Engineer"));
+  assert.ok(profileQueries.length <= 6);
+  assert.ok(!profileQueries.some(q => /^Senior /.test(q)), "firmware scrape should avoid seniority fan-out");
+
+  const outbound = buildProfileSearchTerms(profile, ["C", "Python", "TRACE32", "JTAG", "Firmware Debug"]);
+  assert.ok(outbound.includes("Firmware Engineer"));
+  assert.ok(outbound.includes("Firmware Debug Engineer"));
+  assert.ok(!outbound.includes("C"));
+  assert.ok(!outbound.includes("Python"));
+  assert.ok(outbound.length <= 6);
+});
+
+test("profile title relevance does not let tokenless skill terms match every job", () => {
+  assert.equal(isTitleRelevantToProfile("Product Manager", ["C", "Python"]), false);
+  assert.equal(isTitleRelevantToProfile("Firmware Debug Engineer", ["TRACE32 Engineer", "Firmware Debug Engineer"]), true);
 });
 
 test("ML and AI aliases map to Data instead of Engineering", () => {

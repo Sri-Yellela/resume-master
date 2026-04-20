@@ -30,7 +30,7 @@ import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
-import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
+import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, buildProfileSearchTerms, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
 import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
@@ -1972,9 +1972,19 @@ async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
                       ? scrapeParams.employmentTypes
                       : ["full-time"],
     postedLimit:    scrapeParams.postedLimit     || "24h",
-    maxItems:       MAX_JOBS_PER_REFRESH * 3,
+    maxItems:       scrapeParams.maxItems || MAX_JOBS_PER_REFRESH * 3,
   };
-  console.log(`[scrape] Apify input: titles=[${jobTitles.join(",")}] workplaceType=${input.workplaceType} empType=${input.employmentType} postedLimit=${input.postedLimit} location=${input.locations[0]}`);
+  if (scrapeParams.threadId) {
+    logSearchThread(scrapeParams.threadId, "apify_payload", {
+      jobTitles,
+      workplaceType: input.workplaceType,
+      employmentType: input.employmentType,
+      postedLimit: input.postedLimit,
+      location: input.locations[0],
+      maxItems: input.maxItems,
+    });
+  }
+  console.log(`[scrape] Apify input: titles=[${jobTitles.join(",")}] workplaceType=${input.workplaceType} empType=${input.employmentType} postedLimit=${input.postedLimit} location=${input.locations[0]} maxItems=${input.maxItems}`);
   const run = await client.actor("harvestapi/linkedin-job-search").call(input, { waitSecs: 300 });
   const dataset = await client.dataset(run.defaultDatasetId).listItems({ limit: MAX_JOBS_PER_REFRESH * 3 });
   const items = Array.isArray(dataset.items) ? dataset.items : [];
@@ -2064,7 +2074,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
           const tokens = target.toLowerCase()
             .split(/[\s/\-]+/)
             .filter(w => w.length > 2 && !STOP.has(w));
-          return tokens.length === 0 || tokens.every(t => titleLower.includes(t));
+          return tokens.length > 0 && tokens.every(t => titleLower.includes(t));
         });
         if (!matches) { cntIrrelevant++; return false; }
       }
@@ -2079,6 +2089,22 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     return true;
   });
 
+  if (scrapeParams.threadId) {
+    logSearchThread(scrapeParams.threadId, "scrape_filter_summary", {
+      rawCount: rawItems.length,
+      normalisedCount: combined.length,
+      filteredCount: filtered.length,
+      dropped: {
+        missingTitleOrCompany: cntNoTitle,
+        noExternalApplyUrl: cntNoApply,
+        notFullTime: cntNotFT,
+        titleIrrelevant: cntIrrelevant,
+        repost: cntRepost,
+        ghostScore: cntGhost,
+        duplicate: cntDup,
+      },
+    });
+  }
   console.log(
     `[scrape] filtered: ${filtered.length}/${combined.length}` +
     ` (missingTitleOrCompany:${cntNoTitle} noExternalApplyUrl:${cntNoApply} notFullTime:${cntNotFT}` +
@@ -2163,7 +2189,13 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   // ── ATS scoring for newly inserted jobs (D1) ──────────────────────────────
   // Score new jobs against the user's base resume using Haiku.
   // Non-fatal — job is still inserted if scoring fails.
-  if (userId && ANTHROPIC_KEY) {
+  if (userId && ANTHROPIC_KEY && Date.now() < anthropicAtsUnavailableUntil) {
+    if (scrapeParams.threadId) logSearchThread(scrapeParams.threadId, "ats_enrichment", {
+      status: "ats_unavailable_due_to_credits",
+      skipped: true,
+      retryAfterMs: anthropicAtsUnavailableUntil - Date.now(),
+    });
+  } else if (userId && ANTHROPIC_KEY) {
     enqueueAtsScoreWork(`scrape:${userId}:${query}`, async () => {
       try {
         const baseResumeRow = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
@@ -2187,10 +2219,15 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
           "UPDATE scraped_jobs SET ats_score=?, ats_report=? WHERE job_id=?"
         );
 
-        for (let i = 0; i < newlyInserted.length; i += 5) {
+        let creditsUnavailable = false;
+        let attempted = 0;
+        let failed = 0;
+        for (let i = 0; i < newlyInserted.length && !creditsUnavailable; i += 5) {
           const batch = newlyInserted.slice(i, i + 5);
           await Promise.all(batch.map(async item => {
+            if (creditsUnavailable) return;
             try {
+              attempted++;
               const start = Date.now();
               const scoreMsg = await anthropic.messages.create({
                 model: "claude-haiku-4-5-20251001",
@@ -2214,12 +2251,37 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
                 company: item.company,
               });
             } catch(e) {
-              console.warn(`[scrape] ATS score failed for ${item.jobId}:`, e.message);
+              failed++;
+              if (isAnthropicCreditError(e)) {
+                creditsUnavailable = true;
+                anthropicAtsUnavailableUntil = Date.now() + 15 * 60 * 1000;
+                console.warn(`[scrape] ATS score unavailable due to Anthropic credits for ${item.jobId}:`, e.message);
+              } else {
+                console.warn(`[scrape] ATS score failed for ${item.jobId}:`, e.message);
+              }
             }
           }));
         }
+        if (scrapeParams.threadId) {
+          logSearchThread(scrapeParams.threadId, "ats_enrichment", {
+            candidateCount: newlyInserted.length,
+            attempted,
+            failed,
+            skippedRemaining: creditsUnavailable,
+            status: creditsUnavailable ? "ats_unavailable_due_to_credits" : "complete",
+          });
+        }
       } catch(e) {
-        console.warn("[scrape] ATS batch scoring failed:", e.message);
+        if (isAnthropicCreditError(e)) {
+          anthropicAtsUnavailableUntil = Date.now() + 15 * 60 * 1000;
+          console.warn("[scrape] ATS batch scoring unavailable due to Anthropic credits:", e.message);
+          if (scrapeParams.threadId) logSearchThread(scrapeParams.threadId, "ats_enrichment", {
+            status: "ats_unavailable_due_to_credits",
+            error: e.message,
+          });
+        } else {
+          console.warn("[scrape] ATS batch scoring failed:", e.message);
+        }
       }
     });
   }
@@ -2239,6 +2301,15 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     }
   });
 
+  if (scrapeParams.threadId) {
+    logSearchThread(scrapeParams.threadId, "scrape_complete", {
+      query,
+      insertedCount: inserted,
+      classifiedCount: classified.length,
+      filteredCount: filtered.length,
+      rawCount: combined.length,
+    });
+  }
   console.log(`[scrape] ✓ "${query}" — ${inserted} inserted, ${classified.length} classified, ${filtered.length} passed filter of ${combined.length} total`);
   return {
     classified,
@@ -3141,6 +3212,20 @@ function parseProfileArray(value) {
   try { return JSON.parse(value || "[]"); } catch { return []; }
 }
 
+function getOrRepairActiveProfile(userId) {
+  let active = db.prepare("SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
+  if (active) return active;
+  const fallback = db.prepare("SELECT * FROM domain_profiles WHERE user_id=? ORDER BY updated_at DESC, created_at ASC LIMIT 1").get(userId);
+  if (!fallback) {
+    try { db.prepare("UPDATE users SET domain_profile_complete=0 WHERE id=?").run(userId); } catch {}
+    return null;
+  }
+  db.prepare("UPDATE domain_profiles SET is_active=0 WHERE user_id=?").run(userId);
+  db.prepare("UPDATE domain_profiles SET is_active=1, updated_at=unixepoch() WHERE id=? AND user_id=?").run(fallback.id, userId);
+  try { db.prepare("UPDATE users SET domain_profile_complete=1 WHERE id=?").run(userId); } catch {}
+  return db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?").get(fallback.id, userId);
+}
+
 function profileTitleSql(column, profile) {
   const targetTitles = parseProfileArray(profile?.target_titles);
   if (!targetTitles.length) return { sql: "1 = 1", params: [] };
@@ -3184,9 +3269,7 @@ function assignJobRoleMap(jobId, profile, matchedBy = "profile_scrape", confiden
 }
 
 function resolveUserJobDomainProfileId(userId, jobId) {
-  const userActiveProfile = db.prepare(
-    "SELECT * FROM domain_profiles WHERE user_id = ? AND is_active = 1"
-  ).get(userId);
+  const userActiveProfile = getOrRepairActiveProfile(userId);
   if (!userActiveProfile) return null;
   const activeRoleKey = roleKeyForProfile(userActiveProfile);
 
@@ -3221,6 +3304,7 @@ const app = express();
 const activeScrapes = new Map();
 const atsScoreQueue = [];
 let atsScoreQueueRunning = false;
+let anthropicAtsUnavailableUntil = 0;
 
 function enqueueAtsScoreWork(label, worker) {
   atsScoreQueue.push({ label, worker });
@@ -3241,6 +3325,14 @@ function enqueueAtsScoreWork(label, worker) {
 
 function scrapeStateKey(userId, profileId, query) {
   return `${userId}:${profileId || "none"}:${String(query || "").toLowerCase()}`;
+}
+
+function searchThreadId() {
+  return `search_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`;
+}
+
+function logSearchThread(threadId, event, details = {}) {
+  console.log(`[search:${threadId}] ${event} ${JSON.stringify(details)}`);
 }
 
 // SYNC CLIENTS: in-memory SSE registry.
@@ -4012,7 +4104,7 @@ app.get("/api/extension/autofill", requireAuth, (req, res) => {
 app.get("/api/jobs/facets", requireAuth, (req, res) => {
   const userId = req.user.id;
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
-  const facetProfile = db.prepare("SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
+  const facetProfile = getOrRepairActiveProfile(userId);
   if (!facetProfile) {
     return res.json({ workType:{}, employmentType:{}, category:{}, postedAge:{}, salaryRange:null, total:0 });
   }
@@ -4068,9 +4160,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   // ── Session sync: populate user_jobs — strictly isolated to the active profile ──
   // IMPORTANT: use domain_profile_id = ? (not IN all profiles) so jobs scraped under
   // another profile never bleed into this board.  No active profile → return empty immediately.
-  const sessionActiveProfile = db.prepare(
-    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
-  ).get(userId);
+  const sessionActiveProfile = getOrRepairActiveProfile(userId);
 
   if (!sessionActiveProfile) {
     console.warn(`[jobs] user ${userId} requested jobs without an active profile`);
@@ -4324,9 +4414,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
 
   const sinceSeconds = Math.floor(since / 1000);
   const userId = req.user.id;
-  const activeProfile = db.prepare(
-    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
-  ).get(userId);
+  const activeProfile = getOrRepairActiveProfile(userId);
   if (!activeProfile) {
     console.warn(`[jobs] poll for "${qRaw}" has no active profile for user ${userId}`);
     return res.json({
@@ -4420,6 +4508,15 @@ function isExternalScrapeQuotaError(err) {
       || msg.includes("limit exceeded");
 }
 
+function isAnthropicCreditError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return msg.includes("credit balance is too low")
+      || msg.includes("insufficient credit")
+      || msg.includes("billing")
+      || msg.includes("payment required")
+      || msg.includes("quota exceeded");
+}
+
 // Map UI workType string → Apify workplaceType array
 function mapWorkplaceTypes(workType) {
   const map = { Remote:"remote", Hybrid:"hybrid", Onsite:"office", "On-site":"office",
@@ -4444,9 +4541,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   // QUERY PRIORITY: active profile target_titles + seniority variants first;
   // single query string as fallback. Edit buildApifyQueriesFromProfile() in
   // services/searchQueryBuilder.js to change title variant logic.
-  const activeProfile = db.prepare(
-    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
-  ).get(req.user.id);
+  const activeProfile = getOrRepairActiveProfile(req.user.id);
   if (!activeProfile) {
     const query = normaliseRole(rawQuery);
     console.warn(`[jobs] user ${req.user.id} requested scrape for "${query}" without an active profile`);
@@ -4474,6 +4569,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       scraping: false,
     });
   }
+  const threadId = searchThreadId();
   let profileJobTitles = activeProfile
     ? buildApifyQueriesFromProfile(activeProfile)
     : null;
@@ -4483,9 +4579,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   })();
   const simpleProfile = loadOrCreateSimpleApplyProfile(db, req.user.id, activeProfileTitles);
   const terms = (simpleProfile?.searchTerms || []).slice(0, 4);
-  if (terms.length) {
-    profileJobTitles = [...new Set([...(profileJobTitles || [query]), ...terms])].slice(0, 10);
-  }
+  profileJobTitles = buildProfileSearchTerms(activeProfile, terms);
 
   // employmentTypes — array of HarvestAPI-accepted strings; default full-time
   const rawEmpTypes = Array.isArray(req.body.employmentTypes) ? req.body.employmentTypes : [];
@@ -4509,9 +4603,24 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     : "United States";
 
   const scrapeParams = {
-    employmentTypes, workplaceTypes, postedLimit, location,
+    employmentTypes, workplaceTypes, postedLimit, location, threadId,
+    maxItems: activeProfile.domain === "engineering_embedded_firmware" ? 75 : undefined,
     ...(profileJobTitles ? { jobTitles: profileJobTitles } : {}),
   };
+
+  logSearchThread(threadId, "request", {
+    userId: req.user.id,
+    rawQuery,
+    normalizedQuery: query,
+    activeProfile: {
+      id: activeProfile.id,
+      name: activeProfile.profile_name,
+      roleFamily: activeProfile.role_family,
+      domain: activeProfile.domain,
+    },
+    outbound: scrapeParams,
+    storedSignalTerms: terms,
+  });
 
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
   const token = user?.apify_token;
@@ -4558,6 +4667,15 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   const THRESHOLD = 50;
   const hasEnough = (existingCount?.cnt || 0) >= THRESHOLD;
   const inFlightScrape = activeScrapes.get(scrapeKey);
+  logSearchThread(threadId, "db_first", {
+    query,
+    roleKey: scrapeRoleKey,
+    activeProfileId: activeProfile.id,
+    localCandidateCount: existingCount?.cnt || 0,
+    threshold: THRESHOLD,
+    hasEnough,
+    inFlight: !!(inFlightScrape && !inFlightScrape.done),
+  });
 
   if (hasEnough) {
     console.log(`[scrape] DB-first: ${existingCount.cnt} jobs for "${query}" — skipping scrape`);
@@ -4570,6 +4688,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       scrapedAt:Date.now(),
       query,
       fromCache:true,
+      searchThreadId: threadId,
     });
   }
 
@@ -4584,6 +4703,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       scraping:true,
       queued:true,
       deduped:true,
+      searchThreadId: threadId,
     });
   }
 
@@ -4597,9 +4717,10 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     scrapedAt:Date.now(),
     query,
     scraping:true,
+    searchThreadId: threadId,
   });
 
-  activeScrapes.set(scrapeKey, { startedAt: Date.now(), done: false });
+  activeScrapes.set(scrapeKey, { startedAt: Date.now(), done: false, threadId });
 
   // Background scrape — runs after response is flushed
   setImmediate(async () => {
@@ -4643,6 +4764,13 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
           `${scrapeResult.insertedCount} new job${scrapeResult.insertedCount > 1 ? "s" : ""} added for "${query}"`,
           { query, count: scrapeResult.insertedCount });
       }
+      logSearchThread(threadId, "background_complete", {
+        query,
+        rawCount: scrapeResult.rawCount,
+        filteredCount: scrapeResult.filteredCount,
+        insertedCount: scrapeResult.insertedCount,
+        durationMs: Date.now() - scrapeStart,
+      });
       console.log(`[scrape] Background scrape complete for "${query}"`);
     } catch(e) {
       const quotaExceeded = isExternalScrapeQuotaError(e);
@@ -4670,6 +4798,12 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
           message: "External scrape failed. Local jobs remain available.",
         });
       }
+      logSearchThread(threadId, "background_failed", {
+        query,
+        error: quotaExceeded ? "scrape_quota_exhausted" : "scrape_failed",
+        message: e.message,
+        durationMs: Date.now() - scrapeStart,
+      });
     } finally {
       const existing = activeScrapes.get(scrapeKey) || {};
       activeScrapes.set(scrapeKey, {
@@ -4819,9 +4953,7 @@ ${resumeBasis}`;
 // ── Pending jobs (resume generated but not yet applied or disliked) ──
 app.get("/api/jobs/pending", requireAuth, (req, res) => {
   const userId = req.user.id;
-  const activeProfile = db.prepare(
-    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
-  ).get(userId);
+  const activeProfile = getOrRepairActiveProfile(userId);
   if (!activeProfile) return res.json([]);
   const roleKey = roleKeyForProfile(activeProfile);
   const pendingProfileTitleFilter = profileTitleSql("sj.title", activeProfile);

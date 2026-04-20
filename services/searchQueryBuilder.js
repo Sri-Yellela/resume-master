@@ -100,6 +100,22 @@ export function buildApifyQueriesFromProfile(activeProfile) {
   try { titles.push(...JSON.parse(activeProfile.target_titles || "[]")); } catch {}
   if (!titles.length) return activeProfile.profile_name ? [activeProfile.profile_name] : [];
 
+  if (activeProfile.domain === "engineering_embedded_firmware") {
+    const firmwareCore = [
+      "Firmware Engineer",
+      "Embedded Software Engineer",
+      "Embedded Systems Engineer",
+      "Device Driver Engineer",
+      "BSP Engineer",
+      "Firmware Debug Engineer",
+      "Hardware Debug Engineer",
+      "Post-Silicon Validation Engineer",
+    ];
+    return [...new Set([...titles, ...firmwareCore])]
+      .filter(Boolean)
+      .slice(0, 6);
+  }
+
   const prefixes = SENIORITY_PREFIX[activeProfile.seniority] || [""];
   const variants = [];
   for (const title of titles) {
@@ -111,6 +127,27 @@ export function buildApifyQueriesFromProfile(activeProfile) {
     if (variants.length >= 10) break;
   }
   return variants.length > 0 ? variants : [activeProfile.profile_name];
+}
+
+export function buildProfileSearchTerms(activeProfile, storedSearchTerms = []) {
+  const titles = buildApifyQueriesFromProfile(activeProfile);
+  const map = getAliasMap();
+  const domain = activeProfile?.domain || null;
+  const titleLike = new Set(titles);
+  const titleSignals = /\b(engineer|developer|firmware|embedded|kernel|driver|bsp|rtos|debug|validation|bring[-\s]?up|systems?|platform|software)\b/i;
+  for (const term of storedSearchTerms || []) {
+    const clean = String(term || "").trim();
+    if (!clean) continue;
+    const entry = map[clean.toLowerCase()];
+    if (entry?.domain && domain && entry.domain !== domain) continue;
+    if (entry?.canonical) titleLike.add(entry.canonical);
+    for (const variant of entry?.searchVariants || []) titleLike.add(variant);
+    if (titleSignals.test(clean)) titleLike.add(clean);
+  }
+  if (domain === "engineering_embedded_firmware") {
+    return [...titleLike].filter(q => titleSignals.test(q)).slice(0, 6);
+  }
+  return [...titleLike].slice(0, 10);
 }
 
 // ── Profile-aware title relevance ─────────────────────────────
@@ -128,14 +165,17 @@ export function isTitleRelevantToProfile(title, targetTitles) {
     "enginere":"engineer","enigneer":"engineer","sofware":"software",
     "managr":"manager","analist":"analyst",
   };
-  return targetTitles.some(target => {
+  let sawMeaningfulTarget = false;
+  const matched = targetTitles.some(target => {
     const tokens = target.toLowerCase()
       .split(/[\s,/\-]+/)
       .filter(w => w.length > 2 && !stopWords.has(w))
       .map(w => TYPO_MAP[w] || w);
-    if (tokens.length === 0) return true;
+    if (tokens.length === 0) return false;
+    sawMeaningfulTarget = true;
     return tokens.every(tok => t.includes(tok));
   });
+  return sawMeaningfulTarget ? matched : true;
 }
 
 // TITLE RELEVANCE: ALL meaningful query tokens must appear in the job title (strict AND match).

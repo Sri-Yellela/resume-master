@@ -12,6 +12,8 @@ test("manual scrape builds outbound params from active profile plus stored user 
   assert.match(scrapeRoute, /buildApifyQueriesFromProfile\(activeProfile\)/);
   assert.match(scrapeRoute, /loadOrCreateSimpleApplyProfile\(db, req\.user\.id, activeProfileTitles\)/);
   assert.match(scrapeRoute, /simpleProfile\?\.searchTerms/);
+  assert.match(scrapeRoute, /buildProfileSearchTerms\(activeProfile, terms\)/);
+  assert.match(scrapeRoute, /maxItems: activeProfile\.domain === "engineering_embedded_firmware" \? 75 : undefined/);
   assert.match(scrapeRoute, /employmentTypes/);
   assert.match(scrapeRoute, /workplaceTypes/);
   assert.match(scrapeRoute, /postedLimit/);
@@ -28,9 +30,22 @@ test("active scrape tracking is profile-scoped and duplicate outbound work is de
 
 test("ATS scoring reuses stored signal basis through the queue", () => {
   assert.match(server, /const atsScoreQueue = \[\]/);
+  assert.match(server, /let anthropicAtsUnavailableUntil = 0/);
   assert.match(server, /function enqueueAtsScoreWork\(label, worker\)/);
   assert.match(server, /enqueueAtsScoreWork\(`scrape:\$\{userId\}:\$\{query\}`/);
   assert.match(server, /buildAtsResumeBasis\(baseResumeText, simpleProfile\)/);
+  assert.match(server, /isAnthropicCreditError/);
+  assert.match(server, /ats_unavailable_due_to_credits/);
   assert.match(server, /enqueueAtsScoreWork\(`adopt-enhanced:\$\{userId\}`/);
   assert.match(server, /buildAtsResumeBasis\(newContent, signalProfile\)/);
+});
+
+test("structured search thread logging includes outbound payload and filter summary", () => {
+  assert.match(server, /function searchThreadId\(\)/);
+  assert.match(server, /function logSearchThread\(threadId, event, details = \{\}\)/);
+  assert.match(server, /logSearchThread\(threadId, "request"/);
+  assert.match(server, /logSearchThread\(scrapeParams\.threadId, "apify_payload"/);
+  assert.match(server, /logSearchThread\(scrapeParams\.threadId, "scrape_filter_summary"/);
+  assert.match(server, /logSearchThread\(threadId, "db_first"/);
+  assert.match(server, /logSearchThread\(threadId, "background_complete"/);
 });
