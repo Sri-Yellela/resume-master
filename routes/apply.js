@@ -10,6 +10,7 @@ import fs   from "fs";
 import { fileURLToPath } from "url";
 import { autoApply, getApplyStatus, closeSemiBrowser } from "../services/applyAutomation.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
+import { getAutomationReadiness, getLinkedInStatus, getMissingApplyPrerequisites, requiresLinkedInSession } from "../services/integrationReadiness.js";
 
 const __dirname   = path.dirname(fileURLToPath(import.meta.url));
 const SESSION_DIR = path.join(__dirname, "..", "data", "sessions");
@@ -148,6 +149,9 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
     if (!job) return failRunJob(jobRow, "job_not_found", "Job is no longer available in the local pool.");
     const jobUrl = job.apply_url || job.url;
     if (!jobUrl) return holdRunJob(jobRow, "missing_apply_url", "No apply URL is available for this job.");
+    if (requiresLinkedInSession(jobUrl) && !getLinkedInStatus(db, run.user_id).healthy) {
+      return holdRunJob(jobRow, "linkedin_session_required", "Connect LinkedIn in Integrations before automating LinkedIn applications.", { integration: "linkedin" });
+    }
 
     db.prepare("UPDATE apply_run_jobs SET status='preparing', started_at=COALESCE(started_at, unixepoch()), attempt_count=attempt_count+1 WHERE id=?").run(jobRow.id);
     logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "preparing", message: "Preparing application." });
@@ -272,6 +276,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
     if (!jobIds.length) return res.status(400).json({ error: "jobIds required" });
     const mode = req.body?.mode === "manual" ? "manual" : "auto";
     const toolType = req.body?.tool === "a_plus_resume" ? "a_plus_resume" : "generate";
+    const readiness = getAutomationReadiness(db, req.user.id);
+    const missingPrereqs = getMissingApplyPrerequisites(readiness);
+    if (missingPrereqs.length) {
+      return res.status(409).json({
+        error: "Automation setup is incomplete. Open Integrations to finish setup.",
+        missingPrerequisites: missingPrereqs,
+        integrationsPath: "/app/integrations",
+        readiness,
+      });
+    }
 
     const duplicates = db.prepare(`
       SELECT arj.job_id
@@ -357,6 +371,24 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
   app.post("/api/apply", requireAuth, async (req, res) => {
     const { jobId, jobUrl, mode = "semi", resumeFile } = req.body;
     if (!jobUrl) return res.status(400).json({ error: "jobUrl required" });
+    const readiness = getAutomationReadiness(db, req.user.id);
+    const missingPrereqs = getMissingApplyPrerequisites(readiness);
+    if (missingPrereqs.length) {
+      return res.status(409).json({
+        error: "Automation setup is incomplete. Open Integrations to finish setup.",
+        missingPrerequisites: missingPrereqs,
+        integrationsPath: "/app/integrations",
+        readiness,
+      });
+    }
+    if (requiresLinkedInSession(jobUrl) && !readiness.linkedin.healthy) {
+      return res.status(409).json({
+        error: "Connect LinkedIn in Integrations before automating LinkedIn applications.",
+        missingPrerequisites: ["linkedin"],
+        integrationsPath: "/app/integrations",
+        readiness,
+      });
+    }
 
     // Build autofill payload from stored profile using shared server-side builder.
     // This gives full field coverage (40+ variants), phone/URL normalization,

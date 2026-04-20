@@ -474,13 +474,54 @@ File location: `C:\Users\sriye\resume-master\.env` (local) or Railway Variables 
 | `ADMIN_PASSWORD` | Yes | Admin password (min 8 chars) |
 | `SESSION_SECRET` | Yes | 64-char random string for session signing |
 | `PASSWORD_RESET_SECRET` | Recommended | Separate HMAC secret for password reset token and OTP hashes; falls back to `SESSION_SECRET` |
-| `APP_BASE_URL` | Recommended | Public app origin used in password reset links, for example `https://your-app.example` |
+| `APP_BASE_URL` | Recommended locally, required in production | Public app origin used for password reset links and OAuth callback construction, for example `https://your-app.example` |
 | `RESEND_API_KEY` | For email | Sends password reset email through Resend; without it, reset email contents are logged in dev |
 | `PASSWORD_RESET_FROM` | No | From address for reset emails when `RESEND_API_KEY` is configured |
+| `GOOGLE_OAUTH_CLIENT_ID` | For Google login | Google OAuth client ID |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | For Google login | Google OAuth client secret |
+| `GOOGLE_OAUTH_REDIRECT_URI` | For Google login | Optional explicit callback URL; defaults to `${APP_BASE_URL}/api/auth/oauth/google/callback` |
+| `LINKEDIN_OAUTH_CLIENT_ID` | For LinkedIn login | LinkedIn OAuth/OpenID Connect client ID |
+| `LINKEDIN_OAUTH_CLIENT_SECRET` | For LinkedIn login | LinkedIn OAuth/OpenID Connect client secret |
+| `LINKEDIN_OAUTH_REDIRECT_URI` | For LinkedIn login | Optional explicit callback URL; defaults to `${APP_BASE_URL}/api/auth/oauth/linkedin/callback` |
 | `PORT` | No | Default 3001 |
 | `NODE_ENV` | No | Set to `production` on Railway — enables secure cookies |
 
 **No quotes around values.** `ADMIN_USER=admin` not `ADMIN_USER="admin"`.
+
+### OAuth Provider Setup
+
+Google and LinkedIn login are optional per deployment. If a provider is missing credentials, the app stays up, logs the missing config at startup, disables that provider in the auth UI, and shows the missing fields in Integrations.
+
+Local development callbacks:
+
+| Provider | Redirect URI |
+|---|---|
+| Google | `http://localhost:3001/api/auth/oauth/google/callback` |
+| LinkedIn | `http://localhost:3001/api/auth/oauth/linkedin/callback` |
+
+Production callbacks use the deployed `APP_BASE_URL`:
+
+| Provider | Redirect URI |
+|---|---|
+| Google | `https://your-app.example/api/auth/oauth/google/callback` |
+| LinkedIn | `https://your-app.example/api/auth/oauth/linkedin/callback` |
+
+Google Cloud Console:
+
+1. Create or select a Google Cloud project.
+2. Configure the OAuth consent screen with app name, support email, and authorized domain for production.
+3. Create an OAuth Client ID for a Web application.
+4. Add the exact redirect URI from above under Authorized redirect URIs.
+5. Set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and either `APP_BASE_URL` or `GOOGLE_OAUTH_REDIRECT_URI`.
+
+LinkedIn Developer Portal:
+
+1. Create or select a LinkedIn app.
+2. Enable Sign In with LinkedIn using OpenID Connect.
+3. Add the exact redirect URI from above.
+4. Set `LINKEDIN_OAUTH_CLIENT_ID`, `LINKEDIN_OAUTH_CLIENT_SECRET`, and either `APP_BASE_URL` or `LINKEDIN_OAUTH_REDIRECT_URI`.
+
+Provider secrets must never be committed. The UI only shows connected status, account email/name metadata, and readiness warnings; it does not expose tokens or cookies.
 
 ---
 

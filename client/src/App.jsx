@@ -16,6 +16,7 @@ import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
 import { PlansPanel }            from "./panels/PlansPanel.jsx";
+import { IntegrationsPanel }     from "./panels/IntegrationsPanel.jsx";
 import { JobsConsole }            from "./consoles/PlanConsoles.jsx";
 import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
@@ -96,6 +97,7 @@ function AppDashboard({ authUser, setAuthUser }) {
   const appTabs = [
     { id:"console", label:"Jobs", icon:"JB" },
     { id:"database", label:"Database", icon:"DB" },
+    { id:"integrations", label:"Integrations", icon:"IN" },
   ];
 
   const handleLogout = useCallback(async () => {
@@ -110,7 +112,7 @@ function AppDashboard({ authUser, setAuthUser }) {
       navigate(consolePath);
       return;
     }
-    if (["database","plans","profile"].includes(tab)) {
+    if (["database","plans","profile","integrations"].includes(tab)) {
       navigate(`/app/${tab}`);
     }
   }, [activeTab, consolePath, navigate]);
@@ -133,7 +135,7 @@ function AppDashboard({ authUser, setAuthUser }) {
       navigate(consolePath, { replace:true });
       return;
     }
-    if (routeKey !== CONSOLE_ROUTE && !["database","plans","profile"].includes(routeKey)) {
+    if (routeKey !== CONSOLE_ROUTE && !["database","plans","profile","integrations"].includes(routeKey)) {
       navigate(consolePath, { replace:true });
     }
   }, [routeKey, consolePath, navigate]);
@@ -180,6 +182,7 @@ function AppDashboard({ authUser, setAuthUser }) {
                   isActive={activeTab === "console"}/>
               )}
               {renderRoute === "database" && <DatabasePanel user={authUser}/>}
+              {renderRoute === "integrations" && <IntegrationsPanel/>}
               {renderRoute === "plans"    && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
               {renderRoute === "profile"  && <ProfilePanel  user={authUser}/>}
             </div>
@@ -202,6 +205,14 @@ function AppRouter() {
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauthAuthContext = params.get("authContext");
+    if (oauthAuthContext) {
+      setAuthContext(oauthAuthContext);
+      params.delete("authContext");
+      const nextSearch = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+    }
     api("/api/auth/me")
       .then(d => { if (d.authenticated) setAuthUser(d.user); })
       .catch(() => {})

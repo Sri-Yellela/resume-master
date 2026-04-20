@@ -1472,7 +1472,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           pollIntervalRef.current = null;
           setScraping(false);
           setPollStatus("error");
-          setScrapeError("Could not fetch new jobs — check your Apify token");
+          setScrapeError("Could not fetch new jobs - check Apify in Integrations.");
         }
       }
     }, POLL_INTERVAL_MS);
@@ -1528,7 +1528,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setApplyQueueMsg(`${data.queued?.length || 0} job${data.queued?.length === 1 ? "" : "s"} started in ${mode === "manual" ? "manual review" : "auto apply"} mode.`);
       loadApplyRuns();
     } catch(e) {
-      setApplyQueueMsg(e.message || "Could not start apply run.");
+      const missing = e.payload?.missingPrerequisites;
+      setApplyQueueMsg(missing?.length
+        ? `Setup needed in Integrations: ${missing.join(", ")}.`
+        : (e.message || "Could not start apply run."));
     }
   }, [applyQueue, canUseAPlusResume, loadApplyRuns]);
 
@@ -1663,7 +1666,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         return;
       }
       if (result.missingToken) {
-        setScrapeError("No Apify token set. Add it via avatar > Apify Token.");
+        setScrapeError("No Apify token set. Open Integrations to add it.");
         return;
       }
       if (result.limitReached) {
@@ -1733,7 +1736,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         return;
       }
       if (result.missingToken) {
-        setScrapeError("No Apify token - add it in avatar > Apify Token.");
+        setScrapeError("No Apify token - open Integrations to add it.");
         return;
       }
       if (result.limitReached) {

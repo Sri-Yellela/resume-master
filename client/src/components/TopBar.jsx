@@ -261,9 +261,6 @@ function QuickActions({ theme, onTabChange }) {
 function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget, profiles, onActivateProfile, onDeleteProfile }) {
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
-  const [tokenInput,  setTokenInput]  = useState("");
-  const [tokenSaving, setTokenSaving] = useState(false);
-  const [tokenMsg,    setTokenMsg]    = useState("");
   const triggerRef = useRef(null);
   const { accentId, setAccentId, ACCENT_OPTIONS, bgMode, setBgMode, BG_MODES } = useTheme();
   const planTier = user?.planTier || "BASIC";
@@ -271,18 +268,6 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
   const toolLabel = planTier === "PRO" ? "Generate + A+ Resume"
     : planTier === "PLUS" ? "Generate"
     : "Baseline jobs console";
-
-  const saveToken = async () => {
-    if (!tokenInput.trim()) return;
-    setTokenSaving(true);
-    try {
-      await api("/api/settings/apify-token", { method: "PATCH", body: JSON.stringify({ token: tokenInput.trim() }) });
-      setTokenMsg("Saved");
-      setTokenInput("");
-    } catch(e) { setTokenMsg("Error: " + e.message); }
-    setTokenSaving(false);
-    setTimeout(() => setTokenMsg(""), 3000);
-  };
 
   const menuItemStyle = {
     padding: "10px 16px", cursor: "pointer", fontSize: 13,
@@ -425,6 +410,10 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
               style={{ ...menuItemStyle, marginTop:4, color:theme.accentText, fontWeight:700 }}>
               View Plans
             </button>
+            <button onClick={() => { setOpen(false); onTabChange?.("integrations"); }}
+              style={{ ...menuItemStyle, marginTop:2, color:theme.accentText, fontWeight:700 }}>
+              Integrations
+            </button>
           </div>
 
           {/* Resume widget */}
@@ -477,41 +466,6 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
               )}
             </div>
           )}
-
-          {/* Apify token */}
-          <div style={{ padding: "10px 16px 12px", borderBottom: `1px solid ${theme.border}` }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 4 }}>
-              Apify Token
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input
-                value={tokenInput} onChange={e => setTokenInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && saveToken()}
-                placeholder="apify_api_..." type="password"
-                style={{
-                  flex: 1, height: 32, padding: "0 10px",
-                  border: `1px solid ${tokenInput && !tokenInput.startsWith("apify_api_") ? "#dc2626" : theme.border}`,
-                  borderRadius: 4, background: theme.surface, color: theme.text,
-                  fontSize: 11, outline: "none",
-                }}/>
-              <button onClick={saveToken} disabled={tokenSaving}
-                style={{
-                  background: tokenSaving ? theme.border : theme.accent,
-                  color: "#0f0f0f", border: "none", borderRadius: 4,
-                  padding: "0 12px", cursor: "pointer", fontSize: 11,
-                  fontWeight: 700, flexShrink: 0,
-                }}>
-                {tokenSaving ? "..." : "Save"}
-              </button>
-            </div>
-            {tokenMsg && (
-              <div style={{ fontSize: 10, marginTop: 4,
-                             color: tokenMsg === "Saved" ? "#16a34a" : "#dc2626" }}>
-                {tokenMsg}
-              </div>
-            )}
-          </div>
 
           {/* Sign out */}
           <button

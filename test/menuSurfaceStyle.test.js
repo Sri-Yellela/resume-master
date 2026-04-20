@@ -38,7 +38,7 @@ test("top-right account controls are consolidated into avatar menu", () => {
   assert.match(profileSelector, /\+ Add Profile/);
   assert.match(topBar, /Accent Color/);
   assert.match(topBar, /Background/);
-  assert.match(topBar, /Apify Token/);
+  assert.match(topBar, /Integrations/);
   assert.match(topBar, /onTabChange\?\.\("profile"\)/);
   assert.doesNotMatch(topBar, /function SettingsGear|<SettingsGear|function ProfileSwitcher|<ProfileSwitcher/);
   assert.doesNotMatch(scrollDock, /<ProfileSwitcher|<DockSettingsPanel/);

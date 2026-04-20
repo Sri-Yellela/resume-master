@@ -127,6 +127,7 @@ function AuthModal({ onLogin }) {
   const [step2,   setStep2]   = useState({ first_name:"", middle_name:"", last_name:"", name_suffix:"", email:"", phone:"" });
   const [reset,   setReset]   = useState({ email:"", otp:"", password:"", confirmPassword:"", token:"" });
   const [resetSent, setResetSent] = useState(false);
+  const [oauthStatus, setOauthStatus] = useState(null);
   const [error,   setError]   = useState("");
   const [notice,  setNotice]  = useState("");
   const [loading, setLoading] = useState(false);
@@ -137,11 +138,23 @@ function AuthModal({ onLogin }) {
   const setR  = (k,v) => setReset(f => ({ ...f, [k]:v }));
 
   useEffect(() => {
-    const token = new URLSearchParams(window.location.search).get("resetToken");
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("resetToken");
+    const oauthError = params.get("oauthError");
+    const oauthStatus = params.get("oauthStatus");
+    const oauthProvider = params.get("oauthProvider");
+    if (oauthError) setError(oauthError);
+    if (oauthStatus) setNotice(`${oauthProvider === "linkedin" ? "LinkedIn" : "Google"} ${oauthStatus.replace(/_/g, " ")}.`);
     if (!token) return;
     setReset(f => ({ ...f, token }));
     setTab("forgot");
     setResetSent(true);
+  }, []);
+
+  useEffect(() => {
+    api("/api/auth/oauth/status")
+      .then(d => setOauthStatus(d.providers || {}))
+      .catch(() => setOauthStatus({}));
   }, []);
 
   // Warn before tab close while on step 2 (data would be lost)
@@ -160,6 +173,29 @@ function AuthModal({ onLogin }) {
       else setError(d.error || "Login failed");
     } catch(err) { setError(err.message); }
     setLoading(false);
+  };
+
+  const startProviderOAuth = provider => {
+    setError(""); setNotice("");
+    const readiness = oauthStatus?.[provider];
+    if (readiness && !readiness.configured) {
+      setError(`${provider === "linkedin" ? "LinkedIn" : "Google"} sign-in is not configured for this deployment yet.`);
+      return;
+    }
+    window.location.href = `/api/auth/oauth/${provider}/start?mode=login&returnTo=${encodeURIComponent("/app")}`;
+  };
+
+  const providerButton = (provider) => {
+    const label = provider === "linkedin" ? "LinkedIn" : "Google";
+    const readiness = oauthStatus?.[provider];
+    const configured = readiness?.configured !== false;
+    return (
+      <button type="button" onClick={() => startProviderOAuth(provider)} disabled={!configured}
+        title={!configured ? `${label} OAuth is not configured by the app operator.` : `Continue with ${label}`}
+        style={{ ...providerButtonStyle, opacity:configured ? 1 : 0.55, cursor:configured ? "pointer" : "not-allowed" }}>
+        Continue with {label}
+      </button>
+    );
   };
 
   const handleStep1 = e => {
@@ -238,6 +274,11 @@ function AuthModal({ onLogin }) {
     transition:"border-color 0.15s",
   };
   const halfInput = { ...inputStyle, flex:1 };
+  const providerButtonStyle = {
+    width:"100%", height:40, borderRadius:999, border:`1px solid ${theme.border}`,
+    background:theme.surface, color:theme.text, fontWeight:800, cursor:"pointer",
+    fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+  };
 
   return (
     <motion.div initial={{ opacity:0, scale:0.95 }} animate={{ opacity:1, scale:1 }}
@@ -283,6 +324,11 @@ function AuthModal({ onLogin }) {
                      fontSize:12, fontWeight:700, cursor:"pointer", padding:4 }}>
             Forgot password?
           </button>
+          <div style={{ display:"flex", alignItems:"center", gap:8, color:theme.textDim, fontSize:11 }}>
+            <span style={{ flex:1, height:1, background:theme.border }}/><span>or</span><span style={{ flex:1, height:1, background:theme.border }}/>
+          </div>
+          {providerButton("google")}
+          {providerButton("linkedin")}
         </form>
 
       ) : tab === "forgot" ? (
@@ -368,6 +414,11 @@ function AuthModal({ onLogin }) {
                      fontSize:14, cursor:"pointer", marginTop:4 }}>
             Continue →
           </button>
+          <div style={{ display:"flex", alignItems:"center", gap:8, color:theme.textDim, fontSize:11 }}>
+            <span style={{ flex:1, height:1, background:theme.border }}/><span>or</span><span style={{ flex:1, height:1, background:theme.border }}/>
+          </div>
+          {providerButton("google")}
+          {providerButton("linkedin")}
         </form>
 
       ) : (

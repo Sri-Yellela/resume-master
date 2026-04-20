@@ -40,6 +40,11 @@ import {
   loadOrCreateSimpleApplyProfile,
   upsertSimpleApplyProfile,
 } from "./services/simpleApplyProfile.js";
+import {
+  INTEGRATION_PROVIDERS,
+  getAutomationReadiness,
+  publicIntegrationRow,
+} from "./services/integrationReadiness.js";
 
 // ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
@@ -51,6 +56,27 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
 const PASSWORD_RESET_SECRET = process.env.PASSWORD_RESET_SECRET || SESSION_SECRET;
 const ADMIN_USER     = process.env.ADMIN_USER     || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
+const OAUTH_PROVIDER_CONFIG = {
+  google: {
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+    redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI || "",
+    authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    userInfoUrl: "https://openidconnect.googleapis.com/v1/userinfo",
+    scopes: ["openid", "email", "profile"],
+  },
+  linkedin: {
+    clientId: process.env.LINKEDIN_OAUTH_CLIENT_ID || "",
+    clientSecret: process.env.LINKEDIN_OAUTH_CLIENT_SECRET || "",
+    redirectUri: process.env.LINKEDIN_OAUTH_REDIRECT_URI || "",
+    authUrl: "https://www.linkedin.com/oauth/v2/authorization",
+    tokenUrl: "https://www.linkedin.com/oauth/v2/accessToken",
+    userInfoUrl: "https://api.linkedin.com/v2/userinfo",
+    scopes: ["openid", "profile", "email"],
+  },
+};
+const OAUTH_PROVIDERS = ["google", "linkedin"];
 const CACHE_TTL_MS        = 12 * 60 * 60 * 1000;
 const MAX_JOBS_PER_REFRESH= 50;
 // 64-char hex → 32-byte AES-256 key.  Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -1526,6 +1552,44 @@ db.pragma("busy_timeout = 5000");
         CREATE INDEX IF NOT EXISTS idx_apply_logs_run ON apply_job_logs(run_id, run_job_id, created_at);
       `,
     },
+    {
+      id: "043_user_integrations",
+      sql: `
+        CREATE TABLE IF NOT EXISTS user_integrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL,
+          account_email TEXT,
+          status TEXT NOT NULL DEFAULT 'connected',
+          scopes_json TEXT NOT NULL DEFAULT '[]',
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          secret_enc TEXT,
+          iv TEXT,
+          auth_tag TEXT,
+          expires_at INTEGER,
+          last_checked_at INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(user_id, provider)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_integrations_user_provider
+          ON user_integrations(user_id, provider, status);
+      `,
+    },
+    {
+      id: "044_auth_provider_links",
+      sql: `
+        ALTER TABLE users ADD COLUMN google_auth_id TEXT;
+        ALTER TABLE users ADD COLUMN linkedin_auth_id TEXT;
+        ALTER TABLE user_integrations ADD COLUMN provider_user_id TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_auth_id
+          ON users(google_auth_id) WHERE google_auth_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_linkedin_auth_id
+          ON users(linkedin_auth_id) WHERE linkedin_auth_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_user_integrations_provider_identity
+          ON user_integrations(provider, provider_user_id);
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -2613,6 +2677,8 @@ function bindAuthContext(req, _res, next) {
 function requireAuth(req, res, next)  { if (req.isAuthenticated()) return next(); res.status(401).json({ error:"Unauthorized." }); }
 function requireAdmin(req, res, next) { if (req.isAuthenticated()&&req.user.isAdmin) return next(); res.status(403).json({ error:"Forbidden." }); }
 
+logOAuthReadiness();
+
 function publicUser(user) {
   const planTier = normalisePlanTier(user.planTier || user.plan_tier);
   const allowedModes = allowedModesForTier(planTier);
@@ -2632,6 +2698,318 @@ function publicUser(user) {
     },
     domainProfileComplete:!!(user.domainProfileComplete ?? user.domain_profile_complete),
   };
+}
+
+function makeUniqueUsername(base) {
+  const stem = String(base || "user").toLowerCase()
+    .replace(/@.*/, "")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 28) || "user";
+  let candidate = stem;
+  let n = 1;
+  while (db.prepare("SELECT 1 FROM users WHERE username=?").get(candidate)) {
+    candidate = `${stem}-${++n}`;
+  }
+  return candidate;
+}
+
+function findUserByAuthProvider(provider, providerUserId, email, { allowEmailMatch = true } = {}) {
+  const providerColumn = provider === "linkedin" ? "linkedin_auth_id" : "google_auth_id";
+  if (providerUserId) {
+    const byProvider = db.prepare(`SELECT * FROM users WHERE ${providerColumn}=?`).get(providerUserId);
+    if (byProvider) return byProvider;
+    const byIntegration = db.prepare(`
+      SELECT u.*
+      FROM user_integrations ui
+      JOIN users u ON u.id = ui.user_id
+      WHERE ui.provider=? AND ui.provider_user_id=?
+      LIMIT 1
+    `).get(provider, providerUserId);
+    if (byIntegration) return byIntegration;
+  }
+  if (email && allowEmailMatch) {
+    return db.prepare(`
+      SELECT u.*
+      FROM user_profile up
+      JOIN users u ON u.id = up.user_id
+      WHERE LOWER(up.email)=LOWER(?)
+      LIMIT 1
+    `).get(email);
+  }
+  return null;
+}
+
+function upsertAuthIntegration(userId, provider, { providerUserId, email, displayName, sessionState, scopes = [], expiresAt = null, metadata = {} }) {
+  const encrypted = saveIntegrationSecret(sessionState || null);
+  const mergedMetadata = { authLinked: true, displayName: displayName || null, ...metadata };
+  db.prepare(`
+    INSERT INTO user_integrations
+      (user_id, provider, provider_user_id, account_email, status, scopes_json, metadata_json,
+       secret_enc, iv, auth_tag, expires_at, last_checked_at, updated_at)
+    VALUES (?, ?, ?, ?, 'connected', ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())
+    ON CONFLICT(user_id, provider) DO UPDATE SET
+      provider_user_id=COALESCE(excluded.provider_user_id, user_integrations.provider_user_id),
+      account_email=COALESCE(excluded.account_email, user_integrations.account_email),
+      status='connected',
+      scopes_json=excluded.scopes_json,
+      metadata_json=excluded.metadata_json,
+      secret_enc=COALESCE(excluded.secret_enc, user_integrations.secret_enc),
+      iv=COALESCE(excluded.iv, user_integrations.iv),
+      auth_tag=COALESCE(excluded.auth_tag, user_integrations.auth_tag),
+      expires_at=COALESCE(excluded.expires_at, user_integrations.expires_at),
+      last_checked_at=excluded.last_checked_at,
+      updated_at=excluded.updated_at
+  `).run(
+    userId, provider, providerUserId || null, email || null,
+    JSON.stringify(scopes), JSON.stringify(mergedMetadata),
+    encrypted.enc, encrypted.iv, encrypted.tag, expiresAt,
+  );
+}
+
+function providerColumnFor(provider) {
+  return provider === "linkedin" ? "linkedin_auth_id" : "google_auth_id";
+}
+
+function profileParts(displayName) {
+  const parts = String(displayName || "").split(/\s+/).filter(Boolean);
+  return {
+    first: parts[0] || null,
+    last: parts.length > 1 ? parts[parts.length - 1] : null,
+  };
+}
+
+function completeProviderAuth(provider, identity, { linkUserId = null, tokenSet = null } = {}) {
+  const providerColumn = providerColumnFor(provider);
+  const providerUserId = String(identity.providerUserId || "").trim();
+  const email = String(identity.email || "").trim().toLowerCase() || null;
+  const displayName = String(identity.displayName || email || provider).trim();
+  const emailForMatch = identity.emailVerified === false ? null : email;
+  if (!providerUserId) throw new Error("OAuth provider did not return a stable user id.");
+
+  let user = null;
+  let created = false;
+  let linked = false;
+
+  if (linkUserId) {
+    const existing = findUserByAuthProvider(provider, providerUserId, null, { allowEmailMatch: false });
+    if (existing && existing.id !== linkUserId) {
+      const err = new Error(`${provider} is already linked to another account.`);
+      err.status = 409;
+      throw err;
+    }
+    user = db.prepare("SELECT * FROM users WHERE id=?").get(linkUserId);
+    if (!user) {
+      const err = new Error("Authenticated account no longer exists.");
+      err.status = 401;
+      throw err;
+    }
+    db.prepare(`UPDATE users SET ${providerColumn}=? WHERE id=?`).run(providerUserId, user.id);
+    user = db.prepare("SELECT * FROM users WHERE id=?").get(user.id);
+    linked = true;
+  } else {
+    user = findUserByAuthProvider(provider, providerUserId, emailForMatch, { allowEmailMatch: !!emailForMatch });
+    if (!user) {
+      const username = makeUniqueUsername(email || displayName || provider);
+      const password = hashPassword(crypto.randomBytes(24).toString("base64url"));
+      db.prepare(`INSERT INTO users (username,password_hash,is_admin,apply_mode,plan_tier,${providerColumn}) VALUES (?,?,0,'SIMPLE','BASIC',?)`)
+        .run(username, password, providerUserId);
+      user = db.prepare("SELECT * FROM users WHERE username=?").get(username);
+      const { first, last } = profileParts(displayName);
+      db.prepare(`
+        INSERT OR IGNORE INTO user_profile (user_id, full_name, first_name, last_name, email)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(user.id, displayName || null, first, last, email);
+      created = true;
+    } else if (user[providerColumn] !== providerUserId) {
+      db.prepare(`UPDATE users SET ${providerColumn}=? WHERE id=?`).run(providerUserId, user.id);
+      user = db.prepare("SELECT * FROM users WHERE id=?").get(user.id);
+      linked = true;
+    }
+  }
+
+  if (email) {
+    db.prepare("INSERT OR IGNORE INTO user_profile (user_id, email) VALUES (?, ?)").run(user.id, email);
+    db.prepare("UPDATE user_profile SET email=COALESCE(email, ?) WHERE user_id=?").run(email, user.id);
+  }
+
+  const obtainedAt = Math.floor(Date.now() / 1000);
+  const expiresAt = tokenSet?.expires_in ? obtainedAt + Number(tokenSet.expires_in) : null;
+  upsertAuthIntegration(user.id, provider, {
+    providerUserId,
+    email,
+    displayName,
+    sessionState: tokenSet ? {
+      provider,
+      tokenType: tokenSet.token_type || "Bearer",
+      accessToken: tokenSet.access_token || null,
+      refreshToken: tokenSet.refresh_token || null,
+      idToken: tokenSet.id_token || null,
+      scope: tokenSet.scope || null,
+      obtainedAt,
+    } : null,
+    scopes: provider === "google" ? ["openid", "email", "profile", "google_login_session"] : ["openid", "profile", "email", "linkedin_login_session"],
+    expiresAt,
+    metadata: {
+      oauth: true,
+      emailVerified: identity.emailVerified ?? null,
+      picture: identity.picture || null,
+    },
+  });
+
+  return { user, created, linked };
+}
+
+function authUserFromDbRow(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    isAdmin: !!row.is_admin,
+    applyMode: row.apply_mode,
+    planTier: normalisePlanTier(row.plan_tier),
+    domainProfileComplete: !!row.domain_profile_complete,
+  };
+}
+
+function appBaseUrl(req) {
+  return (process.env.APP_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+}
+
+function isHttpsOrLocalUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function oauthRedirectUri(req, provider) {
+  const cfg = OAUTH_PROVIDER_CONFIG[provider];
+  return cfg?.redirectUri || `${appBaseUrl(req)}/api/auth/oauth/${provider}/callback`;
+}
+
+function oauthProviderReadiness(provider, req = null) {
+  const cfg = OAUTH_PROVIDER_CONFIG[provider];
+  if (!cfg) return { provider, configured: false, status: "unsupported", missing: ["provider"], warnings: [] };
+  const missing = [];
+  const warnings = [];
+  if (!cfg.clientId) missing.push("client_id");
+  if (!cfg.clientSecret) missing.push("client_secret");
+  if (!process.env.APP_BASE_URL && process.env.NODE_ENV === "production") warnings.push("app_base_url_missing");
+  const base = req ? appBaseUrl(req) : (process.env.APP_BASE_URL || "");
+  const redirectUri = req || cfg.redirectUri ? oauthRedirectUri(req, provider) : "";
+  if (!redirectUri) missing.push("redirect_uri_or_app_base_url");
+  if (redirectUri && !isHttpsOrLocalUrl(redirectUri)) warnings.push("redirect_uri_not_https_or_localhost");
+  if (base && !isHttpsOrLocalUrl(base)) warnings.push("app_base_url_not_https_or_localhost");
+  if (!cfg.scopes?.includes("openid") || !cfg.scopes?.includes("email")) warnings.push("openid_email_scopes_missing");
+  const configured = missing.length === 0;
+  return {
+    provider,
+    configured,
+    healthy: configured && warnings.length === 0,
+    status: configured ? (warnings.length ? "configured_with_warnings" : "configured") : (missing.length === 3 ? "missing" : "partial"),
+    missing,
+    warnings,
+    redirectUri: redirectUri || null,
+    requiredEnv: provider === "google"
+      ? ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REDIRECT_URI or APP_BASE_URL"]
+      : ["LINKEDIN_OAUTH_CLIENT_ID", "LINKEDIN_OAUTH_CLIENT_SECRET", "LINKEDIN_OAUTH_REDIRECT_URI or APP_BASE_URL"],
+  };
+}
+
+function oauthReadiness(req = null) {
+  return Object.fromEntries(OAUTH_PROVIDERS.map(provider => [provider, oauthProviderReadiness(provider, req)]));
+}
+
+function logOAuthReadiness() {
+  for (const provider of OAUTH_PROVIDERS) {
+    const status = oauthProviderReadiness(provider);
+    if (status.configured) {
+      console.log(`[oauth:${provider}] ${status.status}${status.warnings.length ? ` (${status.warnings.join(", ")})` : ""}`);
+    } else {
+      console.warn(`[oauth:${provider}] ${status.status}; missing ${status.missing.join(", ")}`);
+    }
+  }
+}
+
+function oauthReturnUrl(req, returnTo, params = {}) {
+  const fallback = req.user ? "/app/integrations" : "/app";
+  const rawPath = String(returnTo || fallback);
+  let safePath = fallback;
+  try {
+    const parsed = new URL(rawPath, appBaseUrl(req));
+    const sameOrigin = parsed.origin === new URL(appBaseUrl(req)).origin;
+    if (sameOrigin && rawPath.startsWith("/") && !rawPath.startsWith("//")) {
+      safePath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {}
+  const url = new URL(safePath, appBaseUrl(req));
+  for (const [key, value] of Object.entries(params)) {
+    if (value != null && value !== "") url.searchParams.set(key, String(value));
+  }
+  return url.toString();
+}
+
+function oauthConfigFor(provider, req) {
+  const cfg = OAUTH_PROVIDER_CONFIG[provider];
+  const readiness = oauthProviderReadiness(provider, req);
+  if (!readiness.configured) {
+    const err = new Error(`${provider} OAuth is not configured (${readiness.missing.join(", ")} missing).`);
+    err.status = 503;
+    err.oauthReadiness = readiness;
+    throw err;
+  }
+  return { ...cfg, redirectUri: oauthRedirectUri(req, provider) };
+}
+
+function normalizeOAuthIdentity(provider, claims) {
+  const email = String(claims.email || claims.emailAddress || "").trim().toLowerCase() || null;
+  const displayName = String(claims.name || [claims.given_name, claims.family_name].filter(Boolean).join(" ") || email || provider).trim();
+  return {
+    providerUserId: String(claims.sub || claims.id || "").trim(),
+    email,
+    emailVerified: claims.email_verified === undefined ? undefined : !!claims.email_verified,
+    displayName,
+    picture: claims.picture || null,
+  };
+}
+
+async function exchangeOAuthCode(provider, code, req) {
+  const cfg = oauthConfigFor(provider, req);
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: cfg.redirectUri,
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
+  });
+  const tokenResponse = await fetch(cfg.tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+    body,
+  });
+  const tokenSet = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok || !tokenSet.access_token) {
+    const err = new Error(tokenSet.error_description || tokenSet.error || `${provider} token exchange failed.`);
+    err.status = 502;
+    throw err;
+  }
+  return tokenSet;
+}
+
+async function fetchOAuthUserInfo(provider, tokenSet, req) {
+  const cfg = oauthConfigFor(provider, req);
+  const infoResponse = await fetch(cfg.userInfoUrl, {
+    headers: { Authorization: `Bearer ${tokenSet.access_token}`, Accept: "application/json" },
+  });
+  const claims = await infoResponse.json().catch(() => ({}));
+  if (!infoResponse.ok) {
+    const err = new Error(claims.error_description || claims.message || `${provider} userinfo lookup failed.`);
+    err.status = 502;
+    throw err;
+  }
+  return normalizeOAuthIdentity(provider, claims);
 }
 
 function requireModeEntitlement(req, res, mode = req.user?.applyMode) {
@@ -2961,6 +3339,151 @@ app.post("/api/auth/register", (req, res) => {
     });
   } catch(e) {
     res.status(400).json({ error:e.message.includes("UNIQUE")?"Username already taken.":e.message });
+  }
+});
+
+app.get("/api/auth/oauth/status", (req, res) => {
+  res.json({ providers: oauthReadiness(req) });
+});
+
+app.get("/api/auth/oauth/:provider/start", (req, res) => {
+  const provider = String(req.params.provider || "").toLowerCase();
+  if (!["google", "linkedin"].includes(provider)) return res.status(400).json({ error: "Unsupported auth provider" });
+  const mode = req.query?.mode === "link" ? "link" : "login";
+  const returnTo = String(req.query?.returnTo || (mode === "link" ? "/app/integrations" : "/app"));
+  if (mode === "link" && !req.isAuthenticated()) {
+    return res.redirect(oauthReturnUrl(req, "/login", {
+      oauthError: "Sign in before linking an OAuth provider.",
+      oauthProvider: provider,
+    }));
+  }
+  try {
+    const cfg = oauthConfigFor(provider, req);
+    const state = crypto.randomBytes(32).toString("base64url");
+    req.session.oauthStates = req.session.oauthStates || {};
+    for (const [key, entry] of Object.entries(req.session.oauthStates)) {
+      if (Date.now() - Number(entry?.createdAt || 0) > 10 * 60 * 1000) delete req.session.oauthStates[key];
+    }
+    req.session.oauthStates[state] = {
+      provider,
+      mode,
+      returnTo,
+      linkUserId: mode === "link" && req.isAuthenticated() ? req.user.id : null,
+      createdAt: Date.now(),
+    };
+    const authUrl = new URL(cfg.authUrl);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("client_id", cfg.clientId);
+    authUrl.searchParams.set("redirect_uri", cfg.redirectUri);
+    authUrl.searchParams.set("scope", cfg.scopes.join(" "));
+    authUrl.searchParams.set("state", state);
+    if (provider === "google") {
+      authUrl.searchParams.set("access_type", "offline");
+      authUrl.searchParams.set("prompt", mode === "link" ? "consent" : "select_account");
+    }
+    res.redirect(authUrl.toString());
+  } catch(e) {
+    console.warn(`[oauth:${provider}] start blocked:`, e.message);
+    const target = oauthReturnUrl(req, mode === "link" ? returnTo : "/login", { oauthError: e.message, oauthProvider: provider });
+    res.redirect(target);
+  }
+});
+
+app.get("/api/auth/oauth/:provider/callback", async (req, res, next) => {
+  const provider = String(req.params.provider || "").toLowerCase();
+  const state = String(req.query?.state || "");
+  const code = String(req.query?.code || "");
+  const stored = req.session.oauthStates?.[state];
+  const fail = (message, returnTo = stored?.mode === "link" ? stored.returnTo : "/login") =>
+    res.redirect(oauthReturnUrl(req, returnTo, { oauthError: message, oauthProvider: provider }));
+
+  if (!["google", "linkedin"].includes(provider)) return fail("Unsupported auth provider.");
+  if (req.query?.error) {
+    console.warn(`[oauth:${provider}] provider returned error:`, String(req.query.error));
+    return fail(String(req.query.error_description || req.query.error));
+  }
+  if (!state || !stored || stored.provider !== provider) {
+    console.warn(`[oauth:${provider}] callback rejected: invalid state`);
+    return fail("OAuth session expired. Try again.");
+  }
+  if (Date.now() - Number(stored.createdAt || 0) > 10 * 60 * 1000) {
+    delete req.session.oauthStates[state];
+    console.warn(`[oauth:${provider}] callback rejected: expired state`);
+    return fail("OAuth session expired. Try again.");
+  }
+  if (!code) {
+    console.warn(`[oauth:${provider}] callback rejected: missing authorization code`);
+    return fail("OAuth callback did not include an authorization code.");
+  }
+
+  try {
+    delete req.session.oauthStates[state];
+    const tokenSet = await exchangeOAuthCode(provider, code, req);
+    const identity = await fetchOAuthUserInfo(provider, tokenSet, req);
+    const { user, created, linked } = completeProviderAuth(provider, identity, {
+      linkUserId: stored.linkUserId || null,
+      tokenSet,
+    });
+    const sessionUser = authUserFromDbRow(user);
+    req.logIn(sessionUser, e => {
+      if (e) return next(e);
+      const authContext = issueAuthContext(user.id, req);
+      res.redirect(oauthReturnUrl(req, stored.returnTo, {
+        authContext,
+        oauthProvider: provider,
+        oauthStatus: stored.linkUserId ? "linked" : created ? "created" : linked ? "linked" : "signed_in",
+      }));
+    });
+  } catch(e) {
+    const status = e.status || 500;
+    if (status >= 500) console.error(`[oauth:${provider}] callback failed:`, e.message);
+    return fail(e.message || "OAuth sign-in failed.");
+  }
+});
+
+app.post("/api/auth/provider/:provider", (req, res, next) => {
+  const provider = String(req.params.provider || "").toLowerCase();
+  if (!["google", "linkedin"].includes(provider)) return res.status(400).json({ error: "Unsupported auth provider" });
+  const email = String(req.body?.email || req.body?.accountEmail || "").trim().toLowerCase() || null;
+  const providerUserId = String(req.body?.providerUserId || req.body?.id || "").trim() || (email ? `${provider}:${email}` : null);
+  const displayName = String(req.body?.displayName || req.body?.name || "").trim() || email || provider;
+  if (!providerUserId && !email) return res.status(400).json({ error: "Provider identity or email required" });
+
+  try {
+    const { user, created, linked } = completeProviderAuth(provider, {
+      providerUserId,
+      email,
+      displayName,
+      emailVerified: true,
+    }, {
+      linkUserId: req.isAuthenticated() ? req.user.id : null,
+      tokenSet: null,
+    });
+    if (req.body?.sessionState || req.body?.cookies) {
+      upsertAuthIntegration(user.id, provider, {
+        providerUserId,
+        email,
+        displayName,
+        sessionState: req.body.sessionState || req.body.cookies,
+        scopes: provider === "google" ? ["google_login_session"] : ["linkedin_login_session"],
+      });
+    }
+
+    const sessionUser = authUserFromDbRow(user);
+    req.logIn(sessionUser, e => {
+      if (e) return next(e);
+      res.json({
+        ok: true,
+        created,
+        linked,
+        provider,
+        user: publicUser(sessionUser),
+        authContext: issueAuthContext(user.id, req),
+        readiness: getAutomationReadiness(db, user.id),
+      });
+    });
+  } catch(e) {
+    next(e);
   }
 });
 
@@ -3327,6 +3850,73 @@ app.get("/api/settings", requireAuth, (req, res) => {
     },
     hasApifyToken:!!u?.apify_token,
   });
+});
+
+function saveIntegrationSecret(value) {
+  const text = typeof value === "string" ? value : JSON.stringify(value || {});
+  if (!text || text === "{}") return { enc: null, iv: null, tag: null };
+  return encryptCookies(text);
+}
+
+app.get("/api/integrations/status", requireAuth, (req, res) => {
+  res.json({ ...getAutomationReadiness(db, req.user.id), oauth: oauthReadiness(req) });
+});
+
+app.patch("/api/integrations/apify-token", requireAuth, (req, res) => {
+  const token = (req.body.token || "").trim() || null;
+  db.prepare("UPDATE users SET apify_token=? WHERE id=?").run(token, req.user.id);
+  res.json({ ok: true, apify: getAutomationReadiness(db, req.user.id).apify, oauth: oauthReadiness(req) });
+});
+
+app.delete("/api/integrations/apify-token", requireAuth, (req, res) => {
+  db.prepare("UPDATE users SET apify_token=NULL WHERE id=?").run(req.user.id);
+  res.json({ ok: true, apify: getAutomationReadiness(db, req.user.id).apify, oauth: oauthReadiness(req) });
+});
+
+app.post("/api/integrations/:provider", requireAuth, (req, res) => {
+  const provider = String(req.params.provider || "").toLowerCase();
+  if (!INTEGRATION_PROVIDERS.has(provider)) return res.status(400).json({ error: "Unsupported integration provider" });
+  const accountEmail = String(req.body?.accountEmail || req.body?.email || "").trim() || null;
+  const scopes = Array.isArray(req.body?.scopes) ? req.body.scopes.map(s => String(s || "").trim()).filter(Boolean) : [];
+  const metadata = req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {};
+  const providerUserId = String(req.body?.providerUserId || "").trim() || null;
+  const status = ["connected", "missing_permissions", "expired"].includes(req.body?.status) ? req.body.status : "connected";
+  const expiresAt = Number.isFinite(Number(req.body?.expiresAt)) ? Number(req.body.expiresAt) : null;
+  const secret = req.body?.sessionState || req.body?.cookies || req.body?.token || null;
+  const encrypted = saveIntegrationSecret(secret);
+  db.prepare(`
+    INSERT INTO user_integrations
+      (user_id, provider, account_email, status, scopes_json, metadata_json,
+       provider_user_id, secret_enc, iv, auth_tag, expires_at, last_checked_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())
+    ON CONFLICT(user_id, provider) DO UPDATE SET
+      account_email=excluded.account_email,
+      status=excluded.status,
+      scopes_json=excluded.scopes_json,
+      metadata_json=excluded.metadata_json,
+      provider_user_id=COALESCE(excluded.provider_user_id, user_integrations.provider_user_id),
+      secret_enc=COALESCE(excluded.secret_enc, user_integrations.secret_enc),
+      iv=COALESCE(excluded.iv, user_integrations.iv),
+      auth_tag=COALESCE(excluded.auth_tag, user_integrations.auth_tag),
+      expires_at=excluded.expires_at,
+      last_checked_at=excluded.last_checked_at,
+      updated_at=excluded.updated_at
+  `).run(
+    req.user.id, provider, accountEmail, status, JSON.stringify(scopes), JSON.stringify(metadata),
+    providerUserId, encrypted.enc, encrypted.iv, encrypted.tag, expiresAt,
+  );
+  const row = db.prepare("SELECT * FROM user_integrations WHERE user_id=? AND provider=?").get(req.user.id, provider);
+  res.json({ ok: true, provider, integration: publicIntegrationRow(row), readiness: { ...getAutomationReadiness(db, req.user.id), oauth: oauthReadiness(req) } });
+});
+
+app.delete("/api/integrations/:provider", requireAuth, (req, res) => {
+  const provider = String(req.params.provider || "").toLowerCase();
+  if (!INTEGRATION_PROVIDERS.has(provider)) return res.status(400).json({ error: "Unsupported integration provider" });
+  db.prepare("DELETE FROM user_integrations WHERE user_id=? AND provider=?").run(req.user.id, provider);
+  if (provider === "google" || provider === "linkedin") {
+    db.prepare(`UPDATE users SET ${providerColumnFor(provider)}=NULL WHERE id=?`).run(req.user.id);
+  }
+  res.json({ ok: true, provider, readiness: { ...getAutomationReadiness(db, req.user.id), oauth: oauthReadiness(req) } });
 });
 
 app.get("/api/plans", requireAuth, (req, res) => {
@@ -5124,7 +5714,7 @@ app.post("/api/linkedin/cookies", requireAuth, (req, res) => {
       ON CONFLICT(user_id) DO UPDATE SET cookies_enc=excluded.cookies_enc, iv=excluded.iv,
         auth_tag=excluded.auth_tag, updated_at=excluded.updated_at
     `).run(req.user.id, enc, iv, tag);
-    res.json({ ok:true });
+    res.json({ ok:true, linkedin: getAutomationReadiness(db, req.user.id).linkedin });
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 
@@ -5132,12 +5722,12 @@ app.get("/api/linkedin/status", requireAuth, (req, res) => {
   const row = db.prepare(
     "SELECT updated_at FROM user_linkedin_sessions WHERE user_id=?"
   ).get(req.user.id);
-  res.json({ connected: !!row, updatedAt: row?.updated_at || null });
+  res.json({ connected: !!row, updatedAt: row?.updated_at || null, readiness: getAutomationReadiness(db, req.user.id).linkedin });
 });
 
 app.delete("/api/linkedin/cookies", requireAuth, (req, res) => {
   db.prepare("DELETE FROM user_linkedin_sessions WHERE user_id=?").run(req.user.id);
-  res.json({ ok:true });
+  res.json({ ok:true, linkedin: getAutomationReadiness(db, req.user.id).linkedin });
 });
 
 // ═══════════════════════════════════════════════════════════════
