@@ -22,9 +22,9 @@ test("integrations backend centralizes connector status and storage", () => {
 });
 
 test("integrations page is routed and replaces scattered Apify menu input", () => {
+  // Integrations was removed from the main tab bar — only accessible via avatar dropdown
   assert.match(app, /IntegrationsPanel/);
-  assert.match(app, /id:"integrations"/);
-  assert.match(topBar, /onTabChange\?\.\("integrations"\)/);
+  assert.match(app, /renderRoute === "integrations"/);
   assert.doesNotMatch(topBar, /Apify Token/);
   assert.match(integrations, /title="Apify"/);
   assert.match(integrations, /title="Gmail"/);

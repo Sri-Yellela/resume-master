@@ -65,7 +65,18 @@ export async function api(path, opts = {}) {
     ...opts,
     headers,
   });
-  if (r.status === 401) throw Object.assign(new Error("Session expired. Sign in again."), { status: 401 });
+  if (r.status === 401) {
+    // Clear the stale auth context so subsequent requests don't keep sending it.
+    // After server-side Fix 1 (requireAuth honors authContextToken), a 401 only
+    // arrives when BOTH the Passport session AND the auth context are invalid.
+    setAuthContext("");
+    // Signal the app shell to force-logout immediately — don't wait for the next
+    // visibilitychange event, which can leave the user stuck in a broken state.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("rm:session-expired"));
+    }
+    throw Object.assign(new Error("Session expired. Sign in again."), { status: 401 });
+  }
   if (r.status === 429) {
     const payload = await r.json().catch(() => ({}));
     throw Object.assign(new Error(payload.error || "Too many requests. Try again shortly."), { status: 429, payload });

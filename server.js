@@ -3054,16 +3054,27 @@ passport.use(new LocalStrategy((username, password, done) => {
 }));
 passport.serializeUser((user, done) => done(null, user.id));
 passport.deserializeUser((id, done) => {
-  const user = db.prepare("SELECT id,username,is_admin,apply_mode,plan_tier,domain_profile_complete FROM users WHERE id=?").get(id);
-  user ? done(null, {
-    id:user.id,
-    username:user.username,
-    isAdmin:!!user.is_admin,
-    applyMode:user.apply_mode,
-    planTier:normalisePlanTier(user.plan_tier),
-    domainProfileComplete:!!user.domain_profile_complete,
-  })
-       : done(new Error("User not found"));
+  try {
+    const user = db.prepare("SELECT id,username,is_admin,apply_mode,plan_tier,domain_profile_complete FROM users WHERE id=?").get(id);
+    if (!user) {
+      // User was deleted or session references a stale ID from another environment.
+      // done(null, false) cleanly de-authenticates — Passport calls req.logout() internally.
+      // done(new Error(...)) would propagate to the global error handler and return 500.
+      console.warn(`[auth] deserializeUser: user id=${id} not found — session will be cleared`);
+      return done(null, false);
+    }
+    done(null, {
+      id:user.id,
+      username:user.username,
+      isAdmin:!!user.is_admin,
+      applyMode:user.apply_mode,
+      planTier:normalisePlanTier(user.plan_tier),
+      domainProfileComplete:!!user.domain_profile_complete,
+    });
+  } catch(e) {
+    console.error("[auth] deserializeUser error:", e.message);
+    done(null, false); // safe fallback — don't crash the request
+  }
 });
 
 function hydrateAuthUser(id) {
@@ -3112,9 +3123,17 @@ function bindAuthContext(req, _res, next) {
         AND ac.expires_at > ?
       LIMIT 1
     `).get(authContextHash(token), now);
-    if (!row) return next();
+    if (!row) {
+      // Token was sent but is expired, revoked, or unknown.
+      // Log so we can diagnose "session expired" reports without leaking the token itself.
+      console.warn(`[auth-context] token not found/expired — ${req.method} ${req.path} | ua:${(req.get("user-agent")||"").slice(0,60)}`);
+      return next();
+    }
     const user = hydrateAuthUser(row.user_id);
-    if (!user) return next();
+    if (!user) {
+      console.warn(`[auth-context] token valid but user_id=${row.user_id} not in users table`);
+      return next();
+    }
     req.user = user;
     req.authContextToken = token;
     db.prepare("UPDATE auth_contexts SET last_seen_at=? WHERE token_hash=?").run(now, authContextHash(token));
@@ -3124,8 +3143,23 @@ function bindAuthContext(req, _res, next) {
   next();
 }
 
-function requireAuth(req, res, next)  { if (req.isAuthenticated()) return next(); res.status(401).json({ error:"Unauthorized." }); }
-function requireAdmin(req, res, next) { if (req.isAuthenticated()&&req.user.isAdmin) return next(); res.status(403).json({ error:"Forbidden." }); }
+function requireAuth(req, res, next) {
+  // Accept either a valid Passport session OR a valid auth context token.
+  // bindAuthContext (which runs before this) sets req.authContextToken only when the
+  // token is non-expired, non-revoked, and the user exists in the DB.
+  // Without this second check, users whose Passport session was wiped (e.g. server
+  // restart on ephemeral storage) but whose auth context token is still valid in
+  // resume.db would always receive 401 even though they are authenticated.
+  if (req.isAuthenticated() || req.authContextToken) return next();
+  const hasCookie = !!req.headers.cookie?.includes("connect.sid");
+  const hasToken  = !!getRequestAuthContextToken(req);
+  console.warn(`[auth] 401 ${req.method} ${req.path} | cookie:${hasCookie} token_sent:${hasToken} ip:${req.ip}`);
+  res.status(401).json({ error:"Unauthorized." });
+}
+function requireAdmin(req, res, next) {
+  if ((req.isAuthenticated() || req.authContextToken) && req.user?.isAdmin) return next();
+  res.status(403).json({ error:"Forbidden." });
+}
 
 logOAuthReadiness();
 
@@ -3965,6 +3999,9 @@ app.use(express.json({ limit:"4mb" }));
 app.use(session({
   store: SStore,
   secret:SESSION_SECRET, resave:false, saveUninitialized:false,
+  // rolling:true resets the cookie maxAge on every response so active users never
+  // hit session expiry mid-session (the 7-day clock restarts on each request).
+  rolling: true,
   cookie:{ maxAge:7*24*60*60*1000, httpOnly:true, secure:process.env.NODE_ENV==="production", sameSite:"lax" },
 }));
 app.use(passport.initialize());
@@ -4999,6 +5036,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     enrichmentAvailable:  false,
   }));
 
+  console.log(`[jobs] user:${userId} profile:"${activeProfile.profile_name}" sort:${sort} page:${page}/${Math.ceil(total/pageSize)} total:${total} returned:${jobs.length}`);
   res.json({ jobs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
 });
 
@@ -5091,6 +5129,9 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     disliked:        !!j.disliked,
   }));
 
+  if (!stillScraping && scrapeState?.done) {
+    console.log(`[poll] user:${userId} profile:"${activeProfile.profile_name}" query:"${qRaw}" scrape done — returned:${jobs.length} new since ${since}`);
+  }
   res.json({
     jobs,
     scraping: stillScraping,
@@ -5799,6 +5840,271 @@ app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) 
 // GENERATE
 // ═══════════════════════════════════════════════════════════════
 const generationInFlight = new Set();
+// Tracks in-flight apply-worker-triggered generations: key → Promise<{html,atsScore,resumeId}|{error}>
+const pendingGenerationPromises = new Map();
+
+// ── coreGenerateResume ─────────────────────────────────────────────────────────
+// Shared generation kernel used by the HTTP /api/generate handler AND the apply
+// worker via generateResumeForApply().  Does NOT do HTTP req/res or rate-limit
+// checks — those live in the caller.  Throws on error; returns artifact on success.
+async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", employers = [] }) {
+  const mode         = legacyModeForTool(tool);
+  const promptMode   = promptModeForTool(tool);
+  const eventSubtype = eventSubtypeForTool(tool);
+
+  const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(userId) || {};
+  const storedResume = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
+  const authoritativeResumeText = storedResume?.content || resumeText;
+
+  const activeDomainProfile = db.prepare(
+    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
+  ).get(userId);
+
+  let domainModuleKey = "general";
+  if (activeDomainProfile) {
+    domainModuleKey = getDomainModuleKey(null, activeDomainProfile.role_family, activeDomainProfile.domain);
+    console.log(`[generate] domain from profile: ${activeDomainProfile.profile_name} → ${domainModuleKey}`);
+  } else {
+    try {
+      const classifierStart = Date.now();
+      const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "", {
+        onUsage: (usage, model) => trackApiCall(db, {
+          userId, eventType: "classifier", eventSubtype, model, usage,
+          durationMs: Date.now() - classifierStart, jobId: String(jobId), company: job.company,
+        }),
+      });
+      const qualKey = resolveFromClassifier(classifierResult, profile?.qualification_key);
+      domainModuleKey = getDomainModuleKey(qualKey, classifierResult.roleFamily, classifierResult.domain);
+    } catch(e) {
+      console.warn("[generate] classifier failed, using general domain:", e.message);
+    }
+  }
+
+  const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, promptMode, employers, activeDomainProfile);
+  const { systemBlocks } = assemblePrompt(domainModuleKey, promptMode, runtimeInputs);
+
+  const genStart = Date.now();
+  const resumeMsg = await anthropic.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 4096,
+    system: systemBlocks,
+    messages: [{ role: "user", content: runtimeInputs }],
+  });
+  trackApiCall(db, {
+    userId, eventType: "resume_generate", eventSubtype,
+    model: "claude-sonnet-4-20250514", usage: resumeMsg.usage,
+    durationMs: Date.now() - genStart, jobId: String(jobId), company: job.company,
+    domainModule: domainModuleKey,
+  });
+  const html = resumeMsg.content.map(b => b.text || "").join("").replace(/```html|```/g, "").trim();
+
+  let formattedHtml = normalizeResumeHtml(html);
+  if (process.env.RESUME_MASTER_LLM_FORMAT === "1") {
+    try {
+      const FORMATTING_SYSTEM = `You are a resume HTML formatter. You receive a resume in any HTML format and reformat it to exactly match the design specification below. You output ONLY the final HTML — no commentary, no markdown fences, no explanation.
+
+DESIGN SPECIFICATION:
+
+All CSS lives in a <style> block in <head>. No inline styles. No external fonts, CDN links, or JavaScript. Include @media print block.
+
+CSS variables (use these — no hardcoded hex):
+:root {
+  --color-bg: #ffffff;
+  --color-text: #1a1a1a;
+  --color-muted: #3d3d3d;
+  --color-rule: #6b6b6b;
+  --fs-body: 8.5pt;
+  --fs-name: 9pt;
+  --fs-section: 8pt;
+  --page-w: 8.5in;
+  --margin-x: 0.55in;
+  --margin-top: 0.45in;
+  --margin-bot: 0.45in;
+  --gap-section: 9pt;
+  --gap-entry: 6pt;
+  --gap-inline: 2pt;
+  --lh-body: 1.42;
+  --lh-bullets: 1.38;
+}
+
+Font: font-family: 'Garamond','EB Garamond',Georgia,serif — all text, no exceptions.
+
+body { background: var(--color-bg); color: var(--color-text); font-family: 'Garamond','EB Garamond',Georgia,serif; font-size: var(--fs-body); line-height: var(--lh-body); margin: var(--margin-top) var(--margin-x) var(--margin-bot); max-width: var(--page-w); }
+
+.header { text-align: center; margin-bottom: 6pt; }
+.header .name { font-size: var(--fs-name); font-weight: bold; text-transform: uppercase; letter-spacing: 0.22em; line-height: 1.1; }
+.header .tagline { color: var(--color-muted); letter-spacing: 0.04em; font-size: var(--fs-body); }
+.header .contact { font-size: var(--fs-body); }
+.header .contact a { color: inherit; text-decoration: none; }
+
+.section-title { font-size: var(--fs-section); font-weight: bold; text-transform: uppercase; letter-spacing: 0.18em; color: var(--color-text); border-bottom: 0.5pt solid var(--color-rule); padding-bottom: 1pt; margin-top: var(--gap-section); margin-bottom: 4pt; }
+
+.entry { margin-bottom: var(--gap-entry); page-break-inside: avoid; }
+.entry-header { display: flex; justify-content: space-between; align-items: baseline; }
+.entry-org { font-weight: bold; }
+.entry-meta { font-style: italic; color: var(--color-muted); font-weight: normal; }
+.sep { font-style: normal; font-weight: normal; color: var(--color-muted); }
+.entry-date { color: var(--color-muted); white-space: nowrap; margin-left: 8pt; flex-shrink: 0; font-size: var(--fs-body); }
+.entry-role { font-style: italic; color: var(--color-muted); margin-bottom: var(--gap-inline); }
+.tech-line { font-size: calc(var(--fs-body) - 0.4pt); color: var(--color-muted); margin-bottom: var(--gap-inline); }
+
+ul.bullets { list-style: none; padding-left: 0.9em; margin: var(--gap-inline) 0 0 0; }
+ul.bullets li { position: relative; font-size: var(--fs-body); line-height: var(--lh-bullets); margin-bottom: 1.6pt; text-align: justify; }
+ul.bullets li::before { content: "•"; position: absolute; left: -0.85em; }
+
+.skills-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
+.skill-label { font-weight: bold; white-space: nowrap; padding-right: 12pt; width: 1%; vertical-align: top; padding: 1.2pt 12pt 1.2pt 0; }
+.skill-values { color: var(--color-text); padding: 1.2pt 0; }
+
+@media print {
+  body { margin: var(--margin-top) var(--margin-x) var(--margin-bot); }
+  .entry { page-break-inside: avoid; }
+  .section-title { page-break-after: avoid; }
+}
+
+RULES:
+- Preserve ALL content exactly — every word, number, company name, date, bullet, skill
+- Only restructure the HTML and CSS — never change the text content
+- Apply the class names above to the correct elements
+- Entry headers must be a single flex row — company on left, date on right
+- Output only the complete HTML file, nothing else`;
+
+      const fmtStart = Date.now();
+      const formatMsg = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 4096,
+        system: [{ type: "text", text: FORMATTING_SYSTEM, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: `Reformat this resume HTML to match the design specification exactly. Preserve all content:\n\n${html}` }],
+      });
+      trackApiCall(db, {
+        userId, eventType: "resume_format", eventSubtype,
+        model: "claude-haiku-4-5-20251001", usage: formatMsg.usage,
+        durationMs: Date.now() - fmtStart,
+      });
+      const formatted = formatMsg.content.map(b => b.text || "").join("").replace(/```html|```/g, "").trim();
+      if (formatted && formatted.includes("<html")) formattedHtml = formatted;
+    } catch(e) {
+      console.warn("[format] Formatting pass failed, using raw generation output:", e.message);
+    }
+  }
+
+  const jobDescription = job.description || job.title;
+  const resumeStripped = stripResumeHtml(formattedHtml);
+  const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
+Company: ${job.company}
+Title: ${job.title}
+Category: ${job.category || ""}
+Full description:
+${jobDescription}
+
+RESUME TEXT (check which JD keywords appear here):
+${resumeStripped}`;
+
+  const atsStart = Date.now();
+  const scoreMsg = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 900,
+    system: ATS_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: atsDynamic }],
+  });
+  let atsReport = null, atsScore = null;
+  try {
+    const raw = scoreMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
+    atsReport = JSON.parse(raw); atsScore = atsReport.score;
+  } catch {}
+  const atsCacheKey = buildAtsCacheKey(formattedHtml, job);
+  trackApiCall(db, {
+    userId, eventType: "ats_score", eventSubtype,
+    model: "claude-haiku-4-5-20251001", usage: scoreMsg.usage,
+    durationMs: Date.now() - atsStart, jobId: String(jobId), company: job.company,
+    atsScoreAfter: atsScore,
+  });
+
+  const version = (db.prepare("SELECT MAX(version) as v FROM resume_versions WHERE user_id=? AND job_id=?")
+    .get(userId, String(jobId))?.v || 0) + 1;
+  const keptExists = !!db.prepare("SELECT 1 FROM resume_versions WHERE user_id=? AND job_id=? AND is_kept=1 LIMIT 1")
+    .get(userId, String(jobId));
+  db.prepare("INSERT INTO resume_versions (user_id,job_id,company,role,category,html,ats_score,ats_report,tool_type,is_kept,version,ats_cache_key,ats_prompt_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .run(userId, String(jobId), job.company, job.title, job.category, formattedHtml, atsScore, JSON.stringify(atsReport), tool, 0, version, atsCacheKey, ATS_SCORE_PROMPT_VERSION);
+  if (!keptExists) {
+    db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,ats_cache_key,ats_prompt_version,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
+      ON CONFLICT(user_id,job_id) DO UPDATE SET html=excluded.html,role=excluded.role,category=excluded.category,
+      apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,
+      ats_cache_key=excluded.ats_cache_key,ats_prompt_version=excluded.ats_prompt_version,updated_at=excluded.updated_at`)
+      .run(userId, String(jobId), job.company, job.title, job.category, mode, formattedHtml, atsScore, JSON.stringify(atsReport), atsCacheKey, ATS_SCORE_PROMPT_VERSION);
+  }
+
+  const userJobProfileId = resolveUserJobDomainProfileId(userId, String(jobId));
+  if (userJobProfileId) {
+    db.prepare(`
+      INSERT INTO user_jobs (user_id, job_id, domain_profile_id, resume_generated, updated_at)
+      VALUES (?, ?, ?, 1, unixepoch())
+      ON CONFLICT(user_id, job_id) DO UPDATE SET
+        resume_generated = 1, updated_at = unixepoch()
+    `).run(userId, String(jobId), userJobProfileId);
+  }
+
+  emitToUser(userId, { type: "resume_generated", jobId: String(jobId), atsScore });
+  insertNotification(userId, "resume_generated",
+    `Resume ready for ${job.company}${atsScore != null ? ` (ATS: ${atsScore})` : ""}`,
+    { jobId: String(jobId), company: job.company, atsScore });
+
+  const savedResume = db.prepare("SELECT id FROM resumes WHERE user_id=? AND job_id=?").get(userId, String(jobId));
+  return { html: formattedHtml, atsScore, atsReport, version, resumeId: savedResume?.id ?? null };
+}
+
+// ── generateResumeForApply ─────────────────────────────────────────────────────
+// Called by the apply worker to resolve or trigger a resume artifact in the
+// background.  Returns a Promise that resolves to { html, atsScore, resumeId }
+// or { error: string }.  Multiple callers for the same (userId, jobId, tool)
+// share the same in-flight Promise to prevent duplicate generation.
+function generateResumeForApply(userId, jobId, toolType) {
+  const tool = toolType === "a_plus_resume" ? "a_plus_resume" : "generate";
+  const mode = legacyModeForTool(tool);
+  const key  = `${userId}:${String(jobId)}:${tool}`;
+
+  // 1. Existing artifact in DB — reuse immediately
+  const existing = db.prepare(
+    "SELECT id, ats_score, html FROM resumes WHERE user_id=? AND job_id=? ORDER BY CASE WHEN apply_mode=? THEN 0 ELSE 1 END, updated_at DESC LIMIT 1"
+  ).get(userId, String(jobId), mode);
+  if (existing?.html) {
+    return Promise.resolve({ html: existing.html, atsScore: existing.ats_score ?? null, resumeId: existing.id, fromCache: true });
+  }
+
+  // 2. In-flight Promise from another worker call — share it
+  if (pendingGenerationPromises.has(key)) return pendingGenerationPromises.get(key);
+
+  // 3. HTTP handler is already generating (generationInFlight) — poll DB until done
+  if (generationInFlight.has(key)) {
+    console.log(`[generateResumeForApply] attaching to in-flight HTTP generation for key=${key}`);
+    const waitP = new Promise(resolve => {
+      const POLL_MS = 2500, MAX_MS = 120_000, start = Date.now();
+      const poll = () => {
+        const row = db.prepare(
+          "SELECT id, ats_score, html FROM resumes WHERE user_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1"
+        ).get(userId, String(jobId));
+        if (row?.html) return resolve({ html: row.html, atsScore: row.ats_score ?? null, resumeId: row.id });
+        if (Date.now() - start > MAX_MS) return resolve({ error: "generation_timed_out" });
+        setTimeout(poll, POLL_MS);
+      };
+      poll();
+    });
+    return waitP;
+  }
+
+  // 4. Trigger new generation
+  const jobRow = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(String(jobId));
+  if (!jobRow) return Promise.resolve({ error: "job_not_found" });
+
+  console.log(`[generateResumeForApply] starting background generation for user=${userId} job=${jobId} tool=${tool}`);
+  const p = coreGenerateResume({ userId, jobId: String(jobId), job: jobRow, tool })
+    .then(r => ({ html: r.html, atsScore: r.atsScore, resumeId: r.resumeId, fromCache: false }))
+    .catch(e => ({ error: e.message }))
+    .finally(() => pendingGenerationPromises.delete(key));
+  pendingGenerationPromises.set(key, p);
+  return p;
+}
 
 app.post("/api/generate", requireAuth, async (req, res) => {
   const { jobId, job, resumeText, forceRegen } = req.body;
@@ -5932,18 +6238,6 @@ ${cachedResumeText}`;
     }
   }
 
-  const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
-  // Phase 4A: always use stored base resume as authoritative source
-  const storedResume = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
-  const authoritativeResumeText = storedResume?.content || resumeText;
-
-  // DOMAIN MODULE SELECTION: active domain profile takes priority over classifier inference.
-  // Profile domain + roleFamily → domainModuleKey directly, skipping the Haiku classify call.
-  // Classifier runs only as fallback when no active profile is set.
-  // To change priority: edit this block.
-  const activeDomainProfile = db.prepare(
-    "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
-  ).get(req.user.id);
   const inFlightKey = `${req.user.id}:${String(jobId)}:${tool}`;
   if (generationInFlight.has(inFlightKey)) {
     return res.status(409).json({ error:"Resume generation already in progress for this job and tool.", inFlight:true, tool });
@@ -5951,213 +6245,12 @@ ${cachedResumeText}`;
   generationInFlight.add(inFlightKey);
 
   try {
-    // New layered prompt flow
-    let domainModuleKey = "general";
-    if (activeDomainProfile) {
-      // Fast path: derive domainModuleKey directly from profile — no Haiku call
-      domainModuleKey = getDomainModuleKey(null, activeDomainProfile.role_family, activeDomainProfile.domain);
-      console.log(`[generate] domain from profile: ${activeDomainProfile.profile_name} → ${domainModuleKey}`);
-    } else {
-      try {
-        const classifierStart = Date.now();
-        const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "", {
-          onUsage: (usage, model) => trackApiCall(db, {
-            userId: req.user.id,
-            eventType: "classifier",
-            eventSubtype,
-            model,
-            usage,
-            durationMs: Date.now() - classifierStart,
-            jobId: String(jobId),
-            company: job.company,
-          }),
-        });
-        const qualKey = resolveFromClassifier(classifierResult, profile?.qualification_key);
-        domainModuleKey = getDomainModuleKey(qualKey, classifierResult.roleFamily, classifierResult.domain);
-      } catch(e) {
-        console.warn("[generate] classifier failed, using general domain:", e.message);
-      }
-    }
-    const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, promptMode, employers, activeDomainProfile);
-    const { systemBlocks } = assemblePrompt(domainModuleKey, promptMode, runtimeInputs);
-
-    const genStart = Date.now();
-    const resumeMsg = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
-      system: systemBlocks,
-      messages: [{ role: "user", content: runtimeInputs }],
-    });
-    trackApiCall(db, {
-      userId: req.user.id, eventType: "resume_generate", eventSubtype,
-      model: "claude-sonnet-4-20250514", usage: resumeMsg.usage,
-      durationMs: Date.now() - genStart, jobId: String(jobId), company: job.company,
-      domainModule: domainModuleKey,
-    });
-    const html = resumeMsg.content.map(b=>b.text||"").join("").replace(/```html|```/g,"").trim();
-
-    // ── Formatting pass — apply visual design template via Haiku ──
-    // The generation step produces content. This step applies the exact
-    // CSS/HTML template spec as a deterministic formatting layer.
-    let formattedHtml = normalizeResumeHtml(html);
-    if (process.env.RESUME_MASTER_LLM_FORMAT === "1") {
-    try {
-      const FORMATTING_SYSTEM = `You are a resume HTML formatter. You receive a resume in any HTML format and reformat it to exactly match the design specification below. You output ONLY the final HTML — no commentary, no markdown fences, no explanation.
-
-DESIGN SPECIFICATION:
-
-All CSS lives in a <style> block in <head>. No inline styles. No external fonts, CDN links, or JavaScript. Include @media print block.
-
-CSS variables (use these — no hardcoded hex):
-:root {
-  --color-bg: #ffffff;
-  --color-text: #1a1a1a;
-  --color-muted: #3d3d3d;
-  --color-rule: #6b6b6b;
-  --fs-body: 8.5pt;
-  --fs-name: 9pt;
-  --fs-section: 8pt;
-  --page-w: 8.5in;
-  --margin-x: 0.55in;
-  --margin-top: 0.45in;
-  --margin-bot: 0.45in;
-  --gap-section: 9pt;
-  --gap-entry: 6pt;
-  --gap-inline: 2pt;
-  --lh-body: 1.42;
-  --lh-bullets: 1.38;
-}
-
-Font: font-family: 'Garamond','EB Garamond',Georgia,serif — all text, no exceptions.
-
-body { background: var(--color-bg); color: var(--color-text); font-family: 'Garamond','EB Garamond',Georgia,serif; font-size: var(--fs-body); line-height: var(--lh-body); margin: var(--margin-top) var(--margin-x) var(--margin-bot); max-width: var(--page-w); }
-
-.header { text-align: center; margin-bottom: 6pt; }
-.header .name { font-size: var(--fs-name); font-weight: bold; text-transform: uppercase; letter-spacing: 0.22em; line-height: 1.1; }
-.header .tagline { color: var(--color-muted); letter-spacing: 0.04em; font-size: var(--fs-body); }
-.header .contact { font-size: var(--fs-body); }
-.header .contact a { color: inherit; text-decoration: none; }
-
-.section-title { font-size: var(--fs-section); font-weight: bold; text-transform: uppercase; letter-spacing: 0.18em; color: var(--color-text); border-bottom: 0.5pt solid var(--color-rule); padding-bottom: 1pt; margin-top: var(--gap-section); margin-bottom: 4pt; }
-
-.entry { margin-bottom: var(--gap-entry); page-break-inside: avoid; }
-.entry-header { display: flex; justify-content: space-between; align-items: baseline; }
-.entry-org { font-weight: bold; }
-.entry-meta { font-style: italic; color: var(--color-muted); font-weight: normal; }
-.sep { font-style: normal; font-weight: normal; color: var(--color-muted); }
-.entry-date { color: var(--color-muted); white-space: nowrap; margin-left: 8pt; flex-shrink: 0; font-size: var(--fs-body); }
-.entry-role { font-style: italic; color: var(--color-muted); margin-bottom: var(--gap-inline); }
-.tech-line { font-size: calc(var(--fs-body) - 0.4pt); color: var(--color-muted); margin-bottom: var(--gap-inline); }
-
-ul.bullets { list-style: none; padding-left: 0.9em; margin: var(--gap-inline) 0 0 0; }
-ul.bullets li { position: relative; font-size: var(--fs-body); line-height: var(--lh-bullets); margin-bottom: 1.6pt; text-align: justify; }
-ul.bullets li::before { content: "•"; position: absolute; left: -0.85em; }
-
-.skills-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
-.skill-label { font-weight: bold; white-space: nowrap; padding-right: 12pt; width: 1%; vertical-align: top; padding: 1.2pt 12pt 1.2pt 0; }
-.skill-values { color: var(--color-text); padding: 1.2pt 0; }
-
-@media print {
-  body { margin: var(--margin-top) var(--margin-x) var(--margin-bot); }
-  .entry { page-break-inside: avoid; }
-  .section-title { page-break-after: avoid; }
-}
-
-RULES:
-- Preserve ALL content exactly — every word, number, company name, date, bullet, skill
-- Only restructure the HTML and CSS — never change the text content
-- Apply the class names above to the correct elements
-- Entry headers must be a single flex row — company on left, date on right
-- Output only the complete HTML file, nothing else`;
-
-      const fmtStart = Date.now();
-      const formatMsg = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 4096,
-        system: [{ type: "text", text: FORMATTING_SYSTEM, cache_control: { type: "ephemeral" } }],
-        messages: [{ role: "user", content: `Reformat this resume HTML to match the design specification exactly. Preserve all content:\n\n${html}` }],
-      });
-      trackApiCall(db, {
-        userId: req.user.id, eventType: "resume_format", eventSubtype,
-        model: "claude-haiku-4-5-20251001", usage: formatMsg.usage,
-        durationMs: Date.now() - fmtStart,
-      });
-      const formatted = formatMsg.content.map(b=>b.text||"").join("").replace(/```html|```/g,"").trim();
-      if (formatted && formatted.includes("<html")) formattedHtml = formatted;
-    } catch(e) {
-      console.warn("[format] Formatting pass failed, using raw generation output:", e.message);
-      // formattedHtml stays as original html — graceful fallback
-    }
-
-    }
-
-    const jobDescription = job.description || job.title;
-    const resumeStripped = stripResumeHtml(formattedHtml);
-
-    const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
-Company: ${job.company}
-Title: ${job.title}
-Category: ${job.category || ""}
-Full description:
-${jobDescription}
-
-RESUME TEXT (check which JD keywords appear here):
-${resumeStripped}`;
-
-    const atsStart = Date.now();
-    const scoreMsg = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 900,
-      system: ATS_SYSTEM_PROMPT,
-      messages: [{ role:"user", content:atsDynamic }],
-    });
-    let atsReport=null, atsScore=null;
-    try {
-      const raw = scoreMsg.content.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
-      atsReport = JSON.parse(raw); atsScore = atsReport.score;
-    } catch {}
-    const atsCacheKey = buildAtsCacheKey(formattedHtml, job);
-    trackApiCall(db, {
-      userId: req.user.id, eventType: "ats_score", eventSubtype,
-      model: "claude-haiku-4-5-20251001", usage: scoreMsg.usage,
-      durationMs: Date.now() - atsStart, jobId: String(jobId), company: job.company,
-      atsScoreAfter: atsScore,
-    });
-
-    const version = (db.prepare("SELECT MAX(version) as v FROM resume_versions WHERE user_id=? AND job_id=?")
-      .get(req.user.id,String(jobId))?.v || 0) + 1;
-    const keptExists = !!db.prepare("SELECT 1 FROM resume_versions WHERE user_id=? AND job_id=? AND is_kept=1 LIMIT 1")
-      .get(req.user.id, String(jobId));
-    db.prepare("INSERT INTO resume_versions (user_id,job_id,company,role,category,html,ats_score,ats_report,tool_type,is_kept,version,ats_cache_key,ats_prompt_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .run(req.user.id,String(jobId),job.company,job.title,job.category,formattedHtml,atsScore,JSON.stringify(atsReport),tool,0,version,atsCacheKey,ATS_SCORE_PROMPT_VERSION);
-    if (!keptExists) {
-      db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,ats_cache_key,ats_prompt_version,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
-        ON CONFLICT(user_id,job_id) DO UPDATE SET html=excluded.html,role=excluded.role,category=excluded.category,
-        apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,
-        ats_cache_key=excluded.ats_cache_key,ats_prompt_version=excluded.ats_prompt_version,updated_at=excluded.updated_at`)
-        .run(req.user.id,String(jobId),job.company,job.title,job.category,mode,formattedHtml,atsScore,JSON.stringify(atsReport),atsCacheKey,ATS_SCORE_PROMPT_VERSION);
-    }
-
-    // Phase 1C: mark resume_generated in user_jobs
-    const userJobProfileId = resolveUserJobDomainProfileId(req.user.id, String(jobId));
-    if (userJobProfileId) {
-      db.prepare(`
-        INSERT INTO user_jobs (user_id, job_id, domain_profile_id, resume_generated, updated_at)
-        VALUES (?, ?, ?, 1, unixepoch())
-        ON CONFLICT(user_id, job_id) DO UPDATE SET
-          resume_generated = 1, updated_at = unixepoch()
-      `).run(req.user.id, String(jobId), userJobProfileId);
-    }
-
-    emitToUser(req.user.id, { type: "resume_generated", jobId: String(jobId), atsScore });
-    insertNotification(req.user.id, "resume_generated",
-      `Resume ready for ${job.company}${atsScore != null ? ` (ATS: ${atsScore})` : ""}`,
-      { jobId: String(jobId), company: job.company, atsScore });
-    res.json({ html: formattedHtml, atsScore, atsReport, cached:false, version, tool, toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate" });
+    const result = await coreGenerateResume({ userId: req.user.id, jobId: String(jobId), job, tool, resumeText, employers });
+    res.json({ html: result.html, atsScore: result.atsScore, atsReport: result.atsReport, cached:false, version: result.version, tool, toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate" });
   } catch(e) { res.status(500).json({ error:e.message }); }
   finally { generationInFlight.delete(inFlightKey); }
 });
+
 
 // ═══════════════════════════════════════════════════════════════
 // SANDBOX + PDF
@@ -6470,7 +6563,7 @@ app.delete("/api/linkedin/cookies", requireAuth, (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 // APPLY AUTOMATION (Playwright)
 // ═══════════════════════════════════════════════════════════════
-applyRoutes(app, db, requireAuth, buildAutofillPayload);
+applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply);
 
 // ── Contact form (public — no auth required) ──────────────────
 app.post("/api/contact", (req, res) => {

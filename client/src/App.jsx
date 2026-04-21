@@ -151,6 +151,15 @@ function AppDashboard({ authUser, setAuthUser }) {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [handleLogout]);
 
+  // Force-logout immediately when any API call gets a 401 (dispatched by api.js).
+  // Without this, users stay on the app page with broken state until the next
+  // visibilitychange triggers the /api/auth/me check.
+  useEffect(() => {
+    const handle = () => handleLogout();
+    window.addEventListener("rm:session-expired", handle);
+    return () => window.removeEventListener("rm:session-expired", handle);
+  }, [handleLogout]);
+
   return (
     <JobBoardProvider>
       <AppScrollProvider>

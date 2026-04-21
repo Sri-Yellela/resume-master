@@ -124,3 +124,48 @@ test("migration 048 UPDATE step is safe after DELETE — no UNIQUE violation pos
   // Must NOT contain INSERT OR IGNORE (UPDATE is correct here, not insert)
   assert.ok(!updateBlock.includes("INSERT OR IGNORE"), "UPDATE is the right operation here");
 });
+
+test("jobs board uses triple filter — role_key + roleTitleSql + profileTitleSql on every query", () => {
+  // All three filters must appear together in the /api/jobs GET conditions array
+  const routeStart = server.indexOf('app.get("/api/jobs"');
+  assert.ok(routeStart > 0, "/api/jobs route must exist");
+  const routeEnd   = server.indexOf("\napp.", routeStart + 10);
+  const block      = server.slice(routeStart, routeEnd);
+
+  assert.match(block, /jrm\.role_key = \?/, "must filter by role_key");
+  assert.match(block, /roleTitleSql\(/, "must apply roleTitleSql");
+  assert.match(block, /profileTitleSql\(/, "must apply profileTitleSql");
+  // Profile filter must be first guard — no-profile returns empty immediately
+  assert.match(block, /if \(!sessionActiveProfile\)/, "must guard on missing active profile");
+});
+
+test("poll board uses same triple filter to prevent wrong-profile jobs leaking", () => {
+  const pollStart = server.indexOf('app.get("/api/jobs/poll"');
+  assert.ok(pollStart > 0, "/api/jobs/poll route must exist");
+  const pollEnd   = server.indexOf("\napp.", pollStart + 10);
+  const block     = server.slice(pollStart, pollEnd);
+
+  assert.match(block, /jrm\.role_key = \?/, "poll must filter by role_key");
+  assert.match(block, /roleTitleSql\(/, "poll must apply roleTitleSql");
+  assert.match(block, /pollProfileTitleFilter/, "poll must apply profileTitleSql");
+  assert.match(block, /if \(!activeProfile\)/, "poll must guard on missing active profile");
+});
+
+test("poll completion triggers re-fetch via fetchJobsRef for correct sort order", () => {
+  // After scrape completes, prepending new jobs without re-sorting leaves the board
+  // in wrong order for atsScore/applicantCount sorts.  fetchJobsRef.current?.(1)
+  // re-fetches from DB with the user's current sort.
+  assert.match(jobsPanel, /fetchJobsRef = useRef\(null\)/, "fetchJobsRef must be declared");
+  assert.match(jobsPanel, /fetchJobsRef\.current = fetchJobs/, "ref must be kept in sync with latest fetchJobs");
+  // In startPollLoop, ref must be called when !pollData.scraping
+  const pollStart = jobsPanel.indexOf("const startPollLoop");
+  const pollEnd   = jobsPanel.indexOf("}, []); // eslint-disable-line react-hooks/exhaustive-deps", pollStart);
+  const pollBlock = jobsPanel.slice(pollStart, pollEnd);
+  assert.match(pollBlock, /fetchJobsRef\.current\?\.\(1\)/, "poll completion must call fetchJobsRef.current?.(1)");
+});
+
+test("jobs board structured logs include profile, sort, and result count", () => {
+  // Ensures the board-population log line exists for observability
+  assert.match(server, /\[jobs\].*profile.*sort.*total.*returned/);
+  assert.match(server, /\[poll\].*profile.*query.*scrape done/);
+});

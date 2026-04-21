@@ -1,6 +1,10 @@
 // routes/apply.js — REST API for Playwright apply automation
-// POST /api/apply                  — trigger automation
-// GET  /api/apply/status/:jobId    — poll in-progress status
+// POST /api/apply                  — trigger automation (legacy single-job)
+// POST /api/apply/runs             — create a queued apply run (multi-job)
+// GET  /api/apply/runs             — list runs + held-review queue
+// GET  /api/apply/runs/:runId      — run detail + per-job logs
+// GET  /api/apply/review           — held-review items across all runs
+// GET  /api/apply/status/:jobId    — poll in-progress status (legacy)
 // POST /api/apply/close/:jobId     — close semi-auto browser
 // POST /api/apply/session/save     — save storageState for a portal domain
 // GET  /api/apply/session/:domain  — check if saved session exists
@@ -25,6 +29,10 @@ const ATS_AUTO_APPLY_THRESHOLD = 65;
 const APPLY_WORKER_LIMIT = 2;
 let activeApplyWorkers = 0;
 const queuedRunIds = new Set();
+
+// Timeout (ms) the apply worker waits for an in-flight generation to finish
+// before declaring it stalled and proceeding without a resume artifact.
+const GENERATION_WAIT_TIMEOUT_MS = 120_000;
 
 function selectedApplyModeForTool(toolType) {
   return toolType === "a_plus_resume" ? "CUSTOM_SAMPLER" : "TAILORED";
@@ -68,7 +76,7 @@ function publicRunJob(row) {
   };
 }
 
-export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) {
+export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply) {
   const logApplyEvent = ({ runId, runJobId, userId, jobId, level = "info", event, message, details }) => {
     db.prepare(`
       INSERT INTO apply_job_logs (run_id, run_job_id, user_id, job_id, level, event, message, details_json)
@@ -84,7 +92,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
         SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) as submitted,
         SUM(CASE WHEN status = 'held_review' THEN 1 ELSE 0 END) as held,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN status IN ('queued','preparing','generating_resume','ats_review','applying') THEN 1 ELSE 0 END) as active
+        SUM(CASE WHEN status IN (
+          'queued','preparing','generation_started','ats_review','applying',
+          'site_visit_started','autofill_started','waiting_for_resume'
+        ) THEN 1 ELSE 0 END) as active
       FROM apply_run_jobs WHERE run_id = ?
     `).get(runId);
     const status = counts.active > 0 ? "running" : "complete";
@@ -144,6 +155,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
     } catch { return null; }
   };
 
+  // ── processRunJob ──────────────────────────────────────────────────────────
+  // Execution order (parallel where indicated):
+  //
+  // 1. Job / URL / LinkedIn guard checks (fast, sync)
+  // 2. Build autofill payload + required-field check
+  // 3a. If artifact EXISTS → ATS check → apply (existing behaviour)
+  // 3b. If NO artifact + MANUAL mode → parallel: start generation + start browser immediately
+  //       Browser fills what it can; after both settle, update artifact info
+  // 3c. If NO artifact + AUTO mode  → generate first (preserves ATS gate), then apply
+  //       Status: generation_started → ats_review → applying → done
   const processRunJob = async (jobRow, run) => {
     const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(jobRow.job_id);
     if (!job) return failRunJob(jobRow, "job_not_found", "Job is no longer available in the local pool.");
@@ -165,30 +186,156 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
       return holdRunJob(jobRow, "missing_user_info", `Missing required profile data: ${missing.join(", ")}.`, { missing });
     }
 
-    db.prepare("UPDATE apply_run_jobs SET status='generating_resume' WHERE id=?").run(jobRow.id);
-    const artifact = findResumeArtifact(run.user_id, job.job_id, run.tool_type);
-    if (!artifact?.html) {
-      return holdRunJob(jobRow, "resume_required", "Generate a resume for this job before auto-apply can submit.", { toolType: run.tool_type });
-    }
-    const resumeFile = applyResumeFileName(job.job_id, artifact.id);
-    db.prepare("UPDATE apply_run_jobs SET resume_id=?, resume_file=? WHERE id=?").run(artifact.id, resumeFile, jobRow.id);
-    logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "resume_reused", message: "Using existing generated resume.", details: { resumeId: artifact.id } });
+    // ── Resume artifact resolution ─────────────────────────────────────────
+    const existingArtifact = findResumeArtifact(run.user_id, job.job_id, run.tool_type);
 
-    const atsScore = artifact.ats_score ?? job.ats_score ?? null;
-    db.prepare("UPDATE apply_run_jobs SET status='ats_review', ats_score=? WHERE id=?").run(atsScore, jobRow.id);
-    logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "ats_checked", message: `ATS score ${atsScore ?? "unavailable"}.`, details: { atsScore } });
-    // Null ATS: resume exists but wasn't scored yet — log the gap but don't block
-    if (atsScore != null && atsScore < ATS_AUTO_APPLY_THRESHOLD) {
-      return holdRunJob(jobRow, "ats_below_threshold", `ATS ${atsScore} is below the auto-submit threshold of ${ATS_AUTO_APPLY_THRESHOLD}.`, { atsScore, threshold: ATS_AUTO_APPLY_THRESHOLD });
-    }
+    if (existingArtifact?.html) {
+      // ── CASE A: artifact already exists — ATS gate + browser (original behaviour) ──
+      db.prepare("UPDATE apply_run_jobs SET status='ats_review', resume_id=?, resume_file=?, ats_score=? WHERE id=?")
+        .run(existingArtifact.id, applyResumeFileName(job.job_id, existingArtifact.id),
+          existingArtifact.ats_score ?? null, jobRow.id);
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+        event: "resume_reused", message: "Using existing generated resume.",
+        details: { resumeId: existingArtifact.id } });
 
-    db.prepare("UPDATE apply_run_jobs SET status='applying' WHERE id=?").run(jobRow.id);
-    logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "applying", message: "Launching automation." });
-    const result = await autoApply(jobUrl, autofillData, {
-      mode: run.mode === "manual" ? "semi" : "full",
-      jobId: `${run.id}_${job.job_id}`,
-      storageStatePath: getStorageStatePath(run.user_id, jobUrl),
-    });
+      const atsScore = existingArtifact.ats_score ?? job.ats_score ?? null;
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+        event: "ats_checked", message: `ATS score ${atsScore ?? "unavailable"}.`, details: { atsScore } });
+      if (atsScore != null && atsScore < ATS_AUTO_APPLY_THRESHOLD) {
+        return holdRunJob(jobRow, "ats_below_threshold", `ATS ${atsScore} is below the auto-submit threshold of ${ATS_AUTO_APPLY_THRESHOLD}.`, { atsScore, threshold: ATS_AUTO_APPLY_THRESHOLD });
+      }
+
+      db.prepare("UPDATE apply_run_jobs SET status='applying' WHERE id=?").run(jobRow.id);
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "applying", message: "Launching automation." });
+      const result = await autoApply(jobUrl, autofillData, {
+        mode: run.mode === "manual" ? "semi" : "full",
+        jobId: `${run.id}_${job.job_id}`,
+        storageStatePath: getStorageStatePath(run.user_id, jobUrl),
+      });
+      return _handleAutomationResult(jobRow, run, job, result, existingArtifact.id);
+
+    } else if (run.mode === "manual") {
+      // ── CASE B: no artifact + MANUAL mode ─────────────────────────────────
+      // Launch generation AND the browser in parallel.
+      // Manual mode never auto-submits so ATS gating is not needed here.
+      // The browser stays open for user review regardless of resume availability.
+      db.prepare("UPDATE apply_run_jobs SET status='generation_started' WHERE id=?").run(jobRow.id);
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+        event: "generation_started",
+        message: "No existing resume found — generation started in parallel with site preparation.",
+        details: { toolType: run.tool_type } });
+
+      db.prepare("UPDATE apply_run_jobs SET status='site_visit_started' WHERE id=?").run(jobRow.id);
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+        event: "site_visit_started", message: "Launching browser while resume generates." });
+
+      const artifactPromise = generateResumeForApply
+        ? generateResumeForApply(run.user_id, job.job_id, run.tool_type)
+        : Promise.resolve({ error: "no_generation_handler" });
+
+      const automationPromise = autoApply(jobUrl, autofillData, {
+        mode: "semi",
+        jobId: `${run.id}_${job.job_id}`,
+        storageStatePath: getStorageStatePath(run.user_id, jobUrl),
+      });
+
+      const [autoSettled, artifactSettled] = await Promise.allSettled([
+        automationPromise,
+        artifactPromise,
+      ]);
+
+      // Update artifact info if generation completed
+      if (artifactSettled.status === "fulfilled" && artifactSettled.value?.resumeId) {
+        const gen = artifactSettled.value;
+        db.prepare("UPDATE apply_run_jobs SET resume_id=?, resume_file=?, ats_score=? WHERE id=?")
+          .run(gen.resumeId, applyResumeFileName(job.job_id, gen.resumeId), gen.atsScore ?? null, jobRow.id);
+        logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+          event: "generation_ready",
+          message: `Resume generation completed${gen.atsScore != null ? ` (ATS: ${gen.atsScore})` : ""}.`,
+          details: { resumeId: gen.resumeId, atsScore: gen.atsScore } });
+      } else if (artifactSettled.status === "rejected" || artifactSettled.value?.error) {
+        const genErr = artifactSettled.status === "rejected"
+          ? artifactSettled.reason?.message
+          : artifactSettled.value?.error;
+        logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+          level: "warn", event: "generation_failed",
+          message: `Resume generation failed (${genErr || "unknown"}). Proceeding with autofill only.`,
+          details: { error: genErr } });
+      }
+
+      if (autoSettled.status === "rejected") {
+        return failRunJob(jobRow, "worker_error", autoSettled.reason?.message || "Browser automation threw.");
+      }
+      return _handleAutomationResult(jobRow, run, job, autoSettled.value, null);
+
+    } else {
+      // ── CASE C: no artifact + AUTO mode ───────────────────────────────────
+      // Generate first to get ATS score for the gate, then run browser.
+      // This preserves ATS gating semantics: we must know the score before submitting.
+      db.prepare("UPDATE apply_run_jobs SET status='generation_started' WHERE id=?").run(jobRow.id);
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+        event: "generation_started",
+        message: "No existing resume found — generating resume before auto-apply.",
+        details: { toolType: run.tool_type } });
+
+      if (!generateResumeForApply) {
+        return holdRunJob(jobRow, "no_generation_handler",
+          "Resume generation is not available in this context. Generate a resume manually and retry.", { toolType: run.tool_type });
+      }
+
+      let genResult;
+      try {
+        genResult = await Promise.race([
+          generateResumeForApply(run.user_id, job.job_id, run.tool_type),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("generation_timed_out")), GENERATION_WAIT_TIMEOUT_MS)),
+        ]);
+      } catch(e) {
+        return holdRunJob(jobRow, "generation_failed",
+          `Resume generation failed or timed out: ${e.message}.`,
+          { toolType: run.tool_type, error: e.message });
+      }
+
+      if (genResult?.error) {
+        return holdRunJob(jobRow, "generation_failed",
+          `Resume generation failed: ${genResult.error}.`,
+          { toolType: run.tool_type, error: genResult.error });
+      }
+
+      // Generation succeeded — update artifact record
+      db.prepare("UPDATE apply_run_jobs SET resume_id=?, resume_file=?, ats_score=? WHERE id=?")
+        .run(genResult.resumeId, applyResumeFileName(job.job_id, genResult.resumeId), genResult.atsScore ?? null, jobRow.id);
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+        event: "generation_ready",
+        message: `Resume generated${genResult.atsScore != null ? ` (ATS: ${genResult.atsScore})` : ""}.`,
+        details: { resumeId: genResult.resumeId, atsScore: genResult.atsScore } });
+
+      // ATS gate using freshly generated score
+      const atsScore = genResult.atsScore ?? null;
+      db.prepare("UPDATE apply_run_jobs SET status='ats_review', ats_score=? WHERE id=?").run(atsScore, jobRow.id);
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+        event: "ats_checked", message: `ATS score ${atsScore ?? "unavailable"} (post-generation).`,
+        details: { atsScore } });
+      if (atsScore != null && atsScore < ATS_AUTO_APPLY_THRESHOLD) {
+        return holdRunJob(jobRow, "ats_below_threshold",
+          `ATS ${atsScore} is below the auto-submit threshold of ${ATS_AUTO_APPLY_THRESHOLD}.`,
+          { atsScore, threshold: ATS_AUTO_APPLY_THRESHOLD });
+      }
+
+      db.prepare("UPDATE apply_run_jobs SET status='applying' WHERE id=?").run(jobRow.id);
+      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "applying", message: "Launching automation." });
+      const result = await autoApply(jobUrl, autofillData, {
+        mode: "full",
+        jobId: `${run.id}_${job.job_id}`,
+        storageStatePath: getStorageStatePath(run.user_id, jobUrl),
+      });
+      return _handleAutomationResult(jobRow, run, job, result, genResult.resumeId);
+    }
+  };
+
+  // ── Shared result handler for autoApply outcome ────────────────────────────
+  const _handleAutomationResult = (jobRow, run, job, result, resumeId) => {
+    const resumeFile = resumeId ? applyResumeFileName(job.job_id, resumeId) : null;
+    const jobUrl = job.apply_url || job.url;
 
     logApplyEvent({
       runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
@@ -269,7 +416,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
     });
   };
 
-  // ── POST /api/apply ───────────────────────────────────────────
+  // ── POST /api/apply/runs ──────────────────────────────────────────────────
   app.post("/api/apply/runs", requireAuth, (req, res) => {
     const rawJobIds = Array.isArray(req.body?.jobIds) ? req.body.jobIds : [];
     const jobIds = [...new Set(rawJobIds.map(id => String(id || "").trim()).filter(Boolean))].slice(0, 25);
@@ -292,7 +439,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
       FROM apply_run_jobs arj
       JOIN apply_runs ar ON ar.id = arj.run_id
       WHERE arj.user_id=? AND arj.job_id IN (${jobIds.map(() => "?").join(",")})
-        AND arj.status IN ('queued','preparing','generating_resume','ats_review','applying')
+        AND arj.status IN (
+          'queued','preparing','generation_started','ats_review','applying',
+          'site_visit_started','autofill_started','waiting_for_resume'
+        )
     `).all(req.user.id, ...jobIds).map(r => r.job_id);
     const duplicateSet = new Set(duplicates);
     const queueIds = jobIds.filter(id => !duplicateSet.has(id));
@@ -390,14 +540,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
       });
     }
 
-    // Build autofill payload from stored profile using shared server-side builder.
-    // This gives full field coverage (40+ variants), phone/URL normalization,
-    // A+ location stripping and EEO dropdown fields.
     db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
     const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id) || {};
     const autofillData = buildAutofillPayload(profile, req.user.applyMode);
 
-    // Session state
     let storageStatePath = null;
     try {
       const domain = new URL(jobUrl).hostname;
@@ -405,7 +551,6 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
       if (fs.existsSync(sp)) storageStatePath = sp;
     } catch {}
 
-    // Resume file path
     let resumePath = null;
     if (resumeFile) {
       const candidate = path.join(__dirname, "..", resumeFile);
@@ -420,7 +565,6 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
           mode, resumePath, jobId: jobIdStr, storageStatePath,
         });
 
-        // Persist to job_applications
         if (jobId) {
           try {
             db.prepare(`
@@ -464,10 +608,6 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
         return res.status(500).json({ error: e.message });
       }
     } else {
-      // Semi mode: AWAIT the launch + fill so errors reach the client.
-      // Fire-and-forget swallowed every error silently (browser never opened,
-      // client always got "launched" anyway). Awaiting keeps the request open
-      // for ~5-15s while Playwright launches and fills — client shows ⏳ already.
       try {
         const result = await autoApply(jobUrl, autofillData, {
           mode: "semi", resumePath, jobId: jobIdStr, storageStatePath,

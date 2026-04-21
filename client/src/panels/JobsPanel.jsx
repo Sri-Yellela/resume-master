@@ -985,6 +985,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const nextFetchPageRef = useRef(1);
   const pendingIntentSearchRef = useRef(null);
   const searchIntentResolveRef = useRef(null);
+  // Stable ref so startPollLoop (empty deps) can always call the latest fetchJobs
+  const fetchJobsRef = useRef(null);
 
   const makeProfileSnapshot = useCallback((overrides = {}) => ({
     jobs,
@@ -1320,6 +1322,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setTotalJobs(d.total || 0);
       setTotalPages(d.totalPages || 0);
       setCurrentPage(page);
+      console.log(`[board] profile:${requestProfileKey} sort:${buildParams(page).match(/sort=([^&]+)/)?.[1]||"?"} page:${page} total:${d.total||0} returned:${incoming.length} source:${mergeMode?"merge":"replace"}`);
       setProfileCache?.(requestProfileKey, makeProfileSnapshot({
         jobs: mergeMode
           ? [...new Map([...jobs, ...incoming].map(j => [j.jobId, j])).values()]
@@ -1338,6 +1341,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (requestSeq === jobsFetchSeqRef.current) setBgLoading(false);
     }
   }, [activeDomainProfile, buildParams, boardTab, fetchPending, jobs, makeProfileSnapshot, setProfileCache]);
+  // Keep stable ref in sync so callbacks with empty deps (e.g. startPollLoop) always
+  // call the current fetchJobs closure without needing it in their dep arrays.
+  fetchJobsRef.current = fetchJobs;
 
   // -- Boot --------------------------------------------------
   useEffect(() => {
@@ -1466,6 +1472,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           setScraping(false);
           setScrapeNewCount(totalNew);
           setPollStatus("complete");
+          // Re-fetch from DB with current sort so poll-prepended jobs end up in correct order
+          fetchJobsRef.current?.(1);
           setTimeout(() => { setPollStatus("idle"); setScrapeNewCount(0); }, 5000);
         }
       } catch {
