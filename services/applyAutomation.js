@@ -206,11 +206,16 @@ async function takeScreenshot(page, jobId) {
 // ── Main entry point ──────────────────────────────────────────────────────────
 export async function autoApply(jobUrl, autofillData, options = {}) {
   const {
-    mode             = "semi",
-    platform         = null,
-    resumePath       = null,
-    jobId            = `tmp_${Date.now()}`,
-    storageStatePath = null,
+    mode              = "semi",
+    platform          = null,
+    resumePath        = null,
+    // Promise<string|null> — resolves to a PDF file path when generation+ATS gate completes,
+    // or null if generation failed / ATS score is below threshold / PDF conversion failed.
+    // The browser awaits this before the first resume upload attempt, enabling parallel
+    // site-visit + generation without blocking navigation or form-fill.
+    resumePathPromise = null,
+    jobId             = `tmp_${Date.now()}`,
+    storageStatePath  = null,
   } = options;
 
   const isFullAuto = mode === "full";
@@ -281,13 +286,46 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     };
 
     await fillAllFrames();
-    await handleResumeUpload(page, resumePath);
+
+    // Resolve effective resume path — await resumePathPromise if no direct path provided.
+    // resumePathPromise is set by the apply worker when generation runs in parallel;
+    // it resolves to a temp PDF path once generation + ATS gate complete, or null on failure.
+    let effectiveResumePath = resumePath;
+    if (!effectiveResumePath && resumePathPromise) {
+      inProgress.set(String(jobId), { status: "waiting_for_resume", browser });
+      try {
+        effectiveResumePath = await Promise.race([
+          resumePathPromise,
+          new Promise(r => setTimeout(() => r(null), 90_000)),
+        ]);
+      } catch { effectiveResumePath = null; }
+    }
+
+    await handleResumeUpload(page, effectiveResumePath);
 
     // Multi-step pagination
     for (let step = 0; step < 8; step++) {
       if (!await clickNext(page)) break;
       await fillAllFrames();
-      await handleResumeUpload(page, resumePath);
+      await handleResumeUpload(page, effectiveResumePath);
+    }
+
+    // ATS gate: if a resumePathPromise was provided but resolved to null (generation failed,
+    // ATS below threshold, or PDF conversion failed) — do NOT auto-submit.
+    if (isFullAuto && resumePathPromise && !effectiveResumePath) {
+      const pageTitle = await page.title().catch(() => "");
+      const ss = await takeScreenshot(page, jobId);
+      inProgress.set(String(jobId), { status: "ats_held", browser: null });
+      await browser.close();
+      return {
+        status:           "ats_held",
+        reasonCode:       "resume_unavailable",
+        fieldsFilled:     totalFilled,
+        platform:         detected,
+        pageTitle,
+        screenshotBase64: ss.base64,
+        screenshotPath:   ss.path,
+      };
     }
 
     let status, pageTitle;

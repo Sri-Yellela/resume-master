@@ -11,6 +11,7 @@
 
 import path from "path";
 import fs   from "fs";
+import os   from "os";
 import { fileURLToPath } from "url";
 import { autoApply, getApplyStatus, closeSemiBrowser } from "../services/applyAutomation.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
@@ -76,7 +77,7 @@ function publicRunJob(row) {
   };
 }
 
-export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply) {
+export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf) {
   const logApplyEvent = ({ runId, runJobId, userId, jobId, level = "info", event, message, details }) => {
     db.prepare(`
       INSERT INTO apply_job_logs (run_id, run_job_id, user_id, job_id, level, event, message, details_json)
@@ -207,11 +208,29 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
       db.prepare("UPDATE apply_run_jobs SET status='applying' WHERE id=?").run(jobRow.id);
       logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "applying", message: "Launching automation." });
+
+      // Convert existing HTML artifact to a temp PDF for upload
+      let pdfPath = null;
+      if (htmlToPdf && existingArtifact.html) {
+        try {
+          const pdfBuf = await htmlToPdf(existingArtifact.html);
+          pdfPath = path.join(os.tmpdir(), `apply_resume_${run.user_id}_${job.job_id}_${Date.now()}.pdf`);
+          fs.writeFileSync(pdfPath, pdfBuf);
+        } catch (e) {
+          logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+            level: "warn", event: "pdf_conversion_failed",
+            message: `PDF conversion failed: ${e.message}. Proceeding without resume upload.`,
+            details: { error: e.message } });
+        }
+      }
+
       const result = await autoApply(jobUrl, autofillData, {
         mode: run.mode === "manual" ? "semi" : "full",
         jobId: `${run.id}_${job.job_id}`,
         storageStatePath: getStorageStatePath(run.user_id, jobUrl),
+        resumePath: pdfPath,
       });
+      if (pdfPath) try { fs.unlinkSync(pdfPath); } catch {}
       return _handleAutomationResult(jobRow, run, job, result, existingArtifact.id);
 
     } else if (run.mode === "manual") {
@@ -233,16 +252,35 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         ? generateResumeForApply(run.user_id, job.job_id, run.tool_type)
         : Promise.resolve({ error: "no_generation_handler" });
 
+      // Convert generated HTML to a temp PDF so the browser can upload it.
+      // Runs in parallel — browser navigates + fills while PDF is being produced.
+      // No ATS gate here: manual mode never auto-submits.
+      const resumePathPromise = htmlToPdf
+        ? artifactPromise.then(async genResult => {
+            if (!genResult?.html || genResult.error) return null;
+            try {
+              const pdfBuf = await htmlToPdf(genResult.html);
+              const tmpPath = path.join(os.tmpdir(), `apply_resume_${run.user_id}_${job.job_id}_${Date.now()}.pdf`);
+              fs.writeFileSync(tmpPath, pdfBuf);
+              return tmpPath;
+            } catch { return null; }
+          }).catch(() => null)
+        : null;
+
       const automationPromise = autoApply(jobUrl, autofillData, {
         mode: "semi",
         jobId: `${run.id}_${job.job_id}`,
         storageStatePath: getStorageStatePath(run.user_id, jobUrl),
+        resumePathPromise,
       });
 
       const [autoSettled, artifactSettled] = await Promise.allSettled([
         automationPromise,
         artifactPromise,
       ]);
+
+      // Clean up temp PDF after apply completes
+      if (resumePathPromise) resumePathPromise.then(p => { if (p) try { fs.unlinkSync(p); } catch {} }).catch(() => {});
 
       // Update artifact info if generation completed
       if (artifactSettled.status === "fulfilled" && artifactSettled.value?.resumeId) {
@@ -270,12 +308,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
     } else {
       // ── CASE C: no artifact + AUTO mode ───────────────────────────────────
-      // Generate first to get ATS score for the gate, then run browser.
-      // This preserves ATS gating semantics: we must know the score before submitting.
+      // Two parallel tracks: generation (for ATS gate + PDF) and browser (site visit + fill).
+      // The tracks couple only at the upload/submit step via resumePathPromise:
+      //   - Browser navigates and fills while generation runs
+      //   - resumePathPromise resolves to PDF path when generation + ATS gate passes,
+      //     or null if generation failed / ATS below threshold / PDF conversion failed
+      //   - autoApply awaits resumePathPromise before the first upload attempt;
+      //     if null and full-auto, it skips submission (returns ats_held)
       db.prepare("UPDATE apply_run_jobs SET status='generation_started' WHERE id=?").run(jobRow.id);
       logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
         event: "generation_started",
-        message: "No existing resume found — generating resume before auto-apply.",
+        message: "No existing resume found — generating resume in parallel with site visit.",
         details: { toolType: run.tool_type } });
 
       if (!generateResumeForApply) {
@@ -283,34 +326,70 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           "Resume generation is not available in this context. Generate a resume manually and retry.", { toolType: run.tool_type });
       }
 
-      let genResult;
-      try {
-        genResult = await Promise.race([
-          generateResumeForApply(run.user_id, job.job_id, run.tool_type),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("generation_timed_out")), GENERATION_WAIT_TIMEOUT_MS)),
-        ]);
-      } catch(e) {
-        return holdRunJob(jobRow, "generation_failed",
-          `Resume generation failed or timed out: ${e.message}.`,
-          { toolType: run.tool_type, error: e.message });
-      }
+      // Generation track with timeout
+      const genWithTimeout = Promise.race([
+        generateResumeForApply(run.user_id, job.job_id, run.tool_type),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("generation_timed_out")), GENERATION_WAIT_TIMEOUT_MS)),
+      ]);
 
-      if (genResult?.error) {
-        return holdRunJob(jobRow, "generation_failed",
-          `Resume generation failed: ${genResult.error}.`,
-          { toolType: run.tool_type, error: genResult.error });
-      }
+      // Gate: ATS check + PDF conversion — resolves to a temp file path or null
+      const resumePathPromise = genWithTimeout.then(async genResult => {
+        if (!genResult?.html || genResult.error) return null;
+        const score = genResult.atsScore ?? null;
+        if (score != null && score < ATS_AUTO_APPLY_THRESHOLD) return null; // ATS gate
+        if (!htmlToPdf) return null;
+        try {
+          const pdfBuf = await htmlToPdf(genResult.html);
+          const tmpPath = path.join(os.tmpdir(), `apply_resume_${run.user_id}_${job.job_id}_${Date.now()}.pdf`);
+          fs.writeFileSync(tmpPath, pdfBuf);
+          return tmpPath;
+        } catch (e) {
+          console.warn(`[applyWorker] PDF conversion failed job=${job.job_id}: ${e.message}`);
+          return null;
+        }
+      }).catch(() => null);
 
-      // Generation succeeded — update artifact record
-      db.prepare("UPDATE apply_run_jobs SET resume_id=?, resume_file=?, ats_score=? WHERE id=?")
-        .run(genResult.resumeId, applyResumeFileName(job.job_id, genResult.resumeId), genResult.atsScore ?? null, jobRow.id);
+      // Apply track: visit site + fill + wait for resume at upload step
+      db.prepare("UPDATE apply_run_jobs SET status='site_visit_started' WHERE id=?").run(jobRow.id);
       logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
-        event: "generation_ready",
-        message: `Resume generated${genResult.atsScore != null ? ` (ATS: ${genResult.atsScore})` : ""}.`,
-        details: { resumeId: genResult.resumeId, atsScore: genResult.atsScore } });
+        event: "site_visit_started", message: "Launching browser in parallel with resume generation." });
 
-      // ATS gate using freshly generated score
-      const atsScore = genResult.atsScore ?? null;
+      const automationPromise = autoApply(jobUrl, autofillData, {
+        mode: "full",
+        jobId: `${run.id}_${job.job_id}`,
+        storageStatePath: getStorageStatePath(run.user_id, jobUrl),
+        resumePathPromise,
+      });
+
+      const [genSettled, autoSettled] = await Promise.allSettled([genWithTimeout, automationPromise]);
+
+      // Clean up temp PDF after both tracks settle
+      resumePathPromise.then(tmpPath => { if (tmpPath) try { fs.unlinkSync(tmpPath); } catch {} }).catch(() => {});
+
+      // Process generation result
+      const genResult = genSettled.status === "fulfilled" ? genSettled.value : null;
+      const genErr = genSettled.status === "rejected"
+        ? genSettled.reason?.message
+        : (genResult?.error || null);
+
+      if (genErr) {
+        const reasonCode = genErr === "generation_timed_out" ? "generation_timed_out" : "generation_failed";
+        return holdRunJob(jobRow, reasonCode,
+          `Resume generation ${reasonCode === "generation_timed_out" ? "timed out" : "failed"}: ${genErr}.`,
+          { toolType: run.tool_type, error: genErr });
+      }
+
+      if (genResult?.resumeId) {
+        db.prepare("UPDATE apply_run_jobs SET resume_id=?, resume_file=?, ats_score=? WHERE id=?")
+          .run(genResult.resumeId, applyResumeFileName(job.job_id, genResult.resumeId), genResult.atsScore ?? null, jobRow.id);
+        logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
+          event: "generation_ready",
+          message: `Resume generated${genResult.atsScore != null ? ` (ATS: ${genResult.atsScore})` : ""}.`,
+          details: { resumeId: genResult.resumeId, atsScore: genResult.atsScore } });
+      }
+
+      // ATS gate (may hold the run regardless of browser result)
+      const atsScore = genResult?.atsScore ?? null;
       db.prepare("UPDATE apply_run_jobs SET status='ats_review', ats_score=? WHERE id=?").run(atsScore, jobRow.id);
       logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id,
         event: "ats_checked", message: `ATS score ${atsScore ?? "unavailable"} (post-generation).`,
@@ -321,14 +400,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           { atsScore, threshold: ATS_AUTO_APPLY_THRESHOLD });
       }
 
-      db.prepare("UPDATE apply_run_jobs SET status='applying' WHERE id=?").run(jobRow.id);
-      logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "applying", message: "Launching automation." });
-      const result = await autoApply(jobUrl, autofillData, {
-        mode: "full",
-        jobId: `${run.id}_${job.job_id}`,
-        storageStatePath: getStorageStatePath(run.user_id, jobUrl),
-      });
-      return _handleAutomationResult(jobRow, run, job, result, genResult.resumeId);
+      if (autoSettled.status === "rejected") {
+        return failRunJob(jobRow, "worker_error", autoSettled.reason?.message || "Browser automation threw.");
+      }
+      return _handleAutomationResult(jobRow, run, job, autoSettled.value, genResult?.resumeId || null);
     }
   };
 
@@ -373,8 +448,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       db.prepare("UPDATE apply_run_jobs SET status='submitted', finished_at=unixepoch(), locked_at=NULL WHERE id=?").run(jobRow.id);
       return;
     }
+    if (result.status === "ats_held") {
+      // resumePathPromise resolved to null after ATS gate — generation succeeded but PDF
+      // conversion was unavailable. ATS score itself was within threshold; hold for manual review.
+      return holdRunJob(jobRow, "pdf_conversion_failed",
+        "Resume generated but PDF conversion failed. Apply manually.", {});
+    }
     if (result.status === "filled_not_submitted") {
-      return holdRunJob(jobRow, "submit_button_missing", "Fields were filled but no safe submit button was found.", result);
+      return holdRunJob(jobRow, result.reasonCode || "submit_button_missing", "Fields were filled but no safe submit button was found.", result);
     }
     return failRunJob(jobRow, result.reasonCode || "automation_failed", result.error || "Application automation failed.", result);
   };

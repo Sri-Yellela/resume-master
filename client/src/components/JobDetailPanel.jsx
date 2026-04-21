@@ -206,19 +206,14 @@ export default function JobDetailPanel({
           </ActionBtn>
         )}
         {(job.applyUrl || job.url) && !semiActive && (
-          <ActionBtn onClick={() => handleAutoApply("semi")} title="Open pre-filled form in browser"
+          <ActionBtn onClick={() => handleAutoApply("semi")} title="Open pre-filled application in browser"
             accent={theme.accent} theme={theme} active={applyLoading}>
-            {applyLoading ? "⏳" : "↗ Apply"}
+            {applyLoading ? "⏳" : "Apply"}
           </ActionBtn>
         )}
         {(job.applyUrl || job.url) && onQueueApply && (
           <ActionBtn onClick={() => onQueueApply(job)} title="Add this job to the auto-apply queue" accent="#16a34a" theme={theme}>
             Queue Auto
-          </ActionBtn>
-        )}
-        {(job.applyUrl || job.url) && !semiActive && (
-          <ActionBtn onClick={() => onVisit?.()} title="Open job listing (manual)" accent={theme.accentText || "#1a6a8a"} theme={theme}>
-            ✎ Manual
           </ActionBtn>
         )}
         {semiActive && (

@@ -6563,7 +6563,7 @@ app.delete("/api/linkedin/cookies", requireAuth, (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 // APPLY AUTOMATION (Playwright)
 // ═══════════════════════════════════════════════════════════════
-applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply);
+applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf);
 
 // ── Contact form (public — no auth required) ──────────────────
 app.post("/api/contact", (req, res) => {

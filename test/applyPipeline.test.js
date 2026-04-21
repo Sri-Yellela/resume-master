@@ -88,10 +88,10 @@ test("coreGenerateResume is extracted and callable from generateResumeForApply",
   assert.match(server, /async function coreGenerateResume/);
   assert.match(server, /function generateResumeForApply/);
   assert.match(server, /const pendingGenerationPromises = new Map/);
-  // generateResumeForApply must be passed to applyRoutes so the worker can call it
-  assert.match(server, /applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply\)/);
-  // The apply routes must accept it as a parameter
-  assert.match(applyRoute, /function applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply\)/);
+  // generateResumeForApply AND htmlToPdf must be passed to applyRoutes
+  assert.match(server, /applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf\)/);
+  // The apply routes must accept both as parameters
+  assert.match(applyRoute, /function applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf\)/);
 });
 
 test("generateResumeForApply reuses existing artifact without triggering a new generation", () => {
@@ -122,4 +122,44 @@ test("jobs UI can queue multiple jobs and start auto or manual apply runs", () =
   assert.match(jobsPanel, /Run Auto Apply/);
   assert.match(jobsPanel, /Autofill for Review/);
   assert.match(jobsPanel, /api\("\/api\/apply\/runs"/);
+});
+
+test("autoApply accepts resumePathPromise and awaits it before first upload", () => {
+  // New option enables true parallel: browser navigates while generation runs,
+  // then waits at the upload step for the PDF path.
+  assert.match(automation, /resumePathPromise/);
+  assert.match(automation, /effectiveResumePath/);
+  // Must set waiting_for_resume status while awaiting the promise
+  assert.match(automation, /waiting_for_resume/);
+  // Must return ats_held (not submit) when resumePathPromise resolves to null in full-auto mode
+  assert.match(automation, /status:\s*"ats_held"/);
+  assert.match(automation, /isFullAuto && resumePathPromise && !effectiveResumePath/);
+});
+
+test("auto apply Case C launches browser in parallel with generation via resumePathPromise", () => {
+  // Case C must no longer be sequential: browser launches before generation completes.
+  const caseC = applyRoute.slice(applyRoute.indexOf("CASE C:"), applyRoute.indexOf("const processRun ="));
+  assert.match(caseC, /resumePathPromise/, "must pass resumePathPromise to autoApply for parallel gating");
+  assert.match(caseC, /site_visit_started/, "must log site_visit_started before browser launch");
+  assert.match(caseC, /Promise\.allSettled/, "must await both tracks together via Promise.allSettled");
+  // The ATS gate must be embedded in resumePathPromise (not a top-level await before browser launch)
+  assert.match(caseC, /ATS_AUTO_APPLY_THRESHOLD/, "ATS gate must be inside resumePathPromise chain");
+});
+
+test("apply routes convert generated HTML to PDF via htmlToPdf for actual file upload", () => {
+  // htmlToPdf must be wired through: server → applyRoutes → used in processRunJob
+  assert.match(applyRoute, /htmlToPdf/, "apply routes must use htmlToPdf");
+  assert.match(applyRoute, /os\.tmpdir\(\)/, "must write PDF to a temp file via os.tmpdir()");
+  assert.match(applyRoute, /unlinkSync/, "must clean up temp PDF after apply completes");
+  // resumePathPromise must be passed to autoApply in all cases that generate a resume
+  assert.match(applyRoute, /resumePathPromise/, "must pass resumePathPromise to autoApply");
+});
+
+test("job detail panel has single Apply action and no redundant Manual button", () => {
+  // Single "Apply" action — no ↗ icon prefix, no separate ✎ Manual button
+  assert.match(detailPanel, /: "Apply"/, "Apply button label must be exactly 'Apply'");
+  assert.doesNotMatch(detailPanel, /✎ Manual/, "redundant Manual button must be removed");
+  // Semi-auto apply mechanism must remain intact
+  assert.match(detailPanel, /handleAutoApply/, "semi-auto apply handler must still be present");
+  assert.match(detailPanel, /mode.*semi|semi.*mode/, "Apply action must use semi mode");
 });
