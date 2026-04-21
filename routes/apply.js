@@ -694,7 +694,19 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           mode: "semi", resumePath, jobId: jobIdStr, storageStatePath,
         });
         if (result.status === "error") {
-          return res.status(500).json({ ok: false, status: "error", error: result.error || "Automation failed" });
+          const BROWSER_FAILURE_CODES = new Set([
+            "browser_runtime_missing_dependency",
+            "browser_binary_not_found",
+            "browser_launch_failed",
+          ]);
+          const isBrowserFailure = BROWSER_FAILURE_CODES.has(result.reasonCode);
+          return res.status(isBrowserFailure ? 503 : 500).json({
+            ok: false, status: "error",
+            error: result.error || "Automation failed",
+            reasonCode: result.reasonCode || "automation_failed",
+            // fallbackUrl lets the client offer a direct-link fallback when browser unavailable
+            ...(isBrowserFailure ? { fallbackUrl: jobUrl } : {}),
+          });
         }
         const n = result.fieldsFilled ?? 0;
         return res.json({

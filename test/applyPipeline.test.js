@@ -110,9 +110,17 @@ test("generateResumeForApply attaches to in-flight HTTP generation instead of du
 });
 
 test("browser unavailable error is classified for graceful fallback", () => {
-  assert.match(automation, /reasonCode = "browser_unavailable"/);
-  assert.match(automation, /Chrome not found on Windows/);
+  // Classification now lives in browserLauncher; applyAutomation delegates to it.
+  const launcher = fs.readFileSync("services/browserLauncher.js", "utf8");
+  // Structured reason codes emitted by classifyLaunchError
+  assert.match(launcher, /browser_runtime_missing_dependency/);
+  assert.match(launcher, /browser_binary_not_found/);
+  assert.match(launcher, /browser_launch_failed/);
+  // autoApply error handler still propagates the structured reasonCode
   assert.match(automation, /reasonCode: e\.reasonCode/);
+  // autoApply uses launchBrowser (no direct puppeteer.launch)
+  assert.match(automation, /launchBrowser/);
+  assert.doesNotMatch(automation, /puppeteer\.launch/);
 });
 
 test("jobs UI can queue multiple jobs and start auto or manual apply runs", () => {

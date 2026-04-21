@@ -12,8 +12,7 @@ import passport       from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import session        from "express-session";
 import SQLiteStoreFactory from "connect-sqlite3";
-import chromium    from "@sparticuz/chromium";
-import puppeteer   from "puppeteer-core";
+import { launchBrowser, probeBrowserAvailability } from "./services/browserLauncher.js";
 import multer         from "multer";
 import ExcelJS        from "exceljs";
 import crypto         from "crypto";
@@ -2898,39 +2897,15 @@ ${resumeText}`;
 // ──────────────────────────────────────────────────────────────
 
 async function htmlToPdf(html) {
-  // Ensure doctype for correct browser rendering
   if (!html.trimStart().toLowerCase().startsWith("<!doctype")) {
     html = "<!DOCTYPE html>" + html;
   }
-
-  // On Windows, @sparticuz/chromium provides a Linux ELF binary that cannot run.
-  // Detect Windows and use the system Chrome installation instead.
-  const isWindows = process.platform === "win32";
-  let executablePath, launchArgs;
-
-  if (isWindows) {
-    const winPaths = [
-      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-      process.env.LOCALAPPDATA + "\\Google\\Chrome\\Application\\chrome.exe",
-    ];
-    const fs = await import("fs");
-    executablePath = winPaths.find(p => { try { return fs.existsSync(p); } catch { return false; } });
-    if (!executablePath) throw new Error("Chrome not found on Windows. Install Chrome to enable PDF export.");
-    launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
-  } else {
-    executablePath = await chromium.executablePath();
-    console.log(`[pdf] chromium path: ${executablePath}`);
-    launchArgs = [...chromium.args, "--single-process"];
-  }
-
-  const browser = await puppeteer.launch({
-    args:            launchArgs,
-    defaultViewport: isWindows ? { width:1240, height:1754 } : chromium.defaultViewport,
-    executablePath,
-    headless:        isWindows ? true : chromium.headless,
+  // launchBrowser resolves the best available binary and applies container-safe args.
+  // On failure it throws with a structured reasonCode (browser_runtime_missing_dependency, etc.)
+  const browser = await launchBrowser({
+    headless: true,
+    viewport: { width:1240, height:1754 },
   });
-
   try {
     const page = await browser.newPage();
     await page.setViewport({ width:1240, height:1754 });
@@ -4592,8 +4567,19 @@ function saveIntegrationSecret(value) {
   return encryptCookies(text);
 }
 
-app.get("/api/integrations/status", requireAuth, (req, res) => {
-  res.json({ ...getAutomationReadiness(db, req.user.id), oauth: oauthReadiness(req) });
+app.get("/api/integrations/status", requireAuth, async (req, res) => {
+  // probeBrowserAvailability() returns a cached result after the first probe
+  const browserStatus = await probeBrowserAvailability();
+  res.json({
+    ...getAutomationReadiness(db, req.user.id),
+    oauth: oauthReadiness(req),
+    browser: {
+      available:   browserStatus.available,
+      reasonCode:  browserStatus.reasonCode,
+      source:      browserStatus.source,
+      requiredFor: ["apply_automation", "pdf_export"],
+    },
+  });
 });
 
 app.patch("/api/integrations/apify-token", requireAuth, (req, res) => {
@@ -6808,4 +6794,12 @@ app.get("/api/debug/verify-isolation", requireAuth, (req, res) => {
   });
 });
 
-app.listen(PORT, () => console.log(`[server] Resume Master v5 on :${PORT}`));
+app.listen(PORT, () => {
+  console.log(`[server] Resume Master v5 on :${PORT}`);
+  // Warm up browser availability probe in background so /api/integrations/status
+  // returns a cached result without delay on first user request.
+  probeBrowserAvailability().then(r => {
+    if (r.available) console.log(`[server] browser ready — source=${r.source}`);
+    else console.warn(`[server] browser unavailable — ${r.reasonCode}: ${r.error}`);
+  }).catch(() => {});
+});

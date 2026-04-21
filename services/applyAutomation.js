@@ -8,11 +8,10 @@
 //   options.resumePath:      absolute path to PDF resume for upload
 //   options.storageStatePath: saved session state file
 
-import puppeteer  from "puppeteer-core";
-import chromium   from "@sparticuz/chromium";
 import path  from "path";
 import fs    from "fs";
 import { fileURLToPath } from "url";
+import { launchBrowser } from "./browserLauncher.js";
 import {
   detectPlatformFromUrl, detectPlatformFromPage,
   getPlatformLabelMap,
@@ -223,31 +222,13 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
   try {
     console.log(`[autoApply] launching browser — mode=${mode} url=${jobUrl}`);
-
     const isWindows = process.platform === "win32";
-    let executablePath, launchArgs;
-    if (isWindows) {
-      const winPaths = [
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-        (process.env.LOCALAPPDATA || "") + "\\Google\\Chrome\\Application\\chrome.exe",
-      ];
-      executablePath = winPaths.find(p => { try { return fs.existsSync(p); } catch { return false; } });
-      if (!executablePath) {
-        const err = new Error("Chrome not found on Windows. Install Chrome or use the direct job link for manual review.");
-        err.reasonCode = "browser_unavailable";
-        throw err;
-      }
-      launchArgs = ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu"];
-    } else {
-      executablePath = await chromium.executablePath();
-      launchArgs = [...chromium.args, "--single-process"];
-    }
-    browser = await puppeteer.launch({
-      args:            launchArgs,
-      defaultViewport: isWindows ? { width: 1280, height: 800 } : chromium.defaultViewport,
-      executablePath,
-      headless:        isFullAuto || !isWindows,
+    // launchBrowser resolves the best available binary, applies container-safe args,
+    // and throws with a structured reasonCode on failure.
+    browser = await launchBrowser({
+      headless:  isFullAuto || !isWindows,
+      viewport:  isWindows ? { width: 1280, height: 800 } : null,
+      isWindows,
     });
     console.log("[autoApply] browser launched");
 

@@ -97,7 +97,7 @@ export default function JobDetailPanel({
       } else if (d.status === "filled_not_submitted") {
         setApplyResult({ status:"warn", message:"Form filled — submit button not found." });
       } else if (d.status === "error") {
-        setApplyResult({ status:"error", message: d.error || "Automation failed" });
+        setApplyResult({ status:"error", message: d.error || "Automation failed", fallbackUrl: d.fallbackUrl || null });
       } else {
         setApplyResult({ status:"info", message: d.message || "Done" });
       }
@@ -256,6 +256,12 @@ export default function JobDetailPanel({
           <span>
             {applyResult.status === "success" ? "✓ " : applyResult.status === "error" ? "✗ " : "ℹ "}
             {applyResult.message}
+            {applyResult.fallbackUrl && (
+              <a href={applyResult.fallbackUrl} target="_blank" rel="noreferrer"
+                style={{ color:"inherit", marginLeft:6, textDecoration:"underline" }}>
+                Apply directly ↗
+              </a>
+            )}
           </span>
           <button onClick={() => setApplyResult(null)}
             style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, opacity:0.6, padding:"0 2px" }}>
