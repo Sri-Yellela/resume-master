@@ -1840,13 +1840,44 @@ db.pragma("busy_timeout = 5000");
     },
     {
       // Migration 048 — Re-classify existing job_role_map entries that were assigned
-      // role_key='engineering' via profile-scrape (profile_scrape matched_by) but whose
-      // title clearly indicates firmware/embedded. These were scraped while the user had
-      // a SWE profile active, so they route correctly to firmware when profile changes.
+      // role_key='engineering' via automated classifiers but whose title clearly indicates
+      // firmware/embedded. Runs in two idempotent steps:
+      //
+      // Step 1: DELETE stale 'engineering' rows for jobs that already have an
+      //   'engineering_embedded_firmware' row — these are duplicates from migration 047,
+      //   the ingest classifier, or a prior partial run of 048. Updating them would hit
+      //   the UNIQUE(job_id, role_key) constraint. Deleting them is safe because the
+      //   correct mapping already exists.
+      //
+      // Step 2: UPDATE remaining 'engineering' firmware-title rows to
+      //   'engineering_embedded_firmware'. After Step 1, no conflict is possible.
+      //   Both steps are no-ops on a clean or already-processed database.
       id: "048_firmware_reclassify",
       sql: `
+        DELETE FROM job_role_map
+        WHERE role_key = 'engineering'
+          AND matched_by IN ('profile_scrape','orphan_repair','strong_anchor','strong_anchor+desc')
+          AND job_id IN (
+            SELECT jrm2.job_id FROM job_role_map jrm2
+            WHERE jrm2.role_key = 'engineering_embedded_firmware'
+          )
+          AND job_id IN (
+            SELECT sj.job_id FROM scraped_jobs sj
+            WHERE LOWER(sj.title) LIKE '%firmware%'
+               OR LOWER(sj.title) LIKE '%embedded system%'
+               OR LOWER(sj.title) LIKE '% bsp %'
+               OR LOWER(sj.title) LIKE 'bsp %'
+               OR LOWER(sj.title) LIKE '%bsp engineer%'
+               OR LOWER(sj.title) LIKE '% uefi %'
+               OR LOWER(sj.title) LIKE '%uefi engineer%'
+               OR LOWER(sj.title) LIKE '%device driver%'
+               OR LOWER(sj.title) LIKE '%bootloader%'
+               OR LOWER(sj.title) LIKE '% rtos %'
+               OR LOWER(sj.title) LIKE '%rtos engineer%'
+          );
+
         UPDATE job_role_map
-        SET role_key   = 'engineering_embedded_firmware',
+        SET role_key    = 'engineering_embedded_firmware',
             role_family = 'engineering',
             domain      = 'engineering_embedded_firmware',
             confidence  = 0.88,
