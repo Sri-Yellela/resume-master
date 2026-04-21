@@ -1,3 +1,5 @@
+import { getBaseResumeRecord } from "./simpleApplyProfile.js";
+
 export const INTEGRATION_PROVIDERS = new Set(["gmail", "google", "linkedin"]);
 
 function parseJson(value, fallback) {
@@ -45,15 +47,17 @@ export function getLinkedInStatus(db, userId) {
 
 export function getAutomationReadiness(db, userId) {
   const user = db.prepare("SELECT apify_token FROM users WHERE id=?").get(userId) || {};
-  const base = db.prepare("SELECT name, updated_at FROM base_resume WHERE user_id=? AND TRIM(content) != ''").get(userId);
   const activeProfile = db.prepare("SELECT id, profile_name FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
+  const base = activeProfile
+    ? getBaseResumeRecord(db, { userId, profileId: activeProfile.id })
+    : null;
   const profile = db.prepare("SELECT first_name, last_name, full_name, email, phone FROM user_profile WHERE user_id=?").get(userId) || {};
   const gmail = publicIntegrationRow(getStoredIntegration(db, userId, "gmail"));
   const google = publicIntegrationRow(getStoredIntegration(db, userId, "google"));
   const linkedin = getLinkedInStatus(db, userId);
   const hasName = !!((profile.first_name && profile.last_name) || profile.full_name);
   const missingApply = [];
-  if (!base) missingApply.push("base_resume");
+  if (!String(base?.content || "").trim()) missingApply.push("base_resume");
   if (!activeProfile) missingApply.push("active_profile");
   if (!profile.email) missingApply.push("profile_email");
   if (!hasName) missingApply.push("profile_name");
@@ -69,8 +73,8 @@ export function getAutomationReadiness(db, userId) {
     linkedin: { ...linkedin, requiredFor: ["linkedin_search_context", "linkedin_apply_session"] },
     resume: {
       connected: !!base,
-      healthy: !!base,
-      status: base ? "available" : "missing",
+      healthy: !!String(base?.content || "").trim(),
+      status: String(base?.content || "").trim() ? "available" : "missing",
       name: base?.name || null,
       updatedAt: base?.updated_at || null,
       requiredFor: ["apply", "ats_defaults", "search_defaults"],

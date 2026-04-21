@@ -5,6 +5,7 @@ import fs from "node:fs";
 const launcher   = fs.readFileSync("services/browserLauncher.js",   "utf8");
 const automation = fs.readFileSync("services/applyAutomation.js",   "utf8");
 const server     = fs.readFileSync("server.js",                      "utf8");
+const account    = fs.readFileSync("routes/account.js",              "utf8");
 const applyRoute = fs.readFileSync("routes/apply.js",                "utf8");
 const nixpacks   = fs.readFileSync("nixpacks.toml",                  "utf8");
 
@@ -114,8 +115,8 @@ test("server imports launchBrowser and probeBrowserAvailability from browserLaun
 
 test("integrations status endpoint includes browser availability in response", () => {
   assert.match(server, /probeBrowserAvailability/);
-  // browser field must be included in the response
-  const statusRoute = server.slice(server.indexOf('"/api/integrations/status"'), server.indexOf('"/api/integrations/apify-token"'));
+  assert.match(server, /createAccountRouter/);
+  const statusRoute = account.slice(account.indexOf('"/api/integrations/status"'), account.indexOf('"/api/integrations/apify-token"'));
   assert.match(statusRoute, /browser:/);
   assert.match(statusRoute, /available/);
   assert.match(statusRoute, /reasonCode/);

@@ -2,9 +2,18 @@
 import { useState } from "react";
 
 // ── Helpers ─────────────────────────────────────────────────────
-function ago(ts) {
-  if (!ts) return "—";
-  const d = Date.now() - new Date(ts).getTime();
+// Compute elapsed time since posting.
+// postedAt is stored as ISO date (e.g. "2024-03-15") after O1 normalization.
+// fallbackTs is scraped_at (Unix seconds) — used when postedAt is absent.
+function ago(postedAt, scrapedAt) {
+  let ms = postedAt ? new Date(postedAt).getTime() : NaN;
+  if (isNaN(ms) || ms <= 0) {
+    // Fall back to scraped_at (Unix seconds → ms)
+    ms = scrapedAt != null ? Number(scrapedAt) * 1000 : NaN;
+  }
+  if (isNaN(ms) || ms <= 0) return "—";
+  const d = Date.now() - ms;
+  if (d < 0) return "—";
   if (d < 3600000)  return `${Math.floor(d / 60000)}m`;
   if (d < 86400000) return `${Math.floor(d / 3600000)}h`;
   return `${Math.floor(d / 86400000)}d`;
@@ -281,7 +290,7 @@ export default function JobCard({
                               overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1, minWidth:0 }}>
                 {job.company}
               </span>
-              <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt)}</span>
+              <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt, job.scrapedAt)}</span>
               {(g?.atsScore != null || job?.baseAtsScore != null) && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>}
               {onStar && (
                 <button title={job.starred ? "Remove from saved" : "Save job"}
@@ -378,7 +387,7 @@ export default function JobCard({
 
           {/* Right side */}
           <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
-            <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
+            <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
 
             {(g?.atsScore != null || job?.baseAtsScore != null) && (
               <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>

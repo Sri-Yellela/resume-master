@@ -48,6 +48,6 @@ test("jobs search blocks missing setup states before running search", () => {
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 
   assert.match(jobsPanel, /Create a job search profile before searching jobs/);
-  assert.match(jobsPanel, /Upload your base resume before searching jobs/);
+  assert.match(jobsPanel, /Upload the active profile's base resume before searching jobs/);
   assert.match(jobsPanel, /SetupGateNotice/);
 });

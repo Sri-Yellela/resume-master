@@ -5,6 +5,12 @@ import { createRequire } from "module";
 import fs                from "fs";
 import path              from "path";
 import { fileURLToPath } from "url";
+import {
+  getBaseResumeRecord,
+  loadOrCreateSimpleApplyProfile,
+  saveBaseResumeRecord,
+  upsertSimpleApplyProfile,
+} from "../services/simpleApplyProfile.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,6 +65,16 @@ function cleanStringArray(value, limit = 20) {
     .slice(0, limit);
 }
 
+function parseProfileRow(row) {
+  return {
+    ...row,
+    target_titles: JSON.parse(row.target_titles || "[]"),
+    selected_keywords: JSON.parse(row.selected_keywords || "[]"),
+    selected_verbs: JSON.parse(row.selected_verbs || "[]"),
+    selected_tools: JSON.parse(row.selected_tools || "[]"),
+  };
+}
+
 export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {}) {
   const router = Router();
 
@@ -66,25 +82,41 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
   // Returns all profiles for the authenticated user.
   router.get("/", (req, res) => {
     let rows = db.prepare(`
-      SELECT * FROM domain_profiles WHERE user_id = ? ORDER BY is_active DESC, created_at ASC
+      SELECT dp.*,
+             EXISTS(
+               SELECT 1 FROM profile_base_resumes pbr
+               WHERE pbr.profile_id = dp.id AND TRIM(pbr.content) != ''
+             ) AS has_base_resume,
+             (
+               SELECT pbr.updated_at FROM profile_base_resumes pbr
+               WHERE pbr.profile_id = dp.id
+             ) AS base_resume_updated_at
+      FROM domain_profiles dp
+      WHERE dp.user_id = ?
+      ORDER BY dp.is_active DESC, dp.created_at ASC
     `).all(req.user.id);
     if (rows.length && !rows.some(r => r.is_active)) {
       db.prepare("UPDATE domain_profiles SET is_active=1, updated_at=unixepoch() WHERE id=? AND user_id=?")
         .run(rows[0].id, req.user.id);
       try { db.prepare("UPDATE users SET domain_profile_complete=1 WHERE id=?").run(req.user.id); } catch {}
       rows = db.prepare(`
-        SELECT * FROM domain_profiles WHERE user_id = ? ORDER BY is_active DESC, created_at ASC
+        SELECT dp.*,
+               EXISTS(
+                 SELECT 1 FROM profile_base_resumes pbr
+                 WHERE pbr.profile_id = dp.id AND TRIM(pbr.content) != ''
+               ) AS has_base_resume,
+               (
+                 SELECT pbr.updated_at FROM profile_base_resumes pbr
+                 WHERE pbr.profile_id = dp.id
+               ) AS base_resume_updated_at
+        FROM domain_profiles dp
+        WHERE dp.user_id = ?
+        ORDER BY dp.is_active DESC, dp.created_at ASC
       `).all(req.user.id);
     } else {
       try { db.prepare("UPDATE users SET domain_profile_complete=? WHERE id=?").run(rows.length ? 1 : 0, req.user.id); } catch {}
     }
-    res.json(rows.map(r => ({
-      ...r,
-      target_titles:      JSON.parse(r.target_titles      || "[]"),
-      selected_keywords:  JSON.parse(r.selected_keywords  || "[]"),
-      selected_verbs:     JSON.parse(r.selected_verbs     || "[]"),
-      selected_tools:     JSON.parse(r.selected_tools     || "[]"),
-    })));
+    res.json(rows.map(parseProfileRow));
   });
 
   // ── POST /api/domain-profiles ─────────────────────────────────
@@ -119,13 +151,7 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
     db.prepare("UPDATE users SET domain_profile_complete=1 WHERE id=?").run(req.user.id);
 
     const row = db.prepare("SELECT * FROM domain_profiles WHERE id=?").get(result.lastInsertRowid);
-    res.json({
-      ...row,
-      target_titles:     JSON.parse(row.target_titles     || "[]"),
-      selected_keywords: JSON.parse(row.selected_keywords || "[]"),
-      selected_verbs:    JSON.parse(row.selected_verbs    || "[]"),
-      selected_tools:    JSON.parse(row.selected_tools    || "[]"),
-    });
+    res.json(parseProfileRow(row));
   });
 
   // Store unsupported-role requests for product/admin review. The user may
@@ -189,13 +215,7 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
       .run(...vals, req.params.id, req.user.id);
 
     const updated = db.prepare("SELECT * FROM domain_profiles WHERE id=?").get(req.params.id);
-    res.json({
-      ...updated,
-      target_titles:     JSON.parse(updated.target_titles     || "[]"),
-      selected_keywords: JSON.parse(updated.selected_keywords || "[]"),
-      selected_verbs:    JSON.parse(updated.selected_verbs    || "[]"),
-      selected_tools:    JSON.parse(updated.selected_tools    || "[]"),
-    });
+    res.json(parseProfileRow(updated));
   });
 
   // ── DELETE /api/domain-profiles/:id ──────────────────────────
@@ -231,13 +251,113 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
 
     const updated = db.prepare("SELECT * FROM domain_profiles WHERE id=?").get(req.params.id);
     emitToUser(req.user.id, { type: "profile_switched", profileId: req.params.id });
-    res.json({
-      ...updated,
-      target_titles:     JSON.parse(updated.target_titles     || "[]"),
-      selected_keywords: JSON.parse(updated.selected_keywords || "[]"),
-      selected_verbs:    JSON.parse(updated.selected_verbs    || "[]"),
-      selected_tools:    JSON.parse(updated.selected_tools    || "[]"),
-    });
+    res.json(parseProfileRow(updated));
+  });
+
+  router.get("/:id/base-resume", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    const row = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
+    res.json(row ? {
+      content: row.content,
+      name: row.name,
+      updatedAt: row.updated_at,
+      enhancedAt: row.enhanced_at || null,
+      enhancedAtsDelta: row.enhanced_ats_delta ?? null,
+      hasEnhancedDraft: !!String(row.enhanced_content || "").trim(),
+    } : { content: null, name: null, updatedAt: null, hasEnhancedDraft: false });
+  });
+
+  router.post("/:id/base-resume", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    const { content, name } = req.body || {};
+    if (content === undefined) return res.status(400).json({ error: "content required" });
+    saveBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id }, content, name || "resume.txt");
+    const roleTitles = JSON.parse(profile.target_titles || "[]");
+    const signals = upsertSimpleApplyProfile(
+      db,
+      { userId: req.user.id, profileId: profile.id },
+      content,
+      roleTitles,
+    );
+    res.json({ ok: true, profileId: profile.id, signals });
+  });
+
+  router.get("/:id/signals", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    const roleTitles = JSON.parse(profile.target_titles || "[]");
+    const signals = loadOrCreateSimpleApplyProfile(
+      db,
+      { userId: req.user.id, profileId: profile.id, roleTitles },
+    );
+    res.json(signals || { titles: [], keywords: [], skills: [], searchTerms: [], yearsExperience: null });
+  });
+
+  router.post("/:id/signals/refresh", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    const base = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
+    if (!base?.content) return res.status(400).json({ error: "No base resume uploaded" });
+    const roleTitles = JSON.parse(profile.target_titles || "[]");
+    const signals = upsertSimpleApplyProfile(
+      db,
+      { userId: req.user.id, profileId: profile.id },
+      base.content,
+      roleTitles,
+    );
+    res.json(signals);
+  });
+
+  router.put("/:id/signals", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    const current = loadOrCreateSimpleApplyProfile(
+      db,
+      { userId: req.user.id, profileId: profile.id, roleTitles: JSON.parse(profile.target_titles || "[]") },
+    ) || {};
+    const next = {
+      titles: cleanStringArray(req.body?.titles ?? current.titles, 12).map(v => v.toLowerCase()),
+      keywords: cleanStringArray(req.body?.keywords ?? current.keywords, 32).map(v => v.toLowerCase()),
+      skills: cleanStringArray(req.body?.skills ?? current.skills, 24).map(v => v.toLowerCase()),
+      searchTerms: cleanStringArray(req.body?.searchTerms ?? current.searchTerms, 12).map(v => v.toLowerCase()),
+      yearsExperience: req.body?.yearsExperience === null || req.body?.yearsExperience === ""
+        ? null
+        : Number.isFinite(Number(req.body?.yearsExperience))
+          ? Number(req.body.yearsExperience)
+          : (current.yearsExperience ?? null),
+      sourceHash: current.sourceHash || null,
+    };
+    db.prepare(`
+      INSERT INTO profile_simple_apply_profiles
+        (profile_id, user_id, titles_json, keywords_json, skills_json, search_terms_json, source_hash, years_experience, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(profile_id) DO UPDATE SET
+        user_id=excluded.user_id,
+        titles_json=excluded.titles_json,
+        keywords_json=excluded.keywords_json,
+        skills_json=excluded.skills_json,
+        search_terms_json=excluded.search_terms_json,
+        source_hash=excluded.source_hash,
+        years_experience=excluded.years_experience,
+        updated_at=excluded.updated_at
+    `).run(
+      profile.id,
+      req.user.id,
+      JSON.stringify(next.titles),
+      JSON.stringify(next.keywords),
+      JSON.stringify(next.skills),
+      JSON.stringify(next.searchTerms),
+      next.sourceHash,
+      next.yearsExperience,
+    );
+    res.json(next);
   });
 
   // ── GET /api/domain-metadata/:domain ─────────────────────────

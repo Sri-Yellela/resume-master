@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const server = fs.readFileSync("server.js", "utf8");
+const accountRoute = fs.readFileSync("routes/account.js", "utf8");
 const auth = fs.readFileSync("client/src/components/AuthScreen.jsx", "utf8");
 const readiness = fs.readFileSync("services/integrationReadiness.js", "utf8");
 const integrations = fs.readFileSync("client/src/panels/IntegrationsPanel.jsx", "utf8");
@@ -55,7 +56,8 @@ test("OAuth callback and redirect handling is hardened", () => {
 });
 
 test("unlinking OAuth integrations clears provider identity columns", () => {
-  assert.match(server, /UPDATE users SET \$\{providerColumnFor\(provider\)\}=NULL WHERE id=\?/);
+  assert.match(server, /providerColumnFor/);
+  assert.match(accountRoute, /UPDATE users SET \$\{providerColumnFor\(provider\)\}=NULL WHERE id=\?/);
 });
 
 test("integrations readiness reflects auth-linked LinkedIn identity as connected", () => {

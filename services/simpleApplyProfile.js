@@ -23,6 +23,29 @@ const SKILL_HINTS = [
   "agile","scrum","jira","roadmap","budget","risk","timeline",
 ];
 
+// Extract the user's total years of professional experience from their resume text.
+// Returns an integer or null if not found. Used as a hard constraint in job filtering.
+export function extractUserYearsExperience(text) {
+  const str = String(text || "");
+  // Match "X+ years of professional/software/work/industry/total experience"
+  // Try the most specific patterns first to reduce false positives.
+  const patterns = [
+    /(\d+)\s*\+?\s*years?\s+of\s+(?:professional|software|industry|work|total)\s+experience/i,
+    /(\d+)\s*\+?\s*years?\s+(?:professional|software|industry|work|total)\s+experience/i,
+    /over\s+(\d+)\s*years?\s+of\s+experience/i,
+    /(\d+)\s*years?\s+of\s+(?:relevant\s+)?experience/i,
+    /(\d+)\s*years?\s+experience\s+(?:in|with|as)/i,
+  ];
+  for (const re of patterns) {
+    const m = str.match(re);
+    if (m) {
+      const n = parseInt(m[1]);
+      if (n >= 1 && n <= 40) return n; // sanity range
+    }
+  }
+  return null;
+}
+
 function compactUnique(items, max) {
   const seen = new Set();
   const out = [];
@@ -57,62 +80,251 @@ export function deriveSimpleApplyProfile(resumeText, roleTitles = []) {
   const skills = compactUnique(SKILL_HINTS.filter(s => lower.includes(s)), 16);
   const keywords = compactUnique([...skills, ...scoreTokens(text)], 28);
   const searchTerms = compactUnique([...titles.slice(0, 4), ...skills.slice(0, 6)], 8);
+  const yearsExperience = extractUserYearsExperience(text);
   return {
     titles,
     skills,
     keywords,
     searchTerms,
+    yearsExperience,
     sourceHash: crypto.createHash("sha256").update(text).digest("hex"),
   };
 }
 
-export function upsertSimpleApplyProfile(db, userId, resumeText, roleTitles = []) {
+function parseJsonArray(value) {
+  try { return JSON.parse(value || "[]"); } catch { return []; }
+}
+
+function resolveScope(scopeOrUserId, maybeRoleTitles = []) {
+  if (scopeOrUserId && typeof scopeOrUserId === "object") {
+    return {
+      userId: scopeOrUserId.userId,
+      profileId: scopeOrUserId.profileId ?? null,
+      roleTitles: Array.isArray(scopeOrUserId.roleTitles) ? scopeOrUserId.roleTitles : [],
+      seedLegacy: scopeOrUserId.seedLegacy !== false,
+    };
+  }
+  return {
+    userId: scopeOrUserId,
+    profileId: null,
+    roleTitles: Array.isArray(maybeRoleTitles) ? maybeRoleTitles : [],
+    seedLegacy: true,
+  };
+}
+
+function shouldSeedLegacyProfile(db, userId, profileId) {
+  if (!userId || !profileId) return false;
+  const hasScopedResume = db.prepare(`
+    SELECT 1
+    FROM profile_base_resumes pbr
+    JOIN domain_profiles dp ON dp.id = pbr.profile_id
+    WHERE dp.user_id = ?
+    LIMIT 1
+  `).get(userId);
+  if (hasScopedResume) return false;
+  const profile = db.prepare(`
+    SELECT is_active
+    FROM domain_profiles
+    WHERE id = ? AND user_id = ?
+  `).get(profileId, userId);
+  return !!profile?.is_active;
+}
+
+function seedScopedProfileFromLegacy(db, userId, profileId, roleTitles = []) {
+  if (!shouldSeedLegacyProfile(db, userId, profileId)) return;
+  const legacyResume = db.prepare(`
+    SELECT name, content, enhanced_content, enhanced_at, enhanced_ats_delta, updated_at
+    FROM base_resume
+    WHERE user_id = ?
+  `).get(userId);
+  if (String(legacyResume?.content || "").trim()) {
+    db.prepare(`
+      INSERT INTO profile_base_resumes
+        (profile_id, user_id, name, content, enhanced_content, enhanced_at, enhanced_ats_delta, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, unixepoch()))
+      ON CONFLICT(profile_id) DO UPDATE SET
+        user_id = excluded.user_id,
+        name = excluded.name,
+        content = excluded.content,
+        enhanced_content = excluded.enhanced_content,
+        enhanced_at = excluded.enhanced_at,
+        enhanced_ats_delta = excluded.enhanced_ats_delta,
+        updated_at = excluded.updated_at
+    `).run(
+      profileId,
+      userId,
+      legacyResume.name || "resume.txt",
+      legacyResume.content,
+      legacyResume.enhanced_content ?? null,
+      legacyResume.enhanced_at ?? null,
+      legacyResume.enhanced_ats_delta ?? null,
+      legacyResume.updated_at ?? null,
+    );
+  }
+
+  const legacySignals = db.prepare(`
+    SELECT *
+    FROM simple_apply_profiles
+    WHERE user_id = ?
+  `).get(userId);
+  if (legacySignals) {
+    db.prepare(`
+      INSERT INTO profile_simple_apply_profiles
+        (profile_id, user_id, titles_json, keywords_json, skills_json, search_terms_json, source_hash, years_experience, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, unixepoch()))
+      ON CONFLICT(profile_id) DO UPDATE SET
+        user_id = excluded.user_id,
+        titles_json = excluded.titles_json,
+        keywords_json = excluded.keywords_json,
+        skills_json = excluded.skills_json,
+        search_terms_json = excluded.search_terms_json,
+        source_hash = excluded.source_hash,
+        years_experience = excluded.years_experience,
+        updated_at = excluded.updated_at
+    `).run(
+      profileId,
+      userId,
+      legacySignals.titles_json || JSON.stringify(roleTitles || []),
+      legacySignals.keywords_json || "[]",
+      legacySignals.skills_json || "[]",
+      legacySignals.search_terms_json || "[]",
+      legacySignals.source_hash ?? null,
+      legacySignals.years_experience ?? null,
+      legacySignals.updated_at ?? null,
+    );
+  }
+}
+
+export function getBaseResumeRecord(db, scopeOrUserId) {
+  const { userId, profileId, seedLegacy } = resolveScope(scopeOrUserId);
+  if (profileId) {
+    if (seedLegacy) seedScopedProfileFromLegacy(db, userId, profileId);
+    return db.prepare(`
+      SELECT name, content, enhanced_content, enhanced_at, enhanced_ats_delta, updated_at
+      FROM profile_base_resumes
+      WHERE profile_id = ? AND user_id = ?
+    `).get(profileId, userId) || null;
+  }
+  return db.prepare(`
+    SELECT name, content, enhanced_content, enhanced_at, enhanced_ats_delta, updated_at
+    FROM base_resume
+    WHERE user_id = ?
+  `).get(userId) || null;
+}
+
+export function saveBaseResumeRecord(db, scopeOrUserId, content, name = "resume.txt") {
+  const { userId, profileId } = resolveScope(scopeOrUserId);
+  if (profileId) {
+    db.prepare(`
+      INSERT INTO profile_base_resumes (profile_id, user_id, content, name, updated_at)
+      VALUES (?, ?, ?, ?, unixepoch())
+      ON CONFLICT(profile_id) DO UPDATE SET
+        user_id = excluded.user_id,
+        content = excluded.content,
+        name = excluded.name,
+        updated_at = excluded.updated_at
+    `).run(profileId, userId, content, name);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO base_resume (user_id, content, name, updated_at)
+    VALUES (?, ?, ?, unixepoch())
+    ON CONFLICT(user_id) DO UPDATE SET
+      content = excluded.content,
+      name = excluded.name,
+      updated_at = excluded.updated_at
+  `).run(userId, content, name);
+}
+
+export function profileHasBaseResume(db, scopeOrUserId) {
+  const row = getBaseResumeRecord(db, scopeOrUserId);
+  return !!String(row?.content || "").trim();
+}
+
+export function upsertSimpleApplyProfile(db, scopeOrUserId, resumeText, roleTitles = []) {
+  const scope = resolveScope(scopeOrUserId, roleTitles);
   const profile = deriveSimpleApplyProfile(resumeText, roleTitles);
+  if (scope.profileId) {
+    db.prepare(`
+      INSERT INTO profile_simple_apply_profiles
+        (profile_id, user_id, titles_json, keywords_json, skills_json, search_terms_json, source_hash, years_experience, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(profile_id) DO UPDATE SET
+        user_id=excluded.user_id,
+        titles_json=excluded.titles_json,
+        keywords_json=excluded.keywords_json,
+        skills_json=excluded.skills_json,
+        search_terms_json=excluded.search_terms_json,
+        source_hash=excluded.source_hash,
+        years_experience=excluded.years_experience,
+        updated_at=excluded.updated_at
+    `).run(
+      scope.profileId,
+      scope.userId,
+      JSON.stringify(profile.titles),
+      JSON.stringify(profile.keywords),
+      JSON.stringify(profile.skills),
+      JSON.stringify(profile.searchTerms),
+      profile.sourceHash,
+      profile.yearsExperience ?? null,
+    );
+    return profile;
+  }
   db.prepare(`
     INSERT INTO simple_apply_profiles
-      (user_id, titles_json, keywords_json, skills_json, search_terms_json, source_hash, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, unixepoch())
+      (user_id, titles_json, keywords_json, skills_json, search_terms_json, source_hash, years_experience, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
     ON CONFLICT(user_id) DO UPDATE SET
       titles_json=excluded.titles_json,
       keywords_json=excluded.keywords_json,
       skills_json=excluded.skills_json,
       search_terms_json=excluded.search_terms_json,
       source_hash=excluded.source_hash,
+      years_experience=excluded.years_experience,
       updated_at=excluded.updated_at
   `).run(
-    userId,
+    scope.userId,
     JSON.stringify(profile.titles),
     JSON.stringify(profile.keywords),
     JSON.stringify(profile.skills),
     JSON.stringify(profile.searchTerms),
     profile.sourceHash,
+    profile.yearsExperience ?? null,
   );
   return profile;
 }
 
-export function loadSimpleApplyProfile(db, userId) {
-  const row = db.prepare("SELECT * FROM simple_apply_profiles WHERE user_id=?").get(userId);
+export function loadSimpleApplyProfile(db, scopeOrUserId) {
+  const scope = resolveScope(scopeOrUserId);
+  if (scope.profileId && scope.seedLegacy) {
+    seedScopedProfileFromLegacy(db, scope.userId, scope.profileId);
+  }
+  const row = scope.profileId
+    ? db.prepare(`
+        SELECT * FROM profile_simple_apply_profiles
+        WHERE profile_id = ? AND user_id = ?
+      `).get(scope.profileId, scope.userId)
+    : db.prepare("SELECT * FROM simple_apply_profiles WHERE user_id=?").get(scope.userId);
   if (!row) return null;
-  const parse = (value) => {
-    try { return JSON.parse(value || "[]"); } catch { return []; }
-  };
   return {
-    titles: parse(row.titles_json),
-    keywords: parse(row.keywords_json),
-    skills: parse(row.skills_json),
-    searchTerms: parse(row.search_terms_json),
+    titles: parseJsonArray(row.titles_json),
+    keywords: parseJsonArray(row.keywords_json),
+    skills: parseJsonArray(row.skills_json),
+    searchTerms: parseJsonArray(row.search_terms_json),
+    yearsExperience: row.years_experience ?? null,
     sourceHash: row.source_hash,
     updatedAt: row.updated_at,
   };
 }
 
-export function loadOrCreateSimpleApplyProfile(db, userId, roleTitles = []) {
-  const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
-  const profile = loadSimpleApplyProfile(db, userId);
+export function loadOrCreateSimpleApplyProfile(db, scopeOrUserId, roleTitles = []) {
+  const scope = resolveScope(scopeOrUserId, roleTitles);
+  const base = getBaseResumeRecord(db, scope);
+  const profile = loadSimpleApplyProfile(db, scope);
   if (!base?.content) return profile;
   const sourceHash = crypto.createHash("sha256").update(String(base.content || "")).digest("hex");
   if (profile?.sourceHash === sourceHash) return profile;
-  return upsertSimpleApplyProfile(db, userId, base.content, roleTitles);
+  return upsertSimpleApplyProfile(db, scope, base.content, scope.roleTitles);
 }
 
 export function buildAtsResumeBasis(resumeText, signalProfile = null) {
@@ -123,7 +335,11 @@ export function buildAtsResumeBasis(resumeText, signalProfile = null) {
         signalProfile.keywords?.length ? `Keywords: ${signalProfile.keywords.slice(0, 18).join(", ")}` : "",
       ].filter(Boolean).join("\n")
     : "";
-  return signals
-    ? `STORED USER SIGNALS:\n${signals}\n\nBASE RESUME TEXT:\n${resumeText || ""}`
+  const yoeLine = signalProfile?.yearsExperience != null
+    ? `Years of experience: ${signalProfile.yearsExperience}`
+    : "";
+  const fullSignals = [signals, yoeLine].filter(Boolean).join("\n");
+  return fullSignals
+    ? `STORED USER SIGNALS:\n${fullSignals}\n\nBASE RESUME TEXT:\n${resumeText || ""}`
     : String(resumeText || "");
 }

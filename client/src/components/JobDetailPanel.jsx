@@ -3,9 +3,14 @@ import { useState, useCallback } from "react";
 import { HighlightedDescription } from "./HighlightedDescription.jsx";
 import { api } from "../lib/api.js";
 
-function ago(ts) {
-  if (!ts) return "—";
-  const d = Date.now() - new Date(ts).getTime();
+function ago(postedAt, scrapedAt) {
+  let ms = postedAt ? new Date(postedAt).getTime() : NaN;
+  if (isNaN(ms) || ms <= 0) {
+    ms = scrapedAt != null ? Number(scrapedAt) * 1000 : NaN;
+  }
+  if (isNaN(ms) || ms <= 0) return "—";
+  const d = Date.now() - ms;
+  if (d < 0) return "—";
   if (d < 3600000)  return `${Math.floor(d / 60000)}m`;
   if (d < 86400000) return `${Math.floor(d / 3600000)}h`;
   return `${Math.floor(d / 86400000)}d`;
@@ -153,7 +158,7 @@ export default function JobDetailPanel({
             {yoeStr && <span style={{ fontSize:10, color:theme.textDim }}>{yoeStr} exp</span>}
             {salaryStr && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>}
             {!salaryStr && job.compensation && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>}
-            <span style={{ fontSize:10, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt)}</span>
+            <span style={{ fontSize:10, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
             {atsScore != null && (
               <span onClick={() => onAts?.()}
                 style={{ background:atsBg, color:atsFg, padding:"2px 8px", borderRadius:999,

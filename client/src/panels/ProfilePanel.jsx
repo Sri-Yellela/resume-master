@@ -1,7 +1,8 @@
 // client/src/panels/ProfilePanel.jsx — Design System v4
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
 
 // ── Field normalisers ─────────────────────────────────────────
 function normalisePhone(raw) {
@@ -25,6 +26,17 @@ function normaliseZip(raw) {
 function normaliseState(raw) {
   if (!raw) return "";
   return raw.trim().toUpperCase().slice(0, 2);
+}
+
+function splitChipText(raw) {
+  return String(raw || "")
+    .split(",")
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
+function joinChipText(value) {
+  return Array.isArray(value) ? value.join(", ") : "";
 }
 
 // ── Sub-components ─────────────────────────────────────────────
@@ -74,6 +86,31 @@ export function ProfilePanel() {
 
   const [form,   setForm]   = useState(BLANK);
   const [status, setStatus] = useState("");
+  const [profiles, setProfiles] = useState([]);
+  const [activeProfileId, setActiveProfileId] = useState(null);
+  const [profileForm, setProfileForm] = useState(null);
+  const [signalsForm, setSignalsForm] = useState({
+    titles: "", keywords: "", skills: "", searchTerms: "", yearsExperience: "",
+  });
+  const [resumeDraft, setResumeDraft] = useState("");
+  const [resumeName, setResumeName] = useState("");
+  const [profileStatus, setProfileStatus] = useState("");
+  const [resumeStatus, setResumeStatus] = useState("");
+  const [signalStatus, setSignalStatus] = useState("");
+  const [loadingProfileAssets, setLoadingProfileAssets] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
+  const [showProfileWizard, setShowProfileWizard] = useState(false);
+  const resumeInputRef = useRef(null);
+
+  const loadProfiles = useCallback(async () => {
+    try {
+      const rows = await api("/api/domain-profiles");
+      const next = Array.isArray(rows) ? rows : [];
+      setProfiles(next);
+      const active = next.find(p => p.is_active) || next[0] || null;
+      setActiveProfileId(prev => (next.some(p => p.id === prev) ? prev : (active?.id ?? null)));
+    } catch {}
+  }, []);
 
   useEffect(() => {
     api("/api/profile")
@@ -84,6 +121,52 @@ export function ProfilePanel() {
       })))
       .catch(() => {});
   }, []);
+
+  useEffect(() => { loadProfiles(); }, [loadProfiles]);
+
+  useEffect(() => {
+    if (!activeProfileId) {
+      setProfileForm(null);
+      setResumeDraft("");
+      setResumeName("");
+      setSignalsForm({ titles: "", keywords: "", skills: "", searchTerms: "", yearsExperience: "" });
+      return;
+    }
+    const selected = profiles.find(p => p.id === activeProfileId);
+    if (selected) {
+      setProfileForm({
+        id: selected.id,
+        profile_name: selected.profile_name || "",
+        role_family: selected.role_family || "",
+        domain: selected.domain || "",
+        seniority: selected.seniority || "mid",
+        target_titles: joinChipText(selected.target_titles),
+        selected_keywords: joinChipText(selected.selected_keywords),
+        selected_verbs: joinChipText(selected.selected_verbs),
+        selected_tools: joinChipText(selected.selected_tools),
+      });
+    }
+
+    setLoadingProfileAssets(true);
+    Promise.all([
+      api(`/api/domain-profiles/${activeProfileId}/base-resume`),
+      api(`/api/domain-profiles/${activeProfileId}/signals`),
+    ]).then(([resume, signals]) => {
+      setResumeDraft(resume?.content || "");
+      setResumeName(resume?.name || "");
+      setSignalsForm({
+        titles: joinChipText(signals?.titles),
+        keywords: joinChipText(signals?.keywords),
+        skills: joinChipText(signals?.skills),
+        searchTerms: joinChipText(signals?.searchTerms),
+        yearsExperience: signals?.yearsExperience ?? "",
+      });
+    }).catch(() => {
+      setResumeDraft("");
+      setResumeName("");
+      setSignalsForm({ titles: "", keywords: "", skills: "", searchTerms: "", yearsExperience: "" });
+    }).finally(() => setLoadingProfileAssets(false));
+  }, [activeProfileId, profiles]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -118,6 +201,128 @@ export function ProfilePanel() {
       setStatus("✓ Saved");
       setTimeout(() => setStatus(""), 3000);
     } catch { setStatus("✗ Save failed"); }
+  };
+
+  const activeProfile = profiles.find(p => p.id === activeProfileId) || null;
+
+  const saveProfileSettings = async () => {
+    if (!profileForm?.id) return;
+    try {
+      const updated = await api(`/api/domain-profiles/${profileForm.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          profile_name: profileForm.profile_name,
+          role_family: profileForm.role_family,
+          domain: profileForm.domain,
+          seniority: profileForm.seniority,
+          target_titles: splitChipText(profileForm.target_titles),
+          selected_keywords: splitChipText(profileForm.selected_keywords),
+          selected_verbs: splitChipText(profileForm.selected_verbs),
+          selected_tools: splitChipText(profileForm.selected_tools),
+        }),
+      });
+      setProfiles(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)));
+      setProfileStatus("Saved job profile");
+      setTimeout(() => setProfileStatus(""), 2500);
+    } catch (e) {
+      setProfileStatus(e.message || "Could not save profile");
+    }
+  };
+
+  const saveSignals = async () => {
+    if (!activeProfileId) return;
+    try {
+      await api(`/api/domain-profiles/${activeProfileId}/signals`, {
+        method: "PUT",
+        body: JSON.stringify({
+          titles: splitChipText(signalsForm.titles),
+          keywords: splitChipText(signalsForm.keywords),
+          skills: splitChipText(signalsForm.skills),
+          searchTerms: splitChipText(signalsForm.searchTerms),
+          yearsExperience: signalsForm.yearsExperience === "" ? null : Number(signalsForm.yearsExperience),
+        }),
+      });
+      setSignalStatus("Saved extracted signals");
+      setTimeout(() => setSignalStatus(""), 2500);
+    } catch (e) {
+      setSignalStatus(e.message || "Could not save signals");
+    }
+  };
+
+  const refreshSignals = async () => {
+    if (!activeProfileId) return;
+    try {
+      const next = await api(`/api/domain-profiles/${activeProfileId}/signals/refresh`, { method: "POST" });
+      setSignalsForm({
+        titles: joinChipText(next?.titles),
+        keywords: joinChipText(next?.keywords),
+        skills: joinChipText(next?.skills),
+        searchTerms: joinChipText(next?.searchTerms),
+        yearsExperience: next?.yearsExperience ?? "",
+      });
+      setSignalStatus("Refreshed from profile resume");
+      setTimeout(() => setSignalStatus(""), 2500);
+    } catch (e) {
+      setSignalStatus(e.message || "Could not refresh signals");
+    }
+  };
+
+  const saveResume = async () => {
+    if (!activeProfileId) return;
+    try {
+      await api(`/api/domain-profiles/${activeProfileId}/base-resume`, {
+        method: "POST",
+        body: JSON.stringify({ content: resumeDraft, name: resumeName || "resume.txt" }),
+      });
+      setResumeStatus("Saved profile resume");
+      setTimeout(() => setResumeStatus(""), 2500);
+      await refreshSignals();
+      loadProfiles();
+    } catch (e) {
+      setResumeStatus(e.message || "Could not save profile resume");
+    }
+  };
+
+  const activateProfile = async (id) => {
+    try {
+      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
+      setActiveProfileId(id);
+      setProfiles(prev => prev.map(p => ({ ...p, is_active: p.id === id ? 1 : 0 })));
+    } catch {}
+  };
+
+  const uploadResumePdf = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !activeProfileId) return;
+    setUploadingResume(true);
+    setResumeStatus("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const parsed = await api("/api/parse-pdf", { method: "POST", body: formData });
+      setResumeDraft(parsed?.text || "");
+      setResumeName(file.name);
+      await api(`/api/domain-profiles/${activeProfileId}/base-resume`, {
+        method: "POST",
+        body: JSON.stringify({ content: parsed?.text || "", name: file.name }),
+      });
+      const nextSignals = await api(`/api/domain-profiles/${activeProfileId}/signals/refresh`, { method: "POST" });
+      setSignalsForm({
+        titles: joinChipText(nextSignals?.titles),
+        keywords: joinChipText(nextSignals?.keywords),
+        skills: joinChipText(nextSignals?.skills),
+        searchTerms: joinChipText(nextSignals?.searchTerms),
+        yearsExperience: nextSignals?.yearsExperience ?? "",
+      });
+      setResumeStatus("Uploaded and extracted for this profile");
+      setTimeout(() => setResumeStatus(""), 2500);
+      loadProfiles();
+    } catch (e) {
+      setResumeStatus(e.message || "Could not parse resume");
+    } finally {
+      setUploadingResume(false);
+      event.target.value = "";
+    }
   };
 
   const selStyle = {
@@ -301,6 +506,189 @@ export function ProfilePanel() {
           </PRow>
         </PSec>
 
+        <PSec title="Job Profiles" theme={theme}>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:16 }}>
+            {profiles.map(profile => (
+              <button
+                key={profile.id}
+                type="button"
+                onClick={() => activateProfile(profile.id)}
+                style={{
+                  padding:"10px 12px",
+                  borderRadius:10,
+                  border:`1px solid ${profile.id === activeProfileId ? theme.accent : theme.border}`,
+                  background: profile.id === activeProfileId ? `${theme.accent}22` : theme.bg,
+                  color: theme.text,
+                  cursor:"pointer",
+                  minWidth:160,
+                  textAlign:"left",
+                }}
+              >
+                <div style={{ fontSize:13, fontWeight:700 }}>{profile.profile_name}</div>
+                <div style={{ fontSize:11, color:theme.textMuted, marginTop:4 }}>
+                  {profile.seniority} · {profile.has_base_resume ? "resume linked" : "resume missing"}
+                </div>
+              </button>
+            ))}
+            {profiles.length < 4 && (
+              <button
+                type="button"
+                onClick={() => setShowProfileWizard(true)}
+                style={{
+                  padding:"10px 14px",
+                  borderRadius:10,
+                  border:`1px dashed ${theme.border}`,
+                  background:theme.bg,
+                  color:theme.textMuted,
+                  cursor:"pointer",
+                  fontWeight:700,
+                }}
+              >
+                + Add Profile
+              </button>
+            )}
+          </div>
+
+          {!activeProfile && (
+            <div style={{ fontSize:12, color:theme.textMuted }}>
+              Create a job profile to connect a profile-specific base resume, extracted signals, titles, and search settings.
+            </div>
+          )}
+
+          {activeProfile && profileForm && (
+            <>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <PRow label="Profile Name" theme={theme}>
+                  <input className="rm-input" value={profileForm.profile_name}
+                    onChange={e => setProfileForm(f => ({ ...f, profile_name: e.target.value }))}/>
+                </PRow>
+                <PRow label="Seniority" theme={theme}>
+                  <select style={selStyle} value={profileForm.seniority}
+                    onChange={e => setProfileForm(f => ({ ...f, seniority: e.target.value }))}>
+                    <option value="junior">Entry Level</option>
+                    <option value="mid">Mid Level</option>
+                    <option value="senior">Senior</option>
+                    <option value="executive">Executive / Director</option>
+                  </select>
+                </PRow>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <PRow label="Role Family" theme={theme}>
+                  <input className="rm-input" value={profileForm.role_family}
+                    onChange={e => setProfileForm(f => ({ ...f, role_family: e.target.value }))}/>
+                </PRow>
+                <PRow label="Domain Key" theme={theme}>
+                  <input className="rm-input" value={profileForm.domain}
+                    onChange={e => setProfileForm(f => ({ ...f, domain: e.target.value }))}/>
+                </PRow>
+              </div>
+              <PRow label="Target Titles" theme={theme}>
+                <textarea className="rm-input" rows={3} value={profileForm.target_titles}
+                  onChange={e => setProfileForm(f => ({ ...f, target_titles: e.target.value }))}
+                  placeholder="Software Engineer, Backend Engineer, Platform Engineer"/>
+                <PHint theme={theme}>Comma-separated. These titles shape search query variants and profile fit.</PHint>
+              </PRow>
+              <PRow label="Keywords" theme={theme}>
+                <textarea className="rm-input" rows={3} value={profileForm.selected_keywords}
+                  onChange={e => setProfileForm(f => ({ ...f, selected_keywords: e.target.value }))}
+                  placeholder="distributed systems, APIs, cloud infrastructure"/>
+              </PRow>
+              <PRow label="Action Verbs" theme={theme}>
+                <textarea className="rm-input" rows={2} value={profileForm.selected_verbs}
+                  onChange={e => setProfileForm(f => ({ ...f, selected_verbs: e.target.value }))}
+                  placeholder="Built, Designed, Automated"/>
+              </PRow>
+              <PRow label="Tools / Skills" theme={theme}>
+                <textarea className="rm-input" rows={2} value={profileForm.selected_tools}
+                  onChange={e => setProfileForm(f => ({ ...f, selected_tools: e.target.value }))}
+                  placeholder="Node.js, React, PostgreSQL, AWS"/>
+              </PRow>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
+                <span style={{ fontSize:12, color:profileStatus ? theme.text : theme.textMuted }}>
+                  {profileStatus || "Edit this profile any time. Changes affect only this profile."}
+                </span>
+                <button type="button" className="rm-btn rm-btn-primary" onClick={saveProfileSettings}>
+                  Save Job Profile
+                </button>
+              </div>
+            </>
+          )}
+        </PSec>
+
+        {activeProfile && (
+          <PSec title="Profile Resume and Signals" theme={theme}>
+            <input
+              ref={resumeInputRef}
+              type="file"
+              accept=".pdf"
+              onChange={uploadResumePdf}
+              style={{ display:"none" }}
+            />
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:14 }}>
+              <button type="button" className="rm-btn rm-btn-primary"
+                onClick={() => resumeInputRef.current?.click()}>
+                {uploadingResume ? "Parsing PDF..." : "Upload / Replace PDF"}
+              </button>
+              <button type="button" className="rm-btn"
+                onClick={saveResume}
+                style={{ border:`1px solid ${theme.border}`, background:theme.surfaceHigh, color:theme.text }}>
+                Save Resume Text
+              </button>
+              <button type="button" className="rm-btn"
+                onClick={refreshSignals}
+                style={{ border:`1px solid ${theme.border}`, background:theme.surfaceHigh, color:theme.text }}>
+                Refresh Extracted Signals
+              </button>
+            </div>
+            <PRow label="Resume File Name" theme={theme}>
+              <input className="rm-input" value={resumeName}
+                onChange={e => setResumeName(e.target.value)}
+                placeholder="resume.pdf"/>
+            </PRow>
+            <PRow label="Profile Base Resume" theme={theme}>
+              <textarea className="rm-input" rows={10} value={resumeDraft}
+                onChange={e => setResumeDraft(e.target.value)}
+                placeholder="Upload a profile-specific PDF or paste resume text here."/>
+              <PHint theme={theme}>This base resume belongs only to the selected profile and drives profile-specific ATS/search behavior.</PHint>
+            </PRow>
+            <div style={{ fontSize:12, color:resumeStatus ? theme.text : theme.textMuted, marginBottom:16 }}>
+              {loadingProfileAssets ? "Loading profile resume..." : (resumeStatus || "Each profile keeps its own stored resume and extracted signal set.")}
+            </div>
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <PRow label="Extracted Titles" theme={theme}>
+                <textarea className="rm-input" rows={3} value={signalsForm.titles}
+                  onChange={e => setSignalsForm(f => ({ ...f, titles: e.target.value }))}/>
+              </PRow>
+              <PRow label="Years of Experience" theme={theme}>
+                <input className="rm-input" type="number" min="0" max="50" value={signalsForm.yearsExperience}
+                  onChange={e => setSignalsForm(f => ({ ...f, yearsExperience: e.target.value }))}/>
+              </PRow>
+            </div>
+            <PRow label="Extracted Keywords" theme={theme}>
+              <textarea className="rm-input" rows={4} value={signalsForm.keywords}
+                onChange={e => setSignalsForm(f => ({ ...f, keywords: e.target.value }))}/>
+            </PRow>
+            <PRow label="Extracted Skills / Tools" theme={theme}>
+              <textarea className="rm-input" rows={3} value={signalsForm.skills}
+                onChange={e => setSignalsForm(f => ({ ...f, skills: e.target.value }))}/>
+            </PRow>
+            <PRow label="Search Terms" theme={theme}>
+              <textarea className="rm-input" rows={2} value={signalsForm.searchTerms}
+                onChange={e => setSignalsForm(f => ({ ...f, searchTerms: e.target.value }))}/>
+              <PHint theme={theme}>These terms are used for profile-scoped search shaping and ATS basis signals.</PHint>
+            </PRow>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
+              <span style={{ fontSize:12, color:signalStatus ? theme.text : theme.textMuted }}>
+                {signalStatus || "Edit extracted values when needed. They persist per profile and do not leak across profiles."}
+              </span>
+              <button type="button" className="rm-btn rm-btn-primary" onClick={saveSignals}>
+                Save Extracted Signals
+              </button>
+            </div>
+          </PSec>
+        )}
+
         <div style={{ display:"flex", justifyContent:"flex-end", alignItems:"center",
                       gap:14, marginTop:8 }}>
           {status && (
@@ -315,6 +703,15 @@ export function ProfilePanel() {
           </button>
         </div>
       </form>
+      {showProfileWizard && (
+        <DomainProfileWizard
+          onComplete={(profile) => {
+            setShowProfileWizard(false);
+            loadProfiles().then(() => setActiveProfileId(profile?.id || null));
+          }}
+          onDismiss={() => setShowProfileWizard(false)}
+        />
+      )}
     </div>
   );
 }

@@ -21,12 +21,14 @@ test("plan updates refresh console state without mode switching", () => {
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
   const plans = fs.readFileSync("client/src/panels/PlansPanel.jsx", "utf8");
   const server = fs.readFileSync("server.js", "utf8");
+  const accountRoute = fs.readFileSync("routes/account.js", "utf8");
 
   assert.match(app, /plan_updated/);
   assert.match(app, /navigate\(consolePath/);
   assert.match(plans, /requestPlanChange/);
   assert.match(plans, /Request \{tier === "BASIC" \? "downgrade" : "upgrade"\}/);
-  assert.match(server, /changeOptions/);
+  assert.match(server, /createAccountRouter/);
+  assert.match(accountRoute, /changeOptions/);
   assert.match(server, /function requireToolEntitlement/);
   assert.match(server, /function legacyModeForTool/);
   assert.doesNotMatch(server, /Next available upgrade|Already on highest plan/);

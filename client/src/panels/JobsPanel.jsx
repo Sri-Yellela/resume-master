@@ -739,14 +739,12 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 
 
 // DEFAULT SIZES (canonical, do not edit inline):
-// A+B only:       A=30  B=70
-// A+B+C:          A=10  B=43  C=47
-// A+B+D:          A=10  B=65  D=25
-// A+B+C+D:        A=10  B=33  C=33  D=24
-// Rule: A=10% whenever any panel beyond B is open.
-// Reset fires via useEffect on C/D visibility change.
-// ALL panel open triggers share one visibility setter —
-// never set panel visibility outside openSandbox / openAtsPanel.
+// A only:         A=100
+// Any 2 panels:   A=30  other=70
+// Any 3 panels:   A=10  other=45  other=45
+// A+B+C+D:        A=10  B=30  C=35  D=25
+// Rule: panel defaults reapply only when a NEW panel is opened.
+// Manual resize remains in effect until the next open transition.
 // To change defaults edit getPanelDefaults() below.
 // -- Card tier — driven by open-panel count, not pixel width ------
 // Tier 1 (full layout):  A alone, or A+B (detail only, 30% default)
@@ -763,23 +761,33 @@ function getCardTier(panelBVisible, panelCVisible, panelDVisible) {
 
 function getPanelDefaults(showDetail, showSandbox, showAts) {
   const count = [true, showDetail, showSandbox, showAts].filter(Boolean).length;
-  // Only jobs panel visible
   if (count === 1) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
-  // Two-panel: A + B — A=30%, B=70%
-  if (count === 2 && showDetail && !showSandbox && !showAts) return { jobs: 30, detail: 70, sandbox: 0, ats: 0 };
-  // All four panels: A=10% B=33% C=33% D=24%
-  if (showDetail && showSandbox && showAts) return { jobs: 10, detail: 33, sandbox: 33, ats: 24 };
-  // A + B + C (sandbox, no ATS): A=10% B=43% C=47%
-  if (showDetail && showSandbox && !showAts) return { jobs: 10, detail: 43, sandbox: 47, ats: 0 };
-  // A + B + D (ATS, no sandbox): A=10% B=65% D=25%
-  if (showDetail && !showSandbox && showAts) return { jobs: 10, detail: 65, sandbox: 0, ats: 25 };
-  // Fallback: A=10, D=25 if visible, remainder split B+C
-  const aSize = 10, dSize = showAts ? 25 : 0;
-  const remaining = 100 - aSize - dSize;
-  const bcPanels = [showDetail, showSandbox].filter(Boolean).length;
-  if (bcPanels === 0) return { jobs: 10, detail: 0, sandbox: 0, ats: 90 };
-  const bcSize = remaining / bcPanels;
-  return { jobs: aSize, detail: showDetail ? bcSize : 0, sandbox: showSandbox ? bcSize : 0, ats: dSize };
+  if (count === 2) {
+    return {
+      jobs: 30,
+      detail: showDetail ? 70 : 0,
+      sandbox: showSandbox ? 70 : 0,
+      ats: showAts ? 70 : 0,
+    };
+  }
+  if (count === 3) {
+    return {
+      jobs: 10,
+      detail: showDetail ? 45 : 0,
+      sandbox: showSandbox ? 45 : 0,
+      ats: showAts ? 45 : 0,
+    };
+  }
+  return {
+    jobs: 10,
+    detail: showDetail ? 30 : 0,
+    sandbox: showSandbox ? 35 : 0,
+    ats: showAts ? 25 : 0,
+  };
+}
+
+function isImportedBoardJob(job) {
+  return !!(job?.boardSource === "linkedin_saved" && job?.importedJobId != null);
 }
 
 // -- Main panel ------------------------------------------------
@@ -887,6 +895,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const detailPanelRef  = useRef(null);
   const sandboxPanelRef = useRef(null);
   const atsPanelRef     = useRef(null);
+  const initialPanelDefaultsAppliedRef = useRef(false);
+  const prevPanelVisibilityRef = useRef({ detail: false, sandbox: false, ats: false });
 
   // ResizeObserver: tracks manual drag width for Tier 1 ? 2 override only
   const jobsPanelElementRef = useRef(null);
@@ -914,6 +924,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
   } = useJobBoard();
   const [pendingJobs, setPendingJobs] = useState([]);
+  const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
+  const [linkedinImportSummary, setLinkedinImportSummary] = useState({ total: 0, lastImportedAt: null });
+  const [linkedinImportModalOpen, setLinkedinImportModalOpen] = useState(false);
+  const [linkedinImportToken, setLinkedinImportToken] = useState(null);
+  const [issuingLinkedinImportToken, setIssuingLinkedinImportToken] = useState(false);
 
   const activeDomainProfile = useMemo(() => (
     domainProfiles.find(p => p.id === activeProfileId)
@@ -922,6 +937,18 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       || null
   ), [domainProfiles, activeProfileId]);
   const activeProfileKey = activeDomainProfile?.id || null;
+  const activeProfileResumePath = activeDomainProfile?.id
+    ? `/api/domain-profiles/${activeDomainProfile.id}/base-resume`
+    : null;
+  const activeProfileEnhanceStatusPath = activeDomainProfile?.id
+    ? `/api/domain-profiles/${activeDomainProfile.id}/enhance-status`
+    : null;
+  const activeProfileEnhancePath = activeDomainProfile?.id
+    ? `/api/domain-profiles/${activeDomainProfile.id}/enhance`
+    : null;
+  const activeProfileAdoptEnhancedPath = activeDomainProfile?.id
+    ? `/api/domain-profiles/${activeDomainProfile.id}/adopt-enhanced`
+    : null;
 
   // Load domain profiles on mount and seed the shared active profile id.
   useEffect(() => {
@@ -941,7 +968,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // ENHANCE GATING: one free per account lifetime.
   // enhance_used is set server-side on API call, not on adoption. Cannot be reset.
   // Future paid unlock: enhance_paid flag in users table.
-  // To change gating logic: edit /api/base-resume/enhance in server.js and update enhance-status response.
+  // To change gating logic: edit the profile-scoped enhance routes in server.js and update enhance-status response.
   const [enhanceUsed,    setEnhanceUsed]    = useState(false);
   const [enhancePaid,    setEnhancePaid]    = useState(false);
   const [enhancing,      setEnhancing]      = useState(false);
@@ -965,6 +992,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // Scrape trigger input
   const [searchInput, setSearchInput] = useState("");
+  // Tracks whether the user has committed the current search input via Enter/button.
+  // Used to dismiss the normalised-preview tooltip after submission.
+  const [searchCommitted, setSearchCommitted] = useState(false);
 
   // Filters
   const [roleFilter,    setRoleFilter]    = useState("");
@@ -1048,34 +1078,20 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const canUseGenerate = planTier === "PLUS" || planTier === "PRO";
   const canUseAPlusResume = planTier === "PRO";
 
-  // Apply initial A+B defaults (30/70) once on mount.
-  // The visibility-change effect below doesn't fire on first render because
-  // C and D start false — this effect covers that gap.
-  useEffect(() => {
-    if (isMobile) return;
-    let r1, r2, r3;
-    r1 = requestAnimationFrame(() => {
-      r2 = requestAnimationFrame(() => {
-        r3 = requestAnimationFrame(() => {
-          try {
-            if (jobsPanelRef.current)   jobsPanelRef.current.resize(30);
-            if (detailPanelRef.current) detailPanelRef.current.resize(70);
-          } catch(e) { console.warn("[panels] initial resize not ready:", e.message); }
-        });
-      });
-    });
-    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
-  }, [isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset panel sizes to defaults when panel visibility changes.
-  // Triple RAF ensures react-resizable-panels has fully committed the new
-  // layout before imperative resize() calls fire. resize() can throw if the
-  // panel is not yet initialised — catch silently, next interaction corrects.
+  // Reset panel sizes to defaults on first desktop render and whenever a NEW panel opens.
+  // Closing panels does not reapply defaults; the next open transition does.
+  // Triple RAF ensures react-resizable-panels has committed the layout first.
   useEffect(() => {
     if (isMobile) return;
     const showDetail  = !!selectedJob;
     const showSandbox = sandboxOpen;
     const showAts     = rightPanelOpen;
+    const prev = prevPanelVisibilityRef.current;
+    const openedNewPanel = (!prev.detail && showDetail) || (!prev.sandbox && showSandbox) || (!prev.ats && showAts);
+    const shouldApply = !initialPanelDefaultsAppliedRef.current || openedNewPanel;
+    prevPanelVisibilityRef.current = { detail: showDetail, sandbox: showSandbox, ats: showAts };
+    if (!shouldApply) return;
+
     const d = getPanelDefaults(showDetail, showSandbox, showAts);
     let r1, r2, r3;
     r1 = requestAnimationFrame(() => {
@@ -1086,6 +1102,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             if (showDetail  && detailPanelRef.current)          detailPanelRef.current.resize(d.detail);
             if (showSandbox && sandboxPanelRef.current)         sandboxPanelRef.current.resize(d.sandbox);
             if (showAts     && atsPanelRef.current)             atsPanelRef.current.resize(d.ats);
+            initialPanelDefaultsAppliedRef.current = true;
           } catch(e) { console.warn("[panels] resize not ready:", e.message); }
         });
       });
@@ -1145,8 +1162,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   const handleResumeClear = useCallback(() => {
     setResumeText(""); setFileName("");
-    api("/api/base-resume", { method:"POST", body:JSON.stringify({ content:"", name:"" }) });
-  }, []);
+    if (activeProfileResumePath) {
+      api(activeProfileResumePath, { method:"POST", body:JSON.stringify({ content:"", name:"" }) });
+    }
+  }, [activeProfileResumePath]);
 
   useEffect(() => {
     onResumeStateChange?.({
@@ -1214,9 +1233,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (prev?.jobId === job.jobId) return null; // toggle off
       return job;
     });
-    markVisited(job.jobId);
-    if (!job.visited) {
+    markVisited(job);
+    if (!job.visited && !isImportedBoardJob(job)) {
       api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }).catch(()=>{});
+    } else if (!job.visited && isImportedBoardJob(job)) {
+      api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" }).catch(()=>{});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1234,7 +1255,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           const nextIdx = e.key === "ArrowDown" ? idx + 1 : idx - 1;
           if (nextIdx >= 0 && nextIdx < jobs.length) {
             const next = jobs[nextIdx];
-            markVisited(next.jobId);
+            markVisited(next);
             return next;
           }
           return prev;
@@ -1269,6 +1290,41 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, localSearch]);
 
+  const fetchImportedSummary = useCallback(async () => {
+    try {
+      const data = await api("/api/imported-jobs/summary");
+      const linkedin = (data?.sources || []).find(source => source.sourceKey === "linkedin_saved");
+      setLinkedinImportSummary({
+        total: linkedin?.total || 0,
+        lastImportedAt: linkedin?.lastImportedAt || null,
+      });
+    } catch {
+      setLinkedinImportSummary({ total: 0, lastImportedAt: null });
+    }
+  }, []);
+
+  const fetchImportedLinkedInJobs = useCallback(async () => {
+    try {
+      const data = await api("/api/imported-jobs/linkedin-saved");
+      setImportedLinkedInJobs(Array.isArray(data?.jobs) ? data.jobs : []);
+    } catch {
+      setImportedLinkedInJobs([]);
+    }
+  }, []);
+
+  const issueLinkedInImportToken = useCallback(async () => {
+    setIssuingLinkedinImportToken(true);
+    try {
+      const data = await api("/api/import-sources/linkedin-saved/token", { method: "POST" });
+      setLinkedinImportToken(data);
+      setLinkedinImportModalOpen(true);
+    } catch (e) {
+      setUploadError(e.message || "Could not create LinkedIn import token.");
+    } finally {
+      setIssuingLinkedinImportToken(false);
+    }
+  }, []);
+
   // -- Fetch pending jobs ----------------------------------------
   const fetchPending = useCallback(async () => {
     const requestProfileKey = activeProfileKeyRef.current;
@@ -1281,6 +1337,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // -- Fetch jobs — never clears board before data arrives ------
   const fetchJobs = useCallback(async (page = 1, mergeMode = false) => {
+    if (boardTab === "linkedin_saved") {
+      fetchImportedLinkedInJobs();
+      return;
+    }
     if (boardTab === "pending") { fetchPending(); return; }
     if (!activeDomainProfile) {
       setJobs([]);
@@ -1298,7 +1358,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (requestProfileKey !== activeProfileKeyRef.current || requestSeq !== jobsFetchSeqRef.current) return;
       // needsProfileSetup is handled by setupBlock gate — avoid double-reporting
       if (d.needsBaseResume) {
-        setScrapeError("Upload your base resume before loading search defaults.");
+        setScrapeError("Upload the active profile's base resume before loading search defaults.");
       }
       const incoming = d.jobs || [];
       if (mergeMode) {
@@ -1340,7 +1400,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     } finally {
       if (requestSeq === jobsFetchSeqRef.current) setBgLoading(false);
     }
-  }, [activeDomainProfile, buildParams, boardTab, fetchPending, jobs, makeProfileSnapshot, setProfileCache]);
+  }, [activeDomainProfile, buildParams, boardTab, fetchImportedLinkedInJobs, fetchPending, jobs, makeProfileSnapshot, setProfileCache]);
   // Keep stable ref in sync so callbacks with empty deps (e.g. startPollLoop) always
   // call the current fetchJobs closure without needing it in their dep arrays.
   fetchJobsRef.current = fetchJobs;
@@ -1351,16 +1411,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     Promise.all([
       api("/api/jobs?page=1&pageSize=25&sort=dateDesc"),
       api("/api/categories"),
-      api("/api/base-resume"),
       api("/api/resumes"),
-    ]).then(([jr, cats, rr, gr]) => {
+      api("/api/imported-jobs/summary").catch(() => ({ sources: [] })),
+    ]).then(([jr, cats, gr, importSummary]) => {
       setJobs(jr.jobs || []);
       setTotalJobs(jr.total || 0);
       setTotalPages(jr.totalPages || 0);
       // needsProfileSetup is gated by setupBlock; don't set scrapeError on boot
-      if (jr.needsBaseResume) setScrapeError("Upload your base resume before loading search defaults.");
+      if (jr.needsBaseResume) setScrapeError("Upload the active profile's base resume before loading search defaults.");
       setCategories(cats || []);
-      if (rr.content) { setResumeText(rr.content); setFileName(rr.name || "Saved resume"); }
       if (gr?.length) {
         const map = {};
         gr.forEach(r => { map[r.job_id] = { html:"__exists__", status:"exists", atsScore:r.ats_score,
@@ -1369,13 +1428,43 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           toolLabel:r.apply_mode === "CUSTOM_SAMPLER" ? TOOL_LABELS[A_PLUS_TOOL] : TOOL_LABELS[GENERATE_TOOL] }; });
         setGenerated(map);
       }
+      const linkedin = (importSummary?.sources || []).find(source => source.sourceKey === "linkedin_saved");
+      setLinkedinImportSummary({
+        total: linkedin?.total || 0,
+        lastImportedAt: linkedin?.lastImportedAt || null,
+      });
     }).catch(console.error);
-    // Fetch enhance status
-    api("/api/base-resume/enhance-status").then(s => {
-      setEnhanceUsed(s.enhanceUsed || false);
-      setEnhancePaid(s.enhancePaid || false);
-    }).catch(() => {});
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, fetchImportedSummary]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user) return;
+    if (!activeProfileResumePath || !activeProfileEnhanceStatusPath) {
+      setResumeText("");
+      setFileName("");
+      setEnhanceUsed(false);
+      setEnhancePaid(false);
+      return;
+    }
+    Promise.all([
+      api(activeProfileResumePath),
+      api(activeProfileEnhanceStatusPath),
+    ]).then(([resume, status]) => {
+      setResumeText(resume?.content || "");
+      setFileName(resume?.name || (resume?.content ? "Saved resume" : ""));
+      setEnhanceUsed(!!status?.enhanceUsed);
+      setEnhancePaid(!!status?.enhancePaid);
+    }).catch(() => {
+      setResumeText("");
+      setFileName("");
+      setEnhanceUsed(false);
+      setEnhancePaid(false);
+    });
+  }, [user, activeProfileResumePath, activeProfileEnhanceStatusPath]);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchImportedSummary();
+  }, [user, fetchImportedSummary]);
 
   // Re-fetch when server-side filters/sort/tab change (background — board stays visible)
   // Note: localSearch is NOT in this dep array — it has its own debounced effect below
@@ -1418,6 +1507,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     scrape_complete: () => {
       fetchJobs(1);
     },
+    imported_jobs_updated: ({ sourceKey }) => {
+      if (sourceKey === "linkedin_saved") {
+        fetchImportedSummary();
+        if (boardTab === "linkedin_saved") fetchImportedLinkedInJobs();
+      }
+    },
   });
 
   // Shared poll loop — used by handleSearch, handlePullRefresh, handleSetRole
@@ -1447,7 +1542,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           pollIntervalRef.current = null;
           setScraping(false);
           setPollStatus("idle");
-          setScrapeError("Upload your base resume before searching jobs.");
+          setScrapeError("Upload the active profile's base resume before searching jobs.");
           return;
         }
         if (pollData.scrapeUnavailable && pollData.message) {
@@ -1629,7 +1724,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       return;
     }
     if (!resumeText.trim()) {
-      setScrapeError("Upload your base resume before setting a search role.");
+      setScrapeError("Upload the active profile's base resume before setting a search role.");
       return;
     }
     if (!options.skipProfileIntent) {
@@ -1639,6 +1734,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setScrapeError("");
     setRoleFilter(q.toLowerCase());
     setSearchInput(q);
+    setSearchCommitted(true);
     fetchJobs(1);
     return;
     // AUTO-SCRAPE: silently trigger background scrape if local results < THRESHOLD (50)
@@ -1665,7 +1761,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       return;
     }
     if (!resumeText.trim()) {
-      setScrapeError("Upload your base resume before searching jobs.");
+      setScrapeError("Upload the active profile's base resume before searching jobs.");
       return;
     }
     if (!options.skipProfileIntent) {
@@ -1673,6 +1769,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (!aligned) return;
     }
     setScrapeError("");
+    setSearchCommitted(true);
     setScraping(true);
     let managedByPoller = false;
     try {
@@ -1682,7 +1779,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         return;
       }
       if (result.needsBaseResume) {
-        setScrapeError(result.error || "Upload your base resume before searching jobs.");
+        setScrapeError(result.error || "Upload the active profile's base resume before searching jobs.");
         return;
       }
       if (result.missingToken) {
@@ -1738,7 +1835,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       return;
     }
     if (!resumeText.trim()) {
-      setScrapeError("Upload your base resume before checking for jobs.");
+      setScrapeError("Upload the active profile's base resume before checking for jobs.");
       return;
     }
     if (scraping || bgLoading) return;
@@ -1752,7 +1849,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         return;
       }
       if (result.needsBaseResume) {
-        setScrapeError(result.error || "Upload your base resume before searching jobs.");
+        setScrapeError(result.error || "Upload the active profile's base resume before searching jobs.");
         return;
       }
       if (result.missingToken) {
@@ -1803,9 +1900,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // -- Resume Enhancer ------------------------------------------
   const handleEnhance = useCallback(async () => {
     if (enhancing) return;
+    if (!activeProfileEnhancePath) {
+      setUploadError("Select a job profile before enhancing its resume.");
+      return;
+    }
     setEnhancing(true);
     try {
-      const result = await api("/api/base-resume/enhance", { method: "POST" });
+      const result = await api(activeProfileEnhancePath, { method: "POST" });
       setEnhanceResult(result);
       setEnhanceModalOpen(true);
     } catch(e) {
@@ -1819,19 +1920,20 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setEnhanceUsed(true);
       setEnhancing(false);
     }
-  }, [enhancing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enhancing, activeProfileEnhancePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAdoptEnhanced = useCallback(async () => {
     try {
-      await api("/api/base-resume/adopt-enhanced", { method: "PATCH" });
+      if (!activeProfileAdoptEnhancedPath) throw new Error("No active profile");
+      await api(activeProfileAdoptEnhancedPath, { method: "PATCH" });
       if (enhanceResult?.enhanced?.text) setResumeText(enhanceResult.enhanced.text);
     } catch(e) { console.warn("[adopt]", e.message); }
     setEnhanceModalOpen(false);
-  }, [enhanceResult]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enhanceResult, activeProfileAdoptEnhancedPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSmartSearch = useCallback(async () => {
     if (!resumeText) {
-      setSmartSearchError("Upload your base resume first — smart search extracts the best query from it.");
+      setSmartSearchError("Upload the active profile's base resume first — smart search extracts the best query from it.");
       fileRef.current?.click(); return;
     }
     setSmartSearchError("");
@@ -1848,6 +1950,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // -- File upload -------------------------------------------
   const handleFile = useCallback(async e => {
     const file = e.target.files[0]; if (!file) return;
+    if (!activeProfileResumePath) {
+      setUploadError("Create or select a job profile before uploading a resume.");
+      return;
+    }
     setFileName(file.name); setUploading(true); setUploadError("");
     try {
       const ext = file.name.split(".").pop().toLowerCase();
@@ -1862,12 +1968,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         text = (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value;
       } else { text = await file.text(); }
       setResumeText(text);
-      await api("/api/base-resume", { method:"POST", body:JSON.stringify({ content:text, name:file.name }) });
+      await api(activeProfileResumePath, { method:"POST", body:JSON.stringify({ content:text, name:file.name }) });
     } catch(err) {
       setUploadError("Error: " + err.message);
       setFileName(""); if (fileRef.current) fileRef.current.value = "";
     } finally { setUploading(false); }
-  }, []);
+  }, [activeProfileResumePath]);
 
   // -- Generate (actual logic) -------------------------------
   const generateActual = useCallback(async (job, force = false, skipCompanyCheck = false, tool = "generate") => {
@@ -2003,7 +2109,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [applyMode, fetchJobs, currentPage, sandbox]);
 
   // -- Starred toggle ----------------------------------------
-  const toggleStar = useCallback(async (jobId) => {
+  const toggleStar = useCallback(async (jobId, job = null) => {
+    if (isImportedBoardJob(job)) {
+      try {
+        const d = await api(`/api/imported-jobs/${job.importedJobId}/starred`, { method:"PATCH" });
+        setImportedLinkedInJobs(prev => prev.map(j =>
+          j.importedJobId === job.importedJobId ? { ...j, starred: d.starred, disliked: false } : j
+        ));
+      } catch {}
+      return;
+    }
     try {
       const d = await api(`/api/jobs/${jobId}/starred`, { method:"PATCH" });
       setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, starred: d.starred, disliked: false} : j));
@@ -2015,7 +2130,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // sessionDislikedRef ensures the card survives any fetchJobs call
   // (sort change, filter change, pagination, etc.) within this session.
   // Only a page reload clears the ref and lets the server exclusion apply.
-  const toggleDislike = useCallback(async (jobId) => {
+  const toggleDislike = useCallback(async (jobId, job = null) => {
+    if (isImportedBoardJob(job)) {
+      try {
+        const d = await api(`/api/imported-jobs/${job.importedJobId}/disliked`, { method:"PATCH" });
+        const isNowDisliked = !!d.disliked;
+        setImportedLinkedInJobs(prev => prev.map(j =>
+          j.importedJobId === job.importedJobId ? { ...j, disliked: isNowDisliked, starred: false } : j
+        ));
+      } catch {}
+      return;
+    }
     try {
       const d = await dislikeJob(jobId);
       const isNowDisliked = !!d.disliked;
@@ -2038,15 +2163,27 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, []);
 
   // -- Mark visited in local state ---------------------------
-  const markVisited = useCallback((jobId) => {
-    setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, visited:true} : j));
+  const markVisited = useCallback((job) => {
+    if (isImportedBoardJob(job)) {
+      setImportedLinkedInJobs(prev => prev.map(j =>
+        j.importedJobId === job.importedJobId ? { ...j, visited: true } : j
+      ));
+      return;
+    }
+    setJobs(prev => prev.map(j => j.jobId === job.jobId ? {...j, visited:true} : j));
   }, []);
 
   // -- Direct URL open (no dialog) ------------------------------
   const visitUrl = useCallback(async (job) => {
     if (!job.url) return;
-    try { await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }); } catch {}
-    markVisited(job.jobId);
+    try {
+      if (isImportedBoardJob(job)) {
+        await api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" });
+      } else {
+        await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" });
+      }
+    } catch {}
+    markVisited(job);
     window.open(job.url, "_blank", "noreferrer");
   }, [markVisited]);
 
@@ -2066,14 +2203,22 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // displayJobs: backend handles localSearch filtering across all pages
   const displayJobs = useMemo(() => {
-    return boardTab === "pending" ? pendingJobs : jobs;
-  }, [jobs, pendingJobs, boardTab]);
+    if (boardTab === "pending") return pendingJobs;
+    if (boardTab === "linkedin_saved") return importedLinkedInJobs;
+    return jobs;
+  }, [jobs, pendingJobs, importedLinkedInJobs, boardTab]);
   displayJobsRef.current = displayJobs;
 
   const genCount = Object.values(generated).filter(v=>v?.html && v.html !== "__exists__").length;
   const normalisedPreview = ALIASES[searchInput.trim().toLowerCase()]
     || (searchInput.trim() ? searchInput.trim().replace(/\b\w/g, c=>c.toUpperCase()) : "");
-  const showPreview = !!(normalisedPreview && normalisedPreview.toLowerCase() !== searchInput.trim().toLowerCase());
+  const showPreview = !searchCommitted && !!(normalisedPreview && normalisedPreview.toLowerCase() !== searchInput.trim().toLowerCase());
+  const boardTabs = [
+    ["all", "All Jobs"],
+    ["saved", "Saved ★"],
+    ["pending", "Pending"],
+    ...(linkedinImportSummary.total > 0 ? [["linkedin_saved", "LinkedIn Saved Jobs"]] : []),
+  ];
 
   const isLastPage = currentPage >= totalPages;
 
@@ -2092,8 +2237,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       }
     : !resumeText.trim()
       ? {
-          title: "Upload your base resume",
-          body: "Search defaults and ATS sorting use extracted signals from your base resume.",
+          title: "Upload a profile resume",
+          body: "Search defaults and ATS sorting use extracted signals from the active profile's base resume.",
           actionLabel: "Upload Resume",
           onAction: () => fileRef.current?.click(),
         }
@@ -2103,7 +2248,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // See the getPanelDefaults() function above for default size rules.
 
   return (
-    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:theme.bg }}>
+    <div style={{ flex:1, minHeight:0, minWidth:0, display:"flex", flexDirection:"column", overflow:"hidden", background:theme.bg }}>
 
       {/* Domain profile wizard modal (non-blocking "+ New Profile") */}
       {profileWizardOpen && (
@@ -2143,6 +2288,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         />
       )}
 
+      <LinkedInImportDialog
+        theme={theme}
+        open={linkedinImportModalOpen}
+        tokenData={linkedinImportToken}
+        issuing={issuingLinkedinImportToken}
+        onClose={() => setLinkedinImportModalOpen(false)}
+        onIssueToken={issueLinkedInImportToken}
+      />
+
       <AnimatePresence>
         {filtersOpen && (
           <FiltersPanel
@@ -2177,7 +2331,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         {/* Board tabs */}
         <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
                       border:`2px solid ${theme.borderStrong}`, borderRadius:2 }}>
-          {[["all","All Jobs"],["saved","Saved ★"],["pending","Pending"]].map(([id,lbl]) => (
+          {boardTabs.map(([id,lbl], idx) => (
             <button key={id} onClick={() => setBoardTab(id)}
               style={{
                 padding:"6px 16px", border:"none", cursor:"pointer",
@@ -2186,43 +2340,51 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 background: boardTab===id ? theme.accent : theme.surface,
                 color: boardTab===id ? "#0f0f0f" : theme.text,
                 transition:"background 0.15s",
-                borderRight: `2px solid ${theme.borderStrong}`,
+                borderRight: idx === boardTabs.length - 1 ? "none" : `2px solid ${theme.borderStrong}`,
               }}>
               {lbl}
             </button>
           ))}
         </div>
+        <LucyBtn onClick={issueLinkedInImportToken} disabled={issuingLinkedinImportToken}
+          style={{ height:34, padding:"0 14px" }} accent="#0A66C2">
+          {issuingLinkedinImportToken ? "Preparing Import" : "Import LinkedIn Saved Jobs"}
+        </LucyBtn>
 
-        {/* Filters button â€” always visible, bold outline */}
-        <button
-          onClick={() => setFiltersOpen(o => !o)}
-          style={{
-            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
-            background: filtersOpen ? theme.accent : theme.surface,
-            border: `2px solid ${theme.borderStrong}`,
-            borderRadius:2, padding:"6px 16px",
-            fontFamily:"'Barlow Condensed',sans-serif",
-            fontWeight:800, fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
-            cursor:"pointer", color: filtersOpen ? "#0f0f0f" : theme.text,
-            transition:"background 0.15s",
-          }}>
-          Filters
-        </button>
+        {boardTab !== "linkedin_saved" && (
+          <>
+            {/* Filters button â€” always visible, bold outline */}
+            <button
+              onClick={() => setFiltersOpen(o => !o)}
+              style={{
+                display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
+                background: filtersOpen ? theme.accent : theme.surface,
+                border: `2px solid ${theme.borderStrong}`,
+                borderRadius:2, padding:"6px 16px",
+                fontFamily:"'Barlow Condensed',sans-serif",
+                fontWeight:800, fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
+                cursor:"pointer", color: filtersOpen ? "#0f0f0f" : theme.text,
+                transition:"background 0.15s",
+              }}>
+              Filters
+            </button>
 
-        {/* Sort */}
-        <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-          style={{ height:34, padding:"0 10px", borderRadius:2, flexShrink:0,
-                   border:`2px solid ${theme.borderStrong}`, background:theme.surface,
-                   fontSize:13, color:theme.text, outline:"none",
-                   fontFamily:"'DM Sans',system-ui", cursor:"pointer" }}>
-          <option value="dateDesc">Newest</option>
-          <option value="dateAsc">Oldest</option>
-          <option value="compHigh">Pay high to low</option>
-          <option value="compLow">Pay low to high</option>
-          <option value="yoeLow">Exp low to high</option>
-          <option value="yoeHigh">Exp high to low</option>
-          <option value="atsScore">ATS Sort</option>
-        </select>
+            {/* Sort */}
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+              style={{ height:34, padding:"0 10px", borderRadius:2, flexShrink:0,
+                       border:`2px solid ${theme.borderStrong}`, background:theme.surface,
+                       fontSize:13, color:theme.text, outline:"none",
+                       fontFamily:"'DM Sans',system-ui", cursor:"pointer" }}>
+              <option value="dateDesc">Newest</option>
+              <option value="dateAsc">Oldest</option>
+              <option value="compHigh">Pay high to low</option>
+              <option value="compLow">Pay low to high</option>
+              <option value="yoeLow">Exp low to high</option>
+              <option value="yoeHigh">Exp high to low</option>
+              <option value="atsScore">ATS Sort</option>
+            </select>
+          </>
+        )}
 
         <ProfileSelectorDropdown
           theme={theme}
@@ -2234,65 +2396,67 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           title="Switch profile"
         />
 
-        {/* Local search â€” live client-side, every keystroke */}
-        <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
-          onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
-          placeholder="Filter loaded jobs..."
-          style={{ flex:"0 1 220px", minWidth:120, height:34, padding:"0 12px",
-                   borderRadius:2, border:`1px solid ${theme.border}`,
-                   background:theme.surface, color:theme.text,
-                   fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none" }}/>
-        {localSearch && (
-          <button onClick={() => setLocalSearch("")}
-            style={{ background:"none", border:"none", color:theme.textDim,
-                     cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>x</button>
-        )}
+        {boardTab !== "linkedin_saved" ? (
+          <>
+            {/* Local search â€” live client-side, every keystroke */}
+            <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
+              onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
+              placeholder="Filter loaded jobs..."
+              style={{ flex:"0 1 220px", minWidth:120, height:34, padding:"0 12px",
+                       borderRadius:2, border:`1px solid ${theme.border}`,
+                       background:theme.surface, color:theme.text,
+                       fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none" }}/>
+            {localSearch && (
+              <button onClick={() => setLocalSearch("")}
+                style={{ background:"none", border:"none", color:theme.textDim,
+                         cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>x</button>
+            )}
 
-        {/* Background loading indicator + job count */}
-        <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0,
-                       display:"flex", alignItems:"center", gap:5 }}>
-          {bgLoading && (
-            <span style={{ display:"inline-block", width:10, height:10,
-                           border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
-                           borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/>
-          )}
-          {boardTab === "pending"
-            ? `${displayJobs.length}`
-            : `${totalJobs}`
-          } job{totalJobs !== 1 ? "s" : ""}
-          {localSearch && !bgLoading ? " matched" : ""}
-        </span>
+            {/* Background loading indicator + job count */}
+            <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0,
+                           display:"flex", alignItems:"center", gap:5 }}>
+              {bgLoading && (
+                <span style={{ display:"inline-block", width:10, height:10,
+                               border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
+                               borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/>
+              )}
+              {boardTab === "pending" ? `${displayJobs.length}` : `${totalJobs}`} job{totalJobs !== 1 ? "s" : ""}
+              {localSearch && !bgLoading ? " matched" : ""}
+            </span>
 
-        {/* â”€â”€ Row B (wraps to next line) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        {/* Full-width divider */}
-        <div style={{ flexBasis:"100%", height:0 }}/>
+            <div style={{ flexBasis:"100%", height:0 }}/>
 
-        {/* Scrape query input */}
-        <div style={{ position:"relative", flex:1, minWidth:200 }}>
-          <input value={searchInput} onChange={e=>setSearchInput(e.target.value)}
-            onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
-            placeholder="ATS search role, e.g. ML Engineer, SWE..."
-            style={{ width:"100%", height:38, paddingLeft:14, paddingRight:14,
-                     borderRadius:2, border:`1px solid ${theme.border}`,
-                     background:theme.surface, color:theme.text,
-                     fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",
-                     boxSizing:"border-box" }}/>
-          {showPreview && (
-            <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0,
-              fontSize:10, color:theme.textMuted, background:theme.surface,
-              border:`1px solid ${theme.border}`,
-              borderRadius:4, padding:"4px 10px", whiteSpace:"nowrap", zIndex:10 }}>
-              Will search as: <span style={{ color:theme.accentText, fontWeight:700 }}>{normalisedPreview}</span>
+            <div style={{ position:"relative", flex:1, minWidth:200 }}>
+              <input value={searchInput} onChange={e=>{ setSearchInput(e.target.value); setSearchCommitted(false); }}
+                onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
+                placeholder="ATS search role, e.g. ML Engineer, SWE..."
+                style={{ width:"100%", height:38, paddingLeft:14, paddingRight:14,
+                         borderRadius:2, border:`1px solid ${theme.border}`,
+                         background:theme.surface, color:theme.text,
+                         fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",
+                         boxSizing:"border-box" }}/>
+              {showPreview && (
+                <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0,
+                  fontSize:10, color:theme.textMuted, background:theme.surface,
+                  border:`1px solid ${theme.border}`,
+                  borderRadius:4, padding:"4px 10px", whiteSpace:"nowrap", zIndex:10 }}>
+                  Will search as: <span style={{ color:theme.accentText, fontWeight:700 }}>{normalisedPreview}</span>
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        <LucyBtn
-          onClick={() => roleIsSet ? handleSearch() : handleSetRole()}
-          disabled={scraping || bgLoading}
-          title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : "Set the role and show matching jobs already in the local pool"}>
-          {buttonLabel}
-        </LucyBtn>
+            <LucyBtn
+              onClick={() => roleIsSet ? handleSearch() : handleSetRole()}
+              disabled={scraping || bgLoading}
+              title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : "Set the role and show matching jobs already in the local pool"}>
+              {buttonLabel}
+            </LucyBtn>
+          </>
+        ) : (
+          <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0 }}>
+            {linkedinImportSummary.total} imported LinkedIn saved job{linkedinImportSummary.total !== 1 ? "s" : ""}
+          </span>
+        )}
         {smartSearchError && (
           <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
             Error: {smartSearchError}
@@ -2676,7 +2840,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       {setupBlock ? (
         <SetupGateNotice theme={theme} {...setupBlock} />
       ) : isMobile && (
-        <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", position:"relative" }}>
+        <div style={{ flex:1, minHeight:0, minWidth:0, display:"flex", flexDirection:"column", overflow:"hidden", position:"relative" }}>
           {/* Full-screen job detail overlay for mobile */}
           {selectedJob && (() => {
             const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
@@ -2686,25 +2850,26 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 <JobDetailPanel
                   job={selectedJob} theme={theme} isDark={isDark}
                   g={g2} done={done2} st={st2} applyMode={applyMode}
-                  canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+                  canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
+                  canUseAPlusResume={!isImportedBoardJob(selectedJob) && canUseAPlusResume}
                   onClose={() => setSelectedJob(null)}
-                  onGenerate={force => generate(selectedJob, force)}
-                  onAPlusResume={force => generate(selectedJob, force, "a_plus_resume")}
-                  onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setMobilePane("editor"); setSelectedJob(null); }}
-                  onExport={() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2))}
+                  onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
+                  onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
+                  onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setMobilePane("editor"); setSelectedJob(null); })}
+                  onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
                   onVisit={() => visitUrl(selectedJob)}
-                  onStar={() => toggleStar(selectedJob.jobId)}
-                  onDislike={() => toggleDislike?.(selectedJob.jobId)}
-                  onAts={() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setSelectedJob(null); }}
-                  onResume={() => generate(selectedJob, false)}
-                  onQueueApply={addToApplyQueue}
+                  onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
+                  onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
+                  onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setSelectedJob(null); })}
+                  onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
+                  onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
                 />
               </div>
             );
           })()}
           {/* Active pane */}
-          <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-            {mobilePane === "jobs" && (
+          <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+            {mobilePane === "jobs" && boardTab !== "linkedin_saved" && (
               <JobsColumn
                 jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
                 scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
@@ -2724,12 +2889,27 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 cardTier={1}
               />
             )}
+            {mobilePane === "jobs" && boardTab === "linkedin_saved" && (
+              <ImportedLinkedInJobsPane
+                jobs={importedLinkedInJobs}
+                theme={theme}
+                isDark={isDark}
+                onRefresh={fetchImportedLinkedInJobs}
+                onImport={issueLinkedInImportToken}
+                importCount={linkedinImportSummary.total}
+                lastImportedAt={linkedinImportSummary.lastImportedAt}
+                onVisit={visitUrl}
+                onDislike={toggleDislike}
+                onJobSelect={handleJobSelect}
+                selectedJobId={selectedJob?.jobId}
+              />
+            )}
             {mobilePane === "editor" && (
               <SandboxPanel entry={sandbox} onClose={closeSandbox}
                 onSave={saveSandboxHtml} onExport={exportAndTrack}/>
             )}
             {mobilePane === "ats" && (
-              <div style={{ flex:1, overflowY:"auto" }}>
+              <div style={{ flex:1, minHeight:0, minWidth:0, overflowY:"auto" }}>
                 <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
                               padding:"0 14px", flexShrink:0 }}>
                   {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
@@ -2785,35 +2965,51 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
       {/* â”€â”€ PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) â”€â”€ */}
       {!setupBlock && (isWide || (isPortrait && !isMobile)) && (
-        <div style={{ flex:1, overflow:"hidden", display:"flex" }}>
-        <PanelGroup orientation="horizontal" style={{ flex: 1, overflow: "hidden" }}>
+        <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex" }}>
+        <PanelGroup orientation="horizontal" style={{ flex: 1, minHeight:0, minWidth:0, overflow: "hidden" }}>
 
           {/* PANEL A â€” Jobs list (always visible) */}
           <Panel
             ref={jobsPanelRef}
             defaultSize={!!selectedJob ? 30 : 100}
             minSize={10}
-            style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <JobsColumn
-              jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
-              scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
-              onClearScrapeError={() => setScrapeError("")}
-              pollStatus={pollStatus} pollNewCount={pollNewCount}
-              resultsUpToDate={resultsUpToDate}
-              onRetryPoll={handlePullRefresh}
-              generated={generated} loading={loading}
-              applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
-              theme={theme} isDark={isDark}
-              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
-              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-              visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
-              openAtsPanel={openAtsPanel}
-              goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
-              setMobilePane={setMobilePane} isMobile={isMobile}
-              compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
-              cardTier={effectiveTier}
-              containerRef={jobsPanelElementRef}
-            />
+            style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden" }}>
+            {boardTab === "linkedin_saved" ? (
+              <ImportedLinkedInJobsPane
+                jobs={importedLinkedInJobs}
+                theme={theme}
+                isDark={isDark}
+                onRefresh={fetchImportedLinkedInJobs}
+                onImport={issueLinkedInImportToken}
+                importCount={linkedinImportSummary.total}
+                lastImportedAt={linkedinImportSummary.lastImportedAt}
+                onVisit={visitUrl}
+                onDislike={toggleDislike}
+                onJobSelect={handleJobSelect}
+                selectedJobId={selectedJob?.jobId}
+              />
+            ) : (
+              <JobsColumn
+                jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
+                scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
+                onClearScrapeError={() => setScrapeError("")}
+                pollStatus={pollStatus} pollNewCount={pollNewCount}
+                resultsUpToDate={resultsUpToDate}
+                onRetryPoll={handlePullRefresh}
+                generated={generated} loading={loading}
+                applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+                theme={theme} isDark={isDark}
+                totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+                generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+                visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
+                openAtsPanel={openAtsPanel}
+                goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+                setMobilePane={setMobilePane} isMobile={isMobile}
+                compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
+                cardTier={effectiveTier}
+                containerRef={jobsPanelElementRef}
+              />
+            )}
           </Panel>
 
           {/* PANEL B â€” Job detail */}
@@ -2826,23 +3022,24 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                   ref={detailPanelRef}
                   defaultSize={70}
                   minSize={10}
-                  style={{ display: "flex", flexDirection: "column", overflow: "hidden",
+                  style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
                            borderLeft: `1px solid ${theme.border}` }}>
                   <JobDetailPanel
                     job={selectedJob} theme={theme} isDark={isDark}
                     g={g2} done={done2} st={st2} applyMode={applyMode}
-                    canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+                    canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
+                    canUseAPlusResume={!isImportedBoardJob(selectedJob) && canUseAPlusResume}
                     onClose={() => setSelectedJob(null)}
-                    onGenerate={force => generate(selectedJob, force)}
-                    onAPlusResume={force => generate(selectedJob, force, "a_plus_resume")}
-                    onViewSandbox={() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); }}
-                    onExport={() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2))}
+                    onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
+                    onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
+                    onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); })}
+                    onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
                     onVisit={() => visitUrl(selectedJob)}
-                    onStar={() => toggleStar(selectedJob.jobId)}
-                    onDislike={() => toggleDislike?.(selectedJob.jobId)}
-                    onAts={() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); }}
-                    onResume={() => generate(selectedJob, false)}
-                    onQueueApply={addToApplyQueue}
+                    onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
+                    onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
+                    onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); })}
+                    onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
+                    onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
                   />
                 </Panel>
               </>
@@ -2858,7 +3055,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 ref={sandboxPanelRef}
                 defaultSize={40}
                 minSize={10}
-                style={{ display: "flex", flexDirection: "column", overflow: "hidden",
+                style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
                          borderLeft: `1px solid ${theme.border}` }}>
                 <SandboxPanel entry={sandbox} onClose={closeSandbox}
                   onSave={saveSandboxHtml} onExport={exportAndTrack}/>
@@ -2874,7 +3071,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 ref={atsPanelRef}
                 defaultSize={20}
                 minSize={10}
-                style={{ display: "flex", flexDirection: "column", overflow: "hidden",
+                style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
                          borderLeft: `1px solid ${theme.border}` }}>
                 <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
                               padding:"0 14px", flexShrink:0, alignItems:"center" }}>
@@ -2895,7 +3092,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
                              color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>x</button>
                 </div>
-                <div style={{ flex:1, overflowY:"auto" }}>
+                <div style={{ flex:1, minHeight:0, minWidth:0, overflowY:"auto" }}>
                   {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText}/>}
                   {rightTab === "history" && (
                     <HistoryList generated={generated} theme={theme}
@@ -3092,6 +3289,75 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
   );
 }
 
+function ImportedLinkedInJobsPane({
+  jobs,
+  theme,
+  isDark,
+  onRefresh,
+  onImport,
+  importCount,
+  lastImportedAt,
+  onVisit,
+  onDislike,
+  onJobSelect,
+  selectedJobId,
+}) {
+  const importedAgo = lastImportedAt ? ago(lastImportedAt * 1000) : null;
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
+                  background: isDark
+                    ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
+                    : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
+      <div style={{ padding:"8px 16px", display:"flex", alignItems:"center", gap:8,
+                    borderBottom:`1px solid ${theme.border}`, flexShrink:0, background:theme.surface }}>
+        <span style={{ fontSize:12, color:theme.textMuted }}>
+          {importCount} LinkedIn saved job{importCount !== 1 ? "s" : ""}
+        </span>
+        {importedAgo && (
+          <span style={{ fontSize:11, color:theme.textDim }}>
+            last import {importedAgo} ago
+          </span>
+        )}
+        <div style={{ flex:1 }}/>
+        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onImport}>Import LinkedIn Saved Jobs</button>
+        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
+      </div>
+      {jobs.length === 0 ? (
+        <div style={{ flex:1, display:"flex", flexDirection:"column",
+                      alignItems:"center", justifyContent:"center", gap:12, padding:40 }}>
+          <div style={{ fontSize:40 }}>in</div>
+          <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No imported LinkedIn saved jobs yet</div>
+          <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:320, lineHeight:1.8 }}>
+            Import your own LinkedIn saved jobs with the extension flow. Jobs stay separate from the local scraped board.
+          </div>
+          <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onImport}>Start Import</button>
+        </div>
+      ) : (
+        <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:16 }}>
+          {jobs.map(job => (
+            <JobCard
+              key={job.jobId}
+              job={job}
+              theme={theme}
+              isDark={isDark}
+              showDislike={true}
+              showApplyButton={true}
+              applyMode="SIMPLE"
+              canUseGenerate={false}
+              canUseAPlusResume={false}
+              compact={false}
+              selected={selectedJobId === job.jobId}
+              onSelect={onJobSelect ? () => onJobSelect(job) : undefined}
+              onVisit={() => onVisit(job)}
+              onDislike={() => onDislike(job.jobId, job)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // JobCard is imported from ../components/JobCard.jsx
 
 // â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3165,6 +3431,75 @@ function SearchIntentDialog({ theme, prompt, onConfirm, onCancel }) {
             style={{ border:"none", borderRadius:6, padding:"8px 12px",
                      background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
             {prompt.confirmLabel || "Continue"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LinkedInImportDialog({ theme, open, tokenData, issuing, onClose, onIssueToken }) {
+  if (!open) return null;
+  const expiresAt = tokenData?.expiresAt ? new Date(tokenData.expiresAt * 1000).toLocaleTimeString() : null;
+  const copyToken = async () => {
+    if (!tokenData?.token) return;
+    try { await navigator.clipboard.writeText(tokenData.token); } catch {}
+  };
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:760, background:"rgba(0,0,0,0.48)",
+                  display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div role="dialog" aria-modal="true" style={{ width:"min(92vw, 560px)",
+        background:theme.modalSurface || theme.surface, border:`1px solid ${theme.border}`,
+        borderRadius:8, boxShadow:"0 24px 72px rgba(0,0,0,0.32)", padding:22, display:"flex",
+        flexDirection:"column", gap:14 }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                      fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase",
+                      color:theme.text }}>
+          LinkedIn Saved Jobs Import
+        </div>
+        <div style={{ fontSize:13, lineHeight:1.6, color:theme.textMuted }}>
+          Use the local browser extension to read your own LinkedIn saved-jobs page while you are logged in, then send only the normalized saved-job data back into Resume Master. No LinkedIn cookies are copied into the app.
+        </div>
+        <div style={{ fontSize:12, lineHeight:1.7, color:theme.text }}>
+          1. Load the extension from the repo's <code>extension/</code> folder.
+          <br/>
+          2. Open LinkedIn Saved Jobs in the same browser.
+          <br/>
+          3. Generate a short-lived import token below and paste it into the extension popup.
+          <br/>
+          4. Run the import. Imported jobs appear in the <strong>LinkedIn Saved Jobs</strong> section.
+        </div>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          <button onClick={onIssueToken} disabled={issuing}
+            style={{ border:"none", borderRadius:6, padding:"8px 12px",
+                     background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
+            {issuing ? "Generating…" : (tokenData?.token ? "Refresh Token" : "Generate Token")}
+          </button>
+          {tokenData?.token && (
+            <button onClick={copyToken}
+              style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
+                       background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
+              Copy Token
+            </button>
+          )}
+          <button onClick={() => window.open("https://www.linkedin.com/my-items/saved-jobs/", "_blank", "noreferrer")}
+            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
+                     background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
+            Open LinkedIn Saved Jobs
+          </button>
+        </div>
+        {tokenData?.token && (
+          <div style={{ background:theme.surfaceHigh, border:`1px solid ${theme.border}`, borderRadius:8, padding:12 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:theme.textMuted, marginBottom:6 }}>Import token</div>
+            <div style={{ fontFamily:"monospace", fontSize:12, color:theme.text, wordBreak:"break-all" }}>{tokenData.token}</div>
+            {expiresAt && <div style={{ fontSize:11, color:theme.textDim, marginTop:8 }}>Expires at {expiresAt}</div>}
+          </div>
+        )}
+        <div style={{ display:"flex", justifyContent:"flex-end" }}>
+          <button onClick={onClose}
+            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
+                     background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
+            Close
           </button>
         </div>
       </div>

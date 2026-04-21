@@ -4,6 +4,8 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import { isTitleRelevantToProfile } from "../services/searchQueryBuilder.js";
 
+const jobClassifier = fs.readFileSync("services/jobClassifier.js", "utf8");
+
 function setupDb() {
   const db = new Database(":memory:");
   db.exec(`
@@ -198,42 +200,36 @@ test("engineering pool excludes stale PM jobs even if legacy role map is wrong",
 });
 
 test("engineering title filter excludes ML/AI, PM, and data-specialty contamination", () => {
-  const server = fs.readFileSync("server.js", "utf8");
-
-  assert.match(server, /NOT LIKE '%machine learning%'/);
-  assert.match(server, /NOT LIKE '%ai engineer%'/);
-  assert.match(server, /NOT LIKE '%project manager%'/);
-  assert.match(server, /NOT LIKE '%product manager%'/);
+  assert.match(jobClassifier, /NOT LIKE '%machine learning%'/);
+  assert.match(jobClassifier, /NOT LIKE '%ai engineer%'/);
+  assert.match(jobClassifier, /NOT LIKE '%project manager%'/);
+  assert.match(jobClassifier, /NOT LIKE '%product manager%'/);
   // data specialty titles must also be excluded from SWE pool
-  assert.match(server, /NOT LIKE '%data scientist%'/);
-  assert.match(server, /NOT LIKE '%data engineer%'/);
-  assert.match(server, /NOT LIKE '%analytics engineer%'/);
+  assert.match(jobClassifier, /NOT LIKE '%data scientist%'/);
+  assert.match(jobClassifier, /NOT LIKE '%data engineer%'/);
+  assert.match(jobClassifier, /NOT LIKE '%analytics engineer%'/);
 });
 
 test("engineering title filter excludes firmware and embedded role contamination", () => {
-  const server = fs.readFileSync("server.js", "utf8");
-
-  assert.match(server, /NOT LIKE '%firmware%'/);
-  assert.match(server, /NOT LIKE '%embedded%'/);
-  assert.match(server, /NOT LIKE '%device driver%'/);
-  assert.match(server, /NOT LIKE '%bsp%'/);
-  assert.match(server, /NOT LIKE '%silicon validation%'/);
-  assert.match(server, /NOT LIKE '%post-silicon%'/);
-  assert.match(server, /NOT LIKE '%bootloader%'/);
-  assert.match(server, /NOT LIKE '%rtos%'/);
-  assert.match(server, /NOT LIKE '%uefi%'/);
+  assert.match(jobClassifier, /NOT LIKE '%firmware%'/);
+  assert.match(jobClassifier, /NOT LIKE '%embedded%'/);
+  assert.match(jobClassifier, /NOT LIKE '%device driver%'/);
+  assert.match(jobClassifier, /NOT LIKE '%bsp%'/);
+  assert.match(jobClassifier, /NOT LIKE '%silicon validation%'/);
+  assert.match(jobClassifier, /NOT LIKE '%post-silicon%'/);
+  assert.match(jobClassifier, /NOT LIKE '%bootloader%'/);
+  assert.match(jobClassifier, /NOT LIKE '%rtos%'/);
+  assert.match(jobClassifier, /NOT LIKE '%uefi%'/);
 });
 
 test("roleTitleSql engineering_embedded_firmware case exists and covers firmware titles", () => {
-  const server = fs.readFileSync("server.js", "utf8");
-
-  assert.match(server, /roleKey === "engineering_embedded_firmware"/);
-  assert.match(server, /LIKE '%firmware%'/);
-  assert.match(server, /LIKE '%embedded%'/);
-  assert.match(server, /LIKE '%bsp%'/);
-  assert.match(server, /LIKE '%silicon validation%'/);
-  assert.match(server, /LIKE '%bootloader%'/);
-  assert.match(server, /LIKE '%hardware debug%'/);
+  assert.match(jobClassifier, /roleKey === "engineering_embedded_firmware"/);
+  assert.match(jobClassifier, /LIKE '%firmware%'/);
+  assert.match(jobClassifier, /LIKE '%embedded%'/);
+  assert.match(jobClassifier, /LIKE '%bsp%'/);
+  assert.match(jobClassifier, /LIKE '%silicon validation%'/);
+  assert.match(jobClassifier, /LIKE '%bootloader%'/);
+  assert.match(jobClassifier, /LIKE '%hardware debug%'/);
 });
 
 test("roleKeyForProfile returns engineering_embedded_firmware for firmware domain profiles", () => {

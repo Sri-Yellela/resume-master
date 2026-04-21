@@ -82,3 +82,13 @@ test("resume sandbox distinguishes idle, error, and missing artifact states", ()
   assert.match(sandbox, /activeEntry\?\.error && !activeEntry\?\.missing/);
   assert.match(server, /uj\.resume_generated = 1\s+AND r\.html IS NOT NULL/);
 });
+
+test("resume sandbox layout keeps scroll ownership inside the preview pane", () => {
+  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+  const sandbox = fs.readFileSync("client/src/panels/SandboxPanel.jsx", "utf8");
+
+  assert.match(sandbox, /minHeight:0, minWidth:0, background:theme\.bg/);
+  assert.match(sandbox, /flex:1,\s*[\s\S]*minHeight:0,\s*[\s\S]*overflowY: "auto"/);
+  assert.match(jobsPanel, /PanelGroup orientation="horizontal" style=\{\{ flex: 1, minHeight:0, minWidth:0, overflow: "hidden" \}\}/);
+  assert.match(jobsPanel, /style=\{\{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden"/);
+});

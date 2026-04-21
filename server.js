@@ -21,23 +21,33 @@ import path           from "path";
 import fs             from "fs";
 import { createBackup, listBackups, restoreBackup } from "./scripts/backup.js";
 import applyRoutes from "./routes/apply.js";
+import { createAccountRouter } from "./routes/account.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createAdminDbRouter } from "./routes/adminDb.js";
 import { createDomainProfilesRouter } from "./routes/domainProfiles.js";
+import { createImportedJobsRouter } from "./routes/importedJobs.js";
+import { createImportSourcesRouter } from "./routes/importSources.js";
 import { trackApiCall, trackScrape } from "./services/usageTracker.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
 import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, buildProfileSearchTerms, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
-import { getRoleKeyForProfile as _getRoleKeyForProfile, ROLE_TITLE_SQL, classifyForIngest, getRoleFamilyDomainForKey } from "./services/jobClassifier.js";
+import { getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRoleFamilyDomainForKey, roleTitleSql } from "./services/jobClassifier.js";
+import { inferWorkType, jobHash, normaliseItem, isFullTimeNorm, isEmploymentTypeWanted, parseYearsExperience, ghostJobScoreNorm, isReposted } from "./services/jobNormalization.js";
+import { profileTitleSql } from "./services/profileTitleFilter.js";
 import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
 import { allowedModesForTier, canUseAPlusResume, canUseGenerate, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
 import {
   buildAtsResumeBasis,
+  extractUserYearsExperience,
+  getBaseResumeRecord,
   loadOrCreateSimpleApplyProfile,
+  loadSimpleApplyProfile,
+  profileHasBaseResume,
+  saveBaseResumeRecord,
   upsertSimpleApplyProfile,
 } from "./services/simpleApplyProfile.js";
 import {
@@ -254,11 +264,6 @@ function normalizeResumeHtml(html) {
   }
   return out;
 }
-
-const NON_FULLTIME_TERMS = [
-  "intern","internship","co-op","coop","contract","contractor",
-  "temporary","temp","part-time","part time","freelance","seasonal",
-];
 
 const INDUSTRY_CATEGORIES = [
   "Fintech / Banking","E-commerce / Retail","Healthcare / Health Tech",
@@ -1899,6 +1904,96 @@ db.pragma("busy_timeout = 5000");
           );
       `,
     },
+    {
+      id: "049_simple_apply_profile_yoe",
+      sql: `
+        ALTER TABLE simple_apply_profiles ADD COLUMN years_experience INTEGER;
+      `,
+    },
+    {
+      id: "050_profile_scoped_resume_signals",
+      sql: `
+        CREATE TABLE IF NOT EXISTS profile_base_resumes (
+          profile_id INTEGER PRIMARY KEY REFERENCES domain_profiles(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name TEXT,
+          content TEXT NOT NULL,
+          enhanced_content TEXT,
+          enhanced_at INTEGER,
+          enhanced_ats_delta INTEGER,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_profile_base_resumes_user
+          ON profile_base_resumes(user_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS profile_simple_apply_profiles (
+          profile_id INTEGER PRIMARY KEY REFERENCES domain_profiles(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          titles_json TEXT NOT NULL DEFAULT '[]',
+          keywords_json TEXT NOT NULL DEFAULT '[]',
+          skills_json TEXT NOT NULL DEFAULT '[]',
+          search_terms_json TEXT NOT NULL DEFAULT '[]',
+          source_hash TEXT,
+          years_experience INTEGER,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_profile_simple_apply_profiles_user
+          ON profile_simple_apply_profiles(user_id, updated_at DESC);
+      `,
+    },
+    {
+      id: "051_imported_saved_jobs",
+      sql: `
+        CREATE TABLE IF NOT EXISTS imported_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          source_key TEXT NOT NULL,
+          source_label TEXT NOT NULL,
+          source_platform TEXT NOT NULL,
+          external_job_id TEXT,
+          dedupe_key TEXT NOT NULL,
+          title TEXT NOT NULL,
+          company TEXT NOT NULL,
+          location TEXT,
+          job_url TEXT,
+          apply_url TEXT,
+          work_type TEXT,
+          employment_type TEXT,
+          compensation TEXT,
+          posted_at TEXT,
+          description TEXT,
+          company_icon_url TEXT,
+          payload_json TEXT,
+          visited INTEGER NOT NULL DEFAULT 0,
+          starred INTEGER NOT NULL DEFAULT 0,
+          disliked INTEGER NOT NULL DEFAULT 0,
+          applied INTEGER NOT NULL DEFAULT 0,
+          import_count INTEGER NOT NULL DEFAULT 1,
+          first_imported_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          last_imported_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(user_id, source_key, dedupe_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_imported_jobs_user_source
+          ON imported_jobs(user_id, source_key, last_imported_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_imported_jobs_user_flags
+          ON imported_jobs(user_id, disliked, starred, applied);
+
+        CREATE TABLE IF NOT EXISTS import_extension_tokens (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          token_hash TEXT NOT NULL UNIQUE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          source_key TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          expires_at INTEGER NOT NULL,
+          last_used_at INTEGER,
+          consumed_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_import_extension_tokens_user
+          ON import_extension_tokens(user_id, source_key, expires_at);
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -2029,216 +2124,10 @@ Use this exact schema:
   "verdict": "<one sentence overall assessment>"
 }`;
 
-// ── Helpers ───────────────────────────────────────────────────
-function inferWorkType(text = "") {
-  const t = text.toLowerCase();
-  if (t.includes("remote")) return "Remote";
-  if (t.includes("hybrid")) return "Hybrid";
-  return "Onsite";
-}
-
-function jobHash(job) {
-  const key = `${(job.company||"").toLowerCase().trim()}|${(job.title||"").toLowerCase().trim()}`;
-  return crypto.createHash("md5").update(key).digest("hex");
-}
-
-// Maps a single HarvestAPI LinkedIn item to our internal schema.
-// Real LinkedIn job IDs are used as primary keys (INSERT OR IGNORE — first write wins).
-function normaliseItem(raw) {
-  const company =
-    raw.company?.name ||
-    raw.companyName   ||
-    raw.employer?.name ||
-    "";
-
-  const title = raw.title || raw.jobTitle || "";
-
-  const description =
-    raw.description?.text ||
-    raw.descriptionText   ||
-    (typeof raw.description === "string" ? raw.description : "") ||
-    "";
-
-  const descriptionHtml =
-    raw.description?.html ||
-    raw.descriptionHtml   ||
-    null;
-
-  const location =
-    (typeof raw.location === "string" ? raw.location : "") ||
-    (raw.location?.city && raw.location?.state
-      ? `${raw.location.city}, ${raw.location.state}`
-      : raw.location?.city || raw.location?.state || "") ||
-    "United States";
-
-  let workTypeHint = "";
-  if (raw.workplaceType)                                              workTypeHint = String(raw.workplaceType).toLowerCase();
-  else if (Array.isArray(raw.workplaceTypes) && raw.workplaceTypes.length) workTypeHint = raw.workplaceTypes[0].toLowerCase();
-  else if (raw.remoteAllowed)                                         workTypeHint = "remote";
-
-  const applyUrl =
-    raw.applyMethod?.companyApplyUrl ||
-    raw.applyUrl      ||
-    raw.apply_url     ||
-    raw.jobPostingUrl ||
-    null;
-
-  const url = raw.linkedinUrl || raw.url || raw.jobUrl || null;
-
-  const postedAt =
-    raw.listingDate ||
-    raw.listedAt    ||
-    raw.postedAt    ||
-    raw.datePosted  ||
-    null;
-
-  const EMP_TYPE_MAP = {
-    "full_time":  "full-time",
-    "part_time":  "part-time",
-    "full-time":  "full-time",
-    "part-time":  "part-time",
-    "contract":   "contract",
-    "internship": "internship",
-    "temporary":  "temporary",
-    "temp":       "temporary",
-    "other":      "full-time",
-  };
-  const rawJobType = (
-    raw.contractType   ||
-    raw.employmentType ||
-    raw.jobType        ||
-    ""
-  ).toLowerCase().replace(/\s+/g, "_");
-  const jobType = EMP_TYPE_MAP[rawJobType] || (rawJobType ? "full-time" : "");
-
-  // Salary — HarvestAPI nested object, or fall back to text compensation fields
-  let salaryMin      = raw.salary?.min      ?? null;
-  let salaryMax      = raw.salary?.max      ?? null;
-  let salaryCurrency = raw.salary?.currency || null;
-  if (salaryMin == null) {
-    const salText = raw.compensationText || raw.compensation || raw.salaryRange || "";
-    if (typeof salText === "string" && salText.trim()) {
-      // Match patterns like "$80K–$120K", "$80,000 - $120,000", "80000-120000"
-      const salRe = /\$?([\d,]+)\s*[Kk]?\s*[-–to]+\s*\$?([\d,]+)\s*[Kk]?/;
-      const salM  = salText.replace(/,/g,"").match(salRe);
-      if (salM) {
-        const toNum = (s, raw2) => {
-          const n = parseFloat(s);
-          return raw2.toLowerCase().includes("k") ? n * 1000 : n;
-        };
-        const lo = parseFloat(salM[1]);
-        const hi = parseFloat(salM[2]);
-        const isK = /[Kk]/.test(salText);
-        salaryMin = isK ? lo * 1000 : lo;
-        salaryMax = isK ? hi * 1000 : hi;
-        const curM = salText.match(/\b(USD|CAD|GBP|EUR|AUD)\b/i);
-        if (curM) salaryCurrency = curM[1].toUpperCase();
-      } else {
-        // Single value: "$120K/yr", "$120,000"
-        const singRe = /\$?([\d,]+)\s*[Kk]?/;
-        const singM  = salText.replace(/,/g,"").match(singRe);
-        if (singM) {
-          const n = parseFloat(singM[1]);
-          const v = /[Kk]/.test(salText) ? n * 1000 : n;
-          if (v > 10000) { salaryMin = v; salaryMax = v; }
-        }
-      }
-    }
-  }
-
-  // Applicant count
-  const applicantCount = raw.applicants ?? raw.applies ?? raw.applicantCount ?? null;
-
-  // Company logo (use from HarvestAPI if available, otherwise clearbit fallback later)
-  const companyLogoUrl = raw.company?.logo || raw.companyLogo || null;
-
-  // Real LinkedIn job ID (string)
-  const jobId = raw.id != null ? String(raw.id) : (raw.jobId != null ? String(raw.jobId) : null);
-
-  return {
-    _source: "LinkedIn",
-    jobId,
-    company,
-    title,
-    description,
-    descriptionHtml,
-    location,
-    workTypeHint,
-    applyUrl,
-    url,
-    postedAt,
-    jobType,
-    salaryMin,
-    salaryMax,
-    salaryCurrency,
-    applicantCount,
-    companyLogoUrl,
-  };
-}
-
-function isFullTimeNorm(item) {
-  const text = [item.title, item.jobType, item.description].join(" ").toLowerCase();
-  return !NON_FULLTIME_TERMS.some(t => text.includes(t));
-}
-
-function isEmploymentTypeWanted(item, wantedTypes) {
-  // If 3+ types selected, keep everything
-  if (wantedTypes.length >= 3) return true;
-
-  const text = [item.title, item.jobType, item.description].join(" ").toLowerCase();
-
-  const signals = {
-    "full-time":  ["full-time", "full time", "permanent"],
-    "contract":   ["contract", "contractor", "freelance", "temp", "temporary"],
-    "internship": ["intern", "internship", "co-op", "coop"],
-  };
-
-  // No type signal in text — assume full-time (most roles don't say it explicitly)
-  const hasAnySignal = Object.values(signals).flat().some(s => text.includes(s));
-  if (!hasAnySignal) return wantedTypes.includes("full-time");
-
-  // Check if any wanted type's signals match
-  return wantedTypes.some(type => signals[type]?.some(s => text.includes(s)));
-}
-
-function parseYearsExperience(description = "") {
-  const patterns = [
-    { re:/(\d+)\s*\+\s*years?\s+(?:of\s+)?experience/i,                              type:"plus"  },
-    { re:/(\d+)\s*[-–]\s*(\d+)\s*years?\s+(?:of\s+)?experience/i,                   type:"range" },
-    { re:/(\d+)\s*to\s*(\d+)\s*years?\s+(?:of\s+)?(?:\w+\s+)?experience/i,          type:"range" },
-    { re:/minimum\s+(\d+)\s*years?/i,                                                type:"min"   },
-    { re:/at\s+least\s+(\d+)\s*years?/i,                                             type:"min"   },
-    { re:/(\d+)\s*or\s*more\s*years?(?:\s+of)?/i,                                   type:"plus"  },
-    { re:/(\d+)\s*years?\s+(?:of\s+)?(?:professional|hands-on|industry)\s+experience/i, type:"exact" },
-    { re:/(\d+)\s*years?\s+(?:of\s+)?(?:relevant\s+)?experience/i,                  type:"exact" },
-  ];
-  for (const { re, type } of patterns) {
-    const m = description.match(re);
-    if (m) {
-      if (type === "range") return { min: Number(m[1]), max: Number(m[2]), raw: m[0] };
-      if (type === "plus")  return { min: Number(m[1]), max: null,         raw: m[0] };
-      return { min: Number(m[1]), max: Number(m[1]), raw: m[0] };
-    }
-  }
-  return { min: null, max: null, raw: null };
-}
-
-function ghostJobScoreNorm(item) {
-  let score = 0;
-  const desc = item.description.toLowerCase();
-  const url  = (item.url || "").toLowerCase();
-  if (!url || url === "#")                                                score += 3;
-  if (url.includes("linkedin.com/jobs/view") && !url.includes("apply")) score += 1;
-  if (desc.length < 150)                                                 score += 2;
-  if (!item.company || item.company === "Unknown")                       score += 2;
-  if (item.title.toLowerCase().includes("multiple") ||
-      item.title.toLowerCase().includes("various"))                      score += 2;
-  return score;
-}
-
-function isReposted(job) {
-  return ((job.title||"")+" "+(job.description||"")).toLowerCase().includes("reposted");
-}
+// ── Helpers (extracted to services/jobNormalization.js) ───────
+// inferWorkType, jobHash, normaliseItem, isFullTimeNorm,
+// isEmploymentTypeWanted, parseYearsExperience, ghostJobScoreNorm,
+// isReposted are now imported from services/jobNormalization.js
 
 function encryptCookies(plaintext) {
   const iv = crypto.randomBytes(12);
@@ -2461,6 +2350,25 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
 
   const nowUnix = Math.floor(Date.now() / 1000);
 
+  // Convert raw posting string to ISO date so the cron cleanup and age display work reliably.
+  // LinkedIn returns relative strings ("2 days ago", "3 weeks ago") or ISO dates.
+  function normalizePostedAt(raw, scrapedAt) {
+    if (!raw) return null;
+    const str = String(raw).trim();
+    // Already a parseable date (ISO, RFC2822, etc.)
+    const d = new Date(str);
+    if (!isNaN(d.getTime()) && d.getFullYear() > 2010) return d.toISOString().slice(0, 10);
+    // Relative string: "X minutes/hours/days/weeks/months ago"
+    const m = str.match(/^(\d+)\s+(minute|hour|day|week|month)s?\s+ago$/i);
+    if (m) {
+      const n = parseInt(m[1]);
+      const unit = m[2].toLowerCase();
+      const offsets = { minute: 60, hour: 3600, day: 86400, week: 604800, month: 2592000 };
+      return new Date((scrapedAt - n * (offsets[unit] || 86400)) * 1000).toISOString().slice(0, 10);
+    }
+    return null;
+  }
+
   const insertJob = db.prepare(`
     INSERT OR IGNORE INTO scraped_jobs
     (job_id, search_query, company, title, category, location,
@@ -2493,7 +2401,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         "LinkedIn",
         item.url        || null,
         item.applyUrl   || null,
-        item.postedAt   || null,
+        normalizePostedAt(item.postedAt, nowUnix),
         item.description || null,
         item.descriptionHtml || null,
         ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }),
@@ -2576,13 +2484,17 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   } else if (userId && ANTHROPIC_KEY) {
     enqueueAtsScoreWork(`scrape:${userId}:${query}`, async () => {
       try {
-        const baseResumeRow = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
+        const baseResumeRow = domainProfile
+          ? getBaseResumeRecord(db, { userId, profileId: domainProfile.id })
+          : null;
         const baseResumeText = baseResumeRow?.content;
         if (!baseResumeText) return; // No base resume — skip scoring
         const profileTitles = domainProfile ? (() => {
           try { return JSON.parse(domainProfile.target_titles || "[]"); } catch { return []; }
         })() : [];
-        const simpleProfile = loadOrCreateSimpleApplyProfile(db, userId, profileTitles);
+        const simpleProfile = domainProfile
+          ? loadOrCreateSimpleApplyProfile(db, { userId, profileId: domainProfile.id, roleTitles: profileTitles })
+          : null;
         const atsResumeBasis = buildAtsResumeBasis(baseResumeText, simpleProfile);
 
         // Find newly inserted jobs that have no ats_score yet
@@ -2700,8 +2612,11 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   };
 }
 
-// ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
-cron.schedule("0 3 * * *", () => {
+// ── Job expiry cleanup — runs at startup and daily at 03:00 ──────
+// Extracts into a named function so it can be called at startup (to
+// catch any window missed if the server was down during the cron time)
+// and also scheduled daily.
+function runExpiredJobsCleanup() {
   const cutoff = Math.floor(Date.now()/1000) - 7*24*60*60;
   // Delete jobs older than 7 days based on original posting date (scraped_at as fallback).
   // Applied jobs are permanently exempt from expiry.
@@ -2755,7 +2670,10 @@ cron.schedule("0 3 * * *", () => {
   ).run(deletedJobs.changes, orphans, details);
 
   console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by posting date), pruned ${orphans} orphaned rows`);
-});
+}
+
+// ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
+cron.schedule("0 3 * * *", runExpiredJobsCleanup);
 
 cron.schedule("0 2 * * *", () => {
   try { createBackup("auto-daily"); }
@@ -3543,287 +3461,10 @@ function roleKeyForProfile(profile) {
   return _getRoleKeyForProfile(profile);
 }
 
-function roleTitleSql(column, roleKey) {
-  if (roleKey === "engineering") return `((
-    LOWER(${column}) LIKE '%engineer%'
-    OR LOWER(${column}) LIKE '%developer%'
-    OR LOWER(${column}) LIKE '%software%'
-    OR LOWER(${column}) LIKE '%programmer%'
-    OR LOWER(${column}) LIKE '%devops%'
-    OR LOWER(${column}) LIKE '%sre%'
-    OR LOWER(${column}) LIKE '%architect%'
-    OR LOWER(${column}) LIKE '%backend%'
-    OR LOWER(${column}) LIKE '%frontend%'
-    OR LOWER(${column}) LIKE '%fullstack%'
-    OR LOWER(${column}) LIKE '%full stack%'
-    OR LOWER(${column}) LIKE '%platform%'
-    OR LOWER(${column}) LIKE '%infrastructure%'
-    OR LOWER(${column}) LIKE '%cloud%'
-    OR LOWER(${column}) LIKE '%systems%'
-    OR LOWER(${column}) LIKE '%security%'
-  )
-    AND LOWER(${column}) NOT LIKE '%firmware%'
-    AND LOWER(${column}) NOT LIKE '%embedded%'
-    AND LOWER(${column}) NOT LIKE '%device driver%'
-    AND LOWER(${column}) NOT LIKE '%bsp%'
-    AND LOWER(${column}) NOT LIKE '%silicon validation%'
-    AND LOWER(${column}) NOT LIKE '%post-silicon%'
-    AND LOWER(${column}) NOT LIKE '%post silicon%'
-    AND LOWER(${column}) NOT LIKE '%soc bring%'
-    AND LOWER(${column}) NOT LIKE '%board bring%'
-    AND LOWER(${column}) NOT LIKE '%chip bring%'
-    AND LOWER(${column}) NOT LIKE '%bootloader%'
-    AND LOWER(${column}) NOT LIKE '%rtos%'
-    AND LOWER(${column}) NOT LIKE '% bios %'
-    AND LOWER(${column}) NOT LIKE 'bios %'
-    AND LOWER(${column}) NOT LIKE '%uefi%'
-    AND LOWER(${column}) NOT LIKE '%machine learning%'
-    AND LOWER(${column}) NOT LIKE '%ml engineer%'
-    AND LOWER(${column}) NOT LIKE '%ai engineer%'
-    AND LOWER(${column}) NOT LIKE '%artificial intelligence%'
-    AND LOWER(${column}) NOT LIKE '%llm%'
-    AND LOWER(${column}) NOT LIKE '%genai%'
-    AND LOWER(${column}) NOT LIKE '%generative ai%'
-    AND LOWER(${column}) NOT LIKE '%data scientist%'
-    AND LOWER(${column}) NOT LIKE '%data engineer%'
-    AND LOWER(${column}) NOT LIKE '%analytics engineer%'
-    AND LOWER(${column}) NOT LIKE '%project manager%'
-    AND LOWER(${column}) NOT LIKE '%program manager%'
-    AND LOWER(${column}) NOT LIKE '%product manager%'
-    AND LOWER(${column}) NOT LIKE '%project coordinator%'
-    AND LOWER(${column}) NOT LIKE '%scrum master%'
-    AND LOWER(${column}) NOT LIKE '%pmo%'
-  )`;
-  // Firmware / Embedded / Device-level roles — kept strictly separate from SWE.
-  // Matches the canonical firmware title set from DOMAIN_METADATA_REGISTRY.json
-  // and ROLE_ALIAS_MAP.json (engineering_embedded_firmware domain).
-  if (roleKey === "engineering_embedded_firmware") return `(
-    LOWER(${column}) LIKE '%firmware%'
-    OR LOWER(${column}) LIKE '%embedded%'
-    OR LOWER(${column}) LIKE '%device driver%'
-    OR LOWER(${column}) LIKE '%bsp%'
-    OR LOWER(${column}) LIKE '%silicon validation%'
-    OR LOWER(${column}) LIKE '%post-silicon%'
-    OR LOWER(${column}) LIKE '%post silicon%'
-    OR LOWER(${column}) LIKE '%soc bring%'
-    OR LOWER(${column}) LIKE '%board bring%'
-    OR LOWER(${column}) LIKE '%chip bring%'
-    OR LOWER(${column}) LIKE '%bootloader%'
-    OR LOWER(${column}) LIKE '%rtos%'
-    OR LOWER(${column}) LIKE '% bios %'
-    OR LOWER(${column}) LIKE 'bios %'
-    OR LOWER(${column}) LIKE '%uefi%'
-    OR LOWER(${column}) LIKE '%hardware debug%'
-    OR LOWER(${column}) LIKE '%debug tools%'
-  )`;
-  if (roleKey === "pm") return `((
-    LOWER(${column}) LIKE '%product manager%'
-    OR LOWER(${column}) LIKE '%project manager%'
-    OR LOWER(${column}) LIKE '%program manager%'
-    OR LOWER(${column}) LIKE '%scrum master%'
-    OR LOWER(${column}) LIKE '%product owner%'
-    OR LOWER(${column}) LIKE '%delivery manager%'
-    OR LOWER(${column}) LIKE '%release manager%'
-    OR LOWER(${column}) LIKE '%agile%'
-    OR LOWER(${column}) LIKE '%pmo%'
-    OR LOWER(${column}) LIKE '%product lead%'
-    OR LOWER(${column}) LIKE '%project coordinator%'
-    OR LOWER(${column}) LIKE '%program coordinator%'
-    OR LOWER(${column}) LIKE '% manager%'
-    OR LOWER(${column}) LIKE '%coordinator%'
-    OR LOWER(${column}) LIKE '%director%'
-    OR LOWER(${column}) LIKE '%project%'
-    OR LOWER(${column}) LIKE '%program%'
-    OR LOWER(${column}) LIKE '%product%'
-    OR LOWER(${column}) LIKE '%delivery%'
-  )
-    AND LOWER(${column}) NOT LIKE '%product designer%'
-    AND LOWER(${column}) NOT LIKE '%product design%'
-    AND LOWER(${column}) NOT LIKE '%art director%'
-    AND LOWER(${column}) NOT LIKE '%creative director%'
-    AND LOWER(${column}) NOT LIKE '%design director%'
-    AND LOWER(${column}) NOT LIKE '%finance director%'
-    AND LOWER(${column}) NOT LIKE '%hr director%'
-    AND LOWER(${column}) NOT LIKE '%sales director%'
-    AND LOWER(${column}) NOT LIKE '%marketing director%'
-  )`;
-  if (roleKey === "data") return `(
-    LOWER(${column}) LIKE '%data scientist%'
-    OR LOWER(${column}) LIKE '%data engineer%'
-    OR LOWER(${column}) LIKE '%analytics engineer%'
-    OR LOWER(${column}) LIKE '%machine learning%'
-    OR LOWER(${column}) LIKE '%ml engineer%'
-    OR LOWER(${column}) LIKE '%ai engineer%'
-    OR LOWER(${column}) LIKE '%artificial intelligence%'
-    OR LOWER(${column}) LIKE '%llm%'
-    OR LOWER(${column}) LIKE '%genai%'
-    OR LOWER(${column}) LIKE '%generative ai%'
-    OR LOWER(${column}) LIKE '%business intelligence%'
-    OR LOWER(${column}) LIKE '%nlp engineer%'
-    OR LOWER(${column}) LIKE '%quantitative%'
-    OR LOWER(${column}) LIKE '%data analyst%'
-    OR LOWER(${column}) LIKE '%bi analyst%'
-    OR LOWER(${column}) LIKE '%research scientist%'
-    OR LOWER(${column}) LIKE '%applied scientist%'
-    OR LOWER(${column}) LIKE '% analyst%'
-    OR LOWER(${column}) LIKE '%analytics%'
-    OR LOWER(${column}) LIKE '%scientist%'
-    OR LOWER(${column}) LIKE '%data%'
-  )`;
-  // HR / People Operations
-  if (roleKey === "hr") return `(
-    LOWER(${column}) LIKE '%recruiter%'
-    OR LOWER(${column}) LIKE '%talent acquisition%'
-    OR LOWER(${column}) LIKE '%human resources%'
-    OR LOWER(${column}) LIKE '%hrbp%'
-    OR LOWER(${column}) LIKE '%hr business%'
-    OR LOWER(${column}) LIKE '%hr manager%'
-    OR LOWER(${column}) LIKE '%hr director%'
-    OR LOWER(${column}) LIKE '%hr generalist%'
-    OR LOWER(${column}) LIKE '%hr specialist%'
-    OR LOWER(${column}) LIKE '%hr analyst%'
-    OR LOWER(${column}) LIKE '%hr coordinator%'
-    OR LOWER(${column}) LIKE '%people ops%'
-    OR LOWER(${column}) LIKE '%people operations%'
-    OR LOWER(${column}) LIKE '%compensation%'
-    OR LOWER(${column}) LIKE '% hr %'
-    OR LOWER(${column}) LIKE 'hr %'
-    OR LOWER(${column}) LIKE '%learning and development%'
-    OR LOWER(${column}) LIKE '%learning & development%'
-    OR LOWER(${column}) LIKE '%workforce%'
-    OR LOWER(${column}) LIKE '%employee relations%'
-    OR LOWER(${column}) LIKE '%total rewards%'
-  )`;
-  // Finance / Accounting / Investment
-  if (roleKey === "finance") return `(
-    LOWER(${column}) LIKE '%financial analyst%'
-    OR LOWER(${column}) LIKE '%investment bank%'
-    OR LOWER(${column}) LIKE '%fp&a%'
-    OR LOWER(${column}) LIKE '%treasury%'
-    OR LOWER(${column}) LIKE '%credit analyst%'
-    OR LOWER(${column}) LIKE '%risk analyst%'
-    OR LOWER(${column}) LIKE '%controller%'
-    OR LOWER(${column}) LIKE '%cfo%'
-    OR LOWER(${column}) LIKE '%auditor%'
-    OR LOWER(${column}) LIKE '%tax analyst%'
-    OR LOWER(${column}) LIKE '%tax manager%'
-    OR LOWER(${column}) LIKE '%portfolio manager%'
-    OR LOWER(${column}) LIKE '%asset manager%'
-    OR LOWER(${column}) LIKE '%underwriter%'
-    OR LOWER(${column}) LIKE '%loan officer%'
-    OR LOWER(${column}) LIKE '%actuary%'
-    OR LOWER(${column}) LIKE '%equity research%'
-    OR LOWER(${column}) LIKE '%budget analyst%'
-    OR LOWER(${column}) LIKE '%revenue analyst%'
-    OR LOWER(${column}) LIKE '% finance%'
-    OR LOWER(${column}) LIKE '%financial%'
-    OR LOWER(${column}) LIKE '%accounting%'
-  )`;
-  // Design / UX / UI / Creative
-  if (roleKey === "design") return `(
-    LOWER(${column}) LIKE '%ux designer%'
-    OR LOWER(${column}) LIKE '%ui designer%'
-    OR LOWER(${column}) LIKE '%ux/ui%'
-    OR LOWER(${column}) LIKE '%ui/ux%'
-    OR LOWER(${column}) LIKE '%product designer%'
-    OR LOWER(${column}) LIKE '%graphic designer%'
-    OR LOWER(${column}) LIKE '%visual designer%'
-    OR LOWER(${column}) LIKE '%interaction designer%'
-    OR LOWER(${column}) LIKE '%ux researcher%'
-    OR LOWER(${column}) LIKE '%user researcher%'
-    OR LOWER(${column}) LIKE '%design researcher%'
-    OR LOWER(${column}) LIKE '%motion designer%'
-    OR LOWER(${column}) LIKE '%creative director%'
-    OR LOWER(${column}) LIKE '%design director%'
-    OR LOWER(${column}) LIKE '%design lead%'
-    OR LOWER(${column}) LIKE '%brand designer%'
-    OR LOWER(${column}) LIKE '%content designer%'
-    OR LOWER(${column}) LIKE '%service designer%'
-  )`;
-  // Marketing / Growth / Brand / Content
-  if (roleKey === "marketing") return `(
-    LOWER(${column}) LIKE '%marketing manager%'
-    OR LOWER(${column}) LIKE '%marketing director%'
-    OR LOWER(${column}) LIKE '%marketing analyst%'
-    OR LOWER(${column}) LIKE '%seo%'
-    OR LOWER(${column}) LIKE '%sem%'
-    OR LOWER(${column}) LIKE '%growth market%'
-    OR LOWER(${column}) LIKE '%demand gen%'
-    OR LOWER(${column}) LIKE '%brand manager%'
-    OR LOWER(${column}) LIKE '%content market%'
-    OR LOWER(${column}) LIKE '%content strategist%'
-    OR LOWER(${column}) LIKE '%social media manager%'
-    OR LOWER(${column}) LIKE '%product marketing%'
-    OR LOWER(${column}) LIKE '%email marketing%'
-    OR LOWER(${column}) LIKE '%digital marketing%'
-    OR LOWER(${column}) LIKE '%performance marketing%'
-    OR LOWER(${column}) LIKE '%paid media%'
-  )`;
-  // Legal / Compliance / Regulatory
-  if (roleKey === "legal") return `(
-    LOWER(${column}) LIKE '%attorney%'
-    OR LOWER(${column}) LIKE '%counsel%'
-    OR LOWER(${column}) LIKE '%paralegal%'
-    OR LOWER(${column}) LIKE '%compliance officer%'
-    OR LOWER(${column}) LIKE '%compliance manager%'
-    OR LOWER(${column}) LIKE '%legal director%'
-    OR LOWER(${column}) LIKE '%legal analyst%'
-    OR LOWER(${column}) LIKE '%regulatory affairs%'
-    OR LOWER(${column}) LIKE '%patent attorney%'
-    OR LOWER(${column}) LIKE '%ip attorney%'
-    OR LOWER(${column}) LIKE '%ip counsel%'
-    OR LOWER(${column}) LIKE '%litigation%'
-    OR LOWER(${column}) LIKE '% legal %'
-    OR LOWER(${column}) LIKE 'legal %'
-  )`;
-  // Operations / Supply Chain / Logistics / Procurement
-  if (roleKey === "operations") return `(
-    LOWER(${column}) LIKE '%operations manager%'
-    OR LOWER(${column}) LIKE '%supply chain%'
-    OR LOWER(${column}) LIKE '%logistics manager%'
-    OR LOWER(${column}) LIKE '%logistics coordinator%'
-    OR LOWER(${column}) LIKE '%procurement manager%'
-    OR LOWER(${column}) LIKE '%procurement analyst%'
-    OR LOWER(${column}) LIKE '%manufacturing engineer%'
-    OR LOWER(${column}) LIKE '%industrial engineer%'
-    OR LOWER(${column}) LIKE '%quality engineer%'
-    OR LOWER(${column}) LIKE '%quality manager%'
-    OR LOWER(${column}) LIKE '%fulfillment manager%'
-    OR LOWER(${column}) LIKE '%warehouse manager%'
-    OR LOWER(${column}) LIKE '%inventory manager%'
-    OR LOWER(${column}) LIKE '%vendor manager%'
-    OR LOWER(${column}) LIKE '%scm analyst%'
-  )`;
-  // Healthcare / Clinical / Medical
-  if (roleKey === "healthcare") return `(
-    LOWER(${column}) LIKE '%registered nurse%'
-    OR LOWER(${column}) LIKE '%nurse practitioner%'
-    OR LOWER(${column}) LIKE '%physician assistant%'
-    OR LOWER(${column}) LIKE '%pharmacist%'
-    OR LOWER(${column}) LIKE '%physical therapist%'
-    OR LOWER(${column}) LIKE '%occupational therapist%'
-    OR LOWER(${column}) LIKE '%medical assistant%'
-    OR LOWER(${column}) LIKE '%clinical nurse%'
-    OR LOWER(${column}) LIKE '%radiolog%'
-    OR LOWER(${column}) LIKE '%medical director%'
-    OR LOWER(${column}) LIKE '%clinical director%'
-    OR LOWER(${column}) LIKE '%healthcare administrator%'
-    OR LOWER(${column}) LIKE '%hospital administrator%'
-    OR LOWER(${column}) LIKE '%patient care%'
-    OR LOWER(${column}) LIKE '%clinical research%'
-    OR LOWER(${column}) LIKE '%clinical coordinator%'
-  )`;
-  return "1 = 1";
-}
-
 function userHasBaseResume(userId) {
-  const row = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
-  return !!String(row?.content || "").trim();
-}
-
-function parseProfileArray(value) {
-  if (Array.isArray(value)) return value;
-  try { return JSON.parse(value || "[]"); } catch { return []; }
+  const activeProfile = getOrRepairActiveProfile(userId);
+  if (!activeProfile) return false;
+  return profileHasBaseResume(db, { userId, profileId: activeProfile.id });
 }
 
 function getOrRepairActiveProfile(userId) {
@@ -3838,31 +3479,6 @@ function getOrRepairActiveProfile(userId) {
   db.prepare("UPDATE domain_profiles SET is_active=1, updated_at=unixepoch() WHERE id=? AND user_id=?").run(fallback.id, userId);
   try { db.prepare("UPDATE users SET domain_profile_complete=1 WHERE id=?").run(userId); } catch {}
   return db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?").get(fallback.id, userId);
-}
-
-function profileTitleSql(column, profile) {
-  const targetTitles = parseProfileArray(profile?.target_titles);
-  if (!targetTitles.length) return { sql: "1 = 1", params: [] };
-  const stopWords = new Set([
-    "the","and","for","with","ing","a","an","of","in","at","by","to","or",
-    "senior","junior","staff","principal","lead","entry","level","mid",
-    "ii","iii","iv","i","engineer","engineering",
-  ]);
-  const clauses = [];
-  const params = [];
-  for (const rawTitle of targetTitles) {
-    const tokens = String(rawTitle || "").toLowerCase()
-      .split(/[\s,/\-()]+/)
-      .map(w => w.trim())
-      .filter(w => w.length > 2 && !stopWords.has(w))
-      .slice(0, 4);
-    if (!tokens.length) continue;
-    clauses.push(`(${tokens.map(() => `LOWER(${column}) LIKE ?`).join(" AND ")})`);
-    params.push(...tokens.map(token => `%${token}%`));
-  }
-  return clauses.length
-    ? { sql: `(${clauses.join(" OR ")})`, params }
-    : { sql: "1 = 1", params: [] };
 }
 
 function assignJobRoleMap(jobId, profile, matchedBy = "profile_scrape", confidence = 1.0) {
@@ -4280,44 +3896,14 @@ app.get("/api/auth/me", (req, res) =>
 // /api/domain-profiles/metadata[/:domain]  — registry (no auth)
 // /api/domain-profiles/generate-chips      — AI chip generation
 app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic, emitToUser));
+app.use(createImportSourcesRouter({ db, requireAuth, emitToUser }));
+app.use("/api/imported-jobs", requireAuth, createImportedJobsRouter(db));
 // Metadata is also public — mount without requireAuth at a sub-path so
 // the chip registry is accessible from the wizard before login
 app.get("/api/domain-metadata",       (_req, res) => res.redirect(307, "/api/domain-profiles/metadata"));
 app.get("/api/domain-metadata/:key",  (req, res) => res.redirect(307, `/api/domain-profiles/metadata/${req.params.key}`));
 
 // Mark onboarding complete (called by wizard on profile save, also done inside createDomainProfilesRouter)
-app.patch("/api/auth/complete-profile", requireAuth, (req, res) => {
-  db.prepare("UPDATE users SET domain_profile_complete=1 WHERE id=?").run(req.user.id);
-  res.json({ ok: true });
-});
-
-
-// ═══════════════════════════════════════════════════════════════
-// MULTI-SESSION SYNC — Server-Sent Events
-// ═══════════════════════════════════════════════════════════════
-app.get("/api/sync/events", requireAuth, (req, res) => {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  const userId = req.user.id;
-  if (!syncClients.has(userId)) syncClients.set(userId, new Set());
-  syncClients.get(userId).add(res);
-  res.write('data: {"type":"connected"}\n\n');
-  const heartbeat = setInterval(() => {
-    try { res.write('data: {"type":"heartbeat"}\n\n'); }
-    catch { clearInterval(heartbeat); }
-  }, 30000);
-  req.on("close", () => {
-    clearInterval(heartbeat);
-    syncClients.get(userId)?.delete(res);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// NOTIFICATIONS
-// ═══════════════════════════════════════════════════════════════
-
 // Helper: insert a notification and emit SSE so badges update live.
 function insertNotification(userId, type, message, payload = null) {
   try {
@@ -4329,63 +3915,6 @@ function insertNotification(userId, type, message, payload = null) {
     console.warn("[notification] insert failed:", e.message);
   }
 }
-
-app.get("/api/notifications", requireAuth, (req, res) => {
-  const rows = db.prepare(`
-    SELECT id, type, message, payload, read, created_at
-    FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50
-  `).all(req.user.id);
-  const unreadCount = rows.filter(r => !r.read).length;
-  res.json({ notifications: rows, unreadCount });
-});
-
-app.patch("/api/notifications/read-all", requireAuth, (req, res) => {
-  db.prepare("UPDATE notifications SET read=1 WHERE user_id=?").run(req.user.id);
-  res.json({ ok: true });
-});
-
-// Must be after /read-all to avoid route collision
-app.patch("/api/notifications/:id/read", requireAuth, (req, res) => {
-  const id = parseInt(req.params.id);
-  const row = db.prepare("SELECT id FROM notifications WHERE id=? AND user_id=?").get(id, req.user.id);
-  if (!row) return res.status(404).json({ error: "Not found" });
-  db.prepare("UPDATE notifications SET read=1 WHERE id=?").run(id);
-  res.json({ ok: true });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// DOCK PREFERENCES
-// ═══════════════════════════════════════════════════════════════
-
-const DEFAULT_DOCK_ITEMS = ["profile_switcher","notifications","quick_actions","settings","user_avatar"];
-
-app.get("/api/dock-preferences", requireAuth, (req, res) => {
-  const row = db.prepare("SELECT items_json, dock_enabled FROM dock_preferences WHERE user_id=?").get(req.user.id);
-  if (!row) return res.json({ itemsOrder: DEFAULT_DOCK_ITEMS, dockEnabled: true });
-  let itemsOrder;
-  try { itemsOrder = JSON.parse(row.items_json); } catch { itemsOrder = DEFAULT_DOCK_ITEMS; }
-  res.json({ itemsOrder, dockEnabled: !!row.dock_enabled });
-});
-
-app.put("/api/dock-preferences", requireAuth, (req, res) => {
-  const VALID_KEYS = new Set(["profile_switcher","notifications","quick_actions","settings","user_avatar"]);
-  let { itemsOrder, dockEnabled } = req.body;
-  if (!Array.isArray(itemsOrder)) return res.status(400).json({ error: "itemsOrder must be array" });
-  // Validate keys
-  if (!itemsOrder.every(k => VALID_KEYS.has(k))) return res.status(400).json({ error: "Invalid item key" });
-  // Ensure user_avatar is last
-  itemsOrder = itemsOrder.filter(k => k !== "user_avatar");
-  itemsOrder.push("user_avatar");
-  // Ensure settings is present
-  if (!itemsOrder.includes("settings")) itemsOrder.splice(itemsOrder.length - 1, 0, "settings");
-  db.prepare(`
-    INSERT INTO dock_preferences (user_id, items_json, dock_enabled, updated_at)
-    VALUES (?, ?, ?, unixepoch())
-    ON CONFLICT(user_id) DO UPDATE SET items_json=excluded.items_json,
-      dock_enabled=excluded.dock_enabled, updated_at=excluded.updated_at
-  `).run(req.user.id, JSON.stringify(itemsOrder), dockEnabled ? 1 : 0);
-  res.json({ itemsOrder, dockEnabled: !!dockEnabled });
-});
 
 // ═══════════════════════════════════════════════════════════════
 // ADMIN BACKUP / RESTORE
@@ -4527,202 +4056,27 @@ app.get("/api/admin/users/:id/applications", requireAdmin, (req, res) => {
 app.use("/api/admin/analytics", createAdminRouter(db));
 app.use("/api/admin/db", createAdminDbRouter(db, { dbPath: DB_PATH, scrapeJobs }));
 
-// ═══════════════════════════════════════════════════════════════
-// SETTINGS
-// ═══════════════════════════════════════════════════════════════
-app.patch("/api/settings/apply-mode", requireAuth, (req, res) => {
-  res.status(410).json({
-    error: "Plans control tool access. The jobs console is shared for every user.",
-  });
-});
-// Save user's personal Apify token (per-user — no server-level token exists)
-app.patch("/api/settings/apify-token", requireAuth, (req, res) => {
-  const token = (req.body.token||"").trim() || null;
-  db.prepare("UPDATE users SET apify_token=? WHERE id=?").run(token, req.user.id);
-  res.json({ ok:true });
-});
-// Clear user's Apify token
-app.delete("/api/settings/apify-token", requireAuth, (req, res) => {
-  db.prepare("UPDATE users SET apify_token=NULL WHERE id=?").run(req.user.id);
-  res.json({ ok:true });
-});
-app.get("/api/settings", requireAuth, (req, res) => {
-  const u = db.prepare("SELECT apply_mode,plan_tier,apify_token FROM users WHERE id=?").get(req.user.id);
-  const planTier = normalisePlanTier(u?.plan_tier);
-  res.json({
-    applyMode:u?.apply_mode,
-    planTier,
-    allowedModes: allowedModesForTier(planTier),
-    capabilities: {
-      canUseGenerate: canUseGenerate(planTier),
-      canUseAPlusResume: canUseAPlusResume(planTier),
-    },
-    hasApifyToken:!!u?.apify_token,
-  });
-});
-
-function saveIntegrationSecret(value) {
-  const text = typeof value === "string" ? value : JSON.stringify(value || {});
-  if (!text || text === "{}") return { enc: null, iv: null, tag: null };
-  return encryptCookies(text);
-}
-
-app.get("/api/integrations/status", requireAuth, async (req, res) => {
-  // probeBrowserAvailability() returns a cached result after the first probe
-  const browserStatus = await probeBrowserAvailability();
-  res.json({
-    ...getAutomationReadiness(db, req.user.id),
-    oauth: oauthReadiness(req),
-    browser: {
-      available:   browserStatus.available,
-      reasonCode:  browserStatus.reasonCode,
-      source:      browserStatus.source,
-      requiredFor: ["apply_automation", "pdf_export"],
-    },
-  });
-});
-
-app.patch("/api/integrations/apify-token", requireAuth, (req, res) => {
-  const token = (req.body.token || "").trim() || null;
-  db.prepare("UPDATE users SET apify_token=? WHERE id=?").run(token, req.user.id);
-  res.json({ ok: true, apify: getAutomationReadiness(db, req.user.id).apify, oauth: oauthReadiness(req) });
-});
-
-app.delete("/api/integrations/apify-token", requireAuth, (req, res) => {
-  db.prepare("UPDATE users SET apify_token=NULL WHERE id=?").run(req.user.id);
-  res.json({ ok: true, apify: getAutomationReadiness(db, req.user.id).apify, oauth: oauthReadiness(req) });
-});
-
-app.post("/api/integrations/:provider", requireAuth, (req, res) => {
-  const provider = String(req.params.provider || "").toLowerCase();
-  if (!INTEGRATION_PROVIDERS.has(provider)) return res.status(400).json({ error: "Unsupported integration provider" });
-  const accountEmail = String(req.body?.accountEmail || req.body?.email || "").trim() || null;
-  const scopes = Array.isArray(req.body?.scopes) ? req.body.scopes.map(s => String(s || "").trim()).filter(Boolean) : [];
-  const metadata = req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {};
-  const providerUserId = String(req.body?.providerUserId || "").trim() || null;
-  const status = ["connected", "missing_permissions", "expired"].includes(req.body?.status) ? req.body.status : "connected";
-  const expiresAt = Number.isFinite(Number(req.body?.expiresAt)) ? Number(req.body.expiresAt) : null;
-  const secret = req.body?.sessionState || req.body?.cookies || req.body?.token || null;
-  const encrypted = saveIntegrationSecret(secret);
-  db.prepare(`
-    INSERT INTO user_integrations
-      (user_id, provider, account_email, status, scopes_json, metadata_json,
-       provider_user_id, secret_enc, iv, auth_tag, expires_at, last_checked_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())
-    ON CONFLICT(user_id, provider) DO UPDATE SET
-      account_email=excluded.account_email,
-      status=excluded.status,
-      scopes_json=excluded.scopes_json,
-      metadata_json=excluded.metadata_json,
-      provider_user_id=COALESCE(excluded.provider_user_id, user_integrations.provider_user_id),
-      secret_enc=COALESCE(excluded.secret_enc, user_integrations.secret_enc),
-      iv=COALESCE(excluded.iv, user_integrations.iv),
-      auth_tag=COALESCE(excluded.auth_tag, user_integrations.auth_tag),
-      expires_at=excluded.expires_at,
-      last_checked_at=excluded.last_checked_at,
-      updated_at=excluded.updated_at
-  `).run(
-    req.user.id, provider, accountEmail, status, JSON.stringify(scopes), JSON.stringify(metadata),
-    providerUserId, encrypted.enc, encrypted.iv, encrypted.tag, expiresAt,
-  );
-  const row = db.prepare("SELECT * FROM user_integrations WHERE user_id=? AND provider=?").get(req.user.id, provider);
-  res.json({ ok: true, provider, integration: publicIntegrationRow(row), readiness: { ...getAutomationReadiness(db, req.user.id), oauth: oauthReadiness(req) } });
-});
-
-app.delete("/api/integrations/:provider", requireAuth, (req, res) => {
-  const provider = String(req.params.provider || "").toLowerCase();
-  if (!INTEGRATION_PROVIDERS.has(provider)) return res.status(400).json({ error: "Unsupported integration provider" });
-  db.prepare("DELETE FROM user_integrations WHERE user_id=? AND provider=?").run(req.user.id, provider);
-  if (provider === "google" || provider === "linkedin") {
-    db.prepare(`UPDATE users SET ${providerColumnFor(provider)}=NULL WHERE id=?`).run(req.user.id);
-  }
-  res.json({ ok: true, provider, readiness: { ...getAutomationReadiness(db, req.user.id), oauth: oauthReadiness(req) } });
-});
-
-app.get("/api/plans", requireAuth, (req, res) => {
-  const row = db.prepare("SELECT plan_tier, apply_mode FROM users WHERE id=?").get(req.user.id);
-  const planTier = normalisePlanTier(row?.plan_tier);
-  const changeOptions = ["BASIC","PLUS","PRO"].filter(tier => tier !== planTier);
-  const pending = db.prepare(`
-    SELECT * FROM plan_upgrade_requests
-    WHERE user_id=? AND status='pending'
-    ORDER BY requested_at DESC LIMIT 1
-  `).get(req.user.id);
-  res.json({
-    planTier,
-    applyMode: row?.apply_mode,
-    allowedModes: allowedModesForTier(planTier),
-    capabilities: {
-      canUseGenerate: canUseGenerate(planTier),
-      canUseAPlusResume: canUseAPlusResume(planTier),
-    },
-    nextPlan: nextPlan(planTier),
-    changeOptions,
-    pendingRequest: pending || null,
-  });
-});
-
-app.post("/api/plans/request-upgrade", requireAuth, (req, res) => {
-  const row = db.prepare("SELECT plan_tier FROM users WHERE id=?").get(req.user.id);
-  const current = normalisePlanTier(row?.plan_tier);
-  const requested = normalisePlanTier(req.body?.requestedTier || nextPlan(current));
-  if (requested === current) return res.status(400).json({ error:"Already on this plan" });
-  const pending = db.prepare(`
-    SELECT * FROM plan_upgrade_requests
-    WHERE user_id=? AND status='pending'
-    ORDER BY requested_at DESC LIMIT 1
-  `).get(req.user.id);
-  if (pending) return res.status(409).json({ error:"Plan change request already pending", pendingRequest:pending });
-  try {
-    db.prepare(`
-      INSERT INTO plan_upgrade_requests (user_id, requested_tier, notes)
-      VALUES (?, ?, ?)
-    `).run(req.user.id, requested, req.body?.notes || null);
-  } catch(e) { return res.status(400).json({ error:e.message }); }
-  res.json({ ok:true, requestedTier:requested });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// PROFILE
-// ═══════════════════════════════════════════════════════════════
-app.get("/api/profile", requireAuth, (req, res) => {
-  db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
-  res.json(db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{});
-});
-app.post("/api/profile", requireAuth, (req, res) => {
-  const f = req.body;
-  db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
-  db.prepare(`UPDATE user_profile SET
-    full_name=?,email=?,phone=?,linkedin_url=?,github_url=?,location=?,
-    address_line1=?,address_line2=?,city=?,state=?,zip=?,country=?,
-    gender=?,ethnicity=?,veteran_status=?,disability_status=?,
-    requires_sponsorship=?,has_clearance=?,clearance_level=?,
-    visa_type=?,work_auth=?,updated_at=unixepoch() WHERE user_id=?`
-  ).run(
-    f.full_name||null,f.email||null,f.phone||null,f.linkedin_url||null,f.github_url||null,f.location||null,
-    f.address_line1||null,f.address_line2||null,f.city||null,f.state||null,f.zip||null,f.country||"United States",
-    f.gender||null,f.ethnicity||null,f.veteran_status||null,f.disability_status||null,
-    f.requires_sponsorship?1:0,f.has_clearance?1:0,f.clearance_level||null,
-    f.visa_type||null,f.work_auth||null,req.user.id
-  );
-  res.json({ ok:true });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// AUTOFILL
-// ═══════════════════════════════════════════════════════════════
-app.get("/api/autofill", requireAuth, (req, res) => {
-  if (!requireModeEntitlement(req, res)) return;
-  db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
-  const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
-  res.json(buildAutofillPayload(profile, req.user.applyMode));
-});
-app.get("/api/extension/autofill", requireAuth, (req, res) => {
-  if (!requireModeEntitlement(req, res)) return;
-  db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
-  const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
-  res.json({ ok:true, mode:req.user.applyMode, ...buildAutofillPayload(profile, req.user.applyMode) });
-});
+app.use(createAccountRouter({
+  db,
+  requireAuth,
+  emitToUser,
+  syncClients,
+  buildAutofillPayload,
+  requireModeEntitlement,
+  normalisePlanTier,
+  allowedModesForTier,
+  canUseGenerate,
+  canUseAPlusResume,
+  nextPlan,
+  getAutomationReadiness,
+  oauthReadiness,
+  probeBrowserAvailability,
+  encryptSecret: encryptCookies,
+  INTEGRATION_PROVIDERS,
+  publicIntegrationRow,
+  providerColumnFor,
+  INDUSTRY_CATEGORIES,
+}));
 
 // ═══════════════════════════════════════════════════════════════
 // ── /api/jobs/facets — live counts for filter UI ──────────────
@@ -4731,7 +4085,7 @@ app.get("/api/extension/autofill", requireAuth, (req, res) => {
 // zero-count filter options. Re-fetch after each scrape completes.
 app.get("/api/jobs/facets", requireAuth, (req, res) => {
   const userId = req.user.id;
-  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+  const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
   const facetProfile = getOrRepairActiveProfile(userId);
   if (!facetProfile) {
     return res.json({ workType:{}, employmentType:{}, category:{}, postedAge:{}, salaryRange:null, total:0 });
@@ -4749,7 +4103,7 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
       AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
            OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
-  `).all(roleKey, userId, facetProfile.id, sevenDaysAgo, sevenDaysAgo);
+  `).all(roleKey, userId, facetProfile.id, thirtyDaysAgo, thirtyDaysAgo);
 
   const workType = {}, empType = {}, category = {}, postedAge = {};
   const salaries = [];
@@ -4783,7 +4137,6 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize || "25")));
   const offset   = (page - 1) * pageSize;
   const sort     = req.query.sort || "dateDesc";
-  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
 
   // ── Session sync: populate user_jobs — strictly isolated to the active profile ──
   // IMPORTANT: use domain_profile_id = ? (not IN all profiles) so jobs scraped under
@@ -4854,7 +4207,6 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     `jrm.role_key = ?`,
     roleTitleSql("sj.title", roleKey),
     activeProfileTitleFilter.sql,
-    `((sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo}) OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))`,
     `(uj.disliked IS NULL OR uj.disliked = 0)`,
     `(uj.applied IS NULL OR uj.applied = 0)`,
     `(uj.resume_generated IS NULL OR uj.resume_generated = 0)`,
@@ -4905,6 +4257,18 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   if (maxYoe !== null && !isNaN(maxYoe)) {
     conditions.push(`(sj.max_years_exp IS NULL OR sj.max_years_exp <= ?)`);
     filterParams.push(maxYoe);
+  }
+
+  // Hard constraint: when no explicit maxYoe filter is set, auto-apply the user's stored
+  // experience level so jobs requiring far more experience are excluded by default.
+  // Uses a +2 year buffer to allow reasonable stretch-goal jobs through.
+  // If user YoE is unknown (null) — no constraint is applied (graceful degradation).
+  if (maxYoe === null) {
+    const signals = loadSimpleApplyProfile(db, { userId, profileId: activeProfile.id });
+    if (signals?.yearsExperience != null) {
+      conditions.push(`(sj.min_years_exp IS NULL OR sj.min_years_exp <= ?)`);
+      filterParams.push(signals.yearsExperience + 2);
+    }
   }
 
   const maxApplicants = req.query.maxApplicants !== undefined && req.query.maxApplicants !== ""
@@ -4997,6 +4361,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     url:                  j.url,
     applyUrl:             j.apply_url,
     postedAt:             j.posted_at,
+    scrapedAt:            j.scraped_at,
     description:          j.description,
     descriptionHtml:      j.description_html,
     ghostScore:           j.ghost_score,
@@ -5196,7 +4561,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       total: 0,
       needsBaseResume: true,
       reason: "no_base_resume",
-      error: "Upload your base resume before searching jobs.",
+      error: "Upload the active profile's base resume before searching jobs.",
       query,
       scraping: false,
     });
@@ -5209,7 +4574,11 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   const activeProfileTitles = (() => {
     try { return JSON.parse(activeProfile.target_titles || "[]"); } catch { return []; }
   })();
-  const simpleProfile = loadOrCreateSimpleApplyProfile(db, req.user.id, activeProfileTitles);
+  const simpleProfile = loadOrCreateSimpleApplyProfile(db, {
+    userId: req.user.id,
+    profileId: activeProfile.id,
+    roleTitles: activeProfileTitles,
+  });
   const terms = (simpleProfile?.searchTerms || []).slice(0, 4);
   profileJobTitles = buildProfileSearchTerms(activeProfile, terms);
 
@@ -5276,13 +4645,13 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     ON CONFLICT(user_id, search_query) DO UPDATE SET last_scraped_at = unixepoch()
   `).run(req.user.id, query.toLowerCase());
 
-  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+  const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
   const scrapeRoleKey = roleKeyForProfile(activeProfile);
   const scrapeProfileTitleFilter = profileTitleSql("sj.title", activeProfile);
   const scrapeUserId = req.user.id;
   const scrapeKey = scrapeStateKey(scrapeUserId, activeProfile.id, query);
 
-  // DB-first: count fresh unvisited quality jobs for this role
+  // DB-first: count unvisited quality jobs scraped in the last 30 days for this role
   const existingCount = db.prepare(`
     SELECT COUNT(*) as cnt FROM scraped_jobs sj
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
@@ -5294,7 +4663,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND sj.ghost_score < 4
-  `).get(scrapeRoleKey, req.user.id, activeProfile.id, sevenDaysAgo, ...scrapeProfileTitleFilter.params);
+  `).get(scrapeRoleKey, req.user.id, activeProfile.id, thirtyDaysAgo, ...scrapeProfileTitleFilter.params);
 
   const THRESHOLD = 50;
   const hasEnough = (existingCount?.cnt || 0) >= THRESHOLD;
@@ -5534,7 +4903,10 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
 
-  const signalProfile = loadOrCreateSimpleApplyProfile(db, userId);
+  const activeProfile = getOrRepairActiveProfile(userId);
+  const signalProfile = activeProfile
+    ? loadOrCreateSimpleApplyProfile(db, { userId, profileId: activeProfile.id })
+    : null;
   const resumeBasis = buildAtsResumeBasis(resumeText, signalProfile);
   const jobDescription = job.description || job.title;
   const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
@@ -5613,52 +4985,90 @@ app.get("/api/categories", requireAuth, (_req,res) => res.json(INDUSTRY_CATEGORI
 // BASE RESUME
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/base-resume", requireAuth, (req, res) => {
-  const row = db.prepare("SELECT * FROM base_resume WHERE user_id=?").get(req.user.id);
-  res.json(row ? { content:row.content, name:row.name, updatedAt:row.updated_at } : { content:null });
+  const activeProfile = getOrRepairActiveProfile(req.user.id);
+  if (!activeProfile) return res.json({ content: null, profileId: null });
+  const row = getBaseResumeRecord(db, { userId: req.user.id, profileId: activeProfile.id });
+  res.json(row ? {
+    content: row.content,
+    name: row.name,
+    updatedAt: row.updated_at,
+    profileId: activeProfile.id,
+  } : {
+    content: null,
+    profileId: activeProfile.id,
+  });
 });
 app.post("/api/base-resume", requireAuth, (req, res) => {
+  const activeProfile = getOrRepairActiveProfile(req.user.id);
+  if (!activeProfile) return res.status(400).json({ error: "No active profile" });
   const { content, name } = req.body;
   if (content===undefined) return res.status(400).json({ error:"content required" });
-  db.prepare(`INSERT INTO base_resume (user_id,content,name,updated_at) VALUES (?,?,?,unixepoch())
-    ON CONFLICT(user_id) DO UPDATE SET content=excluded.content,name=excluded.name,updated_at=excluded.updated_at`)
-    .run(req.user.id, content, name||"resume.txt");
-  const profiles = db.prepare("SELECT target_titles FROM domain_profiles WHERE user_id=?").all(req.user.id);
-  const roleTitles = profiles.flatMap(p => {
-    try { return JSON.parse(p.target_titles || "[]"); } catch { return []; }
-  });
-  upsertSimpleApplyProfile(db, req.user.id, content, roleTitles);
-  res.json({ ok:true });
+  saveBaseResumeRecord(db, { userId: req.user.id, profileId: activeProfile.id }, content, name || "resume.txt");
+  const roleTitles = (() => {
+    try { return JSON.parse(activeProfile.target_titles || "[]"); } catch { return []; }
+  })();
+  upsertSimpleApplyProfile(db, { userId: req.user.id, profileId: activeProfile.id }, content, roleTitles);
+  res.json({ ok:true, profileId: activeProfile.id });
 });
 app.get("/api/simple-apply/profile", requireAuth, (req, res) => {
-  const profile = loadOrCreateSimpleApplyProfile(db, req.user.id);
+  const activeProfile = getOrRepairActiveProfile(req.user.id);
+  if (!activeProfile) {
+    return res.json({ titles: [], keywords: [], skills: [], searchTerms: [], profileId: null });
+  }
+  const profile = loadOrCreateSimpleApplyProfile(db, { userId: req.user.id, profileId: activeProfile.id });
   res.json(profile || { titles: [], keywords: [], skills: [], searchTerms: [] });
 });
 app.post("/api/simple-apply/profile/refresh", requireAuth, (req, res) => {
-  const base = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
-  if (!base?.content) return res.status(400).json({ error:"No base resume uploaded" });
-  const profiles = db.prepare("SELECT target_titles FROM domain_profiles WHERE user_id=?").all(req.user.id);
-  const roleTitles = profiles.flatMap(p => {
-    try { return JSON.parse(p.target_titles || "[]"); } catch { return []; }
-  });
-  res.json(upsertSimpleApplyProfile(db, req.user.id, base.content, roleTitles));
+  const activeProfile = getOrRepairActiveProfile(req.user.id);
+  if (!activeProfile) return res.status(400).json({ error: "No active profile" });
+  const base = getBaseResumeRecord(db, { userId: req.user.id, profileId: activeProfile.id });
+  if (!base?.content) return res.status(400).json({ error:"No base resume uploaded for the active profile" });
+  const roleTitles = (() => {
+    try { return JSON.parse(activeProfile.target_titles || "[]"); } catch { return []; }
+  })();
+res.json(upsertSimpleApplyProfile(db, {
+    userId: req.user.id,
+    profileId: activeProfile.id,
+  }, base.content, roleTitles));
 });
-// ENHANCE GATING: one free per account lifetime.
-// enhance_used is set server-side on API call, not on adoption.
-// Cannot be reset. Future paid unlock: enhance_paid flag in users table.
-// To change gating logic: edit /api/base-resume/enhance below
-// and update enhance-status response.
 
-// GET /api/base-resume/enhance-status
-app.get("/api/base-resume/enhance-status", requireAuth, (req, res) => {
+function getResumeRouteProfile(req, res) {
+  const rawProfileId = req.params.id;
+  if (rawProfileId != null) {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(rawProfileId, req.user.id);
+    if (!profile) {
+      res.status(404).json({ error: "Profile not found" });
+      return null;
+    }
+    return profile;
+  }
+  const activeProfile = getOrRepairActiveProfile(req.user.id);
+  if (!activeProfile) {
+    res.status(400).json({ error: "No active profile" });
+    return null;
+  }
+  return activeProfile;
+}
+
+function sendEnhanceStatus(req, res) {
   const user = db.prepare("SELECT enhance_used, enhance_paid FROM users WHERE id=?").get(req.user.id);
+  const profile = getResumeRouteProfile(req, res);
+  if (!profile) return;
+  const row = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
   res.json({
     enhanceUsed: !!(user?.enhance_used),
     enhancePaid: !!(user?.enhance_paid),
+    profileId: profile.id,
+    hasEnhancedDraft: !!String(row?.enhanced_content || "").trim(),
+    enhancedAt: row?.enhanced_at || null,
+    enhancedAtsDelta: row?.enhanced_ats_delta ?? null,
   });
-});
+}
 
-// POST /api/base-resume/enhance — one-time free enhancement
-app.post("/api/base-resume/enhance", requireAuth, async (req, res) => {
+async function enhanceProfileResume(req, res) {
+  const profile = getResumeRouteProfile(req, res);
+  if (!profile) return;
   if (!requirePlan(req, res, "PLUS")) return;
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
 
@@ -5671,12 +5081,10 @@ app.post("/api/base-resume/enhance", requireAuth, async (req, res) => {
     });
   }
 
-  const baseResumeRow = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(req.user.id);
-  if (!baseResumeRow?.content) return res.status(400).json({ error: "No base resume uploaded" });
+  const baseResumeRow = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
+  if (!baseResumeRow?.content) return res.status(400).json({ error: "No base resume uploaded for this profile" });
 
   const originalText = baseResumeRow.content;
-
-  // Mark enhance as used immediately (consumed on API call, not on adoption)
   db.prepare("UPDATE users SET enhance_used = 1 WHERE id = ?").run(req.user.id);
 
   try {
@@ -5684,7 +5092,7 @@ app.post("/api/base-resume/enhance", requireAuth, async (req, res) => {
 Rewrite the provided resume to significantly improve its ATS score by:
 - Strengthening action verbs (replace weak verbs with domain-specific strong ones)
 - Improving keyword density and placement without keyword stuffing
-- Restructuring bullet points to lead with impact (action → outcome → metric)
+- Restructuring bullet points to lead with impact (action -> outcome -> metric)
 - Removing filler adjectives and generic phrases
 - Ensuring consistent past tense and clean formatting
 - Keeping all facts, dates, companies, job titles, and metrics exactly as provided
@@ -5705,9 +5113,11 @@ Return ONLY the improved resume text with no commentary, preamble, or explanatio
       durationMs: Date.now() - t0,
     });
 
-    // Score both against a generic template to calculate delta
     const templateJd = "Software Engineer, Product Manager, Data Scientist, Data Engineer, Machine Learning Engineer";
-    const scoreSignalProfile = loadOrCreateSimpleApplyProfile(db, req.user.id);
+    const scoreSignalProfile = loadOrCreateSimpleApplyProfile(db, {
+      userId: req.user.id,
+      profileId: profile.id,
+    });
     const scoreFor = async (resumeContent) => {
       try {
         const resumeBasis = buildAtsResumeBasis(resumeContent, scoreSignalProfile);
@@ -5726,54 +5136,58 @@ Return ONLY the improved resume text with no commentary, preamble, or explanatio
     const [origReport, enhReport] = await Promise.all([scoreFor(originalText), scoreFor(enhancedText)]);
     const delta = (enhReport?.score ?? 0) - (origReport?.score ?? 0);
 
-    // Store enhanced content
     db.prepare(`
-      UPDATE base_resume SET enhanced_content=?, enhanced_at=unixepoch(), enhanced_ats_delta=?
-      WHERE user_id=?
-    `).run(enhancedText, delta, req.user.id);
+      UPDATE profile_base_resumes
+      SET enhanced_content=?, enhanced_at=unixepoch(), enhanced_ats_delta=?
+      WHERE profile_id=? AND user_id=?
+    `).run(enhancedText, delta, profile.id, req.user.id);
 
     insertNotification(req.user.id, "enhance_ready",
       `Enhanced resume ready${delta > 0 ? ` (+${delta} ATS pts)` : ""}`,
-      { delta });
+      { delta, profileId: profile.id });
     res.json({
+      profileId: profile.id,
       original: { text: originalText, atsScore: origReport?.score ?? null },
       enhanced: { text: enhancedText, atsScore: enhReport?.score ?? null },
       delta,
       improvements: enhReport?.improvements || [],
     });
   } catch(e) {
-    // If generation fails, the enhance_used flag is already set — resource was consumed
     console.error("[enhance]", e.message);
     res.status(500).json({ error: "Enhancement failed: " + e.message });
   }
-});
+}
 
-// PATCH /api/base-resume/adopt-enhanced — replace base resume with enhanced version
-app.patch("/api/base-resume/adopt-enhanced", requireAuth, async (req, res) => {
-  const row = db.prepare("SELECT enhanced_content FROM base_resume WHERE user_id=?").get(req.user.id);
+async function adoptEnhancedProfileResume(req, res) {
+  const profile = getResumeRouteProfile(req, res);
+  if (!profile) return;
+  const row = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
   if (!row?.enhanced_content) return res.status(400).json({ error: "No enhanced resume available" });
 
-  // Replace base resume content with enhanced version
   db.prepare(`
-    UPDATE base_resume SET content = enhanced_content, updated_at = unixepoch()
-    WHERE user_id = ?
-  `).run(req.user.id);
-  upsertSimpleApplyProfile(db, req.user.id, row.enhanced_content);
+    UPDATE profile_base_resumes
+    SET content = enhanced_content, updated_at = unixepoch()
+    WHERE profile_id = ? AND user_id = ?
+  `).run(profile.id, req.user.id);
+  upsertSimpleApplyProfile(db, {
+    userId: req.user.id,
+    profileId: profile.id,
+  }, row.enhanced_content);
 
-  // Background: re-score all user's jobs against the new enhanced resume
   const userId = req.user.id;
-  enqueueAtsScoreWork(`adopt-enhanced:${userId}`, async () => {
+  const profileId = profile.id;
+  enqueueAtsScoreWork(`adopt-enhanced:${userId}:${profileId}`, async () => {
     try {
-      const newContent = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId)?.content;
+      const newContent = getBaseResumeRecord(db, { userId, profileId })?.content;
       if (!newContent) return;
-      const signalProfile = loadOrCreateSimpleApplyProfile(db, userId);
+      const signalProfile = loadOrCreateSimpleApplyProfile(db, { userId, profileId });
       const atsResumeBasis = buildAtsResumeBasis(newContent, signalProfile);
 
       const jobsToRescore = db.prepare(`
         SELECT sj.job_id, sj.description, sj.title, sj.company FROM scraped_jobs sj
-        JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+        JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
         WHERE sj.description IS NOT NULL
-      `).all(userId);
+      `).all(userId, profileId);
 
       const updateAts = db.prepare("UPDATE scraped_jobs SET ats_score=?, ats_report=? WHERE job_id=?");
 
@@ -5796,13 +5210,45 @@ app.patch("/api/base-resume/adopt-enhanced", requireAuth, async (req, res) => {
           }
         }));
       }
-      console.log(`[adopt-enhanced] Re-scored ${jobsToRescore.length} jobs for user ${userId}`);
+      console.log(`[adopt-enhanced] Re-scored ${jobsToRescore.length} jobs for user ${userId}, profile ${profileId}`);
     } catch(e) {
       console.warn("[adopt-enhanced] background rescore failed:", e.message);
     }
   });
 
-  res.json({ ok: true });
+  res.json({ ok: true, profileId });
+}
+// ENHANCE GATING: one free per account lifetime.
+// enhance_used is set server-side on API call, not on adoption.
+// Cannot be reset. Future paid unlock: enhance_paid flag in users table.
+// To change gating logic: edit enhanceProfileResume/profile-scoped routes below
+// and update enhance-status response.
+
+// GET /api/base-resume/enhance-status
+app.get("/api/base-resume/enhance-status", requireAuth, (req, res) => {
+  sendEnhanceStatus(req, res);
+});
+
+// POST /api/base-resume/enhance — legacy wrapper for the active profile
+app.post("/api/base-resume/enhance", requireAuth, async (req, res) => {
+  return await enhanceProfileResume(req, res);
+});
+
+// PATCH /api/base-resume/adopt-enhanced — legacy wrapper for the active profile
+app.patch("/api/base-resume/adopt-enhanced", requireAuth, async (req, res) => {
+  return await adoptEnhancedProfileResume(req, res);
+});
+
+app.get("/api/domain-profiles/:id/enhance-status", requireAuth, (req, res) => {
+  sendEnhanceStatus(req, res);
+});
+
+app.post("/api/domain-profiles/:id/enhance", requireAuth, async (req, res) => {
+  await enhanceProfileResume(req, res);
+});
+
+app.patch("/api/domain-profiles/:id/adopt-enhanced", requireAuth, async (req, res) => {
+  await adoptEnhancedProfileResume(req, res);
 });
 
 app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) => {
@@ -5839,12 +5285,13 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
   const eventSubtype = eventSubtypeForTool(tool);
 
   const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(userId) || {};
-  const storedResume = db.prepare("SELECT content FROM base_resume WHERE user_id=?").get(userId);
-  const authoritativeResumeText = storedResume?.content || resumeText;
-
   const activeDomainProfile = db.prepare(
     "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
   ).get(userId);
+  const storedResume = activeDomainProfile
+    ? getBaseResumeRecord(db, { userId, profileId: activeDomainProfile.id })
+    : null;
+  const authoritativeResumeText = storedResume?.content || resumeText;
 
   let domainModuleKey = "general";
   if (activeDomainProfile) {
@@ -6471,15 +5918,6 @@ app.get("/api/export/excel", requireAuth, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// EXTENSION RELAY
-// ═══════════════════════════════════════════════════════════════
-app.get("/api/extension/autofill", requireAuth, (req, res) => {
-  db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
-  const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id)||{};
-  res.json({ ok:true, mode:req.user.applyMode, ...buildAutofillPayload(profile, req.user.applyMode) });
-});
-
-// ═══════════════════════════════════════════════════════════════
 // SMART SEARCH
 // ═══════════════════════════════════════════════════════════════
 app.post("/api/smart-search", requireAuth, async (req, res) => {
@@ -6802,4 +6240,10 @@ app.listen(PORT, () => {
     if (r.available) console.log(`[server] browser ready — source=${r.source}`);
     else console.warn(`[server] browser unavailable — ${r.reasonCode}: ${r.error}`);
   }).catch(() => {});
+  // Run startup cleanup to expire any stale jobs that accumulated while server was
+  // down and the 03:00 cron window was missed.
+  setImmediate(() => {
+    try { runExpiredJobsCleanup(); }
+    catch(e) { console.warn("[cleanup] startup cleanup failed:", e.message); }
+  });
 });

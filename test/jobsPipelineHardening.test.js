@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const server = fs.readFileSync("server.js", "utf8");
+const jobClassifier = fs.readFileSync("services/jobClassifier.js", "utf8");
+const profileTitleFilter = fs.readFileSync("services/profileTitleFilter.js", "utf8");
 const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+const simpleProfileSvc = fs.readFileSync("services/simpleApplyProfile.js", "utf8");
 
 test("scrape route guards missing active profile before profile-scoped local count", () => {
   const routeStart = server.indexOf('app.post("/api/scrape"');
   assert.ok(routeStart > 0, "scrape route should exist");
-  const localCount = server.indexOf("DB-first: count fresh unvisited quality jobs", routeStart);
+  const localCount = server.indexOf("DB-first: count unvisited quality jobs scraped in the last 30 days for this role", routeStart);
   assert.ok(localCount > routeStart, "DB-first local count should exist");
 
   const preCount = server.slice(routeStart, localCount);
@@ -37,13 +40,14 @@ test("frontend handles missing profile and local-only scrape unavailable respons
 });
 
 test("roleTitleSql engineering excludes all firmware/embedded keyword families", () => {
-  const engStart = server.indexOf('if (roleKey === "engineering") return');
+  assert.match(server, /import \{ getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRoleFamilyDomainForKey, roleTitleSql \} from "\.\/services\/jobClassifier\.js"/);
+  const engStart = jobClassifier.indexOf('if (roleKey === "engineering") return');
   assert.ok(engStart > 0, "engineering roleTitleSql case must exist");
   // Find the closing of the engineering block by locating the next roleKey check
-  const nextCase = server.indexOf('if (roleKey === "engineering_embedded_firmware")', engStart);
+  const nextCase = jobClassifier.indexOf('if (roleKey === "engineering_embedded_firmware")', engStart);
   assert.ok(nextCase > engStart, "engineering_embedded_firmware case must follow engineering case");
 
-  const engBlock = server.slice(engStart, nextCase);
+  const engBlock = jobClassifier.slice(engStart, nextCase);
   assert.match(engBlock, /NOT LIKE '%firmware%'/, "must exclude firmware");
   assert.match(engBlock, /NOT LIKE '%embedded%'/, "must exclude embedded");
   assert.match(engBlock, /NOT LIKE '%device driver%'/, "must exclude device driver");
@@ -56,10 +60,10 @@ test("roleTitleSql engineering excludes all firmware/embedded keyword families",
 });
 
 test("roleTitleSql engineering_embedded_firmware case covers the canonical firmware title set", () => {
-  const fwStart = server.indexOf('if (roleKey === "engineering_embedded_firmware") return');
+  const fwStart = jobClassifier.indexOf('if (roleKey === "engineering_embedded_firmware") return');
   assert.ok(fwStart > 0, "engineering_embedded_firmware roleTitleSql case must exist");
-  const pmCase = server.indexOf('if (roleKey === "pm") return', fwStart);
-  const fwBlock = server.slice(fwStart, pmCase);
+  const pmCase = jobClassifier.indexOf('if (roleKey === "pm") return', fwStart);
+  const fwBlock = jobClassifier.slice(fwStart, pmCase);
 
   assert.match(fwBlock, /LIKE '%firmware%'/);
   assert.match(fwBlock, /LIKE '%embedded%'/);
@@ -135,6 +139,7 @@ test("jobs board uses triple filter — role_key + roleTitleSql + profileTitleSq
   assert.match(block, /jrm\.role_key = \?/, "must filter by role_key");
   assert.match(block, /roleTitleSql\(/, "must apply roleTitleSql");
   assert.match(block, /profileTitleSql\(/, "must apply profileTitleSql");
+  assert.match(profileTitleFilter, /export function profileTitleSql\(column, profile\)/, "profile title filter must be extracted");
   // Profile filter must be first guard — no-profile returns empty immediately
   assert.match(block, /if \(!sessionActiveProfile\)/, "must guard on missing active profile");
 });
@@ -168,4 +173,104 @@ test("jobs board structured logs include profile, sort, and result count", () =>
   // Ensures the board-population log line exists for observability
   assert.match(server, /\[jobs\].*profile.*sort.*total.*returned/);
   assert.match(server, /\[poll\].*profile.*query.*scrape done/);
+});
+
+test("/api/jobs does not hard-filter by scrape age — no hidden 7-day cutoff in base conditions", () => {
+  // Root cause of '0 SWE jobs despite 100+ local': a sevenDaysAgo filter in the
+  // base conditions array silently removed every job scraped more than a week ago.
+  // The fix: remove the hard freshness filter from the static conditions.
+  // Recency filtering is opt-in via the ageFilter query param.
+  const routeStart = server.indexOf('app.get("/api/jobs"');
+  const routeEnd   = server.indexOf("\napp.", routeStart + 10);
+  const block      = server.slice(routeStart, routeEnd);
+
+  // The conditions array must no longer include a sevenDaysAgo cutoff
+  assert.doesNotMatch(block, /sevenDaysAgo/, "/api/jobs must not use sevenDaysAgo in base conditions");
+  // The existing optional ageFilter must still exist
+  assert.match(block, /ageFilter/, "opt-in age filter must remain available");
+  // Triple filter must still be intact
+  assert.match(block, /roleTitleSql\(/, "roleTitleSql must still be applied");
+  assert.match(block, /profileTitleSql\(/, "profileTitleSql must still be applied");
+});
+
+test("/api/jobs response maps scrapedAt so client can render staleness indicator", () => {
+  const routeStart = server.indexOf('app.get("/api/jobs"');
+  const routeEnd   = server.indexOf("\napp.", routeStart + 10);
+  const block      = server.slice(routeStart, routeEnd);
+  assert.match(block, /scrapedAt:\s*j\.scraped_at/, "response must expose scrapedAt for staleness UI");
+});
+
+test("scrape DB-first count uses 30-day window instead of 7-day", () => {
+  // The 7-day window caused the DB-first count to always return 0 if the last scrape
+  // was more than a week ago, forcing an unnecessary background scrape every time.
+  // A 30-day window matches a realistic job-posting lifecycle.
+  const scrapeStart = server.indexOf('app.post("/api/scrape"');
+  const scrapeEnd   = server.indexOf("\napp.", scrapeStart + 10);
+  const block       = server.slice(scrapeStart, scrapeEnd);
+
+  assert.match(block, /thirtyDaysAgo/, "DB-first count must use thirtyDaysAgo");
+  assert.match(block, /30 \* 24 \* 60 \* 60/, "30-day window constant must be present");
+  assert.doesNotMatch(block, /sevenDaysAgo/, "7-day variable must not appear in scrape DB-first path");
+});
+
+test("normalizePostedAt converts relative age strings to ISO dates at ingest", () => {
+  // Root of O1: LinkedIn returns "2 days ago" which new Date() can't parse.
+  // normalizePostedAt converts these to ISO dates using scraped_at as anchor.
+  assert.match(server, /function normalizePostedAt\(raw, scrapedAt\)/, "normalizePostedAt must be defined");
+  assert.match(server, /minute.*hour.*day.*week.*month/, "must handle all relative time units");
+  assert.match(server, /normalizePostedAt\(item\.postedAt, nowUnix\)/, "must be used at insert time");
+  // ISO fallback must handle parseable dates already
+  assert.match(server, /new Date\(str\)/, "must try to parse as date first");
+});
+
+test("job card age always renders using scrapedAt fallback when postedAt is absent", () => {
+  const jobCard = fs.readFileSync("client/src/components/JobCard.jsx", "utf8");
+  // ago() must accept a second argument (scrapedAt fallback)
+  assert.match(jobCard, /function ago\(postedAt, scrapedAt\)/, "ago must accept scrapedAt fallback");
+  // Fallback logic: use scrapedAt * 1000 when postedAt is not parseable
+  assert.match(jobCard, /Number\(scrapedAt\) \* 1000/, "must convert Unix seconds to ms");
+  // Both card views must pass scrapedAt
+  assert.match(jobCard, /ago\(job\.postedAt, job\.scrapedAt\)/, "must pass scrapedAt to ago()");
+});
+
+test("7-day expiry cron is extracted into runExpiredJobsCleanup and called at startup", () => {
+  // Startup call ensures missed cron windows don't leave stale jobs on the board.
+  assert.match(server, /function runExpiredJobsCleanup\(\)/, "cleanup must be a named function");
+  assert.match(server, /cron\.schedule.*runExpiredJobsCleanup/, "cron must call the named function");
+  // Startup call via setImmediate in app.listen
+  const listenBlock = server.slice(server.indexOf("app.listen(PORT"));
+  assert.match(listenBlock, /runExpiredJobsCleanup\(\)/, "startup must call runExpiredJobsCleanup");
+});
+
+test("search suggestion panel clears after Enter/submit via searchCommitted state", () => {
+  assert.match(jobsPanel, /searchCommitted.*useState\(false\)|useState\(false\).*searchCommitted/, "searchCommitted state must exist");
+  assert.match(jobsPanel, /setSearchCommitted\(true\)/, "must set searchCommitted on submit");
+  assert.match(jobsPanel, /setSearchCommitted\(false\)/, "must reset searchCommitted on input change");
+  assert.match(jobsPanel, /!searchCommitted.*showPreview|showPreview.*searchCommitted/, "showPreview must respect searchCommitted");
+});
+
+test("simple_apply_profiles stores and exposes yearsExperience from base resume", () => {
+  assert.match(server, /extractUserYearsExperience/, "server must import extractUserYearsExperience");
+  // Migration adds the column
+  assert.match(server, /049_simple_apply_profile_yoe/, "migration 049 must exist");
+  assert.match(server, /ADD COLUMN years_experience INTEGER/, "migration must add years_experience column");
+  // Service extracts, stores, and returns the field
+  assert.match(simpleProfileSvc, /export function extractUserYearsExperience/, "service must export extractUserYearsExperience");
+  assert.match(simpleProfileSvc, /years_experience.*excluded\.years_experience/, "upsert must persist years_experience");
+  assert.match(simpleProfileSvc, /yearsExperience: row\.years_experience/, "load must return yearsExperience");
+});
+
+test("/api/jobs auto-applies YoE hard constraint from stored signals when no explicit maxYoe is set", () => {
+  const routeStart = server.indexOf('app.get("/api/jobs"');
+  const routeEnd   = server.indexOf("\napp.", routeStart + 10);
+  const block      = server.slice(routeStart, routeEnd);
+
+  // Must load signals and use yearsExperience
+  assert.match(block, /loadSimpleApplyProfile/, "must call loadSimpleApplyProfile");
+  assert.match(block, /signals\?\.yearsExperience/, "must check yearsExperience from signals");
+  assert.match(block, /yearsExperience \+ 2/, "must use +2 year buffer for stretch goals");
+  // Must only apply when user hasn't set explicit maxYoe
+  assert.match(block, /maxYoe === null/, "hard constraint must only apply when maxYoe is not set");
+  // The constraint must exclude jobs requiring more than user's band
+  assert.match(block, /sj\.min_years_exp IS NULL OR sj\.min_years_exp <= \?/, "must filter by min_years_exp");
 });

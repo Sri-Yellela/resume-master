@@ -126,7 +126,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   });
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100%", background:theme.bg }}>
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", minHeight:0, minWidth:0, background:theme.bg }}>
       <style>{`
         @keyframes rmShimmer { from { opacity: 0.4; } to { opacity: 0.9; } }
       `}</style>
@@ -246,6 +246,8 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
               ref={containerRef}
               style={{
                 flex:1,
+                minHeight:0,
+                minWidth:0,
                 overflowX: "hidden",  // never horizontal scroll
                 overflowY: "auto",    // one clean vertical scrollbar
                 background: isDark ? theme.bg : theme.surfaceHigh,
@@ -259,6 +261,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
                 style={{
                   width:           RESUME_PAGE_WIDTH + "px",
                   height:          RESUME_PAGE_HEIGHT + "px",
+                  minHeight:       RESUME_PAGE_HEIGHT + "px",
                   transformOrigin: "top left",
                   transform:       `scale(${scaleRef.current})`,
                   overflow:        "hidden",

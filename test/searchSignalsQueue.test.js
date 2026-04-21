@@ -10,7 +10,9 @@ test("manual scrape builds outbound params from active profile plus stored user 
   const scrapeRoute = server.slice(routeStart, server.indexOf("app.post(\"/api/jobs/:id/keywords\"", routeStart));
 
   assert.match(scrapeRoute, /buildApifyQueriesFromProfile\(activeProfile\)/);
-  assert.match(scrapeRoute, /loadOrCreateSimpleApplyProfile\(db, req\.user\.id, activeProfileTitles\)/);
+  assert.match(scrapeRoute, /loadOrCreateSimpleApplyProfile\(db, \{/);
+  assert.match(scrapeRoute, /profileId: activeProfile\.id/);
+  assert.match(scrapeRoute, /roleTitles: activeProfileTitles/);
   assert.match(scrapeRoute, /simpleProfile\?\.searchTerms/);
   assert.match(scrapeRoute, /buildProfileSearchTerms\(activeProfile, terms\)/);
   assert.match(scrapeRoute, /maxItems: activeProfile\.domain === "engineering_embedded_firmware" \? 75 : undefined/);
@@ -36,7 +38,7 @@ test("ATS scoring reuses stored signal basis through the queue", () => {
   assert.match(server, /buildAtsResumeBasis\(baseResumeText, simpleProfile\)/);
   assert.match(server, /isAnthropicCreditError/);
   assert.match(server, /ats_unavailable_due_to_credits/);
-  assert.match(server, /enqueueAtsScoreWork\(`adopt-enhanced:\$\{userId\}`/);
+  assert.match(server, /enqueueAtsScoreWork\(`adopt-enhanced:\$\{userId\}:\$\{profileId\}`/);
   assert.match(server, /buildAtsResumeBasis\(newContent, signalProfile\)/);
 });
 
