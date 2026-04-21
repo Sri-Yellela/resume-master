@@ -1838,6 +1838,37 @@ db.pragma("busy_timeout = 5000");
           );
       `,
     },
+    {
+      // Migration 048 — Re-classify existing job_role_map entries that were assigned
+      // role_key='engineering' via profile-scrape (profile_scrape matched_by) but whose
+      // title clearly indicates firmware/embedded. These were scraped while the user had
+      // a SWE profile active, so they route correctly to firmware when profile changes.
+      id: "048_firmware_reclassify",
+      sql: `
+        UPDATE job_role_map
+        SET role_key   = 'engineering_embedded_firmware',
+            role_family = 'engineering',
+            domain      = 'engineering_embedded_firmware',
+            confidence  = 0.88,
+            matched_by  = 'firmware_reclassify'
+        WHERE role_key = 'engineering'
+          AND matched_by IN ('profile_scrape','orphan_repair','strong_anchor','strong_anchor+desc')
+          AND job_id IN (
+            SELECT sj.job_id FROM scraped_jobs sj
+            WHERE LOWER(sj.title) LIKE '%firmware%'
+               OR LOWER(sj.title) LIKE '%embedded system%'
+               OR LOWER(sj.title) LIKE '% bsp %'
+               OR LOWER(sj.title) LIKE 'bsp %'
+               OR LOWER(sj.title) LIKE '%bsp engineer%'
+               OR LOWER(sj.title) LIKE '% uefi %'
+               OR LOWER(sj.title) LIKE '%uefi engineer%'
+               OR LOWER(sj.title) LIKE '%device driver%'
+               OR LOWER(sj.title) LIKE '%bootloader%'
+               OR LOWER(sj.title) LIKE '% rtos %'
+               OR LOWER(sj.title) LIKE '%rtos engineer%'
+          );
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -2050,10 +2081,40 @@ function normaliseItem(raw) {
   ).toLowerCase().replace(/\s+/g, "_");
   const jobType = EMP_TYPE_MAP[rawJobType] || (rawJobType ? "full-time" : "");
 
-  // Salary — HarvestAPI provides nested object or null
-  const salaryMin      = raw.salary?.min      ?? null;
-  const salaryMax      = raw.salary?.max      ?? null;
-  const salaryCurrency = raw.salary?.currency || null;
+  // Salary — HarvestAPI nested object, or fall back to text compensation fields
+  let salaryMin      = raw.salary?.min      ?? null;
+  let salaryMax      = raw.salary?.max      ?? null;
+  let salaryCurrency = raw.salary?.currency || null;
+  if (salaryMin == null) {
+    const salText = raw.compensationText || raw.compensation || raw.salaryRange || "";
+    if (typeof salText === "string" && salText.trim()) {
+      // Match patterns like "$80K–$120K", "$80,000 - $120,000", "80000-120000"
+      const salRe = /\$?([\d,]+)\s*[Kk]?\s*[-–to]+\s*\$?([\d,]+)\s*[Kk]?/;
+      const salM  = salText.replace(/,/g,"").match(salRe);
+      if (salM) {
+        const toNum = (s, raw2) => {
+          const n = parseFloat(s);
+          return raw2.toLowerCase().includes("k") ? n * 1000 : n;
+        };
+        const lo = parseFloat(salM[1]);
+        const hi = parseFloat(salM[2]);
+        const isK = /[Kk]/.test(salText);
+        salaryMin = isK ? lo * 1000 : lo;
+        salaryMax = isK ? hi * 1000 : hi;
+        const curM = salText.match(/\b(USD|CAD|GBP|EUR|AUD)\b/i);
+        if (curM) salaryCurrency = curM[1].toUpperCase();
+      } else {
+        // Single value: "$120K/yr", "$120,000"
+        const singRe = /\$?([\d,]+)\s*[Kk]?/;
+        const singM  = salText.replace(/,/g,"").match(singRe);
+        if (singM) {
+          const n = parseFloat(singM[1]);
+          const v = /[Kk]/.test(salText) ? n * 1000 : n;
+          if (v > 10000) { salaryMin = v; salaryMax = v; }
+        }
+      }
+    }
+  }
 
   // Applicant count
   const applicantCount = raw.applicants ?? raw.applies ?? raw.applicantCount ?? null;
@@ -2112,11 +2173,14 @@ function isEmploymentTypeWanted(item, wantedTypes) {
 
 function parseYearsExperience(description = "") {
   const patterns = [
-    { re:/(\d+)\s*\+\s*years?\s+(?:of\s+)?experience/i,              type:"plus"  },
-    { re:/(\d+)\s*[-–]\s*(\d+)\s*years?\s+(?:of\s+)?experience/i,   type:"range" },
-    { re:/minimum\s+(\d+)\s*years?/i,                                type:"min"   },
-    { re:/at\s+least\s+(\d+)\s*years?/i,                            type:"min"   },
-    { re:/(\d+)\s*years?\s+(?:of\s+)?(?:relevant\s+)?experience/i,  type:"exact" },
+    { re:/(\d+)\s*\+\s*years?\s+(?:of\s+)?experience/i,                              type:"plus"  },
+    { re:/(\d+)\s*[-–]\s*(\d+)\s*years?\s+(?:of\s+)?experience/i,                   type:"range" },
+    { re:/(\d+)\s*to\s*(\d+)\s*years?\s+(?:of\s+)?(?:\w+\s+)?experience/i,          type:"range" },
+    { re:/minimum\s+(\d+)\s*years?/i,                                                type:"min"   },
+    { re:/at\s+least\s+(\d+)\s*years?/i,                                             type:"min"   },
+    { re:/(\d+)\s*or\s*more\s*years?(?:\s+of)?/i,                                   type:"plus"  },
+    { re:/(\d+)\s*years?\s+(?:of\s+)?(?:professional|hands-on|industry)\s+experience/i, type:"exact" },
+    { re:/(\d+)\s*years?\s+(?:of\s+)?(?:relevant\s+)?experience/i,                  type:"exact" },
   ];
   for (const { re, type } of patterns) {
     const m = description.match(re);

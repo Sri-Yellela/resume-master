@@ -860,7 +860,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [scrapeNewCount, setScrapeNewCount] = useState(0);
   const [applyQueue, setApplyQueue] = useState([]);
   const [applyRuns, setApplyRuns] = useState([]);
+  const [applyReviewJobs, setApplyReviewJobs] = useState([]); // held_review items across all runs
   const [applyQueueMsg, setApplyQueueMsg] = useState("");
+  const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
+  const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
 
   // LIVE POLLING: polls /api/jobs/poll every 4s during active scrape.
   // Stops when scraping:false returned or after 3 consecutive failures.
@@ -928,6 +931,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         setDomainProfiles(profiles);
         const active = profiles.find(p => p.is_active) || profiles[0];
         if (active && !activeProfileId) setActiveProfileId?.(active.id);
+        // Clear any stale "create profile" error that may have appeared before profiles loaded
+        if (profiles.length > 0) setScrapeError(e => e.startsWith("Create a job search profile") ? "" : e);
       })
       .catch(() => {});
   }, [activeProfileId, setActiveProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1279,7 +1284,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setJobs([]);
       setTotalJobs(0);
       setTotalPages(0);
-      setScrapeError("Create a job search profile to load matching jobs.");
+      // setupBlock already gates the UI — no need to set scrapeError here
       return;
     }
     const requestProfileKey = activeProfileKeyRef.current;
@@ -1289,9 +1294,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       const qs = buildParams(page);
       const d = await api(`/api/jobs?${qs}`);
       if (requestProfileKey !== activeProfileKeyRef.current || requestSeq !== jobsFetchSeqRef.current) return;
-      if (d.needsProfileSetup) {
-        setScrapeError("Create a job search profile to load matching jobs.");
-      }
+      // needsProfileSetup is handled by setupBlock gate — avoid double-reporting
       if (d.needsBaseResume) {
         setScrapeError("Upload your base resume before loading search defaults.");
       }
@@ -1348,7 +1351,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setJobs(jr.jobs || []);
       setTotalJobs(jr.total || 0);
       setTotalPages(jr.totalPages || 0);
-      if (jr.needsProfileSetup) setScrapeError("Create a job search profile to load matching jobs.");
+      // needsProfileSetup is gated by setupBlock; don't set scrapeError on boot
       if (jr.needsBaseResume) setScrapeError("Upload your base resume before loading search defaults.");
       setCategories(cats || []);
       if (rr.content) { setResumeText(rr.content); setFileName(rr.name || "Saved resume"); }
@@ -1512,6 +1515,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     try {
       const data = await api("/api/apply/runs");
       setApplyRuns(Array.isArray(data.runs) ? data.runs : []);
+      setApplyReviewJobs(Array.isArray(data.review) ? data.review : []);
+    } catch {}
+  }, []);
+
+  const loadApplyRunDetail = useCallback(async (runId) => {
+    try {
+      const data = await api(`/api/apply/runs/${runId}`);
+      setApplyRunDetail(data);
+      setApplyRunDetailOpen(true);
     } catch {}
   }, []);
 
@@ -2287,11 +2299,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           </div>
         )}
 
-        {(applyQueue.length > 0 || applyQueueMsg || applyRuns.length > 0) && (
+        {(applyQueue.length > 0 || applyQueueMsg || applyRuns.length > 0 || applyReviewJobs.length > 0) && (
           <div style={{ flexBasis:"100%", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
                         padding:"8px 10px", border:`1px solid ${theme.border}`,
                         background:theme.surfaceHigh, borderRadius:6 }}>
-            <strong style={{ fontSize:12, color:theme.text }}>Apply Queue</strong>
+            <strong style={{ fontSize:12, color:theme.text }}>Auto Apply</strong>
             {applyQueue.map(job => (
               <span key={job.jobId} style={{ display:"inline-flex", alignItems:"center", gap:5,
                                              padding:"3px 7px", borderRadius:4,
@@ -2316,10 +2328,28 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
               </>
             )}
             {applyQueueMsg && <span style={{ fontSize:11, color:theme.accentText }}>{applyQueueMsg}</span>}
-            {applyRuns[0] && !applyQueue.length && (
-              <span style={{ fontSize:11, color:theme.textMuted }}>
-                Last run: {applyRuns[0].status} - {applyRuns[0].submittedCount} submitted, {applyRuns[0].heldCount} review, {applyRuns[0].failedCount} failed
-              </span>
+            {/* Run status summary badges */}
+            {applyRuns.slice(0, 3).map(run => (
+              <button key={run.id} onClick={() => loadApplyRunDetail(run.id)}
+                style={{ display:"inline-flex", alignItems:"center", gap:5, border:`1px solid ${theme.border}`,
+                         borderRadius:4, padding:"3px 8px", background:theme.surface,
+                         color:theme.text, cursor:"pointer", fontSize:11 }}>
+                <span style={{ width:6, height:6, borderRadius:"50%", flexShrink:0, background:
+                  run.status === "complete" ? "#16a34a" :
+                  run.status === "running"  ? theme.accent :
+                  run.status === "queued"   ? "#d97706" : "#6b7280" }}/>
+                {run.submittedCount}✓
+                {run.heldCount > 0 && <span style={{ color:"#d97706" }}> {run.heldCount} review</span>}
+                {run.failedCount > 0 && <span style={{ color:"#dc2626" }}> {run.failedCount} failed</span>}
+                <span style={{ color:theme.textDim }}>↗</span>
+              </button>
+            ))}
+            {applyReviewJobs.length > 0 && !applyQueue.length && (
+              <button onClick={() => setApplyRunDetailOpen(true)}
+                style={{ border:`1px solid #d97706`, borderRadius:4, padding:"3px 8px",
+                         background:"#fef3c7", color:"#92400e", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                {applyReviewJobs.length} need review ↗
+              </button>
             )}
           </div>
         )}
@@ -2330,6 +2360,200 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
         onChange={handleFile} style={{ display:"none" }}/>
 
       {/* â”€â”€ Resume Enhance modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Apply Runs Review Modal ──────────────────────────────────── */}
+      {applyRunDetailOpen && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) { setApplyRunDetailOpen(false); setApplyRunDetail(null); } }}
+          style={{
+            position:"fixed", inset:0, zIndex:700,
+            background:"rgba(0,0,0,0.55)", display:"flex",
+            alignItems:"flex-start", justifyContent:"center",
+            paddingTop:48, overflowY:"auto",
+          }}
+        >
+          <div style={{
+            background:theme.modalSurface || theme.surface,
+            borderRadius:8, width:"min(96vw, 820px)",
+            maxHeight:"82vh", display:"flex", flexDirection:"column",
+            border:`1px solid ${theme.border}`,
+            boxShadow:"0 24px 64px rgba(0,0,0,0.4)",
+          }}>
+            {/* Header */}
+            <div style={{
+              padding:"16px 20px", borderBottom:`1px solid ${theme.border}`,
+              display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, gap:12,
+            }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                             fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                {applyRunDetail
+                  ? `Apply Run #${applyRunDetail.run?.id} — ${applyRunDetail.run?.mode || "auto"}`
+                  : "Jobs Needing Review"}
+              </div>
+              {applyRunDetail?.run && (
+                <div style={{ display:"flex", gap:10, fontSize:11, flexWrap:"wrap" }}>
+                  {applyRunDetail.run.submittedCount > 0 && (
+                    <span style={{ color:"#16a34a", fontWeight:700 }}>✓ {applyRunDetail.run.submittedCount} submitted</span>
+                  )}
+                  {applyRunDetail.run.heldCount > 0 && (
+                    <span style={{ color:"#d97706", fontWeight:700 }}>⏸ {applyRunDetail.run.heldCount} held</span>
+                  )}
+                  {applyRunDetail.run.failedCount > 0 && (
+                    <span style={{ color:"#dc2626", fontWeight:700 }}>✗ {applyRunDetail.run.failedCount} failed</span>
+                  )}
+                  {applyRunDetail.run.startedAt && (
+                    <span style={{ color:theme.textDim }}>
+                      {new Date(applyRunDetail.run.startedAt).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              )}
+              <button
+                onClick={() => { setApplyRunDetailOpen(false); setApplyRunDetail(null); }}
+                style={{ background:"transparent", border:"none", cursor:"pointer",
+                          color:theme.textMuted, fontSize:20, lineHeight:1, padding:"0 4px",
+                          marginLeft:"auto", flexShrink:0 }}>
+                ×
+              </button>
+            </div>
+
+            {/* Job list */}
+            <div style={{ overflowY:"auto", flex:1, padding:"12px 20px", display:"flex", flexDirection:"column", gap:8 }}>
+              {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).length === 0 && (
+                <div style={{ padding:"24px 0", textAlign:"center", color:theme.textMuted, fontSize:12 }}>
+                  No jobs in this run yet.
+                </div>
+              )}
+              {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).map(job => {
+                const statusColor = job.status === "submitted" ? "#16a34a"
+                  : job.status === "held_review" ? "#d97706"
+                  : job.status === "failed" ? "#dc2626"
+                  : job.status === "running" ? theme.accent
+                  : theme.textMuted;
+                const statusLabel = job.status === "submitted" ? "Submitted"
+                  : job.status === "held_review" ? "Review"
+                  : job.status === "failed" ? "Failed"
+                  : job.status === "running" ? "Running"
+                  : job.status === "queued" ? "Queued"
+                  : job.status || "—";
+                return (
+                  <div key={job.id} style={{
+                    border:`1px solid ${theme.border}`, borderRadius:6,
+                    padding:"10px 14px", display:"flex", flexDirection:"column", gap:5,
+                    background:theme.surfaceHigh,
+                  }}>
+                    {/* title / company / status */}
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+                      <div>
+                        <span style={{ fontWeight:700, fontSize:13, color:theme.text }}>{job.title || "—"}</span>
+                        {job.company && (
+                          <span style={{ fontSize:12, color:theme.textMuted, marginLeft:8 }}>{job.company}</span>
+                        )}
+                      </div>
+                      <span style={{
+                        fontSize:10, fontWeight:700, padding:"2px 8px",
+                        borderRadius:999, background:`${statusColor}22`,
+                        color:statusColor, whiteSpace:"nowrap", flexShrink:0,
+                      }}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                    {/* reason + ATS score */}
+                    {(job.reasonCode || job.atsScore != null) && (
+                      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                        {job.reasonCode && (
+                          <span style={{ fontSize:11, color:statusColor, fontWeight:600 }}>
+                            {job.reasonCode.replace(/_/g, " ")}
+                            {job.reasonDetail ? ` — ${job.reasonDetail}` : ""}
+                          </span>
+                        )}
+                        {job.atsScore != null && (
+                          <span style={{
+                            fontSize:10, fontWeight:700, padding:"1px 6px", borderRadius:999,
+                            background: job.atsScore >= 80 ? "#dcfce7" : job.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
+                            color: job.atsScore >= 80 ? "#166534" : job.atsScore >= 60 ? "#854d0e" : "#991b1b",
+                          }}>
+                            ATS {job.atsScore}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {/* timestamps */}
+                    {(job.startedAt || job.finishedAt) && (
+                      <div style={{ fontSize:10, color:theme.textDim }}>
+                        {job.startedAt && `Started ${new Date(job.startedAt).toLocaleTimeString()}`}
+                        {job.startedAt && job.finishedAt && " · "}
+                        {job.finishedAt && `Finished ${new Date(job.finishedAt).toLocaleTimeString()}`}
+                        {" · "}Attempts: {job.attemptCount || 1}
+                      </div>
+                    )}
+                    {/* apply URL */}
+                    {job.applyUrl && (
+                      <a href={job.applyUrl} target="_blank" rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        style={{ fontSize:10, color:theme.accent, textDecoration:"none", wordBreak:"break-all" }}>
+                        {job.applyUrl.length > 90 ? job.applyUrl.slice(0, 90) + "…" : job.applyUrl}
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Logs section — run detail only */}
+            {applyRunDetail?.logs?.length > 0 && (
+              <details style={{ flexShrink:0, borderTop:`1px solid ${theme.border}` }}>
+                <summary style={{
+                  padding:"10px 20px", fontSize:11, fontWeight:700, cursor:"pointer",
+                  color:theme.textMuted, textTransform:"uppercase", letterSpacing:"0.06em",
+                  userSelect:"none", listStyle:"none",
+                }}>
+                  ▸ Logs ({applyRunDetail.logs.length})
+                </summary>
+                <div style={{
+                  maxHeight:200, overflowY:"auto", padding:"8px 20px 12px",
+                  fontFamily:"monospace", fontSize:10, display:"flex", flexDirection:"column", gap:3,
+                }}>
+                  {applyRunDetail.logs.map(log => (
+                    <div key={log.id} style={{
+                      color: log.level === "error" ? "#dc2626" : log.level === "warn" ? "#d97706" : theme.textMuted,
+                    }}>
+                      <span style={{ color:theme.textDim, marginRight:6 }}>
+                        {log.createdAt ? new Date(log.createdAt).toLocaleTimeString() : ""}
+                      </span>
+                      <span style={{
+                        color: log.level === "error" ? "#dc2626" : log.level === "warn" ? "#d97706" : theme.accent,
+                        marginRight:6, fontWeight:700,
+                      }}>
+                        [{log.event || log.level}]
+                      </span>
+                      {log.message}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {/* Footer */}
+            <div style={{
+              padding:"12px 20px", borderTop:`1px solid ${theme.border}`, flexShrink:0,
+              display:"flex", justifyContent:"flex-end",
+            }}>
+              <button
+                onClick={() => { setApplyRunDetailOpen(false); setApplyRunDetail(null); }}
+                style={{
+                  padding:"8px 20px", borderRadius:4, fontWeight:700, fontSize:12,
+                  background:"transparent", color:theme.textMuted,
+                  border:`1.5px solid ${theme.border}`, cursor:"pointer",
+                  fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.06em",
+                  textTransform:"uppercase",
+                }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {enhanceModalOpen && enhanceResult && (
         <div style={{
           position:"fixed", inset:0, zIndex:600,

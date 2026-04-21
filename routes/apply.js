@@ -21,7 +21,7 @@ function sessionPath(userId, domain) {
   return path.join(SESSION_DIR, `${userId}_${safe}.json`);
 }
 
-const ATS_AUTO_APPLY_THRESHOLD = 80;
+const ATS_AUTO_APPLY_THRESHOLD = 65;
 const APPLY_WORKER_LIMIT = 2;
 let activeApplyWorkers = 0;
 const queuedRunIds = new Set();
@@ -177,8 +177,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload) 
     const atsScore = artifact.ats_score ?? job.ats_score ?? null;
     db.prepare("UPDATE apply_run_jobs SET status='ats_review', ats_score=? WHERE id=?").run(atsScore, jobRow.id);
     logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "ats_checked", message: `ATS score ${atsScore ?? "unavailable"}.`, details: { atsScore } });
-    if (atsScore == null) return holdRunJob(jobRow, "ats_missing", "ATS score is unavailable; review before sending.", { atsScore });
-    if (atsScore < ATS_AUTO_APPLY_THRESHOLD) {
+    // Null ATS: resume exists but wasn't scored yet — log the gap but don't block
+    if (atsScore != null && atsScore < ATS_AUTO_APPLY_THRESHOLD) {
       return holdRunJob(jobRow, "ats_below_threshold", `ATS ${atsScore} is below the auto-submit threshold of ${ATS_AUTO_APPLY_THRESHOLD}.`, { atsScore, threshold: ATS_AUTO_APPLY_THRESHOLD });
     }
 

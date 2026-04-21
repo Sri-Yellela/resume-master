@@ -97,7 +97,6 @@ function AppDashboard({ authUser, setAuthUser }) {
   const appTabs = [
     { id:"console", label:"Jobs", icon:"JB" },
     { id:"database", label:"Database", icon:"DB" },
-    { id:"integrations", label:"Integrations", icon:"IN" },
   ];
 
   const handleLogout = useCallback(async () => {

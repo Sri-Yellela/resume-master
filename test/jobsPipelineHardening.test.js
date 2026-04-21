@@ -26,7 +26,10 @@ test("scrape quota exhaustion is classified and surfaced through poll state", ()
 });
 
 test("frontend handles missing profile and local-only scrape unavailable responses", () => {
-  assert.match(jobsPanel, /d\.needsProfileSetup/);
+  // fetchJobs (d.*) no longer sets scrapeError for needsProfileSetup — setupBlock gate handles it
+  assert.match(jobsPanel, /setupBlock/);
+  assert.match(jobsPanel, /SetupGateNotice/);
+  // scrape start (result.*) and poll (pollData.*) still check needsProfileSetup
   assert.match(jobsPanel, /result\.needsProfileSetup/);
   assert.match(jobsPanel, /pollData\.needsProfileSetup/);
   assert.match(jobsPanel, /pollData\.scrapeUnavailable/);
