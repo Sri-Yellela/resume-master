@@ -2257,7 +2257,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
 
   const combined = rawItems.map(j => normaliseItem(j));
 
-  let cntNoTitle = 0, cntNoApply = 0, cntNotFT = 0, cntIrrelevant = 0, cntRepost = 0, cntGhost = 0, cntDup = 0;
+  let cntNoTitle = 0, cntNoApply = 0, cntNotFT = 0, cntIrrelevant = 0, cntRepost = 0, cntGhost = 0, cntDup = 0, cntYoeMismatch = 0;
   const thisRunIds    = new Set();
   const thisRunHashes = new Set();
 
@@ -2320,16 +2320,45 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     return true;
   });
 
+  const profileTitlesForSignals = domainProfile ? (() => {
+    try { return JSON.parse(domainProfile.target_titles || "[]"); } catch { return []; }
+  })() : [];
+  const signalProfile = domainProfile
+    ? loadOrCreateSimpleApplyProfile(db, {
+        userId,
+        profileId: domainProfile.id,
+        roleTitles: profileTitlesForSignals,
+      })
+    : null;
+  const maxAllowedYoe = signalProfile?.yearsExperience != null
+    ? signalProfile.yearsExperience + 2
+    : null;
+  const eligible = filtered.filter(item => {
+    if (maxAllowedYoe == null) return true;
+    const yoe = parseYearsExperience(item.description || "");
+    if (yoe.min != null && yoe.min > maxAllowedYoe) {
+      cntYoeMismatch++;
+      return false;
+    }
+    return true;
+  });
+  const classified = [];
+  for (let i = 0; i < Math.min(eligible.length, MAX_JOBS_PER_REFRESH); i += 5) {
+    const batch = eligible.slice(i, i + 5);
+    const cats  = await Promise.all(batch.map(item => classifyJob(item.title, item.description)));
+    batch.forEach((item, idx) => classified.push({ ...item, _category: cats[idx] }));
+  }
   if (scrapeParams.threadId) {
     logSearchThread(scrapeParams.threadId, "scrape_filter_summary", {
       rawCount: rawItems.length,
       normalisedCount: combined.length,
-      filteredCount: filtered.length,
+      filteredCount: eligible.length,
       dropped: {
         missingTitleOrCompany: cntNoTitle,
         noExternalApplyUrl: cntNoApply,
         notFullTime: cntNotFT,
         titleIrrelevant: cntIrrelevant,
+        yoeMismatch: cntYoeMismatch,
         repost: cntRepost,
         ghostScore: cntGhost,
         duplicate: cntDup,
@@ -2337,16 +2366,10 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     });
   }
   console.log(
-    `[scrape] filtered: ${filtered.length}/${combined.length}` +
+    `[scrape] filtered: ${eligible.length}/${combined.length}` +
     ` (missingTitleOrCompany:${cntNoTitle} noExternalApplyUrl:${cntNoApply} notFullTime:${cntNotFT}` +
-    ` titleIrrelevant:${cntIrrelevant} repost:${cntRepost} ghostScore:${cntGhost} duplicate:${cntDup})`
+    ` titleIrrelevant:${cntIrrelevant} yoeMismatch:${cntYoeMismatch} repost:${cntRepost} ghostScore:${cntGhost} duplicate:${cntDup})`
   );
-  const classified = [];
-  for (let i = 0; i < Math.min(filtered.length, MAX_JOBS_PER_REFRESH); i += 5) {
-    const batch = filtered.slice(i, i + 5);
-    const cats  = await Promise.all(batch.map(item => classifyJob(item.title, item.description)));
-    batch.forEach((item, idx) => classified.push({ ...item, _category: cats[idx] }));
-  }
 
   const nowUnix = Math.floor(Date.now() / 1000);
 
@@ -4326,6 +4349,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
   let rows = db.prepare(
     `SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked,
        sj.ats_score as base_ats_score,
+       sj.ats_report as base_ats_report,
        r.ats_score as resume_ats_score,
        r.html as resume_html, r.ats_report
      ${baseJoin}
@@ -4382,6 +4406,7 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     disliked:             !!j.disliked,
     companyAppliedBefore: appliedCoSet.has((j.company || "").toLowerCase()),
     baseAtsScore:         j.base_ats_score ?? null,   // ATS of base resume vs JD (from scrape time)
+    baseAtsReport:        parseJsonMaybe(j.base_ats_report, null),
     resumeAtsScore:       j.resume_ats_score ?? null, // ATS of generated resume vs JD
     recruiterData:        null,
     enrichmentAvailable:  false,
@@ -4430,6 +4455,8 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
   }
   const roleKey = roleKeyForProfile(activeProfile);
   const pollProfileTitleFilter = profileTitleSql("sj.title", activeProfile);
+  const pollSignals = loadSimpleApplyProfile(db, { userId, profileId: activeProfile.id });
+  const pollMaxYoe = pollSignals?.yearsExperience != null ? pollSignals.yearsExperience + 2 : null;
   const scrapeKey = scrapeStateKey(userId, activeProfile.id, qRaw);
   const scrapeState  = activeScrapes.get(scrapeKey);
   const stillScraping = !!(scrapeState && !scrapeState.done);
@@ -4442,12 +4469,13 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     WHERE LOWER(sj.search_query) = ?
       AND ${roleTitleSql("sj.title", roleKey)}
       AND ${pollProfileTitleFilter.sql}
+      AND (? IS NULL OR sj.min_years_exp IS NULL OR sj.min_years_exp <= ?)
       AND sj.scraped_at > ?
       AND (uj.disliked  IS NULL OR uj.disliked  = 0)
       AND (uj.applied   IS NULL OR uj.applied   = 0)
     ORDER BY sj.scraped_at DESC
     LIMIT 50
-  `).all(roleKey, userId, activeProfile.id, qRaw, ...pollProfileTitleFilter.params, sinceSeconds);
+  `).all(roleKey, userId, activeProfile.id, qRaw, ...pollProfileTitleFilter.params, pollMaxYoe, pollMaxYoe, sinceSeconds);
 
   const jobs = rows.map(j => ({
     jobId:           j.job_id,
@@ -4467,6 +4495,8 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     minYearsExp:     j.min_years_exp,
     maxYearsExp:     j.max_years_exp,
     expRaw:          j.exp_raw,
+    baseAtsScore:    j.ats_score ?? null,
+    baseAtsReport:   parseJsonMaybe(j.ats_report, null),
     salaryMin:       j.salary_min,
     salaryMax:       j.salary_max,
     salaryCurrency:  j.salary_currency,
@@ -4882,7 +4912,15 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
     try { return res.json(JSON.parse(existingResume.ats_report)); } catch {}
   }
 
-  // Priority 2: return cached ats_only_reports entry (avoids re-running Haiku)
+  // Priority 2: reuse scrape-time ATS report when it already exists for this job.
+  const scrapeTimeReport = db.prepare(
+    "SELECT ats_report FROM scraped_jobs WHERE job_id=?"
+  ).get(jobId);
+  if (scrapeTimeReport?.ats_report) {
+    try { return res.json(JSON.parse(scrapeTimeReport.ats_report)); } catch {}
+  }
+
+  // Priority 3: return cached ats_only_reports entry (avoids re-running Haiku)
   const cached = db.prepare(
     "SELECT ats_report FROM ats_only_reports WHERE user_id=? AND job_id=?"
   ).get(userId, jobId);
@@ -4899,7 +4937,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
     });
   }
 
-  // Priority 3: fetch job + run Haiku call
+  // Priority 4: fetch job + run Haiku call
   const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
 

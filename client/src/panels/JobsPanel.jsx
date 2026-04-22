@@ -786,6 +786,27 @@ function getPanelDefaults(showDetail, showSandbox, showAts) {
   };
 }
 
+function buildAtsPayload(job, artifact = null) {
+  const activeArtifact = artifact ? getActiveArtifact(artifact, artifact.activeTool || artifact.tool) : null;
+  const score = activeArtifact?.atsScore
+    ?? job?.atsScore
+    ?? job?.resumeAtsScore
+    ?? job?.baseAtsScore
+    ?? null;
+  const report = activeArtifact?.atsReport
+    ?? job?.atsReport
+    ?? job?.resumeAtsReport
+    ?? job?.baseAtsReport
+    ?? job?.ats_report
+    ?? null;
+  return {
+    score,
+    report,
+    company: activeArtifact?.company || job?.company,
+    title: activeArtifact?.title || job?.title || job?.role,
+  };
+}
+
 function isImportedBoardJob(job) {
   return !!(job?.boardSource === "linkedin_saved" && job?.importedJobId != null);
 }
@@ -1052,7 +1073,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     setTotalJobs(snapshot.totalJobs || 0);
     setTotalPages(snapshot.totalPages || 0);
     setCurrentPage(snapshot.currentPage || 1);
-    setBoardTab(snapshot.boardTab || "all");
+    setBoardTab(snapshot.boardTab === "linkedin_saved" ? "saved" : (snapshot.boardTab || "all"));
     setLocalSearch(snapshot.localSearch || "");
     setSortBy(snapshot.sortBy || "dateDesc");
     setRoleFilter(snapshot.roleFilter || "");
@@ -1337,10 +1358,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   // -- Fetch jobs — never clears board before data arrives ------
   const fetchJobs = useCallback(async (page = 1, mergeMode = false) => {
-    if (boardTab === "linkedin_saved") {
-      fetchImportedLinkedInJobs();
-      return;
-    }
     if (boardTab === "pending") { fetchPending(); return; }
     if (!activeDomainProfile) {
       setJobs([]);
@@ -1466,6 +1483,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     fetchImportedSummary();
   }, [user, fetchImportedSummary]);
 
+  useEffect(() => {
+    if (boardTab === "linkedin_saved") setBoardTab("saved");
+  }, [boardTab, setBoardTab]);
+
+  useEffect(() => {
+    if (!user || boardTab !== "saved") return;
+    fetchImportedLinkedInJobs();
+  }, [user, boardTab, fetchImportedLinkedInJobs]);
+
   // Re-fetch when server-side filters/sort/tab change (background — board stays visible)
   // Note: localSearch is NOT in this dep array — it has its own debounced effect below
   useEffect(() => {
@@ -1510,7 +1536,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     imported_jobs_updated: ({ sourceKey }) => {
       if (sourceKey === "linkedin_saved") {
         fetchImportedSummary();
-        if (boardTab === "linkedin_saved") fetchImportedLinkedInJobs();
+        if (boardTab === "saved") fetchImportedLinkedInJobs();
       }
     },
   });
@@ -2204,9 +2230,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   // displayJobs: backend handles localSearch filtering across all pages
   const displayJobs = useMemo(() => {
     if (boardTab === "pending") return pendingJobs;
-    if (boardTab === "linkedin_saved") return importedLinkedInJobs;
     return jobs;
-  }, [jobs, pendingJobs, importedLinkedInJobs, boardTab]);
+  }, [jobs, pendingJobs, boardTab]);
   displayJobsRef.current = displayJobs;
 
   const genCount = Object.values(generated).filter(v=>v?.html && v.html !== "__exists__").length;
@@ -2217,7 +2242,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     ["all", "All Jobs"],
     ["saved", "Saved ★"],
     ["pending", "Pending"],
-    ...(linkedinImportSummary.total > 0 ? [["linkedin_saved", "LinkedIn Saved Jobs"]] : []),
   ];
 
   const isLastPage = currentPage >= totalPages;
@@ -2351,40 +2375,36 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           {issuingLinkedinImportToken ? "Preparing Import" : "Import LinkedIn Saved Jobs"}
         </LucyBtn>
 
-        {boardTab !== "linkedin_saved" && (
-          <>
-            {/* Filters button â€” always visible, bold outline */}
-            <button
-              onClick={() => setFiltersOpen(o => !o)}
-              style={{
-                display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
-                background: filtersOpen ? theme.accent : theme.surface,
-                border: `2px solid ${theme.borderStrong}`,
-                borderRadius:2, padding:"6px 16px",
-                fontFamily:"'Barlow Condensed',sans-serif",
-                fontWeight:800, fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
-                cursor:"pointer", color: filtersOpen ? "#0f0f0f" : theme.text,
-                transition:"background 0.15s",
-              }}>
-              Filters
-            </button>
+        {/* Filters button â€” always visible, bold outline */}
+        <button
+          onClick={() => setFiltersOpen(o => !o)}
+          style={{
+            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
+            background: filtersOpen ? theme.accent : theme.surface,
+            border: `2px solid ${theme.borderStrong}`,
+            borderRadius:2, padding:"6px 16px",
+            fontFamily:"'Barlow Condensed',sans-serif",
+            fontWeight:800, fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
+            cursor:"pointer", color: filtersOpen ? "#0f0f0f" : theme.text,
+            transition:"background 0.15s",
+          }}>
+          Filters
+        </button>
 
-            {/* Sort */}
-            <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-              style={{ height:34, padding:"0 10px", borderRadius:2, flexShrink:0,
-                       border:`2px solid ${theme.borderStrong}`, background:theme.surface,
-                       fontSize:13, color:theme.text, outline:"none",
-                       fontFamily:"'DM Sans',system-ui", cursor:"pointer" }}>
-              <option value="dateDesc">Newest</option>
-              <option value="dateAsc">Oldest</option>
-              <option value="compHigh">Pay high to low</option>
-              <option value="compLow">Pay low to high</option>
-              <option value="yoeLow">Exp low to high</option>
-              <option value="yoeHigh">Exp high to low</option>
-              <option value="atsScore">ATS Sort</option>
-            </select>
-          </>
-        )}
+        {/* Sort */}
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+          style={{ height:34, padding:"0 10px", borderRadius:2, flexShrink:0,
+                   border:`2px solid ${theme.borderStrong}`, background:theme.surface,
+                   fontSize:13, color:theme.text, outline:"none",
+                   fontFamily:"'DM Sans',system-ui", cursor:"pointer" }}>
+          <option value="dateDesc">Newest</option>
+          <option value="dateAsc">Oldest</option>
+          <option value="compHigh">Pay high to low</option>
+          <option value="compLow">Pay low to high</option>
+          <option value="yoeLow">Exp low to high</option>
+          <option value="yoeHigh">Exp high to low</option>
+          <option value="atsScore">ATS Sort</option>
+        </select>
 
         <ProfileSelectorDropdown
           theme={theme}
@@ -2396,67 +2416,59 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           title="Switch profile"
         />
 
-        {boardTab !== "linkedin_saved" ? (
-          <>
-            {/* Local search â€” live client-side, every keystroke */}
-            <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
-              onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
-              placeholder="Filter loaded jobs..."
-              style={{ flex:"0 1 220px", minWidth:120, height:34, padding:"0 12px",
-                       borderRadius:2, border:`1px solid ${theme.border}`,
-                       background:theme.surface, color:theme.text,
-                       fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none" }}/>
-            {localSearch && (
-              <button onClick={() => setLocalSearch("")}
-                style={{ background:"none", border:"none", color:theme.textDim,
-                         cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>x</button>
-            )}
-
-            {/* Background loading indicator + job count */}
-            <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0,
-                           display:"flex", alignItems:"center", gap:5 }}>
-              {bgLoading && (
-                <span style={{ display:"inline-block", width:10, height:10,
-                               border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
-                               borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/>
-              )}
-              {boardTab === "pending" ? `${displayJobs.length}` : `${totalJobs}`} job{totalJobs !== 1 ? "s" : ""}
-              {localSearch && !bgLoading ? " matched" : ""}
-            </span>
-
-            <div style={{ flexBasis:"100%", height:0 }}/>
-
-            <div style={{ position:"relative", flex:1, minWidth:200 }}>
-              <input value={searchInput} onChange={e=>{ setSearchInput(e.target.value); setSearchCommitted(false); }}
-                onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
-                placeholder="ATS search role, e.g. ML Engineer, SWE..."
-                style={{ width:"100%", height:38, paddingLeft:14, paddingRight:14,
-                         borderRadius:2, border:`1px solid ${theme.border}`,
-                         background:theme.surface, color:theme.text,
-                         fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",
-                         boxSizing:"border-box" }}/>
-              {showPreview && (
-                <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0,
-                  fontSize:10, color:theme.textMuted, background:theme.surface,
-                  border:`1px solid ${theme.border}`,
-                  borderRadius:4, padding:"4px 10px", whiteSpace:"nowrap", zIndex:10 }}>
-                  Will search as: <span style={{ color:theme.accentText, fontWeight:700 }}>{normalisedPreview}</span>
-                </div>
-              )}
-            </div>
-
-            <LucyBtn
-              onClick={() => roleIsSet ? handleSearch() : handleSetRole()}
-              disabled={scraping || bgLoading}
-              title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : "Set the role and show matching jobs already in the local pool"}>
-              {buttonLabel}
-            </LucyBtn>
-          </>
-        ) : (
-          <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0 }}>
-            {linkedinImportSummary.total} imported LinkedIn saved job{linkedinImportSummary.total !== 1 ? "s" : ""}
-          </span>
+        {/* Local search â€” live client-side, every keystroke */}
+        <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
+          placeholder="Filter loaded jobs..."
+          style={{ flex:"0 1 220px", minWidth:120, height:34, padding:"0 12px",
+                   borderRadius:2, border:`1px solid ${theme.border}`,
+                   background:theme.surface, color:theme.text,
+                   fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none" }}/>
+        {localSearch && (
+          <button onClick={() => setLocalSearch("")}
+            style={{ background:"none", border:"none", color:theme.textDim,
+                     cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>x</button>
         )}
+
+        {/* Background loading indicator + job count */}
+        <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0,
+                       display:"flex", alignItems:"center", gap:5 }}>
+          {bgLoading && (
+            <span style={{ display:"inline-block", width:10, height:10,
+                           border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
+                           borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/>
+          )}
+          {boardTab === "pending" ? `${displayJobs.length}` : `${totalJobs}`} job{totalJobs !== 1 ? "s" : ""}
+          {localSearch && !bgLoading ? " matched" : ""}
+        </span>
+
+        <div style={{ flexBasis:"100%", height:0 }}/>
+
+        <div style={{ position:"relative", flex:1, minWidth:200 }}>
+          <input value={searchInput} onChange={e=>{ setSearchInput(e.target.value); setSearchCommitted(false); }}
+            onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
+            placeholder="ATS search role, e.g. ML Engineer, SWE..."
+            style={{ width:"100%", height:38, paddingLeft:14, paddingRight:14,
+                     borderRadius:2, border:`1px solid ${theme.border}`,
+                     background:theme.surface, color:theme.text,
+                     fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",
+                     boxSizing:"border-box" }}/>
+          {showPreview && (
+            <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0,
+              fontSize:10, color:theme.textMuted, background:theme.surface,
+              border:`1px solid ${theme.border}`,
+              borderRadius:4, padding:"4px 10px", whiteSpace:"nowrap", zIndex:10 }}>
+              Will search as: <span style={{ color:theme.accentText, fontWeight:700 }}>{normalisedPreview}</span>
+            </div>
+          )}
+        </div>
+
+        <LucyBtn
+          onClick={() => roleIsSet ? handleSearch() : handleSetRole()}
+          disabled={scraping || bgLoading}
+          title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : "Set the role and show matching jobs already in the local pool"}>
+          {buttonLabel}
+        </LucyBtn>
         {smartSearchError && (
           <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
             Error: {smartSearchError}
@@ -2855,12 +2867,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                   onClose={() => setSelectedJob(null)}
                   onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
                   onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
-                  onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setMobilePane("editor"); setSelectedJob(null); })}
+                  onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); setMobilePane("editor"); setSelectedJob(null); })}
                   onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
                   onVisit={() => visitUrl(selectedJob)}
                   onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
                   onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
-                  onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); setSelectedJob(null); })}
+                  onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel(buildAtsPayload(selectedJob, g2)); setSelectedJob(null); })}
                   onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
                   onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
                 />
@@ -2869,7 +2881,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           })()}
           {/* Active pane */}
           <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-            {mobilePane === "jobs" && boardTab !== "linkedin_saved" && (
+            {mobilePane === "jobs" && (
               <JobsColumn
                 jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
                 scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
@@ -2886,22 +2898,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                 goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
                 setMobilePane={setMobilePane} isMobile={isMobile}
                 onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
+                showImportedLinkedInSection={boardTab === "saved"}
+                importedLinkedInJobs={importedLinkedInJobs}
+                linkedinImportSummary={linkedinImportSummary}
+                onImportLinkedIn={issueLinkedInImportToken}
+                onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
                 cardTier={1}
-              />
-            )}
-            {mobilePane === "jobs" && boardTab === "linkedin_saved" && (
-              <ImportedLinkedInJobsPane
-                jobs={importedLinkedInJobs}
-                theme={theme}
-                isDark={isDark}
-                onRefresh={fetchImportedLinkedInJobs}
-                onImport={issueLinkedInImportToken}
-                importCount={linkedinImportSummary.total}
-                lastImportedAt={linkedinImportSummary.lastImportedAt}
-                onVisit={visitUrl}
-                onDislike={toggleDislike}
-                onJobSelect={handleJobSelect}
-                selectedJobId={selectedJob?.jobId}
               />
             )}
             {mobilePane === "editor" && (
@@ -2974,42 +2976,31 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             defaultSize={!!selectedJob ? 30 : 100}
             minSize={10}
             style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden" }}>
-            {boardTab === "linkedin_saved" ? (
-              <ImportedLinkedInJobsPane
-                jobs={importedLinkedInJobs}
-                theme={theme}
-                isDark={isDark}
-                onRefresh={fetchImportedLinkedInJobs}
-                onImport={issueLinkedInImportToken}
-                importCount={linkedinImportSummary.total}
-                lastImportedAt={linkedinImportSummary.lastImportedAt}
-                onVisit={visitUrl}
-                onDislike={toggleDislike}
-                onJobSelect={handleJobSelect}
-                selectedJobId={selectedJob?.jobId}
-              />
-            ) : (
-              <JobsColumn
-                jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
-                scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
-                onClearScrapeError={() => setScrapeError("")}
-                pollStatus={pollStatus} pollNewCount={pollNewCount}
-                resultsUpToDate={resultsUpToDate}
-                onRetryPoll={handlePullRefresh}
-                generated={generated} loading={loading}
-                applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
-                theme={theme} isDark={isDark}
-                totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
-                generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-                visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
-                openAtsPanel={openAtsPanel}
-                goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
-                setMobilePane={setMobilePane} isMobile={isMobile}
-                compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
-                cardTier={effectiveTier}
-                containerRef={jobsPanelElementRef}
-              />
-            )}
+            <JobsColumn
+              jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
+              scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
+              onClearScrapeError={() => setScrapeError("")}
+              pollStatus={pollStatus} pollNewCount={pollNewCount}
+              resultsUpToDate={resultsUpToDate}
+              onRetryPoll={handlePullRefresh}
+              generated={generated} loading={loading}
+              applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+              theme={theme} isDark={isDark}
+              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+              visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
+              openAtsPanel={openAtsPanel}
+              goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+              setMobilePane={setMobilePane} isMobile={isMobile}
+              compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
+              showImportedLinkedInSection={boardTab === "saved"}
+              importedLinkedInJobs={importedLinkedInJobs}
+              linkedinImportSummary={linkedinImportSummary}
+              onImportLinkedIn={issueLinkedInImportToken}
+              onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
+              cardTier={effectiveTier}
+              containerRef={jobsPanelElementRef}
+            />
           </Panel>
 
           {/* PANEL B â€” Job detail */}
@@ -3032,12 +3023,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     onClose={() => setSelectedJob(null)}
                     onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
                     onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
-                    onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); })}
+                    onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
                     onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
                     onVisit={() => visitUrl(selectedJob)}
                     onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
                     onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
-                    onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel({ score:g2?.atsScore, report:g2?.atsReport, company:selectedJob.company, title:selectedJob.title }); })}
+                    onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
                     onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
                     onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
                   />
@@ -3150,13 +3141,19 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                       goPage, handleRefresh, onPullRefresh,
                       setMobilePane, isMobile,
                       compact, selectedJobId, onJobSelect,
+                      showImportedLinkedInSection = false,
+                      importedLinkedInJobs = [],
+                      linkedinImportSummary = { total: 0, lastImportedAt: null },
+                      onImportLinkedIn,
+                      onRefreshImportedLinkedIn,
                       cardTier = 1, containerRef }) {
+  const shouldShowEmptyState = jobs.length === 0 && !scraping && !showImportedLinkedInSection;
   return (
     <div ref={containerRef} style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
                   background: isDark
                     ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
                     : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
-      {jobs.length === 0 && !scraping ? <EmptyState theme={theme}/> : (
+      {shouldShowEmptyState ? <EmptyState theme={theme}/> : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
           {/* Live polling pulsing bar â€” shows while scrape is in progress */}
@@ -3219,6 +3216,22 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
             </div>
           )}
 
+          {showImportedLinkedInSection && (
+            <StarredLinkedInSection
+              jobs={importedLinkedInJobs}
+              theme={theme}
+              isDark={isDark}
+              onImport={onImportLinkedIn}
+              onRefresh={onRefreshImportedLinkedIn}
+              importCount={linkedinImportSummary.total}
+              lastImportedAt={linkedinImportSummary.lastImportedAt}
+              onVisit={visitUrl}
+              onDislike={toggleDislike}
+              onJobSelect={onJobSelect}
+              selectedJobId={selectedJobId}
+            />
+          )}
+
           {/* Job cards â€” always rendered (even when scraping) */}
           {jobs.map(job => {
             const key = job.jobId, g = generated[key],
@@ -3240,7 +3253,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                 onViewSandbox={() => {
                   const entry = {...g, company:g.company||job.company, title:g.title||job.title};
                   openSandbox(entry);
-                  openAtsPanel({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
+                  openAtsPanel(buildAtsPayload(job, g));
                 }}
                 onExport={() => exportAndTrack(job, getActiveArtifact(g)?.html, job.company, getActiveArtifact(g))}
                 onVisit={() => visitUrl(job)}
@@ -3250,14 +3263,14 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                   if (done && g.html !== "__exists__") {
                     const entry = {...g, company:g.company||job.company, title:g.title||job.title};
                     openSandbox(entry);
-                    openAtsPanel({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
+                    openAtsPanel(buildAtsPayload(job, g));
                   } else if (job.url) {
                     visitUrl(job);
                   }
                 } : undefined}
                 onAts={() => {
-                  if (g?.atsReport || g?.atsScore != null) {
-                    openAtsPanel({ score:g.atsScore, report:g.atsReport, company:job.company, title:job.title });
+                  if (g?.atsReport || g?.atsScore != null || job?.baseAtsReport || job?.baseAtsScore != null) {
+                    openAtsPanel(buildAtsPayload(job, g));
                   }
                 }}
                 onResume={() => generate(job, false)}
@@ -3289,7 +3302,7 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
   );
 }
 
-function ImportedLinkedInJobsPane({
+function StarredLinkedInSection({
   jobs,
   theme,
   isDark,
@@ -3304,12 +3317,14 @@ function ImportedLinkedInJobsPane({
 }) {
   const importedAgo = lastImportedAt ? ago(lastImportedAt * 1000) : null;
   return (
-    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
-                  background: isDark
-                    ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
-                    : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
-      <div style={{ padding:"8px 16px", display:"flex", alignItems:"center", gap:8,
-                    borderBottom:`1px solid ${theme.border}`, flexShrink:0, background:theme.surface }}>
+    <div style={{ margin:"10px 16px 12px", border:`1px solid ${theme.border}`, borderRadius:10,
+                  background:theme.surface, overflow:"hidden", boxShadow:theme.shadowSm }}>
+      <div style={{ padding:"12px 14px", display:"flex", alignItems:"center", gap:8,
+                    borderBottom:`1px solid ${theme.border}`, flexShrink:0 }}>
+        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:16, fontWeight:800,
+                       letterSpacing:"0.06em", textTransform:"uppercase", color:theme.text }}>
+          LinkedIn Saved Jobs
+        </span>
         <span style={{ fontSize:12, color:theme.textMuted }}>
           {importCount} LinkedIn saved job{importCount !== 1 ? "s" : ""}
         </span>
@@ -3322,18 +3337,23 @@ function ImportedLinkedInJobsPane({
         <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onImport}>Import LinkedIn Saved Jobs</button>
         <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
       </div>
+      <div style={{ padding:"12px 14px", borderBottom:`1px solid ${theme.border}`,
+                    background:isDark ? `${theme.surfaceHigh}66` : theme.surfaceHigh }}>
+        <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6 }}>
+          Import your own LinkedIn saved jobs with the local extension. They stay separate from local starred jobs, keep source-specific dedupe, and only bring normalized saved-job data back into Resume Master.
+        </div>
+      </div>
       {jobs.length === 0 ? (
-        <div style={{ flex:1, display:"flex", flexDirection:"column",
-                      alignItems:"center", justifyContent:"center", gap:12, padding:40 }}>
-          <div style={{ fontSize:40 }}>in</div>
+        <div style={{ display:"flex", flexDirection:"column",
+                      alignItems:"center", justifyContent:"center", gap:12, padding:24 }}>
           <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No imported LinkedIn saved jobs yet</div>
-          <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:320, lineHeight:1.8 }}>
-            Import your own LinkedIn saved jobs with the extension flow. Jobs stay separate from the local scraped board.
+          <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:420, lineHeight:1.8 }}>
+            Click <strong>Import LinkedIn Saved Jobs</strong>, generate a short-lived token, open LinkedIn Saved Jobs in the same browser, then run the extension import.
           </div>
           <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onImport}>Start Import</button>
         </div>
       ) : (
-        <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:16 }}>
+        <div style={{ paddingTop:8, paddingBottom:12 }}>
           {jobs.map(job => (
             <JobCard
               key={job.jobId}

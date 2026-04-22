@@ -146,22 +146,39 @@ export default function ProfileSelectorDropdown({
           <div style={{ padding: "8px 10px 4px", borderTop: `1px solid ${theme.border}`,
                         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <span style={{ fontSize: 10, color: theme.textDim }}>{profiles.length}/4 profiles</span>
-            <button
-              type="button"
-              disabled={!canAdd}
-              onClick={() => { if (canAdd) { setOpen(false); onAdd?.(); } }}
-              style={{
-                background: canAdd ? theme.accent : theme.surfaceHigh,
-                color: canAdd ? "#0f0f0f" : theme.textDim,
-                border: "none",
-                borderRadius: 6,
-                padding: "6px 10px",
-                cursor: canAdd ? "pointer" : "not-allowed",
-                fontSize: 12,
-                fontWeight: 800,
-              }}>
-              + Add Profile
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <a
+                href="/app/profile"
+                onClick={() => setOpen(false)}
+                style={{
+                  color: theme.text,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textDecoration: "none",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  background: theme.surface,
+                }}>
+                Manage Profiles
+              </a>
+              <button
+                type="button"
+                disabled={!canAdd}
+                onClick={() => { if (canAdd) { setOpen(false); onAdd?.(); } }}
+                style={{
+                  background: canAdd ? theme.accent : theme.surfaceHigh,
+                  color: canAdd ? "#0f0f0f" : theme.textDim,
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  cursor: canAdd ? "pointer" : "not-allowed",
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                + Add Profile
+              </button>
+            </div>
           </div>
         </DockPortal>
       )}

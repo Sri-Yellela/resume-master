@@ -125,7 +125,7 @@ export default function JobDetailPanel({
     : job.minYearsExp != null
       ? (job.maxYearsExp != null ? `${job.minYearsExp}–${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
       : null;
-  const atsScore = g?.atsScore;
+  const atsScore = g?.atsScore ?? job?.baseAtsScore ?? null;
   const generateLoading = st === "generate";
   const aPlusLoading = st === "a_plus_resume";
   const atsBg = atsScore >= 80 ? "#dcfce7" : atsScore >= 60 ? "#fef9c3" : "#fee2e2";

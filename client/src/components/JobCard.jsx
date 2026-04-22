@@ -121,25 +121,71 @@ function ComingSoon({ label }) {
 }
 
 // ── Icon button ─────────────────────────────────────────────────
-function IconBtn({ bg, onClick, title, children, disabled = false, size = 28, theme }) {
+function IconBtn({
+  bg,
+  onClick,
+  title,
+  children,
+  disabled = false,
+  size = 28,
+  theme,
+  active = false,
+  activeBg = null,
+  activeColor = null,
+}) {
   const [hov, setHov] = useState(false);
+  const preview = hov && !disabled;
+  const resolvedActiveBg = activeBg || `${bg}22`;
+  const resolvedActiveColor = activeColor || bg;
   return (
     <button title={title} disabled={disabled} onClick={onClick}
       onMouseEnter={() => !disabled && setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
         width:size, height:size, borderRadius:999,
-        background: disabled ? (theme?.surfaceHigh||"#f3f4f6") : hov ? bg : (theme?.surfaceHigh||"#f3f4f6"),
-        border:`1px solid ${disabled ? (theme?.border||"#e5e7eb") : hov ? bg+"44" : (theme?.border||"#e5e7eb")}`,
+        background: disabled
+          ? (theme?.surfaceHigh||"#f3f4f6")
+          : active
+            ? resolvedActiveBg
+            : preview
+              ? `${bg}18`
+              : (theme?.surfaceHigh||"#f3f4f6"),
+        border:`1px solid ${disabled
+          ? (theme?.border||"#e5e7eb")
+          : active
+            ? `${bg}55`
+            : preview
+              ? `${bg}44`
+              : (theme?.border||"#e5e7eb")}`,
         display:"flex", alignItems:"center", justifyContent:"center",
         cursor: disabled ? "not-allowed" : "pointer",
-        fontSize:12, color: hov && !disabled ? "white" : (theme?.textMuted||"#6b7280"),
+        fontSize:12,
+        color: disabled
+          ? (theme?.textMuted||"#6b7280")
+          : active
+            ? resolvedActiveColor
+            : preview
+              ? bg
+              : (theme?.textMuted||"#6b7280"),
         opacity: disabled ? 0.4 : 1,
         transition:"all 0.15s ease", flexShrink:0,
-        transform: hov && !disabled ? "scale(1.1)" : "scale(1)",
+        transform: active ? "scale(1.08)" : preview ? "scale(1.08)" : "scale(1)",
+        boxShadow: active ? `0 0 0 1px ${bg}22` : "none",
       }}>
       {children}
     </button>
+  );
+}
+
+function ToggleIconBtn({ active, activeLabel, inactiveLabel, activeChildren, inactiveChildren, ...props }) {
+  return (
+    <IconBtn
+      {...props}
+      active={active}
+      title={active ? activeLabel : inactiveLabel}
+    >
+      {active ? activeChildren : inactiveChildren}
+    </IconBtn>
   );
 }
 
@@ -293,32 +339,42 @@ export default function JobCard({
               <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt, job.scrapedAt)}</span>
               {(g?.atsScore != null || job?.baseAtsScore != null) && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>}
               {onStar && (
-                <button title={job.starred ? "Remove from saved" : "Save job"}
+                <ToggleIconBtn
+                  bg="#f59e0b"
+                  size={28}
+                  theme={theme}
+                  active={job.starred}
+                  activeLabel="Remove from saved"
+                  inactiveLabel="Save job"
                   onClick={e => { e.stopPropagation(); onStar(); }}
-                  style={{ width:28, height:28, minWidth:28, borderRadius:"50%",
-                    background: job.starred ? "#f59e0b22" : "transparent",
-                    border: job.starred ? "2px solid #f59e0b" : `2px solid ${theme.border}`,
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                    cursor:"pointer", fontSize:12, color: job.starred ? "#f59e0b" : theme.textDim,
-                    transition:"all 0.2s", flexShrink:0 }}>
-                  {job.starred ? "★" : "☆"}
-                </button>
+                  activeChildren="★"
+                  inactiveChildren="☆"
+                />
               )}
               {showDislike && onDislike && (
-                <button title="Not interested"
+                <ToggleIconBtn
+                  bg="#dc2626"
+                  size={28}
+                  theme={theme}
+                  active={job.disliked}
+                  activeLabel="Undo pass"
+                  inactiveLabel="Not interested"
                   onClick={e => { e.stopPropagation(); onDislike(); }}
-                  style={{ width:28, height:28, minWidth:28, borderRadius:"50%",
-                    background: job.disliked ? "#fef2f2" : "transparent",
-                    border: job.disliked ? "2px solid #dc2626" : `2px solid ${theme.border}`,
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                    cursor:"pointer", color: job.disliked ? "#dc2626" : theme.textDim,
-                    transition:"all 0.2s", flexShrink:0 }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
-                    <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
-                  </svg>
-                </button>
+                  activeChildren={
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                      <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                    </svg>
+                  }
+                  inactiveChildren={
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                      <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                    </svg>
+                  }
+                />
               )}
             </div>
             {/* Row 2: job title */}
@@ -403,54 +459,57 @@ export default function JobCard({
 
             {/* Star */}
             {onStar && (
-              <button title={job.starred ? "Remove from saved" : "Save job"}
+              <ToggleIconBtn
+                bg="#f59e0b"
+                size={30}
+                theme={theme}
+                active={job.starred}
+                activeLabel="Remove from saved"
+                inactiveLabel="Save job"
                 onClick={e => { e.stopPropagation(); onStar(); }}
-                style={{
-                  width:30, height:30, borderRadius:"50%",
-                  background: job.starred ? "#f59e0b22" : "transparent",
-                  border: job.starred ? "2px solid #f59e0b" : `2px solid ${theme.border}`,
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  cursor:"pointer", fontSize:14,
-                  color: job.starred ? "#f59e0b" : theme.textDim,
-                  transition:"all 0.2s", flexShrink:0,
-                  transform: job.starred ? "scale(1.15)" : "scale(1)",
-                }}>
-                {job.starred ? "★" : "☆"}
-              </button>
+                activeChildren="★"
+                inactiveChildren="☆"
+              />
             )}
 
             {/* Dislike */}
             {showDislike && onDislike && (
-              <button title="Not interested"
+              <ToggleIconBtn
+                bg="#dc2626"
+                size={28}
+                theme={theme}
+                active={job.disliked}
+                activeLabel="Undo pass"
+                inactiveLabel="Not interested"
                 onClick={e => { e.stopPropagation(); onDislike(); }}
-                style={{
-                  width:28, height:28, borderRadius:"50%",
-                  background: job.disliked ? "#fef2f2" : "transparent",
-                  border: job.disliked ? "2px solid #dc2626" : `2px solid ${theme.border}`,
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  cursor:"pointer",
-                  color: job.disliked ? "#dc2626" : theme.textDim,
-                  transition:"all 0.2s", flexShrink:0,
-                }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
-                  <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
-                </svg>
-              </button>
+                activeChildren={
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                    <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                  </svg>
+                }
+                inactiveChildren={
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                    <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                  </svg>
+                }
+              />
             )}
 
             {/* Generate */}
             {canUseGenerate && onGenerate && showApplyButton && (
               <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
-                disabled={!!st} theme={theme}
+                disabled={!!st} theme={theme} active={done && !generateLoading}
                 onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
                 {generateLoading ? "⏳" : done ? "↻" : "✦"}
               </IconBtn>
             )}
             {canUseAPlusResume && onAPlusResume && showApplyButton && (
               <IconBtn bg="#16a34a" title={done ? "Rebuild A+ Resume" : "A+ Resume"}
-                disabled={!!st} theme={theme}
+                disabled={!!st} theme={theme} active={done && !aPlusLoading}
                 onClick={e => { e.stopPropagation(); onAPlusResume(done && g?.html !== "__exists__"); }}>
                 {aPlusLoading ? "⏳" : "A+"}
               </IconBtn>

@@ -40,12 +40,13 @@ test("server adds dedicated imported jobs tables and import token tables", () =>
   assert.match(server, /app\.use\("\/api\/imported-jobs", requireAuth, createImportedJobsRouter\(db\)\)/);
 });
 
-test("jobs UI exposes a dedicated LinkedIn Saved Jobs section and import action", () => {
+test("jobs UI exposes LinkedIn Saved Jobs inside Starred with import action", () => {
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 
   assert.match(jobsPanel, /LinkedIn Saved Jobs/);
   assert.match(jobsPanel, /Import LinkedIn Saved Jobs/);
-  assert.match(jobsPanel, /boardTab === "linkedin_saved"/);
+  assert.match(jobsPanel, /showImportedLinkedInSection=\{boardTab === "saved"\}/);
+  assert.match(jobsPanel, /StarredLinkedInSection/);
   assert.match(jobsPanel, /api\("\/api\/imported-jobs\/summary"\)/);
   assert.match(jobsPanel, /api\("\/api\/imported-jobs\/linkedin-saved"\)/);
   assert.match(jobsPanel, /api\("\/api\/import-sources\/linkedin-saved\/token", \{ method: "POST" \}\)/);
