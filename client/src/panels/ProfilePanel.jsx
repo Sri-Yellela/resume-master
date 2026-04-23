@@ -71,7 +71,7 @@ const PHint = ({ children, theme }) => (
   </span>
 );
 
-export function ProfilePanel() {
+export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
   const { theme } = useTheme();
 
   const BLANK = {
@@ -649,7 +649,14 @@ export function ProfilePanel() {
         </PSec>
 
         <PSec title="Job Profiles" theme={theme}>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:16 }}>
+          <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.5, marginBottom:14 }}>
+            Job profile creation, editing, switching, and deletion now live in the dedicated Job Profiles section.
+            Profile-specific resume and signal editing remains below for the active profile.
+          </div>
+          <div style={{ fontSize:12, color:theme.textMuted, marginBottom:16 }}>
+            Active profile: <strong style={{ color:theme.text }}>{activeProfile?.profile_name || "None selected"}</strong>
+          </div>
+          <div style={{ display:"none", flexWrap:"wrap", gap:10, marginBottom:16 }}>
             {profiles.map(profile => (
               <button
                 key={profile.id}
@@ -675,7 +682,7 @@ export function ProfilePanel() {
             {profiles.length < 4 && (
               <button
                 type="button"
-                onClick={() => setShowProfileWizard(true)}
+                onClick={onOpenJobProfiles}
                 style={{
                   padding:"10px 14px",
                   borderRadius:10,
@@ -686,10 +693,13 @@ export function ProfilePanel() {
                   fontWeight:700,
                 }}
               >
-                + Add Profile
+                + Add / Edit Profiles
               </button>
             )}
           </div>
+          <button type="button" className="rm-btn rm-btn-primary" onClick={onOpenJobProfiles}>
+            Open Job Profiles
+          </button>
 
           {!activeProfile && (
             <div style={{ fontSize:12, color:theme.textMuted }}>
@@ -697,7 +707,7 @@ export function ProfilePanel() {
             </div>
           )}
 
-          {activeProfile && profileForm && (
+          {false && activeProfile && profileForm && (
             <>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
                 <PRow label="Profile Name" theme={theme}>
@@ -1017,7 +1027,7 @@ export function ProfilePanel() {
           </button>
         </div>
       </form>
-      {showProfileWizard && (
+      {false && showProfileWizard && (
         <DomainProfileWizard
           onComplete={(profile) => {
             setShowProfileWizard(false);

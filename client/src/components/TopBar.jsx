@@ -325,6 +325,10 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                            letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
               Job Profile
             </div>
+            <button onClick={() => { setOpen(false); onTabChange?.("job-profiles"); }}
+              style={{ ...menuItemStyle, padding:"0 0 8px", color:theme.accentText, fontWeight:700 }}>
+              Manage Job Profiles
+            </button>
             {profiles?.length > 0 ? (
               <ProfileSelectorDropdown
                 theme={theme}
@@ -332,10 +336,10 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
                 activeProfile={activeProfile}
                 onActivate={onActivateProfile}
                 onDelete={onDeleteProfile}
-                onAdd={() => { setOpen(false); onTabChange?.("profile"); }}
+                onAdd={() => { setOpen(false); onTabChange?.("job-profiles"); }}
               />
             ) : (
-              <button onClick={() => { setOpen(false); onTabChange?.("profile"); }}
+              <button onClick={() => { setOpen(false); onTabChange?.("job-profiles"); }}
                 style={{ width:"100%", border:`1px solid ${theme.border}`, borderRadius:6,
                          background:theme.surfaceHigh, color:theme.text, padding:"8px 10px",
                          cursor:"pointer", textAlign:"left", fontSize:12, fontWeight:700 }}>
@@ -722,7 +726,7 @@ export default function TopBar({
               activeProfile={profiles.find(p => p.is_active) || profiles[0]}
               onActivate={activateProfile}
               onDelete={deleteProfile}
-              onAdd={() => onTabChange?.("profile")}
+              onAdd={() => onTabChange?.("job-profiles")}
               compact
               title="Switch profile"
             />

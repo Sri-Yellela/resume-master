@@ -14,6 +14,12 @@ import { useTheme } from "../styles/theme.jsx";
 
 const STEPS = ["Domain", "Level", "Titles", "Keywords", "Save"];
 
+function arrayField(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (!value) return [];
+  return String(value).split(",").map(v => v.trim()).filter(Boolean);
+}
+
 // ── Chip component ────────────────────────────────────────────
 function Chip({ label, selected, onToggle }) {
   const { theme } = useTheme();
@@ -87,17 +93,25 @@ function StepIndicator({ current, total }) {
 }
 
 // ── Main wizard ───────────────────────────────────────────────
-export default function DomainProfileWizard({ onComplete, onDismiss, bannerText, initialDomainKey = null }) {
+export default function DomainProfileWizard({
+  onComplete,
+  onDismiss,
+  bannerText,
+  initialDomainKey = null,
+  mode = "create",
+  initialProfile = null,
+}) {
   const { theme } = useTheme();
+  const isEditMode = mode === "edit" && !!initialProfile?.id;
   const [step,       setStep]       = useState(1);
   const [domains,    setDomains]    = useState([]);
-  const [domainKey,  setDomainKey]  = useState(null);
+  const [domainKey,  setDomainKey]  = useState(initialProfile?.domain || null);
   const [domainMeta, setDomainMeta] = useState(null);
-  const [seniority,  setSeniority]  = useState("mid");
-  const [titles,     setTitles]     = useState(new Set());
-  const [keywords,   setKeywords]   = useState(new Set());
-  const [verbs,      setVerbs]      = useState(new Set());
-  const [tools,      setTools]      = useState(new Set());
+  const [seniority,  setSeniority]  = useState(initialProfile?.seniority || "mid");
+  const [titles,     setTitles]     = useState(() => new Set(arrayField(initialProfile?.target_titles)));
+  const [keywords,   setKeywords]   = useState(() => new Set(arrayField(initialProfile?.selected_keywords)));
+  const [verbs,      setVerbs]      = useState(() => new Set(arrayField(initialProfile?.selected_verbs)));
+  const [tools,      setTools]      = useState(() => new Set(arrayField(initialProfile?.selected_tools)));
   const [industries, setIndustries] = useState(new Set());
   const [otherRoleTitle, setOtherRoleTitle] = useState("");
   const [otherRoleFamily, setOtherRoleFamily] = useState("");
@@ -105,7 +119,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText,
   const [otherNotes, setOtherNotes] = useState("");
   const [aiChips,    setAiChips]    = useState(null);
   const [loadingAi,  setLoadingAi]  = useState(false);
-  const [profileName, setProfileName] = useState("");
+  const [profileName, setProfileName] = useState(initialProfile?.profile_name || "");
   const [saving,        setSaving]        = useState(false);
   const [error,         setError]         = useState("");
   const [loadingDomains, setLoadingDomains] = useState(true);
@@ -126,11 +140,31 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText,
     if (initialDomainKey && !domainKey) setDomainKey(initialDomainKey);
   }, [initialDomainKey, domainKey]);
 
+  useEffect(() => {
+    if (!isEditMode) return;
+    setDomainKey(initialProfile?.domain || "general");
+    setSeniority(initialProfile?.seniority || "mid");
+    setProfileName(initialProfile?.profile_name || "");
+    setTitles(new Set(arrayField(initialProfile?.target_titles)));
+    setKeywords(new Set(arrayField(initialProfile?.selected_keywords)));
+    setVerbs(new Set(arrayField(initialProfile?.selected_verbs)));
+    setTools(new Set(arrayField(initialProfile?.selected_tools)));
+  }, [isEditMode, initialProfile?.id]);
+
   // When domain is selected, fetch its metadata and pre-select all chips
   useEffect(() => {
     if (!domainKey) return;
     api(`/api/domain-profiles/metadata/${domainKey}`).then(meta => {
       setDomainMeta(meta);
+      if (isEditMode) {
+        setTitles(prev => prev.size ? prev : new Set(meta.requestOnly ? [] : meta.suggestedTitles));
+        setKeywords(prev => prev.size ? prev : new Set(meta.keywords));
+        setVerbs(prev => prev.size ? prev : new Set(meta.actionVerbs));
+        setTools(prev => prev.size ? prev : new Set(meta.tools));
+        setProfileName(prev => prev || (meta.requestOnly ? "" : meta.label));
+        setAiChips(null);
+        return;
+      }
       setTitles(new Set(meta.requestOnly ? [] : meta.suggestedTitles));
       setKeywords(new Set(meta.keywords));
       setVerbs(new Set(meta.actionVerbs));
@@ -143,7 +177,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText,
       setOtherNotes("");
       setAiChips(null);
     }).catch(() => {});
-  }, [domainKey]);
+  }, [domainKey, isEditMode]);
 
   const toggleSet = useCallback((setter, value) => {
     setter(prev => {
@@ -188,7 +222,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText,
     }
     setSaving(true); setError("");
     try {
-      if (isOtherProfile) {
+      if (!isEditMode && isOtherProfile) {
         await api("/api/domain-profiles/requests", {
           method: "POST",
           body: JSON.stringify({
@@ -205,12 +239,14 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText,
           }),
         });
       }
-      const profile = await api("/api/domain-profiles", {
-        method: "POST",
+      const profile = await api(
+        isEditMode ? `/api/domain-profiles/${initialProfile.id}` : "/api/domain-profiles",
+        {
+        method: isEditMode ? "PUT" : "POST",
         body: JSON.stringify({
           profile_name:      profileName.trim(),
-          role_family:       isOtherProfile ? "general" : (domainMeta?.roleFamily || "general"),
-          domain:            isOtherProfile ? "general" : (domainKey || "general"),
+          role_family:       isOtherProfile ? "general" : (domainMeta?.roleFamily || initialProfile?.role_family || "general"),
+          domain:            isOtherProfile ? "general" : (domainKey || initialProfile?.domain || "general"),
           seniority,
           target_titles:     isOtherProfile
             ? [...new Set([otherRoleTitle.trim(), ...titles].filter(Boolean))]
@@ -286,7 +322,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText,
           <div>
             <div style={{ fontWeight: 900, fontSize: 20, color: theme.text,
                           fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "-0.5px" }}>
-              Create Your Job Search Profile
+              {isEditMode ? "Edit Job Search Profile" : "Create Your Job Search Profile"}
             </div>
             {bannerText && (
               <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4, maxWidth: 480 }}>
@@ -584,7 +620,9 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText,
               <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 20 }}>
                 {isOtherProfile
                   ? "This creates a search profile and sends your role details for support review."
-                  : "Give it a name that identifies this search focus. You can rename it any time."}
+                  : isEditMode
+                    ? "Update the name for this search focus. Changes stay scoped to this job profile."
+                    : "Give it a name that identifies this search focus. You can rename it any time."}
               </div>
               <input
                 value={profileName}
@@ -689,7 +727,7 @@ export default function DomainProfileWizard({ onComplete, onDismiss, bannerText,
                 cursor: (saving || !profileName.trim() || (isOtherProfile && !otherRoleTitle.trim())) ? "default" : "pointer",
               }}
             >
-              {saving ? "Saving…" : "Create Profile"}
+              {saving ? "Saving..." : isEditMode ? "Save Profile" : "Create Profile"}
             </button>
           )}
         </div>

@@ -14,6 +14,7 @@ import TopBar                    from "./components/TopBar.jsx";
 import { AppScrollProvider, useAppScroll } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
+import { JobProfilesPanel }      from "./panels/JobProfilesPanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
 import { PlansPanel }            from "./panels/PlansPanel.jsx";
 import { IntegrationsPanel }     from "./panels/IntegrationsPanel.jsx";
@@ -96,6 +97,7 @@ function AppDashboard({ authUser, setAuthUser }) {
   const renderRoute = activeTab === "console" ? CONSOLE_ROUTE : routeKey;
   const appTabs = [
     { id:"console", label:"Jobs", icon:"JB" },
+    { id:"job-profiles", label:"Job Profiles", icon:"JP" },
     { id:"database", label:"Database", icon:"DB" },
   ];
 
@@ -111,7 +113,7 @@ function AppDashboard({ authUser, setAuthUser }) {
       navigate(consolePath);
       return;
     }
-    if (["database","plans","profile","integrations"].includes(tab)) {
+    if (["database","plans","profile","job-profiles","integrations"].includes(tab)) {
       navigate(`/app/${tab}`);
     }
   }, [activeTab, consolePath, navigate]);
@@ -134,7 +136,7 @@ function AppDashboard({ authUser, setAuthUser }) {
       navigate(consolePath, { replace:true });
       return;
     }
-    if (routeKey !== CONSOLE_ROUTE && !["database","plans","profile","integrations"].includes(routeKey)) {
+    if (routeKey !== CONSOLE_ROUTE && !["database","plans","profile","job-profiles","integrations"].includes(routeKey)) {
       navigate(consolePath, { replace:true });
     }
   }, [routeKey, consolePath, navigate]);
@@ -192,7 +194,8 @@ function AppDashboard({ authUser, setAuthUser }) {
               {renderRoute === "database" && <DatabasePanel user={authUser}/>}
               {renderRoute === "integrations" && <IntegrationsPanel/>}
               {renderRoute === "plans"    && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
-              {renderRoute === "profile"  && <ProfilePanel  user={authUser}/>}
+              {renderRoute === "profile"  && <ProfilePanel user={authUser} onOpenJobProfiles={() => handlePanelChange("job-profiles")}/>}
+              {renderRoute === "job-profiles" && <JobProfilesPanel/>}
             </div>
           </AppShell>
         </div>
@@ -258,8 +261,8 @@ function AppRouter() {
 
       {/* Admin login — redirect if already authenticated */}
       <Route path="/admin/login" element={
-        authUser
-          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
+        authUser?.isAdmin
+          ? <Navigate to="/admin" replace/>
           : <AdminLoginPage onLogin={setAuthUser}/>
       }/>
 
@@ -268,7 +271,7 @@ function AppRouter() {
         !authUser
           ? <Navigate to="/admin/login" replace/>
           : !authUser.isAdmin
-            ? <Navigate to="/app" replace/>
+            ? <Navigate to="/admin/login" replace/>
             : <AdminLayout user={authUser} onLogout={handleAdminLogout}/>
       }/>
 
@@ -277,7 +280,7 @@ function AppRouter() {
         !authUser
           ? <Navigate to="/admin/login" replace/>
           : !authUser.isAdmin
-            ? <Navigate to="/app" replace/>
+            ? <Navigate to="/admin/login" replace/>
             : <AdminLayout user={authUser} onLogout={handleAdminLogout}><DBInspector/></AdminLayout>
       }/>
 

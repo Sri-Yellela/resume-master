@@ -292,9 +292,25 @@ const EMP_TYPE_OPTIONS = [
   { value:"part-time",  label:"Part-time" },
 ];
 
+function defaultFilterSnapshot() {
+  return {
+    roleFilter: "",
+    locationFilter: "",
+    workType: "",
+    employmentTypePrefs: ["full-time"],
+    catFilter: "",
+    srcFilter: "",
+    minYoe: "",
+    maxYoe: "",
+    maxApplicants: "",
+    visitedFilter: "",
+    ageFilter: "",
+  };
+}
+
 // â”€â”€ Filters panel (collapsible) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function FiltersPanel({
-  open, onClose,
+  open, onClose, onApply, isDark,
   categories,
   role, setRole,
   location, setLocation,
@@ -322,16 +338,19 @@ function FiltersPanel({
     <div style={{
       position:"fixed", inset:0, zIndex:500,
       display:"flex", alignItems:"flex-start", justifyContent:"flex-end",
+      background:isDark ? "rgba(0,0,0,0.42)" : "rgba(15,23,42,0.18)",
+      isolation:"isolate",
     }}
     onClick={e => { if(e.target===e.currentTarget) onClose(); }}>
       <motion.div
         initial={{ x:360 }} animate={{ x:0 }} exit={{ x:360 }}
         transition={{ type:"tween", duration:0.22 }}
         style={{
-          width:320, height:"100%", background:theme.surface,
+          width:320, height:"100%", background:theme.modalSurface || (isDark ? "#111827" : "#ffffff"),
           borderLeft:`3px solid ${theme.accent}`,
           padding:"24px 20px", overflowY:"auto",
           display:"flex", flexDirection:"column", gap:16,
+          boxShadow:theme.shadowXl || "-12px 0 36px rgba(0,0,0,0.24)",
         }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
@@ -476,7 +495,7 @@ function FiltersPanel({
           <LucyBtn onClick={onReset} accent={theme.surfaceHigh} style={{ flex:1 }}>
             Reset All
           </LucyBtn>
-          <LucyBtn onClick={onClose} style={{ flex:1 }}>
+          <LucyBtn onClick={onApply} style={{ flex:1 }}>
             Apply
           </LucyBtn>
         </div>
@@ -1010,6 +1029,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const [maxApplicants, setMaxApplicants] = useState("");
   const [visitedFilter, setVisitedFilter] = useState("");
   const [ageFilter,     setAgeFilter]     = useState("");
+  const [pendingFilters, setPendingFilters] = useState(defaultFilterSnapshot);
 
   const activeProfileKeyRef = useRef(activeProfileKey);
   const switchingProfileRef = useRef(false);
@@ -1020,6 +1040,58 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const searchIntentResolveRef = useRef(null);
   // Stable ref so startPollLoop (empty deps) can always call the latest fetchJobs
   const fetchJobsRef = useRef(null);
+
+  const activeFilterSnapshot = useCallback(() => ({
+    roleFilter,
+    locationFilter,
+    workType,
+    employmentTypePrefs: Array.isArray(employmentTypePrefs) && employmentTypePrefs.length
+      ? employmentTypePrefs
+      : ["full-time"],
+    catFilter,
+    srcFilter,
+    minYoe,
+    maxYoe,
+    maxApplicants,
+    visitedFilter,
+    ageFilter,
+  }), [
+    roleFilter, locationFilter, workType, employmentTypePrefs,
+    catFilter, srcFilter, minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter,
+  ]);
+
+  const stageFilter = useCallback((key, value) => {
+    setPendingFilters(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  const openFilterPanel = useCallback(() => {
+    setPendingFilters(activeFilterSnapshot());
+    setFiltersOpen(true);
+  }, [activeFilterSnapshot]);
+
+  const applyPendingFilters = useCallback(() => {
+    const next = { ...defaultFilterSnapshot(), ...pendingFilters };
+    setRoleFilter(next.roleFilter || "");
+    setLocationFilter(next.locationFilter || "");
+    setWorkType(next.workType || "");
+    setEmploymentTypePrefs(
+      Array.isArray(next.employmentTypePrefs) && next.employmentTypePrefs.length
+        ? next.employmentTypePrefs
+        : ["full-time"]
+    );
+    setCatFilter(next.catFilter || "");
+    setSrcFilter(next.srcFilter || "");
+    setMinYoe(next.minYoe || "");
+    setMaxYoe(next.maxYoe || "");
+    setMaxApplicants(next.maxApplicants || "");
+    setVisitedFilter(next.visitedFilter || "");
+    setAgeFilter(next.ageFilter || "");
+    setFiltersOpen(false);
+  }, [pendingFilters]);
+
+  const resetPendingFilters = useCallback(() => {
+    setPendingFilters(defaultFilterSnapshot());
+  }, []);
 
   const makeProfileSnapshot = useCallback((overrides = {}) => ({
     jobs,
@@ -2314,20 +2386,20 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       <AnimatePresence>
         {filtersOpen && (
           <FiltersPanel
-            open={filtersOpen} onClose={() => setFiltersOpen(false)}
+            open={filtersOpen} onClose={() => setFiltersOpen(false)} onApply={applyPendingFilters} isDark={isDark}
             categories={categories}
-            role={roleFilter}         setRole={setRoleFilter}
-            location={locationFilter} setLocation={setLocationFilter}
-            workType={workType}       setWorkType={setWorkType}
-            employmentTypePrefs={employmentTypePrefs} setEmploymentTypePrefs={setEmploymentTypePrefs}
-            catFilter={catFilter}     setCatFilter={setCatFilter}
-            srcFilter={srcFilter}     setSrcFilter={setSrcFilter}
-            minYoe={minYoe}           setMinYoe={setMinYoe}
-            maxYoe={maxYoe}           setMaxYoe={setMaxYoe}
-            maxApplicants={maxApplicants} setMaxApplicants={setMaxApplicants}
-            visitedFilter={visitedFilter} setVisitedFilter={setVisitedFilter}
-            ageFilter={ageFilter}     setAgeFilter={setAgeFilter}
-            onReset={resetFilters}
+            role={pendingFilters.roleFilter}         setRole={value => stageFilter("roleFilter", value)}
+            location={pendingFilters.locationFilter} setLocation={value => stageFilter("locationFilter", value)}
+            workType={pendingFilters.workType}       setWorkType={value => stageFilter("workType", value)}
+            employmentTypePrefs={pendingFilters.employmentTypePrefs} setEmploymentTypePrefs={value => stageFilter("employmentTypePrefs", value)}
+            catFilter={pendingFilters.catFilter}     setCatFilter={value => stageFilter("catFilter", value)}
+            srcFilter={pendingFilters.srcFilter}     setSrcFilter={value => stageFilter("srcFilter", value)}
+            minYoe={pendingFilters.minYoe}           setMinYoe={value => stageFilter("minYoe", value)}
+            maxYoe={pendingFilters.maxYoe}           setMaxYoe={value => stageFilter("maxYoe", value)}
+            maxApplicants={pendingFilters.maxApplicants} setMaxApplicants={value => stageFilter("maxApplicants", value)}
+            visitedFilter={pendingFilters.visitedFilter} setVisitedFilter={value => stageFilter("visitedFilter", value)}
+            ageFilter={pendingFilters.ageFilter}     setAgeFilter={value => stageFilter("ageFilter", value)}
+            onReset={resetPendingFilters}
           />
         )}
       </AnimatePresence>
@@ -2360,14 +2432,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
             </button>
           ))}
         </div>
-        <LucyBtn onClick={issueLinkedInImportToken} disabled={issuingLinkedinImportToken}
-          style={{ height:34, padding:"0 14px" }} accent="#0A66C2">
-          {issuingLinkedinImportToken ? "Preparing Import" : "Import LinkedIn Saved Jobs"}
-        </LucyBtn>
-
         {/* Filters button â€” always visible, bold outline */}
         <button
-          onClick={() => setFiltersOpen(o => !o)}
+          onClick={() => filtersOpen ? setFiltersOpen(false) : openFilterPanel()}
           style={{
             display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
             background: filtersOpen ? theme.accent : theme.surface,
