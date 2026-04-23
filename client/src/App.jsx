@@ -35,6 +35,44 @@ import { TermsPage }       from "./pages/marketing/TermsPage.jsx";
 
 const CONSOLE_ROUTE = "jobs";
 const LEGACY_CONSOLE_ROUTES = new Set(["simple-apply", "tailored", "custom-sampler"]);
+
+function AuthBootstrapScreen({ theme }) {
+  return (
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column",
+                  alignItems:"center", justifyContent:"center",
+                  background:theme.bg, gap:14 }}>
+      <div style={{ width:32, height:32,
+                    border:`3px solid ${theme.border}`,
+                    borderTop:`3px solid ${theme.accent}`,
+                    borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+      <span style={{ color:theme.textMuted, fontSize:13 }}>Loading…</span>
+    </div>
+  );
+}
+
+function UserRouteGate({ authStatus, authUser, children }) {
+  if (authStatus === "unknown") return null;
+  if (authStatus !== "authenticated" || !authUser) return <Navigate to="/login" replace/>;
+  if (authUser.isAdmin) return <Navigate to="/admin" replace/>;
+  return children;
+}
+
+function AdminRouteGate({ authStatus, authUser, children }) {
+  if (authStatus === "unknown") return null;
+  if (authStatus !== "authenticated" || !authUser || !authUser.isAdmin) {
+    return <Navigate to="/admin/login" replace/>;
+  }
+  return children;
+}
+
+function PublicLoginRoute({ authStatus, authUser, children, admin = false }) {
+  if (authStatus === "unknown") return null;
+  if (authStatus === "authenticated" && authUser) {
+    if (admin) return authUser.isAdmin ? <Navigate to="/admin" replace/> : children;
+    return authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>;
+  }
+  return children;
+}
 // AppShell: inside AppScrollProvider — drives dynamic paddingTop + tab visibility
 function AppShell({ theme, isMobile, activeTab, handlePanelChange, appTabs, children }) {
   const { progress: p } = useAppScroll();
@@ -205,12 +243,13 @@ function AppDashboard({ authUser, setAuthUser }) {
 function AppRouter() {
   const { theme } = useTheme();
   const [authUser,    setAuthUser]    = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const [authStatus,  setAuthStatus]  = useState("unknown");
 
   const handleAdminLogout = useCallback(async () => {
     try { await api("/api/auth/logout", { method:"POST" }); } catch {}
     setAuthContext("");
     setAuthUser(null);
+    setAuthStatus("unauthenticated");
   }, []);
 
   useEffect(() => {
@@ -223,12 +262,20 @@ function AppRouter() {
       window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
     }
     api("/api/auth/me")
-      .then(d => { if (d.authenticated) setAuthUser(d.user); })
+      .then(d => {
+        if (d.authenticated && d.user) {
+          setAuthUser(d.user);
+          setAuthStatus("authenticated");
+          return;
+        }
+        setAuthUser(null);
+        setAuthStatus("unauthenticated");
+      })
       .catch(() => {})
-      .finally(() => setAuthChecked(true));
+      .finally(() => setAuthStatus(prev => prev === "unknown" ? "unauthenticated" : prev));
   }, []);
 
-  if (!authChecked) return (
+  if (authStatus === "unknown") return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column",
                   alignItems:"center", justifyContent:"center",
                   background:theme.bg, gap:14 }}>
@@ -259,59 +306,55 @@ function AppRouter() {
 
       {/* Admin login — redirect if already authenticated */}
       <Route path="/admin/login" element={
-        authUser?.isAdmin
-          ? <Navigate to="/admin" replace/>
-          : <AdminLoginPage onLogin={setAuthUser}/>
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser} admin>
+          <AdminLoginPage onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
       }/>
 
       {/* Admin dashboard — requires auth + isAdmin */}
       <Route path="/admin" element={
-        !authUser
-          ? <Navigate to="/admin/login" replace/>
-          : !authUser.isAdmin
-            ? <Navigate to="/admin/login" replace/>
-            : <AdminLayout user={authUser} onLogout={handleAdminLogout}/>
+        <AdminRouteGate authStatus={authStatus} authUser={authUser}>
+          <AdminLayout user={authUser} onLogout={handleAdminLogout}/>
+        </AdminRouteGate>
       }/>
 
       {/* Admin DB Inspector */}
       <Route path="/admin/db" element={
-        !authUser
-          ? <Navigate to="/admin/login" replace/>
-          : !authUser.isAdmin
-            ? <Navigate to="/admin/login" replace/>
-            : <AdminLayout user={authUser} onLogout={handleAdminLogout}><DBInspector/></AdminLayout>
+        <AdminRouteGate authStatus={authStatus} authUser={authUser}>
+          <AdminLayout user={authUser} onLogout={handleAdminLogout}><DBInspector/></AdminLayout>
+        </AdminRouteGate>
       }/>
 
       {/* User login — redirect to /app if logged in as user, /admin if admin */}
       <Route path="/login" element={
-        authUser
-          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
-          : <AuthScreen onLogin={setAuthUser}/>
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser}>
+          <AuthScreen onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
       }/>
 
       {/* User app — redirect admin to /admin */}
       <Route path="/app/*" element={
-        !authUser
-          ? <Navigate to="/login" replace/>
-          : authUser.isAdmin
-            ? <Navigate to="/admin" replace/>
-            : <AppDashboard authUser={authUser} setAuthUser={setAuthUser}/>
+        <UserRouteGate authStatus={authStatus} authUser={authUser}>
+          <AppDashboard authUser={authUser} setAuthUser={setAuthUser}/>
+        </UserRouteGate>
       }/>
 
       {/* Root and catch-all: redirect based on auth state */}
       <Route path="/" element={
-        !authUser
-          ? <Navigate to="/login" replace/>
-          : authUser.isAdmin
-            ? <Navigate to="/admin" replace/>
-            : <Navigate to="/app" replace/>
+        authStatus === "authenticated" && authUser
+          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
+          : <Navigate to="/login" replace/>
       }/>
       <Route path="*" element={
-        !authUser
-          ? <Navigate to="/login" replace/>
-          : authUser.isAdmin
-            ? <Navigate to="/admin" replace/>
-            : <Navigate to="/app" replace/>
+        authStatus === "authenticated" && authUser
+          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
+          : <Navigate to="/login" replace/>
       }/>
     </Routes>
   );

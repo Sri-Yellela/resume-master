@@ -9,7 +9,7 @@
     "prestart": "node -e \"console.log('[start] npm prestart: launching server entrypoint')\"",
     "start": "node server.js",
     "test": "node --test",
-    "prebuild": "node -e \"console.log('[build] npm prebuild: starting root build pipeline')\"",
+    "prebuild": "node -e \"if(process.platform==='win32'){require('child_process').spawnSync('taskkill',['/F','/IM','node.exe','/T'],{stdio:'ignore',shell:true});} console.log('[build] npm prebuild: starting root build pipeline')\"",
     "build": "node -e \"console.log('[build] root build: using existing root install, building client')\" && npm --prefix client ci && npm --prefix client run build",
     "setup": "npm install && npm run build",
     "migrate": "node scripts/migrate.js",

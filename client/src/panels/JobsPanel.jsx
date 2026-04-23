@@ -3350,6 +3350,8 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                     key={item}
                     type="button"
                     onClick={() => goPage(item)}
+                    aria-label={item === currentPage ? `Current page, page ${item}` : `Go to page ${item}`}
+                    title={item === currentPage ? `Current page ${item}` : `Go to page ${item}`}
                     style={{
                       minWidth:32,
                       height:32,
@@ -3377,6 +3379,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                   onChange={e => setPageInput(e.target.value.replace(/[^\d]/g, ""))}
                   onKeyDown={e => e.key === "Enter" && commitPageJump()}
                   inputMode="numeric"
+                  aria-label="Go to page"
                   style={{
                     width:64,
                     height:32,
@@ -3390,7 +3393,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                   }}
                   placeholder={String(currentPage)}
                 />
-                <LucyBtn onClick={commitPageJump} accent={theme.surfaceHigh}>
+                <LucyBtn onClick={commitPageJump} accent={theme.surfaceHigh} title="Go to page">
                   Go
                 </LucyBtn>
               </div>
