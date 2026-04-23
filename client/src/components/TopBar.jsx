@@ -472,10 +472,25 @@ export default function TopBar({
   } = useJobBoard() || {};
 
   const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
+  const [jobsZone, setJobsZone] = useState(null);
   useEffect(() => {
     const onResize = () => setVw(window.innerWidth);
     window.addEventListener("resize", onResize, { passive: true });
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleJobsZone = (event) => {
+      const detail = event.detail;
+      if (!detail?.width) return;
+      setJobsZone({
+        left: detail.left,
+        width: detail.width,
+      });
+    };
+    window.addEventListener("rm:jobs-panel-zone", handleJobsZone);
+    return () => window.removeEventListener("rm:jobs-panel-zone", handleJobsZone);
   }, []);
 
   // Domain profiles for docked pill switcher
@@ -538,6 +553,14 @@ export default function TopBar({
   const [ar, ag, ab] = hexToRgb(theme.accent);
 
   const pillWidth  = Math.round(vw - p * (vw - 400));
+  const zoneWidth = jobsZone?.width || vw;
+  const dockCenter = jobsZone ? jobsZone.left + jobsZone.width / 2 : vw / 2;
+  const dockPadding = 20;
+  const dockMaxWidth = Math.max(0, zoneWidth - dockPadding * 2);
+  const constrainedPillWidth = jobsZone
+    ? Math.max(0, Math.min(pillWidth, dockMaxWidth))
+    : pillWidth;
+  const dockScale = dockMaxWidth > 0 && constrainedPillWidth < 220 ? Math.max(0.68, constrainedPillWidth / 220) : 1;
   const radius     = Math.round(p * 9999);
   const blur       = Math.round(12 + p * 8);
   const topOffset  = Math.round(p * 10);
@@ -573,9 +596,10 @@ export default function TopBar({
         style={{
           position: "fixed",
           top: topOffset,
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: pillWidth,
+          left: dockCenter,
+          transform: `translateX(-50%) scale(${dockScale})`,
+          transformOrigin: "top center",
+          width: constrainedPillWidth,
           height: 46,
           borderRadius: radius,
           background: pillBg,
@@ -588,6 +612,8 @@ export default function TopBar({
           justifyContent: "space-between",
           padding: `0 ${padH}px`,
           overflow: "visible",
+          opacity: constrainedPillWidth <= 0 ? 0 : 1,
+          pointerEvents: constrainedPillWidth <= 0 ? "none" : "auto",
           zIndex: 1000,
           fontFamily: "'DM Sans',system-ui,sans-serif",
         }}>
@@ -620,8 +646,10 @@ export default function TopBar({
           style={{
             position: "fixed",
             top: topOffset + 46 + 8,
-            left: "50%",
-            transform: "translateX(-50%)",
+            left: dockCenter,
+            transform: `translateX(-50%) scale(${dockScale})`,
+            transformOrigin: "top center",
+            maxWidth: Math.max(180, dockMaxWidth),
             height: 36,
             borderRadius: 9999,
             background: pill2Bg,
@@ -633,6 +661,8 @@ export default function TopBar({
             alignItems: "center",
             padding: "0 14px",
             gap: 6,
+            opacity: constrainedPillWidth <= 0 ? 0 : 1,
+            pointerEvents: constrainedPillWidth <= 0 ? "none" : "auto",
             zIndex: 1000,
             fontFamily: "'DM Sans',system-ui,sans-serif",
             animation: "slideDown 200ms ease",

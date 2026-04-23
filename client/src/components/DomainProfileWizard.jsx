@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import { mergeUniqueSignalLabels } from "../../../shared/profileSignals.js";
 
 const STEPS = ["Domain", "Level", "Titles", "Keywords", "Save"];
 
@@ -188,7 +189,7 @@ export default function DomainProfileWizard({
   }, []);
 
   const addToSet = useCallback((setter, value) => {
-    setter(prev => new Set([...prev, value]));
+    setter(prev => new Set(mergeUniqueSignalLabels([...prev, value])));
   }, []);
 
   const loadAiChips = async () => {

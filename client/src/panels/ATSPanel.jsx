@@ -10,6 +10,16 @@
 import { useState, useEffect } from "react";
 import { useTheme } from "../styles/theme.jsx";
 import { api } from "../lib/api.js";
+import { useSyncEvents } from "../hooks/useSyncEvents.js";
+import {
+  addSkillToProfile,
+  addVerbToProfile,
+  buildProfileSuggestionLookup,
+  emitProfileSuggestionsUpdated,
+  hasProfileSuggestion,
+  PROFILE_SUGGESTIONS_UPDATED_EVENT,
+} from "../lib/profileSuggestions.js";
+import { profileSignalKey } from "../../../shared/profileSignals.js";
 
 export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) {
   const { theme } = useTheme();
@@ -17,11 +27,14 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   const [kwLoading,   setKwLoading]   = useState(false);
   const [kwError,     setKwError]     = useState(false);
   const [addedItems,  setAddedItems]  = useState(new Set());
+  const [profileSuggestions, setProfileSuggestions] = useState(null);
+  const [profileSelections, setProfileSelections] = useState({ activeSkills: [], activeVerbs: [] });
 
   // Reset local state when the selected job changes
   useEffect(() => {
     setLocalReport(null);
     setKwError(false);
+    setAddedItems(new Set());
   }, [jobId]);
 
   // Fetch keyword analysis when no generated-resume report exists
@@ -45,15 +58,62 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
 
   const activeReport = report ?? localReport;
   const clickableProfileId = activeProfileId || activeReport?.profileId || activeReport?.domainProfileId || null;
+  const loadProfileSuggestions = async (profileId) => {
+    if (!profileId) {
+      setProfileSuggestions(null);
+      setProfileSelections({ activeSkills: [], activeVerbs: [] });
+      return;
+    }
+    try {
+      const [next, profiles] = await Promise.all([
+        api(`/api/domain-profiles/${profileId}/suggestions`),
+        api("/api/domain-profiles"),
+      ]);
+      setProfileSuggestions(next || null);
+      const activeProfile = (Array.isArray(profiles) ? profiles : []).find(profile => Number(profile.id) === Number(profileId));
+      setProfileSelections({
+        activeSkills: activeProfile?.selected_tools || [],
+        activeVerbs: activeProfile?.selected_verbs || [],
+      });
+    } catch {}
+  };
+
+  useEffect(() => {
+    loadProfileSuggestions(clickableProfileId);
+  }, [clickableProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleSuggestionsUpdated = (event) => {
+      if (!clickableProfileId) return;
+      if (Number(event.detail?.profileId) !== Number(clickableProfileId)) return;
+      if (event.detail?.suggestions) setProfileSuggestions(event.detail.suggestions);
+      else loadProfileSuggestions(clickableProfileId);
+    };
+    window.addEventListener(PROFILE_SUGGESTIONS_UPDATED_EVENT, handleSuggestionsUpdated);
+    return () => window.removeEventListener(PROFILE_SUGGESTIONS_UPDATED_EVENT, handleSuggestionsUpdated);
+  }, [clickableProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useSyncEvents({
+    profile_switched: () => {
+      if (clickableProfileId) loadProfileSuggestions(clickableProfileId);
+    },
+  });
+
   const addSuggestion = async (kind, label) => {
     if (!clickableProfileId || !label) return;
+    const existingInProfile = kind === "action_verb"
+      ? (profileSelections.activeVerbs || []).some(value => profileSignalKey(value) === profileSignalKey(label))
+      : (profileSelections.activeSkills || []).some(value => profileSignalKey(value) === profileSignalKey(label));
+    if (existingInProfile || hasProfileSuggestion(profileSuggestions, kind, label)) return;
     const key = `${kind}:${label}`;
     setAddedItems(prev => new Set([...prev, key]));
     try {
-      await api(`/api/domain-profiles/${clickableProfileId}/suggestions`, {
-        method: "POST",
-        body: JSON.stringify({ kind, labels: [label] }),
-      });
+      const next = kind === "action_verb"
+        ? await addVerbToProfile(clickableProfileId, label)
+        : await addSkillToProfile(clickableProfileId, label);
+      setProfileSuggestions(next || null);
+      emitProfileSuggestionsUpdated(clickableProfileId, next || null);
     } catch {
       setAddedItems(prev => {
         const next = new Set(prev);
@@ -118,6 +178,9 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   const circumference = 2 * Math.PI * R;
   const pct = Math.max(0, Math.min(100, activeReport.score ?? score ?? 0));
   const scoreColor = pct >= 80 ? theme.success : pct >= 60 ? theme.warning : theme.danger;
+  const suggestionLookup = buildProfileSuggestionLookup(profileSuggestions || {});
+  const selectedSkillLookup = new Set((profileSelections.activeSkills || []).map(profileSignalKey).filter(Boolean));
+  const selectedVerbLookup = new Set((profileSelections.activeVerbs || []).map(profileSignalKey).filter(Boolean));
 
   return (
     <div style={{ padding:"16px 16px", display:"flex", flexDirection:"column",
@@ -178,7 +241,10 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
           items={activeReport.tier1_missing}
           onItemClick={clickableProfileId ? item => addSuggestion("skill", item) : null}
           addedItems={addedItems}
-          kind="skill"/>
+          addedLookup={suggestionLookup}
+          selectedLookup={selectedSkillLookup}
+          kind="skill"
+          theme={theme}/>
       )}
 
       {/* Action verbs matched */}
@@ -195,7 +261,10 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
           items={activeReport.action_verbs_missing}
           onItemClick={clickableProfileId ? item => addSuggestion("action_verb", item) : null}
           addedItems={addedItems}
-          kind="action_verb"/>
+          addedLookup={suggestionLookup}
+          selectedLookup={selectedVerbLookup}
+          kind="action_verb"
+          theme={theme}/>
       )}
 
       {activeReport.experience && (
@@ -221,26 +290,44 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   );
 }
 
-function TagSection({ title, bg, fg, border, items, onItemClick = null, addedItems = new Set(), kind = "skill" }) {
+function TagSection({
+  title,
+  bg,
+  fg,
+  border,
+  items,
+  onItemClick = null,
+  addedItems = new Set(),
+  addedLookup = { skillKeys: new Set(), verbKeys: new Set() },
+  selectedLookup = new Set(),
+  kind = "skill",
+  theme,
+}) {
   return (
     <div>
       <div className="rm-section-label" style={{ color:fg }}>{title}</div>
       <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
-        {items.map(k => (
+        {items.map(k => {
+          const itemKey = profileSignalKey(k);
+          const alreadyAdded = kind === "action_verb"
+            ? selectedLookup.has(itemKey) || addedLookup.verbKeys.has(itemKey) || addedItems.has(`${kind}:${k}`)
+            : selectedLookup.has(itemKey) || addedLookup.skillKeys.has(itemKey) || addedItems.has(`${kind}:${k}`);
+          return (
           <button key={k} type="button" className="rm-badge"
             onClick={() => onItemClick?.(k)}
-            disabled={!onItemClick || addedItems.has(`${kind}:${k}`)}
+            disabled={!onItemClick || alreadyAdded}
             title={onItemClick ? `Add "${k}" to this profile as an inactive suggestion` : undefined}
             style={{
-              background:bg,
-              color:fg,
-              border:`1px solid ${border}`,
-              cursor:onItemClick ? "pointer" : "default",
-              opacity:addedItems.has(`${kind}:${k}`) ? 0.55 : 1,
+              background:alreadyAdded ? theme.successMuted : bg,
+              color:alreadyAdded ? theme.success : fg,
+              border:`1px solid ${alreadyAdded ? theme.success+"33" : border}`,
+              cursor:alreadyAdded ? "default" : (onItemClick ? "pointer" : "default"),
+              opacity:alreadyAdded ? 1 : 1,
+              pointerEvents:alreadyAdded ? "none" : "auto",
             }}>
-            {addedItems.has(`${kind}:${k}`) ? `Added: ${k}` : k}
+            {alreadyAdded ? `Added: ${k}` : k}
           </button>
-        ))}
+        )})}
       </div>
     </div>
   );

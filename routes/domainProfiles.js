@@ -13,12 +13,15 @@ import {
   upsertSimpleApplyProfile,
 } from "../services/simpleApplyProfile.js";
 import {
+  addSkillToProfile,
   addProfileSignalSuggestions,
+  addVerbToProfile,
   computeEnhancementStatus,
   listProfileEnhancementHistory,
   listProfileSignalSuggestions,
   syncSelectedSkillSuggestions,
 } from "../services/profileSignalAggregator.js";
+import { mergeUniqueSignalLabels } from "../shared/profileSignals.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,10 +70,7 @@ function getRegistry() {
 
 function cleanStringArray(value, limit = 20) {
   if (!Array.isArray(value)) return [];
-  return value
-    .map(v => String(v || "").trim())
-    .filter(Boolean)
-    .slice(0, limit);
+  return mergeUniqueSignalLabels(value, limit);
 }
 
 function parseProfileRow(row) {
@@ -148,10 +148,10 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
       VALUES (?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.user.id, profile_name, role_family, domain, seniority,
-      JSON.stringify(target_titles     || []),
-      JSON.stringify(selected_keywords || []),
-      JSON.stringify(selected_verbs    || []),
-      JSON.stringify(selected_tools    || []),
+      JSON.stringify(cleanStringArray(target_titles || [])),
+      JSON.stringify(cleanStringArray(selected_keywords || [])),
+      JSON.stringify(cleanStringArray(selected_verbs || [])),
+      JSON.stringify(cleanStringArray(selected_tools || [])),
       isFirst,
     );
 
@@ -214,7 +214,7 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
 
     // JSON-encode array fields
     for (const arrKey of ["target_titles","selected_keywords","selected_verbs","selected_tools"]) {
-      if (updates[arrKey] !== undefined) updates[arrKey] = JSON.stringify(updates[arrKey]);
+      if (updates[arrKey] !== undefined) updates[arrKey] = JSON.stringify(cleanStringArray(updates[arrKey]));
     }
 
     const set  = Object.keys(updates).map(k => `${k}=?`).join(",");
@@ -442,11 +442,12 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
     if (!profile) return res.status(404).json({ error: "Profile not found" });
     const kind = req.body?.kind === "action_verb" ? "action_verb" : "skill";
     const labels = req.body?.labels || req.body?.label || [];
-    const suggestions = addProfileSignalSuggestions(db, {
-      userId: req.user.id,
-      profileId: profile.id,
-      kind,
-      labels,
+    const nextLabels = Array.isArray(labels) ? labels : [labels];
+    let suggestions = listProfileSignalSuggestions(db, { userId: req.user.id, profileId: profile.id });
+    nextLabels.forEach(label => {
+      suggestions = kind === "action_verb"
+        ? addVerbToProfile(db, { userId: req.user.id, profileId: profile.id, label })
+        : addSkillToProfile(db, { userId: req.user.id, profileId: profile.id, label });
     });
     res.json({
       ...suggestions,

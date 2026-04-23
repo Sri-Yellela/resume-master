@@ -1,20 +1,10 @@
+import {
+  cleanProfileSignalLabel,
+  profileSignalKey,
+} from "../shared/profileSignals.js";
+
 function parseJsonArray(value) {
   try { return JSON.parse(value || "[]"); } catch { return []; }
-}
-
-function cleanText(value) {
-  return String(value || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/^[^a-z0-9]+|[^a-z0-9+#/(). -]+$/gi, "");
-}
-
-function signalKey(value) {
-  return cleanText(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9+#/(). -]+/g, "")
-    .replace(/\s+/g, "_")
-    .slice(0, 80);
 }
 
 const NOISE_TERMS = new Set([
@@ -49,7 +39,7 @@ export const ENHANCEMENT_SELECTED_CAP = 8;
 export const ATS_SIGNAL_PROMOTION_THRESHOLD = 2;
 
 export function classifyMissingSignal(rawValue) {
-  const label = cleanText(rawValue);
+  const label = cleanProfileSignalLabel(rawValue);
   if (!label) return null;
   for (const entry of STRUCTURED_FACT_PATTERNS) {
     if (entry.pattern.test(label)) {
@@ -57,7 +47,7 @@ export function classifyMissingSignal(rawValue) {
         kind: "structured_fact",
         field: entry.field,
         label: entry.label,
-        key: signalKey(`${entry.field}:${entry.label}`),
+        key: profileSignalKey(`${entry.field}:${entry.label}`),
       };
     }
   }
@@ -67,7 +57,7 @@ export function classifyMissingSignal(rawValue) {
   return {
     kind: "skill",
     label,
-    key: signalKey(label),
+    key: profileSignalKey(label),
   };
 }
 
@@ -80,9 +70,9 @@ export function extractMissingSignals(report = {}) {
     if (!deduped.has(key)) deduped.set(key, classified);
   });
   (Array.isArray(report?.action_verbs_missing) ? report.action_verbs_missing : []).forEach(value => {
-    const label = cleanText(value);
+    const label = cleanProfileSignalLabel(value);
     if (!label || label.length > 40 || NOISE_TERMS.has(label.toLowerCase())) return;
-    const classified = { kind: "action_verb", label, key: signalKey(label) };
+    const classified = { kind: "action_verb", label, key: profileSignalKey(label) };
     const key = `${classified.kind}:${classified.key}`;
     if (!deduped.has(key)) deduped.set(key, classified);
   });
@@ -126,7 +116,7 @@ export function listProfileSignalSuggestions(db, { userId, profileId }) {
 export function addProfileSignalSuggestions(db, { userId, profileId, kind = "skill", labels = [] }) {
   const allowedKind = kind === "action_verb" ? "action_verb" : "skill";
   const items = (Array.isArray(labels) ? labels : [labels])
-    .map(label => cleanText(label))
+    .map(label => cleanProfileSignalLabel(label))
     .filter(Boolean)
     .slice(0, 20);
   if (!items.length) return listProfileSignalSuggestions(db, { userId, profileId });
@@ -142,14 +132,65 @@ export function addProfileSignalSuggestions(db, { userId, profileId, kind = "ski
       updated_at = unixepoch()
   `);
   const tx = db.transaction(() => {
-    items.forEach(label => upsert.run(profileId, userId, signalKey(label), label, allowedKind, ATS_SIGNAL_PROMOTION_THRESHOLD));
+    items.forEach(label => upsert.run(profileId, userId, profileSignalKey(label), label, allowedKind, ATS_SIGNAL_PROMOTION_THRESHOLD));
   });
   tx();
   return listProfileSignalSuggestions(db, { userId, profileId });
 }
 
+function addNormalizedProfileSuggestion(db, { userId, profileId, kind, label }) {
+  const nextLabel = cleanProfileSignalLabel(label);
+  const nextKey = profileSignalKey(nextLabel);
+  if (!nextLabel || !nextKey) {
+    return listProfileSignalSuggestions(db, { userId, profileId });
+  }
+  const profile = db.prepare(`
+    SELECT selected_tools, selected_verbs
+    FROM domain_profiles
+    WHERE id = ? AND user_id = ?
+  `).get(profileId, userId);
+  const activeValues = kind === "action_verb"
+    ? parseJsonArray(profile?.selected_verbs || "[]")
+    : parseJsonArray(profile?.selected_tools || "[]");
+  if (activeValues.some(value => profileSignalKey(value) === nextKey)) {
+    return listProfileSignalSuggestions(db, { userId, profileId });
+  }
+  const existing = db.prepare(`
+    SELECT signal_key
+    FROM profile_signal_suggestions
+    WHERE user_id = ? AND profile_id = ? AND signal_kind = ?
+  `).all(userId, profileId, kind);
+  if (existing.some(row => row.signal_key === nextKey)) {
+    return listProfileSignalSuggestions(db, { userId, profileId });
+  }
+  return addProfileSignalSuggestions(db, {
+    userId,
+    profileId,
+    kind,
+    labels: [nextLabel],
+  });
+}
+
+export function addSkillToProfile(db, { userId, profileId, label }) {
+  return addNormalizedProfileSuggestion(db, {
+    userId,
+    profileId,
+    kind: "skill",
+    label,
+  });
+}
+
+export function addVerbToProfile(db, { userId, profileId, label }) {
+  return addNormalizedProfileSuggestion(db, {
+    userId,
+    profileId,
+    kind: "action_verb",
+    label,
+  });
+}
+
 export function syncSelectedSkillSuggestions(db, { userId, profileId, selectedKeys = [] }) {
-  const wanted = new Set((Array.isArray(selectedKeys) ? selectedKeys : []).map(signalKey));
+  const wanted = new Set((Array.isArray(selectedKeys) ? selectedKeys : []).map(profileSignalKey));
   const rows = db.prepare(`
     SELECT signal_key, status
     FROM profile_signal_suggestions

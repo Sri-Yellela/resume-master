@@ -900,7 +900,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   // Live scrape status
   const [scrapeError,    setScrapeError]    = useState("");
-  const [scrapeNewCount, setScrapeNewCount] = useState(0);
   const [applyQueue, setApplyQueue] = useState([]);
   const [applyRuns, setApplyRuns] = useState([]);
   const [applyReviewJobs, setApplyReviewJobs] = useState([]); // held_review items across all runs
@@ -913,13 +912,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // To change poll interval edit POLL_INTERVAL_MS below.
   const POLL_INTERVAL_MS = 4000;
   const [pollStatus,   setPollStatus]   = useState("idle"); // "idle"|"polling"|"complete"|"error"
-  const [pollNewCount, setPollNewCount] = useState(0);
   const pollIntervalRef = useRef(null);
 
-  // AUTO-SCRAPE: Set Role triggers background scrape automatically if local results < 50
-  // (THRESHOLD in server.js). Search New always forces a fresh scrape.
-  // To change the threshold edit THRESHOLD in /api/scrape.
-  const [resultsUpToDate, setResultsUpToDate] = useState(false);
+  const [searchPhase, setSearchPhase] = useState("idle");
 
   // Generation progress
   const [genStage, setGenStage] = useState("");
@@ -930,12 +925,30 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const detailPanelRef  = useRef(null);
   const sandboxPanelRef = useRef(null);
   const atsPanelRef     = useRef(null);
+  const detailPanelElementRef = useRef(null);
   const initialPanelDefaultsAppliedRef = useRef(false);
   const prevPanelVisibilityRef = useRef({ detail: false, sandbox: false, ats: false });
 
   // ResizeObserver: tracks manual drag width for Tier 1 ? 2 override only
   const jobsPanelElementRef = useRef(null);
   const [manualWidth, setManualWidth] = useState(null);
+
+  const publishJobsZoneBounds = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const jobsRect = jobsPanelElementRef.current?.getBoundingClientRect?.();
+    const detailRect = detailPanelElementRef.current?.getBoundingClientRect?.();
+    if (!jobsRect) return;
+    const left = jobsRect.left;
+    const right = detailRect ? Math.max(jobsRect.right, detailRect.right) : jobsRect.right;
+    window.dispatchEvent(new CustomEvent("rm:jobs-panel-zone", {
+      detail: {
+        left,
+        right,
+        width: Math.max(0, right - left),
+        top: Math.min(jobsRect.top, detailRect?.top ?? jobsRect.top),
+      },
+    }));
+  }, []);
 
   // effectiveTier: panel count is primary driver; ResizeObserver only overrides Tier 1 ? 2
   const effectiveTier = useMemo(() => {
@@ -1189,29 +1202,38 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             if (showDetail  && detailPanelRef.current)          detailPanelRef.current.resize(d.detail);
             if (showSandbox && sandboxPanelRef.current)         sandboxPanelRef.current.resize(d.sandbox);
             if (showAts     && atsPanelRef.current)             atsPanelRef.current.resize(d.ats);
+            publishJobsZoneBounds();
             initialPanelDefaultsAppliedRef.current = true;
           } catch(e) { console.warn("[panels] resize not ready:", e.message); }
         });
       });
     });
     return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
-  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile, publishJobsZoneBounds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ResizeObserver — only used for Tier 1 ? 2 manual-drag fallback
   useEffect(() => {
-    const el = jobsPanelElementRef.current;
-    if (!el) return;
+    const nodes = [jobsPanelElementRef.current, detailPanelElementRef.current].filter(Boolean);
+    if (!nodes.length) return;
     let debounceTimer;
     const ro = new ResizeObserver(entries => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        const w = entries[0]?.contentRect.width;
+        const jobsEntry = entries.find(entry => entry.target === jobsPanelElementRef.current) || entries[0];
+        const w = jobsEntry?.contentRect.width;
         if (w !== undefined) setManualWidth(w);
+        publishJobsZoneBounds();
       }, 50);
     });
-    ro.observe(el);
-    return () => { clearTimeout(debounceTimer); ro.disconnect(); };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    nodes.forEach(node => ro.observe(node));
+    window.addEventListener("resize", publishJobsZoneBounds, { passive: true });
+    publishJobsZoneBounds();
+    return () => {
+      clearTimeout(debounceTimer);
+      ro.disconnect();
+      window.removeEventListener("resize", publishJobsZoneBounds);
+    };
+  }, [publishJobsZoneBounds, !!selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-open resume + ATS panel when a pending job card is selected
   useEffect(() => {
@@ -1555,6 +1577,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey,
       profileSwitchKey, activeProfileKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    setSearchPhase("idle");
+  }, [activeProfileKey, searchInput]);
+
   // Debounced backend search — fires 300ms after user stops typing
   useEffect(() => {
     if (!user) return;
@@ -1597,7 +1623,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const startPollLoop = useCallback((roleQ, pollSince) => {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     setPollStatus("polling");
-    setPollNewCount(0);
     let failCount = 0;
     const seenIds = new Set();
     let totalNew = 0;
@@ -1631,7 +1656,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         if (newJobs.length > 0) {
           newJobs.forEach(j => seenIds.add(j.jobId));
           totalNew += newJobs.length;
-          setPollNewCount(totalNew);
           // Re-read through /api/jobs so progressive merges honor local filters,
           // profile hard constraints, sort mode, and pagination consistently.
           fetchJobsRef.current?.(1);
@@ -1641,11 +1665,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
           setScraping(false);
-          setScrapeNewCount(totalNew);
-          setPollStatus("complete");
+          setPollStatus("idle");
           // Re-fetch from DB with current sort so poll-prepended jobs end up in correct order
           fetchJobsRef.current?.(1);
-          setTimeout(() => { setPollStatus("idle"); setScrapeNewCount(0); }, 5000);
         }
       } catch {
         failCount++;
@@ -1790,22 +1812,22 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     return false;
   }, [activeDomainProfile, activateProfileForSearch, askSearchIntent, domainProfiles]);
 
-  // Set active role — immediately shows DB results, then auto-scrapes if count < threshold
+  // Set active role — immediately shows local DB results only.
   const handleSetRole = useCallback(async (overrideQuery, options = {}) => {
     const q = (overrideQuery || searchInput).trim();
-    if (!q) return;
+    if (!q) return false;
     if (!activeDomainProfile) {
       setScrapeError("Create a job search profile before setting a search role.");
       setProfileWizardOpen(true);
-      return;
+      return false;
     }
     if (!resumeText.trim()) {
       setScrapeError("Upload the active profile's base resume before setting a search role.");
-      return;
+      return false;
     }
     if (!options.skipProfileIntent) {
       const aligned = await ensureSearchProfileAlignment(q);
-      if (!aligned) return;
+      if (!aligned) return false;
     }
     setScrapeError("");
     const roleQ = q.toLowerCase();
@@ -1813,19 +1835,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setSearchInput(q);
     setSearchCommitted(true);
     await fetchJobs(1, false, { overrides: { role: roleQ } });
-    // AUTO-SCRAPE: silently trigger profile-driven background scrape if local results are below threshold.
-    try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify(buildProfileScrapeRequest(q)) });
-      if (!result || result.missingToken || result.limitReached || result.error) return;
-      const nextRoleQ = (result.query || q).toLowerCase();
-      if (result.scraping) {
-        startPollLoop(nextRoleQ, Date.now());
-      } else if (result.fromCache) {
-        setResultsUpToDate(true);
-        setTimeout(() => setResultsUpToDate(false), 2000);
-      }
-    } catch {} // silent — DB results already shown
-  }, [activeDomainProfile, resumeText, searchInput, startPollLoop, ensureSearchProfileAlignment, fetchJobs]);
+    return true;
+  }, [activeDomainProfile, resumeText, searchInput, ensureSearchProfileAlignment, fetchJobs]);
 
   // -- Scrape / search ---------------------------------------
   const handleSearch = useCallback(async (overrideQuery, options = {}) => {
@@ -1908,18 +1919,18 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // Merges new jobs into the board; removes visited entries.
   const handlePullRefresh = useCallback(async () => {
     const q = (searchInput || roleFilter).trim();
-    if (!q) return;
+    if (!q) return false;
     if (!activeDomainProfile) {
       setScrapeError("Create a job search profile before checking for jobs.");
       setProfileWizardOpen(true);
-      return;
+      return false;
     }
     if (!resumeText.trim()) {
       setScrapeError("Upload the active profile's base resume before checking for jobs.");
-      return;
+      return false;
     }
-    if (scraping || bgLoading) return;
-    setScrapeError(""); setScrapeNewCount(0);
+    if (scraping || bgLoading) return false;
+    setScrapeError("");
     const immediateRoleQ = q.toLowerCase();
     setRoleFilter(immediateRoleQ);
     await fetchJobs(1, false, { overrides: { role: immediateRoleQ } });
@@ -1952,7 +1963,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         setRoleFilter(roleQ);
         fetchJobs(1, false, { overrides: { role: roleQ } });
         startPollLoop(roleQ, Date.now());
-        return;
+        return true;
       }
 
       // Cache hit — merge immediately
@@ -1968,18 +1979,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           new Date(b.postedAt || 0) - new Date(a.postedAt || 0)
         );
       });
-      if (incoming.length > 0) {
-        setScrapeNewCount(incoming.length);
-        setTimeout(() => setScrapeNewCount(0), 4000);
-      }
       setTotalJobs(d.total || 0);
       setRoleFilter(roleQ);
+      return true;
     } catch(e) { setScrapeError(e.message); }
-    finally { if (!managedByPoller) setScraping(false); }
+    finally {
+      setSearchPhase("idle");
+      if (!managedByPoller) setScraping(false);
+    }
+    return false;
   }, [searchInput, roleFilter, sortBy, scraping, bgLoading, startPollLoop, fetchJobs, activeDomainProfile, resumeText]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // -- Legacy Refresh button (end-of-list) -----------------------
-  const handleRefresh = handlePullRefresh;
 
   // -- Resume Enhancer ------------------------------------------
   const handleEnhance = useCallback(async () => {
@@ -2305,12 +2314,23 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   const isLastPage = currentPage >= totalPages;
 
-  // BUTTON STATES: 'Set Role' = save role + local DB lookup.
-  // 'Refresh Search' = explicit Apify scrape/refresh.
+  // BUTTON STATES: first click applies local role filter, second click triggers fresh scrape.
   // To change labels edit the buttonLabel derived value below.
   const roleIsSet = !!roleFilter &&
     searchInput.trim().toLowerCase() === roleFilter.trim();
-  const buttonLabel = scraping ? "Searching…" : roleIsSet ? "Refresh Search" : "Set Role";
+  const runSearchButton = useCallback(async (overrideQuery) => {
+    const q = (overrideQuery || searchInput).trim();
+    if (!q) return;
+    if (!roleIsSet || searchPhase === "idle") {
+      const applied = await handleSetRole(q);
+      if (applied) setSearchPhase("local");
+      return;
+    }
+    const refreshed = await handlePullRefresh();
+    if (!refreshed) setSearchPhase("idle");
+  }, [handlePullRefresh, handleSetRole, roleIsSet, searchInput, searchPhase]);
+  const buttonLabel = scraping ? "Searching…" : searchPhase === "local" && roleIsSet ? "Search New" : "Set Role";
+  const buttonIcon = scraping ? "…" : searchPhase === "local" && roleIsSet ? "↻" : "⌕";
   const setupBlock = !activeDomainProfile
     ? {
         title: "Create a job profile",
@@ -2352,7 +2372,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 return;
               }
             }
-            if (pendingQuery) await handleSearch(pendingQuery, { skipProfileIntent: true });
+            if (pendingQuery) {
+              const applied = await handleSetRole(pendingQuery, { skipProfileIntent: true });
+              if (applied) setSearchPhase("local");
+            }
           }}
           onDismiss={() => {
             pendingIntentSearchRef.current = null;
@@ -2500,7 +2523,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
         <div style={{ position:"relative", flex:1, minWidth:200 }}>
           <input value={searchInput} onChange={e=>{ setSearchInput(e.target.value); setSearchCommitted(false); }}
-            onKeyDown={e => e.key==="Enter" && (roleIsSet ? handleSearch() : handleSetRole())}
+            onKeyDown={e => e.key==="Enter" && runSearchButton()}
             placeholder="ATS search role, e.g. ML Engineer, SWE..."
             style={{ width:"100%", height:38, paddingLeft:14, paddingRight:14,
                      borderRadius:2, border:`1px solid ${theme.border}`,
@@ -2518,10 +2541,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         </div>
 
         <LucyBtn
-          onClick={() => roleIsSet ? handleSearch() : handleSetRole()}
+          onClick={() => runSearchButton()}
           disabled={scraping || bgLoading}
-          title={roleIsSet ? "Fetch new job listings for this role from LinkedIn" : "Set the role and show matching jobs already in the local pool"}>
-          {buttonLabel}
+          title={searchPhase === "local" && roleIsSet
+            ? "Trigger a fresh profile-scoped scrape for this role"
+            : "Apply this role to the local board first"}>
+          <span aria-hidden="true">{buttonIcon}</span>
+          <span>{buttonLabel}</span>
         </LucyBtn>
         {smartSearchError && (
           <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
@@ -2938,10 +2964,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             {mobilePane === "jobs" && (
               <JobsColumn
                 jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
-                scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
                 onClearScrapeError={() => setScrapeError("")}
-                pollStatus={pollStatus} pollNewCount={pollNewCount}
-                resultsUpToDate={resultsUpToDate}
+                pollStatus={pollStatus}
                 onRetryPoll={handlePullRefresh}
                 generated={generated} loading={loading}
                 applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
@@ -2949,7 +2973,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
                 generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
                 visitUrl={visitUrl} toggleStar={toggleStar} openAtsPanel={openAtsPanel}
-                goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+                goPage={goPage} onPullRefresh={handlePullRefresh}
                 setMobilePane={setMobilePane} isMobile={isMobile}
                 onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
                 showImportedLinkedInSection={boardTab === "saved"}
@@ -3032,10 +3056,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden" }}>
             <JobsColumn
               jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
-              scrapeNewCount={scrapeNewCount} onClearScrapeNew={() => setScrapeNewCount(0)}
               onClearScrapeError={() => setScrapeError("")}
-              pollStatus={pollStatus} pollNewCount={pollNewCount}
-              resultsUpToDate={resultsUpToDate}
+              pollStatus={pollStatus}
               onRetryPoll={handlePullRefresh}
               generated={generated} loading={loading}
               applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
@@ -3044,7 +3066,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
               openAtsPanel={openAtsPanel}
-              goPage={goPage} handleRefresh={handleRefresh} onPullRefresh={handlePullRefresh}
+              goPage={goPage} onPullRefresh={handlePullRefresh}
               setMobilePane={setMobilePane} isMobile={isMobile}
               compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
               showImportedLinkedInSection={boardTab === "saved"}
@@ -3069,23 +3091,25 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                   minSize={10}
                   style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
                            borderLeft: `1px solid ${theme.border}` }}>
-                  <JobDetailPanel
-                    job={selectedJob} theme={theme} isDark={isDark}
-                    g={g2} done={done2} st={st2} applyMode={applyMode}
-                    canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
-                    canUseAPlusResume={!isImportedBoardJob(selectedJob) && canUseAPlusResume}
-                    onClose={() => setSelectedJob(null)}
-                    onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
-                    onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
-                    onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
-                    onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
-                    onVisit={() => visitUrl(selectedJob)}
-                    onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
-                    onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
-                    onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
-                    onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
-                    onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
-                  />
+                  <div ref={detailPanelElementRef} style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden" }}>
+                    <JobDetailPanel
+                      job={selectedJob} theme={theme} isDark={isDark}
+                      g={g2} done={done2} st={st2} applyMode={applyMode}
+                      canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
+                      canUseAPlusResume={!isImportedBoardJob(selectedJob) && canUseAPlusResume}
+                      onClose={() => setSelectedJob(null)}
+                      onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
+                      onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
+                      onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
+                      onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
+                      onVisit={() => visitUrl(selectedJob)}
+                      onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
+                      onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
+                      onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
+                      onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
+                      onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
+                    />
+                  </div>
                 </Panel>
               </>
             );
@@ -3186,13 +3210,13 @@ function ResizeHandle({ theme: themeProp }) {
 }
 
 // â”€â”€ Jobs column (shared across layout modes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrapeNew, onClearScrapeError,
-                      pollStatus, pollNewCount, resultsUpToDate, onRetryPoll,
+function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
+                      pollStatus, onRetryPoll,
                       generated, loading, applyMode, canUseGenerate, canUseAPlusResume, theme, isDark,
                       totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, toggleDislike, openAtsPanel,
-                      goPage, handleRefresh, onPullRefresh,
+                      goPage, onPullRefresh,
                       setMobilePane, isMobile,
                       compact, selectedJobId, onJobSelect,
                       showImportedLinkedInSection = false,
@@ -3201,7 +3225,20 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                       onImportLinkedIn,
                       onRefreshImportedLinkedIn,
                       cardTier = 1, containerRef }) {
+  const [pageInput, setPageInput] = useState("");
   const shouldShowEmptyState = jobs.length === 0 && !scraping && !showImportedLinkedInSection;
+  const visiblePages = buildVisiblePageItems(currentPage, totalPages);
+  useEffect(() => {
+    setPageInput(String(currentPage || ""));
+  }, [currentPage]);
+  const commitPageJump = () => {
+    if (!totalPages) return;
+    const parsed = Number.parseInt(pageInput, 10);
+    if (!Number.isFinite(parsed)) return;
+    const nextPage = Math.min(totalPages, Math.max(1, parsed));
+    goPage(nextPage);
+    setPageInput(String(nextPage));
+  };
   return (
     <div ref={containerRef} style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
                   background: isDark
@@ -3209,43 +3246,6 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
                     : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
       {shouldShowEmptyState ? <EmptyState theme={theme}/> : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
-
-          {/* Live polling pulsing bar â€” shows while scrape is in progress */}
-          {pollStatus === "polling" && (
-            <div style={{ margin:"6px 16px 0", padding:"8px 12px", borderRadius:4,
-                          background:theme.accentMuted, border:`1px solid ${theme.accent}33`,
-                          display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%",
-                             background:theme.accent, animation:"pulse 1.5s ease-in-out infinite" }}/>
-              <span style={{ fontSize:11, color:theme.accentText, fontWeight:600 }}>
-                {pollNewCount > 0
-                  ? `Fetching... ${pollNewCount} new job${pollNewCount !== 1 ? "s" : ""} found so far`
-                  : "Fetching new jobs..."}
-              </span>
-            </div>
-          )}
-
-          {/* Scrape complete â€” fades after 5s */}
-          {pollStatus === "complete" && scrapeNewCount > 0 && (
-            <div style={{ margin:"6px 16px 0", padding:"8px 12px", borderRadius:4,
-                          background:"#dcfce7", border:"1px solid #86efac",
-                          display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-              <span style={{ fontSize:11, fontWeight:700, color:"#166534" }}>
-                Scrape complete - {scrapeNewCount} new job{scrapeNewCount !== 1 ? "s" : ""} added
-              </span>
-              <button onClick={onClearScrapeNew} style={{ background:"none", border:"none",
-                cursor:"pointer", color:"#166534", fontSize:13 }}>x</button>
-            </div>
-          )}
-
-          {/* Results up to date (Set Role cache hit) */}
-          {resultsUpToDate && (
-            <div style={{ margin:"6px 16px 0", padding:"6px 12px", borderRadius:4,
-                          background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
-                          fontSize:11, color:theme.textMuted }}>
-              Results up to date
-            </div>
-          )}
 
           {/* Scrape error banner */}
           {scrapeError && (
@@ -3335,18 +3335,65 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
           {/* Pagination controls */}
           {totalPages > 1 && (
             <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
-                           gap:8, padding:"16px 20px", borderTop:`1px solid ${theme.border}` }}>
+                           gap:8, padding:"16px 20px", borderTop:`1px solid ${theme.border}`, flexWrap:"wrap" }}>
               <LucyBtn onClick={() => goPage(currentPage-1)}
                         disabled={currentPage <= 1} accent={theme.surfaceHigh}>
                 Prev
               </LucyBtn>
-              <span style={{ fontSize:12, color:theme.textMuted }}>
-                Page {currentPage} of {totalPages}
-              </span>
+              <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", justifyContent:"center" }}>
+                {visiblePages.map(item => typeof item === "string" ? (
+                  <span key={item} style={{ fontSize:12, color:theme.textDim, padding:"0 4px" }}>
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => goPage(item)}
+                    style={{
+                      minWidth:32,
+                      height:32,
+                      borderRadius:999,
+                      border:`1px solid ${item === currentPage ? theme.accent : theme.border}`,
+                      background:item === currentPage ? theme.accent : theme.surface,
+                      color:item === currentPage ? theme.accentText : theme.text,
+                      fontSize:12,
+                      fontWeight:item === currentPage ? 800 : 600,
+                      cursor:item === currentPage ? "default" : "pointer",
+                      padding:"0 10px",
+                    }}>
+                    {item}
+                  </button>
+                ))}
+              </div>
               <LucyBtn onClick={() => goPage(currentPage+1)}
                         disabled={currentPage >= totalPages} accent={theme.surfaceHigh}>
                 Next
               </LucyBtn>
+              <div style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                <span style={{ fontSize:12, color:theme.textMuted }}>Go to page</span>
+                <input
+                  value={pageInput}
+                  onChange={e => setPageInput(e.target.value.replace(/[^\d]/g, ""))}
+                  onKeyDown={e => e.key === "Enter" && commitPageJump()}
+                  inputMode="numeric"
+                  style={{
+                    width:64,
+                    height:32,
+                    borderRadius:999,
+                    border:`1px solid ${theme.border}`,
+                    background:theme.surface,
+                    color:theme.text,
+                    fontSize:12,
+                    padding:"0 10px",
+                    outline:"none",
+                  }}
+                  placeholder={String(currentPage)}
+                />
+                <LucyBtn onClick={commitPageJump} accent={theme.surfaceHigh}>
+                  Go
+                </LucyBtn>
+              </div>
             </div>
           )}
 
@@ -3354,6 +3401,21 @@ function JobsColumn({ jobs, scraping, scrapeError, scrapeNewCount, onClearScrape
       )}
     </div>
   );
+}
+
+function buildVisiblePageItems(currentPage, totalPages) {
+  if (totalPages <= 1) return [1];
+  const pages = new Set([1, totalPages]);
+  for (let page = currentPage - 2; page <= currentPage + 2; page += 1) {
+    if (page >= 1 && page <= totalPages) pages.add(page);
+  }
+  const sorted = [...pages].sort((a, b) => a - b);
+  const items = [];
+  sorted.forEach((page, index) => {
+    if (index > 0 && page - sorted[index - 1] > 1) items.push("ellipsis-" + page);
+    items.push(page);
+  });
+  return items;
 }
 
 function StarredLinkedInSection({

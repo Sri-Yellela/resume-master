@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
+import { emitProfileSuggestionsUpdated } from "../lib/profileSuggestions.js";
 
 // ── Field normalisers ─────────────────────────────────────────
 function normalisePhone(raw) {
@@ -390,8 +391,12 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
         inactiveSkills: next?.inactiveSkills || [],
         selectedSkills: next?.selectedSkills || [],
         appliedSkills: next?.appliedSkills || prev.appliedSkills || [],
+        inactiveActionVerbs: next?.inactiveActionVerbs || prev.inactiveActionVerbs || [],
+        selectedActionVerbs: next?.selectedActionVerbs || prev.selectedActionVerbs || [],
+        appliedActionVerbs: next?.appliedActionVerbs || prev.appliedActionVerbs || [],
         structuredFacts: prev.structuredFacts,
       }));
+      emitProfileSuggestionsUpdated(activeProfileId, next || null);
       setEnhancementStatus(prev => ({ ...prev, ...(next?.enhancement || {}) }));
       setSuggestionStatus("Updated enhancement skill selections");
       setTimeout(() => setSuggestionStatus(""), 2500);
