@@ -95,6 +95,17 @@ function parseJsonArray(value) {
   try { return JSON.parse(value || "[]"); } catch { return []; }
 }
 
+function cleanStructuredFacts(input = {}) {
+  return {
+    citizenshipStatus: String(input.citizenshipStatus || "").trim(),
+    workAuthorization: String(input.workAuthorization || "").trim(),
+    requiresSponsorship: !!input.requiresSponsorship,
+    hasClearance: !!input.hasClearance,
+    clearanceLevel: String(input.clearanceLevel || "").trim(),
+    degreeLevel: String(input.degreeLevel || "").trim(),
+  };
+}
+
 function resolveScope(scopeOrUserId, maybeRoleTitles = []) {
   if (scopeOrUserId && typeof scopeOrUserId === "object") {
     return {
@@ -193,6 +204,39 @@ function seedScopedProfileFromLegacy(db, userId, profileId, roleTitles = []) {
       legacySignals.updated_at ?? null,
     );
   }
+
+  try {
+    const userProfile = db.prepare(`
+      SELECT visa_type, work_auth, requires_sponsorship, has_clearance, clearance_level
+      FROM user_profile
+      WHERE user_id = ?
+    `).get(userId);
+    if (userProfile) {
+      db.prepare(`
+        UPDATE profile_simple_apply_profiles
+        SET citizenship_status = COALESCE(NULLIF(citizenship_status, ''), ?),
+            work_authorization = COALESCE(NULLIF(work_authorization, ''), ?),
+            requires_sponsorship = CASE
+              WHEN requires_sponsorship IS NULL THEN ?
+              ELSE requires_sponsorship
+            END,
+            has_clearance = CASE
+              WHEN has_clearance IS NULL THEN ?
+              ELSE has_clearance
+            END,
+            clearance_level = COALESCE(NULLIF(clearance_level, ''), ?)
+        WHERE profile_id = ? AND user_id = ?
+      `).run(
+        String(userProfile.visa_type || "").includes("Citizen") ? "U.S. citizen" : "",
+        userProfile.work_auth || "",
+        userProfile.requires_sponsorship ? 1 : 0,
+        userProfile.has_clearance ? 1 : 0,
+        userProfile.clearance_level || "",
+        profileId,
+        userId,
+      );
+    }
+  } catch {}
 }
 
 export function getBaseResumeRecord(db, scopeOrUserId) {
@@ -312,6 +356,14 @@ export function loadSimpleApplyProfile(db, scopeOrUserId) {
     skills: parseJsonArray(row.skills_json),
     searchTerms: parseJsonArray(row.search_terms_json),
     yearsExperience: row.years_experience ?? null,
+    structuredFacts: cleanStructuredFacts({
+      citizenshipStatus: row.citizenship_status,
+      workAuthorization: row.work_authorization,
+      requiresSponsorship: row.requires_sponsorship,
+      hasClearance: row.has_clearance,
+      clearanceLevel: row.clearance_level,
+      degreeLevel: row.degree_level,
+    }),
     sourceHash: row.source_hash,
     updatedAt: row.updated_at,
   };
@@ -328,11 +380,20 @@ export function loadOrCreateSimpleApplyProfile(db, scopeOrUserId, roleTitles = [
 }
 
 export function buildAtsResumeBasis(resumeText, signalProfile = null) {
+  const structuredFacts = cleanStructuredFacts(signalProfile?.structuredFacts || {});
+  const factLines = [
+    structuredFacts.citizenshipStatus ? `Citizenship/work status: ${structuredFacts.citizenshipStatus}` : "",
+    structuredFacts.workAuthorization ? `Work authorization: ${structuredFacts.workAuthorization}` : "",
+    structuredFacts.requiresSponsorship ? "Requires sponsorship: yes" : "",
+    structuredFacts.hasClearance ? `Security clearance: ${structuredFacts.clearanceLevel || "active"}` : "",
+    structuredFacts.degreeLevel ? `Degree level: ${structuredFacts.degreeLevel}` : "",
+  ].filter(Boolean).join("\n");
   const signals = signalProfile
     ? [
         signalProfile.titles?.length ? `Likely titles: ${signalProfile.titles.join(", ")}` : "",
         signalProfile.skills?.length ? `Skills/tools: ${signalProfile.skills.join(", ")}` : "",
         signalProfile.keywords?.length ? `Keywords: ${signalProfile.keywords.slice(0, 18).join(", ")}` : "",
+        factLines,
       ].filter(Boolean).join("\n")
     : "";
   const yoeLine = signalProfile?.yearsExperience != null
@@ -342,4 +403,8 @@ export function buildAtsResumeBasis(resumeText, signalProfile = null) {
   return fullSignals
     ? `STORED USER SIGNALS:\n${fullSignals}\n\nBASE RESUME TEXT:\n${resumeText || ""}`
     : String(resumeText || "");
+}
+
+export function normaliseStructuredFacts(input = {}) {
+  return cleanStructuredFacts(input);
 }

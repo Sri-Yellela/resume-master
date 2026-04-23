@@ -41,15 +41,28 @@ import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } f
 import { sendPasswordResetEmail } from "./services/emailService.js";
 import { allowedModesForTier, canUseAPlusResume, canUseGenerate, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
 import {
+  normalizeResumeHtml as formatterNormalizeResumeHtml,
+  stripResumeHtml as formatterStripResumeHtml,
+} from "./services/resumeFormatter.js";
+import {
   buildAtsResumeBasis,
   extractUserYearsExperience,
   getBaseResumeRecord,
   loadOrCreateSimpleApplyProfile,
   loadSimpleApplyProfile,
+  normaliseStructuredFacts,
   profileHasBaseResume,
   saveBaseResumeRecord,
   upsertSimpleApplyProfile,
 } from "./services/simpleApplyProfile.js";
+import {
+  aggregateAtsMissingSignals,
+  buildSelectedEnhancementSkills,
+  computeEnhancementStatus,
+  insertProfileEnhancementHistory,
+  listProfileEnhancementHistory,
+  markSelectedSuggestionsApplied,
+} from "./services/profileSignalAggregator.js";
 import {
   INTEGRATION_PROVIDERS,
   getAutomationReadiness,
@@ -198,14 +211,7 @@ function hashText(value) {
 }
 
 function stripResumeHtml(html) {
-  return String(html || "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<!-- A_PLUS SELECTION[\s\S]*?-->/gi, "")
-    .replace(/<!-- CUSTOM_SAMPLER SELECTION[\s\S]*?-->/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return formatterStripResumeHtml(html);
 }
 
 function jobAtsSource(job = {}) {
@@ -248,21 +254,7 @@ function displayModeForPrompt(mode) {
 }
 
 function normalizeResumeHtml(html) {
-  let out = String(html || "").replace(/```html|```/g, "").trim();
-  out = out.replace(/<!-- A_PLUS SELECTION[\s\S]*?-->/gi, "").trim();
-  out = out.replace(/<!-- CUSTOM_SAMPLER SELECTION[\s\S]*?-->/gi, "").trim();
-  if (!/^<html[\s>]/i.test(out)) out = `<html><head></head><body>${out}</body></html>`;
-  if (/<style[^>]*>[\s\S]*?<\/style>/i.test(out)) {
-    out = out.replace(/<style[^>]*>[\s\S]*?<\/style>/i, RESUME_STYLE_BLOCK);
-  } else if (/<head[^>]*>/i.test(out)) {
-    out = out.replace(/<head[^>]*>/i, match => `${match}\n${RESUME_STYLE_BLOCK}`);
-  } else {
-    out = out.replace(/^<html[^>]*>/i, match => `${match}<head>${RESUME_STYLE_BLOCK}</head>`);
-  }
-  if (!/Save and submit as PDF/.test(out)) {
-    out = out.replace(/<\/html>\s*$/i, "<!-- Save and submit as PDF (print to PDF from browser). Do not submit as image PDF, Google Docs link, or scanned document. -->\n</html>");
-  }
-  return out;
+  return formatterNormalizeResumeHtml(html);
 }
 
 const INDUSTRY_CATEGORIES = [
@@ -1994,6 +1986,52 @@ db.pragma("busy_timeout = 5000");
           ON import_extension_tokens(user_id, source_key, expires_at);
       `,
     },
+    {
+      id: "052_profile_enhancement_signals",
+      sql: `
+        ALTER TABLE profile_simple_apply_profiles ADD COLUMN citizenship_status TEXT;
+        ALTER TABLE profile_simple_apply_profiles ADD COLUMN work_authorization TEXT;
+        ALTER TABLE profile_simple_apply_profiles ADD COLUMN requires_sponsorship INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE profile_simple_apply_profiles ADD COLUMN has_clearance INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE profile_simple_apply_profiles ADD COLUMN clearance_level TEXT;
+        ALTER TABLE profile_simple_apply_profiles ADD COLUMN degree_level TEXT;
+        ALTER TABLE profile_simple_apply_profiles ADD COLUMN enhancement_notified_at INTEGER;
+
+        CREATE TABLE IF NOT EXISTS profile_signal_suggestions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          profile_id INTEGER NOT NULL REFERENCES domain_profiles(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          signal_key TEXT NOT NULL,
+          signal_label TEXT NOT NULL,
+          signal_kind TEXT NOT NULL,
+          structured_field TEXT,
+          frequency INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL DEFAULT 'inactive',
+          first_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          selected_at INTEGER,
+          applied_at INTEGER,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(profile_id, signal_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_profile_signal_suggestions_profile
+          ON profile_signal_suggestions(profile_id, status, signal_kind, frequency DESC);
+
+        CREATE TABLE IF NOT EXISTS profile_resume_enhancements (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          profile_id INTEGER NOT NULL REFERENCES domain_profiles(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          base_resume_content TEXT NOT NULL,
+          enhanced_content TEXT NOT NULL,
+          selected_skills_json TEXT NOT NULL DEFAULT '[]',
+          ats_delta INTEGER,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          adopted_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_profile_resume_enhancements_profile
+          ON profile_resume_enhancements(profile_id, created_at DESC);
+      `,
+    },
   ];
 
   const applied = new Set(
@@ -2257,7 +2295,8 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
 
   const combined = rawItems.map(j => normaliseItem(j));
 
-  let cntNoTitle = 0, cntNoApply = 0, cntNotFT = 0, cntIrrelevant = 0, cntRepost = 0, cntGhost = 0, cntDup = 0, cntYoeMismatch = 0;
+  let cntNoTitle = 0, cntNoApply = 0, cntNotFT = 0, cntIrrelevant = 0, cntRepost = 0, cntGhost = 0, cntDup = 0, cntYoeMismatch = 0, cntProfileFactMismatch = 0;
+  const profileFactDrops = { clearance: 0, citizenship: 0, sponsorship: 0 };
   const thisRunIds    = new Set();
   const thisRunHashes = new Set();
 
@@ -2334,20 +2373,23 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     ? signalProfile.yearsExperience + 2
     : null;
   const eligible = filtered.filter(item => {
-    if (maxAllowedYoe == null) return true;
-    const yoe = parseYearsExperience(item.description || "");
-    if (yoe.min != null && yoe.min > maxAllowedYoe) {
-      cntYoeMismatch++;
+    if (maxAllowedYoe != null) {
+      const yoe = parseYearsExperience(item.description || "");
+      if (yoe.min != null && yoe.min > maxAllowedYoe) {
+        cntYoeMismatch++;
+        return false;
+      }
+    }
+    const factCheck = evaluateProfileFactEligibility(item, signalProfile);
+    if (!factCheck.ok) {
+      cntProfileFactMismatch++;
+      if (factCheck.reason && profileFactDrops[factCheck.reason] != null) {
+        profileFactDrops[factCheck.reason] += 1;
+      }
       return false;
     }
     return true;
   });
-  const classified = [];
-  for (let i = 0; i < Math.min(eligible.length, MAX_JOBS_PER_REFRESH); i += 5) {
-    const batch = eligible.slice(i, i + 5);
-    const cats  = await Promise.all(batch.map(item => classifyJob(item.title, item.description)));
-    batch.forEach((item, idx) => classified.push({ ...item, _category: cats[idx] }));
-  }
   if (scrapeParams.threadId) {
     logSearchThread(scrapeParams.threadId, "scrape_filter_summary", {
       rawCount: rawItems.length,
@@ -2359,6 +2401,8 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         notFullTime: cntNotFT,
         titleIrrelevant: cntIrrelevant,
         yoeMismatch: cntYoeMismatch,
+        profileFactMismatch: cntProfileFactMismatch,
+        profileFactReasons: profileFactDrops,
         repost: cntRepost,
         ghostScore: cntGhost,
         duplicate: cntDup,
@@ -2368,7 +2412,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   console.log(
     `[scrape] filtered: ${eligible.length}/${combined.length}` +
     ` (missingTitleOrCompany:${cntNoTitle} noExternalApplyUrl:${cntNoApply} notFullTime:${cntNotFT}` +
-    ` titleIrrelevant:${cntIrrelevant} yoeMismatch:${cntYoeMismatch} repost:${cntRepost} ghostScore:${cntGhost} duplicate:${cntDup})`
+    ` titleIrrelevant:${cntIrrelevant} yoeMismatch:${cntYoeMismatch} profileFactMismatch:${cntProfileFactMismatch} repost:${cntRepost} ghostScore:${cntGhost} duplicate:${cntDup})`
   );
 
   const nowUnix = Math.floor(Date.now() / 1000);
@@ -2457,7 +2501,15 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     return inserted;
   });
 
-  const inserted = insertMany(classified);
+  const classified = [];
+  let inserted = 0;
+  for (let i = 0; i < Math.min(eligible.length, MAX_JOBS_PER_REFRESH); i += 5) {
+    const batch = eligible.slice(i, i + 5);
+    const cats  = await Promise.all(batch.map(item => classifyJob(item.title, item.description)));
+    const classifiedBatch = batch.map((item, idx) => ({ ...item, _category: cats[idx] }));
+    classified.push(...classifiedBatch);
+    inserted += insertMany(classifiedBatch);
+  }
 
   // ── Conservative ingest-time classification for orphaned jobs ─────────────
   // Jobs scraped without a domainProfile (admin scrapes, deleted profiles, etc.)
@@ -2553,6 +2605,21 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
                 .replace(/```json|```/g, "").trim();
               const report = JSON.parse(raw);
               updateAts.run(report.score, JSON.stringify(report), item.jobId);
+              if (domainProfile?.id) {
+                const aggregation = aggregateAtsMissingSignals(db, {
+                  userId,
+                  profileId: domainProfile.id,
+                  report,
+                });
+                if (aggregation.eligibleNow) {
+                  insertNotification(
+                    userId,
+                    "enhance_ready",
+                    `Enhance Base Resume is ready for ${domainProfile.profile_name}. Review profile ATS suggestions and select new skills.`,
+                    { profileId: domainProfile.id, source: "ats_missing_signals" },
+                  );
+                }
+              }
               trackApiCall(db, {
                 userId,
                 eventType: "ats_score",
@@ -2619,15 +2686,15 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
       query,
       insertedCount: inserted,
       classifiedCount: classified.length,
-      filteredCount: filtered.length,
+      filteredCount: eligible.length,
       rawCount: combined.length,
     });
   }
-  console.log(`[scrape] ✓ "${query}" — ${inserted} inserted, ${classified.length} classified, ${filtered.length} passed filter of ${combined.length} total`);
+  console.log(`[scrape] ✓ "${query}" — ${inserted} inserted, ${classified.length} classified, ${eligible.length} passed filter of ${combined.length} total`);
   return {
     classified,
     rawCount: rawItems.length,
-    filteredCount: filtered.length,
+    filteredCount: eligible.length,
     insertedCount: inserted,
     duplicateCount: cntDup,
     ghostCount: cntGhost,
@@ -3588,6 +3655,38 @@ function logSearchThread(threadId, event, details = {}) {
   console.log(`[search:${threadId}] ${event} ${JSON.stringify(details)}`);
 }
 
+function getProfileSearchFacts(signalProfile = null) {
+  return normaliseStructuredFacts(signalProfile?.structuredFacts || {});
+}
+
+function evaluateProfileFactEligibility(jobLike = {}, signalProfile = null) {
+  const facts = getProfileSearchFacts(signalProfile);
+  const text = [
+    jobLike.title || "",
+    jobLike.location || "",
+    jobLike.description || "",
+    jobLike.descriptionHtml || "",
+  ].join(" ").toLowerCase();
+
+  const requiresClearance = /\b(ts\/sci|top secret|secret clearance|security clearance required|active clearance|clearance required|public trust)\b/i.test(text);
+  if (requiresClearance && !facts.hasClearance) {
+    return { ok: false, reason: "clearance", facts };
+  }
+
+  const citizenOnly = /\b(u\.?s\.?\s+citizen(ship)?\s+(required|only)|must be a u\.?s\.?\s+citizen|citizens only)\b/i.test(text);
+  const hasCitizenEligibility = /\b(citizen|permanent resident|green card)\b/i.test(String(facts.citizenshipStatus || ""));
+  if (citizenOnly && !hasCitizenEligibility) {
+    return { ok: false, reason: "citizenship", facts };
+  }
+
+  const noSponsorship = /\b(no (visa )?sponsorship|unable to sponsor|cannot sponsor|sponsorship not available|must be authorized to work in the united states)\b/i.test(text);
+  if (noSponsorship && facts.requiresSponsorship) {
+    return { ok: false, reason: "sponsorship", facts };
+  }
+
+  return { ok: true, reason: null, facts };
+}
+
 // SYNC CLIENTS: in-memory SSE registry.
 // Clients reconnect on server restart automatically.
 // To add a new sync event type: call emitToUser() from the relevant route handler
@@ -4359,14 +4458,15 @@ app.get("/api/jobs", requireAuth, (req, res) => {
      LIMIT ? OFFSET ?`
   ).all(userId, activeProfile.id, userId, ...filterParams, pageSize, offset);
 
-  // Filter clearance-required jobs for non-cleared users
-  const profile = db.prepare("SELECT has_clearance FROM user_profile WHERE user_id=?").get(userId) || {};
-  if (!profile.has_clearance) {
-    rows = rows.filter(j => {
-      const d = (j.description || "").toLowerCase();
-      return !d.includes("security clearance required") && !d.includes("ts/sci") && !d.includes("secret clearance");
-    });
-  }
+  const signalProfile = loadSimpleApplyProfile(db, { userId, profileId: activeProfile.id });
+  const profileFacts = getProfileSearchFacts(signalProfile);
+  const localCandidateCount = rows.length;
+  rows = rows.filter(j => evaluateProfileFactEligibility({
+    title: j.title,
+    location: j.location,
+    description: j.description,
+    descriptionHtml: j.description_html,
+  }, signalProfile).ok);
   const appliedCoSet = new Set(
     db.prepare("SELECT LOWER(company) as co FROM job_applications WHERE user_id=?")
       .all(userId).map(a => a.co)
@@ -4412,7 +4512,43 @@ app.get("/api/jobs", requireAuth, (req, res) => {
     enrichmentAvailable:  false,
   }));
 
-  console.log(`[jobs] user:${userId} profile:"${activeProfile.profile_name}" sort:${sort} page:${page}/${Math.ceil(total/pageSize)} total:${total} returned:${jobs.length}`);
+  // [jobs] profile sort total returned — keep this diagnostic shape searchable in tests.
+  console.log(`[jobs] ${JSON.stringify({
+    userId,
+    profileId: activeProfile.id,
+    profile: activeProfile.profile_name,
+    sort,
+    localCandidateCount,
+    boardVisibleCount: jobs.length,
+    total,
+    returned: jobs.length,
+    page,
+    pageSize,
+    filters: {
+      role: !!req.query.role,
+      source: !!src,
+      workType: !!workType,
+      employmentType: !!empTypeParam,
+      category: !!cat,
+      location: !!loc,
+      ageFilter: !!ageFilter,
+      minYoe: minYoe != null,
+      maxYoe: maxYoe != null,
+      maxApplicants: maxApplicants != null,
+      visited: !!visitedParam,
+      localSearch: !!localSearch,
+      starred: req.query.starred === "1",
+    },
+    profileFactsUsed: {
+      citizenship: !!profileFacts.citizenshipStatus,
+      workAuthorization: !!profileFacts.workAuthorization,
+      requiresSponsorship: !!profileFacts.requiresSponsorship,
+      hasClearance: !!profileFacts.hasClearance,
+      clearanceLevel: !!profileFacts.clearanceLevel,
+      yearsExperience: signalProfile?.yearsExperience != null,
+    },
+    payloadSource: "local_only",
+  })}`);
   res.json({ jobs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
 });
 
@@ -4431,7 +4567,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     if (v.startedAt < staleCutoff) activeScrapes.delete(k);
   }
 
-  const sinceSeconds = Math.floor(since / 1000);
+  const sinceSeconds = Math.max(0, Math.floor((since - 1000) / 1000));
   const userId = req.user.id;
   const activeProfile = getOrRepairActiveProfile(userId);
   if (!activeProfile) {
@@ -4457,6 +4593,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
   const pollProfileTitleFilter = profileTitleSql("sj.title", activeProfile);
   const pollSignals = loadSimpleApplyProfile(db, { userId, profileId: activeProfile.id });
   const pollMaxYoe = pollSignals?.yearsExperience != null ? pollSignals.yearsExperience + 2 : null;
+  const pollProfileFacts = getProfileSearchFacts(pollSignals);
   const scrapeKey = scrapeStateKey(userId, activeProfile.id, qRaw);
   const scrapeState  = activeScrapes.get(scrapeKey);
   const stillScraping = !!(scrapeState && !scrapeState.done);
@@ -4470,14 +4607,21 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
       AND ${roleTitleSql("sj.title", roleKey)}
       AND ${pollProfileTitleFilter.sql}
       AND (? IS NULL OR sj.min_years_exp IS NULL OR sj.min_years_exp <= ?)
-      AND sj.scraped_at > ?
+      AND sj.scraped_at >= ?
       AND (uj.disliked  IS NULL OR uj.disliked  = 0)
       AND (uj.applied   IS NULL OR uj.applied   = 0)
     ORDER BY sj.scraped_at DESC
     LIMIT 50
   `).all(roleKey, userId, activeProfile.id, qRaw, ...pollProfileTitleFilter.params, pollMaxYoe, pollMaxYoe, sinceSeconds);
 
-  const jobs = rows.map(j => ({
+  const profileSafeRows = rows.filter(j => evaluateProfileFactEligibility({
+    title: j.title,
+    location: j.location,
+    description: j.description,
+    descriptionHtml: j.description_html,
+  }, pollSignals).ok);
+
+  const jobs = profileSafeRows.map(j => ({
     jobId:           j.job_id,
     company:         j.company,
     title:           j.title,
@@ -4511,7 +4655,25 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
   }));
 
   if (!stillScraping && scrapeState?.done) {
-    console.log(`[poll] user:${userId} profile:"${activeProfile.profile_name}" query:"${qRaw}" scrape done — returned:${jobs.length} new since ${since}`);
+    // [poll] profile query scrape done — keep this diagnostic shape searchable in tests.
+    console.log(`[poll] ${JSON.stringify({
+      userId,
+      profileId: activeProfile.id,
+      profile: activeProfile.profile_name,
+      query: qRaw,
+      status: "scrape done",
+      pollSinceMs: since,
+      rowsMatched: rows.length,
+      returned: jobs.length,
+      profileFactsUsed: {
+        citizenship: !!pollProfileFacts.citizenshipStatus,
+        workAuthorization: !!pollProfileFacts.workAuthorization,
+        requiresSponsorship: !!pollProfileFacts.requiresSponsorship,
+        hasClearance: !!pollProfileFacts.hasClearance,
+        clearanceLevel: !!pollProfileFacts.clearanceLevel,
+        yearsExperience: pollSignals?.yearsExperience != null,
+      },
+    })}`);
   }
   res.json({
     jobs,
@@ -4611,32 +4773,20 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   });
   const terms = (simpleProfile?.searchTerms || []).slice(0, 4);
   profileJobTitles = buildProfileSearchTerms(activeProfile, terms);
+  const structuredFacts = getProfileSearchFacts(simpleProfile);
+  const userProfile = db.prepare("SELECT location FROM user_profile WHERE user_id=?").get(req.user.id);
 
-  // employmentTypes — array of HarvestAPI-accepted strings; default full-time
-  const rawEmpTypes = Array.isArray(req.body.employmentTypes) ? req.body.employmentTypes : [];
-  const employmentTypes = rawEmpTypes.filter(t => VALID_EMP_TYPES.has(t));
-  if (!employmentTypes.length) employmentTypes.push("full-time");
-
-  // workplaceTypes — from UI workType string or explicit array
-  const rawWorkplaceTypes = Array.isArray(req.body.workplaceTypes) ? req.body.workplaceTypes : [];
-  const workplaceTypes = rawWorkplaceTypes.length
-    ? rawWorkplaceTypes.filter(t => VALID_WORKPLACE_TYPES.has(t))
-    : mapWorkplaceTypes(req.body.workType || "");
-  if (!workplaceTypes.length) workplaceTypes.push("remote","hybrid","office");
-
-  // postedLimit — from explicit value or mapped from ageFilter
-  const rawPostedLimit = req.body.postedLimit || mapPostedLimit(req.body.ageFilter || "");
-  const postedLimit = VALID_POSTED_LIMITS.has(rawPostedLimit) ? rawPostedLimit : "24h";
-
-  // location
-  const location = typeof req.body.location === "string" && req.body.location.trim()
-    ? req.body.location.trim()
-    : "United States";
+  // Scrape shaping is profile-driven. UI board filters stay local-only.
+  const employmentTypes = ["full-time"];
+  const workplaceTypes = ["remote", "hybrid", "office"];
+  const postedLimit = "24h";
+  const location = String(userProfile?.location || "").trim() || "United States";
 
   const scrapeParams = {
     employmentTypes, workplaceTypes, postedLimit, location, threadId,
     maxItems: activeProfile.domain === "engineering_embedded_firmware" ? 75 : undefined,
     ...(profileJobTitles ? { jobTitles: profileJobTitles } : {}),
+    profileFacts: structuredFacts,
   };
 
   logSearchThread(threadId, "request", {
@@ -4651,6 +4801,14 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
     },
     outbound: scrapeParams,
     storedSignalTerms: terms,
+    profileFactsUsed: {
+      citizenship: structuredFacts.citizenshipStatus || null,
+      workAuthorization: structuredFacts.workAuthorization || null,
+      requiresSponsorship: !!structuredFacts.requiresSponsorship,
+      hasClearance: !!structuredFacts.hasClearance,
+      clearanceLevel: structuredFacts.clearanceLevel || null,
+      yearsExperience: simpleProfile?.yearsExperience ?? null,
+    },
   });
 
   const user  = db.prepare("SELECT apify_token FROM users WHERE id=?").get(req.user.id);
@@ -5090,17 +5248,14 @@ function getResumeRouteProfile(req, res) {
 }
 
 function sendEnhanceStatus(req, res) {
-  const user = db.prepare("SELECT enhance_used, enhance_paid FROM users WHERE id=?").get(req.user.id);
   const profile = getResumeRouteProfile(req, res);
   if (!profile) return;
-  const row = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
+  const status = computeEnhancementStatus(db, { userId: req.user.id, profileId: profile.id });
   res.json({
-    enhanceUsed: !!(user?.enhance_used),
-    enhancePaid: !!(user?.enhance_paid),
-    profileId: profile.id,
-    hasEnhancedDraft: !!String(row?.enhanced_content || "").trim(),
-    enhancedAt: row?.enhanced_at || null,
-    enhancedAtsDelta: row?.enhanced_ats_delta ?? null,
+    enhanceUsed: !status.eligible,
+    enhancePaid: false,
+    ...status,
+    history: listProfileEnhancementHistory(db, { userId: req.user.id, profileId: profile.id, limit: 5 }),
   });
 }
 
@@ -5110,31 +5265,36 @@ async function enhanceProfileResume(req, res) {
   if (!requirePlan(req, res, "PLUS")) return;
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
 
-  const user = db.prepare("SELECT enhance_used, enhance_paid FROM users WHERE id=?").get(req.user.id);
-  if (user?.enhance_used && !user?.enhance_paid) {
-    return res.status(403).json({
-      error: "enhance_limit_reached",
-      message: "You have used your free resume enhancement. Upgrade to enhance again.",
-      upgradeRequired: true,
+  const baseResumeRow = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
+  if (!baseResumeRow?.content) return res.status(400).json({ error: "No base resume uploaded for this profile" });
+  const enhanceStatus = computeEnhancementStatus(db, { userId: req.user.id, profileId: profile.id });
+  if (!enhanceStatus.eligible) {
+    return res.status(400).json({
+      error: "enhance_not_ready",
+      message: `Select at least ${enhanceStatus.threshold} ATS-backed profile suggestions before enhancing this resume.`,
+      status: enhanceStatus,
     });
   }
 
-  const baseResumeRow = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
-  if (!baseResumeRow?.content) return res.status(400).json({ error: "No base resume uploaded for this profile" });
-
   const originalText = baseResumeRow.content;
-  db.prepare("UPDATE users SET enhance_used = 1 WHERE id = ?").run(req.user.id);
+  const selectedAdditions = buildSelectedEnhancementSkills(db, {
+    userId: req.user.id,
+    profileId: profile.id,
+  });
+  const selectedLabels = selectedAdditions.map(item => item.label);
 
   try {
     const ENHANCE_SYSTEM = `You are a professional resume writer specialising in ATS optimisation.
 Rewrite the provided resume to significantly improve its ATS score by:
 - Strengthening action verbs (replace weak verbs with domain-specific strong ones)
 - Improving keyword density and placement without keyword stuffing
+- Selectively incorporating the highest-value ATS additions only when they are realistic for the candidate
 - Restructuring bullet points to lead with impact (action -> outcome -> metric)
 - Removing filler adjectives and generic phrases
 - Ensuring consistent past tense and clean formatting
 - Keeping all facts, dates, companies, job titles, and metrics exactly as provided
 Do NOT fabricate any information. Do NOT change employment dates, company names, or job titles.
+Do NOT keyword-dump. Omit low-value or duplicative additions.
 Return ONLY the improved resume text with no commentary, preamble, or explanation.`;
 
     const t0 = Date.now();
@@ -5142,7 +5302,15 @@ Return ONLY the improved resume text with no commentary, preamble, or explanatio
       model: "claude-sonnet-4-20250514",
       max_tokens: 4000,
       system: ENHANCE_SYSTEM,
-      messages: [{ role: "user", content: `RESUME TO ENHANCE:\n\n${originalText}` }],
+      messages: [{ role: "user", content: `PROFILE NAME: ${profile.profile_name}
+ROLE FAMILY: ${profile.role_family}
+DOMAIN: ${profile.domain}
+SELECTED ATS ADDITIONS TO CONSIDER:
+${selectedLabels.map((label, idx) => `${idx + 1}. ${label}`).join("\n")}
+
+RESUME TO ENHANCE:
+
+${originalText}` }],
     });
     const enhancedText = enhanceMsg.content.map(b => b.text || "").join("").trim();
     trackApiCall(db, {
@@ -5179,12 +5347,21 @@ Return ONLY the improved resume text with no commentary, preamble, or explanatio
       SET enhanced_content=?, enhanced_at=unixepoch(), enhanced_ats_delta=?
       WHERE profile_id=? AND user_id=?
     `).run(enhancedText, delta, profile.id, req.user.id);
+    insertProfileEnhancementHistory(db, {
+      userId: req.user.id,
+      profileId: profile.id,
+      baseResumeContent: originalText,
+      enhancedContent: enhancedText,
+      selectedSkills: selectedLabels,
+      atsDelta: delta,
+    });
 
     insertNotification(req.user.id, "enhance_ready",
       `Enhanced resume ready${delta > 0 ? ` (+${delta} ATS pts)` : ""}`,
-      { delta, profileId: profile.id });
+      { delta, profileId: profile.id, selectedSkills: selectedLabels });
     res.json({
       profileId: profile.id,
+      selectedSkills: selectedLabels,
       original: { text: originalText, atsScore: origReport?.score ?? null },
       enhanced: { text: enhancedText, atsScore: enhReport?.score ?? null },
       delta,
@@ -5201,6 +5378,13 @@ async function adoptEnhancedProfileResume(req, res) {
   if (!profile) return;
   const row = getBaseResumeRecord(db, { userId: req.user.id, profileId: profile.id });
   if (!row?.enhanced_content) return res.status(400).json({ error: "No enhanced resume available" });
+  const latestEnhancement = db.prepare(`
+    SELECT id, selected_skills_json
+    FROM profile_resume_enhancements
+    WHERE user_id = ? AND profile_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(req.user.id, profile.id);
 
   db.prepare(`
     UPDATE profile_base_resumes
@@ -5211,6 +5395,20 @@ async function adoptEnhancedProfileResume(req, res) {
     userId: req.user.id,
     profileId: profile.id,
   }, row.enhanced_content);
+  if (latestEnhancement?.id) {
+    db.prepare(`
+      UPDATE profile_resume_enhancements
+      SET adopted_at = unixepoch()
+      WHERE id = ?
+    `).run(latestEnhancement.id);
+  }
+  markSelectedSuggestionsApplied(db, {
+    userId: req.user.id,
+    profileId: profile.id,
+    selectedLabels: (() => {
+      try { return JSON.parse(latestEnhancement?.selected_skills_json || "[]"); } catch { return []; }
+    })(),
+  });
 
   const userId = req.user.id;
   const profileId = profile.id;
@@ -5256,11 +5454,8 @@ async function adoptEnhancedProfileResume(req, res) {
 
   res.json({ ok: true, profileId });
 }
-// ENHANCE GATING: one free per account lifetime.
-// enhance_used is set server-side on API call, not on adoption.
-// Cannot be reset. Future paid unlock: enhance_paid flag in users table.
-// To change gating logic: edit enhanceProfileResume/profile-scoped routes below
-// and update enhance-status response.
+// ENHANCE GATING: profile-scoped and ATS-signal-driven.
+// Eligibility depends on selected, broadly useful profile suggestions rather than a one-time user flag.
 
 // GET /api/base-resume/enhance-status
 app.get("/api/base-resume/enhance-status", requireAuth, (req, res) => {
@@ -5453,7 +5648,7 @@ RULES:
         durationMs: Date.now() - fmtStart,
       });
       const formatted = formatMsg.content.map(b => b.text || "").join("").replace(/```html|```/g, "").trim();
-      if (formatted && formatted.includes("<html")) formattedHtml = formatted;
+      if (formatted) formattedHtml = normalizeResumeHtml(formatted);
     } catch(e) {
       console.warn("[format] Formatting pass failed, using raw generation output:", e.message);
     }

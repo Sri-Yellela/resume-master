@@ -46,28 +46,10 @@ function writeProfileUiCache(profileId, snapshot) {
   } catch {}
 }
 
-// â”€â”€ Pre-scrape param maps (UI â†’ Apify enum) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// workType UI value â†’ Apify workplaceType array
-const WORKPLACE_TO_APIFY = {
-  Remote:  "remote",
-  Hybrid:  "hybrid",
-  Onsite:  "office",
-  "On-site": "office",
-};
-// ageFilter UI value â†’ Apify postedLimit string
-const AGE_TO_POSTED_LIMIT = {
-  "1d":"24h","2d":"24h","3d":"24h","1w":"1w","1m":"1m","1mo":"1m",
-};
-function buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) {
-  const workplaceTypes = workType && WORKPLACE_TO_APIFY[workType]
-    ? [WORKPLACE_TO_APIFY[workType]]
-    : ["remote","hybrid","office"];
-  return {
-    workplaceTypes,
-    employmentTypes: employmentTypePrefs?.length ? employmentTypePrefs : ["full-time"],
-    postedLimit:     AGE_TO_POSTED_LIMIT[ageFilter] || "24h",
-    location:        locationFilter?.trim() || "United States",
-  };
+// Upstream scrape requests are profile-driven on the server.
+// Board UI filters stay local to /api/jobs and must not shape /api/scrape.
+function buildProfileScrapeRequest(query) {
+  return { query };
 }
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1288,12 +1270,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, [selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Build query params from current filter state ----------
-  const buildParams = useCallback((page = 1, overrideStarred = null) => {
+  const buildParams = useCallback((page = 1, overrideStarred = null, overrides = {}) => {
     const p = new URLSearchParams();
     p.set("page", String(page));
     p.set("pageSize", String(PAGE_SIZE));
     p.set("sort", sortBy);
-    if (roleFilter.trim())    p.set("role",     roleFilter.trim().toLowerCase());
+    const effectiveRole = overrides.role ?? roleFilter;
+    const effectiveVisited = overrides.visited ?? visitedFilter;
+    if (effectiveRole.trim()) p.set("role",     effectiveRole.trim().toLowerCase());
     if (locationFilter.trim())p.set("location", locationFilter.trim());
     if (workType)             p.set("workType", workType);
     if (employmentTypePrefs.length && !(employmentTypePrefs.length === 1 && employmentTypePrefs[0] === "full-time"))
@@ -1303,7 +1287,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     if (minYoe !== "")        p.set("minYoe",        minYoe);
     if (maxYoe !== "")        p.set("maxYoe",        maxYoe);
     if (maxApplicants !== "") p.set("maxApplicants", maxApplicants);
-    if (visitedFilter)        p.set("visited",       visitedFilter);
+    if (effectiveVisited)     p.set("visited",       effectiveVisited);
     if (ageFilter)            p.set("ageFilter",     ageFilter);
     if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
     if (localSearch.trim())   p.set("localSearch",   localSearch.trim().toLowerCase());
@@ -1357,7 +1341,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   }, []);
 
   // -- Fetch jobs — never clears board before data arrives ------
-  const fetchJobs = useCallback(async (page = 1, mergeMode = false) => {
+  const fetchJobs = useCallback(async (page = 1, mergeMode = false, options = {}) => {
     if (boardTab === "pending") { fetchPending(); return; }
     if (!activeDomainProfile) {
       setJobs([]);
@@ -1370,7 +1354,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     const requestSeq = ++jobsFetchSeqRef.current;
     setBgLoading(true);
     try {
-      const qs = buildParams(page);
+      const qs = buildParams(page, null, options.overrides || {});
       const d = await api(`/api/jobs?${qs}`);
       if (requestProfileKey !== activeProfileKeyRef.current || requestSeq !== jobsFetchSeqRef.current) return;
       // needsProfileSetup is handled by setupBlock gate — avoid double-reporting
@@ -1580,11 +1564,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           newJobs.forEach(j => seenIds.add(j.jobId));
           totalNew += newJobs.length;
           setPollNewCount(totalNew);
-          setJobs(prev => {
-            const existingIds = new Set(prev.map(j => j.jobId));
-            const toAdd = newJobs.filter(j => !existingIds.has(j.jobId));
-            return toAdd.length > 0 ? [...toAdd, ...prev] : prev;
-          });
+          // Re-read through /api/jobs so progressive merges honor local filters,
+          // profile hard constraints, sort mode, and pagination consistently.
+          fetchJobsRef.current?.(1);
         }
 
         if (!pollData.scraping) {
@@ -1758,24 +1740,24 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (!aligned) return;
     }
     setScrapeError("");
-    setRoleFilter(q.toLowerCase());
+    const roleQ = q.toLowerCase();
+    setRoleFilter(roleQ);
     setSearchInput(q);
     setSearchCommitted(true);
-    fetchJobs(1);
-    return;
-    // AUTO-SCRAPE: silently trigger background scrape if local results < THRESHOLD (50)
+    await fetchJobs(1, false, { overrides: { role: roleQ } });
+    // AUTO-SCRAPE: silently trigger profile-driven background scrape if local results are below threshold.
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify(buildProfileScrapeRequest(q)) });
       if (!result || result.missingToken || result.limitReached || result.error) return;
-      const roleQ = (result.query || q).toLowerCase();
+      const nextRoleQ = (result.query || q).toLowerCase();
       if (result.scraping) {
-        startPollLoop(roleQ, Date.now());
+        startPollLoop(nextRoleQ, Date.now());
       } else if (result.fromCache) {
         setResultsUpToDate(true);
         setTimeout(() => setResultsUpToDate(false), 2000);
       }
     } catch {} // silent — DB results already shown
-  }, [activeDomainProfile, resumeText, searchInput, startPollLoop, ensureSearchProfileAlignment]);
+  }, [activeDomainProfile, resumeText, searchInput, startPollLoop, ensureSearchProfileAlignment, fetchJobs]);
 
   // -- Scrape / search ---------------------------------------
   const handleSearch = useCallback(async (overrideQuery, options = {}) => {
@@ -1796,10 +1778,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     }
     setScrapeError("");
     setSearchCommitted(true);
+    const immediateRoleQ = q.toLowerCase();
+    setRoleFilter(immediateRoleQ);
+    await fetchJobs(1, false, { overrides: { role: immediateRoleQ } });
     setScraping(true);
     let managedByPoller = false;
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify(buildProfileScrapeRequest(q)) });
       if (result.needsProfileSetup) {
         setScrapeError(result.error || "Create a job search profile to search jobs.");
         return;
@@ -1824,6 +1809,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (result.scraping) {
         managedByPoller = true;
         setRoleFilter(roleQ);
+        fetchJobs(1, false, { overrides: { role: roleQ } });
         startPollLoop(roleQ, Date.now());
         return;
       }
@@ -1866,10 +1852,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     }
     if (scraping || bgLoading) return;
     setScrapeError(""); setScrapeNewCount(0);
+    const immediateRoleQ = q.toLowerCase();
+    setRoleFilter(immediateRoleQ);
+    await fetchJobs(1, false, { overrides: { role: immediateRoleQ } });
     setScraping(true);
     let managedByPoller = false;
     try {
-      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify({ query:q, ...buildScrapeParams({ workType, ageFilter, locationFilter, employmentTypePrefs }) }) });
+      const result = await api("/api/scrape", { method:"POST", body:JSON.stringify(buildProfileScrapeRequest(q)) });
       if (result.needsProfileSetup) {
         setScrapeError(result.error || "Create a job search profile to search jobs.");
         return;
@@ -1893,6 +1882,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (result.scraping) {
         managedByPoller = true;
         setRoleFilter(roleQ);
+        fetchJobs(1, false, { overrides: { role: roleQ } });
         startPollLoop(roleQ, Date.now());
         return;
       }
@@ -1918,7 +1908,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       setRoleFilter(roleQ);
     } catch(e) { setScrapeError(e.message); }
     finally { if (!managedByPoller) setScraping(false); }
-  }, [searchInput, roleFilter, sortBy, scraping, bgLoading, startPollLoop]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchInput, roleFilter, sortBy, scraping, bgLoading, startPollLoop, fetchJobs, activeDomainProfile, resumeText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Legacy Refresh button (end-of-list) -----------------------
   const handleRefresh = handlePullRefresh;

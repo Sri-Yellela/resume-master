@@ -92,6 +92,33 @@ export function ProfilePanel() {
   const [signalsForm, setSignalsForm] = useState({
     titles: "", keywords: "", skills: "", searchTerms: "", yearsExperience: "",
   });
+  const [structuredFactsForm, setStructuredFactsForm] = useState({
+    citizenshipStatus: "",
+    workAuthorization: "",
+    requiresSponsorship: false,
+    hasClearance: false,
+    clearanceLevel: "",
+    degreeLevel: "",
+  });
+  const [suggestedSignals, setSuggestedSignals] = useState({
+    inactiveSkills: [],
+    selectedSkills: [],
+    appliedSkills: [],
+    structuredFacts: [],
+  });
+  const [enhancementStatus, setEnhancementStatus] = useState({
+    eligible: false,
+    selectedCount: 0,
+    threshold: 5,
+    suggestedSkillCount: 0,
+    structuredFactCount: 0,
+    hasEnhancedDraft: false,
+    history: [],
+  });
+  const [enhancementHistory, setEnhancementHistory] = useState([]);
+  const [enhancingProfileResume, setEnhancingProfileResume] = useState(false);
+  const [enhancePreview, setEnhancePreview] = useState(null);
+  const [suggestionStatus, setSuggestionStatus] = useState("");
   const [resumeDraft, setResumeDraft] = useState("");
   const [resumeName, setResumeName] = useState("");
   const [profileStatus, setProfileStatus] = useState("");
@@ -101,6 +128,50 @@ export function ProfilePanel() {
   const [uploadingResume, setUploadingResume] = useState(false);
   const [showProfileWizard, setShowProfileWizard] = useState(false);
   const resumeInputRef = useRef(null);
+
+  const loadProfileAssets = useCallback(async (profileId) => {
+    if (!profileId) return;
+    setEnhancePreview(null);
+    const [resume, signals, enhance, history] = await Promise.all([
+      api(`/api/domain-profiles/${profileId}/base-resume`),
+      api(`/api/domain-profiles/${profileId}/signals`),
+      api(`/api/domain-profiles/${profileId}/enhance-status`),
+      api(`/api/domain-profiles/${profileId}/enhancement-history`).catch(() => ({ history: [] })),
+    ]);
+    setResumeDraft(resume?.content || "");
+    setResumeName(resume?.name || "");
+    setSignalsForm({
+      titles: joinChipText(signals?.titles),
+      keywords: joinChipText(signals?.keywords),
+      skills: joinChipText(signals?.skills),
+      searchTerms: joinChipText(signals?.searchTerms),
+      yearsExperience: signals?.yearsExperience ?? "",
+    });
+    setStructuredFactsForm({
+      citizenshipStatus: signals?.structuredFacts?.citizenshipStatus || "",
+      workAuthorization: signals?.structuredFacts?.workAuthorization || "",
+      requiresSponsorship: !!signals?.structuredFacts?.requiresSponsorship,
+      hasClearance: !!signals?.structuredFacts?.hasClearance,
+      clearanceLevel: signals?.structuredFacts?.clearanceLevel || "",
+      degreeLevel: signals?.structuredFacts?.degreeLevel || "",
+    });
+    setSuggestedSignals(signals?.suggestions || {
+      inactiveSkills: [],
+      selectedSkills: [],
+      appliedSkills: [],
+      structuredFacts: [],
+    });
+    setEnhancementStatus(enhance || {
+      eligible: false,
+      selectedCount: 0,
+      threshold: 5,
+      suggestedSkillCount: 0,
+      structuredFactCount: 0,
+      hasEnhancedDraft: false,
+      history: [],
+    });
+    setEnhancementHistory(history?.history || enhance?.history || []);
+  }, []);
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -130,6 +201,17 @@ export function ProfilePanel() {
       setResumeDraft("");
       setResumeName("");
       setSignalsForm({ titles: "", keywords: "", skills: "", searchTerms: "", yearsExperience: "" });
+      setStructuredFactsForm({
+        citizenshipStatus: "",
+        workAuthorization: "",
+        requiresSponsorship: false,
+        hasClearance: false,
+        clearanceLevel: "",
+        degreeLevel: "",
+      });
+      setSuggestedSignals({ inactiveSkills: [], selectedSkills: [], appliedSkills: [], structuredFacts: [] });
+      setEnhancementStatus({ eligible: false, selectedCount: 0, threshold: 5, suggestedSkillCount: 0, structuredFactCount: 0, hasEnhancedDraft: false, history: [] });
+      setEnhancementHistory([]);
       return;
     }
     const selected = profiles.find(p => p.id === activeProfileId);
@@ -148,25 +230,12 @@ export function ProfilePanel() {
     }
 
     setLoadingProfileAssets(true);
-    Promise.all([
-      api(`/api/domain-profiles/${activeProfileId}/base-resume`),
-      api(`/api/domain-profiles/${activeProfileId}/signals`),
-    ]).then(([resume, signals]) => {
-      setResumeDraft(resume?.content || "");
-      setResumeName(resume?.name || "");
-      setSignalsForm({
-        titles: joinChipText(signals?.titles),
-        keywords: joinChipText(signals?.keywords),
-        skills: joinChipText(signals?.skills),
-        searchTerms: joinChipText(signals?.searchTerms),
-        yearsExperience: signals?.yearsExperience ?? "",
-      });
-    }).catch(() => {
+    loadProfileAssets(activeProfileId).catch(() => {
       setResumeDraft("");
       setResumeName("");
       setSignalsForm({ titles: "", keywords: "", skills: "", searchTerms: "", yearsExperience: "" });
     }).finally(() => setLoadingProfileAssets(false));
-  }, [activeProfileId, profiles]);
+  }, [activeProfileId, profiles, loadProfileAssets]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -239,11 +308,13 @@ export function ProfilePanel() {
           keywords: splitChipText(signalsForm.keywords),
           skills: splitChipText(signalsForm.skills),
           searchTerms: splitChipText(signalsForm.searchTerms),
+          structuredFacts: structuredFactsForm,
           yearsExperience: signalsForm.yearsExperience === "" ? null : Number(signalsForm.yearsExperience),
         }),
       });
       setSignalStatus("Saved extracted signals");
       setTimeout(() => setSignalStatus(""), 2500);
+      await loadProfileAssets(activeProfileId);
     } catch (e) {
       setSignalStatus(e.message || "Could not save signals");
     }
@@ -260,8 +331,17 @@ export function ProfilePanel() {
         searchTerms: joinChipText(next?.searchTerms),
         yearsExperience: next?.yearsExperience ?? "",
       });
+      setStructuredFactsForm({
+        citizenshipStatus: next?.structuredFacts?.citizenshipStatus || structuredFactsForm.citizenshipStatus,
+        workAuthorization: next?.structuredFacts?.workAuthorization || structuredFactsForm.workAuthorization,
+        requiresSponsorship: next?.structuredFacts?.requiresSponsorship ?? structuredFactsForm.requiresSponsorship,
+        hasClearance: next?.structuredFacts?.hasClearance ?? structuredFactsForm.hasClearance,
+        clearanceLevel: next?.structuredFacts?.clearanceLevel || structuredFactsForm.clearanceLevel,
+        degreeLevel: next?.structuredFacts?.degreeLevel || structuredFactsForm.degreeLevel,
+      });
       setSignalStatus("Refreshed from profile resume");
       setTimeout(() => setSignalStatus(""), 2500);
+      await loadProfileAssets(activeProfileId);
     } catch (e) {
       setSignalStatus(e.message || "Could not refresh signals");
     }
@@ -278,6 +358,7 @@ export function ProfilePanel() {
       setTimeout(() => setResumeStatus(""), 2500);
       await refreshSignals();
       loadProfiles();
+      await loadProfileAssets(activeProfileId);
     } catch (e) {
       setResumeStatus(e.message || "Could not save profile resume");
     }
@@ -289,6 +370,66 @@ export function ProfilePanel() {
       setActiveProfileId(id);
       setProfiles(prev => prev.map(p => ({ ...p, is_active: p.id === id ? 1 : 0 })));
     } catch {}
+  };
+
+  const updateSelectedSuggestions = async (nextKeys) => {
+    if (!activeProfileId) return;
+    try {
+      const next = await api(`/api/domain-profiles/${activeProfileId}/suggestions`, {
+        method: "PUT",
+        body: JSON.stringify({ selectedSkillKeys: nextKeys }),
+      });
+      setSuggestedSignals(prev => ({
+        ...prev,
+        inactiveSkills: next?.inactiveSkills || [],
+        selectedSkills: next?.selectedSkills || [],
+        appliedSkills: next?.appliedSkills || prev.appliedSkills || [],
+        structuredFacts: prev.structuredFacts,
+      }));
+      setEnhancementStatus(prev => ({ ...prev, ...(next?.enhancement || {}) }));
+      setSuggestionStatus("Updated enhancement skill selections");
+      setTimeout(() => setSuggestionStatus(""), 2500);
+    } catch (e) {
+      setSuggestionStatus(e.message || "Could not update suggested skills");
+    }
+  };
+
+  const toggleSuggestedSkill = async (key, enabled) => {
+    const current = (suggestedSignals.selectedSkills || []).map(item => item.key);
+    const next = enabled
+      ? [...new Set([...current, key])]
+      : current.filter(item => item !== key);
+    await updateSelectedSuggestions(next);
+  };
+
+  const runEnhancement = async () => {
+    if (!activeProfileId || enhancingProfileResume) return;
+    setEnhancingProfileResume(true);
+    setResumeStatus("");
+    try {
+      const preview = await api(`/api/domain-profiles/${activeProfileId}/enhance`, { method: "POST" });
+      setEnhancePreview(preview);
+      setResumeStatus("Enhanced draft ready for review");
+      await loadProfileAssets(activeProfileId);
+    } catch (e) {
+      setResumeStatus(e.message || "Could not enhance profile resume");
+    } finally {
+      setEnhancingProfileResume(false);
+    }
+  };
+
+  const adoptEnhancedResume = async () => {
+    if (!activeProfileId) return;
+    try {
+      await api(`/api/domain-profiles/${activeProfileId}/adopt-enhanced`, { method: "PATCH" });
+      setEnhancePreview(null);
+      setResumeStatus("Enhanced resume adopted for this profile");
+      setTimeout(() => setResumeStatus(""), 2500);
+      await loadProfileAssets(activeProfileId);
+      await loadProfiles();
+    } catch (e) {
+      setResumeStatus(e.message || "Could not adopt enhanced resume");
+    }
   };
 
   const uploadResumePdf = async (event) => {
@@ -317,6 +458,7 @@ export function ProfilePanel() {
       setResumeStatus("Uploaded and extracted for this profile");
       setTimeout(() => setResumeStatus(""), 2500);
       loadProfiles();
+      await loadProfileAssets(activeProfileId);
     } catch (e) {
       setResumeStatus(e.message || "Could not parse resume");
     } finally {
@@ -651,8 +793,97 @@ export function ProfilePanel() {
                 placeholder="Upload a profile-specific PDF or paste resume text here."/>
               <PHint theme={theme}>This base resume belongs only to the selected profile and drives profile-specific ATS/search behavior.</PHint>
             </PRow>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+              <div style={{ fontSize:12, color:theme.textMuted }}>
+                {enhancementStatus.eligible
+                  ? `Enhancement ready: ${enhancementStatus.selectedCount}/${enhancementStatus.threshold} ATS-backed additions selected.`
+                  : `Select at least ${enhancementStatus.threshold} broadly useful ATS suggestions before enhancing this profile resume.`}
+              </div>
+              {enhancementStatus.eligible && (
+                <button
+                  type="button"
+                  className="rm-btn rm-btn-primary"
+                  onClick={runEnhancement}
+                  disabled={enhancingProfileResume}
+                >
+                  {enhancingProfileResume ? "Enhancing..." : "Enhance Base Resume"}
+                </button>
+              )}
+            </div>
             <div style={{ fontSize:12, color:resumeStatus ? theme.text : theme.textMuted, marginBottom:16 }}>
               {loadingProfileAssets ? "Loading profile resume..." : (resumeStatus || "Each profile keeps its own stored resume and extracted signal set.")}
+            </div>
+
+            {enhancePreview && (
+              <div style={{
+                border:`1px solid ${theme.border}`,
+                borderRadius:12,
+                padding:"14px 16px",
+                marginBottom:16,
+                background:theme.surfaceHigh,
+              }}>
+                <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginBottom:10, flexWrap:"wrap" }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:theme.text }}>
+                    Enhanced draft ready
+                  </div>
+                  <div style={{ fontSize:12, color:theme.textMuted }}>
+                    ATS delta: {enhancePreview.delta > 0 ? "+" : ""}{enhancePreview.delta ?? 0}
+                  </div>
+                </div>
+                <div style={{ fontSize:11, color:theme.textMuted, marginBottom:10 }}>
+                  Selected additions: {(enhancePreview.selectedSkills || []).join(", ") || "No new additions"}
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+                  <textarea className="rm-input" rows={8} readOnly value={enhancePreview.original?.text || ""} />
+                  <textarea className="rm-input" rows={8} readOnly value={enhancePreview.enhanced?.text || ""} />
+                </div>
+                <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
+                  <button type="button" className="rm-btn" onClick={() => setEnhancePreview(null)}
+                    style={{ border:`1px solid ${theme.border}`, background:theme.surface, color:theme.text }}>
+                    Dismiss
+                  </button>
+                  <button type="button" className="rm-btn rm-btn-primary" onClick={adoptEnhancedResume}>
+                    Adopt Enhanced Resume
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <PRow label="Citizenship / Status" theme={theme}>
+                <input className="rm-input" value={structuredFactsForm.citizenshipStatus}
+                  onChange={e => setStructuredFactsForm(f => ({ ...f, citizenshipStatus: e.target.value }))}
+                  placeholder="U.S. citizen, permanent resident, etc." />
+              </PRow>
+              <PRow label="Work Authorization" theme={theme}>
+                <input className="rm-input" value={structuredFactsForm.workAuthorization}
+                  onChange={e => setStructuredFactsForm(f => ({ ...f, workAuthorization: e.target.value }))}
+                  placeholder="Authorized to work without sponsorship" />
+              </PRow>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:13, color:theme.text }}>
+                <input type="checkbox" checked={!!structuredFactsForm.requiresSponsorship}
+                  onChange={e => setStructuredFactsForm(f => ({ ...f, requiresSponsorship: e.target.checked }))}/>
+                Requires sponsorship
+              </label>
+              <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:13, color:theme.text }}>
+                <input type="checkbox" checked={!!structuredFactsForm.hasClearance}
+                  onChange={e => setStructuredFactsForm(f => ({ ...f, hasClearance: e.target.checked }))}/>
+                Active clearance
+              </label>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginTop:12 }}>
+              <PRow label="Clearance Level" theme={theme}>
+                <input className="rm-input" value={structuredFactsForm.clearanceLevel}
+                  onChange={e => setStructuredFactsForm(f => ({ ...f, clearanceLevel: e.target.value }))}
+                  placeholder="Secret, TS/SCI, Public Trust" />
+              </PRow>
+              <PRow label="Degree Level" theme={theme}>
+                <input className="rm-input" value={structuredFactsForm.degreeLevel}
+                  onChange={e => setStructuredFactsForm(f => ({ ...f, degreeLevel: e.target.value }))}
+                  placeholder="Bachelor's, Master's, PhD" />
+              </PRow>
             </div>
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
@@ -673,6 +904,84 @@ export function ProfilePanel() {
               <textarea className="rm-input" rows={3} value={signalsForm.skills}
                 onChange={e => setSignalsForm(f => ({ ...f, skills: e.target.value }))}/>
             </PRow>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ ...labelStyle, color:theme.textMuted, marginBottom:8 }}>Inactive ATS-Suggested Skills</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {(suggestedSignals.inactiveSkills || []).length === 0 && (
+                  <span style={{ fontSize:12, color:theme.textMuted }}>
+                    ATS suggestions will appear here after enough scraped jobs surface recurring missing skills.
+                  </span>
+                )}
+                {(suggestedSignals.inactiveSkills || []).map(skill => (
+                  <button
+                    key={skill.key}
+                    type="button"
+                    onClick={() => toggleSuggestedSkill(skill.key, true)}
+                    style={{
+                      border:`1px dashed ${theme.border}`,
+                      background:theme.bg,
+                      color:theme.text,
+                      borderRadius:999,
+                      padding:"6px 10px",
+                      cursor:"pointer",
+                      fontSize:12,
+                    }}
+                  >
+                    + {skill.label} ({skill.frequency})
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ ...labelStyle, color:theme.textMuted, marginBottom:8 }}>Selected For Enhancement</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {(suggestedSignals.selectedSkills || []).length === 0 && (
+                  <span style={{ fontSize:12, color:theme.textMuted }}>
+                    Pick broadly useful ATS suggestions here. Enhancement unlocks when you reach the threshold.
+                  </span>
+                )}
+                {(suggestedSignals.selectedSkills || []).map(skill => (
+                  <button
+                    key={skill.key}
+                    type="button"
+                    onClick={() => toggleSuggestedSkill(skill.key, false)}
+                    style={{
+                      border:`1px solid ${theme.accent}`,
+                      background:`${theme.accent}22`,
+                      color:theme.text,
+                      borderRadius:999,
+                      padding:"6px 10px",
+                      cursor:"pointer",
+                      fontSize:12,
+                    }}
+                  >
+                    ✓ {skill.label}
+                  </button>
+                ))}
+              </div>
+              <PHint theme={theme}>
+                Structured ATS facts stay separate from skill suggestions. They should be edited in the profile facts fields above.
+              </PHint>
+            </div>
+            {(suggestedSignals.structuredFacts || []).length > 0 && (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ ...labelStyle, color:theme.textMuted, marginBottom:8 }}>Structured ATS Facts Seen In Target Jobs</div>
+                <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                  {(suggestedSignals.structuredFacts || []).map(item => (
+                    <span key={item.key} style={{
+                      border:`1px solid ${theme.border}`,
+                      borderRadius:999,
+                      padding:"6px 10px",
+                      fontSize:12,
+                      color:theme.textMuted,
+                      background:theme.surface,
+                    }}>
+                      {item.label} ({item.frequency})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             <PRow label="Search Terms" theme={theme}>
               <textarea className="rm-input" rows={2} value={signalsForm.searchTerms}
                 onChange={e => setSignalsForm(f => ({ ...f, searchTerms: e.target.value }))}/>
@@ -680,12 +989,17 @@ export function ProfilePanel() {
             </PRow>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
               <span style={{ fontSize:12, color:signalStatus ? theme.text : theme.textMuted }}>
-                {signalStatus || "Edit extracted values when needed. They persist per profile and do not leak across profiles."}
+                {signalStatus || suggestionStatus || "Edit extracted values when needed. They persist per profile and do not leak across profiles."}
               </span>
               <button type="button" className="rm-btn rm-btn-primary" onClick={saveSignals}>
                 Save Extracted Signals
               </button>
             </div>
+            {enhancementHistory.length > 0 && (
+              <div style={{ marginTop:16, fontSize:12, color:theme.textMuted }}>
+                {enhancementHistory.length} enhancement version{enhancementHistory.length === 1 ? "" : "s"} stored for this profile.
+              </div>
+            )}
           </PSec>
         )}
 

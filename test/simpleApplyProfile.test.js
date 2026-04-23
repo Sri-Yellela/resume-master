@@ -37,11 +37,19 @@ test("ATS resume basis includes stored user signals before resume text", () => {
     titles: ["software engineer"],
     skills: ["node", "react"],
     keywords: ["backend", "api", "platform"],
+    structuredFacts: {
+      citizenshipStatus: "U.S. citizen",
+      workAuthorization: "Authorized to work without sponsorship",
+      hasClearance: true,
+      clearanceLevel: "Secret",
+    },
   });
 
   assert.match(basis, /STORED USER SIGNALS/);
   assert.match(basis, /Likely titles: software engineer/);
   assert.match(basis, /Skills\/tools: node, react/);
+  assert.match(basis, /Citizenship\/work status: U\.S\. citizen/);
+  assert.match(basis, /Security clearance: Secret/);
   assert.match(basis, /BASE RESUME TEXT:\nBuilt services in Node and React\./);
 });
 

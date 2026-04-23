@@ -8,9 +8,16 @@ import { fileURLToPath } from "url";
 import {
   getBaseResumeRecord,
   loadOrCreateSimpleApplyProfile,
+  normaliseStructuredFacts,
   saveBaseResumeRecord,
   upsertSimpleApplyProfile,
 } from "../services/simpleApplyProfile.js";
+import {
+  computeEnhancementStatus,
+  listProfileEnhancementHistory,
+  listProfileSignalSuggestions,
+  syncSelectedSkillSuggestions,
+} from "../services/profileSignalAggregator.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -295,7 +302,17 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
       db,
       { userId: req.user.id, profileId: profile.id, roleTitles },
     );
-    res.json(signals || { titles: [], keywords: [], skills: [], searchTerms: [], yearsExperience: null });
+    res.json({
+      ...(signals || {
+        titles: [],
+        keywords: [],
+        skills: [],
+        searchTerms: [],
+        yearsExperience: null,
+        structuredFacts: {},
+      }),
+      suggestions: listProfileSignalSuggestions(db, { userId: req.user.id, profileId: profile.id }),
+    });
   });
 
   router.post("/:id/signals/refresh", (req, res) => {
@@ -327,6 +344,7 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
       keywords: cleanStringArray(req.body?.keywords ?? current.keywords, 32).map(v => v.toLowerCase()),
       skills: cleanStringArray(req.body?.skills ?? current.skills, 24).map(v => v.toLowerCase()),
       searchTerms: cleanStringArray(req.body?.searchTerms ?? current.searchTerms, 12).map(v => v.toLowerCase()),
+      structuredFacts: normaliseStructuredFacts(req.body?.structuredFacts ?? current.structuredFacts),
       yearsExperience: req.body?.yearsExperience === null || req.body?.yearsExperience === ""
         ? null
         : Number.isFinite(Number(req.body?.yearsExperience))
@@ -336,8 +354,10 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
     };
     db.prepare(`
       INSERT INTO profile_simple_apply_profiles
-        (profile_id, user_id, titles_json, keywords_json, skills_json, search_terms_json, source_hash, years_experience, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+        (profile_id, user_id, titles_json, keywords_json, skills_json, search_terms_json,
+         source_hash, years_experience, citizenship_status, work_authorization,
+         requires_sponsorship, has_clearance, clearance_level, degree_level, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
       ON CONFLICT(profile_id) DO UPDATE SET
         user_id=excluded.user_id,
         titles_json=excluded.titles_json,
@@ -346,6 +366,12 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
         search_terms_json=excluded.search_terms_json,
         source_hash=excluded.source_hash,
         years_experience=excluded.years_experience,
+        citizenship_status=excluded.citizenship_status,
+        work_authorization=excluded.work_authorization,
+        requires_sponsorship=excluded.requires_sponsorship,
+        has_clearance=excluded.has_clearance,
+        clearance_level=excluded.clearance_level,
+        degree_level=excluded.degree_level,
         updated_at=excluded.updated_at
     `).run(
       profile.id,
@@ -356,8 +382,66 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
       JSON.stringify(next.searchTerms),
       next.sourceHash,
       next.yearsExperience,
+      next.structuredFacts.citizenshipStatus || null,
+      next.structuredFacts.workAuthorization || null,
+      next.structuredFacts.requiresSponsorship ? 1 : 0,
+      next.structuredFacts.hasClearance ? 1 : 0,
+      next.structuredFacts.clearanceLevel || null,
+      next.structuredFacts.degreeLevel || null,
     );
     res.json(next);
+  });
+
+  router.get("/:id/suggestions", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    res.json(listProfileSignalSuggestions(db, { userId: req.user.id, profileId: profile.id }));
+  });
+
+  router.put("/:id/suggestions", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    const before = computeEnhancementStatus(db, { userId: req.user.id, profileId: profile.id });
+    const suggestions = syncSelectedSkillSuggestions(db, {
+      userId: req.user.id,
+      profileId: profile.id,
+      selectedKeys: req.body?.selectedSkillKeys || [],
+    });
+    const enhancement = computeEnhancementStatus(db, { userId: req.user.id, profileId: profile.id });
+    if (!before.eligible && enhancement.eligible) {
+      try {
+        const row = db.prepare(`
+          INSERT INTO notifications (user_id, type, message, payload)
+          VALUES (?, ?, ?, ?)
+        `).run(
+          req.user.id,
+          "enhance_ready",
+          `Enhance Base Resume is ready for ${profile.profile_name}.`,
+          JSON.stringify({ profileId: profile.id, source: "manual_selection" }),
+        );
+        emitToUser(req.user.id, {
+          type: "notification",
+          id: row.lastInsertRowid,
+          notif_type: "enhance_ready",
+          message: `Enhance Base Resume is ready for ${profile.profile_name}.`,
+        });
+      } catch {}
+    }
+    res.json({
+      ...suggestions,
+      enhancement,
+    });
+  });
+
+  router.get("/:id/enhancement-history", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    res.json({
+      history: listProfileEnhancementHistory(db, { userId: req.user.id, profileId: profile.id }),
+    });
   });
 
   // ── GET /api/domain-metadata/:domain ─────────────────────────

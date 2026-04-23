@@ -169,6 +169,52 @@ test("poll completion triggers re-fetch via fetchJobsRef for correct sort order"
   assert.match(pollBlock, /fetchJobsRef\.current\?\.\(1\)/, "poll completion must call fetchJobsRef.current?.(1)");
 });
 
+test("manual search renders local board before profile-driven scrape starts", () => {
+  const searchStart = jobsPanel.indexOf("const handleSearch");
+  assert.ok(searchStart > 0, "handleSearch must exist");
+  const searchEnd = jobsPanel.indexOf("// -- Pull / Check-for-new", searchStart);
+  const block = jobsPanel.slice(searchStart, searchEnd);
+
+  const localFetch = block.indexOf("await fetchJobs(1, false, { overrides: { role: immediateRoleQ } })");
+  const scrapeCall = block.indexOf('api("/api/scrape"');
+  assert.ok(localFetch > 0, "search must explicitly fetch local board rows first");
+  assert.ok(scrapeCall > localFetch, "scrape must start after the local board fetch");
+  assert.match(block, /buildProfileScrapeRequest\(q\)/, "scrape body must be profile-driven only");
+});
+
+test("board filters stay local and are not sent as scrape parameters", () => {
+  assert.match(jobsPanel, /Board UI filters stay local to \/api\/jobs and must not shape \/api\/scrape/);
+  assert.doesNotMatch(jobsPanel, /buildScrapeParams/, "old UI-filter scrape parameter builder must be removed");
+  assert.doesNotMatch(jobsPanel, /body:JSON\.stringify\(\{ query:q,[\s\S]*workType/, "scrape body must not include board workType filter");
+  assert.doesNotMatch(jobsPanel, /body:JSON\.stringify\(\{ query:q,[\s\S]*ageFilter/, "scrape body must not include board age filter");
+  assert.doesNotMatch(jobsPanel, /body:JSON\.stringify\(\{ query:q,[\s\S]*locationFilter/, "scrape body must not include board location filter");
+  assert.doesNotMatch(jobsPanel, /body:JSON\.stringify\(\{ query:q,[\s\S]*employmentTypePrefs/, "scrape body must not include board employment filters");
+});
+
+test("polling includes same-second inserts and refreshes through local board filters", () => {
+  const pollStart = server.indexOf('app.get("/api/jobs/poll"');
+  const pollEnd = server.indexOf("\napp.", pollStart + 10);
+  const pollBlock = server.slice(pollStart, pollEnd);
+  assert.match(pollBlock, /Math\.floor\(\(since - 1000\) \/ 1000\)/, "poll must not miss same-second scrape inserts");
+  assert.match(pollBlock, /sj\.scraped_at >= \?/, "poll query must include same-second rows");
+
+  const loopStart = jobsPanel.indexOf("const startPollLoop");
+  const loopEnd = jobsPanel.indexOf("const activateProfileForSearch", loopStart);
+  const loopBlock = jobsPanel.slice(loopStart, loopEnd);
+  assert.match(loopBlock, /fetchJobsRef\.current\?\.\(1\)/, "progressive poll updates must re-read filtered board state");
+  assert.doesNotMatch(loopBlock, /\[\.\.\.toAdd, \.\.\.prev\]/, "poll must not blindly prepend unfiltered rows");
+});
+
+test("profile facts are hard constraints for local jobs, poll, and scrape ingestion", () => {
+  assert.match(server, /function evaluateProfileFactEligibility/, "profile fact eligibility helper must exist");
+  assert.match(server, /normaliseStructuredFacts/, "structured profile facts must be normalized before use");
+  assert.match(server, /profileFactMismatch/, "scrape filter summary must track profile fact drops");
+  assert.match(server, /profileFactsUsed/, "board/search logs must expose profile facts used for shaping");
+  assert.match(server, /requiresSponsorship/, "sponsorship fact must be considered");
+  assert.match(server, /hasClearance/, "clearance fact must be considered");
+  assert.match(server, /citizenshipStatus/, "citizenship fact must be considered");
+});
+
 test("jobs board structured logs include profile, sort, and result count", () => {
   // Ensures the board-population log line exists for observability
   assert.match(server, /\[jobs\].*profile.*sort.*total.*returned/);
