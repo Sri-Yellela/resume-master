@@ -104,6 +104,9 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
     inactiveSkills: [],
     selectedSkills: [],
     appliedSkills: [],
+    inactiveActionVerbs: [],
+    selectedActionVerbs: [],
+    appliedActionVerbs: [],
     structuredFacts: [],
   });
   const [enhancementStatus, setEnhancementStatus] = useState({
@@ -159,6 +162,9 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
       inactiveSkills: [],
       selectedSkills: [],
       appliedSkills: [],
+      inactiveActionVerbs: [],
+      selectedActionVerbs: [],
+      appliedActionVerbs: [],
       structuredFacts: [],
     });
     setEnhancementStatus(enhance || {
@@ -209,7 +215,7 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
         clearanceLevel: "",
         degreeLevel: "",
       });
-      setSuggestedSignals({ inactiveSkills: [], selectedSkills: [], appliedSkills: [], structuredFacts: [] });
+      setSuggestedSignals({ inactiveSkills: [], selectedSkills: [], appliedSkills: [], inactiveActionVerbs: [], selectedActionVerbs: [], appliedActionVerbs: [], structuredFacts: [] });
       setEnhancementStatus({ eligible: false, selectedCount: 0, threshold: 5, suggestedSkillCount: 0, structuredFactCount: 0, hasEnhancedDraft: false, history: [] });
       setEnhancementHistory([]);
       return;
@@ -939,6 +945,31 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
                   >
                     + {skill.label} ({skill.frequency})
                   </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ ...labelStyle, color:theme.textMuted, marginBottom:8 }}>Inactive ATS-Suggested Action Verbs</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {(suggestedSignals.inactiveActionVerbs || []).length === 0 && (
+                  <span style={{ fontSize:12, color:theme.textMuted }}>
+                    Missing action verbs clicked from ATS cards will appear here as inactive profile suggestions.
+                  </span>
+                )}
+                {(suggestedSignals.inactiveActionVerbs || []).map(verb => (
+                  <span
+                    key={verb.key}
+                    style={{
+                      border:`1px dashed ${theme.border}`,
+                      background:theme.bg,
+                      color:theme.text,
+                      borderRadius:999,
+                      padding:"6px 10px",
+                      fontSize:12,
+                    }}
+                  >
+                    {verb.label} ({verb.frequency})
+                  </span>
                 ))}
               </div>
             </div>

@@ -90,7 +90,6 @@ function AppDashboard({ authUser, setAuthUser }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
-  const [resumeWidget,       setResumeWidget]       = useState(null);
   const consolePath = `/app/${CONSOLE_ROUTE}`;
   const routeKey = location.pathname.replace(/^\/app\/?/, "") || "";
   const activeTab = routeKey === CONSOLE_ROUTE || LEGACY_CONSOLE_ROUTES.has(routeKey) || routeKey === "" ? "console" : routeKey;
@@ -178,7 +177,6 @@ function AppDashboard({ authUser, setAuthUser }) {
             onTabChange={handlePanelChange}
             onLogout={handleLogout}
             onUserChange={setAuthUser}
-            resumeWidget={resumeWidget}
             onProfileActivate={handleProfileActivate}
           />
 
@@ -188,7 +186,7 @@ function AppDashboard({ authUser, setAuthUser }) {
             <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
               {renderRoute === CONSOLE_ROUTE && (
                 <JobsConsole user={authUser} onUserChange={setAuthUser}
-                  refreshKey={jobBoardRefreshKey} onResumeStateChange={setResumeWidget}
+                  refreshKey={jobBoardRefreshKey}
                   isActive={activeTab === "console"}/>
               )}
               {renderRoute === "database" && <DatabasePanel user={authUser}/>}

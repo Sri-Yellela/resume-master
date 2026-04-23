@@ -34,6 +34,39 @@ test("profile-scoped base resume storage writes and reads by profile_id", () => 
   assert.equal(profileHasBaseResume(db, { userId: 9, profileId: 42, seedLegacy: false }), true);
 });
 
+test("profile A base resume upload does not affect profile B", () => {
+  const store = new Map();
+  const db = {
+    prepare(sql) {
+      if (sql.includes("INSERT INTO profile_base_resumes")) {
+        return {
+          run(profileId, userId, content, name) {
+            store.set(`${userId}:${profileId}`, { profile_id: profileId, user_id: userId, content, name, updated_at: 123 });
+          },
+        };
+      }
+      if (sql.includes("FROM profile_base_resumes")) {
+        return {
+          get(profileId, userId) {
+            return store.get(`${userId}:${profileId}`) || null;
+          },
+        };
+      }
+      throw new Error(`unexpected SQL: ${sql}`);
+    },
+  };
+
+  saveBaseResumeRecord(db, { userId: 9, profileId: 42 }, "Firmware resume", "firmware.pdf");
+  saveBaseResumeRecord(db, { userId: 9, profileId: 84 }, "Data resume", "data.pdf");
+
+  const profileA = getBaseResumeRecord(db, { userId: 9, profileId: 42, seedLegacy: false });
+  const profileB = getBaseResumeRecord(db, { userId: 9, profileId: 84, seedLegacy: false });
+
+  assert.equal(profileA?.content, "Firmware resume");
+  assert.equal(profileB?.content, "Data resume");
+  assert.notEqual(profileA?.content, profileB?.content);
+});
+
 test("legacy resume seeds only the first active scoped profile and refreshes signals there", () => {
   const store = {
     scopedResume: null,
@@ -120,4 +153,14 @@ test("profile panel exposes editable profile-scoped resume and extracted signal 
   assert.match(panel, /\/api\/domain-profiles\/\$\{activeProfileId\}\/signals/);
   assert.match(panel, /Upload \/ Replace PDF/);
   assert.match(panel, /Save Extracted Signals/);
+});
+
+test("job profile cards expose per-profile resume readiness and upload controls", () => {
+  const panel = fs.readFileSync("client/src/panels/JobProfilesPanel.jsx", "utf8");
+
+  assert.match(panel, /profile\.has_base_resume/);
+  assert.match(panel, /Required before search, ATS, and enhancement/);
+  assert.match(panel, /ATS scoring, new scrapes, and enhancement are blocked for this profile/);
+  assert.match(panel, /Extracted metadata ready for this profile only/);
+  assert.match(panel, /\/api\/domain-profiles\/\$\{profile\.id\}\/base-resume/);
 });

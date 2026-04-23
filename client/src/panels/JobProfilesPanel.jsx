@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../lib/api.js";
+import { api, authHeaders } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
@@ -11,6 +11,35 @@ export function JobProfilesPanel() {
   const [status, setStatus] = useState("");
   const [wizardMode, setWizardMode] = useState(null);
   const [editingProfile, setEditingProfile] = useState(null);
+  const [uploadingProfileId, setUploadingProfileId] = useState(null);
+
+  const parseResumeFile = async (file) => {
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (ext === "pdf") {
+      const fd = new FormData();
+      fd.append("file", file);
+      const response = await fetch("/api/parse-pdf", {
+        method: "POST",
+        credentials: "include",
+        headers: authHeaders(),
+        body: fd,
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || "PDF parse failed");
+      return data.text || "";
+    }
+    if (ext === "docx") {
+      const mammoth = (await import("mammoth")).default;
+      return (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value;
+    }
+    return file.text();
+  };
+
+  const formatTimestamp = (value) => {
+    if (!value) return "";
+    try { return new Date(Number(value) * 1000).toLocaleDateString(); }
+    catch { return ""; }
+  };
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -58,6 +87,28 @@ export function JobProfilesPanel() {
   const openEdit = (profile) => {
     setEditingProfile(profile);
     setWizardMode("edit");
+  };
+
+  const uploadProfileResume = async (profile, event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !profile?.id) return;
+    setUploadingProfileId(profile.id);
+    setStatus(`Parsing resume for ${profile.profile_name}...`);
+    try {
+      const text = await parseResumeFile(file);
+      if (!String(text || "").trim()) throw new Error("No text was extracted from that resume");
+      await api(`/api/domain-profiles/${profile.id}/base-resume`, {
+        method: "POST",
+        body: JSON.stringify({ content: text, name: file.name }),
+      });
+      await loadProfiles();
+      setStatus(`Base resume updated for ${profile.profile_name}. Extracted signals were refreshed for this profile only.`);
+    } catch (e) {
+      setStatus(e.message || "Could not upload profile resume");
+    } finally {
+      setUploadingProfileId(null);
+    }
   };
 
   const closeWizard = () => {
@@ -131,6 +182,47 @@ export function JobProfilesPanel() {
 
                 <div style={{ fontSize:12, color:theme.textMuted, marginTop:12, minHeight:36, lineHeight:1.45 }}>
                   {(profile.target_titles || []).slice(0, 3).join(", ") || profile.role_family || "No target titles yet"}
+                </div>
+
+                <div style={{
+                  marginTop:14,
+                  border:`1px solid ${theme.border}`,
+                  background:theme.surfaceHigh,
+                  borderRadius:12,
+                  padding:"10px 12px",
+                }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.06em", color:theme.text }}>
+                        Base Resume
+                      </div>
+                      <div style={{ fontSize:11, color:profile.has_base_resume ? "#16a34a" : "#d97706", marginTop:3 }}>
+                        {profile.has_base_resume
+                          ? `Ready${profile.base_resume_updated_at ? ` · ${formatTimestamp(profile.base_resume_updated_at)}` : ""}`
+                          : "Required before search, ATS, and enhancement"}
+                      </div>
+                      <div style={{ fontSize:10, color:theme.textMuted, marginTop:2 }}>
+                        {profile.has_base_resume
+                          ? "Extracted metadata ready for this profile only"
+                          : "ATS scoring, new scrapes, and enhancement are blocked for this profile"}
+                      </div>
+                    </div>
+                    <label className="rm-btn rm-btn-sm" style={{ cursor:"pointer", margin:0 }}>
+                      {uploadingProfileId === profile.id
+                        ? "Parsing..."
+                        : profile.has_base_resume ? "Replace" : "Upload"}
+                      <input
+                        type="file"
+                        accept=".txt,.html,.md,.docx,.pdf"
+                        onChange={event => uploadProfileResume(profile, event)}
+                        style={{ display:"none" }}
+                        disabled={uploadingProfileId === profile.id}
+                      />
+                    </label>
+                  </div>
+                  <div style={{ marginTop:7, fontSize:10, color:theme.textMuted, lineHeight:1.4 }}>
+                    Stored and extracted only for this profile. Other profiles keep their own resume, signals, ATS basis, and search readiness.
+                  </div>
                 </div>
 
                 <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:16 }}>

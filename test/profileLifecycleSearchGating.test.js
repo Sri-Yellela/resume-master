@@ -12,6 +12,7 @@ test("jobs and scrape endpoints expose controlled no-profile and no-resume state
   assert.match(server, /function getOrRepairActiveProfile\(userId\)/);
   assert.match(server, /UPDATE domain_profiles SET is_active=1/);
   assert.match(server, /function userHasBaseResume\(userId\)/);
+  assert.match(server, /profileHasBaseResume\(db, \{ userId, profileId: activeProfile\.id \}\)/);
   assert.match(server, /needsBaseResume: true/);
   assert.match(server, /reason: "no_base_resume"/);
   assert.match(server, /Upload the active profile's base resume before searching jobs/);

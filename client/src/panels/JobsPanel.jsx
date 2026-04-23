@@ -1,5 +1,6 @@
 ﻿// client/src/panels/JobsPanel.jsx â€” Lucy Brand, shared job pool
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { api, printResume, dislikeJob, authHeaders } from "../lib/api.js";
@@ -740,16 +741,17 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 
 
 // DEFAULT SIZES (canonical, do not edit inline):
-// A only:         A=100
-// Any 2 panels:   A=30  other=70
-// Any 3 panels:   A=10  other=45  other=45
-// A+B+C+D:        A=10  B=30  C=35  D=25
-// Rule: panel defaults reapply only when a NEW panel is opened.
-// Manual resize remains in effect until the next open transition.
+// A only:                 A=100
+// A + one other panel:    A=30, other=70
+// A + 2+ other panels:    A=6, residual split uniformly
+// Resume panel exception: resume receives 10 percentage points more than
+// each other non-collapsed panel; A is excluded from that bonus.
+// Rule: panel defaults reapply on every open/close transition.
+// Manual resize remains in effect until the next transition.
 // To change defaults edit getPanelDefaults() below.
 // -- Card tier — driven by open-panel count, not pixel width ------
 // Tier 1 (full layout):  A alone, or A+B (detail only, 30% default)
-// Tier 3 (condensed):    A+B+C or A+B+C+D (panel A shrinks to 10%)
+// Tier 3 (condensed):    A+B+C or A+B+C+D (panel A shrinks to 6%)
 // Tier 2 (medium):       only reached by manual drag — ResizeObserver
 //                        overrides Tier 1 ? 2 when user drags A to 180-279px.
 //                        Tier 3 always wins over pixel measurement.
@@ -757,13 +759,18 @@ function getCardTier(panelBVisible, panelCVisible, panelDVisible) {
   const extraPanels = [panelBVisible, panelCVisible, panelDVisible].filter(Boolean).length;
   if (extraPanels === 0) return 1; // A only — full width
   if (extraPanels === 1) return 1; // A+B — still 30%, full layout
-  return 3;                        // A+B+C or A+B+C+D — 10%, condensed
+  return 3;                        // A+B+C or A+B+C+D — 6%, condensed
 }
 
 function getPanelDefaults(showDetail, showSandbox, showAts) {
-  const count = [true, showDetail, showSandbox, showAts].filter(Boolean).length;
-  if (count === 1) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
-  if (count === 2) {
+  const openPanels = [
+    ["detail", showDetail],
+    ["sandbox", showSandbox],
+    ["ats", showAts],
+  ].filter(([, visible]) => visible).map(([key]) => key);
+
+  if (openPanels.length === 0) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
+  if (openPanels.length === 1) {
     return {
       jobs: 30,
       detail: showDetail ? 70 : 0,
@@ -771,19 +778,24 @@ function getPanelDefaults(showDetail, showSandbox, showAts) {
       ats: showAts ? 70 : 0,
     };
   }
-  if (count === 3) {
-    return {
-      jobs: 10,
-      detail: showDetail ? 45 : 0,
-      sandbox: showSandbox ? 45 : 0,
-      ats: showAts ? 45 : 0,
-    };
-  }
+
+  const jobs = 6;
+  const residualWidth = 100 - jobs;
+  const hasResumePanel = openPanels.includes("sandbox");
+  const baseShare = hasResumePanel
+    ? Math.max(0, (residualWidth - 10) / openPanels.length)
+    : residualWidth / openPanels.length;
+  const panelShare = key => (
+    openPanels.includes(key)
+      ? (hasResumePanel && key === "sandbox" ? baseShare + 10 : baseShare)
+      : 0
+  );
+
   return {
-    jobs: 10,
-    detail: showDetail ? 30 : 0,
-    sandbox: showSandbox ? 35 : 0,
-    ats: showAts ? 25 : 0,
+    jobs,
+    detail: panelShare("detail"),
+    sandbox: panelShare("sandbox"),
+    ats: panelShare("ats"),
   };
 }
 
@@ -813,9 +825,10 @@ function isImportedBoardJob(job) {
 }
 
 // -- Main panel ------------------------------------------------
-export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResumeStateChange, isActive = true }) {
+export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive = true }) {
   const { theme, isDark } = useTheme();
   const { mode: vpMode } = useViewport();
+  const navigate = useNavigate();
   const { pin: pinDock, scrollToTopRef, progress: scrollProgress } = useAppScroll();
   const isWide     = vpMode === "wide";
   const isMobile   = vpMode === "mobile" || vpMode === "tablet";
@@ -1153,8 +1166,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
   const canUseGenerate = planTier === "PLUS" || planTier === "PRO";
   const canUseAPlusResume = planTier === "PRO";
 
-  // Reset panel sizes to defaults on first desktop render and whenever a NEW panel opens.
-  // Closing panels does not reapply defaults; the next open transition does.
+  // Reset panel sizes to defaults on first desktop render and every open/close transition.
   // Triple RAF ensures react-resizable-panels has committed the layout first.
   useEffect(() => {
     if (isMobile) return;
@@ -1162,8 +1174,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     const showSandbox = sandboxOpen;
     const showAts     = rightPanelOpen;
     const prev = prevPanelVisibilityRef.current;
-    const openedNewPanel = (!prev.detail && showDetail) || (!prev.sandbox && showSandbox) || (!prev.ats && showAts);
-    const shouldApply = !initialPanelDefaultsAppliedRef.current || openedNewPanel;
+    const visibilityChanged = prev.detail !== showDetail || prev.sandbox !== showSandbox || prev.ats !== showAts;
+    const shouldApply = !initialPanelDefaultsAppliedRef.current || visibilityChanged;
     prevPanelVisibilityRef.current = { detail: showDetail, sandbox: showSandbox, ats: showAts };
     if (!shouldApply) return;
 
@@ -1235,22 +1247,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     // No generated artifact yet. Keep the pre-generation state neutral.
   }, [selectedJob?.jobId, boardTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleResumeClear = useCallback(() => {
-    setResumeText(""); setFileName("");
-    if (activeProfileResumePath) {
-      api(activeProfileResumePath, { method:"POST", body:JSON.stringify({ content:"", name:"" }) });
-    }
-  }, [activeProfileResumePath]);
-
-  useEffect(() => {
-    onResumeStateChange?.({
-      text: resumeText, fileName, uploading,
-      onUploadClick: () => fileRef.current?.click(),
-      onClear: handleResumeClear,
-      enhanceUsed, enhancePaid, enhancing,
-      onEnhance: handleEnhance,
-    });
-  }, [resumeText, fileName, uploading, enhanceUsed, enhancePaid, enhancing]); // eslint-disable-line react-hooks/exhaustive-deps
   const PAGE_SIZE = 25;
 
   // Profile-scoped cache restore: show the correct profile's last board state
@@ -2021,8 +2017,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
 
   const handleSmartSearch = useCallback(async () => {
     if (!resumeText) {
-      setSmartSearchError("Upload the active profile's base resume first — smart search extracts the best query from it.");
-      fileRef.current?.click(); return;
+      setSmartSearchError("Upload the active profile's base resume from Job Profiles first — smart search extracts the best query from it.");
+      navigate("/app/job-profiles");
+      return;
     }
     setSmartSearchError("");
     setSmartSearching(true);
@@ -2033,7 +2030,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
       if (q) { setSearchInput(q); await handleSearch(q); }
     } catch(e) { setSmartSearchError("Smart search failed: " + e.message); }
     finally { setSmartSearching(false); }
-  }, [resumeText, handleSearch]);
+  }, [resumeText, handleSearch, navigate]);
 
   // -- File upload -------------------------------------------
   const handleFile = useCallback(async e => {
@@ -2324,9 +2321,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
     : !resumeText.trim()
       ? {
           title: "Upload a profile resume",
-          body: "Search defaults and ATS sorting use extracted signals from the active profile's base resume.",
-          actionLabel: "Upload Resume",
-          onAction: () => fileRef.current?.click(),
+          body: "Search defaults and ATS sorting use extracted signals from this profile's own base resume. Manage it from the Job Profiles section.",
+          actionLabel: "Open Job Profiles",
+          onAction: () => navigate("/app/job-profiles"),
         }
       : null;
 
@@ -2985,7 +2982,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                     </button>
                   ))}
                 </div>
-                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText}/>}
+                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}/>}
                 {rightTab === "history" && (
                   <HistoryList generated={generated}
                     theme={theme}
@@ -3031,7 +3028,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
           <Panel
             ref={jobsPanelRef}
             defaultSize={!!selectedJob ? 30 : 100}
-            minSize={10}
+            minSize={6}
             style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden" }}>
             <JobsColumn
               jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
@@ -3141,7 +3138,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, onResume
                              color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>x</button>
                 </div>
                 <div style={{ flex:1, minHeight:0, minWidth:0, overflowY:"auto" }}>
-                  {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText}/>}
+                  {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}/>}
                   {rightTab === "history" && (
                     <HistoryList generated={generated} theme={theme}
                       onOpen={e => {

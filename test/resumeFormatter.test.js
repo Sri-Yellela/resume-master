@@ -93,6 +93,31 @@ test("structured renderer preserves bullets and experience blocks deterministica
   assert.match(html, /list-style: disc outside/);
 });
 
+test("formatter removes duplicated experience header rows from bullet content", () => {
+  const html = normalizeResumeHtml(`
+<html><body>
+  <div class="header"><div class="name">Jane Doe</div></div>
+  <div class="section-title">Experience</div>
+  <div class="entry">
+    <div class="entry-header">
+      <div><span class="entry-org">Acme Corp</span> <span class="entry-meta"><span class="sep">|</span> Platform Team, Boston, MA</span></div>
+      <div class="entry-date">Jan 2020 - Present</div>
+    </div>
+    <div class="entry-role">Senior Engineer</div>
+    <ul class="bullets">
+      <li>Senior Engineer | Jan 2020 - Present</li>
+      <li>Built reliable APIs.</li>
+    </ul>
+  </div>
+</body></html>
+  `);
+
+  assert.match(html, /<div class="entry-role">Senior Engineer<\/div>/);
+  assert.doesNotMatch(html, /<li>Senior Engineer \| Jan 2020 - Present<\/li>/);
+  assert.match(html, /<li>Built reliable APIs\.<\/li>/);
+  assert.equal((html.match(/Senior Engineer/g) || []).length, 1);
+});
+
 test("formatter emits HTML contract classes and tuned typography", () => {
   const html = normalizeResumeHtml(`
     Jane Doe

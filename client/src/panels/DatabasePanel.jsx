@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, printResume } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import JobCard      from "../components/JobCard.jsx";
 
 // ── Calendar component ────────────────────────────────────────
@@ -341,6 +342,7 @@ function DetailModal({ modal, onClose, theme }) {
 // ── Main panel ────────────────────────────────────────────────
 export function DatabasePanel({ user }) {
   const { theme, isDark } = useTheme();
+  const { activeProfileId, setActiveProfileId } = useJobBoard() || {};
   const [activeSheet,  setActiveSheet]  = useState("applications");
   const [apps,         setApps]         = useState([]);
   const [resumes,      setResumes]      = useState([]);
@@ -385,20 +387,27 @@ export function DatabasePanel({ user }) {
 
   const loadSaved = useCallback(async () => {
     try {
+      let profileId = activeProfileId;
+      if (!profileId) {
+        const profiles = await api("/api/domain-profiles");
+        const active = (Array.isArray(profiles) ? profiles : []).find(p => p.is_active) || profiles?.[0];
+        profileId = active?.id || null;
+        if (profileId) setActiveProfileId?.(profileId);
+      }
       const [jr, rr, br] = await Promise.all([
         api("/api/jobs?starred=1&pageSize=100"),
         api("/api/resumes"),
-        api("/api/base-resume"),
+        profileId ? api(`/api/domain-profiles/${profileId}/base-resume`) : Promise.resolve({ content: "" }),
       ]);
       setSavedJobs(jr.jobs || []);
-      if (br?.content) setBaseResume(br.content);
+      setBaseResume(br?.content || "");
       if (rr?.length) {
         const map = {};
         rr.forEach(r => { map[r.job_id] = { html:"__exists__", atsScore:r.ats_score }; });
         setSavedGen(map);
       }
     } catch {}
-  }, []);
+  }, [activeProfileId, setActiveProfileId]);
 
   const loadPending = useCallback(async () => {
     try {
@@ -411,7 +420,7 @@ export function DatabasePanel({ user }) {
     const planTier = String(user?.planTier || "BASIC").toUpperCase();
     if (planTier === "BASIC") { alert("Upgrade from Plans to unlock Generate."); return; }
     if (tool === "a_plus_resume" && planTier !== "PRO") { alert("Upgrade from Plans to unlock A+ Resume."); return; }
-    if (!baseResume) { alert("Upload your base resume in the Jobs tab first."); return; }
+    if (!baseResume) { alert("Upload this job profile's base resume in Job Profiles first."); return; }
     setGenLoading(p => ({...p, [job.jobId]: true}));
     try {
       const d = await api("/api/generate", { method:"POST",

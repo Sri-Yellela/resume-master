@@ -72,14 +72,17 @@ export function classifyMissingSignal(rawValue) {
 }
 
 export function extractMissingSignals(report = {}) {
-  const rawSignals = [
-    ...(Array.isArray(report?.tier1_missing) ? report.tier1_missing : []),
-    ...(Array.isArray(report?.action_verbs_missing) ? report.action_verbs_missing : []),
-  ];
   const deduped = new Map();
-  rawSignals.forEach(value => {
+  (Array.isArray(report?.tier1_missing) ? report.tier1_missing : []).forEach(value => {
     const classified = classifyMissingSignal(value);
     if (!classified) return;
+    const key = `${classified.kind}:${classified.key}`;
+    if (!deduped.has(key)) deduped.set(key, classified);
+  });
+  (Array.isArray(report?.action_verbs_missing) ? report.action_verbs_missing : []).forEach(value => {
+    const label = cleanText(value);
+    if (!label || label.length > 40 || NOISE_TERMS.has(label.toLowerCase())) return;
+    const classified = { kind: "action_verb", label, key: signalKey(label) };
     const key = `${classified.kind}:${classified.key}`;
     if (!deduped.has(key)) deduped.set(key, classified);
   });
@@ -113,8 +116,36 @@ export function listProfileSignalSuggestions(db, { userId, profileId }) {
     inactiveSkills: promoted.filter(item => item.kind === "skill" && item.status === "inactive" && item.promotable),
     selectedSkills: promoted.filter(item => item.kind === "skill" && item.status === "selected" && item.promotable),
     appliedSkills: promoted.filter(item => item.kind === "skill" && item.status === "applied"),
+    inactiveActionVerbs: promoted.filter(item => item.kind === "action_verb" && item.status === "inactive" && item.promotable),
+    selectedActionVerbs: promoted.filter(item => item.kind === "action_verb" && item.status === "selected" && item.promotable),
+    appliedActionVerbs: promoted.filter(item => item.kind === "action_verb" && item.status === "applied"),
     structuredFacts: promoted.filter(item => item.kind === "structured_fact" && item.promotable),
   };
+}
+
+export function addProfileSignalSuggestions(db, { userId, profileId, kind = "skill", labels = [] }) {
+  const allowedKind = kind === "action_verb" ? "action_verb" : "skill";
+  const items = (Array.isArray(labels) ? labels : [labels])
+    .map(label => cleanText(label))
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!items.length) return listProfileSignalSuggestions(db, { userId, profileId });
+  const upsert = db.prepare(`
+    INSERT INTO profile_signal_suggestions
+      (profile_id, user_id, signal_key, signal_label, signal_kind, structured_field, frequency, status, first_seen_at, last_seen_at)
+    VALUES (?, ?, ?, ?, ?, NULL, ?, 'inactive', unixepoch(), unixepoch())
+    ON CONFLICT(profile_id, signal_key) DO UPDATE SET
+      signal_label = excluded.signal_label,
+      signal_kind = excluded.signal_kind,
+      frequency = MAX(profile_signal_suggestions.frequency, excluded.frequency),
+      last_seen_at = excluded.last_seen_at,
+      updated_at = unixepoch()
+  `);
+  const tx = db.transaction(() => {
+    items.forEach(label => upsert.run(profileId, userId, signalKey(label), label, allowedKind, ATS_SIGNAL_PROMOTION_THRESHOLD));
+  });
+  tx();
+  return listProfileSignalSuggestions(db, { userId, profileId });
 }
 
 export function syncSelectedSkillSuggestions(db, { userId, profileId, selectedKeys = [] }) {

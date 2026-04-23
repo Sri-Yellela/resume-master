@@ -13,6 +13,7 @@ import {
   upsertSimpleApplyProfile,
 } from "../services/simpleApplyProfile.js";
 import {
+  addProfileSignalSuggestions,
   computeEnhancementStatus,
   listProfileEnhancementHistory,
   listProfileSignalSuggestions,
@@ -432,6 +433,24 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
     res.json({
       ...suggestions,
       enhancement,
+    });
+  });
+
+  router.post("/:id/suggestions", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    const kind = req.body?.kind === "action_verb" ? "action_verb" : "skill";
+    const labels = req.body?.labels || req.body?.label || [];
+    const suggestions = addProfileSignalSuggestions(db, {
+      userId: req.user.id,
+      profileId: profile.id,
+      kind,
+      labels,
+    });
+    res.json({
+      ...suggestions,
+      enhancement: computeEnhancementStatus(db, { userId: req.user.id, profileId: profile.id }),
     });
   });
 

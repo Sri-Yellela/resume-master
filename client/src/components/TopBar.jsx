@@ -258,7 +258,7 @@ function QuickActions({ theme, onTabChange }) {
   );
 }
 
-function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resumeWidget, profiles, onActivateProfile, onDeleteProfile }) {
+function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, profiles, onActivateProfile, onDeleteProfile }) {
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
   const triggerRef = useRef(null);
@@ -420,57 +420,6 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
             </button>
           </div>
 
-          {/* Resume widget */}
-          {resumeWidget && (
-            <div style={{ padding: "10px 16px 12px", borderBottom: `1px solid ${theme.border}` }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-                             letterSpacing: "0.08em", color: theme.textDim, marginBottom: 6 }}>
-                Base Resume
-              </div>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <button
-                  onClick={() => !resumeWidget.uploading && resumeWidget.onUploadClick?.()}
-                  style={{
-                    background: "transparent",
-                    border: `1px solid ${resumeWidget.text ? "#16a34a44" : theme.border}`,
-                    borderRadius: 2, padding: "6px 10px", cursor: "pointer",
-                    fontSize: 11, flex: 1,
-                    color: resumeWidget.uploading ? "#d97706" : resumeWidget.text ? "#16a34a" : theme.textMuted,
-                    fontFamily: "'DM Sans',system-ui",
-                  }}>
-                  {resumeWidget.uploading ? "Parsing..."
-                    : resumeWidget.text
-                      ? `${(resumeWidget.fileName || "").length > 24
-                          ? (resumeWidget.fileName || "").slice(0, 24) + "..."
-                          : resumeWidget.fileName}`
-                    : "Upload Resume"}
-                </button>
-                {resumeWidget.text && !resumeWidget.uploading && (
-                  <button onClick={() => resumeWidget.onClear?.()}
-                    style={{ background: "none", border: "none", color: "#dc2626",
-                             cursor: "pointer", fontSize: 12, padding: "4px 6px", flexShrink: 0 }}>
-                    x
-                  </button>
-                )}
-              </div>
-              {user?.planTier !== "BASIC" && resumeWidget.text && !resumeWidget.uploading && !resumeWidget.enhanceUsed && (
-                <button
-                  onClick={() => resumeWidget.onEnhance?.()}
-                  disabled={resumeWidget.enhancing}
-                  style={{
-                    marginTop: 8, width: "100%", padding: "7px 10px", borderRadius: 4,
-                    background: resumeWidget.enhancing ? theme.surfaceHigh : theme.accentMuted,
-                    color: theme.accentText, border: `1px solid ${theme.accent}44`,
-                    cursor: resumeWidget.enhancing ? "not-allowed" : "pointer",
-                    fontSize: 11, fontWeight: 700, fontFamily: "'DM Sans',system-ui",
-                    opacity: resumeWidget.enhancing ? 0.7 : 1,
-                  }}>
-                  {resumeWidget.enhancing ? "Rewriting for better ATS..." : "Enhance Resume"}
-                </button>
-              )}
-            </div>
-          )}
-
           {/* Sign out */}
           <button
             onClick={() => { setOpen(false); onLogout?.(); }}
@@ -489,7 +438,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, resu
 // Main TopBar — position:fixed, convergence animation
 // ═══════════════════════════════════════════════════════════════
 export default function TopBar({
-  user, onTabChange, onLogout, onUserChange, resumeWidget, onProfileActivate,
+  user, onTabChange, onLogout, onUserChange, onProfileActivate,
 }) {
   const { theme } = useTheme();
   const { progress: rawProgress, pinned } = useAppScroll();
@@ -655,7 +604,6 @@ export default function TopBar({
             <UserAvatarMenu
               theme={theme} user={user} onLogout={onLogout}
               onTabChange={onTabChange} onUserChange={onUserChange}
-              resumeWidget={resumeWidget}
               profiles={profiles}
               onActivateProfile={activateProfile}
               onDeleteProfile={deleteProfile}

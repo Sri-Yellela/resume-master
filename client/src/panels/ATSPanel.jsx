@@ -11,11 +11,12 @@ import { useState, useEffect } from "react";
 import { useTheme } from "../styles/theme.jsx";
 import { api } from "../lib/api.js";
 
-export function ATSPanel({ report, score, jobId, resumeText }) {
+export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) {
   const { theme } = useTheme();
   const [localReport, setLocalReport] = useState(null);
   const [kwLoading,   setKwLoading]   = useState(false);
   const [kwError,     setKwError]     = useState(false);
+  const [addedItems,  setAddedItems]  = useState(new Set());
 
   // Reset local state when the selected job changes
   useEffect(() => {
@@ -43,6 +44,24 @@ export function ATSPanel({ report, score, jobId, resumeText }) {
   }, [jobId, resumeText, report]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeReport = report ?? localReport;
+  const clickableProfileId = activeProfileId || activeReport?.profileId || activeReport?.domainProfileId || null;
+  const addSuggestion = async (kind, label) => {
+    if (!clickableProfileId || !label) return;
+    const key = `${kind}:${label}`;
+    setAddedItems(prev => new Set([...prev, key]));
+    try {
+      await api(`/api/domain-profiles/${clickableProfileId}/suggestions`, {
+        method: "POST",
+        body: JSON.stringify({ kind, labels: [label] }),
+      });
+    } catch {
+      setAddedItems(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
 
   // No base resume uploaded yet
   if (!activeReport && !resumeText && !kwLoading) {
@@ -125,7 +144,7 @@ export function ATSPanel({ report, score, jobId, resumeText }) {
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:12, color:theme.textMuted, fontStyle:"italic",
                           lineHeight:1.6, marginBottom:8 }}>
-              {activeReport.verdict}
+              {activeReport.verdict || activeReport.experience?.summary || "Deterministic local ATS match against this profile."}
             </div>
             {activeReport.best_possible_score != null && (
               <div style={{ fontSize:11, padding:"6px 10px", borderRadius:8,
@@ -156,7 +175,10 @@ export function ATSPanel({ report, score, jobId, resumeText }) {
       {activeReport.tier1_missing?.length > 0 && (
         <TagSection title="✗ Skills Missing"
           bg={theme.dangerMuted} fg={theme.danger} border={theme.danger+"33"}
-          items={activeReport.tier1_missing}/>
+          items={activeReport.tier1_missing}
+          onItemClick={clickableProfileId ? item => addSuggestion("skill", item) : null}
+          addedItems={addedItems}
+          kind="skill"/>
       )}
 
       {/* Action verbs matched */}
@@ -170,32 +192,54 @@ export function ATSPanel({ report, score, jobId, resumeText }) {
       {activeReport.action_verbs_missing?.length > 0 && (
         <TagSection title="⚠ Verbs Missing"
           bg={theme.warningMuted} fg={theme.warning} border={theme.warning+"33"}
-          items={activeReport.action_verbs_missing}/>
+          items={activeReport.action_verbs_missing}
+          onItemClick={clickableProfileId ? item => addSuggestion("action_verb", item) : null}
+          addedItems={addedItems}
+          kind="action_verb"/>
+      )}
+
+      {activeReport.experience && (
+        <ListSection title="Experience Fit" items={[activeReport.experience.summary]} color={activeReport.experience.fit ? theme.success : theme.warning} theme={theme}/>
+      )}
+
+      {activeReport.hard_constraint_misses?.length > 0 && (
+        <TagSection title="Profile Facts Missing"
+          bg={theme.dangerMuted} fg={theme.danger} border={theme.danger+"33"}
+          items={activeReport.hard_constraint_misses}/>
       )}
 
       {/* Strengths */}
-      {activeReport.strengths?.length > 0 && (
+      {activeReport.source !== "local_ats_v1" && activeReport.strengths?.length > 0 && (
         <ListSection title="💪 Strengths" items={activeReport.strengths} color={theme.success} theme={theme}/>
       )}
 
       {/* Improvements */}
-      {activeReport.improvements?.length > 0 && (
+      {activeReport.source !== "local_ats_v1" && activeReport.improvements?.length > 0 && (
         <ListSection title="🔧 Improvements" items={activeReport.improvements} color={theme.accent} theme={theme}/>
       )}
     </div>
   );
 }
 
-function TagSection({ title, bg, fg, border, items }) {
+function TagSection({ title, bg, fg, border, items, onItemClick = null, addedItems = new Set(), kind = "skill" }) {
   return (
     <div>
       <div className="rm-section-label" style={{ color:fg }}>{title}</div>
       <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
         {items.map(k => (
-          <span key={k} className="rm-badge"
-            style={{ background:bg, color:fg, border:`1px solid ${border}` }}>
-            {k}
-          </span>
+          <button key={k} type="button" className="rm-badge"
+            onClick={() => onItemClick?.(k)}
+            disabled={!onItemClick || addedItems.has(`${kind}:${k}`)}
+            title={onItemClick ? `Add "${k}" to this profile as an inactive suggestion` : undefined}
+            style={{
+              background:bg,
+              color:fg,
+              border:`1px solid ${border}`,
+              cursor:onItemClick ? "pointer" : "default",
+              opacity:addedItems.has(`${kind}:${k}`) ? 0.55 : 1,
+            }}>
+            {addedItems.has(`${kind}:${k}`) ? `Added: ${k}` : k}
+          </button>
         ))}
       </div>
     </div>

@@ -32,14 +32,14 @@ test("active scrape tracking is profile-scoped and duplicate outbound work is de
 
 test("ATS scoring reuses stored signal basis through the queue", () => {
   assert.match(server, /const atsScoreQueue = \[\]/);
-  assert.match(server, /let anthropicAtsUnavailableUntil = 0/);
   assert.match(server, /function enqueueAtsScoreWork\(label, worker\)/);
   assert.match(server, /enqueueAtsScoreWork\(`scrape:\$\{userId\}:\$\{query\}`/);
-  assert.match(server, /buildAtsResumeBasis\(baseResumeText, simpleProfile\)/);
-  assert.match(server, /isAnthropicCreditError/);
-  assert.match(server, /ats_unavailable_due_to_credits/);
+  assert.match(server, /buildRuntimeAtsBasis\(\{/);
+  assert.match(server, /resumeText: baseResumeRow\?\.enhanced_content \|\| baseResumeText/);
+  assert.match(server, /signalProfile: simpleProfile/);
+  assert.match(server, /scoreAtsLocally\(\{/);
   assert.match(server, /enqueueAtsScoreWork\(`adopt-enhanced:\$\{userId\}:\$\{profileId\}`/);
-  assert.match(server, /buildAtsResumeBasis\(newContent, signalProfile\)/);
+  assert.match(server, /buildRuntimeAtsBasis\(\{\s*resumeText: newContent,\s*signalProfile,\s*domainProfile: profile/);
 });
 
 test("structured search thread logging includes outbound payload and filter summary", () => {

@@ -48,6 +48,22 @@ test("job profiles have a dedicated app section and menu entry", () => {
   assert.match(profile, /Open Job Profiles/);
 });
 
+test("base resume management is profile-card scoped, not a global menu control", () => {
+  const app = fs.readFileSync("client/src/App.jsx", "utf8");
+  const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+  const panel = fs.readFileSync("client/src/panels/JobProfilesPanel.jsx", "utf8");
+  const database = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
+
+  assert.doesNotMatch(app, /resumeWidget/);
+  assert.doesNotMatch(topBar, /resumeWidget/);
+  assert.doesNotMatch(topBar, /Upload Resume/);
+  assert.match(panel, /Base Resume/);
+  assert.match(panel, /\/api\/domain-profiles\/\$\{profile\.id\}\/base-resume/);
+  assert.match(panel, /Required before search, ATS, and enhancement/);
+  assert.match(database, /\/api\/domain-profiles\/\$\{profileId\}\/base-resume/);
+  assert.doesNotMatch(database, /api\("\/api\/base-resume"\)/);
+});
+
 test("domain profile wizard supports shared create and edit modes", () => {
   const wizard = fs.readFileSync("client/src/components/DomainProfileWizard.jsx", "utf8");
   const panel = fs.readFileSync("client/src/panels/JobProfilesPanel.jsx", "utf8");

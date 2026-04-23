@@ -413,6 +413,50 @@ function parseResumeFromText(text) {
   return { header, sections };
 }
 
+function normalizeHeaderComparable(value) {
+  return collapseWhitespace(stripTagsToText(value || ""))
+    .toLowerCase()
+    .replace(/[–—]/g, "-")
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/[|,;:()[\]{}]/g, " ")
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isDuplicateEntryHeaderLine(line, entry) {
+  const text = normalizeHeaderComparable(line);
+  if (!text) return false;
+  const company = normalizeHeaderComparable(entry.company);
+  const meta = normalizeHeaderComparable(entry.meta);
+  const role = normalizeHeaderComparable(entry.role);
+  const date = normalizeHeaderComparable(entry.date);
+  const headerParts = [company, meta, role, date].filter(Boolean);
+  if (!headerParts.length) return false;
+  const headerText = normalizeHeaderComparable(headerParts.join(" "));
+  const compactText = text.replace(/\s+/g, "");
+  const compactHeader = headerText.replace(/\s+/g, "");
+  if (compactHeader && compactText === compactHeader) return true;
+  if (date && text.includes(date) && (role && text.includes(role))) return true;
+  if (date && text.includes(date) && (company && text.includes(company))) return true;
+  if (role && date && text === normalizeHeaderComparable(`${role} ${date}`)) return true;
+  return false;
+}
+
+function cleanEntryHeaderDupes(entry) {
+  const cleaned = {
+    ...entry,
+    bullets: [...(entry.bullets || [])],
+  };
+  while (cleaned.bullets.length && isDuplicateEntryHeaderLine(cleaned.bullets[0], cleaned)) {
+    cleaned.bullets.shift();
+  }
+  if (cleaned.text && isDuplicateEntryHeaderLine(cleaned.text, cleaned)) {
+    cleaned.text = "";
+  }
+  return cleaned;
+}
+
 function normalizeStructure(structure = {}) {
   const header = {
     name: collapseWhitespace(structure.header?.name || ""),
@@ -438,7 +482,7 @@ function normalizeStructure(structure = {}) {
       return {
         type: "entries",
         title: section.title,
-        entries: mergeEntryFragments((section.entries || []).map(entry => ({
+        entries: mergeEntryFragments((section.entries || []).map(entry => cleanEntryHeaderDupes({
           company: collapseWhitespace(entry.company || ""),
           meta: collapseWhitespace(entry.meta || ""),
           date: collapseWhitespace(entry.date || ""),
@@ -446,7 +490,8 @@ function normalizeStructure(structure = {}) {
           tech: collapseWhitespace(entry.tech || ""),
           text: collapseWhitespace(entry.text || ""),
           bullets: (entry.bullets || []).map(bullet => collapseWhitespace(bullet)).filter(Boolean),
-        })).filter(entry => entry.company || entry.role || entry.date || entry.text || entry.bullets.length)),
+        })).filter(entry => entry.company || entry.role || entry.date || entry.text || entry.bullets.length))
+          .map(cleanEntryHeaderDupes),
       };
     });
   return { header, sections };

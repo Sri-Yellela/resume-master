@@ -64,6 +64,10 @@ import {
   markSelectedSuggestionsApplied,
 } from "./services/profileSignalAggregator.js";
 import {
+  buildRuntimeAtsBasis,
+  scoreAtsLocally,
+} from "./services/localAtsScorer.js";
+import {
   INTEGRATION_PROVIDERS,
   getAutomationReadiness,
   publicIntegrationRow,
@@ -157,7 +161,7 @@ function sanitiseEmployers(employers) {
   );
 }
 
-const ATS_SCORE_PROMPT_VERSION = "ats-score-v1";
+const ATS_SCORE_PROMPT_VERSION = "local-ats-v1";
 
 const RESUME_STYLE_BLOCK = `<style>
 :root {
@@ -2550,13 +2554,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   // ── ATS scoring for newly inserted jobs (D1) ──────────────────────────────
   // Score new jobs against the user's base resume using Haiku.
   // Non-fatal — job is still inserted if scoring fails.
-  if (userId && ANTHROPIC_KEY && Date.now() < anthropicAtsUnavailableUntil) {
-    if (scrapeParams.threadId) logSearchThread(scrapeParams.threadId, "ats_enrichment", {
-      status: "ats_unavailable_due_to_credits",
-      skipped: true,
-      retryAfterMs: anthropicAtsUnavailableUntil - Date.now(),
-    });
-  } else if (userId && ANTHROPIC_KEY) {
+  if (userId) {
     enqueueAtsScoreWork(`scrape:${userId}:${query}`, async () => {
       try {
         const baseResumeRow = domainProfile
@@ -2570,7 +2568,11 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         const simpleProfile = domainProfile
           ? loadOrCreateSimpleApplyProfile(db, { userId, profileId: domainProfile.id, roleTitles: profileTitles })
           : null;
-        const atsResumeBasis = buildAtsResumeBasis(baseResumeText, simpleProfile);
+        const runtimeBasis = buildRuntimeAtsBasis({
+          resumeText: baseResumeRow?.enhanced_content || baseResumeText,
+          signalProfile: simpleProfile,
+          domainProfile,
+        });
 
         // Find newly inserted jobs that have no ats_score yet
         const newlyInserted = classified.filter(item => {
@@ -2584,26 +2586,17 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
           "UPDATE scraped_jobs SET ats_score=?, ats_report=? WHERE job_id=?"
         );
 
-        let creditsUnavailable = false;
         let attempted = 0;
         let failed = 0;
-        for (let i = 0; i < newlyInserted.length && !creditsUnavailable; i += 5) {
-          const batch = newlyInserted.slice(i, i + 5);
+        for (let i = 0; i < newlyInserted.length; i += 25) {
+          const batch = newlyInserted.slice(i, i + 25);
           await Promise.all(batch.map(async item => {
-            if (creditsUnavailable) return;
             try {
               attempted++;
-              const start = Date.now();
-              const scoreMsg = await anthropic.messages.create({
-                model: "claude-haiku-4-5-20251001",
-                max_tokens: 900,
-                system: ATS_SYSTEM_PROMPT,
-                messages: [{ role: "user", content:
-                  `JOB DESCRIPTION:\n${item.description || item.title}\n\n${atsResumeBasis}` }],
+              const report = scoreAtsLocally({
+                job: item,
+                runtimeBasis,
               });
-              const raw = scoreMsg.content.map(b => b.text || "").join("")
-                .replace(/```json|```/g, "").trim();
-              const report = JSON.parse(raw);
               updateAts.run(report.score, JSON.stringify(report), item.jobId);
               if (domainProfile?.id) {
                 const aggregation = aggregateAtsMissingSignals(db, {
@@ -2620,25 +2613,9 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
                   );
                 }
               }
-              trackApiCall(db, {
-                userId,
-                eventType: "ats_score",
-                eventSubtype: "scrape_time",
-                model: "claude-haiku-4-5-20251001",
-                usage: scoreMsg.usage,
-                durationMs: Date.now() - start,
-                jobId: item.jobId,
-                company: item.company,
-              });
             } catch(e) {
               failed++;
-              if (isAnthropicCreditError(e)) {
-                creditsUnavailable = true;
-                anthropicAtsUnavailableUntil = Date.now() + 15 * 60 * 1000;
-                console.warn(`[scrape] ATS score unavailable due to Anthropic credits for ${item.jobId}:`, e.message);
-              } else {
-                console.warn(`[scrape] ATS score failed for ${item.jobId}:`, e.message);
-              }
+              console.warn(`[scrape] local ATS score failed for ${item.jobId}:`, e.message);
             }
           }));
         }
@@ -2647,21 +2624,12 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
             candidateCount: newlyInserted.length,
             attempted,
             failed,
-            skippedRemaining: creditsUnavailable,
-            status: creditsUnavailable ? "ats_unavailable_due_to_credits" : "complete",
+            scorer: "local_ats_v1",
+            status: "complete",
           });
         }
       } catch(e) {
-        if (isAnthropicCreditError(e)) {
-          anthropicAtsUnavailableUntil = Date.now() + 15 * 60 * 1000;
-          console.warn("[scrape] ATS batch scoring unavailable due to Anthropic credits:", e.message);
-          if (scrapeParams.threadId) logSearchThread(scrapeParams.threadId, "ats_enrichment", {
-            status: "ats_unavailable_due_to_credits",
-            error: e.message,
-          });
-        } else {
-          console.warn("[scrape] ATS batch scoring failed:", e.message);
-        }
+        console.warn("[scrape] local ATS batch scoring failed:", e.message);
       }
     });
   }
@@ -5067,7 +5035,10 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
     "SELECT ats_report FROM resumes WHERE user_id=? AND job_id=?"
   ).get(userId, jobId);
   if (existingResume?.ats_report) {
-    try { return res.json(JSON.parse(existingResume.ats_report)); } catch {}
+    try {
+      const parsed = JSON.parse(existingResume.ats_report);
+      if (parsed?.source === "local_ats_v1") return res.json(parsed);
+    } catch {}
   }
 
   // Priority 2: reuse scrape-time ATS report when it already exists for this job.
@@ -5075,7 +5046,10 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
     "SELECT ats_report FROM scraped_jobs WHERE job_id=?"
   ).get(jobId);
   if (scrapeTimeReport?.ats_report) {
-    try { return res.json(JSON.parse(scrapeTimeReport.ats_report)); } catch {}
+    try {
+      const parsed = JSON.parse(scrapeTimeReport.ats_report);
+      if (parsed?.source === "local_ats_v1") return res.json(parsed);
+    } catch {}
   }
 
   // Priority 3: return cached ats_only_reports entry (avoids re-running Haiku)
@@ -5083,19 +5057,13 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
     "SELECT ats_report FROM ats_only_reports WHERE user_id=? AND job_id=?"
   ).get(userId, jobId);
   if (cached?.ats_report) {
-    try { return res.json(JSON.parse(cached.ats_report)); } catch {}
+    try {
+      const parsed = JSON.parse(cached.ats_report);
+      if (parsed?.source === "local_ats_v1") return res.json(parsed);
+    } catch {}
   }
 
-  // Check monthly_ats_scores limit before running Haiku
-  const limitCheck = checkLimit(db, userId, "ats_score");
-  if (!limitCheck.allowed) {
-    return res.status(429).json({
-      error: limitCheck.reason, limitReached: true,
-      current: limitCheck.current, limit: limitCheck.limit, period: limitCheck.period,
-    });
-  }
-
-  // Priority 4: fetch job + run Haiku call
+  // Priority 4: fetch job + run the in-house deterministic scorer.
   const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
 
@@ -5103,28 +5071,13 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   const signalProfile = activeProfile
     ? loadOrCreateSimpleApplyProfile(db, { userId, profileId: activeProfile.id })
     : null;
-  const resumeBasis = buildAtsResumeBasis(resumeText, signalProfile);
-  const jobDescription = job.description || job.title;
-  const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
-Company: ${job.company}
-Title: ${job.title}
-Category: ${job.category || ""}
-Full description:
-${jobDescription}
-
-RESUME TEXT (check which JD keywords appear here):
-${resumeBasis}`;
-
-  const t0 = Date.now();
   try {
-    const msg = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 900,
-      system: ATS_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: atsDynamic }],
+    const runtimeBasis = buildRuntimeAtsBasis({
+      resumeText,
+      signalProfile,
+      domainProfile: activeProfile,
     });
-    const raw = msg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
-    const result = JSON.parse(raw);
+    const result = scoreAtsLocally({ job, runtimeBasis });
 
     // Save to cache — INSERT OR REPLACE via ON CONFLICT
     db.prepare(`
@@ -5135,13 +5088,6 @@ ${resumeBasis}`;
         ats_score=excluded.ats_score,
         created_at=unixepoch()
     `).run(userId, jobId, JSON.stringify(result), result.score ?? null);
-
-    trackApiCall(db, {
-      userId, eventType: "ats_score", eventSubtype: "keywords",
-      model: "claude-haiku-4-5-20251001", usage: msg.usage,
-      durationMs: Date.now() - t0, jobId: String(jobId), company: job.company,
-      atsScoreAfter: result.score,
-    });
 
     res.json(result);
   } catch (e) {
@@ -5324,22 +5270,18 @@ ${originalText}` }],
       userId: req.user.id,
       profileId: profile.id,
     });
-    const scoreFor = async (resumeContent) => {
+    const scoreFor = (resumeContent) => {
       try {
-        const resumeBasis = buildAtsResumeBasis(resumeContent, scoreSignalProfile);
-        const scoreMsg = await anthropic.messages.create({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 900,
-          system: ATS_SYSTEM_PROMPT,
-          messages: [{ role: "user", content:
-            `JOB DESCRIPTION:\n${templateJd}\n\n${resumeBasis}` }],
+        const runtimeBasis = buildRuntimeAtsBasis({
+          resumeText: resumeContent,
+          signalProfile: scoreSignalProfile,
+          domainProfile: profile,
         });
-        const raw = scoreMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
-        return JSON.parse(raw);
+        return scoreAtsLocally({ job: { title: profile.profile_name, description: templateJd }, runtimeBasis });
       } catch { return null; }
     };
 
-    const [origReport, enhReport] = await Promise.all([scoreFor(originalText), scoreFor(enhancedText)]);
+    const [origReport, enhReport] = [scoreFor(originalText), scoreFor(enhancedText)];
     const delta = (enhReport?.score ?? 0) - (origReport?.score ?? 0);
 
     db.prepare(`
@@ -5417,7 +5359,11 @@ async function adoptEnhancedProfileResume(req, res) {
       const newContent = getBaseResumeRecord(db, { userId, profileId })?.content;
       if (!newContent) return;
       const signalProfile = loadOrCreateSimpleApplyProfile(db, { userId, profileId });
-      const atsResumeBasis = buildAtsResumeBasis(newContent, signalProfile);
+      const runtimeBasis = buildRuntimeAtsBasis({
+        resumeText: newContent,
+        signalProfile,
+        domainProfile: profile,
+      });
 
       const jobsToRescore = db.prepare(`
         SELECT sj.job_id, sj.description, sj.title, sj.company FROM scraped_jobs sj
@@ -5427,19 +5373,11 @@ async function adoptEnhancedProfileResume(req, res) {
 
       const updateAts = db.prepare("UPDATE scraped_jobs SET ats_score=?, ats_report=? WHERE job_id=?");
 
-      for (let i = 0; i < jobsToRescore.length; i += 5) {
-        const batch = jobsToRescore.slice(i, i + 5);
+      for (let i = 0; i < jobsToRescore.length; i += 25) {
+        const batch = jobsToRescore.slice(i, i + 25);
         await Promise.all(batch.map(async job => {
           try {
-            const scoreMsg = await anthropic.messages.create({
-              model: "claude-haiku-4-5-20251001",
-              max_tokens: 900,
-              system: ATS_SYSTEM_PROMPT,
-              messages: [{ role: "user", content:
-                `JOB DESCRIPTION:\n${job.description}\n\n${atsResumeBasis}` }],
-            });
-            const raw = scoreMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
-            const report = JSON.parse(raw);
+            const report = scoreAtsLocally({ job, runtimeBasis });
             updateAts.run(report.score, JSON.stringify(report), job.job_id);
           } catch(e) {
             console.warn(`[adopt-enhanced] rescore failed for ${job.job_id}:`, e.message);
@@ -5654,37 +5592,19 @@ RULES:
     }
   }
 
-  const jobDescription = job.description || job.title;
   const resumeStripped = stripResumeHtml(formattedHtml);
-  const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
-Company: ${job.company}
-Title: ${job.title}
-Category: ${job.category || ""}
-Full description:
-${jobDescription}
-
-RESUME TEXT (check which JD keywords appear here):
-${resumeStripped}`;
-
-  const atsStart = Date.now();
-  const scoreMsg = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 900,
-    system: ATS_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: atsDynamic }],
+  const activeProfile = getOrRepairActiveProfile(userId);
+  const signalProfile = activeProfile
+    ? loadOrCreateSimpleApplyProfile(db, { userId, profileId: activeProfile.id })
+    : null;
+  const runtimeBasis = buildRuntimeAtsBasis({
+    resumeText: resumeStripped,
+    signalProfile,
+    domainProfile: activeProfile,
   });
-  let atsReport = null, atsScore = null;
-  try {
-    const raw = scoreMsg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
-    atsReport = JSON.parse(raw); atsScore = atsReport.score;
-  } catch {}
+  const atsReport = scoreAtsLocally({ job, runtimeBasis });
+  const atsScore = atsReport.score;
   const atsCacheKey = buildAtsCacheKey(formattedHtml, job);
-  trackApiCall(db, {
-    userId, eventType: "ats_score", eventSubtype,
-    model: "claude-haiku-4-5-20251001", usage: scoreMsg.usage,
-    durationMs: Date.now() - atsStart, jobId: String(jobId), company: job.company,
-    atsScoreAfter: atsScore,
-  });
 
   const version = (db.prepare("SELECT MAX(version) as v FROM resume_versions WHERE user_id=? AND job_id=?")
     .get(userId, String(jobId))?.v || 0) + 1;
@@ -5842,30 +5762,17 @@ app.post("/api/generate", requireAuth, async (req, res) => {
     }
     try {
       const cachedResumeText = stripResumeHtml(cachedArtifact.html);
-      const jobDescription = job.description || job.title;
-      const freshAtsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):
-Company: ${job.company}
-Title: ${job.title}
-Category: ${job.category || ""}
-Full description:
-${jobDescription}
-
-RESUME TEXT (check which JD keywords appear here):
-${cachedResumeText}`;
-
-      const t0 = Date.now();
-      const freshScore = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 900,
-        system: ATS_SYSTEM_PROMPT,
-        messages: [{ role:"user", content:freshAtsDynamic }],
+      const activeProfile = getOrRepairActiveProfile(req.user.id);
+      const signalProfile = activeProfile
+        ? loadOrCreateSimpleApplyProfile(db, { userId: req.user.id, profileId: activeProfile.id })
+        : null;
+      const runtimeBasis = buildRuntimeAtsBasis({
+        resumeText: cachedResumeText,
+        signalProfile,
+        domainProfile: activeProfile,
       });
-      const rawFresh = freshScore.content.map(b=>b.text||"").join("")
-        .replace(/```json|```/g,"").trim();
-      let freshReport = null, freshScoreVal = cachedArtifact.ats_score;
-      try {
-        freshReport   = JSON.parse(rawFresh);
-        freshScoreVal = freshReport.score;
+      const freshReport = scoreAtsLocally({ job, runtimeBasis });
+      const freshScoreVal = freshReport.score;
         db.prepare(
           "UPDATE resumes SET ats_score=?,ats_report=?,ats_cache_key=?,ats_prompt_version=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?"
         ).run(freshScoreVal, JSON.stringify(freshReport), cachedAtsKey, ATS_SCORE_PROMPT_VERSION, req.user.id, String(jobId));
@@ -5873,17 +5780,10 @@ ${cachedResumeText}`;
           db.prepare("UPDATE resume_versions SET ats_score=?,ats_report=?,ats_cache_key=?,ats_prompt_version=? WHERE id=?")
             .run(freshScoreVal, JSON.stringify(freshReport), cachedAtsKey, ATS_SCORE_PROMPT_VERSION, existingVersion.id);
         }
-      } catch {}
-      trackApiCall(db, {
-        userId: req.user.id, eventType: "ats_score", eventSubtype,
-        model: "claude-haiku-4-5-20251001", usage: freshScore.usage,
-        durationMs: Date.now() - t0, jobId: String(jobId), company: job.company,
-        atsScoreAfter: freshScoreVal,
-      });
       return res.json({
         html:cachedArtifact.html,
         atsScore:freshScoreVal,
-        atsReport:freshReport || JSON.parse(cachedArtifact.ats_report||"null"),
+        atsReport:freshReport,
         cached:true,
         atsCached:false,
         tool,
