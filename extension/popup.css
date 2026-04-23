@@ -1,0 +1,61 @@
+body {
+  font-family: Arial, sans-serif;
+  width: 320px;
+  margin: 0;
+  padding: 16px;
+  background: #f8fafc;
+  color: #111827;
+}
+
+h1 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #475569;
+}
+
+.status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #0a66c2;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: none;
+  border-radius: 6px;
+  background: #0a66c2;
+  color: #fff;
+  padding: 10px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex: 1 1 auto;
+}
+
+button.secondary {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

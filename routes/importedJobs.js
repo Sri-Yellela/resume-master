@@ -6,7 +6,11 @@ export function createImportedJobsRouter(db) {
 
   router.get("/summary", (req, res) => {
     const rows = db.prepare(`
-      SELECT source_key, source_label, COUNT(*) as total, MAX(last_imported_at) as last_imported_at
+      SELECT
+        CASE WHEN source_key IN ('linkedin', 'linkedin_saved') THEN 'linkedin' ELSE source_key END as source_key,
+        CASE WHEN source_key IN ('linkedin', 'linkedin_saved') THEN 'LinkedIn Jobs' ELSE source_label END as source_label,
+        COUNT(*) as total,
+        MAX(last_imported_at) as last_imported_at
       FROM imported_jobs
       WHERE user_id=? AND (disliked IS NULL OR disliked = 0)
       GROUP BY source_key, source_label
@@ -22,13 +26,22 @@ export function createImportedJobsRouter(db) {
     });
   });
 
-  router.get("/linkedin-saved", (req, res) => {
-    const rows = db.prepare(`
+  function listLinkedInJobs(userId) {
+    return db.prepare(`
       SELECT *
       FROM imported_jobs
-      WHERE user_id=? AND source_key='linkedin_saved' AND (disliked IS NULL OR disliked = 0)
+      WHERE user_id=? AND source_key IN ('linkedin', 'linkedin_saved') AND (disliked IS NULL OR disliked = 0)
       ORDER BY COALESCE(posted_at, '') DESC, last_imported_at DESC, id DESC
-    `).all(req.user.id);
+    `).all(userId);
+  }
+
+  router.get("/linkedin", (req, res) => {
+    const rows = listLinkedInJobs(req.user.id);
+    res.json({ jobs: rows.map(publicImportedJob) });
+  });
+
+  router.get("/linkedin-saved", (req, res) => {
+    const rows = listLinkedInJobs(req.user.id);
     res.json({ jobs: rows.map(publicImportedJob) });
   });
 

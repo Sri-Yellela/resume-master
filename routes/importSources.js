@@ -2,6 +2,16 @@ import { Router } from "express";
 import crypto from "crypto";
 import { importedJobDedupeKey, normaliseImportedJob } from "../services/importedJobs.js";
 
+const LINKEDIN_SOURCE_KEYS = ["linkedin", "linkedin_saved"];
+
+function resolveSourceKey(source) {
+  return String(source || "").toLowerCase() === "linkedin_saved" ? "linkedin_saved" : "linkedin";
+}
+
+function resolveSourceLabel(sourceKey) {
+  return sourceKey === "linkedin_saved" ? "LinkedIn Saved Jobs" : "LinkedIn Jobs";
+}
+
 function tokenHash(token) {
   return crypto.createHash("sha256").update(String(token || "")).digest("hex");
 }
@@ -26,29 +36,11 @@ function requireImportToken(db) {
 export function createImportSourcesRouter({ db, requireAuth, emitToUser }) {
   const router = Router();
 
-  router.post("/api/import-sources/linkedin-saved/token", requireAuth, (req, res) => {
-    const rawToken = crypto.randomBytes(24).toString("base64url");
-    const now = Math.floor(Date.now() / 1000);
-    const expiresAt = now + (30 * 60);
-    db.prepare(`
-      INSERT INTO import_extension_tokens
-        (token_hash, user_id, source_key, expires_at, created_at, last_used_at)
-      VALUES (?, ?, 'linkedin_saved', ?, ?, ?)
-    `).run(tokenHash(rawToken), req.user.id, expiresAt, now, now);
-    res.json({
-      ok: true,
-      sourceKey: "linkedin_saved",
-      token: rawToken,
-      expiresAt,
-      importUrl: "/api/import-sources/linkedin-saved/jobs",
-      sourceLabel: "LinkedIn Saved Jobs",
-    });
-  });
-
-  router.post("/api/import-sources/linkedin-saved/jobs", requireImportToken(db), (req, res) => {
-    const userId = req.importToken.user_id;
-    const rawJobs = Array.isArray(req.body?.jobs) ? req.body.jobs : [];
-    if (!rawJobs.length) return res.status(400).json({ error: "jobs array required" });
+  function importJobsForUser({ userId, jobs, source }) {
+    const sourceKey = resolveSourceKey(source);
+    const sourceLabel = resolveSourceLabel(sourceKey);
+    const rawJobs = Array.isArray(jobs) ? jobs : [];
+    if (!rawJobs.length) return { error: "jobs array required", status: 400 };
 
     const upsert = db.prepare(`
       INSERT INTO imported_jobs (
@@ -56,8 +48,9 @@ export function createImportSourcesRouter({ db, requireAuth, emitToUser }) {
         title, company, location, job_url, apply_url, work_type, employment_type,
         compensation, posted_at, description, company_icon_url, payload_json,
         first_imported_at, last_imported_at, last_seen_at, import_count, updated_at
-      ) VALUES (?, ?, 'LinkedIn Saved Jobs', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch(), unixepoch(), 1, unixepoch())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch(), unixepoch(), 1, unixepoch())
       ON CONFLICT(user_id, source_key, dedupe_key) DO UPDATE SET
+        source_label=excluded.source_label,
         source_platform=excluded.source_platform,
         external_job_id=COALESCE(excluded.external_job_id, imported_jobs.external_job_id),
         title=excluded.title,
@@ -77,22 +70,23 @@ export function createImportSourcesRouter({ db, requireAuth, emitToUser }) {
         import_count=imported_jobs.import_count + 1,
         updated_at=unixepoch()
     `);
-    const existedStmt = db.prepare("SELECT id FROM imported_jobs WHERE user_id=? AND source_key='linkedin_saved' AND dedupe_key=?");
+    const existedStmt = db.prepare("SELECT id FROM imported_jobs WHERE user_id=? AND source_key=? AND dedupe_key=?");
 
-    let inserted = 0;
-    let updated = 0;
-    let skipped = 0;
+    let imported = 0;
+    let duplicates = 0;
+    const errors = [];
 
     for (const rawJob of rawJobs.slice(0, 250)) {
-      const normalised = normaliseImportedJob("linkedin_saved", rawJob);
+      const normalised = normaliseImportedJob(sourceKey, rawJob);
       if (!normalised) {
-        skipped++;
+        errors.push("Skipped an invalid LinkedIn job payload.");
         continue;
       }
-      const existed = existedStmt.get(userId, importedJobDedupeKey("linkedin_saved", rawJob));
+      const existed = existedStmt.get(userId, sourceKey, importedJobDedupeKey(sourceKey, rawJob));
       upsert.run(
         userId,
-        "linkedin_saved",
+        sourceKey,
+        sourceLabel,
         normalised.sourcePlatform,
         normalised.externalJobId,
         normalised.dedupeKey,
@@ -109,12 +103,32 @@ export function createImportSourcesRouter({ db, requireAuth, emitToUser }) {
         normalised.companyIconUrl,
         normalised.payloadJson,
       );
-      if (existed) updated++;
-      else inserted++;
+      if (existed) duplicates++;
+      else imported++;
     }
 
-    emitToUser?.(userId, { type: "imported_jobs_updated", sourceKey: "linkedin_saved", inserted, updated });
-    res.json({ ok: true, sourceKey: "linkedin_saved", inserted, updated, skipped });
+    emitToUser?.(userId, { type: "imported_jobs_updated", sourceKey, imported, duplicates });
+    return { ok: true, sourceKey, imported, duplicates, errors };
+  }
+
+  router.post("/api/import-sources/linkedin-saved/jobs", requireImportToken(db), (req, res) => {
+    const result = importJobsForUser({
+      userId: req.importToken.user_id,
+      jobs: req.body?.jobs,
+      source: "linkedin_saved",
+    });
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    res.json(result);
+  });
+
+  router.post("/api/jobs/import", requireAuth, (req, res) => {
+    const result = importJobsForUser({
+      userId: req.user.id,
+      jobs: req.body?.jobs,
+      source: req.body?.source || "linkedin",
+    });
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    res.json(result);
   });
 
   return router;

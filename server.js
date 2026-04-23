@@ -3055,20 +3055,29 @@ function authContextHash(token) {
   return crypto.createHash("sha256").update(String(token || ""), "utf8").digest("hex");
 }
 
-function issueAuthContext(userId, req) {
+function issueAuthContext(userId, req, options = {}) {
   const token = crypto.randomBytes(32).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   db.prepare("DELETE FROM auth_contexts WHERE expires_at <= ? OR revoked_at IS NOT NULL").run(now - 86400);
   db.prepare(`
     INSERT INTO auth_contexts (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(authContextHash(token), userId, now, now, now + 7 * 24 * 60 * 60, req.get("user-agent") || null);
+  `).run(
+    authContextHash(token),
+    userId,
+    now,
+    now,
+    now + 7 * 24 * 60 * 60,
+    options.userAgent || req.get("user-agent") || null,
+  );
   return token;
 }
 
 function getRequestAuthContextToken(req) {
   const header = req.get("x-rm-auth-context");
-  return header || req.query?.authContext || null;
+  const authHeader = req.get("authorization") || "";
+  const bearer = authHeader.match(/^Bearer\s+(.+)$/i)?.[1] || null;
+  return header || bearer || req.query?.authContext || null;
 }
 
 function bindAuthContext(req, _res, next) {
@@ -3988,6 +3997,31 @@ app.get("/api/auth/me", (req, res) =>
     ? res.json({ authenticated:true, user:publicUser(req.user) })
     : res.json({ authenticated:false })
 );
+
+app.get("/api/auth/extension-token", requireAuth, (req, res) => {
+  const token = issueAuthContext(req.user.id, req, { userAgent: "resume-master-extension" });
+  res.json({ token });
+});
+
+app.post("/api/auth/revoke-extension-token", requireAuth, (req, res) => {
+  db.prepare(`
+    UPDATE auth_contexts
+    SET revoked_at=unixepoch()
+    WHERE user_id=? AND revoked_at IS NULL AND user_agent='resume-master-extension'
+  `).run(req.user.id);
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/active-profile", requireAuth, (req, res) => {
+  const activeProfile = getOrRepairActiveProfile(req.user.id);
+  if (!activeProfile) return res.status(404).json({ error: "No active profile" });
+  res.json({
+    profileId: activeProfile.id,
+    targetRole: activeProfile.profile_name || "",
+    name: activeProfile.profile_name || "",
+    location: activeProfile.location || "",
+  });
+});
 
 // ═══════════════════════════════════════════════════════════════
 // DOMAIN PROFILES

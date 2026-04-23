@@ -15,6 +15,13 @@ import ProfileSelectorDropdown from "../components/ProfileSelectorDropdown.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { useAppScroll } from "../contexts/AppScrollContext.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
+import { toast } from "../hooks/use-toast.js";
+import { useLinkedInExtension } from "../hooks/useLinkedInExtension.js";
+import {
+  getLinkedInExtensionInstallUrl,
+  isLinkedInExtensionInstalled,
+  sendExtensionRequest,
+} from "../lib/extensionBridge.js";
 import ROLE_ALIAS_MAP from "../../../data/ROLE_ALIAS_MAP.json";
 
 const USER_TEXT   = "#0f0f0f";   // black text on accent
@@ -821,7 +828,7 @@ function buildAtsPayload(job, artifact = null) {
 }
 
 function isImportedBoardJob(job) {
-  return !!(job?.boardSource === "linkedin_saved" && job?.importedJobId != null);
+  return !!(["linkedin", "linkedin_saved"].includes(job?.boardSource) && job?.importedJobId != null);
 }
 
 // -- Main panel ------------------------------------------------
@@ -974,9 +981,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [pendingJobs, setPendingJobs] = useState([]);
   const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
   const [linkedinImportSummary, setLinkedinImportSummary] = useState({ total: 0, lastImportedAt: null });
-  const [linkedinImportModalOpen, setLinkedinImportModalOpen] = useState(false);
-  const [linkedinImportToken, setLinkedinImportToken] = useState(null);
-  const [issuingLinkedinImportToken, setIssuingLinkedinImportToken] = useState(false);
+  const [linkedinInstallModalOpen, setLinkedinInstallModalOpen] = useState(false);
+  const [linkedinImporting, setLinkedinImporting] = useState(false);
+  const [linkedinExtensionNotice, setLinkedinExtensionNotice] = useState(null);
+  const { extensionState, refreshExtensionState } = useLinkedInExtension();
 
   const activeDomainProfile = useMemo(() => (
     domainProfiles.find(p => p.id === activeProfileId)
@@ -1153,7 +1161,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setTotalJobs(snapshot.totalJobs || 0);
     setTotalPages(snapshot.totalPages || 0);
     setCurrentPage(snapshot.currentPage || 1);
-    setBoardTab(snapshot.boardTab === "linkedin_saved" ? "saved" : (snapshot.boardTab || "all"));
+    setBoardTab(["linkedin", "linkedin_saved"].includes(snapshot.boardTab) ? "saved" : (snapshot.boardTab || "all"));
     setLocalSearch(snapshot.localSearch || "");
     setSortBy(snapshot.sortBy || "dateDesc");
     setRoleFilter(snapshot.roleFilter || "");
@@ -1388,7 +1396,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const fetchImportedSummary = useCallback(async () => {
     try {
       const data = await api("/api/imported-jobs/summary");
-      const linkedin = (data?.sources || []).find(source => source.sourceKey === "linkedin_saved");
+      const linkedin = (data?.sources || []).find(source => source.sourceKey === "linkedin");
       setLinkedinImportSummary({
         total: linkedin?.total || 0,
         lastImportedAt: linkedin?.lastImportedAt || null,
@@ -1400,25 +1408,62 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   const fetchImportedLinkedInJobs = useCallback(async () => {
     try {
-      const data = await api("/api/imported-jobs/linkedin-saved");
+      const data = await api("/api/imported-jobs/linkedin");
       setImportedLinkedInJobs(Array.isArray(data?.jobs) ? data.jobs : []);
     } catch {
       setImportedLinkedInJobs([]);
     }
   }, []);
 
-  const issueLinkedInImportToken = useCallback(async () => {
-    setIssuingLinkedinImportToken(true);
+  const openLinkedInExtensionPopup = useCallback(async () => {
     try {
-      const data = await api("/api/import-sources/linkedin-saved/token", { method: "POST" });
-      setLinkedinImportToken(data);
-      setLinkedinImportModalOpen(true);
+      await sendExtensionRequest({ type: "OPEN_POPUP" });
     } catch (e) {
-      setUploadError(e.message || "Could not create LinkedIn import token.");
-    } finally {
-      setIssuingLinkedinImportToken(false);
+      setUploadError(e.message || "Could not open the LinkedIn extension.");
     }
   }, []);
+
+  const closeLinkedInImportTab = useCallback(async (tabId) => {
+    try {
+      await sendExtensionRequest({ type: "CLOSE_LINKEDIN_TAB", tabId });
+    } catch {}
+  }, []);
+
+  const startLinkedInImport = useCallback(async () => {
+    if (!activeDomainProfile) {
+      setUploadError("Create and activate a job profile before importing from LinkedIn.");
+      return;
+    }
+    if (!isLinkedInExtensionInstalled()) {
+      setLinkedinInstallModalOpen(true);
+      return;
+    }
+    const status = await refreshExtensionState().catch((error) => {
+      throw new Error(error.message || "Could not reach the LinkedIn extension.");
+    });
+    if (status.status === "NOT_AUTHED") {
+      setLinkedinExtensionNotice({
+        message: "Reconnect Extension to Resume Master before importing from LinkedIn.",
+        actionLabel: "Fix Connection",
+      });
+      return;
+    }
+    setLinkedinExtensionNotice(null);
+    setLinkedinImporting(true);
+    setUploadError("");
+    try {
+      await sendExtensionRequest({
+        type: "START_LINKEDIN_IMPORT",
+        payload: {
+          targetRole: activeDomainProfile.profile_name || "",
+          location: activeDomainProfile.location || "",
+        },
+      });
+    } catch (e) {
+      setLinkedinImporting(false);
+      setUploadError(e.message || "Could not start LinkedIn import.");
+    }
+  }, [activeDomainProfile, refreshExtensionState]);
 
   // -- Fetch pending jobs ----------------------------------------
   const fetchPending = useCallback(async () => {
@@ -1519,7 +1564,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           toolLabel:r.apply_mode === "CUSTOM_SAMPLER" ? TOOL_LABELS[A_PLUS_TOOL] : TOOL_LABELS[GENERATE_TOOL] }; });
         setGenerated(map);
       }
-      const linkedin = (importSummary?.sources || []).find(source => source.sourceKey === "linkedin_saved");
+      const linkedin = (importSummary?.sources || []).find(source => source.sourceKey === "linkedin");
       setLinkedinImportSummary({
         total: linkedin?.total || 0,
         lastImportedAt: linkedin?.lastImportedAt || null,
@@ -1558,7 +1603,41 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   }, [user, fetchImportedSummary]);
 
   useEffect(() => {
-    if (boardTab === "linkedin_saved") setBoardTab("saved");
+    if (extensionState.status === "DONE" && linkedinImporting) {
+      closeLinkedInImportTab(extensionState.linkedInTabId);
+      fetchImportedSummary();
+      fetchImportedLinkedInJobs();
+      fetchJobsRef.current?.(1);
+      toast({ title: "LinkedIn import complete", description: `Imported ${extensionState.importedCount || 0} jobs from LinkedIn.` });
+      setLinkedinImporting(false);
+      setLinkedinExtensionNotice(null);
+    }
+    if (extensionState.status === "ERROR" && linkedinImporting) {
+      closeLinkedInImportTab(extensionState.linkedInTabId);
+      toast({ title: "LinkedIn import failed", description: extensionState.error || "Could not import LinkedIn jobs." });
+      setLinkedinImporting(false);
+    }
+  }, [closeLinkedInImportTab, extensionState, fetchImportedLinkedInJobs, fetchImportedSummary, linkedinImporting]);
+
+  useEffect(() => {
+    const onExtensionEvent = (event) => {
+      const payload = event.detail?.payload;
+      if (!payload?.type) return;
+      if (payload.type === "LINKEDIN_LOGIN_REQUIRED") {
+        setLinkedinImporting(false);
+        setLinkedinExtensionNotice({
+          message: "Please log into LinkedIn in the tab that just opened, then click Import again.",
+          actionLabel: "",
+        });
+        toast({ title: "LinkedIn login required", description: "Finish logging into LinkedIn in the opened tab, then click Import again." });
+      }
+    };
+    window.addEventListener("rm-extension:event", onExtensionEvent);
+    return () => window.removeEventListener("rm-extension:event", onExtensionEvent);
+  }, []);
+
+  useEffect(() => {
+    if (["linkedin", "linkedin_saved"].includes(boardTab)) setBoardTab("saved");
   }, [boardTab, setBoardTab]);
 
   useEffect(() => {
@@ -1612,7 +1691,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       fetchJobs(1);
     },
     imported_jobs_updated: ({ sourceKey }) => {
-      if (sourceKey === "linkedin_saved") {
+      if (sourceKey === "linkedin" || sourceKey === "linkedin_saved") {
         fetchImportedSummary();
         if (boardTab === "saved") fetchImportedLinkedInJobs();
       }
@@ -2394,13 +2473,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         />
       )}
 
-      <LinkedInImportDialog
+      <LinkedInInstallDialog
         theme={theme}
-        open={linkedinImportModalOpen}
-        tokenData={linkedinImportToken}
-        issuing={issuingLinkedinImportToken}
-        onClose={() => setLinkedinImportModalOpen(false)}
-        onIssueToken={issueLinkedInImportToken}
+        open={linkedinInstallModalOpen}
+        onClose={() => setLinkedinInstallModalOpen(false)}
+        onImportNow={async () => {
+          setLinkedinInstallModalOpen(false);
+          await startLinkedInImport();
+        }}
       />
 
       <AnimatePresence>
@@ -2560,6 +2640,21 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
             Error: {uploadError}
             <button onClick={() => setUploadError("")} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:"#991b1b" }}>Dismiss</button>
+          </div>
+        )}
+
+        {linkedinExtensionNotice?.message && (
+          <div style={{ flexBasis:"100%", padding:"6px 0", fontSize:11, color:theme.text }}>
+            {linkedinExtensionNotice.message}
+            {linkedinExtensionNotice.actionLabel ? (
+              <button
+                onClick={openLinkedInExtensionPopup}
+                style={{ marginLeft:8, border:"none", borderRadius:999, padding:"4px 10px", cursor:"pointer",
+                  background:theme.accent, color:"#0f0f0f", fontWeight:800, fontSize:11 }}>
+                {linkedinExtensionNotice.actionLabel}
+              </button>
+            ) : null}
+            <button onClick={() => setLinkedinExtensionNotice(null)} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:theme.textMuted }}>Dismiss</button>
           </div>
         )}
 
@@ -2979,7 +3074,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 showImportedLinkedInSection={boardTab === "saved"}
                 importedLinkedInJobs={importedLinkedInJobs}
                 linkedinImportSummary={linkedinImportSummary}
-                onImportLinkedIn={issueLinkedInImportToken}
+                onImportLinkedIn={startLinkedInImport}
                 onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
                 cardTier={1}
               />
@@ -3072,7 +3167,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               showImportedLinkedInSection={boardTab === "saved"}
               importedLinkedInJobs={importedLinkedInJobs}
               linkedinImportSummary={linkedinImportSummary}
-              onImportLinkedIn={issueLinkedInImportToken}
+              onImportLinkedIn={startLinkedInImport}
               onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
               cardTier={effectiveTier}
               containerRef={jobsPanelElementRef}
@@ -3276,6 +3371,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
               theme={theme}
               isDark={isDark}
               onImport={onImportLinkedIn}
+              linkedinImporting={linkedinImporting}
               onRefresh={onRefreshImportedLinkedIn}
               importCount={linkedinImportSummary.total}
               lastImportedAt={linkedinImportSummary.lastImportedAt}
@@ -3427,6 +3523,7 @@ function StarredLinkedInSection({
   isDark,
   onRefresh,
   onImport,
+  linkedinImporting,
   importCount,
   lastImportedAt,
   onVisit,
@@ -3442,7 +3539,7 @@ function StarredLinkedInSection({
                     borderBottom:`1px solid ${theme.border}`, flexShrink:0 }}>
         <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:16, fontWeight:800,
                        letterSpacing:"0.06em", textTransform:"uppercase", color:theme.text }}>
-          LinkedIn Saved Jobs
+          LinkedIn Jobs
         </span>
         <span style={{ fontSize:12, color:theme.textMuted }}>
           {importCount} LinkedIn saved job{importCount !== 1 ? "s" : ""}
@@ -3453,23 +3550,27 @@ function StarredLinkedInSection({
           </span>
         )}
         <div style={{ flex:1 }}/>
-        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onImport}>Import LinkedIn Saved Jobs</button>
+        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onImport} disabled={linkedinImporting}>
+          {linkedinImporting ? "Importing..." : "Import from LinkedIn"}
+        </button>
         <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
       </div>
       <div style={{ padding:"12px 14px", borderBottom:`1px solid ${theme.border}`,
                     background:isDark ? `${theme.surfaceHigh}66` : theme.surfaceHigh }}>
         <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6 }}>
-          Import your own LinkedIn saved jobs with the local extension. They stay separate from local starred jobs, keep source-specific dedupe, and only bring normalized saved-job data back into Resume Master.
+          Import visible LinkedIn job listings with the browser extension. Resume Master keeps the existing imported-job dedupe path and refreshes the job board automatically after import.
         </div>
       </div>
       {jobs.length === 0 ? (
         <div style={{ display:"flex", flexDirection:"column",
                       alignItems:"center", justifyContent:"center", gap:12, padding:24 }}>
-          <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No imported LinkedIn saved jobs yet</div>
+          <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No imported LinkedIn jobs yet</div>
           <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:420, lineHeight:1.8 }}>
-            Click <strong>Import LinkedIn Saved Jobs</strong>, generate a short-lived token, open LinkedIn Saved Jobs in the same browser, then run the extension import.
+            Click <strong>Import from LinkedIn</strong>. Resume Master opens LinkedIn jobs for your active profile, the extension imports the visible listings, and the board refreshes automatically.
           </div>
-          <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onImport}>Start Import</button>
+          <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onImport} disabled={linkedinImporting}>
+            {linkedinImporting ? "Importing..." : "Import from LinkedIn"}
+          </button>
         </div>
       ) : (
         <div style={{ paddingTop:8, paddingBottom:12 }}>
@@ -3577,13 +3678,31 @@ function SearchIntentDialog({ theme, prompt, onConfirm, onCancel }) {
   );
 }
 
-function LinkedInImportDialog({ theme, open, tokenData, issuing, onClose, onIssueToken }) {
+function LinkedInInstallDialog({ theme, open, onClose, onImportNow }) {
   if (!open) return null;
-  const expiresAt = tokenData?.expiresAt ? new Date(tokenData.expiresAt * 1000).toLocaleTimeString() : null;
-  const copyToken = async () => {
-    if (!tokenData?.token) return;
-    try { await navigator.clipboard.writeText(tokenData.token); } catch {}
-  };
+  const [step, setStep] = useState("install");
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (!open || step !== "install") return;
+    setTimedOut(false);
+    const poll = setInterval(() => {
+      if (isLinkedInExtensionInstalled()) {
+        clearInterval(poll);
+        setStep("ready");
+      }
+    }, 1000);
+    const timeout = setTimeout(() => setTimedOut(true), 60000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(timeout);
+    };
+  }, [open, step]);
+
+  useEffect(() => {
+    if (!open) setStep("install");
+  }, [open]);
+
   return (
     <div style={{ position:"fixed", inset:0, zIndex:760, background:"rgba(0,0,0,0.48)",
                   display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
@@ -3594,53 +3713,50 @@ function LinkedInImportDialog({ theme, open, tokenData, issuing, onClose, onIssu
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
                       fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase",
                       color:theme.text }}>
-          LinkedIn Saved Jobs Import
+          {step === "ready" ? "Extension Installed!" : "Install the Resume Master Extension"}
         </div>
         <div style={{ fontSize:13, lineHeight:1.6, color:theme.textMuted }}>
-          Use the local browser extension to read your own LinkedIn saved-jobs page while you are logged in, then send only the normalized saved-job data back into Resume Master. No LinkedIn cookies are copied into the app.
-        </div>
-        <div style={{ fontSize:12, lineHeight:1.7, color:theme.text }}>
-          1. Load the extension from the repo's <code>extension/</code> folder.
-          <br/>
-          2. Open LinkedIn Saved Jobs in the same browser.
-          <br/>
-          3. Generate a short-lived import token below and paste it into the extension popup.
-          <br/>
-          4. Run the import. Imported jobs appear in the <strong>LinkedIn Saved Jobs</strong> section.
+          {step === "ready"
+            ? "You're ready to import jobs from LinkedIn."
+            : "The browser extension lets you import jobs from LinkedIn in one click."}
         </div>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-          <button onClick={onIssueToken} disabled={issuing}
+          {step !== "ready" && (
+            <button onClick={() => window.open(getLinkedInExtensionInstallUrl(), "_blank", "noreferrer")}
             style={{ border:"none", borderRadius:6, padding:"8px 12px",
                      background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
-            {issuing ? "Generating…" : (tokenData?.token ? "Refresh Token" : "Generate Token")}
-          </button>
-          {tokenData?.token && (
-            <button onClick={copyToken}
-              style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
-                       background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
-              Copy Token
+              Install Extension
             </button>
           )}
-          <button onClick={() => window.open("https://www.linkedin.com/my-items/saved-jobs/", "_blank", "noreferrer")}
+          {step === "ready" && (
+            <button onClick={onImportNow}
             style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
-                     background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
-            Open LinkedIn Saved Jobs
-          </button>
-        </div>
-        {tokenData?.token && (
-          <div style={{ background:theme.surfaceHigh, border:`1px solid ${theme.border}`, borderRadius:8, padding:12 }}>
-            <div style={{ fontSize:11, fontWeight:700, color:theme.textMuted, marginBottom:6 }}>Import token</div>
-            <div style={{ fontFamily:"monospace", fontSize:12, color:theme.text, wordBreak:"break-all" }}>{tokenData.token}</div>
-            {expiresAt && <div style={{ fontSize:11, color:theme.textDim, marginTop:8 }}>Expires at {expiresAt}</div>}
-          </div>
-        )}
-        <div style={{ display:"flex", justifyContent:"flex-end" }}>
+                     background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
+              Import Now
+            </button>
+          )}
           <button onClick={onClose}
             style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
                      background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
-            Close
+            {step === "ready" ? "Close" : "Cancel"}
           </button>
         </div>
+        {step !== "ready" && (
+          <div style={{ background:theme.surfaceHigh, border:`1px solid ${theme.border}`, borderRadius:8, padding:12 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ width:16, height:16, borderRadius:"50%", border:`2px solid ${theme.border}`, borderTopColor:theme.accent,
+                animation:"spin 0.8s linear infinite" }} />
+              <div style={{ fontSize:12, color:theme.text }}>
+                Waiting for installation...
+              </div>
+            </div>
+            {timedOut && (
+              <div style={{ fontSize:11, color:theme.textMuted, marginTop:8 }}>
+                Didn't work? Try refreshing the page.
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

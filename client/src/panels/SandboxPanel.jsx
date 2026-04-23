@@ -26,19 +26,23 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const [dirty,       setDirty]       = useState(false);
   const [saveMsg,     setSaveMsg]     = useState("");
   const [selectedTool, setSelectedTool] = useState(entry?.activeTool || entry?.tool || "generate");
+  const [pageCount, setPageCount] = useState(1);
   const variants = entry?.variants || null;
   const variantKeys = variants ? Object.keys(variants) : [];
   const activeEntry = variants?.[selectedTool] || entry;
+  const previewHeight = pageCount * RESUME_PAGE_HEIGHT;
 
   const frameRef     = useRef(null);
   const containerRef = useRef(null);  // outer scroll container, observed by ResizeObserver
   const innerRef     = useRef(null);  // scale host — transform applied directly to DOM
   const scaleRef     = useRef(1);     // current scale value — never stored in state
+  const frameCleanupRef = useRef(() => {});
 
   useEffect(() => {
     setSelectedTool(entry?.activeTool || entry?.tool || "generate");
     setDirty(false);
     setExportError("");
+    setPageCount(1);
   }, [entry?.html, entry?.activeTool, entry?.tool]);
 
   // Apply scale directly to the DOM node — no state update, no re-render, no flicker.
@@ -46,9 +50,15 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     scaleRef.current = s;
     if (innerRef.current) {
       innerRef.current.style.transform = `scale(${s})`;
-      innerRef.current.style.height    = `${RESUME_PAGE_HEIGHT * s}px`;
+      innerRef.current.style.height    = `${previewHeight * s}px`;
     }
   };
+
+  useEffect(() => {
+    applyScale(scaleRef.current);
+  }, [previewHeight]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => frameCleanupRef.current(), []);
 
   // Compute initial scale synchronously, then observe for changes.
   // Dependency [activeEntry?.html] ensures scale recalculates when new resume arrives.
@@ -107,13 +117,47 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   };
 
   const handleFrameLoad = () => {
+    frameCleanupRef.current();
     const frame = frameRef.current;
     if (!frame) return;
     const doc = frame.contentDocument;
     if (!doc) return;
     doc.body.contentEditable = "true";
     doc.body.spellcheck = false;
-    doc.addEventListener("input", () => setDirty(true));
+
+    const syncPageCount = () => {
+      const root = doc.documentElement;
+      const contentHeight = Math.max(
+        RESUME_PAGE_HEIGHT,
+        doc.body?.scrollHeight || 0,
+        doc.body?.offsetHeight || 0,
+        root?.scrollHeight || 0,
+        root?.offsetHeight || 0,
+      );
+      const nextPageCount = Math.max(1, Math.ceil(contentHeight / RESUME_PAGE_HEIGHT));
+      setPageCount(prev => (prev === nextPageCount ? prev : nextPageCount));
+    };
+
+    const handleInput = () => {
+      setDirty(true);
+      syncPageCount();
+    };
+
+    doc.addEventListener("input", handleInput);
+    syncPageCount();
+
+    let resizeObserver = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(syncPageCount);
+      if (doc.body) resizeObserver.observe(doc.body);
+      if (doc.documentElement) resizeObserver.observe(doc.documentElement);
+    }
+
+    frameCleanupRef.current = () => {
+      doc.removeEventListener("input", handleInput);
+      resizeObserver?.disconnect();
+      frameCleanupRef.current = () => {};
+    };
   };
 
   const btnStyle = () => ({
@@ -260,8 +304,8 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
                 ref={innerRef}
                 style={{
                   width:           RESUME_PAGE_WIDTH + "px",
-                  height:          RESUME_PAGE_HEIGHT + "px",
-                  minHeight:       RESUME_PAGE_HEIGHT + "px",
+                  height:          previewHeight + "px",
+                  minHeight:       previewHeight + "px",
                   transformOrigin: "top left",
                   transform:       `scale(${scaleRef.current})`,
                   overflow:        "hidden",
@@ -277,7 +321,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
                   onLoad={handleFrameLoad}
                   style={{
                     width:    RESUME_PAGE_WIDTH  + "px",
-                    height:   RESUME_PAGE_HEIGHT + "px",
+                    height:   previewHeight + "px",
                     border:   "none",
                     display:  "block",
                     overflow: "hidden",

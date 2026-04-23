@@ -296,7 +296,7 @@ export default function JobDetailPanel({
           <HighlightedDescription
             text={job.description}
             theme={theme}
-            maxChars={3000}
+            truncate={false}
           />
         ) : (
           <p style={{ fontSize:12, color:theme.textDim, fontStyle:"italic" }}>No description available.</p>

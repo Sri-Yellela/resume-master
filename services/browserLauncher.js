@@ -5,10 +5,11 @@
 // neither caller needs platform-specific logic.
 //
 // Resolution order:
-//   1. BROWSER_EXECUTABLE_PATH env var   (explicit operator override)
-//   2. Known Linux system paths          (/usr/bin/chromium-browser, etc.)
-//   3. @sparticuz/chromium bundled path  (default for containers/Railway)
-//   4. Windows system Chrome paths       (dev / local environments)
+//   1. PUPPETEER_EXECUTABLE_PATH env var (explicit operator override)
+//   2. BROWSER_EXECUTABLE_PATH env var   (legacy override)
+//   3. Known Linux system paths          (/usr/bin/chromium-browser, etc.)
+//   4. @sparticuz/chromium bundled path  (fallback only)
+//   5. Windows system Chrome paths       (dev / local environments)
 //
 // Error reason codes emitted:
 //   browser_binary_not_found            — no executable located
@@ -20,6 +21,7 @@ import puppeteer from "puppeteer-core";
 import chromium  from "@sparticuz/chromium";
 import fs        from "fs";
 import path      from "path";
+const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 
 // ── Known system paths ────────────────────────────────────────────────────────
 
@@ -45,9 +47,14 @@ const WINDOWS_SYSTEM_PATHS = [
  */
 export async function resolveBrowserExecutable() {
   // 1. Operator override — highest priority, no filesystem check required
-  const envPath = process.env.BROWSER_EXECUTABLE_PATH;
+  const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.BROWSER_EXECUTABLE_PATH;
   if (envPath) {
-    return { path: envPath, source: "env:BROWSER_EXECUTABLE_PATH" };
+    return {
+      path: envPath,
+      source: process.env.PUPPETEER_EXECUTABLE_PATH
+        ? "env:PUPPETEER_EXECUTABLE_PATH"
+        : "env:BROWSER_EXECUTABLE_PATH",
+    };
   }
 
   const isWindows = process.platform === "win32";
@@ -86,17 +93,30 @@ export async function resolveBrowserExecutable() {
  * useChromiumArgs: true  → merge with @sparticuz curated set (Linux/containers)
  *                  false → minimal flag set (Windows / system Chrome)
  */
-export function buildLaunchArgs({ useChromiumArgs = false } = {}) {
-  const base = [
+export function buildLaunchArgs({ mode = "auto" } = {}) {
+  const args = [
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
+    "--no-zygote",
+    "--single-process",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--disable-translate",
+    "--metrics-recording-only",
+    "--mute-audio",
+    "--no-first-run",
+    "--safebrowsing-disable-auto-update",
   ];
-  if (!useChromiumArgs) return base;
-  // Merge @sparticuz flags with base; deduplicate
-  const merged = new Set([...chromium.args, ...base]);
-  return [...merged];
+  if (mode === "manual") {
+    return args
+      .filter((arg) => arg !== "--single-process" && arg !== "--no-zygote")
+      .concat("--remote-debugging-port=0");
+  }
+  return args;
 }
 
 // ── Error classification ──────────────────────────────────────────────────────
@@ -145,17 +165,21 @@ export async function probeBrowserAvailability() {
       reasonCode: "browser_binary_not_found",
       resolvedPath: null,
       source: null,
-      error: "No browser binary located on this system. Install Chrome/Chromium or set BROWSER_EXECUTABLE_PATH.",
+      error: "No browser binary located on this system. Install Chrome/Chromium or set PUPPETEER_EXECUTABLE_PATH.",
     };
     return _readinessCache;
   }
 
-  const isWindows = process.platform === "win32";
-  const args = buildLaunchArgs({ useChromiumArgs: !isWindows });
+  const args = buildLaunchArgs({ mode: "auto" });
   let browser;
   try {
     console.log(`[browserLauncher] probing — source=${resolution.source} path=${resolution.path}`);
-    browser = await puppeteer.launch({ args, executablePath: resolution.path, headless: true });
+    browser = await puppeteer.launch({
+      args,
+      executablePath: resolution.path,
+      headless: "new",
+      defaultViewport: DEFAULT_VIEWPORT,
+    });
     await browser.close();
     _readinessCache = {
       available: true,
@@ -186,34 +210,33 @@ export async function probeBrowserAvailability() {
  * Throws with err.reasonCode set on failure.
  *
  * @param {object}  options
- * @param {boolean} options.headless    Run headless (default: true)
+ * @param {boolean|string} options.headless Run headless (default: "new")
+ * @param {"auto"|"manual"} options.mode Launch profile
  * @param {object}  options.viewport    defaultViewport override
  * @param {boolean} options.isWindows   Override platform detection
  * @returns {Promise<import('puppeteer-core').Browser>}
  */
-export async function launchBrowser({ headless = true, viewport = null, isWindows = null } = {}) {
+export async function launchBrowser({ headless = "new", mode = "auto", viewport = null, isWindows = null } = {}) {
   if (isWindows === null) isWindows = process.platform === "win32";
 
   const resolution = await resolveBrowserExecutable();
   if (!resolution) {
     const err = new Error(
-      "No browser binary found. Install Chrome/Chromium or set BROWSER_EXECUTABLE_PATH."
+      "No browser binary found. Install Chrome/Chromium or set PUPPETEER_EXECUTABLE_PATH."
     );
     err.reasonCode = "browser_binary_not_found";
     throw err;
   }
 
-  const args = buildLaunchArgs({ useChromiumArgs: !isWindows });
-  const defaultVp = viewport || (isWindows
-    ? { width: 1280, height: 800 }
-    : chromium.defaultViewport);
+  const args = buildLaunchArgs({ mode });
+  const defaultVp = viewport || DEFAULT_VIEWPORT;
 
   console.log(`[browserLauncher] launching — source=${resolution.source} headless=${headless}`);
 
   try {
     return await puppeteer.launch({
       args,
-      executablePath:  resolution.path,
+      executablePath:  process.env.PUPPETEER_EXECUTABLE_PATH || resolution.path,
       defaultViewport: defaultVp,
       headless,
     });
@@ -224,11 +247,19 @@ export async function launchBrowser({ headless = true, viewport = null, isWindow
       reasonCode === "browser_runtime_missing_dependency"
         ? "Browser is missing required system libraries (e.g. libnspr4). Check server dependencies."
         : reasonCode === "browser_binary_not_found"
-          ? "Browser binary not found. Install Chrome or set BROWSER_EXECUTABLE_PATH."
+          ? "Browser binary not found. Install Chrome or set PUPPETEER_EXECUTABLE_PATH."
           : `Browser launch failed: ${e.message}`
     );
     classified.reasonCode = reasonCode;
     classified.originalError = e.message;
     throw classified;
   }
+}
+
+export async function launchBrowserPage(options = {}) {
+  const browser = await launchBrowser(options);
+  const page = await browser.newPage();
+  const viewport = options.viewport || DEFAULT_VIEWPORT;
+  await page.setViewport(viewport);
+  return { browser, page };
 }

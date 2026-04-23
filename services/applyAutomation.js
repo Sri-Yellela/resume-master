@@ -226,7 +226,8 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // launchBrowser resolves the best available binary, applies container-safe args,
     // and throws with a structured reasonCode on failure.
     browser = await launchBrowser({
-      headless:  isFullAuto || !isWindows,
+      headless:  isFullAuto || !isWindows ? "new" : false,
+      mode:      isFullAuto ? "auto" : "manual",
       viewport:  isWindows ? { width: 1280, height: 800 } : null,
       isWindows,
     });

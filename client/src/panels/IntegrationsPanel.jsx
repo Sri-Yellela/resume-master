@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import { useLinkedInExtension } from "../hooks/useLinkedInExtension.js";
+import {
+  getLinkedInExtensionInstallUrl,
+  sendExtensionRequest,
+} from "../lib/extensionBridge.js";
 
 function StatusPill({ status, healthy, theme }) {
   const color = healthy ? "#16a34a" : status === "missing" || status === "not_connected" ? "#dc2626" : "#d97706";
@@ -36,8 +41,8 @@ export function IntegrationsPanel() {
   const [status, setStatus] = useState(null);
   const [apifyToken, setApifyToken] = useState("");
   const [gmailEmail, setGmailEmail] = useState("");
-  const [linkedinCookies, setLinkedinCookies] = useState("");
   const [msg, setMsg] = useState("");
+  const { extensionInstalled, extensionState, refreshExtensionState } = useLinkedInExtension();
 
   const load = () => api("/api/integrations/status").then(setStatus).catch(e => setMsg(e.message));
   useEffect(() => { load(); }, []);
@@ -76,13 +81,18 @@ export function IntegrationsPanel() {
     }
     window.location.href = `/api/auth/oauth/${provider}/start?mode=link&returnTo=${encodeURIComponent("/app/integrations")}`;
   };
-  const saveLinkedIn = async () => {
-    await api("/api/linkedin/cookies", { method:"POST", body:JSON.stringify({ cookies:linkedinCookies.trim() }) });
-    setLinkedinCookies(""); setMsg("LinkedIn session saved."); load();
+  const openExtensionPopup = async () => {
+    try {
+      await sendExtensionRequest({ type: "OPEN_POPUP" });
+    } catch (e) {
+      setMsg(e.message || "Could not open the LinkedIn extension.");
+    }
   };
-  const clearLinkedIn = async () => {
-    await api("/api/linkedin/cookies", { method:"DELETE" });
-    setMsg("LinkedIn session cleared."); load();
+  const disconnectExtension = async () => {
+    await api("/api/auth/revoke-extension-token", { method: "POST" });
+    try { await sendExtensionRequest({ type: "CLEAR_EXTENSION_SESSION" }); } catch {}
+    await refreshExtensionState().catch(() => {});
+    setMsg("LinkedIn extension disconnected.");
   };
 
   const inputStyle = { height:36, border:`1px solid ${theme.border}`, borderRadius:6,
@@ -176,19 +186,34 @@ export function IntegrationsPanel() {
           </div>
         </Section>
 
-        <Section theme={theme} title="LinkedIn" subtitle="OAuth-linked LinkedIn identity plus optional encrypted cookie/session capture for LinkedIn-related automation."
+        <Section theme={theme} title="LinkedIn" subtitle="Install the extension, connect it silently to Resume Master, and import LinkedIn jobs without token copy/paste."
           status={oauthSectionStatus("linkedin", status.linkedin)}>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {!extensionInstalled && (
+              <button onClick={() => window.open(getLinkedInExtensionInstallUrl(), "_blank", "noreferrer")} style={buttonStyle}>
+                Install Extension
+              </button>
+            )}
+            {extensionInstalled && extensionState.status === "NOT_AUTHED" && (
+              <button onClick={openExtensionPopup} style={buttonStyle}>
+                Reconnect
+              </button>
+            )}
+            {extensionInstalled && extensionState.status !== "NOT_AUTHED" && (
+              <button onClick={disconnectExtension} style={secondaryButton}>
+                Disconnect
+              </button>
+            )}
             <button onClick={() => startOAuth("linkedin")} disabled={status.oauth?.linkedin?.configured === false} style={oauthButtonStyle("linkedin")}>
               {status.linkedin.identityLinked ? "Reconnect LinkedIn Login" : "Connect LinkedIn Login"}
             </button>
-            <input value={linkedinCookies} onChange={e => setLinkedinCookies(e.target.value)}
-              placeholder="Paste exported LinkedIn cookies/session JSON" style={inputStyle}/>
-            <button onClick={saveLinkedIn} disabled={!linkedinCookies.trim()} style={buttonStyle}>Save Session</button>
             {status.linkedin.identityLinked && <button onClick={() => disconnectProvider("linkedin")} style={secondaryButton}>Unlink Login</button>}
-            {status.linkedin.connected && <button onClick={clearLinkedIn} style={secondaryButton}>Clear</button>}
             <span style={{ color:theme.textMuted, fontSize:12, alignSelf:"center" }}>
-              {status.linkedin.accountEmail || (status.linkedin.identityLinked ? "LinkedIn identity linked" : "Login not connected")}
+              {!extensionInstalled
+                ? "LinkedIn Importer - Not installed"
+                : extensionState.status === "NOT_AUTHED"
+                  ? "LinkedIn Importer - Installed, not connected"
+                  : `LinkedIn Importer - Connected as ${extensionState.userEmail || "your account"}`}
             </span>
             <span style={{ color:status.oauth?.linkedin?.configured === false ? theme.danger : theme.textMuted, fontSize:12, alignSelf:"center" }}>
               {oauthHelp("linkedin")}

@@ -98,13 +98,14 @@ function ATSBadge({ score, onClick }) {
 }
 
 // ── Plain description renderer ───────────────────────────────────
-function DescriptionText({ text, theme }) {
+function DescriptionText({ text, theme, truncate = true, maxChars = 1200 }) {
   if (!text) return null;
-  const trimmed = text.slice(0, 1200);
+  const shouldTruncate = truncate && Number.isFinite(maxChars);
+  const trimmed = shouldTruncate ? text.slice(0, maxChars) : text;
   return (
     <p style={{ fontSize:11, color:theme.textMuted, lineHeight:1.7, margin:0, whiteSpace:"pre-wrap" }}>
       {trimmed}
-      {text.length > 1200 && <span style={{ color:theme.textDim }}> … (truncated)</span>}
+      {shouldTruncate && text.length > maxChars && <span style={{ color:theme.textDim }}> … (truncated)</span>}
     </p>
   );
 }
@@ -543,7 +544,7 @@ export default function JobCard({
         }}>
           {/* Description */}
           {job.description && (
-            <DescriptionText text={job.description} theme={theme}/>
+            <DescriptionText text={job.description} theme={theme} truncate={false}/>
           )}
 
           {/* Extra meta row */}
