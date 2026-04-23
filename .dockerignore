@@ -1,0 +1,9 @@
+.git
+.claude
+.idea
+node_modules
+client/node_modules
+client/dist
+data
+test-output.txt
+*.log

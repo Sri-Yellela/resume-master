@@ -73,6 +73,8 @@ import {
   publicIntegrationRow,
 } from "./services/integrationReadiness.js";
 
+console.log("[boot] server module loaded");
+
 // ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
 const ANTHROPIC_KEY  = process.env.ANTHROPIC_KEY  || "";
@@ -274,6 +276,7 @@ const INDUSTRY_CATEGORIES = [
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH   = path.join(__dirname, "data", "resume_master.db");
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+console.log(`[boot] data directory ready: ${path.dirname(DB_PATH)}`);
 
 // ── DB ────────────────────────────────────────────────────────
 const db = new Database(DB_PATH);
@@ -281,6 +284,7 @@ const db = new Database(DB_PATH);
 // Critical for multi-user deployments — prevents SQLITE_BUSY lock errors.
 db.pragma("journal_mode = WAL");
 db.pragma("busy_timeout = 5000");
+console.log(`[boot] database ready: ${DB_PATH}`);
 
 // ── Inline migration runner (additive only — never drops data) ─
 {
@@ -2038,24 +2042,30 @@ db.pragma("busy_timeout = 5000");
     },
   ];
 
+  console.log("[boot] migrations: checking schema");
   const applied = new Set(
     db.prepare("SELECT id FROM schema_migrations").all().map(r => r.id)
   );
+  let migrationCount = 0;
   for (const m of MIGRATIONS) {
     if (applied.has(m.id)) continue;
     try {
       db.exec(m.sql);
       db.prepare("INSERT INTO schema_migrations (id) VALUES (?)").run(m.id);
       console.log(`[migrate] ✓ ${m.id}`);
+      migrationCount++;
     } catch(e) {
       console.error(`[migrate] ✗ FAILED ${m.id}:`, e.message);
       process.exit(1);
     }
   }
+  console.log(`[boot] migrations complete (${migrationCount} applied)`);
 }
 
 // Load layered prompt system at startup
+console.log("[boot] loading prompts");
 loadAllPrompts();
+console.log("[boot] prompts loaded");
 
 // ── Backfill: split full_name into first_name / last_name ─────
 {
@@ -6365,10 +6375,12 @@ app.get("/api/debug/verify-isolation", requireAuth, (req, res) => {
   });
 });
 
+console.log(`[boot] binding HTTP listener on :${PORT}`);
 app.listen(PORT, () => {
   console.log(`[server] Resume Master v5 on :${PORT}`);
   // Warm up browser availability probe in background so /api/integrations/status
   // returns a cached result without delay on first user request.
+  console.log("[boot] scheduling background browser probe");
   probeBrowserAvailability().then(r => {
     if (r.available) console.log(`[server] browser ready — source=${r.source}`);
     else console.warn(`[server] browser unavailable — ${r.reasonCode}: ${r.error}`);
@@ -6376,6 +6388,7 @@ app.listen(PORT, () => {
   // Run startup cleanup to expire any stale jobs that accumulated while server was
   // down and the 03:00 cron window was missed.
   setImmediate(() => {
+    console.log("[boot] running startup expired-jobs cleanup");
     try { runExpiredJobsCleanup(); }
     catch(e) { console.warn("[cleanup] startup cleanup failed:", e.message); }
   });
