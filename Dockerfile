@@ -49,6 +49,7 @@ RUN npm install
 COPY client/package*.json ./client/
 RUN cd client && npm install
 COPY client/ ./client/
+COPY shared/ ./shared/
 RUN cd client && npm run build
 
 # Copy remaining server source
