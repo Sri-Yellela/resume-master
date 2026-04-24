@@ -41,9 +41,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Server dependencies
 COPY package*.json ./
 RUN npm install
 
+# Client dependencies and build
+COPY client/package*.json ./client/
+RUN cd client && npm install
+COPY client/ ./client/
+RUN cd client && npm run build
+
+# Copy remaining server source
 COPY . .
 
 EXPOSE 3000
