@@ -30,6 +30,8 @@ const SECTION_ALIASES = new Map([
   ["RESEARCH PROJECTS", "ACADEMIC PROJECTS"],
 ]);
 
+// CHANGE 1: .header .name — removed text-transform:uppercase and letter-spacing
+// CHANGE 2: .entry-meta — changed to font-style:normal and color:var(--color-text)
 export const RESUME_STYLE_BLOCK = `<style>
 :root {
   --color-bg: #ffffff;
@@ -51,7 +53,7 @@ export const RESUME_STYLE_BLOCK = `<style>
 }
 body { background: var(--color-bg); color: var(--color-text); font-family: 'Garamond','EB Garamond',Georgia,serif; font-size: var(--fs-body); line-height: var(--lh-body); margin: var(--margin-top) var(--margin-x) var(--margin-bot); max-width: var(--page-w); }
 .header { text-align: center; margin-bottom: 6pt; }
-.header .name { font-size: var(--fs-name); font-weight: bold; text-transform: uppercase; letter-spacing: 0.08em; line-height: 1.1; }
+.header .name { font-size: var(--fs-name); font-weight: bold; text-transform: none; letter-spacing: normal; line-height: 1.1; }
 .header .tagline { color: var(--color-muted); letter-spacing: 0.01em; font-size: var(--fs-body); }
 .header .contact { font-size: var(--fs-body); letter-spacing: normal; }
 .header .contact a { color: inherit; text-decoration: none; }
@@ -59,7 +61,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: 'Gara
 .entry { margin-bottom: var(--gap-entry); page-break-inside: avoid; }
 .entry-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8pt; }
 .entry-org { font-weight: bold; }
-.entry-meta { font-style: italic; color: var(--color-muted); font-weight: normal; }
+.entry-meta { font-style: normal; color: var(--color-text); font-weight: normal; }
 .sep { font-style: normal; font-weight: normal; color: var(--color-muted); }
 .entry-date { color: var(--color-muted); white-space: nowrap; margin-left: 8pt; flex-shrink: 0; font-size: var(--fs-body); }
 .entry-role { font-style: italic; color: var(--color-muted); margin-bottom: var(--gap-inline); }
@@ -100,9 +102,19 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+// CHANGE 3: added common HTML entities the LLM outputs; &amp; kept last so
+// it does not double-encode entities decoded earlier in the chain
 function decodeHtmlEntities(value) {
   return String(value || "")
     .replace(/&nbsp;/gi, " ")
+    .replace(/&ast;/gi, "*")
+    .replace(/&bull;/gi, "•")
+    .replace(/&mdash;/gi, "-")
+    .replace(/&ndash;/gi, "-")
+    .replace(/&ldquo;/gi, '"')
+    .replace(/&rdquo;/gi, '"')
+    .replace(/&lsquo;/gi, "'")
+    .replace(/&rsquo;/gi, "'")
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
@@ -132,10 +144,14 @@ export function renderInlineRichText(value) {
   return escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
 
+// CHANGE 4: convert <strong> and <b> to **...** BEFORE stripping tags so
+// bold survives the parse-render round-trip when the LLM uses HTML bold tags
 function stripTagsToText(value) {
   return collapseWhitespace(
     decodeHtmlEntities(
       String(value || "")
+        .replace(/<strong[^>]*>([\s\S]*?)<\/strong>/gi, "**$1**")
+        .replace(/<b(?:\s[^>]*)?>([\s\S]*?)<\/b>/gi, "**$1**")
         .replace(/<br\s*\/?>/gi, "\n")
         .replace(/<\/p>|<\/div>|<\/li>|<\/tr>|<\/h\d>/gi, "\n")
         .replace(/<li[^>]*>/gi, "• ")
@@ -424,6 +440,8 @@ function normalizeHeaderComparable(value) {
     .trim();
 }
 
+// CHANGE 5: added date+meta check to catch the LLM's duplicate plain <div>
+// that contains the date and location after entry-role (e.g. "Jul 2025 – Present\n\nBentonville, AR")
 function isDuplicateEntryHeaderLine(line, entry) {
   const text = normalizeHeaderComparable(line);
   if (!text) return false;
@@ -439,6 +457,7 @@ function isDuplicateEntryHeaderLine(line, entry) {
   if (compactHeader && compactText === compactHeader) return true;
   if (date && text.includes(date) && (role && text.includes(role))) return true;
   if (date && text.includes(date) && (company && text.includes(company))) return true;
+  if (date && meta && text.includes(date) && text.includes(meta)) return true;
   if (role && date && text === normalizeHeaderComparable(`${role} ${date}`)) return true;
   return false;
 }
@@ -537,10 +556,12 @@ function mergeEntryFragments(entries = []) {
   return merged;
 }
 
+// CHANGE 6: broadened looksHtml to catch LLM output that uses <ul>, <li>,
+// <span>, <strong>, or <table> without a <div>, <p>, <body>, or <html> wrapper
 export function buildStructuredResume(raw) {
   const normalized = collapseWhitespace(String(raw || ""));
   if (!normalized) return { header: { name: "", tagline: "", contact: "" }, sections: [] };
-  const looksHtml = /<html[\s>]|<body[\s>]|<div[\s>]|<p[\s>]|<section[\s>]/i.test(normalized);
+  const looksHtml = /<html[\s>]|<body[\s>]|<div[\s>]|<p[\s>]|<section[\s>]|<ul[\s>]|<li[\s>]|<span[\s>]|<strong[\s>]|<table[\s>]/i.test(normalized);
   const structure = looksHtml ? parseResumeFromHtml(normalized) : parseResumeFromText(normalized);
   const normalizedStructure = normalizeStructure(structure);
   if (looksHtml && !normalizedStructure.sections.length) {
@@ -577,6 +598,8 @@ ${entry.bullets.map(bullet => `  <li>${renderInlineRichText(bullet)}</li>`).join
 </div>`;
 }
 
+// CHANGE 7: skills section now renders as a bullet list instead of a table
+// for better ATS compatibility and to match the Twilio format
 function renderSection(section) {
   if (section.type === "summary") {
     return `<div class="section-title">${section.title}</div>
@@ -584,11 +607,9 @@ function renderSection(section) {
   }
   if (section.type === "skills") {
     return `<div class="section-title">${section.title}</div>
-<table class="skills-table">
-  <tbody>
-${section.rows.map(row => `    <tr><td class="skill-label">${renderInlineRichText(row.label)}</td><td class="skill-values">${renderInlineRichText(row.values)}</td></tr>`).join("\n")}
-  </tbody>
-</table>`;
+<ul class="bullets">
+${section.rows.map(row => `  <li><strong>${renderInlineRichText(row.label)}</strong> ${renderInlineRichText(row.values)}</li>`).join("\n")}
+</ul>`;
   }
   return `<div class="section-title">${section.title}</div>
 ${section.entries.map(renderEntry).join("\n")}`;
