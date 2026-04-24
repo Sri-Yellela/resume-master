@@ -18,6 +18,7 @@ import { useTheme } from "../styles/theme.jsx";
 
 const RESUME_PAGE_WIDTH  = 794;  // A4 at 96dpi
 const RESUME_PAGE_HEIGHT = 1123; // A4 at 96dpi
+const RESUME_PAGE_GAP    = 12;
 
 export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const { theme, isDark } = useTheme();
@@ -31,18 +32,24 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const variantKeys = variants ? Object.keys(variants) : [];
   const activeEntry = variants?.[selectedTool] || entry;
   const previewHeight = pageCount * RESUME_PAGE_HEIGHT;
+  const stackedPreviewHeight = previewHeight + Math.max(0, pageCount - 1) * RESUME_PAGE_GAP;
 
-  const frameRef     = useRef(null);
+  const frameRefs    = useRef([]);
   const containerRef = useRef(null);  // outer scroll container, observed by ResizeObserver
   const innerRef     = useRef(null);  // scale host — transform applied directly to DOM
   const scaleRef     = useRef(1);     // current scale value — never stored in state
-  const frameCleanupRef = useRef(() => {});
+  const frameCleanupRef = useRef([]);
+  const currentHtmlRef = useRef(activeEntry?.html || "");
+  const syncingFramesRef = useRef(false);
 
   useEffect(() => {
     setSelectedTool(entry?.activeTool || entry?.tool || "generate");
     setDirty(false);
     setExportError("");
     setPageCount(1);
+    currentHtmlRef.current = entry?.html || "";
+    frameRefs.current = [];
+    frameCleanupRef.current = [];
   }, [entry?.html, entry?.activeTool, entry?.tool]);
 
   // Apply scale directly to the DOM node — no state update, no re-render, no flicker.
@@ -50,15 +57,17 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     scaleRef.current = s;
     if (innerRef.current) {
       innerRef.current.style.transform = `scale(${s})`;
-      innerRef.current.style.height    = `${previewHeight * s}px`;
+      innerRef.current.style.height    = `${stackedPreviewHeight * s}px`;
     }
   };
 
   useEffect(() => {
     applyScale(scaleRef.current);
-  }, [previewHeight]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stackedPreviewHeight]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => () => frameCleanupRef.current(), []);
+  useEffect(() => () => {
+    frameCleanupRef.current.forEach(cleanup => cleanup?.());
+  }, []);
 
   // Compute initial scale synchronously, then observe for changes.
   // Dependency [activeEntry?.html] ensures scale recalculates when new resume arrives.
@@ -79,9 +88,10 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   }, [activeEntry?.html]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getCurrentHtml = () => {
-    if (!frameRef.current) return activeEntry?.html || "";
-    const doc = frameRef.current.contentDocument;
-    return doc ? doc.documentElement.outerHTML : activeEntry?.html || "";
+    const primaryFrame = frameRefs.current[0];
+    if (!primaryFrame) return currentHtmlRef.current || activeEntry?.html || "";
+    const doc = primaryFrame.contentDocument;
+    return doc ? doc.documentElement.outerHTML : currentHtmlRef.current || activeEntry?.html || "";
   };
 
   const save = async () => {
@@ -116,9 +126,26 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     } finally { setExporting(false); }
   };
 
-  const handleFrameLoad = () => {
-    frameCleanupRef.current();
-    const frame = frameRef.current;
+  const syncOtherFrames = (sourceFrame, sourceDoc) => {
+    if (!sourceDoc?.body) return;
+    syncingFramesRef.current = true;
+    try {
+      frameRefs.current.forEach(frame => {
+        if (!frame || frame === sourceFrame) return;
+        const doc = frame.contentDocument;
+        if (!doc?.body) return;
+        if (doc.body.innerHTML !== sourceDoc.body.innerHTML) {
+          doc.body.innerHTML = sourceDoc.body.innerHTML;
+        }
+      });
+    } finally {
+      syncingFramesRef.current = false;
+    }
+  };
+
+  const handleFrameLoad = (pageIndex) => {
+    frameCleanupRef.current[pageIndex]?.();
+    const frame = frameRefs.current[pageIndex];
     if (!frame) return;
     const doc = frame.contentDocument;
     if (!doc) return;
@@ -139,7 +166,10 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     };
 
     const handleInput = () => {
+      if (syncingFramesRef.current) return;
       setDirty(true);
+      currentHtmlRef.current = doc.documentElement.outerHTML;
+      syncOtherFrames(frame, doc);
       syncPageCount();
     };
 
@@ -153,10 +183,10 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
       if (doc.documentElement) resizeObserver.observe(doc.documentElement);
     }
 
-    frameCleanupRef.current = () => {
+    frameCleanupRef.current[pageIndex] = () => {
       doc.removeEventListener("input", handleInput);
       resizeObserver?.disconnect();
-      frameCleanupRef.current = () => {};
+      frameCleanupRef.current[pageIndex] = null;
     };
   };
 
@@ -304,32 +334,53 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
                 ref={innerRef}
                 style={{
                   width:           RESUME_PAGE_WIDTH + "px",
-                  height:          previewHeight + "px",
-                  minHeight:       previewHeight + "px",
+                  height:          stackedPreviewHeight + "px",
+                  minHeight:       stackedPreviewHeight + "px",
                   transformOrigin: "top left",
                   transform:       `scale(${scaleRef.current})`,
-                  overflow:        "hidden",
+                  overflow:        "visible",
                   willChange:      "transform",  // GPU layer — prevents paint flicker
-                  background:      theme.surface,
-                  borderRadius:    4,
-                  boxShadow:       theme.shadowXl,
+                  display:         "flex",
+                  flexDirection:   "column",
+                  gap:             RESUME_PAGE_GAP + "px",
                 }}
               >
-                <iframe
-                  ref={frameRef}
-                  srcDoc={activeEntry.html}
-                  onLoad={handleFrameLoad}
-                  style={{
-                    width:    RESUME_PAGE_WIDTH  + "px",
-                    height:   previewHeight + "px",
-                    border:   "none",
-                    display:  "block",
-                    overflow: "hidden",
-                  }}
-                  scrolling="no"
-                  title="resume-preview"
-                  sandbox="allow-same-origin allow-scripts"
-                />
+                {Array.from({ length: pageCount }, (_, pageIndex) => (
+                  <div
+                    key={`${selectedTool}-${pageIndex}-${pageCount}`}
+                    style={{
+                      width:        RESUME_PAGE_WIDTH + "px",
+                      height:       RESUME_PAGE_HEIGHT + "px",
+                      overflow:     "hidden",
+                      position:     "relative",
+                      background:   theme.surface,
+                      borderRadius: 4,
+                      boxShadow:    theme.shadowXl,
+                      flexShrink:   0,
+                    }}
+                  >
+                    <iframe
+                      ref={node => {
+                        frameRefs.current[pageIndex] = node;
+                      }}
+                      srcDoc={currentHtmlRef.current || activeEntry.html}
+                      onLoad={() => handleFrameLoad(pageIndex)}
+                      style={{
+                        width:     RESUME_PAGE_WIDTH + "px",
+                        height:    previewHeight + "px",
+                        border:    "none",
+                        display:   "block",
+                        overflow:  "hidden",
+                        position:  "absolute",
+                        top:       `${-(pageIndex * RESUME_PAGE_HEIGHT)}px`,
+                        left:      0,
+                      }}
+                      scrolling="no"
+                      title={`resume-preview-${pageIndex + 1}`}
+                      sandbox="allow-same-origin allow-scripts"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           )}
