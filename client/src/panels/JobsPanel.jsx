@@ -3074,6 +3074,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 showImportedLinkedInSection={boardTab === "saved"}
                 importedLinkedInJobs={importedLinkedInJobs}
                 linkedinImportSummary={linkedinImportSummary}
+                linkedinImporting={linkedinImporting}
                 onImportLinkedIn={startLinkedInImport}
                 onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
                 cardTier={1}
@@ -3167,6 +3168,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               showImportedLinkedInSection={boardTab === "saved"}
               importedLinkedInJobs={importedLinkedInJobs}
               linkedinImportSummary={linkedinImportSummary}
+              linkedinImporting={linkedinImporting}
               onImportLinkedIn={startLinkedInImport}
               onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
               cardTier={effectiveTier}
@@ -3317,6 +3319,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       showImportedLinkedInSection = false,
                       importedLinkedInJobs = [],
                       linkedinImportSummary = { total: 0, lastImportedAt: null },
+                      linkedinImporting = false,
                       onImportLinkedIn,
                       onRefreshImportedLinkedIn,
                       cardTier = 1, containerRef }) {
