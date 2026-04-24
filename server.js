@@ -3709,7 +3709,7 @@ app.use(passport.session());
 app.use(bindAuthContext);
 
 const CLIENT_DIST = path.join(__dirname,"client","dist");
-if (fs.existsSync(CLIENT_DIST)) app.use(express.static(CLIENT_DIST));
+app.use(express.static(CLIENT_DIST));
 
 // ═══════════════════════════════════════════════════════════════
 // AUTH
@@ -6376,11 +6376,6 @@ app.post("/api/standalone/apply",
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/health", (_req,res) => res.json({ ok:true, time:new Date().toISOString() }));
 
-app.get("*", (req, res) => {
-  const index = path.join(CLIENT_DIST,"index.html");
-  if (fs.existsSync(index)) return res.sendFile(index);
-  res.status(404).send("Run: cd client && npm run build");
-});
 
 // ── Profile isolation diagnostic ─────────────────────────────
 app.get("/api/debug/verify-isolation", requireAuth, (req, res) => {
@@ -6407,6 +6402,10 @@ app.get("/api/debug/verify-isolation", requireAuth, (req, res) => {
     wrongJobSamples:      wrongJobs,
     isolated:             wrongJobs.length === 0,
   });
+});
+
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(CLIENT_DIST, "index.html"));
 });
 
 console.log(`[boot] binding HTTP listener on :${PORT}`);
