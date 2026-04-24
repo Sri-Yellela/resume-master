@@ -50,7 +50,7 @@ COPY client/package*.json ./client/
 RUN cd client && npm install
 COPY client/ ./client/
 COPY shared/ ./shared/
-COPY data/ ./data/
+COPY data/ROLE_ALIAS_MAP.json ./data/ROLE_ALIAS_MAP.json
 RUN cd client && npm run build
 
 # Copy remaining server source
