@@ -50,6 +50,7 @@ COPY client/package*.json ./client/
 RUN cd client && npm install
 COPY client/ ./client/
 COPY shared/ ./shared/
+COPY data/ ./data/
 RUN cd client && npm run build
 
 # Copy remaining server source
