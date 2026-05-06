@@ -1,0 +1,302 @@
+
+────────────────────────────────────────────────────────────────
+  JOB PIPELINE TRACE  —  "Data Scientist, full-time, 3–5 YOE (should PASS all filters)"
+────────────────────────────────────────────────────────────────
+  Scenario: "datascientist"    Profile: "Data Scientist"
+
+▶ Stage 1  Role Normalisation  (searchQueryBuilder.js → normaliseRole)
+──────────────────────────────────────────────────
+
+  ┌── INPUT ───────────────────────────────────┐
+  │  rawRole                  "data scientist"
+  └────────────────────────────────────────────────┘
+
+  ┌── OUTPUT ──────────────────────────────────┐
+  │  normalisedRole           "Data Scientist"
+  └────────────────────────────────────────────────┘
+
+   PASS   Role input cleaned and alias-mapped to canonical form
+
+▶ Stage 2  Profile-Driven Title Variants  (searchQueryBuilder.js → buildApifyQueriesFromProfile)
+──────────────────────────────────────────────────
+
+  ┌── PROFILE INPUT ───────────────────────────┐
+  │  profile_name             "Data Scientist"
+  │  target_titles            ["Data Scientist", "ML Engineer", "Analytics Engineer"]
+  │  seniority                "mid"
+  │  domain                   "data"
+  └────────────────────────────────────────────────┘
+
+  ┌── TITLE VARIANTS SENT TO APIFY ────────────┐
+  │  [0]  "Data Scientist"
+  │  [1]  "Mid-Level Data Scientist"
+  │  [2]  "ML Engineer"
+  │  [3]  "Mid-Level ML Engineer"
+  │  [4]  "Analytics Engineer"
+  │  [5]  "Mid-Level Analytics Engineer"
+  └────────────────────────────────────────────────┘
+
+  → These become the jobTitles[] array in the Apify/HarvestAPI call.
+
+   PASS   6 title variant(s) generated
+
+▶ Stage 2.5  Apify / HarvestAPI Payload  (what gets SENT to the external scraper)
+──────────────────────────────────────────────────
+  Actor: harvestapi/linkedin-job-search  (LinkedIn scraper on Apify platform)
+
+  ┌── FULL PAYLOAD SENT TO APIFY ──────────────┐
+  │  jobTitles                ["Data Scientist", "Mid-Level Data Scientist", "ML Engineer", "Mid-Level ML Engineer", "Analytics Engineer", "Mid-Level Analytics Engineer"]
+  │  locations                ["United States"]
+  │  workplaceType            ["remote", "hybrid", "office"]
+  │  employmentType           ["full-time"]
+  │  postedLimit              "24h"
+  │  maxItems                 300
+  └────────────────────────────────────────────────┘
+
+  Notes:
+  │  jobTitles     comes from buildApifyQueriesFromProfile() — profile drives the search
+  │  workplaceType always all three — UI board filter is applied after, not before
+  │  postedLimit   "24h" = last 24 hours (default). "1w" / "1m" when UI sets ageFilter
+  │  maxItems      300 cap; firmware domain gets 75 (smaller niche)
+  │  locations     single string from user_profile; defaults to "United States"
+
+  ┌── SAMPLE RAW APIFY RESPONSE ITEM (1 of up to 300 returned) ┐
+  │  id                       "4123456789"
+  │  title                    "Data Scientist"
+  │  company.name             "Insight Analytics Inc"
+  │  location                 "Remote"
+  │  contractType             "full_time"
+  │  workplaceType            "remote"
+  │  description.text         "We are seeking a Data Scientist with 3-5 years of experience to join our growing…"
+  │  description.html         "<p>(HTML markup of the full job post)</p>"
+  │  applyMethod.companyApplyUrl "https://insightanalytics.com/careers/apply/4123456789"
+  │  linkedinUrl              "https://www.linkedin.com/jobs/view/4123456789"
+  │  listingDate              "2026-05-06"
+  │  salary.min               120000
+  │  salary.max               160000
+  │  salary.currency          "USD"
+  │  applicants               47
+  └────────────────────────────────────────────────┘
+
+  → Apify returns a flat array of these objects (50–200 items typical)
+  → Each item is handed to normaliseItem() in Stage 3 to map to internal schema
+
+   PASS   Payload queued — Apify actor runs for 2–5 min; server responds immediately with {scraping:true}
+
+▶ Stage 3  Raw Item Normalisation  (jobNormalization.js → normaliseItem)
+──────────────────────────────────────────────────
+
+  ┌── RAW API RESPONSE (key fields) ───────────┐
+  │  id                       "4123456789"
+  │  title                    "Data Scientist"
+  │  company                  "Insight Analytics Inc"
+  │  location                 "Remote"
+  │  contractType             "full_time"
+  │  workplaceType            "remote"
+  │  description              "We are seeking a Data Scientist with 3-5 years of experience to join our growing…"
+  └────────────────────────────────────────────────┘
+
+  ┌── NORMALISED ITEM ─────────────────────────┐
+  │  jobId                    "4123456789"
+  │  title                    "Data Scientist"
+  │  company                  "Insight Analytics Inc"
+  │  location                 "Remote"
+  │  jobType                  "full-time"
+  │  workTypeHint             "remote"
+  │  applyUrl                 "https://insightanalytics.com/careers/apply/4123456789"
+  │  salaryMin                120000
+  │  salaryMax                160000
+  │  description              "We are seeking a Data Scientist with 3-5 years of experience to join our growing…"
+  └────────────────────────────────────────────────┘
+
+▶ Stage 4a  Employment Type Filter  (jobNormalization.js → isEmploymentTypeWanted)
+──────────────────────────────────────────────────
+
+  ┌── INPUT ───────────────────────────────────┐
+  │  item.jobType             "full-time"
+  │  item.title               "Data Scientist"
+  │  item.description         "We are seeking a Data Scientist with 3-5 years of experience to join our growing…"
+  │  wantedTypes              ["full-time"]
+  └────────────────────────────────────────────────┘
+
+  ┌── OUTPUT ──────────────────────────────────┐
+  │  passed                   true
+  └────────────────────────────────────────────────┘
+
+   PASS   Employment type is acceptable — continues to next stage
+
+▶ Stage 4b  Title Relevance Filter  (searchQueryBuilder.js → isTitleRelevantToProfile)
+──────────────────────────────────────────────────
+
+  ┌── INPUT ───────────────────────────────────┐
+  │  job title                "Data Scientist"
+  │  profile targets (variants) ["Data Scientist", "Mid-Level Data Scientist", "ML Engineer", "Mid-Level ML Engineer", "Analytics Engineer", "Mid-Level Analytics Engineer"]
+  └────────────────────────────────────────────────┘
+
+  Token breakdown (AND match — all tokens must appear in job title):
+    Data Scientist                 tokens: [✓data  ✓scientist]  →  ✓ MATCHES
+    Mid-Level Data Scientist       tokens: [✓data  ✓scientist]  →  ✓ MATCHES
+    ML Engineer                    tokens: [✗engineer]  →  ✗ no match
+    Mid-Level ML Engineer          tokens: [✗engineer]  →  ✗ no match
+    Analytics Engineer             tokens: [✗analytics  ✗engineer]  →  ✗ no match
+    Mid-Level Analytics Engineer   tokens: [✗analytics  ✗engineer]  →  ✗ no match
+
+  ┌── OUTPUT ──────────────────────────────────┐
+  │  titleRelevant            true
+  └────────────────────────────────────────────────┘
+
+   PASS   Title matches profile targets — continues
+
+▶ Stage 4c  Ghost Job Scoring  (jobNormalization.js → ghostJobScoreNorm + isReposted)
+──────────────────────────────────────────────────
+
+  Scoring signals:
+    No/empty URL            +0  (ok)
+    Description < 150 chars +0  (len=515)
+    Unknown company          +0  (company="Insight Analytics Inc")
+    'Reposted' in text       no
+
+  ┌── OUTPUT ──────────────────────────────────┐
+  │  ghostScore               0
+  │  threshold                4
+  │  reposted                 false
+  │  willDrop                 false
+  └────────────────────────────────────────────────┘
+
+   PASS   Ghost score 0 < 4 — continues
+
+▶ Stage 4d  Years-of-Experience Filter  (jobNormalization.js → parseYearsExperience)
+──────────────────────────────────────────────────
+
+  ┌── INPUT ───────────────────────────────────┐
+  │  description snippet      "We are seeking a Data Scientist with 3-5 years of experience to join our growing…"
+  │  user.yearsExperience     4
+  │  maxAllowed (user+2)      6
+  └────────────────────────────────────────────────┘
+
+  ┌── OUTPUT ──────────────────────────────────┐
+  │  parsed.min               3
+  │  parsed.max               5
+  │  parsed.raw               "3-5 years of experience"
+  │  will drop                false
+  └────────────────────────────────────────────────┘
+
+   PASS   Job needs 3 YOE, user has 4 (within +2 buffer)
+
+▶ Stage 5  Classification at Ingest  (jobClassifier.js → classifyForIngest)
+──────────────────────────────────────────────────
+
+  ┌── INPUT ───────────────────────────────────┐
+  │  title                    "Data Scientist"
+  │  description              "We are seeking a Data Scientist with 3-5 years of experience to join our growing…"
+  │  confidence threshold     0.75
+  └────────────────────────────────────────────────┘
+
+  ┌── OUTPUT ──────────────────────────────────┐
+  │  roleKey                  "data"
+  │  confidence               0.97
+  │  matchedBy                "strong_anchor+desc"
+  │  willAssign               true
+  └────────────────────────────────────────────────┘
+
+   PASS   Assigned role_key="data" with confidence 97%
+
+▶ Stage 5.5  DB Storage  (INSERT rows written to SQLite after ingest)
+──────────────────────────────────────────────────
+
+  TABLE 1 — scraped_jobs  (one row per unique LinkedIn job ID)
+
+  ┌── scraped_jobs INSERT values ──────────────┐
+  │  job_id                   "4123456789  ← real LinkedIn job ID (PK, INSERT OR IGNORE)"
+  │  search_query             "data scientist  ← normalised query string"
+  │  company                  "Insight Analytics Inc"
+  │  title                    "Data Scientist"
+  │  category                 "(assigned by classifyJob — async LLM/rule call after ingest)"
+  │  location                 "Remote"
+  │  work_type                "Remote  ← inferred from location + description text"
+  │  source                   "LinkedIn"
+  │  url                      "https://www.linkedin.com/jobs/view/4123456789"
+  │  apply_url                "https://insightanalytics.com/careers/apply/4123456789"
+  │  posted_at                "(unix epoch — normalizePostedAt(listingDate))"
+  │  description              "(full text — 515 chars)"
+  │  description_html         null
+  │  ghost_score              0
+  │  min_years_exp            3
+  │  max_years_exp            5
+  │  exp_raw                  "3-5 years of experience"
+  │  is_frequent_repost       0
+  │  _hash                    "(md5(company.lower + '|' + title.lower)  — content dedup key)"
+  │  scraped_at               "(unixepoch() — epoch seconds at insert time)"
+  │  source_platform          "linkedin"
+  │  salary_min               120000
+  │  salary_max               160000
+  │  salary_currency          "USD"
+  │  applicant_count          47
+  │  company_icon_url         null
+  │  employment_type          "full-time"
+  │  domain_profile_id        "(domain_profiles.id — scopes job to the triggering profile)"
+  └────────────────────────────────────────────────┘
+
+  TABLE 2 — job_role_map  (drives triple-filter board query)
+
+  ┌── job_role_map INSERT values ──────────────┐
+  │  job_id                   "4123456789"
+  │  role_key                 "data  ← used in WHERE jrm.role_key = ?"
+  │  role_family              "data"
+  │  domain                   "data"
+  │  source_profile_id        "(domain_profiles.id — which profile produced this mapping)"
+  │  confidence               0.97
+  │  matched_by               "profile_scrape"
+  └────────────────────────────────────────────────┘
+  │  NOTE: INSERT OR IGNORE — first-write wins; profile scrape takes precedence over orphan ingest classifier
+
+  TABLE 3 — user_jobs  (user-scoped interaction state — created lazily)
+
+  ┌── user_jobs INSERT (on first board load / user interaction) ┐
+  │  user_id                  "(users.id — the user who triggered /api/scrape)"
+  │  job_id                   "4123456789"
+  │  domain_profile_id        "(domain_profiles.id — per-profile isolation; no cross-profile bleed)"
+  │  visited                  0
+  │  starred                  0
+  │  disliked                 0
+  │  applied                  0
+  │  resume_generated         0
+  │  updated_at               "(unixepoch() — set on first user action: visit, star, apply, etc.)"
+  └────────────────────────────────────────────────┘
+  │  NOTE: Row created when user opens board (GET /api/jobs) or interacts with the job card
+  │  SSE:  After background scrape finishes, emitToUser() fires "scrape_complete" → board auto-refreshes
+
+   PASS   3 tables written — job is now scoped to the profile and visible on the user's board
+
+▶ Stage 6  Profile Title SQL Builder  (profileTitleFilter.js → profileTitleSql)
+──────────────────────────────────────────────────
+  (This runs at board-display time — GET /api/jobs — not at scrape time)
+
+  ┌── INPUT ───────────────────────────────────┐
+  │  profile.target_titles    ["Data Scientist", "ML Engineer", "Analytics Engineer"]
+  └────────────────────────────────────────────────┘
+
+  ┌── OUTPUT ──────────────────────────────────┐
+  │  sql fragment             "((LOWER(sj.title) LIKE ? AND LOWER(sj.title) LIKE ?) OR (LOWER(sj.title) LIKE ?)…"
+  │  bind params              ["%data%", "%scientist%", "%analytics%"]
+  └────────────────────────────────────────────────┘
+
+   PASS   SQL fragment used to scope the board query to this profile's titles
+
+────────────────────────────────────────────────────────────────
+  PIPELINE SUMMARY
+────────────────────────────────────────────────────────────────
+
+   PASS   Job passed all pipeline filters
+  Next steps:  INSERT into scraped_jobs → tag job_role_map → sync user_jobs → SSE push
+  Board query: profileTitleSql() + roleTitleSql() + user board filters
+
+  Try other scenarios:
+  node scripts/tracePipeline.js --scenario datascientist   ← Data Scientist, full-time, 3–5 YOE (PASSES)
+  node scripts/tracePipeline.js --scenario contract         ← dropped at Stage 4a (employment type)
+  node scripts/tracePipeline.js --scenario ghost             ← dropped at Stage 4c (ghost score ≥ 4)
+  node scripts/tracePipeline.js --scenario yoe_drop          ← dropped at Stage 4d (10+ YOE required)
+  node scripts/tracePipeline.js --scenario firmware          ← firmware domain isolation test
+  node scripts/tracePipeline.js --scenario imported          ← LinkedIn extension import path
+  node scripts/tracePipeline.js --role "ML Engineer"         ← swap role on any scenario
+

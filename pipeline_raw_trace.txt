@@ -1,0 +1,377 @@
+
+======================================================================
+
+PIPELINE RAW TRACE — scenario: datascientist
+
+======================================================================
+
+
+
+====== STAGE 1: normaliseRole ======
+
+----------------------------------------------------------------------
+INPUT  → raw role string
+----------------------------------------------------------------------
+"data scientist"
+
+----------------------------------------------------------------------
+OUTPUT → normalised role
+----------------------------------------------------------------------
+"Data Scientist"
+
+
+====== STAGE 2: buildApifyQueriesFromProfile ======
+
+----------------------------------------------------------------------
+INPUT  → active domain profile object
+----------------------------------------------------------------------
+{
+  "profile_name": "Data Scientist",
+  "target_titles": [
+    "Data Scientist",
+    "ML Engineer",
+    "Analytics Engineer"
+  ],
+  "seniority": "mid",
+  "domain": "data",
+  "role_family": "data"
+}
+
+----------------------------------------------------------------------
+OUTPUT → jobTitles[] array (sent to Apify)
+----------------------------------------------------------------------
+[
+  "Data Scientist",
+  "Mid-Level Data Scientist",
+  "ML Engineer",
+  "Mid-Level ML Engineer",
+  "Analytics Engineer",
+  "Mid-Level Analytics Engineer"
+]
+
+
+====== STAGE 2.5: Apify actor input payload (scrapeHarvestAPI) ======
+
+----------------------------------------------------------------------
+INPUT  → payload sent to harvestapi/linkedin-job-search actor
+----------------------------------------------------------------------
+{
+  "jobTitles": [
+    "Data Scientist",
+    "Mid-Level Data Scientist",
+    "ML Engineer",
+    "Mid-Level ML Engineer",
+    "Analytics Engineer",
+    "Mid-Level Analytics Engineer"
+  ],
+  "locations": [
+    "United States"
+  ],
+  "workplaceType": [
+    "remote",
+    "hybrid",
+    "office"
+  ],
+  "employmentType": [
+    "full-time"
+  ],
+  "postedLimit": "24h",
+  "maxItems": 300
+}
+
+----------------------------------------------------------------------
+OUTPUT → raw items array from Apify (one sample item shown)
+----------------------------------------------------------------------
+[
+  {
+    "id": "4123456789",
+    "title": "Data Scientist",
+    "company": {
+      "name": "Insight Analytics Inc"
+    },
+    "location": "Remote",
+    "contractType": "full_time",
+    "description": {
+      "text": "We are seeking a Data Scientist with 3-5 years of experience to join our growing team. You will build and deploy predictive models, run A/B tests, and surface insights to stakeholders. Requirements: strong Python skills, SQL, and ML frameworks (scikit-learn, XGBoost, LightGBM). Experience with data pipelines, feature engineering, and experiment design preferred. Familiarity with cloud platforms (AWS, GCP) and tools like dbt, Airflow, or Spark is a plus. This is a full-time remote role with equity compensation.",
+      "html": "<p>We are seeking a <strong>Data Scientist</strong> with 3-5 years of experience...</p>"
+    },
+    "applyMethod": {
+      "companyApplyUrl": "https://insightanalytics.com/careers/apply/4123456789"
+    },
+    "linkedinUrl": "https://www.linkedin.com/jobs/view/4123456789",
+    "workplaceType": "remote",
+    "listingDate": "2026-05-06",
+    "salary": {
+      "min": 120000,
+      "max": 160000,
+      "currency": "USD"
+    },
+    "applicants": 47
+  }
+]
+
+
+====== STAGE 3: normaliseItem ======
+
+----------------------------------------------------------------------
+INPUT  → raw Apify item
+----------------------------------------------------------------------
+{
+  "id": "4123456789",
+  "title": "Data Scientist",
+  "company": {
+    "name": "Insight Analytics Inc"
+  },
+  "location": "Remote",
+  "contractType": "full_time",
+  "description": {
+    "text": "We are seeking a Data Scientist with 3-5 years of experience to join our growing team. You will build and deploy predictive models, run A/B tests, and surface insights to stakeholders. Requirements: strong Python skills, SQL, and ML frameworks (scikit-learn, XGBoost, LightGBM). Experience with data pipelines, feature engineering, and experiment design preferred. Familiarity with cloud platforms (AWS, GCP) and tools like dbt, Airflow, or Spark is a plus. This is a full-time remote role with equity compensation.",
+    "html": "<p>We are seeking a <strong>Data Scientist</strong> with 3-5 years of experience...</p>"
+  },
+  "applyMethod": {
+    "companyApplyUrl": "https://insightanalytics.com/careers/apply/4123456789"
+  },
+  "linkedinUrl": "https://www.linkedin.com/jobs/view/4123456789",
+  "workplaceType": "remote",
+  "listingDate": "2026-05-06",
+  "salary": {
+    "min": 120000,
+    "max": 160000,
+    "currency": "USD"
+  },
+  "applicants": 47
+}
+
+----------------------------------------------------------------------
+OUTPUT → normalised item (internal schema)
+----------------------------------------------------------------------
+{
+  "_source": "LinkedIn",
+  "jobId": "4123456789",
+  "company": "Insight Analytics Inc",
+  "title": "Data Scientist",
+  "description": "We are seeking a Data Scientist with 3-5 years of experience to join our growing team. You will build and deploy predictive models, run A/B tests, and surface insights to stakeholders. Requirements: strong Python skills, SQL, and ML frameworks (scikit-learn, XGBoost, LightGBM). Experience with data pipelines, feature engineering, and experiment design preferred. Familiarity with cloud platforms (AWS, GCP) and tools like dbt, Airflow, or Spark is a plus. This is a full-time remote role with equity compensation.",
+  "descriptionHtml": "<p>We are seeking a <strong>Data Scientist</strong> with 3-5 years of experience...</p>",
+  "location": "Remote",
+  "workTypeHint": "remote",
+  "applyUrl": "https://insightanalytics.com/careers/apply/4123456789",
+  "url": "https://www.linkedin.com/jobs/view/4123456789",
+  "postedAt": "2026-05-06",
+  "jobType": "full-time",
+  "salaryMin": 120000,
+  "salaryMax": 160000,
+  "salaryCurrency": "USD",
+  "applicantCount": 47,
+  "companyLogoUrl": null
+}
+
+
+====== STAGE 4a: isEmploymentTypeWanted ======
+
+----------------------------------------------------------------------
+INPUT  → item fields + wantedTypes
+----------------------------------------------------------------------
+{
+  "item.title": "Data Scientist",
+  "item.jobType": "full-time",
+  "item.description": "We are seeking a Data Scientist with 3-5 years of experience to join our growing team. You will build and deploy predictive models, run A/B tests, and surface insights to stakeholders. Requirements: strong Python skills, SQL, and ML frameworks (scikit-learn, XGBoost, LightGBM). Experience with data pipelines, feature engineering, and experiment design preferred. Familiarity with cloud platforms (AWS, GCP) and tools like dbt, Airflow, or Spark is a plus. This is a full-time remote role with equity compensation.",
+  "wantedTypes": [
+    "full-time"
+  ]
+}
+
+----------------------------------------------------------------------
+OUTPUT → boolean (true = keep, false = drop)
+----------------------------------------------------------------------
+true
+
+
+====== STAGE 4b: isTitleRelevantToProfile ======
+
+----------------------------------------------------------------------
+INPUT  → job title + profile target variants
+----------------------------------------------------------------------
+{
+  "jobTitle": "Data Scientist",
+  "targetTitles": [
+    "Data Scientist",
+    "Mid-Level Data Scientist",
+    "ML Engineer",
+    "Mid-Level ML Engineer",
+    "Analytics Engineer",
+    "Mid-Level Analytics Engineer"
+  ]
+}
+
+----------------------------------------------------------------------
+OUTPUT → boolean (true = title relevant, false = drop)
+----------------------------------------------------------------------
+true
+
+
+====== STAGE 4c: ghostJobScoreNorm + isReposted ======
+
+----------------------------------------------------------------------
+INPUT  → item fields checked for ghost signals
+----------------------------------------------------------------------
+{
+  "item.url": "https://insightanalytics.com/careers/apply/4123456789",
+  "item.description": "We are seeking a Data Scientist with 3-5 years of experience to join our growing team. You will build and deploy predictive models, run A/B tests, and surface insights to stakeholders. Requirements: strong Python skills, SQL, and ML frameworks (scikit-learn, XGBoost, LightGBM). Experience with data pipelines, feature engineering, and experiment design preferred. Familiarity with cloud platforms (AWS, GCP) and tools like dbt, Airflow, or Spark is a plus. This is a full-time remote role with equity compensation.",
+  "item.company": "Insight Analytics Inc",
+  "item.title": "Data Scientist"
+}
+
+----------------------------------------------------------------------
+OUTPUT → score + reposted flag (drop if score >= 4 or reposted)
+----------------------------------------------------------------------
+{
+  "ghostScore": 0,
+  "reposted": false,
+  "drop": false
+}
+
+
+====== STAGE 4d: parseYearsExperience ======
+
+----------------------------------------------------------------------
+INPUT  → description text + user YOE context
+----------------------------------------------------------------------
+{
+  "description": "We are seeking a Data Scientist with 3-5 years of experience to join our growing team. You will build and deploy predictive models, run A/B tests, and surface insights to stakeholders. Requirements: strong Python skills, SQL, and ML frameworks (scikit-learn, XGBoost, LightGBM). Experience with data pipelines, feature engineering, and experiment design preferred. Familiarity with cloud platforms (AWS, GCP) and tools like dbt, Airflow, or Spark is a plus. This is a full-time remote role with equity compensation.",
+  "user.yearsExperience": 4,
+  "maxAllowed (user+2)": 6
+}
+
+----------------------------------------------------------------------
+OUTPUT → parsed YOE range + drop decision
+----------------------------------------------------------------------
+{
+  "parsed": {
+    "min": 3,
+    "max": 5,
+    "raw": "3-5 years of experience"
+  },
+  "maxAllowed": 6,
+  "drop": false
+}
+
+
+====== STAGE 5: classifyForIngest ======
+
+----------------------------------------------------------------------
+INPUT  → title + description + confidence threshold
+----------------------------------------------------------------------
+{
+  "title": "Data Scientist",
+  "description": "We are seeking a Data Scientist with 3-5 years of experience to join our growing team. You will build and deploy predictive models, run A/B tests, and surface insights to stakeholders. Requirements: strong Python skills, SQL, and ML frameworks (scikit-learn, XGBoost, LightGBM). Experience with data pipelines, feature engineering, and experiment design preferred. Familiarity with cloud platforms (AWS, GCP) and tools like dbt, Airflow, or Spark is a plus. This is a full-time remote role with equity compensation.",
+  "threshold": 0.75
+}
+
+----------------------------------------------------------------------
+OUTPUT → classification result (null = unclassified)
+----------------------------------------------------------------------
+{
+  "roleKey": "data",
+  "confidence": 0.97,
+  "matchedBy": "strong_anchor+desc"
+}
+
+
+====== STAGE 5.5: DB INSERT rows ======
+
+----------------------------------------------------------------------
+TABLE: scraped_jobs — INSERT values
+----------------------------------------------------------------------
+{
+  "job_id": "4123456789",
+  "search_query": "data scientist",
+  "company": "Insight Analytics Inc",
+  "title": "Data Scientist",
+  "category": "(assigned by async classifyJob call)",
+  "location": "Remote",
+  "work_type": "Remote",
+  "source": "LinkedIn",
+  "url": "https://www.linkedin.com/jobs/view/4123456789",
+  "apply_url": "https://insightanalytics.com/careers/apply/4123456789",
+  "posted_at": "(normalizePostedAt('2026-05-06') → unix epoch)",
+  "description": "We are seeking a Data Scientist with 3-5 years of experience to join our growing team. You will build and deploy predictive models, run A/B tests, and surface insights to stakeholders. Requirements: strong Python skills, SQL, and ML frameworks (scikit-learn, XGBoost, LightGBM). Experience with data pipelines, feature engineering, and experiment design preferred. Familiarity with cloud platforms (AWS, GCP) and tools like dbt, Airflow, or Spark is a plus. This is a full-time remote role with equity compensation.",
+  "description_html": "<p>We are seeking a <strong>Data Scientist</strong> with 3-5 years of experience...</p>",
+  "ghost_score": 0,
+  "years_experience": 3,
+  "min_years_exp": 3,
+  "max_years_exp": 5,
+  "exp_raw": "3-5 years of experience",
+  "is_frequent_repost": 0,
+  "_hash": "(md5('insight analytics inc|data scientist'))",
+  "scraped_at": "(unixepoch())",
+  "source_platform": "linkedin",
+  "salary_min": 120000,
+  "salary_max": 160000,
+  "salary_currency": "USD",
+  "applicant_count": 47,
+  "company_icon_url": null,
+  "employment_type": "full-time",
+  "domain_profile_id": "(domain_profiles.id of active profile)"
+}
+
+----------------------------------------------------------------------
+TABLE: job_role_map — INSERT values
+----------------------------------------------------------------------
+{
+  "job_id": "4123456789",
+  "role_key": "data",
+  "role_family": "data",
+  "domain": "data",
+  "source_profile_id": "(domain_profiles.id of active profile)",
+  "confidence": 0.97,
+  "matched_by": "profile_scrape"
+}
+
+----------------------------------------------------------------------
+TABLE: user_jobs    — INSERT values (created lazily on first board load)
+----------------------------------------------------------------------
+{
+  "user_id": "(users.id — user who triggered /api/scrape)",
+  "job_id": "4123456789",
+  "domain_profile_id": "(domain_profiles.id of active profile)",
+  "visited": 0,
+  "starred": 0,
+  "disliked": 0,
+  "applied": 0,
+  "resume_generated": 0,
+  "updated_at": "(unixepoch() on first board interaction)"
+}
+
+
+====== STAGE 6: profileTitleSql (board query filter) ======
+
+----------------------------------------------------------------------
+INPUT  → column name + profile.target_titles
+----------------------------------------------------------------------
+{
+  "column": "sj.title",
+  "target_titles": [
+    "Data Scientist",
+    "ML Engineer",
+    "Analytics Engineer"
+  ]
+}
+
+----------------------------------------------------------------------
+OUTPUT → SQL fragment + bind params
+----------------------------------------------------------------------
+{
+  "sql": "((LOWER(sj.title) LIKE ? AND LOWER(sj.title) LIKE ?) OR (LOWER(sj.title) LIKE ?))",
+  "params": [
+    "%data%",
+    "%scientist%",
+    "%analytics%"
+  ]
+}
+
+======================================================================
+
+END OF TRACE
+
+======================================================================
+

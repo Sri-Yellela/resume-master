@@ -31,6 +31,7 @@ export function jobHash(job) {
 export function normaliseItem(raw) {
   const company =
     raw.company?.name ||
+    (typeof raw.company === "string" ? raw.company : "") ||
     raw.companyName   ||
     raw.employer?.name ||
     "";
@@ -169,9 +170,21 @@ export function isEmploymentTypeWanted(item, wantedTypes) {
 
   const signals = {
     "full-time":  ["full-time", "full time", "permanent"],
-    "contract":   ["contract", "contractor", "freelance", "temp", "temporary"],
+    "contract":   [
+      "contract", "contractor", "freelance", "temp", "temporary",
+      "w2 contract", "corp-to-corp", "c2c", "contract-to-hire",
+      "contract to hire", "1099",
+    ],
     "internship": ["intern", "internship", "co-op", "coop"],
   };
+
+  // HARD EXCLUSIONS: contract and internship signals are treated as disqualifiers
+  // when those types are not in wantedTypes. This prevents "full-time equivalent
+  // contract" or "internship with full-time potential" from slipping through.
+  const hardExcludeTypes = ["contract", "internship"].filter(t => !wantedTypes.includes(t));
+  for (const type of hardExcludeTypes) {
+    if (signals[type].some(s => text.includes(s))) return false;
+  }
 
   // No type signal in text — assume full-time (most roles don't say it explicitly)
   const hasAnySignal = Object.values(signals).flat().some(s => text.includes(s));
@@ -205,14 +218,39 @@ export function parseYearsExperience(description = "") {
 
 export function ghostJobScoreNorm(item) {
   let score = 0;
-  const desc = item.description.toLowerCase();
-  const url  = (item.url || "").toLowerCase();
+  const desc  = (item.description || "").toLowerCase();
+  const url   = (item.url || "").toLowerCase();
+  const title = (item.title || "").toLowerCase();
+
+  // ── URL signals ───────────────────────────────────────────
+  // No apply URL at all — cannot apply externally → strong ghost signal
   if (!url || url === "#")                                                score += 3;
+  // LinkedIn-only view URL with no company apply URL → staffing farm or ghost
   if (url.includes("linkedin.com/jobs/view") && !url.includes("apply")) score += 1;
-  if (desc.length < 150)                                                 score += 2;
-  if (!item.company || item.company === "Unknown")                       score += 2;
-  if (item.title.toLowerCase().includes("multiple") ||
-      item.title.toLowerCase().includes("various"))                      score += 2;
+  // LinkedIn Easy Apply only (no external company site) → no company website
+  if (item.isEasyApply === true && !item.applyUrl)                       score += 2;
+
+  // ── Description signals ───────────────────────────────────
+  // Very short description → placeholder or scraped stub
+  if (desc.length < 150)                                                  score += 2;
+  // No description at all
+  if (!desc.trim())                                                        score += 3;
+  // Boilerplate-only descriptions (copy-paste ghost farms)
+  if (/equal opportunity employer/i.test(desc) && desc.length < 300)     score += 1;
+
+  // ── Company signals ───────────────────────────────────────
+  // Unknown / missing company name
+  if (!item.company || item.company === "Unknown")                        score += 2;
+  // Staffing / recruiting agency language in company name
+  if (/\b(staffing|recruiting|talent|placement|search firm|headhunt)\b/i.test(item.company || "")) score += 1;
+
+  // ── Title signals ─────────────────────────────────────────
+  // Bulk-posting titles
+  if (/\b(multiple|various|several)\b/.test(title))                       score += 2;
+  // Vague filler titles
+  if (/\b(opportunity|opening|position|role)\b/.test(title) &&
+      title.split(/\s+/).length <= 3)                                      score += 1;
+
   return score;
 }
 

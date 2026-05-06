@@ -1,0 +1,375 @@
+======================================================================
+PIPELINE CONDITION TEST RESULTS
+Run: 2026-05-06T23:36:43.454Z
+======================================================================
+
+
+----------------------------------------------------------------------
+GROUP: 1-TitleVariants
+----------------------------------------------------------------------
+
+[PASS] mid seniority → includes plain + Mid-Level prefix
+  INPUT:    {"target_titles":"[\"Data Scientist\"]","seniority":"mid","domain":"data"}
+  OUTPUT:   ["Data Scientist","Mid-Level Data Scientist"]
+  EXPECTED: ["Data Scientist","Mid-Level Data Scientist"]
+  NOTE:     mid seniority should produce exactly these 2 variants
+
+[PASS] senior seniority → Senior/Lead/Staff prefixes
+  INPUT:    {"target_titles":"[\"Data Scientist\"]","seniority":"senior","domain":"data"}
+  OUTPUT:   ["Senior Data Scientist","Lead Data Scientist","Staff Data Scientist"]
+  EXPECTED: ["Senior Data Scientist","Lead Data Scientist","Staff Data Scientist"]
+
+[PASS] junior seniority → Junior/Associate/Entry Level prefixes
+  INPUT:    {"target_titles":"[\"Data Scientist\"]","seniority":"junior","domain":"data"}
+  OUTPUT:   ["Junior Data Scientist","Associate Data Scientist","Entry Level Data Scientist"]
+  EXPECTED: ["Junior Data Scientist","Associate Data Scientist","Entry Level Data Scientist"]
+
+[PASS] empty target_titles → fallback should not crash
+  INPUT:    {"target_titles":"[]","seniority":"mid","domain":"data"}
+  OUTPUT:   []
+  EXPECTED: (any array, even empty — must not throw)
+  NOTE:     ok
+
+[PASS] 3 titles × mid = 6 variants, capped at 10
+  INPUT:    {"target_titles":"[\"Data Scientist\",\"ML Engineer\",\"Analytics Engineer\"]","seniority":"mid","domain":"data"}
+  OUTPUT:   ["Data Scientist","Mid-Level Data Scientist","ML Engineer","Mid-Level ML Engineer","Analytics Engineer","Mid-Level Analytics Engineer"]
+  EXPECTED: 6 variants (3 × 2 prefixes)
+  NOTE:     got 6 variants
+
+
+----------------------------------------------------------------------
+GROUP: 2-NormaliseItem
+----------------------------------------------------------------------
+
+[PASS] company as flat string (not object) — common Apify variant
+  INPUT:    {"company field":"FlatCo"}
+  OUTPUT:   {"company result":"FlatCo"}
+  EXPECTED: FlatCo
+  NOTE:     ok
+
+[PASS] missing job id → jobId should be null
+  INPUT:    "(no id field)"
+  OUTPUT:   {"jobId":null}
+  EXPECTED: null
+  NOTE:     ok
+
+[PASS] salary as text '$120K–$160K' → parses to salaryMin/Max
+  INPUT:    {"compensationText":"$120K–$160K"}
+  OUTPUT:   {"salaryMin":120000,"salaryMax":160000}
+  EXPECTED: {"salaryMin":120000,"salaryMax":160000}
+  NOTE:     got min=120000 max=160000
+
+[PASS] salary as text '$100,000 - $140,000' (no K suffix)
+  INPUT:    {"compensationText":"$100,000 - $140,000"}
+  OUTPUT:   {"salaryMin":100000,"salaryMax":140000}
+  EXPECTED: {"salaryMin":100000,"salaryMax":140000}
+  NOTE:     got min=100000 max=140000
+
+[PASS] location as object { city, state } → combined string
+  INPUT:    {"location":{"city":"New York","state":"NY"}}
+  OUTPUT:   {"location":"New York, NY"}
+  EXPECTED: New York, NY
+  NOTE:     got "New York, NY"
+
+[PASS] empty description → description should be empty string not null
+  INPUT:    "(empty description.text)"
+  OUTPUT:   {"description":""}
+  EXPECTED: 
+  NOTE:     got: ""
+
+[PASS] no description field at all → should not throw, description = ''
+  INPUT:    "(no description field)"
+  OUTPUT:   {"description":""}
+  EXPECTED: 
+  NOTE:     got: ""
+
+[PASS] contractType 'full_time' maps to jobType 'full-time'
+  INPUT:    {"contractType":"full_time"}
+  OUTPUT:   {"jobType":"full-time"}
+  EXPECTED: full-time
+  NOTE:     got "full-time"
+
+[PASS] contractType 'internship' maps to jobType 'internship'
+  INPUT:    {"contractType":"internship"}
+  OUTPUT:   {"jobType":"internship"}
+  EXPECTED: internship
+  NOTE:     got "internship"
+
+
+----------------------------------------------------------------------
+GROUP: 3-EmpTypeFilter
+----------------------------------------------------------------------
+
+[PASS] contractType=contract → DROP
+  INPUT:    {"jobType":"contract"}
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     correctly dropped
+
+[PASS] 'W2 contract' in description → DROP
+  INPUT:    {"description_snippet":"W2 contract position"}
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     correctly dropped
+
+[PASS] no employment signal at all → assume full-time (KEEP)
+  INPUT:    {"jobType":"","description":"no signal"}
+  OUTPUT:   true
+  EXPECTED: true
+  NOTE:     correctly kept (no signal = full-time assumption)
+
+[PASS] 'freelance' in description → DROP
+  INPUT:    {"description_snippet":"freelance"}
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     correctly dropped
+
+[PASS] wantedTypes has 3 entries → keep EVERYTHING including contracts
+  INPUT:    {"wantedTypes":"3 types","jobType":"contract"}
+  OUTPUT:   true
+  EXPECTED: true
+  NOTE:     3+ types = keep all
+
+[PASS] 'full-time' in description but jobType=contract → what wins?
+  INPUT:    {"jobType":"contract","description_snippet":"full-time equivalent contract"}
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     actual result: false — "contract" signal detected even when "full-time" also appears
+
+
+----------------------------------------------------------------------
+GROUP: 4-TitleRelevance
+----------------------------------------------------------------------
+
+[PASS] 'Senior Data Scientist' matches 'Data Scientist' target
+  INPUT:    {"jobTitle":"Senior Data Scientist","targets":["Data Scientist","ML Engineer","Analytics Engineer"]}
+  OUTPUT:   true
+  EXPECTED: true
+  NOTE:     'senior' is stop word → stripped → data+scientist match
+
+[PASS] 'Staff Data Scientist' matches (stop word 'staff' stripped)
+  INPUT:    {"jobTitle":"Staff Data Scientist"}
+  OUTPUT:   true
+  EXPECTED: true
+  NOTE:     ok
+
+[PASS] 'Data Science Manager' vs 'Data Scientist' — science ≠ scientist
+  INPUT:    {"jobTitle":"Data Science Manager"}
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     actual: false — "science" token does NOT match "scientist" → job DROPPED. Valid DS manager roles silently excluded.
+
+[PASS] 'Machine Learning Engineer' vs 'ML Engineer' target
+  INPUT:    {"jobTitle":"Machine Learning Engineer","targets":"includes 'ML Engineer'"}
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     actual: false — tokens from "ML Engineer" = ["engineer"]. "Machine Learning Engineer" DOES contain "engineer" → DROPS. "ML" token stripped (len≤2).
+
+[PASS] 'Data Scientist II' — roman numeral 'ii' is stop word
+  INPUT:    {"jobTitle":"Data Scientist II"}
+  OUTPUT:   true
+  EXPECTED: true
+  NOTE:     'ii' is stop word → stripped → still matches data+scientist
+
+[PASS] 'Applied Data Scientist' — extra token 'applied'
+  INPUT:    {"jobTitle":"Applied Data Scientist"}
+  OUTPUT:   true
+  EXPECTED: true
+  NOTE:     ok — AND check is on target tokens in job title, not vice versa
+
+[PASS] 'Data Analyst' vs 'Data Scientist' — analyst ≠ scientist
+  INPUT:    {"jobTitle":"Data Analyst"}
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     correctly dropped — analyst is not scientist
+
+[PASS] job title 'DS' (abbreviation) — short token stripped (len≤2)
+  INPUT:    {"jobTitle":"DS"}
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     actual: false — 'ds' is length 2 → filtered out → no tokens remain → DROPS. Real DS jobs with abbreviated titles missed.
+
+[PASS] empty job title → should not throw
+  INPUT:    "(empty string)"
+  OUTPUT:   false
+  EXPECTED: false
+  NOTE:     empty title should always be false
+
+
+----------------------------------------------------------------------
+GROUP: 5-GhostScore
+----------------------------------------------------------------------
+
+[PASS] score exactly 3 (no URL +3) → KEEP (threshold is 4)
+  INPUT:    {"url":"(empty)","descLen":200,"company":"RealCo"}
+  OUTPUT:   {"score":3}
+  EXPECTED: {"score":3,"drop":false}
+  NOTE:     score=3 — below threshold of 4, job KEPT
+
+[PASS] score exactly 4 → DROP (at threshold)
+  INPUT:    {"url":"(empty)","descLen":50,"company":"RealCo"}
+  OUTPUT:   {"score":5}
+  EXPECTED: {"score":5,"drop":true}
+  NOTE:     score=5 — no URL(+3) + short desc(+2) = 5 → DROP
+
+[PASS] description exactly 150 chars → boundary (< 150 scores +2)
+  INPUT:    {"desc150":"150 chars","desc149":"149 chars"}
+  OUTPUT:   {"score_at_150":0,"score_at_149":2}
+  EXPECTED: {"score_at_150":0,"score_at_149":2}
+  NOTE:     150 chars → score=0 (should be 0). 149 chars → score=2 (should be +2). Boundary is STRICT less-than.
+
+[PASS] LinkedIn-only URL (no /apply) → +1 signal
+  INPUT:    {"url":"https://www.linkedin.com/jobs/view/12345"}
+  OUTPUT:   {"score":1}
+  EXPECTED: 1
+  NOTE:     LinkedIn view URL without /apply = +1 ghost signal. score=1
+
+[PASS] 'Multiple Positions Available' in title → +2
+  INPUT:    {"title":"Multiple Positions Available"}
+  OUTPUT:   {"score":2}
+  EXPECTED: 2
+  NOTE:     "multiple" in title = +2. score=2
+
+
+----------------------------------------------------------------------
+GROUP: 6-YOEFilter
+----------------------------------------------------------------------
+
+[PASS] '3-5 years of experience', userYoe=4 → KEEP (min=3 ≤ maxAllowed=6)
+  INPUT:    {"description_snippet":"We need someone with 3-5 years of experience in data science.","user_yoe":4,"maxAllowed":6}
+  OUTPUT:   {"parsed":{"min":3,"max":5,"raw":"3-5 years of experience"},"drop":false}
+  EXPECTED: {"min":3,"max":5,"drop":false}
+  NOTE:     parsed min=3 max=5 raw="3-5 years of experience" drop=false
+
+[PASS] '10+ years of experience', userYoe=4 → DROP (min=10 > maxAllowed=6)
+  INPUT:    {"description_snippet":"Requires 10+ years of experience in analytics.","user_yoe":4,"maxAllowed":6}
+  OUTPUT:   {"parsed":{"min":10,"max":null,"raw":"10+ years of experience"},"drop":true}
+  EXPECTED: {"min":10,"max":null,"drop":true}
+  NOTE:     parsed min=10 max=null raw="10+ years of experience" drop=true
+
+[PASS] '5 or more years', userYoe=4 → KEEP (min=5 ≤ maxAllowed=6)
+  INPUT:    {"description_snippet":"Requires 5 or more years of experience.","user_yoe":4,"maxAllowed":6}
+  OUTPUT:   {"parsed":{"min":5,"max":null,"raw":"5 or more years of"},"drop":false}
+  EXPECTED: {"min":5,"max":null,"drop":false}
+  NOTE:     parsed min=5 max=null raw="5 or more years of" drop=false
+
+[PASS] '7 or more years', userYoe=4 → DROP (min=7 > maxAllowed=6)
+  INPUT:    {"description_snippet":"Requires 7 or more years of experience.","user_yoe":4,"maxAllowed":6}
+  OUTPUT:   {"parsed":{"min":7,"max":null,"raw":"7 or more years of"},"drop":true}
+  EXPECTED: {"min":7,"max":null,"drop":true}
+  NOTE:     parsed min=7 max=null raw="7 or more years of" drop=true
+
+[PASS] 'minimum 3 years', userYoe=2 → KEEP (min=3 ≤ maxAllowed=4)
+  INPUT:    {"description_snippet":"Minimum 3 years of relevant experience required.","user_yoe":2,"maxAllowed":4}
+  OUTPUT:   {"parsed":{"min":3,"max":3,"raw":"Minimum 3 years"},"drop":false}
+  EXPECTED: {"min":3,"max":3,"drop":false}
+  NOTE:     parsed min=3 max=3 raw="Minimum 3 years" drop=false
+
+[PASS] no YOE mentioned → KEEP (min=null → no drop)
+  INPUT:    {"description_snippet":"We are looking for a talented data scientist to join our team.","user_yoe":4,"maxAllowed":6}
+  OUTPUT:   {"parsed":{"min":null,"max":null,"raw":null},"drop":false}
+  EXPECTED: {"min":null,"max":null,"drop":false}
+  NOTE:     parsed min=null max=null raw="null" drop=false
+
+[PASS] '1-2 years' entry-level, userYoe=0 → KEEP
+  INPUT:    {"description_snippet":"Looking for 1-2 years of experience in Python.","user_yoe":0,"maxAllowed":2}
+  OUTPUT:   {"parsed":{"min":1,"max":2,"raw":"1-2 years of experience"},"drop":false}
+  EXPECTED: {"min":1,"max":2,"drop":false}
+  NOTE:     parsed min=1 max=2 raw="1-2 years of experience" drop=false
+
+[PASS] 'at least 8 years', userYoe=6 → DROP (min=8 > maxAllowed=8) — boundary
+  INPUT:    {"snippet":"at least 8 years","userYoe":6,"maxAllowed":8}
+  OUTPUT:   {"parsed":{"min":8,"max":8,"raw":"At least 8 years"},"drop":false}
+  EXPECTED: min=8, maxAllowed=8 → 8>8 is false → KEEP
+  NOTE:     parsed min=8. 8 > 8 = false → job KEPT. Boundary is STRICT greater-than.
+
+[PASS] '2 to 4 years of experience', userYoe=4 → KEEP
+  INPUT:    {"description_snippet":"We need 2 to 4 years of relevant experience.","user_yoe":4,"maxAllowed":6}
+  OUTPUT:   {"parsed":{"min":2,"max":4,"raw":"2 to 4 years of relevant experience"},"drop":false}
+  EXPECTED: {"min":2,"max":4,"drop":false}
+  NOTE:     parsed min=2 max=4 raw="2 to 4 years of relevant experience" drop=false
+
+
+----------------------------------------------------------------------
+GROUP: 7-Classification
+----------------------------------------------------------------------
+
+[PASS] 'Data Scientist' + DS description → role_key='data'
+  INPUT:    {"title":"Data Scientist","description_snippet":"Build predictive models using Python, scikit-learn, XGBoost.…"}
+  OUTPUT:   {"roleKey":"data","confidence":0.97,"matchedBy":"strong_anchor+desc"}
+  EXPECTED: roleKey="data" confidence≥0.75
+  NOTE:     roleKey="data" confidence=0.97 matchedBy="strong_anchor+desc"
+
+[PASS] 'Machine Learning Engineer' + ML description → role_key='data'
+  INPUT:    {"title":"Machine Learning Engineer","description_snippet":"Train and deploy ML models. Deep learning, PyTorch, TensorFl…"}
+  OUTPUT:   {"roleKey":"data","confidence":0.82,"matchedBy":"strong_anchor"}
+  EXPECTED: roleKey="data" confidence≥0.75
+  NOTE:     roleKey="data" confidence=0.82 matchedBy="strong_anchor"
+
+[PASS] 'Data Engineer' + pipeline description → role_key='data'
+  INPUT:    {"title":"Data Engineer","description_snippet":"Build data pipelines using Spark, Airflow, dbt. ETL, Kafka, …"}
+  OUTPUT:   {"roleKey":"data","confidence":0.97,"matchedBy":"strong_anchor+desc"}
+  EXPECTED: roleKey="data" confidence≥0.75
+  NOTE:     roleKey="data" confidence=0.97 matchedBy="strong_anchor+desc"
+
+[PASS] 'Business Analyst' + BI description → should classify (data or unclassified?)
+  INPUT:    {"title":"Business Analyst","desc":"Analyze business metrics, create dashboards in Tableau, SQL "}
+  OUTPUT:   null
+  EXPECTED: documenting actual behaviour
+  NOTE:     returns null → UNCLASSIFIED — won't appear on any board without manual review
+
+[PASS] 'Software Engineer' + SWE description → role_key='engineering' NOT 'data'
+  INPUT:    {"title":"Software Engineer","description_snippet":"Build backend APIs in Python/Django. REST, PostgreSQL, Docke…"}
+  OUTPUT:   {"roleKey":"engineering","confidence":0.97,"matchedBy":"strong_anchor+desc"}
+  EXPECTED: roleKey="engineering" confidence≥0.75
+  NOTE:     roleKey="engineering" confidence=0.97 matchedBy="strong_anchor+desc"
+
+[PASS] 'Analytics Engineer' + DE description → what wins?
+  INPUT:    {"title":"Analytics Engineer"}
+  OUTPUT:   {"roleKey":"data","confidence":0.97,"matchedBy":"strong_anchor+desc"}
+  EXPECTED: documenting — data vs engineering conflict
+  NOTE:     "data" at 0.97
+
+[PASS] title only, empty description → confidence drops?
+  INPUT:    {"title":"Data Scientist","description":"(empty)"}
+  OUTPUT:   {"roleKey":"data","confidence":0.845,"matchedBy":"strong_anchor"}
+  EXPECTED: role_key='data' (title alone should be enough)
+  NOTE:     roleKey="data" conf=0.845
+
+[PASS] 'Intern Data Scientist' — does intern in title affect classification?
+  INPUT:    {"title":"Intern Data Scientist"}
+  OUTPUT:   {"roleKey":"data","confidence":0.97,"matchedBy":"strong_anchor+desc"}
+  EXPECTED: role_key='data'
+  NOTE:     "data" at 0.97
+
+
+----------------------------------------------------------------------
+GROUP: 8-ProfileTitleSQL
+----------------------------------------------------------------------
+
+[PASS] 3 target titles → 3 OR clauses
+  INPUT:    {"target_titles":["Data Scientist","ML Engineer","Analytics Engineer"]}
+  OUTPUT:   {"sql":"((LOWER(sj.title) LIKE ? AND LOWER(sj.title) LIKE ?) OR (LOWER(sj.title) LIKE ?) OR (LOWER(sj.title) LIKE ? AND LOWER(sj.title) LIKE ?))","params":["%data%","%scientist%","%engineer%","%analyt
+  EXPECTED: sql has LIKE clauses for each meaningful token
+  NOTE:     params=["%data%","%scientist%","%engineer%","%analytics%","%engineer%"] clauses=5
+
+[PASS] empty target_titles → returns 1=1 passthrough
+  INPUT:    {"target_titles":[]}
+  OUTPUT:   {"sql":"1 = 1","params":[]}
+  EXPECTED: {"sql":"1 = 1","params":[]}
+  NOTE:     sql="1 = 1" params=[]
+
+[PASS] target title with only stop words → no tokens → falls through to 1=1
+  INPUT:    {"target_titles":["Senior Lead Engineer"]}
+  OUTPUT:   {"sql":"((LOWER(sj.title) LIKE ?))","params":["%engineer%"]}
+  EXPECTED: documenting actual behaviour
+  NOTE:     sql="((LOWER(sj.title) LIKE ?))" params=["%engineer%"] — if all tokens are stop words, no clause generated
+
+
+======================================================================
+SUMMARY
+======================================================================
+Total: 54   PASS: 54   FAIL: 0
+
+All tests passed.
+======================================================================

@@ -153,6 +153,12 @@ export function buildProfileSearchTerms(activeProfile, storedSearchTerms = []) {
 // ── Profile-aware title relevance ─────────────────────────────
 // Title passes if it matches ANY target title's tokens (OR across titles, AND within each).
 // Used when scraping with a domain profile (profileTitles array available).
+//
+// Token rules:
+//   - Min length 2 (allows abbreviations like "ml", "ai", "ds", "pm")
+//   - Stop words stripped (seniority noise: senior/junior/lead/mid etc.)
+//   - Word-boundary matching (not substring) so "ml" won't match inside "xml",
+//     and "engineer" won't match inside "engineering student"
 export function isTitleRelevantToProfile(title, targetTitles) {
   if (!targetTitles?.length) return true;
   const t = title?.toLowerCase().trim() || "";
@@ -165,15 +171,20 @@ export function isTitleRelevantToProfile(title, targetTitles) {
     "enginere":"engineer","enigneer":"engineer","sofware":"software",
     "managr":"manager","analist":"analyst",
   };
+  // Escape special regex chars in a token before building a word-boundary pattern
+  function wordMatch(tok, str) {
+    const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp("\\b" + escaped + "\\b").test(str);
+  }
   let sawMeaningfulTarget = false;
   const matched = targetTitles.some(target => {
     const tokens = target.toLowerCase()
       .split(/[\s,/\-]+/)
-      .filter(w => w.length > 2 && !stopWords.has(w))
+      .filter(w => w.length >= 2 && !stopWords.has(w))   // ≥2 allows "ml","ai","ds"
       .map(w => TYPO_MAP[w] || w);
     if (tokens.length === 0) return false;
     sawMeaningfulTarget = true;
-    return tokens.every(tok => t.includes(tok));
+    return tokens.every(tok => wordMatch(tok, t));         // word-boundary, not substring
   });
   return sawMeaningfulTarget ? matched : true;
 }
@@ -204,11 +215,15 @@ export function isTitleRelevant(title, query) {
 
   const tokens = q
     .split(/[\s,/\-]+/)
-    .filter(w => w.length > 2 && !stopWords.has(w))
+    .filter(w => w.length >= 2 && !stopWords.has(w))      // ≥2 allows "ml","ai","ds"
     .map(normTerm);
 
   if (tokens.length === 0) return true;
 
-  // Every token must appear in the title — strict AND match
-  return tokens.every(token => t.includes(token));
+  // Every token must appear in the title — strict AND match, word-boundary
+  function wordMatch(tok, str) {
+    const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp("\\b" + escaped + "\\b").test(str);
+  }
+  return tokens.every(token => wordMatch(token, t));
 }

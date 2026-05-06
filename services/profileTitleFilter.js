@@ -17,7 +17,10 @@ export function profileTitleSql(column, profile) {
   const stopWords = new Set([
     "the","and","for","with","ing","a","an","of","in","at","by","to","or",
     "senior","junior","staff","principal","lead","entry","level","mid",
-    "ii","iii","iv","i","engineer","engineering",
+    "ii","iii","iv","i",
+    // NOTE: "engineer"/"engineering" intentionally removed — they are meaningful
+    // filter tokens. Keeping them caused "Senior Lead Engineer" to produce zero
+    // tokens and fall through to 1=1, matching every job on the board.
   ]);
 
   const clauses = [];
