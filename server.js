@@ -2712,19 +2712,15 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
 // and also scheduled daily.
 function runExpiredJobsCleanup() {
   const cutoff = Math.floor(Date.now()/1000) - 7*24*60*60;
-  // Delete jobs older than 7 days based on original posting date (scraped_at as fallback).
+  // Delete jobs older than 7 days based on when they entered our DB.
   // Applied jobs are permanently exempt from expiry.
   const deletedJobs = db.prepare(`
     DELETE FROM scraped_jobs
-    WHERE (
-      (posted_at IS NOT NULL AND posted_at != ''
-        AND CAST(strftime('%s', posted_at) AS INTEGER) < ?)
-      OR ((posted_at IS NULL OR posted_at = '') AND scraped_at < ?)
-    )
+    WHERE scraped_at < ?
     AND job_id NOT IN (
       SELECT DISTINCT job_id FROM user_jobs WHERE applied = 1
     )
-  `).run(cutoff, cutoff);
+  `).run(cutoff);
 
   // Cascade: remove orphaned user records for expired jobs (exempt applied rows)
   const deletedRoleMap = db.prepare(
@@ -2763,7 +2759,7 @@ function runExpiredJobsCleanup() {
     "INSERT INTO cleanup_log (jobs_deleted, orphans_cleaned, details) VALUES (?,?,?)"
   ).run(deletedJobs.changes, orphans, details);
 
-  console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by posting date), pruned ${orphans} orphaned rows`);
+  console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by DB age), pruned ${orphans} orphaned rows`);
 }
 
 // ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
@@ -3024,12 +3020,20 @@ passport.use(new LocalStrategy((username, password, done) => {
     SELECT u.*
     FROM users u
     LEFT JOIN user_profile up ON up.user_id = u.id
-    WHERE u.username = ?
+    WHERE LOWER(u.username) = LOWER(?)
        OR LOWER(up.email) = LOWER(?)
     LIMIT 1
   `).get(login, login);
-  if (!user || !verifyPassword(password, user.password_hash))
+  const passwordOk = user ? verifyPassword(password, user.password_hash) : false;
+  if (!user || !passwordOk) {
+    // TEMPORARY DIAGNOSTIC: remove after production login is confirmed stable.
+    console.warn("[auth-login-debug] local login rejected", {
+      hasIdentifier: !!login,
+      matchedUser: !!user,
+      passwordOk,
+    });
     return done(null, false, { message:"Invalid credentials." });
+  }
   return done(null, {
     id:user.id,
     username:user.username,
@@ -3195,6 +3199,7 @@ function envOrigin(value) {
 const APP_BASE_ORIGIN = envOrigin(process.env.APP_BASE_URL);
 const FRONTEND_ORIGIN = envOrigin(process.env.FRONTEND_URL) || APP_BASE_ORIGIN;
 const ALLOWED_CORS_ORIGINS = new Set([APP_BASE_ORIGIN, FRONTEND_ORIGIN].filter(Boolean));
+const CROSS_ORIGIN_FRONTEND = APP_BASE_ORIGIN && FRONTEND_ORIGIN && APP_BASE_ORIGIN !== FRONTEND_ORIGIN;
 if (IS_PRODUCTION && !ALLOWED_CORS_ORIGINS.size) {
   console.warn("[auth] APP_BASE_URL or FRONTEND_URL should be set in production for credentialed CORS");
 }
@@ -3811,7 +3816,7 @@ app.use(session({
   cookie:{
     httpOnly:true,
     secure:process.env.NODE_ENV === "production",
-    sameSite:process.env.NODE_ENV === "production" ? "none" : "lax",
+    sameSite:process.env.NODE_ENV === "production" && CROSS_ORIGIN_FRONTEND ? "none" : "lax",
     maxAge:7*24*60*60*1000,
   },
 }));

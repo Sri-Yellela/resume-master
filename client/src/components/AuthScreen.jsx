@@ -171,7 +171,7 @@ function AuthModal({ onLogin }) {
   const handleLogin = async e => {
     e.preventDefault(); setError(""); setNotice(""); setLoading(true);
     try {
-      const d = await api("/api/auth/login", { method:"POST", body:JSON.stringify({ username:login.username, password:login.password }) });
+      const d = await api("/api/auth/login", { method:"POST", body:JSON.stringify({ username:login.username.trim(), password:login.password }) });
       if (d.user) { setAuthContext(d.authContext); onLogin(d.user); }
       else setError(d.error || "Login failed");
     } catch(err) { setError(err.message); }
