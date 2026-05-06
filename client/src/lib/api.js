@@ -3,20 +3,33 @@
 const AUTH_CONTEXT_KEY = "rm_auth_context";
 
 export function getAuthContext() {
-  try { return sessionStorage.getItem(AUTH_CONTEXT_KEY) || ""; }
+  try {
+    return sessionStorage.getItem(AUTH_CONTEXT_KEY) || localStorage.getItem(AUTH_CONTEXT_KEY) || "";
+  }
   catch { return ""; }
 }
 
 export function setAuthContext(token) {
   try {
-    if (token) sessionStorage.setItem(AUTH_CONTEXT_KEY, token);
-    else sessionStorage.removeItem(AUTH_CONTEXT_KEY);
+    if (token) {
+      sessionStorage.setItem(AUTH_CONTEXT_KEY, token);
+      localStorage.setItem(AUTH_CONTEXT_KEY, token);
+    } else {
+      sessionStorage.removeItem(AUTH_CONTEXT_KEY);
+      localStorage.removeItem(AUTH_CONTEXT_KEY);
+    }
   } catch {}
 }
 
 export function authHeaders(headers = {}) {
   const token = getAuthContext();
-  return token ? { "X-RM-Auth-Context": token, ...headers } : headers;
+  if (!token) return headers;
+  const hasAuthHeader = headers.Authorization || headers.authorization;
+  return {
+    "X-RM-Auth-Context": token,
+    ...(hasAuthHeader ? {} : { Authorization: `Bearer ${token}` }),
+    ...headers,
+  };
 }
 
 export function authContextQuery() {
@@ -73,7 +86,8 @@ export async function api(path, opts = {}) {
     // Signal the app shell to force-logout immediately — don't wait for the next
     // visibilitychange event, which can leave the user stuck in a broken state.
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("rm:session-expired"));
+      console.warn("[auth-debug] 401 response", { path });
+      window.dispatchEvent(new CustomEvent("rm:session-expired", { detail: { path } }));
     }
     throw Object.assign(new Error("Session expired. Sign in again."), { status: 401 });
   }
