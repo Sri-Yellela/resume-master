@@ -3020,12 +3020,20 @@ passport.use(new LocalStrategy((username, password, done) => {
     SELECT u.*
     FROM users u
     LEFT JOIN user_profile up ON up.user_id = u.id
-    WHERE u.username = ?
+    WHERE LOWER(u.username) = LOWER(?)
        OR LOWER(up.email) = LOWER(?)
     LIMIT 1
   `).get(login, login);
-  if (!user || !verifyPassword(password, user.password_hash))
+  const passwordOk = user ? verifyPassword(password, user.password_hash) : false;
+  if (!user || !passwordOk) {
+    // TEMPORARY DIAGNOSTIC: remove after production login is confirmed stable.
+    console.warn("[auth-login-debug] local login rejected", {
+      hasIdentifier: !!login,
+      matchedUser: !!user,
+      passwordOk,
+    });
     return done(null, false, { message:"Invalid credentials." });
+  }
   return done(null, {
     id:user.id,
     username:user.username,

@@ -79,6 +79,10 @@ export async function api(path, opts = {}) {
     headers,
   });
   if (r.status === 401) {
+    const payload = await r.json().catch(() => ({}));
+    if (path === "/api/auth/login") {
+      throw Object.assign(new Error(payload.error || "Invalid credentials."), { status: 401, payload });
+    }
     // Clear the stale auth context so subsequent requests don't keep sending it.
     // After server-side Fix 1 (requireAuth honors authContextToken), a 401 only
     // arrives when BOTH the Passport session AND the auth context are invalid.
