@@ -132,6 +132,9 @@ function AuthModal({ onLogin }) {
   const [notice,  setNotice]  = useState("");
   const [loading, setLoading] = useState(false);
 
+  const oauthLabel = provider =>
+    provider === "linkedin" ? "LinkedIn" : provider === "github" ? "GitHub" : "Google";
+
   const setL  = (k,v) => setLoginF(f => ({ ...f, [k]:v }));
   const setS1 = (k,v) => setStep1(f => ({ ...f, [k]:v }));
   const setS2 = (k,v) => setStep2(f => ({ ...f, [k]:v }));
@@ -144,7 +147,7 @@ function AuthModal({ onLogin }) {
     const oauthStatus = params.get("oauthStatus");
     const oauthProvider = params.get("oauthProvider");
     if (oauthError) setError(oauthError);
-    if (oauthStatus) setNotice(`${oauthProvider === "linkedin" ? "LinkedIn" : "Google"} ${oauthStatus.replace(/_/g, " ")}.`);
+    if (oauthStatus) setNotice(`${oauthLabel(oauthProvider)} ${oauthStatus.replace(/_/g, " ")}.`);
     if (!token) return;
     setReset(f => ({ ...f, token }));
     setTab("forgot");
@@ -175,26 +178,28 @@ function AuthModal({ onLogin }) {
     setLoading(false);
   };
 
-  const startProviderOAuth = provider => {
+  const startProviderOAuth = (provider, event) => {
     setError(""); setNotice("");
     const readiness = oauthStatus?.[provider];
     if (readiness && !readiness.configured) {
-      setError(`${provider === "linkedin" ? "LinkedIn" : "Google"} sign-in is not configured for this deployment yet.`);
+      event?.preventDefault();
+      setError(`${oauthLabel(provider)} sign-in is not configured for this deployment yet.`);
       return;
     }
-    window.location.href = `/api/auth/oauth/${provider}/start?mode=login&returnTo=${encodeURIComponent("/app")}`;
   };
 
   const providerButton = (provider) => {
-    const label = provider === "linkedin" ? "LinkedIn" : "Google";
+    const label = oauthLabel(provider);
     const readiness = oauthStatus?.[provider];
     const configured = readiness?.configured !== false;
+    const brand = provider === "linkedin" ? "#0A66C2" : provider === "github" ? "#24292e" : "#4285F4";
     return (
-      <button type="button" onClick={() => startProviderOAuth(provider)} disabled={!configured}
+      <a href={`/auth/${provider}`} onClick={event => startProviderOAuth(provider, event)}
         title={!configured ? `${label} OAuth is not configured by the app operator.` : `Continue with ${label}`}
-        style={{ ...providerButtonStyle, opacity:configured ? 1 : 0.55, cursor:configured ? "pointer" : "not-allowed" }}>
+        aria-disabled={!configured}
+        style={{ ...providerButtonStyle, background:brand, color:"#fff", border:"none", opacity:configured ? 1 : 0.55, cursor:configured ? "pointer" : "not-allowed", textDecoration:"none" }}>
         Continue with {label}
-      </button>
+      </a>
     );
   };
 
@@ -329,6 +334,7 @@ function AuthModal({ onLogin }) {
           </div>
           {providerButton("google")}
           {providerButton("linkedin")}
+          {providerButton("github")}
         </form>
 
       ) : tab === "forgot" ? (
@@ -419,6 +425,7 @@ function AuthModal({ onLogin }) {
           </div>
           {providerButton("google")}
           {providerButton("linkedin")}
+          {providerButton("github")}
         </form>
 
       ) : (

@@ -3,6 +3,11 @@
   "name": "Resume Master Importer",
   "version": "0.1.0",
   "description": "Import LinkedIn jobs into Resume Master.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["activeTab", "storage", "tabs", "cookies", "scripting"],
   "host_permissions": [
     "https://www.linkedin.com/*",
@@ -16,7 +21,12 @@
   },
   "action": {
     "default_title": "Resume Master Importer",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "content_scripts": [
     {

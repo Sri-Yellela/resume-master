@@ -174,6 +174,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     if (requiresLinkedInSession(jobUrl) && !getLinkedInStatus(db, run.user_id).healthy) {
       return holdRunJob(jobRow, "linkedin_session_required", "Connect LinkedIn in Integrations before automating LinkedIn applications.", { integration: "linkedin" });
     }
+    const readiness = getAutomationReadiness(db, run.user_id);
+    if (!readiness.resume.healthy) {
+      return holdRunJob(jobRow, "base_resume_missing", "No base resume for this profile", { missing: ["base_resume"] });
+    }
 
     db.prepare("UPDATE apply_run_jobs SET status='preparing', started_at=COALESCE(started_at, unixepoch()), attempt_count=attempt_count+1 WHERE id=?").run(jobRow.id);
     logApplyEvent({ runId: run.id, runJobId: jobRow.id, userId: run.user_id, jobId: job.job_id, event: "preparing", message: "Preparing application." });
@@ -506,6 +510,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const toolType = req.body?.tool === "a_plus_resume" ? "a_plus_resume" : "generate";
     const readiness = getAutomationReadiness(db, req.user.id);
     const missingPrereqs = getMissingApplyPrerequisites(readiness);
+    if (missingPrereqs.includes("base_resume")) {
+      return res.status(409).json({
+        error: "No base resume for this profile",
+        missingPrerequisites: missingPrereqs,
+        integrationsPath: "/app/integrations",
+        readiness,
+      });
+    }
     if (missingPrereqs.length) {
       return res.status(409).json({
         error: "Automation setup is incomplete. Open Integrations to finish setup.",
@@ -604,6 +616,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     if (!jobUrl) return res.status(400).json({ error: "jobUrl required" });
     const readiness = getAutomationReadiness(db, req.user.id);
     const missingPrereqs = getMissingApplyPrerequisites(readiness);
+    if (missingPrereqs.includes("base_resume")) {
+      return res.status(409).json({
+        error: "No base resume for this profile",
+        missingPrerequisites: missingPrereqs,
+        integrationsPath: "/app/integrations",
+        readiness,
+      });
+    }
     if (missingPrereqs.length) {
       return res.status(409).json({
         error: "Automation setup is incomplete. Open Integrations to finish setup.",

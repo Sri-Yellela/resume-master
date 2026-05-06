@@ -81,31 +81,49 @@ const ANTHROPIC_KEY  = process.env.ANTHROPIC_KEY  || "";
 // NOTE: There is NO server-level APIFY_TOKEN.
 // Each user stores their own token in the DB (users.apify_token).
 // The cron job borrows the most recently active user's token.
-const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? "" : "dev-session-secret-change-me");
+if (IS_PRODUCTION && !process.env.SESSION_SECRET) {
+  console.error("[auth] FATAL: SESSION_SECRET is not set");
+  process.exit(1);
+}
+if (IS_PRODUCTION && process.env.COOKIE_DOMAIN) {
+  console.warn("[auth] COOKIE_DOMAIN is set but ignored; host-only session cookies are used for domain migration safety");
+}
 const PASSWORD_RESET_SECRET = process.env.PASSWORD_RESET_SECRET || SESSION_SECRET;
 const ADMIN_USER     = process.env.ADMIN_USER     || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 const OAUTH_PROVIDER_CONFIG = {
   google: {
-    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || "",
-    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
-    redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI || "",
+    clientId: process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_OAUTH_CLIENT_ID || "",
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
+    redirectUri: process.env.GOOGLE_CALLBACK_URL || process.env.GOOGLE_OAUTH_REDIRECT_URI || "",
     authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     tokenUrl: "https://oauth2.googleapis.com/token",
     userInfoUrl: "https://openidconnect.googleapis.com/v1/userinfo",
     scopes: ["openid", "email", "profile"],
   },
   linkedin: {
-    clientId: process.env.LINKEDIN_OAUTH_CLIENT_ID || "",
-    clientSecret: process.env.LINKEDIN_OAUTH_CLIENT_SECRET || "",
-    redirectUri: process.env.LINKEDIN_OAUTH_REDIRECT_URI || "",
+    clientId: process.env.LINKEDIN_CLIENT_ID || process.env.LINKEDIN_OAUTH_CLIENT_ID || "",
+    clientSecret: process.env.LINKEDIN_CLIENT_SECRET || process.env.LINKEDIN_OAUTH_CLIENT_SECRET || "",
+    redirectUri: process.env.LINKEDIN_CALLBACK_URL || process.env.LINKEDIN_OAUTH_REDIRECT_URI || "",
     authUrl: "https://www.linkedin.com/oauth/v2/authorization",
     tokenUrl: "https://www.linkedin.com/oauth/v2/accessToken",
     userInfoUrl: "https://api.linkedin.com/v2/userinfo",
     scopes: ["openid", "profile", "email"],
   },
+  github: {
+    clientId: process.env.GITHUB_CLIENT_ID || "",
+    clientSecret: process.env.GITHUB_CLIENT_SECRET || "",
+    redirectUri: process.env.GITHUB_CALLBACK_URL || "",
+    authUrl: "https://github.com/login/oauth/authorize",
+    tokenUrl: "https://github.com/login/oauth/access_token",
+    userInfoUrl: "https://api.github.com/user",
+    emailsUrl: "https://api.github.com/user/emails",
+    scopes: ["user:email"],
+  },
 };
-const OAUTH_PROVIDERS = ["google", "linkedin"];
+const OAUTH_PROVIDERS = ["google", "linkedin", "github"];
 const CACHE_TTL_MS        = 12 * 60 * 60 * 1000;
 const MAX_JOBS_PER_REFRESH= 50;
 // 64-char hex → 32-byte AES-256 key.  Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -1596,6 +1614,14 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       `,
     },
     {
+      id: "053_github_auth_provider_link",
+      sql: `
+        ALTER TABLE users ADD COLUMN github_auth_id TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_github_auth_id
+          ON users(github_auth_id) WHERE github_auth_id IS NOT NULL;
+      `,
+    },
+    {
       // Repair: firmware/embedded jobs were bulk-assigned role_key='engineering' by
       // the title_heuristic in migration 031 and were never corrected.  This migration:
       //   1. Adds role_key='engineering_embedded_firmware' for jobs scraped under
@@ -3080,6 +3106,26 @@ function getRequestAuthContextToken(req) {
   return header || bearer || req.query?.authContext || null;
 }
 
+function requestCookieNames(req) {
+  return String(req.headers.cookie || "")
+    .split(";")
+    .map(part => part.trim().split("=")[0])
+    .filter(Boolean);
+}
+
+function requestCookieMap(req) {
+  return Object.fromEntries(
+    String(req.headers.cookie || "")
+      .split(";")
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => {
+        const idx = part.indexOf("=");
+        return idx === -1 ? [part, ""] : [part.slice(0, idx), part.slice(idx + 1)];
+      })
+  );
+}
+
 function bindAuthContext(req, _res, next) {
   const token = getRequestAuthContextToken(req);
   if (!token) return next();
@@ -3114,6 +3160,16 @@ function bindAuthContext(req, _res, next) {
 }
 
 function requireAuth(req, res, next) {
+  // TEMPORARY DIAGNOSTIC: remove after Railway session-cookie issue is resolved.
+  const debugCookies = req.cookies || requestCookieMap(req);
+  console.log("[auth-debug]", {
+    env: process.env.NODE_ENV,
+    hasCookie: !!req.cookies?.token || !!debugCookies["connect.sid"],
+    cookieKeys: Object.keys(debugCookies || {}),
+    hasAuthHeader: !!req.headers?.authorization,
+    secure: req.secure,
+    protocol: req.protocol,
+  });
   // Accept either a valid Passport session OR a valid auth context token.
   // bindAuthContext (which runs before this) sets req.authContextToken only when the
   // token is non-expired, non-revoked, and the user exists in the DB.
@@ -3129,6 +3185,25 @@ function requireAuth(req, res, next) {
 function requireAdmin(req, res, next) {
   if ((req.isAuthenticated() || req.authContextToken) && req.user?.isAdmin) return next();
   res.status(403).json({ error:"Forbidden." });
+}
+
+function envOrigin(value) {
+  try { return value ? new URL(value).origin : ""; }
+  catch { return ""; }
+}
+
+const APP_BASE_ORIGIN = envOrigin(process.env.APP_BASE_URL);
+const FRONTEND_ORIGIN = envOrigin(process.env.FRONTEND_URL) || APP_BASE_ORIGIN;
+const ALLOWED_CORS_ORIGINS = new Set([APP_BASE_ORIGIN, FRONTEND_ORIGIN].filter(Boolean));
+if (IS_PRODUCTION && !ALLOWED_CORS_ORIGINS.size) {
+  console.warn("[auth] APP_BASE_URL or FRONTEND_URL should be set in production for credentialed CORS");
+}
+
+function corsOrigin(origin, callback) {
+  if (!origin) return callback(null, true);
+  if (!IS_PRODUCTION) return callback(null, true);
+  if (ALLOWED_CORS_ORIGINS.has(origin)) return callback(null, true);
+  return callback(null, false);
 }
 
 logOAuthReadiness();
@@ -3168,8 +3243,14 @@ function makeUniqueUsername(base) {
   return candidate;
 }
 
+function providerColumnFor(provider) {
+  if (provider === "linkedin") return "linkedin_auth_id";
+  if (provider === "github") return "github_auth_id";
+  return "google_auth_id";
+}
+
 function findUserByAuthProvider(provider, providerUserId, email, { allowEmailMatch = true } = {}) {
-  const providerColumn = provider === "linkedin" ? "linkedin_auth_id" : "google_auth_id";
+  const providerColumn = providerColumnFor(provider);
   if (providerUserId) {
     const byProvider = db.prepare(`SELECT * FROM users WHERE ${providerColumn}=?`).get(providerUserId);
     if (byProvider) return byProvider;
@@ -3221,10 +3302,6 @@ function upsertAuthIntegration(userId, provider, { providerUserId, email, displa
   );
 }
 
-function providerColumnFor(provider) {
-  return provider === "linkedin" ? "linkedin_auth_id" : "google_auth_id";
-}
-
 function profileParts(displayName) {
   const parts = String(displayName || "").split(/\s+/).filter(Boolean);
   return {
@@ -3233,12 +3310,12 @@ function profileParts(displayName) {
   };
 }
 
-function completeProviderAuth(provider, identity, { linkUserId = null, tokenSet = null } = {}) {
+async function findOrCreateOAuthUser({ provider, providerId, email, name, emailVerified = undefined, picture = null, tokenSet = null, linkUserId = null }) {
   const providerColumn = providerColumnFor(provider);
-  const providerUserId = String(identity.providerUserId || "").trim();
-  const email = String(identity.email || "").trim().toLowerCase() || null;
-  const displayName = String(identity.displayName || email || provider).trim();
-  const emailForMatch = identity.emailVerified === false ? null : email;
+  const providerUserId = String(providerId || "").trim();
+  const emailForStorage = String(email || "").trim().toLowerCase() || null;
+  const displayName = String(name || emailForStorage || provider).trim();
+  const emailForMatch = emailVerified === false ? null : emailForStorage;
   if (!providerUserId) throw new Error("OAuth provider did not return a stable user id.");
 
   let user = null;
@@ -3264,7 +3341,7 @@ function completeProviderAuth(provider, identity, { linkUserId = null, tokenSet 
   } else {
     user = findUserByAuthProvider(provider, providerUserId, emailForMatch, { allowEmailMatch: !!emailForMatch });
     if (!user) {
-      const username = makeUniqueUsername(email || displayName || provider);
+      const username = makeUniqueUsername(emailForStorage || displayName || provider);
       const password = hashPassword(crypto.randomBytes(24).toString("base64url"));
       db.prepare(`INSERT INTO users (username,password_hash,is_admin,apply_mode,plan_tier,${providerColumn}) VALUES (?,?,0,'SIMPLE','BASIC',?)`)
         .run(username, password, providerUserId);
@@ -3273,7 +3350,7 @@ function completeProviderAuth(provider, identity, { linkUserId = null, tokenSet 
       db.prepare(`
         INSERT OR IGNORE INTO user_profile (user_id, full_name, first_name, last_name, email)
         VALUES (?, ?, ?, ?, ?)
-      `).run(user.id, displayName || null, first, last, email);
+      `).run(user.id, displayName || null, first, last, emailForStorage);
       created = true;
     } else if (user[providerColumn] !== providerUserId) {
       db.prepare(`UPDATE users SET ${providerColumn}=? WHERE id=?`).run(providerUserId, user.id);
@@ -3282,16 +3359,16 @@ function completeProviderAuth(provider, identity, { linkUserId = null, tokenSet 
     }
   }
 
-  if (email) {
-    db.prepare("INSERT OR IGNORE INTO user_profile (user_id, email) VALUES (?, ?)").run(user.id, email);
-    db.prepare("UPDATE user_profile SET email=COALESCE(email, ?) WHERE user_id=?").run(email, user.id);
+  if (emailForStorage) {
+    db.prepare("INSERT OR IGNORE INTO user_profile (user_id, email) VALUES (?, ?)").run(user.id, emailForStorage);
+    db.prepare("UPDATE user_profile SET email=COALESCE(email, ?) WHERE user_id=?").run(emailForStorage, user.id);
   }
 
   const obtainedAt = Math.floor(Date.now() / 1000);
   const expiresAt = tokenSet?.expires_in ? obtainedAt + Number(tokenSet.expires_in) : null;
   upsertAuthIntegration(user.id, provider, {
     providerUserId,
-    email,
+    email: emailForStorage,
     displayName,
     sessionState: tokenSet ? {
       provider,
@@ -3302,16 +3379,29 @@ function completeProviderAuth(provider, identity, { linkUserId = null, tokenSet 
       scope: tokenSet.scope || null,
       obtainedAt,
     } : null,
-    scopes: provider === "google" ? ["openid", "email", "profile", "google_login_session"] : ["openid", "profile", "email", "linkedin_login_session"],
+    scopes: OAUTH_PROVIDER_CONFIG[provider]?.scopes || [],
     expiresAt,
     metadata: {
       oauth: true,
-      emailVerified: identity.emailVerified ?? null,
-      picture: identity.picture || null,
+      emailVerified: emailVerified ?? null,
+      picture: picture || null,
     },
   });
 
   return { user, created, linked };
+}
+
+function completeProviderAuth(provider, identity, { linkUserId = null, tokenSet = null } = {}) {
+  return findOrCreateOAuthUser({
+    provider,
+    providerId: identity.providerUserId,
+    email: identity.email,
+    name: identity.displayName,
+    emailVerified: identity.emailVerified,
+    picture: identity.picture,
+    tokenSet,
+    linkUserId,
+  });
 }
 
 function authUserFromDbRow(row) {
@@ -3340,7 +3430,7 @@ function isHttpsOrLocalUrl(value) {
 
 function oauthRedirectUri(req, provider) {
   const cfg = OAUTH_PROVIDER_CONFIG[provider];
-  return cfg?.redirectUri || `${appBaseUrl(req)}/api/auth/oauth/${provider}/callback`;
+  return cfg?.redirectUri || `${appBaseUrl(req)}/auth/${provider}/callback`;
 }
 
 function oauthProviderReadiness(provider, req = null) {
@@ -3356,8 +3446,9 @@ function oauthProviderReadiness(provider, req = null) {
   if (!redirectUri) missing.push("redirect_uri_or_app_base_url");
   if (redirectUri && !isHttpsOrLocalUrl(redirectUri)) warnings.push("redirect_uri_not_https_or_localhost");
   if (base && !isHttpsOrLocalUrl(base)) warnings.push("app_base_url_not_https_or_localhost");
-  if (!cfg.scopes?.includes("openid") || !cfg.scopes?.includes("email")) warnings.push("openid_email_scopes_missing");
+  if (provider !== "github" && (!cfg.scopes?.includes("openid") || !cfg.scopes?.includes("email"))) warnings.push("openid_email_scopes_missing");
   const configured = missing.length === 0;
+  const envPrefix = provider.toUpperCase();
   return {
     provider,
     configured,
@@ -3366,9 +3457,11 @@ function oauthProviderReadiness(provider, req = null) {
     missing,
     warnings,
     redirectUri: redirectUri || null,
-    requiredEnv: provider === "google"
-      ? ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REDIRECT_URI or APP_BASE_URL"]
-      : ["LINKEDIN_OAUTH_CLIENT_ID", "LINKEDIN_OAUTH_CLIENT_SECRET", "LINKEDIN_OAUTH_REDIRECT_URI or APP_BASE_URL"],
+    requiredEnv: [
+      `${envPrefix}_CLIENT_ID`,
+      `${envPrefix}_CLIENT_SECRET`,
+      `${envPrefix}_CALLBACK_URL or APP_BASE_URL`,
+    ],
   };
 }
 
@@ -3419,7 +3512,7 @@ function oauthConfigFor(provider, req) {
 
 function normalizeOAuthIdentity(provider, claims) {
   const email = String(claims.email || claims.emailAddress || "").trim().toLowerCase() || null;
-  const displayName = String(claims.name || [claims.given_name, claims.family_name].filter(Boolean).join(" ") || email || provider).trim();
+  const displayName = String(claims.name || claims.login || [claims.given_name, claims.family_name].filter(Boolean).join(" ") || email || provider).trim();
   return {
     providerUserId: String(claims.sub || claims.id || "").trim(),
     email,
@@ -3455,13 +3548,26 @@ async function exchangeOAuthCode(provider, code, req) {
 async function fetchOAuthUserInfo(provider, tokenSet, req) {
   const cfg = oauthConfigFor(provider, req);
   const infoResponse = await fetch(cfg.userInfoUrl, {
-    headers: { Authorization: `Bearer ${tokenSet.access_token}`, Accept: "application/json" },
+    headers: { Authorization: `Bearer ${tokenSet.access_token}`, Accept: "application/json", "User-Agent": "resume-master" },
   });
   const claims = await infoResponse.json().catch(() => ({}));
   if (!infoResponse.ok) {
     const err = new Error(claims.error_description || claims.message || `${provider} userinfo lookup failed.`);
     err.status = 502;
     throw err;
+  }
+  if (provider === "github" && !claims.email && cfg.emailsUrl) {
+    const emailResponse = await fetch(cfg.emailsUrl, {
+      headers: { Authorization: `Bearer ${tokenSet.access_token}`, Accept: "application/json", "User-Agent": "resume-master" },
+    });
+    const emails = await emailResponse.json().catch(() => []);
+    if (emailResponse.ok && Array.isArray(emails)) {
+      const primary = emails.find(row => row?.primary && row?.verified) || emails.find(row => row?.verified) || emails[0];
+      if (primary?.email) {
+        claims.email = primary.email;
+        claims.email_verified = !!primary.verified;
+      }
+    }
   }
   return normalizeOAuthIdentity(provider, claims);
 }
@@ -3692,7 +3798,7 @@ function emitToUser(userId, event) {
 // trust proxy: required for Railway/Render — without this, secure: true cookies
 // fail behind their HTTPS reverse proxy and all sessions silently break.
 app.set("trust proxy", 1);
-app.use(cors({ origin:true, credentials:true }));
+app.use(cors({ origin:corsOrigin, credentials:true }));
 app.use(express.json({ limit:"4mb" }));
 // TODO: reduce cookie maxAge to 30 min + implement sliding renewal
 // once useInactivityLogout (30-min idle) is deployed on the client.
@@ -3702,7 +3808,12 @@ app.use(session({
   // rolling:true resets the cookie maxAge on every response so active users never
   // hit session expiry mid-session (the 7-day clock restarts on each request).
   rolling: true,
-  cookie:{ maxAge:7*24*60*60*1000, httpOnly:true, secure:process.env.NODE_ENV==="production", sameSite:"lax" },
+  cookie:{
+    httpOnly:true,
+    secure:process.env.NODE_ENV === "production",
+    sameSite:process.env.NODE_ENV === "production" ? "none" : "lax",
+    maxAge:7*24*60*60*1000,
+  },
 }));
 app.use(passport.initialize());
 app.use(passport.session());
@@ -3710,6 +3821,51 @@ app.use(bindAuthContext);
 
 const CLIENT_DIST = path.join(__dirname,"client","dist");
 app.use(express.static(CLIENT_DIST));
+
+function xmlEscape(value) {
+  return String(value).replace(/[<>&'"]/g, ch => ({
+    "<": "&lt;",
+    ">": "&gt;",
+    "&": "&amp;",
+    "'": "&apos;",
+    '"': "&quot;",
+  }[ch]));
+}
+
+app.get("/sitemap.xml", (req, res) => {
+  const base = appBaseUrl(req);
+  const routes = [
+    { path: "/", changefreq: "weekly", priority: "1.0" },
+    { path: "/login", changefreq: "monthly", priority: "0.8" },
+    { path: "/features", changefreq: "monthly", priority: "0.6" },
+    { path: "/pricing", changefreq: "monthly", priority: "0.6" },
+    { path: "/about", changefreq: "monthly", priority: "0.5" },
+    { path: "/contact", changefreq: "monthly", priority: "0.5" },
+  ];
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${routes.map(route => `  <url>
+    <loc>${xmlEscape(`${base}${route.path === "/" ? "" : route.path}`)}</loc>
+    <changefreq>${route.changefreq}</changefreq>
+    <priority>${route.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`;
+  res.type("application/xml").send(body);
+});
+
+app.get("/robots.txt", (req, res) => {
+  const base = appBaseUrl(req);
+  res.type("text/plain").send([
+    "User-agent: *",
+    "Disallow: /api/",
+    "Disallow: /jobs",
+    "Disallow: /profile",
+    "Allow: /",
+    "Allow: /login",
+    `Sitemap: ${base}/sitemap.xml`,
+    "",
+  ].join("\n"));
+});
 
 // ═══════════════════════════════════════════════════════════════
 // AUTH
@@ -3780,9 +3936,9 @@ app.get("/api/auth/oauth/status", (req, res) => {
   res.json({ providers: oauthReadiness(req) });
 });
 
-app.get("/api/auth/oauth/:provider/start", (req, res) => {
+app.get(["/api/auth/oauth/:provider/start", "/auth/:provider"], (req, res) => {
   const provider = String(req.params.provider || "").toLowerCase();
-  if (!["google", "linkedin"].includes(provider)) return res.status(400).json({ error: "Unsupported auth provider" });
+  if (!OAUTH_PROVIDERS.includes(provider)) return res.status(400).json({ error: "Unsupported auth provider" });
   const mode = req.query?.mode === "link" ? "link" : "login";
   const returnTo = String(req.query?.returnTo || (mode === "link" ? "/app/integrations" : "/app"));
   if (mode === "link" && !req.isAuthenticated()) {
@@ -3823,7 +3979,7 @@ app.get("/api/auth/oauth/:provider/start", (req, res) => {
   }
 });
 
-app.get("/api/auth/oauth/:provider/callback", async (req, res, next) => {
+app.get(["/api/auth/oauth/:provider/callback", "/auth/:provider/callback"], async (req, res, next) => {
   const provider = String(req.params.provider || "").toLowerCase();
   const state = String(req.query?.state || "");
   const code = String(req.query?.code || "");
@@ -3831,7 +3987,7 @@ app.get("/api/auth/oauth/:provider/callback", async (req, res, next) => {
   const fail = (message, returnTo = stored?.mode === "link" ? stored.returnTo : "/login") =>
     res.redirect(oauthReturnUrl(req, returnTo, { oauthError: message, oauthProvider: provider }));
 
-  if (!["google", "linkedin"].includes(provider)) return fail("Unsupported auth provider.");
+  if (!OAUTH_PROVIDERS.includes(provider)) return fail("Unsupported auth provider.");
   if (req.query?.error) {
     console.warn(`[oauth:${provider}] provider returned error:`, String(req.query.error));
     return fail(String(req.query.error_description || req.query.error));
@@ -3854,7 +4010,7 @@ app.get("/api/auth/oauth/:provider/callback", async (req, res, next) => {
     delete req.session.oauthStates[state];
     const tokenSet = await exchangeOAuthCode(provider, code, req);
     const identity = await fetchOAuthUserInfo(provider, tokenSet, req);
-    const { user, created, linked } = completeProviderAuth(provider, identity, {
+    const { user, created, linked } = await completeProviderAuth(provider, identity, {
       linkUserId: stored.linkUserId || null,
       tokenSet,
     });
@@ -3875,16 +4031,16 @@ app.get("/api/auth/oauth/:provider/callback", async (req, res, next) => {
   }
 });
 
-app.post("/api/auth/provider/:provider", (req, res, next) => {
+app.post("/api/auth/provider/:provider", async (req, res, next) => {
   const provider = String(req.params.provider || "").toLowerCase();
-  if (!["google", "linkedin"].includes(provider)) return res.status(400).json({ error: "Unsupported auth provider" });
+  if (!OAUTH_PROVIDERS.includes(provider)) return res.status(400).json({ error: "Unsupported auth provider" });
   const email = String(req.body?.email || req.body?.accountEmail || "").trim().toLowerCase() || null;
   const providerUserId = String(req.body?.providerUserId || req.body?.id || "").trim() || (email ? `${provider}:${email}` : null);
   const displayName = String(req.body?.displayName || req.body?.name || "").trim() || email || provider;
   if (!providerUserId && !email) return res.status(400).json({ error: "Provider identity or email required" });
 
   try {
-    const { user, created, linked } = completeProviderAuth(provider, {
+    const { user, created, linked } = await completeProviderAuth(provider, {
       providerUserId,
       email,
       displayName,
@@ -3899,7 +4055,7 @@ app.post("/api/auth/provider/:provider", (req, res, next) => {
         email,
         displayName,
         sessionState: req.body.sessionState || req.body.cookies,
-        scopes: provider === "google" ? ["google_login_session"] : ["linkedin_login_session"],
+        scopes: OAUTH_PROVIDER_CONFIG[provider]?.scopes || [],
       });
     }
 
@@ -3993,7 +4149,7 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 app.get("/api/auth/me", (req, res) =>
-  req.isAuthenticated()
+  req.isAuthenticated() || req.authContextToken
     ? res.json({ authenticated:true, user:publicUser(req.user) })
     : res.json({ authenticated:false })
 );

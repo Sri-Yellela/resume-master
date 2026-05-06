@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Resume Master Importer Privacy Policy</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f8fafc;
+        --surface: #ffffff;
+        --text: #111827;
+        --muted: #4b5563;
+        --border: #d1d5db;
+        --accent: #0a66c2;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Arial, Helvetica, sans-serif;
+        line-height: 1.65;
+      }
+      main {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 48px 20px 72px;
+      }
+      article {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 32px;
+      }
+      h1, h2, h3 {
+        line-height: 1.25;
+        margin: 1.6em 0 0.5em;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 2rem;
+      }
+      h2 {
+        font-size: 1.35rem;
+        border-top: 1px solid var(--border);
+        padding-top: 1.2em;
+      }
+      h3 {
+        font-size: 1.05rem;
+      }
+      p, li {
+        color: var(--muted);
+      }
+      code {
+        background: #eef2f7;
+        color: #0f172a;
+        border-radius: 4px;
+        padding: 0.1em 0.3em;
+      }
+      a {
+        color: var(--accent);
+      }
+      .notice {
+        border-left: 4px solid var(--accent);
+        background: #eff6ff;
+        padding: 12px 16px;
+        color: #1e3a8a;
+      }
+      @media (max-width: 640px) {
+        main {
+          padding: 20px 12px 40px;
+        }
+        article {
+          padding: 22px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>Resume Master Importer Privacy Policy</h1>
+        <p><strong>Effective date:</strong> May 1, 2026</p>
+        <p class="notice">This page is the public HTML version for GitHub Pages. The maintainable Markdown source is <a href="../privacy-policy.md">docs/privacy-policy.md</a>.</p>
+
+        <p>This privacy policy describes the Chrome extension named <strong>Resume Master Importer</strong>. It covers only the browser extension and the extension-specific data flows used to import visible LinkedIn job listings into Resume Master. The broader Resume Master web application may handle additional account, resume, job-search, application, billing, or integration data outside the scope of this extension-specific policy.</p>
+        <p><strong>TODO:</strong> Add the legal operator name, support email address, and public production application URL before submitting this policy URL to the Chrome Web Store.</p>
+
+        <h2>What the Extension Does</h2>
+        <p>Resume Master Importer connects a signed-in Resume Master browser tab with LinkedIn Jobs pages. When the user starts an import from Resume Master, the extension opens a LinkedIn job search page for the user's active Resume Master job profile, reads visible job cards from that LinkedIn page, and sends normalized job listing data back to the user's Resume Master account.</p>
+        <p>The extension does not create a separate extension account. It relies on the user's existing Resume Master web session and an extension auth-context token issued by the Resume Master backend.</p>
+
+        <h2>Information the Extension Handles</h2>
+        <h3>Resume Master Account and Connection Information</h3>
+        <p>The extension asks the Resume Master app tab for the signed-in user's authentication status through <code>/api/auth/me</code>. The response currently includes account information such as the user's internal user ID, username, admin flag, apply mode, plan tier, allowed modes, capabilities, and whether the domain profile is complete.</p>
+        <p>The extension displays the username, or a fallback account label, in the extension popup and Resume Master integration UI to show connection status. The extension code also supports displaying an email value if the backend provides one in the future.</p>
+
+        <h3>Authentication and Session Data</h3>
+        <p>The extension uses the browser <code>cookies</code> permission to inspect cookies for the detected Resume Master app domain. It looks for an authentication or session cookie name and may use a matching cookie value if it is usable. If that cookie value is not usable for extension import requests, the extension requests an auth-context token from <code>/api/auth/extension-token</code>.</p>
+        <p>The backend stores only a hash of each issued auth-context token, associated with the user ID, creation time, last-seen time, expiration time, and user-agent label. Extension auth-context tokens are issued with the user-agent label <code>resume-master-extension</code> and expire after seven days unless revoked or cleaned up. The extension sends the token as a <code>Bearer</code> token when importing LinkedIn jobs.</p>
+        <p>The Resume Master web session cookie is configured by the backend as <code>httpOnly</code>, <code>sameSite: "lax"</code>, and <code>secure</code> when <code>NODE_ENV</code> is <code>production</code>. The session cookie max age is seven days and rolls forward on server requests.</p>
+
+        <h3>Active Job Profile Information</h3>
+        <p>The extension requests the user's active Resume Master job profile through <code>/api/auth/active-profile</code>. The response includes the active profile ID, target role/profile name, and location. The target role and location are used to build the LinkedIn job search URL. The active profile ID is sent with imported job listings so Resume Master can associate the import with the user's active profile context.</p>
+
+        <h3>LinkedIn Job Listing Data</h3>
+        <p>When the user starts an import, the extension reads visible job cards from LinkedIn Jobs pages matching <code>https://www.linkedin.com/jobs/*</code>. It extracts the following fields when available:</p>
+        <ul>
+          <li>LinkedIn external job ID from the job URL.</li>
+          <li>Job URL.</li>
+          <li>Apply URL.</li>
+          <li>Job title.</li>
+          <li>Company name.</li>
+          <li>Location.</li>
+          <li>Posted-at text.</li>
+          <li>Source platform value of <code>linkedin</code>.</li>
+        </ul>
+        <p>The extension imports up to 250 visible jobs per import run. It does not read LinkedIn private messages, contacts, profile data, saved passwords, or the contents of pages outside the LinkedIn Jobs match pattern declared in the manifest.</p>
+
+        <h3>Import Status and Error Information</h3>
+        <p>The extension tracks transient status needed to run and display imports, including connection status, imported job count, error messages, Resume Master app URL, and the LinkedIn tab ID opened for an import.</p>
+
+        <h2>Where Information Comes From</h2>
+        <ul>
+          <li>The Resume Master web application tab, through the injected app bridge and same-origin app API requests.</li>
+          <li>The Resume Master backend APIs used by the signed-in user.</li>
+          <li>Visible LinkedIn Jobs page content in the user's browser.</li>
+          <li>Browser cookie metadata and cookie values for the detected Resume Master app domain.</li>
+          <li>User actions in the Resume Master UI and extension popup, such as starting an import, retrying an import, opening Resume Master, or disconnecting extension tokens.</li>
+        </ul>
+
+        <h2>How the Extension Uses Information</h2>
+        <ul>
+          <li>To confirm that the user is signed in to Resume Master.</li>
+          <li>To obtain an auth-context token or usable session credential for import requests.</li>
+          <li>To open a LinkedIn Jobs search page based on the active Resume Master profile's target role and location.</li>
+          <li>To read visible LinkedIn job cards selected by the user's current browser context.</li>
+          <li>To send normalized job listing data to Resume Master for storage in the user's account.</li>
+          <li>To display connection, import, completion, retry, and error status.</li>
+          <li>To close the LinkedIn import tab after completion when requested by the app workflow.</li>
+        </ul>
+
+        <h2>Information Sent to Resume Master</h2>
+        <p>The extension sends imported LinkedIn job listings to <code>POST /api/jobs/import</code>.</p>
+        <p>The request includes a <code>Bearer</code> auth-context token and a JSON body containing the source value <code>linkedin</code>, the active profile ID when available, and an array of job listing objects. The job objects may include title, company, location, job URL, apply URL, external job ID, posted-at text, and source platform.</p>
+        <p>The backend normalizes imported jobs and stores them in the <code>imported_jobs</code> table with fields including user ID, source key, source label, source platform, external job ID, dedupe key, title, company, location, job URL, apply URL, work type, employment type, compensation, posted-at text, description, company icon URL, original payload JSON, flags such as visited/starred/disliked/applied, import count, and import timestamps. For the current LinkedIn extension scraper, description, compensation, company icon URL, work type, and similar optional fields are generally not collected unless present in a submitted payload.</p>
+        <p>The backend deduplicates imported jobs per user, source, and dedupe key. On duplicate imports, it updates the existing imported-job record and increments the import count.</p>
+
+        <h2>Browser Storage</h2>
+        <p>The extension uses <code>chrome.storage.session</code> with the key <code>rmExtensionState</code>. The stored session state may include <code>status</code>, <code>userEmail</code>, <code>importedCount</code>, <code>error</code>, <code>appUrl</code>, and <code>linkedInTabId</code>.</p>
+        <p>This storage is used for extension UI state and app-to-extension coordination. The extension does not use <code>chrome.storage.local</code> or <code>chrome.storage.sync</code> in the current implementation.</p>
+        <p>The extension also keeps runtime-only state in memory, including the Resume Master app tab ID, LinkedIn tab ID, app URL, and last import request. Runtime state is not intentionally persisted by the extension.</p>
+
+        <h2>Backend Storage and Retention</h2>
+        <p>Imported jobs are persisted in the Resume Master backend database under the signed-in user's account. The current code stores import timestamps and keeps imported-job rows unless they are later changed or removed by application functionality or database maintenance.</p>
+        <p>Auth-context token hashes are stored by the backend with creation, last-seen, expiration, and revocation metadata. The code issues these tokens with a seven-day expiration and deletes expired or revoked auth-context rows during token issuance cleanup.</p>
+        <p><strong>TODO:</strong> Confirm and publish the operator's formal retention schedule for imported jobs, account records, logs, backups, and production database retention. The repository does not contain a complete business retention policy.</p>
+
+        <h2>Cookies and Identifiers</h2>
+        <p>The extension can read cookies for the Resume Master app domain because it declares the <code>cookies</code> permission. It uses this access to detect and use an existing Resume Master session where possible. The extension does not set LinkedIn cookies, does not copy LinkedIn cookies into Resume Master, and does not store LinkedIn login cookies.</p>
+        <p>The extension sends an auth-context token to Resume Master as a <code>Bearer</code> token for import requests. The backend stores a hash of that token, not the raw token, in the auth-context database table.</p>
+
+        <h2>Third Parties and Infrastructure</h2>
+        <ul>
+          <li>LinkedIn Jobs pages, where the user is already browsing and where visible job listing data is read.</li>
+          <li>The Resume Master web application and backend API.</li>
+          <li>Production Resume Master hosts matching the extension manifest pattern <code>https://*.up.railway.app/*</code>.</li>
+          <li>Local development hosts <code>http://localhost:3001/*</code> and <code>http://127.0.0.1:3001/*</code>, which are present in the manifest for development and testing builds.</li>
+        </ul>
+        <p>The repository also contains backend integrations for services such as Anthropic, Google OAuth, LinkedIn OAuth, Resend, Apify user tokens, and optional infrastructure mentioned in deployment comments. Those services are part of the broader Resume Master application and are not directly called by the Chrome extension's LinkedIn import code path, except that the extension communicates with the Resume Master backend that may run on Railway-hosted infrastructure.</p>
+        <p><strong>TODO:</strong> Confirm the production hosting provider, production domain, and any subprocessors used for the production Resume Master service before publishing a complete company-wide privacy policy.</p>
+
+        <h2>Sale or Sharing of Data</h2>
+        <p>The current extension code does not contain advertising, analytics SDKs, telemetry SDKs, data broker integrations, or code that sells imported LinkedIn job data.</p>
+        <p><strong>TODO:</strong> Confirm the operator's business practice for data sale, advertising use, and cross-context behavioral advertising. The repository code does not by itself prove business commitments outside the software implementation.</p>
+
+        <h2>Security</h2>
+        <p>For production hosts covered by <code>https://*.up.railway.app/*</code>, extension-to-backend import requests use HTTPS. The backend also marks session cookies as secure in production. Auth-context tokens are sent only to the configured Resume Master app URL and are stored on the backend as hashes.</p>
+        <p>Local development hosts in the manifest use HTTP for local testing only. They should not be used as the public production service URL in Chrome Web Store listing materials.</p>
+        <p>No security method can guarantee absolute protection. Users should install the extension only from the official Chrome Web Store listing and use it only with the intended Resume Master service.</p>
+
+        <h2>User Choices and Controls</h2>
+        <ul>
+          <li>Choose whether to install or remove the Chrome extension.</li>
+          <li>Start a LinkedIn import manually from Resume Master.</li>
+          <li>Avoid importing by not clicking the LinkedIn import action.</li>
+          <li>Disconnect the LinkedIn importer from Resume Master through the Resume Master integrations UI, which calls <code>/api/auth/revoke-extension-token</code>.</li>
+          <li>Clear extension session state through the extension session-clear flow implemented in the extension message handler.</li>
+          <li>Remove the extension through Chrome.</li>
+        </ul>
+        <p><strong>TODO:</strong> Confirm whether the production app exposes user-facing deletion controls for imported jobs and account deletion, and document those controls here.</p>
+
+        <h2>Chrome Extension Permissions</h2>
+        <ul>
+          <li><code>activeTab</code>: to work with the current user-initiated browser context.</li>
+          <li><code>storage</code>: to store transient extension status in <code>chrome.storage.session</code>.</li>
+          <li><code>tabs</code>: to open the LinkedIn job search tab, detect LinkedIn login/checkpoint pages, close the import tab, and coordinate with the Resume Master app tab.</li>
+          <li><code>cookies</code>: to detect the Resume Master session for the app domain and connect the extension to the signed-in account.</li>
+          <li><code>scripting</code>: to inject the app bridge or LinkedIn content script into already-open matching tabs during extension installation.</li>
+        </ul>
+        <p>The extension requests host access for LinkedIn Jobs, deployed Resume Master app hosts matching <code>https://*.up.railway.app/*</code>, and local development hosts.</p>
+
+        <h2>Chrome Web Store User Data Statement</h2>
+        <p>The extension's single purpose is to import visible LinkedIn job listings into the user's Resume Master account. Extension-handled data is used to provide that import workflow and related connection/status UI.</p>
+        <p>The current extension code does not use extension-handled data for advertising, creditworthiness, unrelated profiling, or resale. The extension does not include remote-code loading, obfuscated extension logic, analytics SDKs, or telemetry SDKs in the current extension folder.</p>
+        <p>The extension sends job listing data and auth-context credentials only to the configured Resume Master app URL needed to perform the import. This statement is limited to the behavior visible in the current repository and should be reviewed again before each Chrome Web Store release.</p>
+
+        <h2>Children's Privacy</h2>
+        <p>Resume Master Importer is intended for people using Resume Master for job-search workflows. It is not directed to children under 13.</p>
+
+        <h2>Changes to This Policy</h2>
+        <p>This policy should be updated when the extension's permissions, host access, data flows, backend endpoints, storage behavior, or production subprocessors change. The effective date above should be updated when material changes are published.</p>
+
+        <h2>Contact</h2>
+        <p><strong>TODO:</strong> Add the support email address, legal operator name, mailing address if required, and any jurisdiction-specific privacy contact details.</p>
+      </article>
+    </main>
+  </body>
+</html>

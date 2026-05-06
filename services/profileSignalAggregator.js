@@ -144,6 +144,7 @@ function addNormalizedProfileSuggestion(db, { userId, profileId, kind, label }) 
   if (!nextLabel || !nextKey) {
     return listProfileSignalSuggestions(db, { userId, profileId });
   }
+  const targetColumn = kind === "action_verb" ? "selected_verbs" : "selected_tools";
   const profile = db.prepare(`
     SELECT selected_tools, selected_verbs
     FROM domain_profiles
@@ -155,20 +156,39 @@ function addNormalizedProfileSuggestion(db, { userId, profileId, kind, label }) 
   if (activeValues.some(value => profileSignalKey(value) === nextKey)) {
     return listProfileSignalSuggestions(db, { userId, profileId });
   }
-  const existing = db.prepare(`
-    SELECT signal_key
-    FROM profile_signal_suggestions
-    WHERE user_id = ? AND profile_id = ? AND signal_kind = ?
-  `).all(userId, profileId, kind);
-  if (existing.some(row => row.signal_key === nextKey)) {
-    return listProfileSignalSuggestions(db, { userId, profileId });
-  }
-  return addProfileSignalSuggestions(db, {
-    userId,
-    profileId,
-    kind,
-    labels: [nextLabel],
+  const nextValues = [...activeValues, nextLabel];
+  const applySuggestion = db.prepare(`
+    INSERT INTO profile_signal_suggestions
+      (profile_id, user_id, signal_key, signal_label, signal_kind, structured_field, frequency, status, first_seen_at, last_seen_at, selected_at, applied_at)
+    VALUES (?, ?, ?, ?, ?, NULL, ?, 'applied', unixepoch(), unixepoch(), NULL, unixepoch())
+    ON CONFLICT(profile_id, signal_key) DO UPDATE SET
+      signal_label = excluded.signal_label,
+      signal_kind = excluded.signal_kind,
+      frequency = MAX(profile_signal_suggestions.frequency, excluded.frequency),
+      status = 'applied',
+      last_seen_at = excluded.last_seen_at,
+      applied_at = COALESCE(profile_signal_suggestions.applied_at, excluded.applied_at),
+      updated_at = unixepoch()
+  `);
+  const updateProfile = db.prepare(`
+    UPDATE domain_profiles
+    SET ${targetColumn} = ?, updated_at = unixepoch()
+    WHERE id = ? AND user_id = ?
+  `);
+  const tx = db.transaction(() => {
+    updateProfile.run(JSON.stringify(nextValues), profileId, userId);
+    applySuggestion.run(
+      profileId,
+      userId,
+      nextKey,
+      nextLabel,
+      kind,
+      ATS_SIGNAL_PROMOTION_THRESHOLD,
+    );
   });
+  tx();
+  console.log(`[profile-suggestions] applied ${kind} "${nextLabel}" to profile ${profileId} (${targetColumn}) for user ${userId}`);
+  return listProfileSignalSuggestions(db, { userId, profileId });
 }
 
 export function addSkillToProfile(db, { userId, profileId, label }) {

@@ -113,6 +113,7 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
         ? await addVerbToProfile(clickableProfileId, label)
         : await addSkillToProfile(clickableProfileId, label);
       setProfileSuggestions(next || null);
+      await loadProfileSuggestions(clickableProfileId);
       emitProfileSuggestionsUpdated(clickableProfileId, next || null);
     } catch {
       setAddedItems(prev => {

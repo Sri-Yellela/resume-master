@@ -3,7 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api }      from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
-import { emitProfileSuggestionsUpdated } from "../lib/profileSuggestions.js";
+import {
+  emitProfileSuggestionsUpdated,
+  PROFILE_SUGGESTIONS_UPDATED_EVENT,
+} from "../lib/profileSuggestions.js";
 
 // ── Field normalisers ─────────────────────────────────────────
 function normalisePhone(raw) {
@@ -243,6 +246,17 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
       setSignalsForm({ titles: "", keywords: "", skills: "", searchTerms: "", yearsExperience: "" });
     }).finally(() => setLoadingProfileAssets(false));
   }, [activeProfileId, profiles, loadProfileAssets]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !activeProfileId) return undefined;
+    const handleSuggestionsUpdated = (event) => {
+      if (Number(event.detail?.profileId) !== Number(activeProfileId)) return;
+      loadProfiles().catch(() => {});
+      loadProfileAssets(activeProfileId).catch(() => {});
+    };
+    window.addEventListener(PROFILE_SUGGESTIONS_UPDATED_EVENT, handleSuggestionsUpdated);
+    return () => window.removeEventListener(PROFILE_SUGGESTIONS_UPDATED_EVENT, handleSuggestionsUpdated);
+  }, [activeProfileId, loadProfileAssets, loadProfiles]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 

@@ -166,6 +166,17 @@ async function handleResumeUpload(page, resumePath) {
     const inputs = await page.$$("input[type='file']");
     if (inputs.length > 0) {
       await inputs[0].uploadFile(resumePath);
+      await inputs[0].evaluate(input => {
+        if (!input.files?.length || typeof DataTransfer === "undefined") {
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          return;
+        }
+        const transfer = new DataTransfer();
+        for (const file of input.files) transfer.items.add(file);
+        input.files = transfer.files;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
       await new Promise(r => setTimeout(r, 800));
     }
   } catch (e) {
