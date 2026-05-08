@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

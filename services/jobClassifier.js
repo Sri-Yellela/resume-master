@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // ============================================================
 // services/jobClassifier.js â€” Modular job profile-classification engine
 // ============================================================

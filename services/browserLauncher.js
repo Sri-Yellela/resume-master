@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // services/browserLauncher.js â€” environment-aware Puppeteer browser launcher
 //
 // Shared by services/applyAutomation.js and server.js (htmlToPdf).

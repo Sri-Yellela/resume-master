@@ -1,5 +1,4 @@
-import { Router } from "express";
-import { publicImportedJob } from "../services/importedJobs.js";
+﻿import { Router } from "express";
 
 export function createImportedJobsRouter(db) {
   const router = Router();
@@ -7,12 +6,12 @@ export function createImportedJobsRouter(db) {
   router.get("/summary", (req, res) => {
     const rows = db.prepare(`
       SELECT
-        CASE WHEN source_key IN ('linkedin', 'linkedin_saved') THEN 'linkedin' ELSE source_key END as source_key,
-        CASE WHEN source_key IN ('linkedin', 'linkedin_saved') THEN 'LinkedIn Jobs' ELSE source_label END as source_label,
+        source_key,
+        source_label,
         COUNT(*) as total,
         MAX(last_imported_at) as last_imported_at
       FROM imported_jobs
-      WHERE user_id=? AND (disliked IS NULL OR disliked = 0)
+      WHERE user_id=? AND source_key NOT IN ('linkedin', 'linkedin_saved') AND (disliked IS NULL OR disliked = 0)
       GROUP BY source_key, source_label
       ORDER BY source_label ASC
     `).all(req.user.id);
@@ -26,34 +25,15 @@ export function createImportedJobsRouter(db) {
     });
   });
 
-  function listLinkedInJobs(userId) {
-    return db.prepare(`
-      SELECT *
-      FROM imported_jobs
-      WHERE user_id=? AND source_key IN ('linkedin', 'linkedin_saved') AND (disliked IS NULL OR disliked = 0)
-      ORDER BY COALESCE(posted_at, '') DESC, last_imported_at DESC, id DESC
-    `).all(userId);
-  }
-
-  router.get("/linkedin", (req, res) => {
-    const rows = listLinkedInJobs(req.user.id);
-    res.json({ jobs: rows.map(publicImportedJob) });
-  });
-
-  router.get("/linkedin-saved", (req, res) => {
-    const rows = listLinkedInJobs(req.user.id);
-    res.json({ jobs: rows.map(publicImportedJob) });
-  });
-
   router.patch("/:id/visited", (req, res) => {
-    const row = db.prepare("SELECT id FROM imported_jobs WHERE id=? AND user_id=?").get(req.params.id, req.user.id);
+    const row = db.prepare("SELECT id FROM imported_jobs WHERE id=? AND user_id=? AND source_key NOT IN ('linkedin', 'linkedin_saved')").get(req.params.id, req.user.id);
     if (!row) return res.status(404).json({ error: "Imported job not found" });
     db.prepare("UPDATE imported_jobs SET visited=1, updated_at=unixepoch() WHERE id=? AND user_id=?").run(req.params.id, req.user.id);
     res.json({ ok: true, visited: true });
   });
 
   router.patch("/:id/starred", (req, res) => {
-    const row = db.prepare("SELECT starred FROM imported_jobs WHERE id=? AND user_id=?").get(req.params.id, req.user.id);
+    const row = db.prepare("SELECT starred FROM imported_jobs WHERE id=? AND user_id=? AND source_key NOT IN ('linkedin', 'linkedin_saved')").get(req.params.id, req.user.id);
     if (!row) return res.status(404).json({ error: "Imported job not found" });
     const starred = row.starred ? 0 : 1;
     db.prepare("UPDATE imported_jobs SET starred=?, disliked=0, updated_at=unixepoch() WHERE id=? AND user_id=?")
@@ -62,7 +42,7 @@ export function createImportedJobsRouter(db) {
   });
 
   router.patch("/:id/disliked", (req, res) => {
-    const row = db.prepare("SELECT disliked FROM imported_jobs WHERE id=? AND user_id=?").get(req.params.id, req.user.id);
+    const row = db.prepare("SELECT disliked FROM imported_jobs WHERE id=? AND user_id=? AND source_key NOT IN ('linkedin', 'linkedin_saved')").get(req.params.id, req.user.id);
     if (!row) return res.status(404).json({ error: "Imported job not found" });
     const disliked = row.disliked ? 0 : 1;
     db.prepare("UPDATE imported_jobs SET disliked=?, starred=0, updated_at=unixepoch() WHERE id=? AND user_id=?")

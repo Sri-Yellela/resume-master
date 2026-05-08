@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/ScrollDock.jsx
 // Unified nav bar: full-width expanded â†’ floating pill collapsed on scroll.
 // Variants: "marketing" | "app" | "tools"

@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 import { useEffect, useRef } from "react";
 import { authContextQuery } from "../lib/api.js";
 

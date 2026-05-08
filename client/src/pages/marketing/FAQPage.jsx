@@ -1,32 +1,25 @@
-// client/src/pages/marketing/FAQPage.jsx
+﻿// client/src/pages/marketing/FAQPage.jsx
 import { useState } from "react";
 import { useTheme } from "../../styles/theme.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
 
 const FAQS = [
-  { q: "Is my resume data private?",
-    a: "Yes. Your resume and job data are stored only on your account and never shared or used to train AI models." },
-  { q: "Does this work for non-tech roles?",
-    a: "Yes. Resume Master supports all professional roles — engineering, product management, finance, marketing, HR, healthcare, legal, and more." },
-  { q: "What job boards do you pull from?",
-    a: "We currently source listings from LinkedIn via the Apify scraping platform. You need your own Apify token to use job scraping." },
-  { q: "How is this different from other resume tools?",
-    a: "Most tools give you a template. We give you a resume that is written specifically for the job description you are applying to, with keyword analysis and apply automation built in." },
-  { q: "What is an ATS score?",
-    a: "An ATS (Applicant Tracking System) score measures how well your resume matches the job description based on keywords, skills, and language. Most large companies filter resumes by ATS score before a human sees them." },
-  { q: "Can I use my own resume?",
-    a: "Yes. You upload your base resume once. Generate and A+ Resume use it as the foundation for plan-gated resume tools." },
-  { q: "What happens to my data if I cancel?",
-    a: "Your data remains accessible until you delete your account. We do not delete data on cancellation." },
+  { q: "Is my resume data private?", a: "Yes. Your resume and job data stay on your account and are never used to train AI models." },
+  { q: "Does the extension scrape my LinkedIn profile?", a: "No. The extension only reads the visible job description text on job listing pages, and only when you explicitly click 'Send to Resume Master'. It never accesses your LinkedIn profile or any private data." },
+  { q: "Does Resume Master auto-apply to jobs on my behalf?", a: "Not currently. You can queue jobs and track applications in Resume Master, but submissions go to the employer's official application page. You review and submit manually." },
+  { q: "Where do job listings come from?", a: "Job listings are sourced from Adzuna and Indeed via their official publisher APIs. We do not scrape any job boards." },
+  { q: "What LinkedIn data does Resume Master access?", a: "Only your name and email address, and only when you explicitly click 'Import from LinkedIn' and approve the consent screen. We do not access your connections, work history, or any other LinkedIn data." },
+  { q: "Does this work for non-tech roles?", a: "Yes. Resume Master supports professional roles across engineering, product, finance, marketing, HR, healthcare, legal, and more." },
+  { q: "What is an ATS score?", a: "An ATS score estimates how well your resume matches a pasted job description based on keywords, skills, and language." },
+  { q: "Can I use my own resume?", a: "Yes. You upload your base resume once. Generate and A+ Resume use it as the foundation for resume tools." },
 ];
 
 function FAQItem({ q, a }) {
   const { theme } = useTheme();
   const [open, setOpen] = useState(false);
   return (
-    <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, overflow: "hidden",
-                   marginBottom: 8 }}>
+    <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 8 }}>
       <button onClick={() => setOpen(o => !o)}
         style={{ width: "100%", padding: "16px 20px", background: theme.surface,
                   border: "none", cursor: "pointer", display: "flex",
@@ -60,7 +53,7 @@ export function FAQPage() {
                       fontFamily: "'Barlow Condensed', 'DM Sans', system-ui" }}>
           Frequently asked questions
         </h1>
-        {FAQS.map((f, i) => <FAQItem key={i} q={f.q} a={f.a}/>)}
+        {FAQS.map((f, i) => <FAQItem key={i} q={f.q} a={f.a}/>) }
       </main>
       <Footer/>
     </div>

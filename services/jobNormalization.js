@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // ============================================================
 // services/jobNormalization.js â€” Pure job item normalization helpers
 // ============================================================

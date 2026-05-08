@@ -1,4 +1,4 @@
-import { getBaseResumeRecord } from "./simpleApplyProfile.js";
+﻿import { getBaseResumeRecord } from "./simpleApplyProfile.js";
 
 export const INTEGRATION_PROVIDERS = new Set(["gmail", "google", "linkedin"]);
 
@@ -20,7 +20,7 @@ export function publicIntegrationRow(row) {
     expiresAt: row.expires_at || null,
     lastCheckedAt: row.last_checked_at || null,
     updatedAt: row.updated_at || null,
-    hasSession: !!row.secret_enc,
+    hasSession: false,
   };
 }
 
@@ -30,23 +30,33 @@ export function getStoredIntegration(db, userId, provider) {
 }
 
 export function getLinkedInStatus(db, userId) {
-  const row = db.prepare("SELECT updated_at FROM user_linkedin_sessions WHERE user_id=?").get(userId);
   const linkedIdentity = getStoredIntegration(db, userId, "linkedin");
   const publicLinkedIdentity = publicIntegrationRow(linkedIdentity);
   return {
-    connected: !!row || publicLinkedIdentity.connected,
-    healthy: !!row || publicLinkedIdentity.healthy,
-    status: row ? "connected" : publicLinkedIdentity.status,
+    connected: publicLinkedIdentity.connected,
+    healthy: publicLinkedIdentity.healthy,
+    status: publicLinkedIdentity.status,
     accountEmail: publicLinkedIdentity.accountEmail || null,
-    updatedAt: row?.updated_at || publicLinkedIdentity.updatedAt || null,
+    updatedAt: publicLinkedIdentity.updatedAt || null,
     lastCheckedAt: publicLinkedIdentity.lastCheckedAt || null,
-    hasSession: !!row || publicLinkedIdentity.hasSession,
+    hasSession: false,
     identityLinked: publicLinkedIdentity.connected,
   };
 }
 
+export function isAdzunaConfigured() {
+  return !!(process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY);
+}
+
+export function isIndeedConfigured() {
+  return !!process.env.INDEED_PUBLISHER_ID;
+}
+
+export function isLinkedInOAuthConfigured() {
+  return !!(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET);
+}
+
 export function getAutomationReadiness(db, userId) {
-  const user = db.prepare("SELECT apify_token FROM users WHERE id=?").get(userId) || {};
   const activeProfile = db.prepare("SELECT id, profile_name FROM domain_profiles WHERE user_id=? AND is_active=1").get(userId);
   const base = activeProfile
     ? getBaseResumeRecord(db, { userId, profileId: activeProfile.id })
@@ -62,15 +72,25 @@ export function getAutomationReadiness(db, userId) {
   if (!profile.email) missingApply.push("profile_email");
   if (!hasName) missingApply.push("profile_name");
   return {
-    apify: {
-      connected: !!user.apify_token,
-      healthy: !!user.apify_token,
-      status: user.apify_token ? "configured" : "missing",
-      requiredFor: ["job_search", "manual_refresh"],
+    adzuna: {
+      connected: isAdzunaConfigured(),
+      healthy: isAdzunaConfigured(),
+      status: isAdzunaConfigured() ? "configured" : "missing",
+      requiredFor: ["job_search"],
+    },
+    indeed: {
+      connected: isIndeedConfigured(),
+      healthy: isIndeedConfigured(),
+      status: isIndeedConfigured() ? "configured" : "missing",
+      requiredFor: ["job_search"],
     },
     gmail: { ...gmail, requiredFor: ["otp_retrieval", "portal_verification"] },
     google: { ...google, requiredFor: ["google_login", "portal_account_creation"] },
-    linkedin: { ...linkedin, requiredFor: ["linkedin_search_context", "linkedin_apply_session"] },
+    linkedin: {
+      ...linkedin,
+      oauthConfigured: isLinkedInOAuthConfigured(),
+      requiredFor: ["profile_import"],
+    },
     resume: {
       connected: !!base,
       healthy: !!String(base?.content || "").trim(),
@@ -98,7 +118,6 @@ export function getAutomationReadiness(db, userId) {
       optional: [
         ...(!gmail.healthy ? ["gmail"] : []),
         ...(!google.healthy ? ["google"] : []),
-        ...(!linkedin.healthy ? ["linkedin"] : []),
       ],
     },
   };
@@ -106,12 +125,4 @@ export function getAutomationReadiness(db, userId) {
 
 export function getMissingApplyPrerequisites(readiness) {
   return readiness?.apply?.missing || [];
-}
-
-export function requiresLinkedInSession(jobUrl) {
-  try {
-    return new URL(jobUrl).hostname.toLowerCase().includes("linkedin.com");
-  } catch {
-    return false;
-  }
 }

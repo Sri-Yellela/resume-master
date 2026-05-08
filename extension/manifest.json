@@ -1,26 +1,22 @@
-{
+﻿{
   "manifest_version": 3,
-  "name": "Resume Master Importer",
-  "version": "0.1.0",
-  "description": "Import LinkedIn jobs into Resume Master.",
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
-  "permissions": ["activeTab", "storage", "tabs", "cookies", "scripting"],
+  "name": "Resume Master",
+  "version": "1.1.0",
+  "description": "Send job descriptions to Resume Master for ATS scoring. Quick access to your resume builder.",
+  "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [
-    "https://www.linkedin.com/*",
-    "http://localhost:3001/*",
-    "http://127.0.0.1:3001/*",
-    "https://*.up.railway.app/*"
+    "https://*.linkedin.com/*",
+    "https://*.indeed.com/*",
+    "https://*.glassdoor.com/*",
+    "https://*.lever.co/*",
+    "https://*.greenhouse.io/*",
+    "https://*.workable.com/*"
   ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
-    "default_title": "Resume Master Importer",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
@@ -30,18 +26,19 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/jobs/*"],
+      "matches": [
+        "https://www.linkedin.com/jobs/view/*",
+        "https://www.indeed.com/viewjob*",
+        "https://www.glassdoor.com/job-listing/*",
+        "https://jobs.lever.co/*/*",
+        "https://boards.greenhouse.io/*/*",
+        "https://*.workable.com/j/*"
+      ],
       "js": ["linkedin-content.js"],
       "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "http://localhost:3001/*",
-        "http://127.0.0.1:3001/*",
-        "https://*.up.railway.app/*"
-      ],
-      "js": ["app-bridge.js"],
-      "run_at": "document_idle"
     }
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
 }

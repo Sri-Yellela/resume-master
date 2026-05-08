@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // services/limitEnforcer.js
 // PURPOSE: Check per-user limits before allowing metered operations.
 // Returns { allowed: bool, reason: string, current: int, limit: int }

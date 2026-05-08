@@ -1,4 +1,4 @@
-// client/src/pages/marketing/PrivacyPage.jsx
+﻿// client/src/pages/marketing/PrivacyPage.jsx
 import { useTheme } from "../../styles/theme.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
@@ -6,27 +6,35 @@ import { Footer } from "../../components/Footer.jsx";
 const SECTIONS = [
   {
     title: "Data We Collect",
-    body: `We collect the information you provide directly: your account credentials (username and hashed password), profile information (name, email, phone), your base resume text, job listings you interact with, and resumes we generate on your behalf. We also collect usage metadata including timestamps of API calls, model token usage, and application activity — this data is used solely for usage metering and is never sold.`,
+    body: "We collect information you provide directly: account credentials, profile information, resume content, generated resumes, job descriptions you submit for ATS scoring, and application tracking entries you create. LinkedIn import collects only the name and email you explicitly share through LinkedIn's OAuth consent screen.",
   },
   {
     title: "How We Use Your Data",
-    body: `Your data is used exclusively to provide the Resume Master service: powering plan-gated resume tools, performing ATS analysis, scraping and displaying job listings, and tracking your application history. We do not use your resume content or job data to train AI models. AI calls are made to the Anthropic API (Claude) on your behalf; your resume text is sent to Anthropic only during active generation or analysis requests.`,
+    body: "Your data powers resume building, template selection, PDF export, ATS analysis, manual application tracking, and profile pre-fill. We do not use your resume content or job data to train AI models.",
   },
   {
-    title: "Data Storage and Security",
-    body: `All data is stored in an encrypted SQLite database on your hosting server. Passwords are hashed using bcrypt before storage — we never store plaintext passwords. Session tokens are stored server-side and expire on logout or inactivity. We recommend using a strong, unique password for your account.`,
+    title: "Job Listings",
+    body: "Job listings are sourced from Adzuna and Indeed via their official publisher APIs. Resume Master does not scrape job boards.",
+  },
+  {
+    title: "Chrome Extension",
+    body: "The Chrome extension reads only visible job description text on supported job listing pages, and only when you click Send to Resume Master. It does not access your LinkedIn profile or private data.",
+  },
+  {
+    title: "Applications",
+    body: "Applications are submitted manually by you via the official employer application page. Resume Master may track applications you record, but it does not submit LinkedIn applications on your behalf.",
   },
   {
     title: "Third Party Services",
-    body: `Resume Master integrates with two third-party services: (1) Anthropic API — used for AI resume generation and ATS scoring. Resume text and job descriptions are transmitted to Anthropic's servers for processing. Anthropic's privacy policy governs their handling of this data. (2) Apify — used for job scraping from LinkedIn. Your Apify API token is stored encrypted in your account and is used only to execute scraping requests on your behalf.`,
+    body: "Resume Master uses LinkedIn OpenID Connect for user-consented name and email import, Anthropic for AI resume generation and ATS analysis, Adzuna for job listings, and Indeed Publisher for job listings.",
   },
   {
-    title: "Your Rights",
-    body: `You have the right to access all data we hold about you, delete your account and all associated data at any time, export your resume history, and opt out of non-essential data collection. To exercise these rights, contact us at the address below.`,
+    title: "Data Storage and Security",
+    body: "Passwords are hashed before storage. Session tokens are stored server-side. LinkedIn access tokens are discarded after the import request and are not written to the database or logs.",
   },
   {
     title: "Contact",
-    body: `For privacy-related inquiries, use the contact form at /contact. We will respond within 5 business days.`,
+    body: "For privacy-related inquiries, use the contact form at /contact. We will respond within 5 business days.",
   },
 ];
 
@@ -44,16 +52,12 @@ export function PrivacyPage() {
           Privacy Policy
         </h1>
         <p style={{ fontSize: 13, color: theme.textDim, marginBottom: 48 }}>
-          Last updated: April 2025
+          Last updated: May 8, 2026
         </p>
         {SECTIONS.map((s, i) => (
           <div key={i} style={{ marginBottom: 40 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: theme.text, marginBottom: 12 }}>
-              {s.title}
-            </h2>
-            <p style={{ fontSize: 14, color: theme.textMuted, lineHeight: 1.8, margin: 0 }}>
-              {s.body}
-            </p>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: theme.text, marginBottom: 12 }}>{s.title}</h2>
+            <p style={{ fontSize: 14, color: theme.textMuted, lineHeight: 1.8, margin: 0 }}>{s.body}</p>
           </div>
         ))}
       </main>

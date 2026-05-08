@@ -1,3 +1,4 @@
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/TopBar.jsx — single animated nav (Lucy Brand)
 // position:fixed, converges from full-width bar → centered glassy pill on scroll.
 // Consumes AppScrollContext progress/pinned set by PullToRefresh in JobsPanel.

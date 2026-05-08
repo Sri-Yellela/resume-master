@@ -1,61 +1,65 @@
-const STORAGE_KEY = "rmExtensionState";
-const popupRoot = document.getElementById("popup");
+﻿const RESUME_MASTER_URL = 'https://YOUR_DOMAIN.com';
 
-function actionButton(label, className, onClick) {
-  const button = document.createElement("button");
-  button.textContent = label;
-  if (className) button.className = className;
-  button.addEventListener("click", onClick);
-  return button;
+function setStatus(msg, timeout = 0) {
+  document.getElementById('status').textContent = msg;
+  if (timeout) setTimeout(() => setStatus(''), timeout);
 }
 
-async function sendMessage(payload) {
-  return chrome.runtime.sendMessage(payload);
+async function getCurrentTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
 }
 
-function render(state) {
-  popupRoot.innerHTML = "";
-  const title = document.createElement("h1");
-  title.textContent = "Resume Master";
-  const message = document.createElement("p");
-  const actions = document.createElement("div");
-  actions.className = "actions";
+function isJobPage(url = '') {
+  return (
+    /linkedin\.com\/jobs\/view\//.test(url) ||
+    /indeed\.com\/viewjob/.test(url) ||
+    /glassdoor\.com\/job-listing/.test(url) ||
+    /lever\.co\/.+\/.+/.test(url) ||
+    /greenhouse\.io/.test(url) ||
+    /workable\.com\/j\//.test(url)
+  );
+}
 
-  if (state.status === "READY") {
-    message.textContent = `Connected as ${state.userEmail || "your account"}. Click Import on the job board to import jobs.`;
-  } else if (state.status === "IMPORTING") {
-    const spinner = document.createElement("div");
-    spinner.className = "spinner";
-    popupRoot.append(title, spinner);
-    message.textContent = "Importing jobs from LinkedIn...";
-  } else if (state.status === "DONE") {
-    message.textContent = `Imported ${state.importedCount || 0} jobs successfully.`;
-    actions.append(
-      actionButton("Go to Job Board", "", () => sendMessage({ type: "OPEN_APP" })),
-      actionButton("Open Resume Master", "secondary", () => sendMessage({ type: "OPEN_APP" }))
-    );
-  } else if (state.status === "ERROR") {
-    message.textContent = `Import failed: ${state.error || "Unknown error."}`;
-    actions.append(
-      actionButton("Retry", "", () => sendMessage({ type: "RETRY_IMPORT" })),
-      actionButton("Open Resume Master", "secondary", () => sendMessage({ type: "OPEN_APP" }))
-    );
-  } else {
-    message.textContent = "Not connected to Resume Master. Please log in.";
-    actions.append(actionButton("Open Resume Master", "", () => sendMessage({ type: "OPEN_APP" })));
+async function init() {
+  const tab = await getCurrentTab();
+  if (isJobPage(tab?.url)) {
+    setStatus('Job listing detected');
+  } else if (/linkedin\.com\/in\//.test(tab?.url)) {
+    setStatus('LinkedIn profile page');
   }
-
-  popupRoot.append(title, message, actions);
 }
 
-async function loadState() {
-  const stored = await chrome.storage.session.get(STORAGE_KEY);
-  render(stored[STORAGE_KEY] || { status: "NOT_AUTHED" });
-}
-
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "session" || !changes[STORAGE_KEY]) return;
-  render(changes[STORAGE_KEY].newValue || { status: "NOT_AUTHED" });
+document.getElementById('btn-resume').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'OPEN_RESUME_BUILDER' });
+  setStatus('Opening...', 800);
+  setTimeout(() => window.close(), 800);
 });
 
-loadState();
+document.getElementById('btn-linkedin').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'OPEN_LINKEDIN_IMPORT' });
+  setStatus('Opening LinkedIn login...', 1000);
+  setTimeout(() => window.close(), 900);
+});
+
+document.getElementById('btn-ats').addEventListener('click', async () => {
+  const tab = await getCurrentTab();
+  if (isJobPage(tab?.url) && tab?.id) {
+    try {
+      const [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => document.body?.innerText?.slice(0, 6000) || '',
+      });
+      await chrome.runtime.sendMessage({ type: 'OPEN_ATS_SCORE', jobText: result || '' });
+      setStatus('Sending to ATS Score...', 1000);
+    } catch (_err) {
+      await chrome.runtime.sendMessage({ type: 'OPEN_ATS_SCORE', jobText: '' });
+    }
+    setTimeout(() => window.close(), 900);
+  } else {
+    await chrome.tabs.create({ url: `${RESUME_MASTER_URL}/ats-score` });
+    setTimeout(() => window.close(), 300);
+  }
+});
+
+init();

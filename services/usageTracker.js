@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // services/usageTracker.js
 // PURPOSE: Record all metered events to usage_events, cache_events, and scrape_events.
 // DEPENDENCIES: db instance from server.js passed as first argument.

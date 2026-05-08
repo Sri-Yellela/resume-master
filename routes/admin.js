@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // routes/admin.js â€” Usage analytics and limits admin API
 import { Router } from "express";
 

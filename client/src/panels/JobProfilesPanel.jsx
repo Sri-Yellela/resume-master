@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 import { useCallback, useEffect, useState } from "react";
 import { api, authHeaders } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";

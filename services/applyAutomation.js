@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // services/applyAutomation.js â€” Server-side Puppeteer apply automation
 // Replaces the Chrome extension form-fill logic with a Node.js service.
 //

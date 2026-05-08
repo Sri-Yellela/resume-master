@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/panels/ProfilePanel.jsx â€” Design System v4
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api }      from "../lib/api.js";

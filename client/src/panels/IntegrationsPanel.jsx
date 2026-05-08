@@ -1,23 +1,19 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
-import { useLinkedInExtension } from "../hooks/useLinkedInExtension.js";
-import {
-  getLinkedInExtensionInstallUrl,
-  sendExtensionRequest,
-} from "../lib/extensionBridge.js";
 
 function StatusPill({ status, healthy, theme }) {
   const color = healthy ? "#16a34a" : status === "missing" || status === "not_connected" ? "#dc2626" : "#d97706";
   return (
     <span style={{ display:"inline-flex", alignItems:"center", border:`1px solid ${color}55`,
       background:`${color}14`, color, borderRadius:6, padding:"3px 7px", fontSize:11, fontWeight:800 }}>
-      {healthy ? "Ready" : status.replace(/_/g, " ")}
+      {healthy ? "Active" : String(status || "pending").replace(/_/g, " ")}
     </span>
   );
 }
 
 function Section({ title, subtitle, status, children, theme }) {
+  const resolvedStatus = status || { healthy: false, status: "missing" };
   return (
     <section style={{ border:`1px solid ${theme.border}`, background:theme.surface,
       borderRadius:8, padding:18, display:"flex", flexDirection:"column", gap:12 }}>
@@ -29,7 +25,7 @@ function Section({ title, subtitle, status, children, theme }) {
           </div>
           <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.5, marginTop:2 }}>{subtitle}</div>
         </div>
-        <StatusPill theme={theme} status={status.status} healthy={status.healthy}/>
+        <StatusPill theme={theme} status={resolvedStatus.status} healthy={resolvedStatus.healthy}/>
       </div>
       {children}
     </section>
@@ -39,82 +35,44 @@ function Section({ title, subtitle, status, children, theme }) {
 export function IntegrationsPanel() {
   const { theme } = useTheme();
   const [status, setStatus] = useState(null);
-  const [apifyToken, setApifyToken] = useState("");
-  const [gmailEmail, setGmailEmail] = useState("");
   const [msg, setMsg] = useState("");
-  const { extensionInstalled, extensionState, refreshExtensionState } = useLinkedInExtension();
 
   const load = () => api("/api/integrations/status").then(setStatus).catch(e => setMsg(e.message));
   useEffect(() => { load(); }, []);
 
-  const saveApify = async () => {
-    await api("/api/integrations/apify-token", { method:"PATCH", body:JSON.stringify({ token:apifyToken.trim() }) });
-    setApifyToken(""); setMsg("Apify token saved."); load();
-  };
-  const clearApify = async () => {
-    await api("/api/integrations/apify-token", { method:"DELETE" });
-    setMsg("Apify token cleared."); load();
-  };
-  const connectProvider = async (provider, accountEmail) => {
-    await api(`/api/integrations/${provider}`, {
-      method:"POST",
-      body:JSON.stringify({
-        accountEmail: accountEmail.trim(),
-        scopes: provider === "gmail" ? ["gmail.readonly", "verification_email_lookup"] : ["google_login_session"],
-        metadata: { configuredFrom: "integrations_panel" },
-      }),
-    });
-    setMsg(`${provider === "gmail" ? "Gmail" : provider === "linkedin" ? "LinkedIn" : "Google"} connection saved.`);
-    if (provider === "gmail") setGmailEmail("");
-    load();
-  };
-  const disconnectProvider = async (provider) => {
-    await api(`/api/integrations/${provider}`, { method:"DELETE" });
-    setMsg(`${provider === "gmail" ? "Gmail" : provider === "linkedin" ? "LinkedIn" : "Google"} disconnected.`);
-    load();
-  };
   const startOAuth = (provider) => {
     const readiness = status?.oauth?.[provider];
     if (readiness && !readiness.configured) {
       setMsg(`${provider === "linkedin" ? "LinkedIn" : "Google"} OAuth is not configured by the app operator: ${readiness.missing.join(", ")} missing.`);
       return;
     }
+    if (provider === "linkedin") {
+      window.location.href = "/auth/linkedin";
+      return;
+    }
     window.location.href = `/api/auth/oauth/${provider}/start?mode=link&returnTo=${encodeURIComponent("/app/integrations")}`;
   };
-  const openExtensionPopup = async () => {
-    try {
-      await sendExtensionRequest({ type: "OPEN_POPUP" });
-    } catch (e) {
-      setMsg(e.message || "Could not open the LinkedIn extension.");
-    }
-  };
-  const disconnectExtension = async () => {
-    await api("/api/auth/revoke-extension-token", { method: "POST" });
-    try { await sendExtensionRequest({ type: "CLEAR_EXTENSION_SESSION" }); } catch {}
-    await refreshExtensionState().catch(() => {});
-    setMsg("LinkedIn extension disconnected.");
+
+  const disconnectProvider = async (provider) => {
+    await api(`/api/integrations/${provider}`, { method:"DELETE" });
+    setMsg(`${provider === "gmail" ? "Gmail" : provider === "linkedin" ? "LinkedIn" : "Google"} disconnected.`);
+    load();
   };
 
-  const inputStyle = { height:36, border:`1px solid ${theme.border}`, borderRadius:6,
-    background:theme.surfaceHigh, color:theme.text, padding:"0 10px", outline:"none", fontSize:13, flex:1 };
   const buttonStyle = { border:"none", borderRadius:6, background:theme.accent, color:"#0f0f0f",
     padding:"8px 12px", cursor:"pointer", fontWeight:800, fontSize:12 };
   const secondaryButton = { ...buttonStyle, background:theme.surfaceHigh, color:theme.text, border:`1px solid ${theme.border}` };
   const oauthSectionStatus = (provider, userStatus) => {
-    const operator = status.oauth?.[provider];
+    const operator = status?.oauth?.[provider];
     if (operator && !operator.configured) return { healthy:false, status:operator.status || "not_configured" };
     return userStatus;
   };
   const oauthHelp = (provider) => {
-    const operator = status.oauth?.[provider];
+    const operator = status?.oauth?.[provider];
     if (!operator) return null;
     if (!operator.configured) return `${provider === "linkedin" ? "LinkedIn" : "Google"} OAuth is not configured: ${operator.missing.join(", ")} missing.`;
     if (operator.warnings?.length) return `Configured with warnings: ${operator.warnings.join(", ")}.`;
     return "OAuth app configuration is ready.";
-  };
-  const oauthButtonStyle = (provider) => {
-    const configured = status.oauth?.[provider]?.configured !== false;
-    return { ...buttonStyle, opacity:configured ? 1 : 0.55, cursor:configured ? "pointer" : "not-allowed" };
   };
 
   if (!status) {
@@ -130,105 +88,43 @@ export function IntegrationsPanel() {
             Integrations
           </div>
           <div style={{ color:theme.textMuted, fontSize:13, lineHeight:1.6 }}>
-            Connect search, login, email verification, and apply automation prerequisites in one place.
+            Manage official data providers and profile import connections.
           </div>
         </div>
 
         {msg && <div style={{ border:`1px solid ${theme.border}`, background:theme.surfaceHigh,
           color:theme.text, borderRadius:6, padding:"9px 12px", fontSize:12 }}>{msg}</div>}
 
-        <Section theme={theme} title="Automation Readiness"
-          subtitle="Auto Apply and Manual Apply require a base resume, active job profile, and profile contact fields. Login connectors are used when a portal needs them."
-          status={{ healthy:status.apply.ready, status:status.apply.ready ? "ready" : "missing_setup" }}>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-            {(status.apply.missing.length ? status.apply.missing : ["core_ready"]).map(item => (
-              <span key={item} style={{ padding:"5px 8px", borderRadius:6, background:theme.surfaceHigh,
-                color:status.apply.ready ? "#16a34a" : "#dc2626", fontSize:12, fontWeight:700 }}>
-                {item.replace(/_/g, " ")}
-              </span>
-            ))}
-          </div>
-        </Section>
-
-        <Section theme={theme} title="Apify" subtitle="Required for LinkedIn job search and manual refresh."
-          status={status.apify}>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            <input type="password" value={apifyToken} onChange={e => setApifyToken(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && saveApify()} placeholder="apify_api_..." style={inputStyle}/>
-            <button onClick={saveApify} style={buttonStyle}>Save Token</button>
-            {status.apify.connected && <button onClick={clearApify} style={secondaryButton}>Clear</button>}
-          </div>
-        </Section>
-
-        <Section theme={theme} title="Gmail" subtitle="Used for verification email and OTP retrieval during account creation flows."
-          status={status.gmail}>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            <input value={gmailEmail} onChange={e => setGmailEmail(e.target.value)}
-              placeholder={status.gmail.accountEmail || "gmail account email"} style={inputStyle}/>
-            <button onClick={() => connectProvider("gmail", gmailEmail)} disabled={!gmailEmail.trim()} style={buttonStyle}>Connect Gmail</button>
-            {status.gmail.connected && <button onClick={() => disconnectProvider("gmail")} style={secondaryButton}>Disconnect</button>}
-          </div>
-        </Section>
-
-        <Section theme={theme} title="Google Login" subtitle="OAuth-linked Google account metadata for portals that offer Continue with Google."
-          status={oauthSectionStatus("google", status.google)}>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            <button onClick={() => startOAuth("google")} disabled={status.oauth?.google?.configured === false} style={oauthButtonStyle("google")}>
-              {status.google.connected ? "Reconnect Google" : "Connect Google"}
-            </button>
-            {status.google.connected && <button onClick={() => disconnectProvider("google")} style={secondaryButton}>Disconnect</button>}
-            <span style={{ color:theme.textMuted, fontSize:12, alignSelf:"center" }}>
-              {status.google.accountEmail || (status.google.identityLinked ? "Google identity linked" : "Not connected")}
-            </span>
-            <span style={{ color:status.oauth?.google?.configured === false ? theme.danger : theme.textMuted, fontSize:12, alignSelf:"center" }}>
-              {oauthHelp("google")}
-            </span>
-          </div>
-        </Section>
-
-        <Section theme={theme} title="LinkedIn" subtitle="Install the extension, connect it silently to Resume Master, and import LinkedIn jobs without token copy/paste."
+        <Section theme={theme} title="LinkedIn Profile Import"
+          subtitle="Import your name and email to pre-fill your resume."
           status={oauthSectionStatus("linkedin", status.linkedin)}>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            {!extensionInstalled && (
-              <button onClick={() => window.open(getLinkedInExtensionInstallUrl(), "_blank", "noreferrer")} style={buttonStyle}>
-                Install Extension
-              </button>
-            )}
-            {extensionInstalled && extensionState.status === "NOT_AUTHED" && (
-              <button onClick={openExtensionPopup} style={buttonStyle}>
-                Reconnect
-              </button>
-            )}
-            {extensionInstalled && extensionState.status !== "NOT_AUTHED" && (
-              <button onClick={disconnectExtension} style={secondaryButton}>
-                Disconnect
-              </button>
-            )}
-            <button onClick={() => startOAuth("linkedin")} disabled={status.oauth?.linkedin?.configured === false} style={oauthButtonStyle("linkedin")}>
-              {status.linkedin.identityLinked ? "Reconnect LinkedIn Login" : "Connect LinkedIn Login"}
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+            <button onClick={() => startOAuth("linkedin")} disabled={status.oauth?.linkedin?.configured === false} style={buttonStyle}>
+              {status.linkedin?.identityLinked ? "Import Again" : "Import from LinkedIn"}
             </button>
-            {status.linkedin.identityLinked && <button onClick={() => disconnectProvider("linkedin")} style={secondaryButton}>Unlink Login</button>}
-            <span style={{ color:theme.textMuted, fontSize:12, alignSelf:"center" }}>
-              {!extensionInstalled
-                ? "LinkedIn Importer - Not installed"
-                : extensionState.status === "NOT_AUTHED"
-                  ? "LinkedIn Importer - Installed, not connected"
-                  : `LinkedIn Importer - Connected as ${extensionState.userEmail || "your account"}`}
-            </span>
-            <span style={{ color:status.oauth?.linkedin?.configured === false ? theme.danger : theme.textMuted, fontSize:12, alignSelf:"center" }}>
-              {oauthHelp("linkedin")}
+            {status.linkedin?.identityLinked && <button onClick={() => disconnectProvider("linkedin")} style={secondaryButton}>Disconnect</button>}
+            <span style={{ color:status.oauth?.linkedin?.configured === false ? theme.danger : theme.textMuted, fontSize:12 }}>
+              {status.linkedin?.identityLinked ? "Profile imported" : oauthHelp("linkedin")}
             </span>
           </div>
         </Section>
 
-        <Section theme={theme} title="Resume and Profile" subtitle="Search defaults, ATS sorting, resume generation, and autofill depend on these local prerequisites."
-          status={{ healthy:status.resume.healthy && status.profile.healthy, status:status.resume.healthy && status.profile.healthy ? "ready" : "missing_setup" }}>
+        <Section theme={theme} title="Indeed" subtitle="Powered by Indeed." status={status.indeed}>
+          <div style={{ fontSize:12, color:theme.textMuted }}>Official publisher feed provider for upcoming job listings.</div>
+        </Section>
+
+        <Section theme={theme} title="Adzuna" subtitle="Job data provider." status={status.adzuna}>
+          <div style={{ fontSize:12, color:theme.textMuted }}>Primary official API provider for upcoming job search.</div>
+        </Section>
+
+        <Section theme={theme} title="Resume and Profile" subtitle="Manual application tracking and resume tools depend on local profile readiness."
+          status={{ healthy:status.resume?.healthy && status.profile?.healthy, status:status.resume?.healthy && status.profile?.healthy ? "ready" : "missing_setup" }}>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:10 }}>
             <div style={{ background:theme.surfaceHigh, borderRadius:6, padding:10 }}>
-              <strong>Base resume</strong><br/><span style={{ color:theme.textMuted }}>{status.resume.name || status.resume.status}</span>
+              <strong>Base resume</strong><br/><span style={{ color:theme.textMuted }}>{status.resume?.name || status.resume?.status}</span>
             </div>
             <div style={{ background:theme.surfaceHigh, borderRadius:6, padding:10 }}>
-              <strong>Active profile</strong><br/><span style={{ color:theme.textMuted }}>{status.profile.activeProfileName || status.profile.status}</span>
+              <strong>Active profile</strong><br/><span style={{ color:theme.textMuted }}>{status.profile?.activeProfileName || status.profile?.status}</span>
             </div>
           </div>
         </Section>

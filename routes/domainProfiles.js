@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // routes/domainProfiles.js â€” Domain profile CRUD + chip generation
 import { Router }        from "express";
 import Anthropic         from "@anthropic-ai/sdk";

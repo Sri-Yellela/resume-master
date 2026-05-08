@@ -1,95 +1,107 @@
-function cleanText(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
+﻿/*
+ * JOB DESCRIPTION EXTRACTOR - Resume Master Extension v1.1
+ *
+ * Reads only the VISIBLE job description text on job listing pages.
+ * Activated only by user clicking the injected button or popup action.
+ * Does NOT scrape profiles, user data, or any non-public information.
+ * Does NOT run automatically or in the background.
+ * Does NOT collect data without user interaction.
+ */
 
-function dedupeByUrl(jobs) {
-  const seen = new Set();
-  return jobs.filter((job) => {
-    const key = job.jobUrl || `${job.title}|${job.company}|${job.location}`;
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
+(function () {
+  if (document.getElementById('rm-send-btn')) return;
 
-function findText(root, selectors) {
-  for (const selector of selectors) {
-    const text = cleanText(root.querySelector(selector)?.textContent || "");
-    if (text) return text;
-  }
-  return "";
-}
+  const EXTRACTORS = {
+    'linkedin.com':  () => trySelectors([
+      '.jobs-description__content .jobs-box__html-content',
+      '.jobs-description-content__text',
+      '.job-view-layout',
+    ]),
+    'indeed.com':    () => trySelectors(['#jobDescriptionText']),
+    'glassdoor.com': () => trySelectors(['.jobDescriptionContent']),
+    'lever.co':      () => trySelectors(['.posting-description', '.section-wrapper']),
+    'greenhouse.io': () => trySelectors(['#content .job__description', '#content']),
+    'workable.com':  () => trySelectors(['.job-description']),
+  };
 
-function scrapeVisibleLinkedInJobs() {
-  const cards = Array.from(document.querySelectorAll("li .job-card-container, .jobs-search-results__list-item, .scaffold-layout__list-item"));
-  const jobs = cards.map((card) => {
-    const link = card.querySelector('a[href*="/jobs/view/"]');
-    const href = link?.href || link?.getAttribute("href") || "";
-    const title = findText(card, [
-      ".job-card-list__title",
-      ".job-card-container__link",
-      ".artdeco-entity-lockup__title span",
-    ]);
-    const company = findText(card, [
-      ".artdeco-entity-lockup__subtitle",
-      ".job-card-container__primary-description",
-      ".job-card-container__company-name",
-    ]);
-    const location = findText(card, [
-      ".job-card-container__metadata-item",
-      ".artdeco-entity-lockup__caption",
-      ".job-card-container__metadata-wrapper li",
-    ]);
-    const postedAt = findText(card, ["time", ".job-card-container__footer-item"]);
-    const jobIdMatch = href.match(/\/jobs\/view\/(\d+)/);
-    return {
-      externalJobId: jobIdMatch ? jobIdMatch[1] : "",
-      jobUrl: href,
-      applyUrl: href,
-      title,
-      company,
-      location,
-      postedAt,
-      sourcePlatform: "linkedin",
-    };
-  }).filter((job) => job.title && job.jobUrl);
-  return dedupeByUrl(jobs).slice(0, 250);
-}
-
-async function importJobs() {
-  const jobs = scrapeVisibleLinkedInJobs();
-  if (!jobs.length) throw new Error("No LinkedIn jobs found on this page.");
-
-  const context = await chrome.runtime.sendMessage({ type: "GET_IMPORT_CONTEXT" });
-  if (!context?.ok || !context.token || !context.appUrl) {
-    throw new Error(context?.error || "Extension is not connected to Resume Master.");
+  function trySelectors(selectors) {
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el?.innerText?.trim().length > 100) return el.innerText.trim();
+    }
+    const fallback = document.querySelector('main') || document.body;
+    return fallback.innerText.slice(0, 6000).trim();
   }
 
-  const response = await fetch(`${context.appUrl}/api/jobs/import`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${context.token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      jobs,
-      source: "linkedin",
-      profileId: context.profile?.profileId || null,
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "LinkedIn import failed.");
+  function getSiteKey() {
+    return Object.keys(EXTRACTORS).find(k => window.location.hostname.includes(k));
+  }
 
-  await chrome.runtime.sendMessage({ type: "IMPORT_DONE", count: Number(payload.imported || 0) });
-}
+  function extractJobText() {
+    const siteKey = getSiteKey();
+    const extract = siteKey ? EXTRACTORS[siteKey] : () => trySelectors(['main']);
+    return extract();
+  }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "SCRAPE_JOBS") return false;
-  importJobs()
-    .then(() => sendResponse({ ok: true }))
-    .catch(async (error) => {
-      await chrome.runtime.sendMessage({ type: "IMPORT_ERROR", error: error.message || "Import failed." });
-      sendResponse({ ok: false, error: error.message || "Import failed." });
+  function setButtonText(text, reset = true) {
+    btn.textContent = text;
+    if (reset) setTimeout(() => { btn.textContent = ' Send to Resume Master'; }, 2500);
+  }
+
+  function sendCurrentJob() {
+    const jobText = extractJobText();
+    if (!jobText || jobText.length < 80) {
+      setButtonText('No job description found');
+      return;
+    }
+
+    chrome.runtime.sendMessage({ type: 'OPEN_ATS_SCORE', jobText }, () => {
+      btn.textContent = 'Opened in Resume Master';
+      btn.style.background = '#437A22';
+      setTimeout(() => {
+        btn.textContent = ' Send to Resume Master';
+        btn.style.background = '#01696F';
+      }, 2500);
     });
-  return true;
-});
+  }
+
+  const btn = document.createElement('button');
+  btn.id = 'rm-send-btn';
+  btn.textContent = ' Send to Resume Master';
+  Object.assign(btn.style, {
+    position: 'fixed', bottom: '24px', right: '24px',
+    zIndex: '2147483647',
+    background: '#01696F', color: '#fff',
+    border: 'none', borderRadius: '9999px',
+    padding: '10px 20px', fontSize: '14px', fontWeight: '600',
+    cursor: 'pointer', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    transition: 'background 0.18s ease, transform 0.12s ease',
+    lineHeight: '1.4',
+  });
+
+  btn.addEventListener('mouseenter', () => {
+    btn.style.background = '#0C4E54';
+    btn.style.transform = 'scale(1.03)';
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.background = '#01696F';
+    btn.style.transform = 'scale(1)';
+  });
+  btn.addEventListener('click', sendCurrentJob);
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.type === 'EXTRACT_JOB_TEXT') {
+      sendResponse({ jobText: extractJobText() });
+      return true;
+    }
+    if (message.type === 'SEND_CURRENT_JOB') {
+      sendCurrentJob();
+      sendResponse({ success: true });
+      return true;
+    }
+    return false;
+  });
+
+  document.body.appendChild(btn);
+})();

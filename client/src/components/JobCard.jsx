@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/JobCard.jsx â€” shared expandable job card
 import { useState } from "react";
 

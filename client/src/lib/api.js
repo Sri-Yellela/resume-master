@@ -1,4 +1,4 @@
-// client/src/lib/api.js
+﻿// client/src/lib/api.js
 
 const AUTH_CONTEXT_KEY = "rm_auth_context";
 
@@ -43,11 +43,11 @@ const MOJIBAKE_REPLACEMENTS = [
   [new RegExp("\\u00e2\\u20ac\\u00a6", "g"), "..."],
   [new RegExp("\\u00e2\\u2020\\u2019", "g"), "->"],
   [new RegExp("\\u00e2\\u2020\\u0090", "g"), "<-"],
-  [new RegExp("\\u00e2\\u0153\\u201c", "g"), "✓"],
+  [new RegExp("\\u00e2\\u0153\\u201c", "g"), "âœ“"],
   [new RegExp("\\u00e2\\u0153\\u2014", "g"), "x"],
   [new RegExp("\\u00e2\\u0153\\u2022", "g"), "x"],
-  [new RegExp("\\u00e2\\u02dc\\u2026", "g"), "★"],
-  [new RegExp("\\u00c2\\u00b7", "g"), "·"],
+  [new RegExp("\\u00e2\\u02dc\\u2026", "g"), "â˜…"],
+  [new RegExp("\\u00c2\\u00b7", "g"), "Â·"],
   [new RegExp("\\u00c3\\u2014", "g"), "x"],
   [new RegExp("\\u00c3\\u00a2\\u00e2\\u201a\\u00ac\\u00e2\\u20ac\\u009d", "g"), "-"],
 ];
@@ -87,7 +87,7 @@ export async function api(path, opts = {}) {
     // After server-side Fix 1 (requireAuth honors authContextToken), a 401 only
     // arrives when BOTH the Passport session AND the auth context are invalid.
     setAuthContext("");
-    // Signal the app shell to force-logout immediately — don't wait for the next
+    // Signal the app shell to force-logout immediately â€” don't wait for the next
     // visibilitychange event, which can leave the user stuck in a broken state.
     if (typeof window !== "undefined") {
       console.warn("[auth-debug] 401 response", { path });
@@ -120,18 +120,12 @@ export async function downloadBlob(blob, filename) {
 export const dislikeJob = (jobId) =>
   api(`/api/jobs/${jobId}/disliked`, { method:"PATCH" });
 
-export const postLinkedInCookies  = (cookies) =>
-  api("/api/linkedin/cookies", { method:"POST",   body:JSON.stringify({ cookies }) });
-export const getLinkedInStatus    = ()         =>
-  api("/api/linkedin/status");
-export const deleteLinkedInCookies = ()        =>
-  api("/api/linkedin/cookies", { method:"DELETE" });
 
-// Chromium File System Access API — shows Save As dialog, returns chosen filename.
+// Chromium File System Access API â€” shows Save As dialog, returns chosen filename.
 // Falls back to standard download on unsupported browsers.
 export function printResume(html, filename) {
   const win = window.open("", "_blank");
-  if (!win) { alert("Pop-up blocked — please allow pop-ups for this site and try again."); return; }
+  if (!win) { alert("Pop-up blocked â€” please allow pop-ups for this site and try again."); return; }
   win.document.write(html);
   win.document.close();
   win.focus();
@@ -160,3 +154,4 @@ export async function saveWithPicker(blob, suggestedName, mimeType) {
   await downloadBlob(blob, suggestedName);
   return suggestedName;
 }
+

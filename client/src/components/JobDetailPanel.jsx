@@ -1,3 +1,4 @@
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/JobDetailPanel.jsx â€” right-panel job detail in split view
 import { useState, useCallback } from "react";
 import { HighlightedDescription } from "./HighlightedDescription.jsx";
