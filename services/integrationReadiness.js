@@ -1,4 +1,5 @@
 ﻿import { getBaseResumeRecord } from "./simpleApplyProfile.js";
+import { getSourceStatus } from "./jobs/aggregator.js";
 
 export const INTEGRATION_PROVIDERS = new Set(["gmail", "google", "linkedin"]);
 
@@ -44,12 +45,19 @@ export function getLinkedInStatus(db, userId) {
   };
 }
 
+export function getJobSourceReadiness() {
+  return getSourceStatus();
+  // Returns: [{ name: 'adzuna', configured: true }, ...]
+  // Add more sources to aggregator.js to see them here automatically
+}
+
+// Backward-compatible named exports for anything calling these directly
 export function isAdzunaConfigured() {
-  return !!(process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY);
+  return getSourceStatus().find(s => s.name === 'adzuna')?.configured ?? false;
 }
 
 export function isIndeedConfigured() {
-  return !!process.env.INDEED_PUBLISHER_ID;
+  return getSourceStatus().find(s => s.name === 'indeed')?.configured ?? false;
 }
 
 export function isLinkedInOAuthConfigured() {
@@ -72,18 +80,13 @@ export function getAutomationReadiness(db, userId) {
   if (!profile.email) missingApply.push("profile_email");
   if (!hasName) missingApply.push("profile_name");
   return {
-    adzuna: {
-      connected: isAdzunaConfigured(),
-      healthy: isAdzunaConfigured(),
-      status: isAdzunaConfigured() ? "configured" : "missing",
+    jobSources: getSourceStatus().map(s => ({
+      name: s.name,
+      connected: s.configured,
+      healthy: s.configured,
+      status: s.configured ? "configured" : "missing",
       requiredFor: ["job_search"],
-    },
-    indeed: {
-      connected: isIndeedConfigured(),
-      healthy: isIndeedConfigured(),
-      status: isIndeedConfigured() ? "configured" : "missing",
-      requiredFor: ["job_search"],
-    },
+    })),
     gmail: { ...gmail, requiredFor: ["otp_retrieval", "portal_verification"] },
     google: { ...google, requiredFor: ["google_login", "portal_account_creation"] },
     linkedin: {

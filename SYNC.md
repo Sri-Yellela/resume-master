@@ -14,7 +14,7 @@ Last updated: 2026-05-08
 | Extension (scrape-free) | ✅ | n/a | n/a | Chrome companion sends visible JD text to ATS tool |
 | Manual application tracking | ✅ | ✅ | ✅ | User submits on official employer page |
 | Auto-apply queue | ❌ | ❌ | ❌ | LinkedIn automation removed |
-| Adzuna + Indeed job feed | ❌ | ❌ | ❌ | Stub is live at /api/jobs; provider services pending |
+| Job feed (Adzuna) | ✅ | ✅ | ✅ | Plugin-based aggregator; add sources in aggregator.js only |
 
 ## Pending Sync Items
 
@@ -55,3 +55,25 @@ Current shared model version: 1.0.1
 ### Credentials Needed Before Next Phase
 ADZUNA_APP_ID and ADZUNA_APP_KEY in .env
 (Get from developer.adzuna.com — instant approval)
+
+## Phase: Adzuna Job Aggregator — Plugin Architecture
+
+### Shipped: 2026-05-09
+| File | Role |
+|---|---|
+| services/jobs/schema.js | Single normalized job shape — all sources must conform |
+| services/jobs/sources/base.js | Plugin interface + runtime validation |
+| services/jobs/sources/adzuna.js | Adzuna source plugin — ONLY file that knows about Adzuna |
+| services/jobs/aggregator.js | Composes sources; fan-out to all configured in parallel |
+| server.js /api/jobs | Wired to aggregator; sanitized inputs, 500 on failure |
+| iOS: Data/JobRepository.swift | Calls /api/jobs, generic attribution footer |
+| Android: data/JobRepository.kt | Calls /api/jobs, maps to existing Job model |
+
+### Adding a new job source later
+1. Create `services/jobs/sources/{name}.js` — implement `name`, `isConfigured()`, `search()`
+2. Add one import + one line to `SOURCES` array in `aggregator.js`
+3. Done — zero frontend, iOS, or Android changes required
+
+### Architecture rule
+The frontend knows only `/api/jobs`. It never hardcodes source names, logos, or URLs.
+Attribution is rendered generically from the `attribution` array in the API response.

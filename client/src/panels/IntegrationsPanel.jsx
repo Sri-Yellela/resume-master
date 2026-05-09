@@ -109,12 +109,17 @@ export function IntegrationsPanel() {
           </div>
         </Section>
 
-        <Section theme={theme} title="Indeed" subtitle="Powered by Indeed." status={status.indeed}>
-          <div style={{ fontSize:12, color:theme.textMuted }}>Official publisher feed provider for upcoming job listings.</div>
-        </Section>
-
-        <Section theme={theme} title="Adzuna" subtitle="Job data provider." status={status.adzuna}>
-          <div style={{ fontSize:12, color:theme.textMuted }}>Primary official API provider for upcoming job search.</div>
+        <Section theme={theme} title="Job Feed"
+          subtitle="Official API providers for job search results."
+          status={{
+            healthy: (status.jobSources || []).some(s => s.configured),
+            status:  (status.jobSources || []).some(s => s.configured) ? "configured" : "missing",
+          }}>
+          <div style={{ fontSize:12, color:theme.textMuted }}>
+            {(status.jobSources || []).some(s => s.configured)
+              ? `Job search active — ${(status.jobSources || []).filter(s => s.configured).length} provider(s) configured.`
+              : "No job feed providers configured. Contact the app operator."}
+          </div>
         </Section>
 
         <Section theme={theme} title="Resume and Profile" subtitle="Manual application tracking and resume tools depend on local profile readiness."

@@ -71,6 +71,7 @@ import {
   getAutomationReadiness,
   publicIntegrationRow,
 } from "./services/integrationReadiness.js";
+import { searchJobs } from "./services/jobs/aggregator.js";
 
 console.log("[boot] server module loaded");
 
@@ -4411,19 +4412,43 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
 
 // JOBS â€” shared pool with pagination, filters, sort
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-app.get("/api/jobs", requireAuth, (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page || "1", 10));
-  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit || req.query.pageSize || "25", 10)));
-  // TODO: Replace with jobAggregator.searchJobs() after
-  // Adzuna + Indeed services are implemented in Phase 2.
-  res.json({
-    jobs: [],
-    total: 0,
-    page,
-    pageSize: limit,
-    totalPages: 0,
-    sources: { adzuna: 0, indeed: 0 },
-  });
+app.get("/api/jobs", requireAuth, async (req, res) => {
+  try {
+    const {
+      q        = '',
+      location = '',
+      country  = 'us',
+      page     = '1',
+      pageSize = '10',
+    } = req.query;
+
+    const sanitized = {
+      query:    String(q).slice(0, 200).trim(),
+      location: String(location).slice(0, 200).trim(),
+      country:  String(country).slice(0, 2).toLowerCase() || 'us',
+      page:     Math.max(1, parseInt(page, 10) || 1),
+      pageSize: Math.min(50, Math.max(1, parseInt(pageSize, 10) || 10)),
+    };
+
+    const result = await searchJobs(sanitized);
+
+    res.json({
+      success:     true,
+      jobs:        result.jobs,
+      total:       result.total,
+      page:        result.page,
+      pageSize:    result.pageSize,
+      sources:     result.sources,
+      attribution: result.attribution,
+    });
+  } catch (err) {
+    console.error('[GET /api/jobs] Error:', err.message);
+    res.status(500).json({
+      success: false,
+      error:   'Failed to fetch jobs. Please try again.',
+      jobs:    [],
+    });
+  }
 });
 
 // GET /api/jobs/poll â€” returns new jobs since <since> ms timestamp + scraping status

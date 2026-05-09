@@ -3,9 +3,8 @@ import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 
 function sourceLabel(source) {
-  if (source === "indeed") return "via Indeed";
-  if (source === "adzuna") return "via Adzuna";
-  return source ? `via ${source}` : "";
+  if (!source) return "";
+  return `via ${source.charAt(0).toUpperCase() + source.slice(1)}`;
 }
 
 function JobCard({ job, theme }) {
