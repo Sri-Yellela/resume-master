@@ -3189,6 +3189,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         </PanelGroup>
         </div>
       )}
+
+      {attribution.length > 0 && (
+        <div style={{ padding:"8px 16px", display:"flex", gap:12, flexWrap:"wrap" }}>
+          {attribution.map(a => (
+            <a key={a.name} href={a.url} target="_blank" rel="noopener noreferrer"
+               style={{ fontSize:11, color:theme.textMuted, textDecoration:"none", opacity:0.7 }}>
+              Jobs powered by {a.name}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -3413,16 +3424,6 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
           )}
 
         </PullToRefresh>
-      )}
-      {attribution.length > 0 && (
-        <div style={{ padding:"8px 16px", display:"flex", gap:12, flexWrap:"wrap" }}>
-          {attribution.map(a => (
-            <a key={a.name} href={a.url} target="_blank" rel="noopener noreferrer"
-               style={{ fontSize:11, color:theme.textMuted, textDecoration:"none", opacity:0.7 }}>
-              Jobs powered by {a.name}
-            </a>
-          ))}
-        </div>
       )}
     </div>
   );
