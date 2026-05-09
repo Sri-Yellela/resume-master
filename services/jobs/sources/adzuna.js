@@ -47,7 +47,8 @@ const adzunaPlugin = {
     return !!(process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY);
   },
 
-  async search({ query, location, country = 'us', page = 1, pageSize = 10 }) {
+  async search({ query, location, country = 'us', page = 1, pageSize = 10,
+                  sort, employmentType, remote }) {
     const params = {
       app_id:           process.env.ADZUNA_APP_ID,
       app_key:          process.env.ADZUNA_APP_KEY,
@@ -56,6 +57,20 @@ const adzunaPlugin = {
 
     if (query)    params.what  = query;
     if (location) params.where = location;
+
+    // Sort mapping
+    if (sort === 'dateDesc')   { params.sort_by = 'date';   params.sort_direction = 'down'; }
+    else if (sort === 'dateAsc')    { params.sort_by = 'date';   params.sort_direction = 'up'; }
+    else if (sort === 'salaryDesc') { params.sort_by = 'salary'; params.sort_direction = 'down'; }
+    else if (sort === 'salaryAsc')  { params.sort_by = 'salary'; params.sort_direction = 'up'; }
+
+    // Contract type mapping (employmentType is comma-separated e.g. "full-time,contract")
+    if (employmentType) {
+      const types = String(employmentType).split(',').map(t => t.trim());
+      if (types.includes('full-time')) params.full_time = 1;
+      if (types.includes('part-time')) params.part_time = 1;
+      if (types.includes('contract'))  params.contract  = 1;
+    }
 
     const url = `${BASE_URL}/${country}/search/${page}`;
 
@@ -66,8 +81,15 @@ const adzunaPlugin = {
 
     const data = response.data;
 
+    let jobs = (data.results || []).map(normalizeAdzunaJob);
+
+    // Adzuna has no native remote filter — apply post-fetch when requested
+    if (remote === true || remote === 'true') {
+      jobs = jobs.filter(j => j.remote === true);
+    }
+
     return {
-      jobs:     (data.results || []).map(normalizeAdzunaJob),
+      jobs,
       total:    data.count || 0,
       page,
       pageSize: Math.min(pageSize, 50),

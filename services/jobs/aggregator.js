@@ -29,7 +29,8 @@ if (inactiveSources.length) {
  * Search jobs across all configured sources.
  * Fan-out in parallel — if one source fails, others continue.
  */
-async function searchJobs({ query = '', location = '', country = 'us', page = 1, pageSize = 10 } = {}) {
+async function searchJobs({ query = '', location = '', country = 'us', page = 1, pageSize = 10,
+                            sort, employmentType, remote } = {}) {
   const configured = SOURCES.filter(s => s.isConfigured());
 
   if (configured.length === 0) {
@@ -39,7 +40,7 @@ async function searchJobs({ query = '', location = '', country = 'us', page = 1,
 
   const results = await Promise.allSettled(
     configured.map(source =>
-      source.search({ query, location, country, page, pageSize })
+      source.search({ query, location, country, page, pageSize, sort, employmentType, remote })
         .then(result => ({ ...result, source: source.name }))
     )
   );

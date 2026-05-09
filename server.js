@@ -4415,19 +4415,29 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
 app.get("/api/jobs", requireAuth, async (req, res) => {
   try {
     const {
-      q        = '',
-      location = '',
-      country  = 'us',
-      page     = '1',
-      pageSize = '10',
+      q              = '',
+      role           = '',
+      location       = '',
+      country        = 'us',
+      page           = '1',
+      pageSize       = '10',
+      sort           = '',
+      employmentType = '',
+      workType       = '',
     } = req.query;
 
+    // Client sends `role` (not `q`) — treat role as query keyword, fall back to q
+    const rawQuery = (role || q || '').slice(0, 200).trim();
+
     const sanitized = {
-      query:    String(q).slice(0, 200).trim(),
-      location: String(location).slice(0, 200).trim(),
-      country:  String(country).slice(0, 2).toLowerCase() || 'us',
-      page:     Math.max(1, parseInt(page, 10) || 1),
-      pageSize: Math.min(50, Math.max(1, parseInt(pageSize, 10) || 10)),
+      query:          rawQuery,
+      location:       String(location).slice(0, 200).trim(),
+      country:        String(country).slice(0, 2).toLowerCase() || 'us',
+      page:           Math.max(1, parseInt(page, 10) || 1),
+      pageSize:       Math.min(50, Math.max(1, parseInt(pageSize, 10) || 10)),
+      sort:           ['dateDesc','dateAsc','salaryDesc','salaryAsc','relevance'].includes(sort) ? sort : undefined,
+      employmentType: employmentType ? String(employmentType).slice(0, 100) : undefined,
+      remote:         workType === 'Remote' ? true : undefined,
     };
 
     const result = await searchJobs(sanitized);
