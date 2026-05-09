@@ -1,106 +1,3787 @@
-﻿import { useCallback, useEffect, useState } from "react";
-import { api } from "../lib/api.js";
+﻿// client/src/panels/JobsPanel.jsx â€” Lucy Brand, shared job pool
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
+import { api, printResume, dislikeJob, authHeaders } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import { useViewport } from "../hooks/useViewport.js";
+import JobCard from "../components/JobCard.jsx";
+import JobDetailPanel from "../components/JobDetailPanel.jsx";
+import SandboxPanel from "./SandboxPanel.jsx";
+import { ATSPanel } from "./ATSPanel.jsx";
+import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
+import ProfileSelectorDropdown from "../components/ProfileSelectorDropdown.jsx";
+import { useSyncEvents } from "../hooks/useSyncEvents.js";
+import { useAppScroll } from "../contexts/AppScrollContext.jsx";
+import { useJobBoard } from "../contexts/JobBoardContext.jsx";
+import { toast } from "../hooks/use-toast.js";
+import ROLE_ALIAS_MAP from "../../../data/ROLE_ALIAS_MAP.json";
 
-function sourceLabel(source) {
-  if (!source) return "";
-  return `via ${source.charAt(0).toUpperCase() + source.slice(1)}`;
+// Stubs for removed extension bridge — hooks no longer exist
+const getLinkedInExtensionInstallUrl = () => null;
+const isLinkedInExtensionInstalled   = () => false;
+const sendExtensionRequest           = async () => {};
+
+// Normalizes the new /api/jobs aggregator field names to the shape
+// the rest of JobsPanel and JobCard expect (legacy camelCase fields).
+function normalizeApiJob(job) {
+  return {
+    ...job,
+    jobId:          job.jobId          ?? job.id,
+    applyUrl:       job.applyUrl       ?? job.url,
+    postedAt:       job.postedAt       ?? job.posted_at,
+    salaryMin:      job.salaryMin      != null ? job.salaryMin      : (job.salary_min  ?? null),
+    salaryMax:      job.salaryMax      != null ? job.salaryMax      : (job.salary_max  ?? null),
+    salaryCurrency: job.salaryCurrency ?? job.salary_currency ?? null,
+    workType:       job.workType       ?? (job.remote === true ? "Remote" : job.remote === false ? "On-site" : null),
+    employmentType: job.employmentType ?? job.contract_type ?? null,
+  };
 }
 
-function JobCard({ job, theme }) {
-  const applyUrl = job.applyUrl || job.apply_url || job.url;
+const USER_TEXT   = "#0f0f0f";   // black text on accent
+const PROFILE_UI_CACHE_KEY = "rm_jobs_profile_ui_v1";
+
+function readProfileUiCache(profileId) {
+  if (profileId == null) return null;
+  try {
+    const all = JSON.parse(localStorage.getItem(PROFILE_UI_CACHE_KEY) || "{}");
+    return all[String(profileId)] || null;
+  } catch { return null; }
+}
+
+function writeProfileUiCache(profileId, snapshot) {
+  if (profileId == null || !snapshot) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(PROFILE_UI_CACHE_KEY) || "{}");
+    const {
+      boardTab, localSearch, sortBy, roleFilter, locationFilter, workType,
+      employmentTypePrefs, catFilter, srcFilter, minYoe, maxYoe, maxApplicants,
+      visitedFilter, ageFilter, currentPage,
+    } = snapshot;
+    all[String(profileId)] = {
+      boardTab, localSearch, sortBy, roleFilter, locationFilter, workType,
+      employmentTypePrefs, catFilter, srcFilter, minYoe, maxYoe, maxApplicants,
+      visitedFilter, ageFilter, currentPage,
+      cachedAt: Date.now(),
+    };
+    localStorage.setItem(PROFILE_UI_CACHE_KEY, JSON.stringify(all));
+  } catch {}
+}
+
+// Upstream scrape requests are profile-driven on the server.
+// Board UI filters stay local to /api/jobs and must not shape /api/scrape.
+function buildProfileScrapeRequest(query) {
+  return { query };
+}
+
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function ago(ts) {
+  if (!ts) return "-";
+  const d = Date.now() - new Date(ts).getTime();
+  if (d < 3600000)  return `${Math.floor(d/60000)}m`;
+  if (d < 86400000) return `${Math.floor(d/3600000)}h`;
+  return `${Math.floor(d/86400000)}d`;
+}
+
+// â”€â”€ LinkedIn "in" logo (inline SVG) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const GENERATE_TOOL = "generate";
+const A_PLUS_TOOL = "a_plus_resume";
+const TOOL_LABELS = { [GENERATE_TOOL]: "Generate", [A_PLUS_TOOL]: "A+ Resume" };
+
+function normalizeTool(tool) {
+  return tool === A_PLUS_TOOL ? A_PLUS_TOOL : GENERATE_TOOL;
+}
+
+function getActiveArtifact(entry, tool) {
+  if (!entry) return null;
+  const selected = normalizeTool(tool || entry.activeTool || entry.tool);
+  return entry.variants?.[selected] || entry;
+}
+
+function mergeArtifact(entry, artifact) {
+  const tool = normalizeTool(artifact.tool);
+  const variants = { ...(entry?.variants || {}) };
+  if (entry?.html && entry.html !== "__exists__" && entry.tool) {
+    variants[normalizeTool(entry.tool)] = { ...entry, variants: undefined };
+  }
+  variants[tool] = { ...artifact, variants: undefined, activeTool: tool };
+  return { ...artifact, variants, activeTool: tool };
+}
+
+function buildArtifact(job, data, tool) {
+  const t = normalizeTool(data?.tool || tool);
+  return {
+    html: data.html,
+    atsScore: data.atsScore ?? data.ats_score,
+    atsReport: data.atsReport,
+    company: data.company || job.company,
+    title: data.title || data.role || job.title,
+    jobId: job.jobId,
+    jobUrl: job.url,
+    source: job.source,
+    location: job.location,
+    tool: t,
+    toolLabel: data.toolLabel || TOOL_LABELS[t],
+    version: data.version || null,
+    status: "success",
+  };
+}
+
+function LinkedInLogo({ size = 20 }) {
   return (
-    <article style={{ border:`1px solid ${theme.border}`, background:theme.surface, borderRadius:8, padding:16, display:"flex", flexDirection:"column", gap:10 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"flex-start" }}>
-        <div style={{ minWidth:0 }}>
-          <div style={{ fontWeight:800, color:theme.text, fontSize:16 }}>{job.title || "Untitled role"}</div>
-          <div style={{ color:theme.textMuted, fontSize:13, marginTop:2 }}>{job.company || "Company unavailable"}</div>
-        </div>
-        {job.matchScore != null && (
-          <span style={{ background:theme.surfaceHigh, color:theme.text, border:`1px solid ${theme.border}`, borderRadius:6, padding:"4px 8px", fontSize:12, fontWeight:800 }}>
-            {job.matchScore}%
-          </span>
-        )}
-      </div>
-      <div style={{ color:theme.textMuted, fontSize:12, display:"flex", flexWrap:"wrap", gap:8 }}>
-        {job.location && <span>{job.location}</span>}
-        {job.salaryDisplay && <span>{job.salaryDisplay}</span>}
-        {job.contractType && <span>{job.contractType}</span>}
-      </div>
-      {job.description && (
-        <p style={{ color:theme.textMuted, fontSize:12, lineHeight:1.5, margin:0, maxHeight:54, overflow:"hidden" }}>
-          {job.description}
-        </p>
-      )}
-      <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginTop:2 }}>
-        <span className="attribution" style={{ color:theme.textMuted, fontSize:11 }}>{sourceLabel(job.source)}</span>
-        {applyUrl && (
-          <a href={applyUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration:"none", background:theme.accent, color:"#0f0f0f", borderRadius:6, padding:"8px 12px", fontSize:12, fontWeight:800 }}>
-            Apply
-          </a>
-        )}
-      </div>
-    </article>
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-label="LinkedIn" role="img">
+      <rect width="20" height="20" rx="3" fill="#0A66C2"/>
+      <text x="4" y="15" fontFamily="Georgia,serif" fontWeight="900" fontSize="13" fill="#fff">in</text>
+    </svg>
   );
 }
 
-export default function JobsPanel() {
-  const { theme } = useTheme();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [location, setLocation] = useState("");
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const fetchJobs = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await api(`/api/jobs?q=${encodeURIComponent(searchQuery)}&location=${encodeURIComponent(location)}`);
-      setJobs(Array.isArray(data?.jobs) ? data.jobs : []);
-    } catch (e) {
-      setError(e.message || "Could not load jobs.");
-      setJobs([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery, location]);
-
-  useEffect(() => { fetchJobs(); }, [fetchJobs]);
-
+// â”€â”€ Indeed logo (inline SVG) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function IndeedLogo({ size = 20 }) {
   return (
-    <div style={{ flex:1, overflowY:"auto", background:theme.bg, padding:"28px 24px 44px" }}>
-      <div style={{ maxWidth:1100, margin:"0 auto", display:"flex", flexDirection:"column", gap:18 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", gap:16, alignItems:"flex-end", flexWrap:"wrap" }}>
-          <div>
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:30, fontWeight:800, letterSpacing:"0.06em", textTransform:"uppercase", color:theme.text }}>
-              Jobs
-            </div>
-            <div style={{ color:theme.textMuted, fontSize:13 }}>Official job listings from Adzuna and Indeed.</div>
-          </div>
-          <form onSubmit={(e) => { e.preventDefault(); fetchJobs(); }} style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Role or keyword" style={{ height:36, minWidth:220, border:`1px solid ${theme.border}`, borderRadius:6, background:theme.surface, color:theme.text, padding:"0 10px" }}/>
-            <input value={location} onChange={e => setLocation(e.target.value)} placeholder="Location" style={{ height:36, minWidth:180, border:`1px solid ${theme.border}`, borderRadius:6, background:theme.surface, color:theme.text, padding:"0 10px" }}/>
-            <button type="submit" style={{ height:36, border:"none", borderRadius:6, background:theme.accent, color:"#0f0f0f", padding:"0 14px", fontWeight:800, cursor:"pointer" }}>
-              Search
-            </button>
-          </form>
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-label="Indeed" role="img">
+      <rect width="20" height="20" rx="3" fill="#003A9B"/>
+      <circle cx="10" cy="8" r="3" fill="#fff"/>
+      <rect x="7.5" y="11" width="5" height="6" rx="1" fill="#fff"/>
+    </svg>
+  );
+}
+
+// â”€â”€ Platform logo dispatcher â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function PlatformLogo({ platform, size = 20, theme }) {
+  const p = (platform || "").toLowerCase();
+  if (p === "linkedin") return <LinkedInLogo size={size}/>;
+  if (p === "indeed")   return <IndeedLogo size={size}/>;
+  return <span style={{ fontSize:size*0.5, color:theme?.textMuted||"#888" }}>◆</span>;
+}
+
+// â”€â”€ Company icon with monogram fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function CompanyIcon({ company, iconUrl, size = 48 }) {
+  const [failed, setFailed] = useState(false);
+  const letter = (company || "?")[0].toUpperCase();
+  // Deterministic color from company name
+  const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706","#9333ea"];
+  let hash = 0;
+  for (const c of company || "") hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
+  const bg = colors[hash % colors.length];
+
+  if (iconUrl && !failed) {
+    return (
+      <img
+        src={iconUrl}
+        alt={company}
+        onError={() => setFailed(true)}
+        style={{
+          width:size, height:size, borderRadius:10,
+          objectFit:"contain", border:"1px solid transparent",
+          background:"transparent", flexShrink:0,
+        }}
+      />
+    );
+  }
+  return (
+    <div style={{
+      width:size, height:size, borderRadius:10,
+      background:bg, color:"#fff",
+      display:"flex", alignItems:"center", justifyContent:"center",
+      fontWeight:800, fontSize:Math.round(size*0.38), flexShrink:0,
+      letterSpacing:"-0.5px",
+    }}>
+      {letter}
+    </div>
+  );
+}
+
+// â”€â”€ Work type badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function WorkBadge({ t, theme }) {
+  // Use semantic colors that work in both light/dark â€” the fg/bg are theme tokens
+  const map = {
+    Remote: { bg:"#e8f6fb", fg:"#1a6a8a" },
+    Hybrid: { bg:"#f0f9ff", fg:"#0284c7" },
+  };
+  const s = map[t] || null;
+  if (s) {
+    return (
+      <span style={{ background:s.bg, color:s.fg, padding:"2px 8px",
+                     borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+        {t}
+      </span>
+    );
+  }
+  return (
+    <span style={{ background:theme?.surfaceHigh, color:theme?.textMuted, padding:"2px 8px",
+                   borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+      {t || "-"}
+    </span>
+  );
+}
+
+// â”€â”€ ATS badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function ATSBadge({ score, onClick }) {
+  if (score == null) return null;
+  const bg = score>=80 ? "#dcfce7" : score>=60 ? "#fef9c3" : "#fee2e2";
+  const fg = score>=80 ? "#166534" : score>=60 ? "#854d0e" : "#991b1b";
+  return (
+    <span
+      onClick={onClick ? e => { e.stopPropagation(); onClick(); } : undefined}
+      style={{ background:bg, color:fg, padding:"2px 8px",
+               borderRadius:999, fontSize:10, fontWeight:700,
+               cursor: onClick ? "pointer" : "default",
+               border: onClick ? `1px solid ${fg}33` : "none" }}>
+      ATS {score}
+    </span>
+  );
+}
+
+// â”€â”€ Resume badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function ResumeBadge({ onClick, loading }) {
+  return (
+    <span
+      onClick={onClick ? e => { e.stopPropagation(); onClick(); } : undefined}
+      style={{ background:"#e8f6fb", color:"#1a6a8a", padding:"2px 8px",
+               borderRadius:999, fontSize:10, fontWeight:700,
+               cursor:"pointer", border:"1px solid #A8D8EA44",
+               display:"inline-flex", alignItems:"center", gap:3 }}>
+      {loading ? "Loading" : "Resume"}
+    </span>
+  );
+}
+
+// â”€â”€ Lucy button (rectangular â†’ pill on hover, 1s) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function LucyBtn({ children, onClick, disabled, accent: accentProp,
+                    style = {}, title }) {
+  const [hov, setHov] = useState(false);
+  const { theme } = useTheme();
+  const accent = accentProp || theme.accent;
+  return (
+    <button
+      onClick={onClick} disabled={disabled} title={title}
+      onMouseEnter={() => !disabled && setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        // Water-fill: gradient fills upward from bottom over 1s
+        backgroundImage: `linear-gradient(to top, ${accent}, ${accent})`,
+        backgroundSize: hov && !disabled ? "100% 100%" : "100% 0%",
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "bottom",
+        backgroundColor: "transparent",
+        color: theme.text,
+        border: `2.5px solid ${hov && !disabled ? accent : theme.borderStrong}`,
+        cursor: disabled ? "not-allowed" : "pointer",
+        padding: "7px 18px", fontWeight: 800, fontSize: 12,
+        fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
+        letterSpacing: "0.1em", textTransform: "uppercase",
+        borderRadius: hov && !disabled ? 999 : 2,
+        transition: "background-size 1s ease, border-radius 1s ease, border-color 1s ease",
+        whiteSpace: "nowrap", flexShrink: 0,
+        opacity: disabled ? 0.4 : 1,
+        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4,
+        ...style,
+      }}>
+      {children}
+    </button>
+  );
+}
+
+// â”€â”€ Icon button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function IconBtn({ bg, onClick, title, children, disabled = false, size = 28 }) {
+  const [hov, setHov] = useState(false);
+  const { theme } = useTheme();
+  return (
+    <button title={title} disabled={disabled} onClick={onClick}
+      onMouseEnter={() => !disabled && setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        width:size, height:size, borderRadius:999,
+        background: disabled ? theme.surfaceHigh : hov ? bg : theme.surfaceHigh,
+        border:`1px solid ${disabled ? theme.border : hov ? bg+"44" : theme.border}`,
+        display:"flex", alignItems:"center", justifyContent:"center",
+        cursor: disabled ? "not-allowed" : "pointer",
+        fontSize:12, color: hov && !disabled ? "white" : theme.textMuted,
+        opacity: disabled ? 0.4 : 1,
+        transition:"all 0.15s ease", flexShrink:0,
+        transform: hov && !disabled ? "scale(1.1)" : "scale(1)",
+      }}>
+      {children}
+    </button>
+  );
+}
+
+const EMP_TYPE_OPTIONS = [
+  { value:"full-time",  label:"Full-time" },
+  { value:"contract",   label:"Contract"  },
+  { value:"internship", label:"Internship"},
+  { value:"part-time",  label:"Part-time" },
+];
+
+function defaultFilterSnapshot() {
+  return {
+    roleFilter: "",
+    locationFilter: "",
+    workType: "",
+    employmentTypePrefs: ["full-time"],
+    catFilter: "",
+    srcFilter: "",
+    minYoe: "",
+    maxYoe: "",
+    maxApplicants: "",
+    visitedFilter: "",
+    ageFilter: "",
+  };
+}
+
+// â”€â”€ Filters panel (collapsible) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function FiltersPanel({
+  open, onClose, onApply, isDark,
+  categories,
+  role, setRole,
+  location, setLocation,
+  workType, setWorkType,
+  employmentTypePrefs, setEmploymentTypePrefs,
+  catFilter, setCatFilter,
+  srcFilter, setSrcFilter,
+  minYoe, setMinYoe,
+  maxYoe, setMaxYoe,
+  maxApplicants, setMaxApplicants,
+  visitedFilter, setVisitedFilter,
+  ageFilter, setAgeFilter,
+  onReset,
+}) {
+  const { theme } = useTheme();
+  if (!open) return null;
+  const selStyle = {
+    width:"100%", height:36, padding:"0 10px",
+    border:`1px solid ${theme.border}`, borderRadius:4,
+    background:theme.surface, color:theme.text, fontSize:12, outline:"none",
+  };
+  const labelStyle = { fontSize:11, fontWeight:700, color:theme.textMuted,
+                        textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 };
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:500,
+      display:"flex", alignItems:"flex-start", justifyContent:"flex-end",
+      background:isDark ? "rgba(0,0,0,0.42)" : "rgba(15,23,42,0.18)",
+      isolation:"isolate",
+    }}
+    onClick={e => { if(e.target===e.currentTarget) onClose(); }}>
+      <motion.div
+        initial={{ x:360 }} animate={{ x:0 }} exit={{ x:360 }}
+        transition={{ type:"tween", duration:0.22 }}
+        style={{
+          width:320, height:"100%", background:theme.modalSurface || (isDark ? "#111827" : "#ffffff"),
+          borderLeft:`3px solid ${theme.accent}`,
+          padding:"24px 20px", overflowY:"auto",
+          display:"flex", flexDirection:"column", gap:16,
+          boxShadow:theme.shadowXl || "-12px 0 36px rgba(0,0,0,0.24)",
+        }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                          fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+            Filters
+          </span>
+          <button onClick={onClose} style={{ background:"none", border:"none",
+                                             cursor:"pointer", fontSize:18, color:theme.textMuted }}>x</button>
         </div>
 
-        {error && <div style={{ border:`1px solid ${theme.danger}55`, background:`${theme.danger}12`, color:theme.danger, borderRadius:8, padding:12, fontSize:13 }}>{error}</div>}
-        {loading && <div style={{ color:theme.textMuted, fontSize:13 }}>Loading jobs...</div>}
+        <div>
+          <div style={labelStyle}>Role</div>
+          <input value={role} onChange={e=>setRole(e.target.value)}
+            placeholder="e.g. Software Engineer"
+            style={{...selStyle, padding:"0 10px", height:36, borderRadius:4}}/>
+        </div>
 
-        {!loading && jobs.length === 0 && !error && (
-          <div style={{ border:`1px solid ${theme.border}`, background:theme.surface, borderRadius:8, padding:28, textAlign:"center", color:theme.textMuted, fontSize:14 }}>
-            Job feed coming soon. We're connecting to live job listings from Adzuna and Indeed.
+        <div>
+          <div style={labelStyle}>Location</div>
+          <input value={location} onChange={e=>setLocation(e.target.value)}
+            placeholder="e.g. San Francisco"
+            style={{...selStyle, padding:"0 10px", height:36, borderRadius:4}}/>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Work Type</div>
+          <select value={workType} onChange={e=>setWorkType(e.target.value)} style={selStyle}>
+            <option value="">All types</option>
+            <option>Remote</option><option>Hybrid</option><option>Onsite</option>
+          </select>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Employment Type</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {EMP_TYPE_OPTIONS.map(opt => {
+              const active = employmentTypePrefs.includes(opt.value);
+              return (
+                <button key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    const next = active
+                      ? employmentTypePrefs.filter(v => v !== opt.value)
+                      : [...employmentTypePrefs, opt.value];
+                    // Always keep at least one selected
+                    if (next.length > 0) setEmploymentTypePrefs(next);
+                  }}
+                  style={{
+                    padding:"5px 12px", borderRadius:999, fontSize:11, fontWeight:600,
+                    cursor:"pointer", border:`1px solid ${active ? theme.accent : theme.border}`,
+                    background: active ? theme.accentMuted : "transparent",
+                    color: active ? theme.accentText : theme.textMuted,
+                    transition:"all 0.15s",
+                  }}>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Category</div>
+          <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={selStyle}>
+            <option value="">All categories</option>
+            {categories.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Source</div>
+          <select value={srcFilter} onChange={e=>setSrcFilter(e.target.value)} style={selStyle}>
+            <option value="">All sources</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="indeed">Indeed</option>
+          </select>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Date Posted</div>
+          <select value={ageFilter} onChange={e=>setAgeFilter(e.target.value)} style={selStyle}>
+            <option value="">Any time</option>
+            <option value="1d">Past 24h</option>
+            <option value="2d">Past 2 days</option>
+            <option value="3d">Past 3 days</option>
+            <option value="1w">Past week</option>
+            <option value="1m">Past month</option>
+          </select>
+        </div>
+
+        <div>
+          <div style={labelStyle}>
+            Years of Experience: {minYoe || 0}-{maxYoe || "Any"}
+          </div>
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <input type="number" min={0} max={30} placeholder="Min"
+              value={minYoe} onChange={e=>setMinYoe(e.target.value)}
+              style={{...selStyle, width:70}}/>
+            <span style={{ fontSize:12, color:theme.textMuted }}>to</span>
+            <input type="number" min={0} max={30} placeholder="Max"
+              value={maxYoe} onChange={e=>setMaxYoe(e.target.value)}
+              style={{...selStyle, width:70}}/>
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Max Applicants</div>
+          <input type="number" min={0} placeholder="e.g. 100"
+            value={maxApplicants} onChange={e=>setMaxApplicants(e.target.value)}
+            style={{...selStyle, width:"100%"}}/>
+          <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
+            Hide jobs with more applicants than this
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Status</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+            <select value={visitedFilter} onChange={e=>setVisitedFilter(e.target.value)} style={selStyle}>
+              <option value="">Visited & unvisited</option>
+              <option value="0">Unvisited only</option>
+              <option value="1">Visited only</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Coming soon: Salary range filter */}
+        <div style={{ padding:"10px 12px", background:theme.surfaceHigh, borderRadius:4,
+                      border:`1px dashed ${theme.border}`, opacity:0.7 }}>
+          <div style={{ ...labelStyle, marginBottom:6 }}>Salary Range
+            <span style={{ marginLeft:6, fontSize:9, padding:"1px 6px", borderRadius:999,
+                           background:"#f3f4f6", color:"#9ca3af", border:"1px dashed #d1d5db",
+                           fontWeight:700, letterSpacing:"0.04em" }}>soon</span>
+          </div>
+          <div style={{ display:"flex", gap:6 }}>
+            <input disabled placeholder="$60k" style={{...selStyle, flex:1, opacity:0.5, cursor:"not-allowed"}}/>
+            <input disabled placeholder="$200k" style={{...selStyle, flex:1, opacity:0.5, cursor:"not-allowed"}}/>
+          </div>
+        </div>
+
+        <div style={{ display:"flex", gap:8, paddingTop:8 }}>
+          <LucyBtn onClick={onReset} accent={theme.surfaceHigh} style={{ flex:1 }}>
+            Reset All
+          </LucyBtn>
+          <LucyBtn onClick={onApply} style={{ flex:1 }}>
+            Apply
+          </LucyBtn>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// -- Aliases (mirrors server normaliser) -----------------------
+const ALIASES = Object.fromEntries(
+  Object.entries(ROLE_ALIAS_MAP).map(([alias, entry]) => [alias, entry.canonical])
+);
+
+const ROLE_FAMILY_DOMAIN_FALLBACK = {
+  data: "data",
+  pm: "pm_general",
+  finance: "finance",
+  marketing: "marketing",
+  hr: "hr",
+  design: "design",
+  legal: "legal",
+  operations: "operations",
+};
+
+function intentDomainForAlias(entry) {
+  if (!entry) return "general";
+  if (entry.domain && entry.domain !== "it_digital") return entry.domain;
+  if (entry.roleFamily === "general" && entry.domain) return entry.domain;
+  return ROLE_FAMILY_DOMAIN_FALLBACK[entry.roleFamily] || entry.roleFamily || "general";
+}
+
+function mergeIntentTerms(baseIntents) {
+  const byDomain = new Map(baseIntents.map(intent => [intent.domainKey, { ...intent, terms: [...intent.terms] }]));
+  for (const [alias, entry] of Object.entries(ROLE_ALIAS_MAP)) {
+    const domainKey = intentDomainForAlias(entry);
+    const current = byDomain.get(domainKey) || {
+      domainKey,
+      label: entry.roleFamily ? `${entry.roleFamily[0].toUpperCase()}${entry.roleFamily.slice(1)} Roles` : "Supported Roles",
+      terms: [],
+    };
+    current.terms.push(alias, entry.canonical, ...(entry.searchVariants || []));
+    byDomain.set(domainKey, current);
+  }
+  return [...byDomain.values()].map(intent => ({
+    ...intent,
+    terms: [...new Set(intent.terms.map(normaliseIntentText).filter(Boolean))],
+  }));
+}
+
+// Search/profile intent guard:
+// /api/scrape normalises the typed query, but the outbound provider call uses
+// the active domain profile's target_titles. Strong cross-profile signals are
+// intercepted here so searches run under the intended profile only after user
+// confirmation.
+const BASE_SEARCH_PROFILE_INTENTS = [
+  {
+    domainKey: "engineering_embedded_firmware",
+    label: "Firmware, Embedded & Device Software",
+    terms: [
+      "firmware", "embedded", "embedded software", "embedded systems",
+      "bsp", "board support", "rtos", "device driver", "driver engineer",
+      "soc bring-up", "chip bring-up", "post-silicon", "hardware debug",
+    ],
+  },
+  {
+    domainKey: "engineering_systems_low_level",
+    label: "Systems, Platform & Performance Engineering",
+    terms: [
+      "kernel", "compiler", "operating systems", "systems software",
+      "performance engineer", "platform software", "linux kernel",
+    ],
+  },
+  {
+    domainKey: "data",
+    label: "Data Science & Analytics",
+    terms: [
+      "data scientist", "data analyst", "machine learning", "ml engineer",
+      "analytics engineer", "research scientist", "business intelligence",
+    ],
+  },
+  {
+    domainKey: "pm_general",
+    label: "Product Management",
+    terms: [
+      "product manager", "technical product manager", "associate product manager",
+      "group product manager", "director of product",
+    ],
+  },
+  {
+    domainKey: "pm_it",
+    label: "IT / Technical Program Management",
+    terms: [
+      "technical program manager", "program manager", "scrum master",
+      "delivery manager", "release manager", "pmo",
+    ],
+  },
+  {
+    domainKey: "finance",
+    label: "Finance & Accounting",
+    terms: ["financial analyst", "fp&a", "investment banking", "credit analyst", "controller"],
+  },
+  {
+    domainKey: "marketing",
+    label: "Marketing & Growth",
+    terms: ["marketing manager", "growth manager", "seo manager", "demand generation"],
+  },
+  {
+    domainKey: "design",
+    label: "Design & UX",
+    terms: ["ux designer", "product designer", "ui/ux", "ux researcher"],
+  },
+];
+
+const SEARCH_PROFILE_INTENTS = mergeIntentTerms(BASE_SEARCH_PROFILE_INTENTS);
+
+function normaliseIntentText(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9+]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function profileMatchesIntent(profile, intent) {
+  if (!profile || !intent) return false;
+  if (profile.domain === intent.domainKey) return true;
+  const titles = Array.isArray(profile.target_titles) ? profile.target_titles : [];
+  const haystack = normaliseIntentText([
+    profile.profile_name,
+    profile.domain,
+    profile.role_family,
+    ...titles,
+  ].join(" "));
+  return intent.terms.some(term => haystack.includes(normaliseIntentText(term)));
+}
+
+function detectSearchProfileIntent(query, profiles, activeProfile) {
+  const text = normaliseIntentText(ALIASES[query.trim().toLowerCase()] || query);
+  if (!text || text.split(" ").length > 8) return null;
+  const intent = SEARCH_PROFILE_INTENTS.find(candidate =>
+    candidate.terms.some(term => {
+      const t = normaliseIntentText(term);
+      return text === t || text.includes(t);
+    })
+  );
+  if (!intent || profileMatchesIntent(activeProfile, intent)) return null;
+  const existingProfile = (profiles || []).find(profile => profileMatchesIntent(profile, intent));
+  return { ...intent, existingProfile };
+}
+
+// -- Pull-to-refresh -------------------------------------------
+function PullToRefresh({ onRefresh, refreshing, theme, children }) {
+  const scrollRef = useRef(null);
+  const { update: updateScroll, scrollToTopRef } = useAppScroll();
+  const [pullY,   setPullY]   = useState(0);
+  const [ready,   setReady]   = useState(false);
+  const startY = useRef(null);
+  const THRESHOLD = 56;
+
+  // Register scroll-to-top fn so goPage can scroll this container, not window
+  useEffect(() => {
+    scrollToTopRef.current = () => {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    };
+    return () => { scrollToTopRef.current = null; };
+  }, [scrollToTopRef]);
+
+  // Touch: pull-down gesture when already at the top
+  const onTouchStart = (e) => {
+    if ((scrollRef.current?.scrollTop ?? 1) === 0)
+      startY.current = e.touches[0].clientY;
+  };
+  const onTouchMove = (e) => {
+    if (startY.current === null) return;
+    const dy = e.touches[0].clientY - startY.current;
+    if (dy > 0) {
+      setPullY(Math.min(dy * 0.55, THRESHOLD + 20));
+      setReady(dy * 0.55 >= THRESHOLD);
+    }
+  };
+  const onTouchEnd = () => {
+    if (ready) onRefresh();
+    setPullY(0); setReady(false); startY.current = null;
+  };
+
+  // Desktop: expose the scrollRef so parent can detect wheel-at-top if needed
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+      {/* Pull indicator — animates down then snaps back */}
+      <div style={{
+        height: pullY, flexShrink:0, overflow:"hidden",
+        display:"flex", alignItems:"center", justifyContent:"center",
+        background: theme.accentMuted,
+        transition: pullY === 0 ? "height 0.22s ease" : "none",
+      }}>
+        {pullY > 12 && (
+          <span style={{ fontSize:11, fontWeight:700, color:theme.accentText }}>
+            {ready ? "? Release to refresh" : "? Keep pulling…"}
+          </span>
+        )}
+      </div>
+
+      {/* Desktop "check for new" strip — visible at very top, compact */}
+      {!refreshing && pullY === 0 && (
+        <div onClick={onRefresh} style={{
+          flexShrink:0, padding:"4px 20px",
+          display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+          background:theme.accentMuted, borderBottom:`1px solid ${theme.accent}22`,
+          cursor:"pointer", fontSize:10, fontWeight:700,
+          color:theme.accentText, letterSpacing:"0.06em", textTransform:"uppercase",
+        }}>
+          <span style={{ display:"inline-block", width:10, height:10,
+                         border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
+                         borderRadius:"50%", marginRight:6, verticalAlign:"-2px" }}/>
+          Check for new jobs
+        </div>
+      )}
+      {refreshing && (
+        <div style={{
+          flexShrink:0, padding:"4px 20px",
+          display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+          background:theme.accentMuted, borderBottom:`1px solid ${theme.accent}22`,
+          fontSize:10, fontWeight:700, color:theme.accentText,
+          letterSpacing:"0.06em", textTransform:"uppercase",
+        }}>
+          <span style={{ display:"inline-block", width:10, height:10,
+                         border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
+                         borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+          Checking…
+        </div>
+      )}
+
+      <div
+        ref={scrollRef}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onScroll={(e) => updateScroll(e.currentTarget.scrollTop / 90)}
+        style={{ flex:1, overflowY:"auto", paddingTop:4, paddingBottom:8 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+
+
+// DEFAULT SIZES (canonical, do not edit inline):
+// A only:                 A=100
+// A + one other panel:    A=30, other=70
+// A + 2+ other panels:    A=6, residual split uniformly
+// Resume panel exception: resume receives 10 percentage points more than
+// each other non-collapsed panel; A is excluded from that bonus.
+// Rule: panel defaults reapply on every open/close transition.
+// Manual resize remains in effect until the next transition.
+// To change defaults edit getPanelDefaults() below.
+// -- Card tier — driven by open-panel count, not pixel width ------
+// Tier 1 (full layout):  A alone, or A+B (detail only, 30% default)
+// Tier 3 (condensed):    A+B+C or A+B+C+D (panel A shrinks to 6%)
+// Tier 2 (medium):       only reached by manual drag — ResizeObserver
+//                        overrides Tier 1 ? 2 when user drags A to 180-279px.
+//                        Tier 3 always wins over pixel measurement.
+function getCardTier(panelBVisible, panelCVisible, panelDVisible) {
+  const extraPanels = [panelBVisible, panelCVisible, panelDVisible].filter(Boolean).length;
+  if (extraPanels === 0) return 1; // A only — full width
+  if (extraPanels === 1) return 1; // A+B — still 30%, full layout
+  return 3;                        // A+B+C or A+B+C+D — 6%, condensed
+}
+
+function getPanelDefaults(showDetail, showSandbox, showAts) {
+  const openPanels = [
+    ["detail", showDetail],
+    ["sandbox", showSandbox],
+    ["ats", showAts],
+  ].filter(([, visible]) => visible).map(([key]) => key);
+
+  if (openPanels.length === 0) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
+  if (openPanels.length === 1) {
+    return {
+      jobs: 30,
+      detail: showDetail ? 70 : 0,
+      sandbox: showSandbox ? 70 : 0,
+      ats: showAts ? 70 : 0,
+    };
+  }
+
+  const jobs = 6;
+  const residualWidth = 100 - jobs;
+  const hasResumePanel = openPanels.includes("sandbox");
+  const baseShare = hasResumePanel
+    ? Math.max(0, (residualWidth - 10) / openPanels.length)
+    : residualWidth / openPanels.length;
+  const panelShare = key => (
+    openPanels.includes(key)
+      ? (hasResumePanel && key === "sandbox" ? baseShare + 10 : baseShare)
+      : 0
+  );
+
+  return {
+    jobs,
+    detail: panelShare("detail"),
+    sandbox: panelShare("sandbox"),
+    ats: panelShare("ats"),
+  };
+}
+
+function buildAtsPayload(job, artifact = null) {
+  const activeArtifact = artifact ? getActiveArtifact(artifact, artifact.activeTool || artifact.tool) : null;
+  const score = activeArtifact?.atsScore
+    ?? job?.atsScore
+    ?? job?.resumeAtsScore
+    ?? job?.baseAtsScore
+    ?? null;
+  const report = activeArtifact?.atsReport
+    ?? job?.atsReport
+    ?? job?.resumeAtsReport
+    ?? job?.baseAtsReport
+    ?? job?.ats_report
+    ?? null;
+  return {
+    score,
+    report,
+    company: activeArtifact?.company || job?.company,
+    title: activeArtifact?.title || job?.title || job?.role,
+  };
+}
+
+function isImportedBoardJob(job) {
+  return !!(["linkedin", "linkedin_saved"].includes(job?.boardSource) && job?.importedJobId != null);
+}
+
+// -- Main panel ------------------------------------------------
+export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive = true }) {
+  const { theme, isDark } = useTheme();
+  const { mode: vpMode } = useViewport();
+  const navigate = useNavigate();
+  const { pin: pinDock, scrollToTopRef, progress: scrollProgress } = useAppScroll();
+  const isWide     = vpMode === "wide";
+  const isMobile   = vpMode === "mobile" || vpMode === "tablet";
+  const isPortrait = vpMode === "portrait" || vpMode === "laptop";
+
+  // Mobile pane state
+  const [mobilePane, setMobilePane] = useState("jobs"); // "jobs" | "editor" | "ats"
+
+  // Tracks jobs disliked in this browser session — survives filter/sort refetches
+  // but is cleared on page reload (so server exclusions take effect on next login)
+  const sessionDislikedRef = useRef(new Map()); // jobId ? job object
+
+  // Job data
+  const [jobs,        setJobs]        = useState([]);
+  const [totalJobs,   setTotalJobs]   = useState(0);
+  const [totalPages,  setTotalPages]  = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // UI state
+  const [scraping,    setScraping]    = useState(false);  // Apify live scrape
+  const [bgLoading,   setBgLoading]   = useState(false);  // background DB fetch
+  const [categories,  setCategories]  = useState([]);
+  const [resumeText,  setResumeText]  = useState("");
+  const [fileName,    setFileName]    = useState("");
+  const [uploading,   setUploading]   = useState(false);
+  const [generated,   setGenerated]   = useState({});
+  const [loading,     setLoading]     = useState({});
+  const [sandbox,     setSandbox]     = useState(null);
+  const [sandboxOpen, setSandboxOpen] = useState(false);
+  const [rightTab,      setRightTab]      = useState("history");
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+
+  // Split view
+  const [selectedJob,  setSelectedJob]  = useState(null);
+
+  // Open / close sandbox — panel size rebalancing handled by useEffect below
+  const openSandbox = useCallback((entry) => {
+    setSandbox(entry);
+    setSandboxOpen(true);
+    if (isMobile) setMobilePane("editor");
+  }, [isMobile]);
+
+  const closeSandbox = useCallback(() => {
+    setSandboxOpen(false);
+    if (isMobile) setMobilePane("jobs");
+  }, [isMobile]);
+
+  const openAtsPanel = useCallback((atsData) => {
+    if (atsData) setActiveAts(atsData);
+    setRightPanelOpen(true);
+    setRightTab("ats");
+    if (isMobile) setMobilePane("ats");
+  }, [isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const closeAtsPanel = useCallback(() => {
+    setRightPanelOpen(false);
+  }, []);
+
+  const [activeAts,   setActiveAts]   = useState(null);
+  const [smartSearching, setSmartSearching] = useState(false);
+  const [attribution, setAttribution] = useState([]); // job source attribution from aggregator
+
+  // Domain profiles
+  const [domainProfiles,   setDomainProfiles]   = useState([]);
+  const [profileWizardOpen, setProfileWizardOpen] = useState(false);
+  const [profileWizardIntent, setProfileWizardIntent] = useState(null);
+  const [searchIntentPrompt, setSearchIntentPrompt] = useState(null);
+  // Increments when active profile changes — triggers job board refetch
+  const [profileSwitchKey, setProfileSwitchKey] = useState(0);
+
+  // Live scrape status
+  const [scrapeError,    setScrapeError]    = useState("");
+  const [applyQueue, setApplyQueue] = useState([]);
+  const [applyRuns, setApplyRuns] = useState([]);
+  const [applyReviewJobs, setApplyReviewJobs] = useState([]); // held_review items across all runs
+  const [applyQueueMsg, setApplyQueueMsg] = useState("");
+  const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
+  const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
+
+  // LIVE POLLING: polls /api/jobs/poll every 4s during active scrape.
+  // Stops when scraping:false returned or after 3 consecutive failures.
+  // To change poll interval edit POLL_INTERVAL_MS below.
+  const POLL_INTERVAL_MS = 4000;
+  const [pollStatus,   setPollStatus]   = useState("idle"); // "idle"|"polling"|"complete"|"error"
+  const pollIntervalRef = useRef(null);
+
+  const [searchPhase, setSearchPhase] = useState("idle");
+
+  // Generation progress
+  const [genStage, setGenStage] = useState("");
+  const genTimerRef = useRef(null);
+
+  // Panel resize refs (react-resizable-panels imperative API)
+  const jobsPanelRef    = useRef(null);
+  const detailPanelRef  = useRef(null);
+  const sandboxPanelRef = useRef(null);
+  const atsPanelRef     = useRef(null);
+  const detailPanelElementRef = useRef(null);
+  const initialPanelDefaultsAppliedRef = useRef(false);
+  const prevPanelVisibilityRef = useRef({ detail: false, sandbox: false, ats: false });
+
+  // ResizeObserver: tracks manual drag width for Tier 1 ? 2 override only
+  const jobsPanelElementRef = useRef(null);
+  const [manualWidth, setManualWidth] = useState(null);
+
+  const publishJobsZoneBounds = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const jobsRect = jobsPanelElementRef.current?.getBoundingClientRect?.();
+    const detailRect = detailPanelElementRef.current?.getBoundingClientRect?.();
+    if (!jobsRect) return;
+    const left = jobsRect.left;
+    const right = detailRect ? Math.max(jobsRect.right, detailRect.right) : jobsRect.right;
+    window.dispatchEvent(new CustomEvent("rm:jobs-panel-zone", {
+      detail: {
+        left,
+        right,
+        width: Math.max(0, right - left),
+        top: Math.min(jobsRect.top, detailRect?.top ?? jobsRect.top),
+      },
+    }));
+  }, []);
+
+  // effectiveTier: panel count is primary driver; ResizeObserver only overrides Tier 1 ? 2
+  const effectiveTier = useMemo(() => {
+    const baseTier = getCardTier(!!selectedJob, sandboxOpen, rightPanelOpen);
+    if (baseTier === 3) return 3; // panel count wins — never override Tier 3
+    if (manualWidth !== null && manualWidth < 280 && manualWidth >= 180) return 2;
+    return baseTier;
+  }, [!!selectedJob, sandboxOpen, rightPanelOpen, manualWidth]); // eslint-disable-line react-hooks/exhaustive-deps
+
+
+  // Task 5 — Inline error states
+  const [smartSearchError, setSmartSearchError] = useState("");
+  const [uploadError,      setUploadError]      = useState("");
+
+  // Task 6 — Company reuse modal
+  const [companyReuseTarget, setCompanyReuseTarget] = useState(null);
+
+  // Board tabs — shared via JobBoardContext so TopBar compact row can drive them
+  const {
+    boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
+    activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
+  } = useJobBoard();
+  const [pendingJobs, setPendingJobs] = useState([]);
+  const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
+  const [linkedinImportSummary, setLinkedinImportSummary] = useState({ total: 0, lastImportedAt: null });
+  const [linkedinInstallModalOpen, setLinkedinInstallModalOpen] = useState(false);
+  const [linkedinImporting, setLinkedinImporting] = useState(false);
+  const [linkedinExtensionNotice, setLinkedinExtensionNotice] = useState(null);
+  // Extension removed — stub so remaining extension-gated UI stays dormant
+  const extensionState = { status: "IDLE" };
+  const refreshExtensionState = () => {};
+
+  const activeDomainProfile = useMemo(() => (
+    domainProfiles.find(p => p.id === activeProfileId)
+      || domainProfiles.find(p => p.is_active)
+      || domainProfiles[0]
+      || null
+  ), [domainProfiles, activeProfileId]);
+  const activeProfileKey = activeDomainProfile?.id || null;
+  const activeProfileResumePath = activeDomainProfile?.id
+    ? `/api/domain-profiles/${activeDomainProfile.id}/base-resume`
+    : null;
+  const activeProfileEnhanceStatusPath = activeDomainProfile?.id
+    ? `/api/domain-profiles/${activeDomainProfile.id}/enhance-status`
+    : null;
+  const activeProfileEnhancePath = activeDomainProfile?.id
+    ? `/api/domain-profiles/${activeDomainProfile.id}/enhance`
+    : null;
+  const activeProfileAdoptEnhancedPath = activeDomainProfile?.id
+    ? `/api/domain-profiles/${activeDomainProfile.id}/adopt-enhanced`
+    : null;
+
+  // Load domain profiles on mount and seed the shared active profile id.
+  useEffect(() => {
+    api("/api/domain-profiles")
+      .then(rows => {
+        const profiles = Array.isArray(rows) ? rows : [];
+        setDomainProfiles(profiles);
+        const active = profiles.find(p => p.is_active) || profiles[0];
+        if (active && !activeProfileId) setActiveProfileId?.(active.id);
+        // Clear any stale "create profile" error that may have appeared before profiles loaded
+        if (profiles.length > 0) setScrapeError(e => e.startsWith("Create a job search profile") ? "" : e);
+      })
+      .catch(() => {});
+  }, [activeProfileId, setActiveProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Enhance resume state
+  // ENHANCE GATING: one free per account lifetime.
+  // enhance_used is set server-side on API call, not on adoption. Cannot be reset.
+  // Future paid unlock: enhance_paid flag in users table.
+  // To change gating logic: edit the profile-scoped enhance routes in server.js and update enhance-status response.
+  const [enhanceUsed,    setEnhanceUsed]    = useState(false);
+  const [enhancePaid,    setEnhancePaid]    = useState(false);
+  const [enhancing,      setEnhancing]      = useState(false);
+  const [enhanceResult,  setEnhanceResult]  = useState(null); // { original, enhanced, delta }
+  const [enhanceModalOpen, setEnhanceModalOpen] = useState(false);
+
+  // Filter panel
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Employment type preferences — persisted in localStorage
+  const [employmentTypePrefs, setEmploymentTypePrefsRaw] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("empTypePrefs") || "null");
+      return Array.isArray(saved) && saved.length ? saved : ["full-time"];
+    } catch { return ["full-time"]; }
+  });
+  const setEmploymentTypePrefs = (val) => {
+    setEmploymentTypePrefsRaw(val);
+    try { localStorage.setItem("empTypePrefs", JSON.stringify(val)); } catch {}
+  };
+
+  // Scrape trigger input
+  const [searchInput, setSearchInput] = useState("");
+  // Tracks whether the user has committed the current search input via Enter/button.
+  // Used to dismiss the normalised-preview tooltip after submission.
+  const [searchCommitted, setSearchCommitted] = useState(false);
+
+  // Filters
+  const [roleFilter,    setRoleFilter]    = useState("");
+  const [locationFilter,setLocationFilter]= useState("");
+  const [workType,      setWorkType]      = useState("");
+  const [catFilter,     setCatFilter]     = useState("");
+  const [srcFilter,     setSrcFilter]     = useState("");
+  const [minYoe,        setMinYoe]        = useState("");
+  const [maxYoe,        setMaxYoe]        = useState("");
+  const [maxApplicants, setMaxApplicants] = useState("");
+  const [visitedFilter, setVisitedFilter] = useState("");
+  const [ageFilter,     setAgeFilter]     = useState("");
+  const [pendingFilters, setPendingFilters] = useState(defaultFilterSnapshot);
+
+  const activeProfileKeyRef = useRef(activeProfileKey);
+  const switchingProfileRef = useRef(false);
+  const latestSnapshotRef = useRef(null);
+  const jobsFetchSeqRef = useRef(0);
+  const nextFetchPageRef = useRef(1);
+  const pendingIntentSearchRef = useRef(null);
+  const searchIntentResolveRef = useRef(null);
+  // Stable ref so startPollLoop (empty deps) can always call the latest fetchJobs
+  const fetchJobsRef = useRef(null);
+
+  const activeFilterSnapshot = useCallback(() => ({
+    roleFilter,
+    locationFilter,
+    workType,
+    employmentTypePrefs: Array.isArray(employmentTypePrefs) && employmentTypePrefs.length
+      ? employmentTypePrefs
+      : ["full-time"],
+    catFilter,
+    srcFilter,
+    minYoe,
+    maxYoe,
+    maxApplicants,
+    visitedFilter,
+    ageFilter,
+  }), [
+    roleFilter, locationFilter, workType, employmentTypePrefs,
+    catFilter, srcFilter, minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter,
+  ]);
+
+  const stageFilter = useCallback((key, value) => {
+    setPendingFilters(prev => ({ ...prev, [key]: value }));
+  }, []);
+
+  const openFilterPanel = useCallback(() => {
+    setPendingFilters(activeFilterSnapshot());
+    setFiltersOpen(true);
+  }, [activeFilterSnapshot]);
+
+  const applyPendingFilters = useCallback(() => {
+    const next = { ...defaultFilterSnapshot(), ...pendingFilters };
+    setRoleFilter(next.roleFilter || "");
+    setLocationFilter(next.locationFilter || "");
+    setWorkType(next.workType || "");
+    setEmploymentTypePrefs(
+      Array.isArray(next.employmentTypePrefs) && next.employmentTypePrefs.length
+        ? next.employmentTypePrefs
+        : ["full-time"]
+    );
+    setCatFilter(next.catFilter || "");
+    setSrcFilter(next.srcFilter || "");
+    setMinYoe(next.minYoe || "");
+    setMaxYoe(next.maxYoe || "");
+    setMaxApplicants(next.maxApplicants || "");
+    setVisitedFilter(next.visitedFilter || "");
+    setAgeFilter(next.ageFilter || "");
+    setFiltersOpen(false);
+  }, [pendingFilters]);
+
+  const resetPendingFilters = useCallback(() => {
+    setPendingFilters(defaultFilterSnapshot());
+  }, []);
+
+  const makeProfileSnapshot = useCallback((overrides = {}) => ({
+    jobs,
+    pendingJobs,
+    totalJobs,
+    totalPages,
+    currentPage,
+    boardTab,
+    localSearch,
+    sortBy,
+    roleFilter,
+    locationFilter,
+    workType,
+    employmentTypePrefs,
+    catFilter,
+    srcFilter,
+    minYoe,
+    maxYoe,
+    maxApplicants,
+    visitedFilter,
+    ageFilter,
+    selectedJob,
+    ...overrides,
+  }), [jobs, pendingJobs, totalJobs, totalPages, currentPage, boardTab, localSearch, sortBy,
+      roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, selectedJob]);
+
+  latestSnapshotRef.current = makeProfileSnapshot();
+
+  const applyProfileSnapshot = useCallback((snapshot) => {
+    setJobs(snapshot.jobs || []);
+    setPendingJobs(snapshot.pendingJobs || []);
+    setTotalJobs(snapshot.totalJobs || 0);
+    setTotalPages(snapshot.totalPages || 0);
+    setCurrentPage(snapshot.currentPage || 1);
+    setBoardTab(["linkedin", "linkedin_saved"].includes(snapshot.boardTab) ? "saved" : (snapshot.boardTab || "all"));
+    setLocalSearch(snapshot.localSearch || "");
+    setSortBy(snapshot.sortBy || "dateDesc");
+    setRoleFilter(snapshot.roleFilter || "");
+    setLocationFilter(snapshot.locationFilter || "");
+    setWorkType(snapshot.workType || "");
+    setEmploymentTypePrefs(snapshot.employmentTypePrefs?.length ? snapshot.employmentTypePrefs : ["full-time"]);
+    setCatFilter(snapshot.catFilter || "");
+    setSrcFilter(snapshot.srcFilter || "");
+    setMinYoe(snapshot.minYoe || "");
+    setMaxYoe(snapshot.maxYoe || "");
+    setMaxApplicants(snapshot.maxApplicants || "");
+    setVisitedFilter(snapshot.visitedFilter || "");
+    setAgeFilter(snapshot.ageFilter || "");
+    setSelectedJob(snapshot.selectedJob || null);
+  }, [setBoardTab, setLocalSearch, setSortBy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fileRef        = useRef();
+  const jobCountRef    = useRef(0);
+  const displayJobsRef = useRef([]);
+  jobCountRef.current = jobs.length;
+  const applyMode = user?.applyMode || "SIMPLE";
+  const planTier = String(user?.planTier || "BASIC").toUpperCase();
+  const canUseGenerate = planTier === "PLUS" || planTier === "PRO";
+  const canUseAPlusResume = planTier === "PRO";
+
+  // Reset panel sizes to defaults on first desktop render and every open/close transition.
+  // Triple RAF ensures react-resizable-panels has committed the layout first.
+  useEffect(() => {
+    if (isMobile) return;
+    const showDetail  = !!selectedJob;
+    const showSandbox = sandboxOpen;
+    const showAts     = rightPanelOpen;
+    const prev = prevPanelVisibilityRef.current;
+    const visibilityChanged = prev.detail !== showDetail || prev.sandbox !== showSandbox || prev.ats !== showAts;
+    const shouldApply = !initialPanelDefaultsAppliedRef.current || visibilityChanged;
+    prevPanelVisibilityRef.current = { detail: showDetail, sandbox: showSandbox, ats: showAts };
+    if (!shouldApply) return;
+
+    const d = getPanelDefaults(showDetail, showSandbox, showAts);
+    let r1, r2, r3;
+    r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => {
+        r3 = requestAnimationFrame(() => {
+          try {
+            if (jobsPanelRef.current)                           jobsPanelRef.current.resize(d.jobs);
+            if (showDetail  && detailPanelRef.current)          detailPanelRef.current.resize(d.detail);
+            if (showSandbox && sandboxPanelRef.current)         sandboxPanelRef.current.resize(d.sandbox);
+            if (showAts     && atsPanelRef.current)             atsPanelRef.current.resize(d.ats);
+            publishJobsZoneBounds();
+            initialPanelDefaultsAppliedRef.current = true;
+          } catch(e) { console.warn("[panels] resize not ready:", e.message); }
+        });
+      });
+    });
+    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
+  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile, publishJobsZoneBounds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ResizeObserver — only used for Tier 1 ? 2 manual-drag fallback
+  useEffect(() => {
+    const nodes = [jobsPanelElementRef.current, detailPanelElementRef.current].filter(Boolean);
+    if (!nodes.length) return;
+    let debounceTimer;
+    const ro = new ResizeObserver(entries => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const jobsEntry = entries.find(entry => entry.target === jobsPanelElementRef.current) || entries[0];
+        const w = jobsEntry?.contentRect.width;
+        if (w !== undefined) setManualWidth(w);
+        publishJobsZoneBounds();
+      }, 50);
+    });
+    nodes.forEach(node => ro.observe(node));
+    window.addEventListener("resize", publishJobsZoneBounds, { passive: true });
+    publishJobsZoneBounds();
+    return () => {
+      clearTimeout(debounceTimer);
+      ro.disconnect();
+      window.removeEventListener("resize", publishJobsZoneBounds);
+    };
+  }, [publishJobsZoneBounds, !!selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-open resume + ATS panel when a pending job card is selected
+  useEffect(() => {
+    if (!selectedJob || boardTab !== "pending") return;
+    const key = selectedJob.jobId;
+
+    // If pending job response included resume_html, use it directly (no extra fetch)
+    if (selectedJob.resume_html) {
+      const entry = {
+        html:      selectedJob.resume_html,
+        atsScore:  selectedJob.ats_score,
+        atsReport: selectedJob.ats_report,
+        company:   selectedJob.company,
+        title:     selectedJob.title,
+        jobId:     selectedJob.jobId,
+        tool:      selectedJob.apply_mode === "CUSTOM_SAMPLER" ? A_PLUS_TOOL : GENERATE_TOOL,
+        toolLabel: selectedJob.apply_mode === "CUSTOM_SAMPLER" ? TOOL_LABELS[A_PLUS_TOOL] : TOOL_LABELS[GENERATE_TOOL],
+        status:    "success",
+      };
+      setGenerated(p => ({ ...p, [key]: entry }));
+      openSandbox({ ...entry });
+      openAtsPanel({ score: entry.atsScore, report: entry.atsReport,
+                     company: selectedJob.company, title: selectedJob.title });
+      return;
+    }
+
+    // Fallback: resume exists in DB (generated[key] = __exists__) - fetch on demand
+    if (generated[key]?.html === "__exists__") {
+      generateActual(selectedJob, false, true);
+      return;
+    }
+
+    // No generated artifact yet. Keep the pre-generation state neutral.
+  }, [selectedJob?.jobId, boardTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const PAGE_SIZE = 25;
+
+  // Profile-scoped cache restore: show the correct profile's last board state
+  // immediately, then let the normal fetch effect refresh it in the background.
+  useEffect(() => {
+    const nextKey = activeProfileKey == null ? null : String(activeProfileKey);
+    const prevKey = activeProfileKeyRef.current == null ? null : String(activeProfileKeyRef.current);
+    if (!nextKey || nextKey === prevKey) {
+      activeProfileKeyRef.current = activeProfileKey;
+      return;
+    }
+    if (!prevKey && latestSnapshotRef.current?.jobs?.length) {
+      setProfileCache?.(nextKey, latestSnapshotRef.current);
+      writeProfileUiCache(nextKey, latestSnapshotRef.current);
+      activeProfileKeyRef.current = activeProfileKey;
+      return;
+    }
+
+    if (prevKey && latestSnapshotRef.current) {
+      setProfileCache?.(prevKey, latestSnapshotRef.current);
+    }
+
+    switchingProfileRef.current = true;
+    const cached = getProfileCache?.(nextKey);
+    if (cached) {
+      nextFetchPageRef.current = cached.currentPage || 1;
+      applyProfileSnapshot(cached);
+      setScrapeError("");
+    } else {
+      const cachedUi = readProfileUiCache(nextKey);
+      nextFetchPageRef.current = cachedUi?.currentPage || 1;
+      applyProfileSnapshot({ ...(cachedUi || {}), jobs: [], pendingJobs: [], totalJobs: 0, totalPages: 0, selectedJob: null });
+      setSandbox(null);
+      setSandboxOpen(false);
+      setRightPanelOpen(false);
+      setScrapeError("");
+    }
+
+    activeProfileKeyRef.current = activeProfileKey;
+    requestAnimationFrame(() => { switchingProfileRef.current = false; });
+  }, [activeProfileKey, applyProfileSnapshot, getProfileCache, setProfileCache]);
+
+  useEffect(() => {
+    if (!activeProfileKey || switchingProfileRef.current) return;
+    setProfileCache?.(activeProfileKey, latestSnapshotRef.current);
+    writeProfileUiCache(activeProfileKey, latestSnapshotRef.current);
+  }, [activeProfileKey, jobs, pendingJobs, totalJobs, totalPages, currentPage, boardTab,
+      localSearch, sortBy, roleFilter, locationFilter, workType, employmentTypePrefs,
+      catFilter, srcFilter, minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter,
+      selectedJob, setProfileCache]);
+
+  // -- Split-view: job selection ---------------------------------
+  const handleJobSelect = useCallback((job) => {
+    setSelectedJob(prev => {
+      if (prev?.jobId === job.jobId) return null; // toggle off
+      return job;
+    });
+    markVisited(job);
+    if (!job.visited && !isImportedBoardJob(job)) {
+      api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }).catch(()=>{});
+    } else if (!job.visited && isImportedBoardJob(job)) {
+      api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" }).catch(()=>{});
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keyboard nav: Escape closes, ArrowUp/Down navigates
+  useEffect(() => {
+    if (!selectedJob) return;
+    const handler = (e) => {
+      if (e.key === "Escape") { setSelectedJob(null); return; }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedJob(prev => {
+          if (!prev) return prev;
+          const jobs = displayJobsRef.current;
+          const idx = jobs.findIndex(j => j.jobId === prev.jobId);
+          const nextIdx = e.key === "ArrowDown" ? idx + 1 : idx - 1;
+          if (nextIdx >= 0 && nextIdx < jobs.length) {
+            const next = jobs[nextIdx];
+            markVisited(next);
+            return next;
+          }
+          return prev;
+        });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -- Build query params from current filter state ----------
+  const buildParams = useCallback((page = 1, overrideStarred = null, overrides = {}) => {
+    const p = new URLSearchParams();
+    p.set("page", String(page));
+    p.set("pageSize", String(PAGE_SIZE));
+    p.set("sort", sortBy);
+    const effectiveRole = overrides.role ?? roleFilter;
+    const effectiveVisited = overrides.visited ?? visitedFilter;
+    if (effectiveRole.trim()) p.set("role",     effectiveRole.trim().toLowerCase());
+    if (locationFilter.trim())p.set("location", locationFilter.trim());
+    if (workType)             p.set("workType", workType);
+    if (employmentTypePrefs.length && !(employmentTypePrefs.length === 1 && employmentTypePrefs[0] === "full-time"))
+      p.set("employmentType", employmentTypePrefs.join(","));
+    if (catFilter)            p.set("category", catFilter);
+    if (srcFilter)            p.set("source",   srcFilter);
+    if (minYoe !== "")        p.set("minYoe",        minYoe);
+    if (maxYoe !== "")        p.set("maxYoe",        maxYoe);
+    if (maxApplicants !== "") p.set("maxApplicants", maxApplicants);
+    if (effectiveVisited)     p.set("visited",       effectiveVisited);
+    if (ageFilter)            p.set("ageFilter",     ageFilter);
+    if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
+    if (localSearch.trim())   p.set("localSearch",   localSearch.trim().toLowerCase());
+    return p.toString();
+  }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, localSearch]);
+
+  const fetchImportedSummary = useCallback(async () => {
+    try {
+      const data = await api("/api/imported-jobs/summary");
+      const linkedin = (data?.sources || []).find(source => source.sourceKey === "linkedin");
+      setLinkedinImportSummary({
+        total: linkedin?.total || 0,
+        lastImportedAt: linkedin?.lastImportedAt || null,
+      });
+    } catch {
+      setLinkedinImportSummary({ total: 0, lastImportedAt: null });
+    }
+  }, []);
+
+  const fetchImportedLinkedInJobs = useCallback(async () => {
+    try {
+      const data = await api("/api/imported-jobs/linkedin");
+      setImportedLinkedInJobs(Array.isArray(data?.jobs) ? data.jobs : []);
+    } catch {
+      setImportedLinkedInJobs([]);
+    }
+  }, []);
+
+  const openLinkedInExtensionPopup = useCallback(async () => {
+    try {
+      await sendExtensionRequest({ type: "OPEN_POPUP" });
+    } catch (e) {
+      setUploadError(e.message || "Could not open the LinkedIn extension.");
+    }
+  }, []);
+
+  const closeLinkedInImportTab = useCallback(async (tabId) => {
+    try {
+      await sendExtensionRequest({ type: "CLOSE_LINKEDIN_TAB", tabId });
+    } catch {}
+  }, []);
+
+  const startLinkedInImport = useCallback(async () => {
+    if (!activeDomainProfile) {
+      setUploadError("Create and activate a job profile before importing from LinkedIn.");
+      return;
+    }
+    if (!isLinkedInExtensionInstalled()) {
+      setLinkedinInstallModalOpen(true);
+      return;
+    }
+    const status = await refreshExtensionState().catch((error) => {
+      throw new Error(error.message || "Could not reach the LinkedIn extension.");
+    });
+    if (status.status === "NOT_AUTHED") {
+      setLinkedinExtensionNotice({
+        message: "Reconnect Extension to Resume Master before importing from LinkedIn.",
+        actionLabel: "Fix Connection",
+      });
+      return;
+    }
+    setLinkedinExtensionNotice(null);
+    setLinkedinImporting(true);
+    setUploadError("");
+    try {
+      await sendExtensionRequest({
+        type: "START_LINKEDIN_IMPORT",
+        payload: {
+          targetRole: activeDomainProfile.profile_name || "",
+          location: activeDomainProfile.location || "",
+        },
+      });
+    } catch (e) {
+      setLinkedinImporting(false);
+      setUploadError(e.message || "Could not start LinkedIn import.");
+    }
+  }, [activeDomainProfile, refreshExtensionState]);
+
+  // -- Fetch pending jobs ----------------------------------------
+  const fetchPending = useCallback(async () => {
+    const requestProfileKey = activeProfileKeyRef.current;
+    try {
+      const rows = await api("/api/jobs/pending");
+      if (requestProfileKey !== activeProfileKeyRef.current) return;
+      setPendingJobs(Array.isArray(rows) ? rows : []);
+    } catch {}
+  }, []);
+
+  // -- Fetch jobs — never clears board before data arrives ------
+  const fetchJobs = useCallback(async (page = 1, mergeMode = false, options = {}) => {
+    if (boardTab === "pending") { fetchPending(); return; }
+    if (!activeDomainProfile) {
+      setJobs([]);
+      setTotalJobs(0);
+      setTotalPages(0);
+      // setupBlock already gates the UI — no need to set scrapeError here
+      return;
+    }
+    const requestProfileKey = activeProfileKeyRef.current;
+    const requestSeq = ++jobsFetchSeqRef.current;
+    setBgLoading(true);
+    try {
+      const qs = buildParams(page, null, options.overrides || {});
+      const d = await api(`/api/jobs?${qs}`);
+      if (requestProfileKey !== activeProfileKeyRef.current || requestSeq !== jobsFetchSeqRef.current) return;
+      // Normalize aggregator field names to legacy camelCase expected by JobCard/JobsPanel
+      const incoming = (d.jobs || []).map(normalizeApiJob);
+      // Capture attribution from aggregator response for footer rendering
+      if (Array.isArray(d.attribution)) setAttribution(d.attribution);
+      if (mergeMode) {
+        setJobs(prev => {
+          const map = new Map(prev.map(j => [j.jobId, j]));
+          incoming.forEach(j => map.set(j.jobId, j));
+          return [...map.values()];
+        });
+      } else {
+        // Replace list but re-inject any jobs disliked this session so they
+        // remain visible (faded) until the user reloads the page.
+        setJobs(() => {
+          const result = new Map(incoming.map(j => [j.jobId, j]));
+          for (const [id, job] of sessionDislikedRef.current) {
+            if (job.__profileKey && String(job.__profileKey) !== String(requestProfileKey)) continue;
+            if (!result.has(id)) result.set(id, job);
+          }
+          return [...result.values()];
+        });
+      }
+      setTotalJobs(d.total || 0);
+      setTotalPages(d.totalPages || 0);
+      setCurrentPage(page);
+      console.log(`[board] profile:${requestProfileKey} sort:${buildParams(page).match(/sort=([^&]+)/)?.[1]||"?"} page:${page} total:${d.total||0} returned:${incoming.length} source:${mergeMode?"merge":"replace"}`);
+      setProfileCache?.(requestProfileKey, makeProfileSnapshot({
+        jobs: mergeMode
+          ? [...new Map([...jobs, ...incoming].map(j => [j.jobId, j])).values()]
+          : [...new Map([
+              ...incoming.map(j => [j.jobId, j]),
+              ...[...sessionDislikedRef.current].filter(([id, job]) =>
+                (!job.__profileKey || String(job.__profileKey) === String(requestProfileKey))
+                && !incoming.some(j => j.jobId === id)
+              ),
+            ]).values()],
+        totalJobs: d.total || 0,
+        totalPages: d.totalPages || 0,
+        currentPage: page,
+      }));
+    } finally {
+      if (requestSeq === jobsFetchSeqRef.current) setBgLoading(false);
+    }
+  }, [activeDomainProfile, buildParams, boardTab, fetchImportedLinkedInJobs, fetchPending, jobs, makeProfileSnapshot, setProfileCache]);
+  // Keep stable ref in sync so callbacks with empty deps (e.g. startPollLoop) always
+  // call the current fetchJobs closure without needing it in their dep arrays.
+  fetchJobsRef.current = fetchJobs;
+
+  // -- Boot --------------------------------------------------
+  useEffect(() => {
+    if (!user) return;
+    Promise.all([
+      api("/api/jobs?page=1&pageSize=25&sort=dateDesc"),
+      api("/api/categories"),
+      api("/api/resumes"),
+      api("/api/imported-jobs/summary").catch(() => ({ sources: [] })),
+    ]).then(([jr, cats, gr, importSummary]) => {
+      setJobs((jr.jobs || []).map(normalizeApiJob));
+      setTotalJobs(jr.total || 0);
+      setTotalPages(jr.totalPages || 0);
+      if (Array.isArray(jr.attribution)) setAttribution(jr.attribution);
+      setCategories(cats || []);
+      if (gr?.length) {
+        const map = {};
+        gr.forEach(r => { map[r.job_id] = { html:"__exists__", status:"exists", atsScore:r.ats_score,
+          atsReport:r.ats_report, company:r.company, title:r.role,
+          jobId:r.job_id, tool:r.apply_mode === "CUSTOM_SAMPLER" ? A_PLUS_TOOL : GENERATE_TOOL,
+          toolLabel:r.apply_mode === "CUSTOM_SAMPLER" ? TOOL_LABELS[A_PLUS_TOOL] : TOOL_LABELS[GENERATE_TOOL] }; });
+        setGenerated(map);
+      }
+      const linkedin = (importSummary?.sources || []).find(source => source.sourceKey === "linkedin");
+      setLinkedinImportSummary({
+        total: linkedin?.total || 0,
+        lastImportedAt: linkedin?.lastImportedAt || null,
+      });
+    }).catch(console.error);
+  }, [user, fetchImportedSummary]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!user) return;
+    if (!activeProfileResumePath || !activeProfileEnhanceStatusPath) {
+      setResumeText("");
+      setFileName("");
+      setEnhanceUsed(false);
+      setEnhancePaid(false);
+      return;
+    }
+    Promise.all([
+      api(activeProfileResumePath),
+      api(activeProfileEnhanceStatusPath),
+    ]).then(([resume, status]) => {
+      setResumeText(resume?.content || "");
+      setFileName(resume?.name || (resume?.content ? "Saved resume" : ""));
+      setEnhanceUsed(!!status?.enhanceUsed);
+      setEnhancePaid(!!status?.enhancePaid);
+    }).catch(() => {
+      setResumeText("");
+      setFileName("");
+      setEnhanceUsed(false);
+      setEnhancePaid(false);
+    });
+  }, [user, activeProfileResumePath, activeProfileEnhanceStatusPath]);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchImportedSummary();
+  }, [user, fetchImportedSummary]);
+
+  useEffect(() => {
+    if (extensionState.status === "DONE" && linkedinImporting) {
+      closeLinkedInImportTab(extensionState.linkedInTabId);
+      fetchImportedSummary();
+      fetchImportedLinkedInJobs();
+      fetchJobsRef.current?.(1);
+      toast({ title: "LinkedIn import complete", description: `Imported ${extensionState.importedCount || 0} jobs from LinkedIn.` });
+      setLinkedinImporting(false);
+      setLinkedinExtensionNotice(null);
+    }
+    if (extensionState.status === "ERROR" && linkedinImporting) {
+      closeLinkedInImportTab(extensionState.linkedInTabId);
+      toast({ title: "LinkedIn import failed", description: extensionState.error || "Could not import LinkedIn jobs." });
+      setLinkedinImporting(false);
+    }
+  }, [closeLinkedInImportTab, extensionState, fetchImportedLinkedInJobs, fetchImportedSummary, linkedinImporting]);
+
+  useEffect(() => {
+    const onExtensionEvent = (event) => {
+      const payload = event.detail?.payload;
+      if (!payload?.type) return;
+      if (payload.type === "LINKEDIN_LOGIN_REQUIRED") {
+        setLinkedinImporting(false);
+        setLinkedinExtensionNotice({
+          message: "Please log into LinkedIn in the tab that just opened, then click Import again.",
+          actionLabel: "",
+        });
+        toast({ title: "LinkedIn login required", description: "Finish logging into LinkedIn in the opened tab, then click Import again." });
+      }
+    };
+    window.addEventListener("rm-extension:event", onExtensionEvent);
+    return () => window.removeEventListener("rm-extension:event", onExtensionEvent);
+  }, []);
+
+  useEffect(() => {
+    if (["linkedin", "linkedin_saved"].includes(boardTab)) setBoardTab("saved");
+  }, [boardTab, setBoardTab]);
+
+  useEffect(() => {
+    if (!user || boardTab !== "saved") return;
+    fetchImportedLinkedInJobs();
+  }, [user, boardTab, fetchImportedLinkedInJobs]);
+
+  // Re-fetch when server-side filters/sort/tab change (background — board stays visible)
+  // Note: localSearch is NOT in this dep array — it has its own debounced effect below
+  useEffect(() => {
+    if (!user) return;
+    const page = nextFetchPageRef.current || 1;
+    nextFetchPageRef.current = 1;
+    fetchJobs(page);
+  }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey,
+      profileSwitchKey, activeProfileKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setSearchPhase("idle");
+  }, [activeProfileKey, searchInput]);
+
+  // Debounced backend search — fires 300ms after user stops typing
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      setCurrentPage(1);
+      fetchJobs(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [localSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Multi-session sync — reflect changes from other tabs/devices without full reload
+  useSyncEvents({
+    job_flag: ({ jobId, starred, disliked }) => {
+      setJobs(prev => prev.map(j =>
+        j.jobId === jobId
+          ? { ...j, ...(starred  != null ? { starred:  !!starred,  disliked: false } : {}),
+                     ...(disliked != null ? { disliked: !!disliked, starred:  false } : {}) }
+          : j
+      ));
+    },
+    resume_generated: () => {
+      fetchJobs(currentPage);
+    },
+    profile_switched: ({ profileId }) => {
+      if (profileId) setActiveProfileId?.(Number(profileId));
+      setProfileSwitchKey(k => k + 1);
+    },
+    scrape_complete: () => {
+      fetchJobs(1);
+    },
+    imported_jobs_updated: ({ sourceKey }) => {
+      if (sourceKey === "linkedin" || sourceKey === "linkedin_saved") {
+        fetchImportedSummary();
+        if (boardTab === "saved") fetchImportedLinkedInJobs();
+      }
+    },
+  });
+
+  // Shared poll loop — used by handleSearch, handlePullRefresh, handleSetRole
+  const startPollLoop = useCallback((roleQ, pollSince) => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    setPollStatus("polling");
+    let failCount = 0;
+    const seenIds = new Set();
+    let totalNew = 0;
+
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const qs = new URLSearchParams({ since: String(pollSince), query: roleQ });
+        const pollData = await api(`/api/jobs/poll?${qs.toString()}`);
+        failCount = 0;
+        if (pollData.needsProfileSetup) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setScraping(false);
+          setPollStatus("idle");
+          setScrapeError("Create a job search profile to load matching jobs.");
+          return;
+        }
+        if (pollData.needsBaseResume) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setScraping(false);
+          setPollStatus("idle");
+          setScrapeError("Upload the active profile's base resume before searching jobs.");
+          return;
+        }
+        if (pollData.scrapeUnavailable && pollData.message) {
+          setScrapeError(pollData.message);
+        }
+
+        const newJobs = (pollData.jobs || []).filter(j => !seenIds.has(j.jobId));
+        if (newJobs.length > 0) {
+          newJobs.forEach(j => seenIds.add(j.jobId));
+          totalNew += newJobs.length;
+          // Re-read through /api/jobs so progressive merges honor local filters,
+          // profile hard constraints, sort mode, and pagination consistently.
+          fetchJobsRef.current?.(1);
+        }
+
+        if (!pollData.scraping) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setScraping(false);
+          setPollStatus("idle");
+          // Re-fetch from DB with current sort so poll-prepended jobs end up in correct order
+          fetchJobsRef.current?.(1);
+        }
+      } catch {
+        failCount++;
+        if (failCount >= 3) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+          setScraping(false);
+          setPollStatus("error");
+          setScrapeError("Could not fetch new jobs - check Apify in Integrations.");
+        }
+      }
+    }, POLL_INTERVAL_MS);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activateProfileForSearch = useCallback(async (profileId) => {
+    await api(`/api/domain-profiles/${profileId}/activate`, { method: "POST" });
+    setDomainProfiles(prev => prev.map(p => ({ ...p, is_active: p.id === profileId ? 1 : 0 })));
+    setActiveProfileId?.(profileId);
+    setProfileSwitchKey(k => k + 1);
+  }, [setActiveProfileId]);
+
+  const askSearchIntent = useCallback((prompt) => new Promise(resolve => {
+    searchIntentResolveRef.current = resolve;
+    setSearchIntentPrompt(prompt);
+  }), []);
+
+  const closeSearchIntentPrompt = useCallback((accepted) => {
+    const resolve = searchIntentResolveRef.current;
+    searchIntentResolveRef.current = null;
+    setSearchIntentPrompt(null);
+    resolve?.(accepted);
+  }, []);
+
+  const addToApplyQueue = useCallback((job) => {
+    if (!job?.jobId) return;
+    setApplyQueue(prev => prev.some(item => item.jobId === job.jobId) ? prev : [...prev, job]);
+    setApplyQueueMsg(`${job.company || "Job"} queued for auto apply.`);
+    setTimeout(() => setApplyQueueMsg(""), 3000);
+  }, []);
+
+  const removeFromApplyQueue = useCallback((jobId) => {
+    setApplyQueue(prev => prev.filter(item => item.jobId !== jobId));
+  }, []);
+
+  const loadApplyRuns = useCallback(async () => {
+    try {
+      const data = await api("/api/apply/runs");
+      setApplyRuns(Array.isArray(data.runs) ? data.runs : []);
+      setApplyReviewJobs(Array.isArray(data.review) ? data.review : []);
+    } catch {}
+  }, []);
+
+  const loadApplyRunDetail = useCallback(async (runId) => {
+    try {
+      const data = await api(`/api/apply/runs/${runId}`);
+      setApplyRunDetail(data);
+      setApplyRunDetailOpen(true);
+    } catch {}
+  }, []);
+
+  useEffect(() => { if (user) loadApplyRuns(); }, [user, loadApplyRuns]);
+
+  const startApplyRun = useCallback(async (mode = "auto") => {
+    if (!applyQueue.length) return;
+    try {
+      const data = await api("/api/apply/runs", {
+        method: "POST",
+        body: JSON.stringify({ jobIds: applyQueue.map(job => job.jobId), mode, tool: canUseAPlusResume ? A_PLUS_TOOL : GENERATE_TOOL }),
+      });
+      setApplyQueue([]);
+      setApplyQueueMsg(`${data.queued?.length || 0} job${data.queued?.length === 1 ? "" : "s"} started in ${mode === "manual" ? "manual review" : "auto apply"} mode.`);
+      loadApplyRuns();
+    } catch(e) {
+      const missing = e.payload?.missingPrerequisites;
+      setApplyQueueMsg(missing?.length
+        ? `Setup needed in Integrations: ${missing.join(", ")}.`
+        : (e.message || "Could not start apply run."));
+    }
+  }, [applyQueue, canUseAPlusResume, loadApplyRuns]);
+
+  const deleteDomainProfile = useCallback(async (profileId) => {
+    const profile = domainProfiles.find(p => p.id === profileId);
+    if (!profile || domainProfiles.length <= 1) return;
+    if (!confirm(`Delete job profile "${profile.profile_name}"?`)) return;
+    try {
+      await api(`/api/domain-profiles/${profileId}`, { method: "DELETE" });
+      deleteProfileCache?.(profileId);
+      const next = await api("/api/domain-profiles");
+      const rows = Array.isArray(next) ? next : [];
+      setDomainProfiles(rows);
+      const active = rows.find(p => p.is_active) || rows[0];
+      if (active) setActiveProfileId?.(active.id);
+      setProfileSwitchKey(k => k + 1);
+    } catch(e) {
+      setScrapeError(e.message || "Could not delete profile.");
+    }
+  }, [deleteProfileCache, domainProfiles, setActiveProfileId]);
+
+  const ensureSearchProfileAlignment = useCallback(async (query) => {
+    const intent = detectSearchProfileIntent(query, domainProfiles, activeDomainProfile);
+    if (!intent) return true;
+
+    if (intent.existingProfile) {
+      const ok = await askSearchIntent({
+        title: "Switch Profile?",
+        body: `This search looks like ${intent.label}. Switch to "${intent.existingProfile.profile_name}" for this search?`,
+        confirmLabel: "Switch and Search",
+        cancelLabel: "Cancel Search",
+      });
+      if (!ok) {
+        setScrapeError(`Search canceled. Switch profiles or refine the query to avoid wrong-profile results.`);
+        return false;
+      }
+      try {
+        await activateProfileForSearch(intent.existingProfile.id);
+      } catch(e) {
+        setScrapeError(e.message || "Could not switch profile for this search.");
+        return false;
+      }
+      return true;
+    }
+
+    const canAddProfile = domainProfiles.length < 4;
+    if (!canAddProfile) {
+      setScrapeError(`This search looks like ${intent.label}, but you already have 4 profiles. Search canceled to avoid wrong-profile results.`);
+      return false;
+    }
+
+    const ok = await askSearchIntent({
+      title: "Add Matching Profile?",
+      body: `This search fits ${intent.label}. Add that profile before searching?`,
+      confirmLabel: "Add Profile",
+      cancelLabel: "Cancel Search",
+    });
+    if (!ok) {
+      setScrapeError(`Search canceled. Add the matching profile or refine the query to continue.`);
+      return false;
+    }
+    pendingIntentSearchRef.current = query;
+    setProfileWizardIntent(intent);
+    setProfileWizardOpen(true);
+    return false;
+  }, [activeDomainProfile, activateProfileForSearch, askSearchIntent, domainProfiles]);
+
+  // Set active role — immediately shows local DB results only.
+  const handleSetRole = useCallback(async (overrideQuery, options = {}) => {
+    const q = (overrideQuery || searchInput).trim();
+    if (!q) return false;
+    if (!activeDomainProfile) {
+      setScrapeError("Create a job search profile before setting a search role.");
+      setProfileWizardOpen(true);
+      return false;
+    }
+    if (!resumeText.trim()) {
+      setScrapeError("Upload the active profile's base resume before setting a search role.");
+      return false;
+    }
+    if (!options.skipProfileIntent) {
+      const aligned = await ensureSearchProfileAlignment(q);
+      if (!aligned) return false;
+    }
+    setScrapeError("");
+    const roleQ = q.toLowerCase();
+    setRoleFilter(roleQ);
+    setSearchInput(q);
+    setSearchCommitted(true);
+    await fetchJobs(1, false, { overrides: { role: roleQ } });
+    return true;
+  }, [activeDomainProfile, resumeText, searchInput, ensureSearchProfileAlignment, fetchJobs]);
+
+  // -- Scrape / search ---------------------------------------
+  const handleSearch = useCallback(async (overrideQuery, options = {}) => {
+    const q = (overrideQuery || searchInput).trim();
+    if (!q) return;
+    if (!activeDomainProfile) {
+      setScrapeError("Create a job search profile before searching jobs.");
+      setProfileWizardOpen(true);
+      return;
+    }
+    if (!resumeText.trim()) {
+      setScrapeError("Upload the active profile's base resume before searching jobs.");
+      return;
+    }
+    if (!options.skipProfileIntent) {
+      const aligned = await ensureSearchProfileAlignment(q);
+      if (!aligned) return;
+    }
+    setScrapeError("");
+    setSearchCommitted(true);
+    const immediateRoleQ = q.toLowerCase();
+    setRoleFilter(immediateRoleQ);
+    // Fetch from aggregator — results come back directly, no scraping needed
+    await fetchJobs(1, false, { overrides: { role: immediateRoleQ } });
+  }, [activeDomainProfile, resumeText, searchInput, fetchJobs, ensureSearchProfileAlignment]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -- Pull / Check-for-new: DB-first, then scrape if quota unmet -
+  // Merges new jobs into the board; removes visited entries.
+  const handlePullRefresh = useCallback(async () => {
+    const q = (searchInput || roleFilter).trim();
+    if (!q) return false;
+    if (!activeDomainProfile) {
+      setScrapeError("Create a job search profile before checking for jobs.");
+      setProfileWizardOpen(true);
+      return false;
+    }
+    if (!resumeText.trim()) {
+      setScrapeError("Upload the active profile's base resume before checking for jobs.");
+      return false;
+    }
+    if (bgLoading) return false;
+    setScrapeError("");
+    const immediateRoleQ = q.toLowerCase();
+    setRoleFilter(immediateRoleQ);
+    // Fetch from aggregator — results come back directly
+    await fetchJobs(1, false, { overrides: { role: immediateRoleQ } });
+    setSearchPhase("idle");
+    return true;
+  }, [searchInput, roleFilter, bgLoading, fetchJobs, activeDomainProfile, resumeText]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -- Resume Enhancer ------------------------------------------
+  const handleEnhance = useCallback(async () => {
+    if (enhancing) return;
+    if (!activeProfileEnhancePath) {
+      setUploadError("Select a job profile before enhancing its resume.");
+      return;
+    }
+    setEnhancing(true);
+    try {
+      const result = await api(activeProfileEnhancePath, { method: "POST" });
+      setEnhanceResult(result);
+      setEnhanceModalOpen(true);
+    } catch(e) {
+      if (e.status === 403) {
+        setEnhanceUsed(true);
+      } else {
+        setUploadError("Enhancement failed: " + e.message);
+      }
+    } finally {
+      // Consume the free use regardless of outcome — server already set enhance_used
+      setEnhanceUsed(true);
+      setEnhancing(false);
+    }
+  }, [enhancing, activeProfileEnhancePath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleAdoptEnhanced = useCallback(async () => {
+    try {
+      if (!activeProfileAdoptEnhancedPath) throw new Error("No active profile");
+      await api(activeProfileAdoptEnhancedPath, { method: "PATCH" });
+      if (enhanceResult?.enhanced?.text) setResumeText(enhanceResult.enhanced.text);
+    } catch(e) { console.warn("[adopt]", e.message); }
+    setEnhanceModalOpen(false);
+  }, [enhanceResult, activeProfileAdoptEnhancedPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSmartSearch = useCallback(async () => {
+    if (!resumeText) {
+      setSmartSearchError("Upload the active profile's base resume from Job Profiles first — smart search extracts the best query from it.");
+      navigate("/app/job-profiles");
+      return;
+    }
+    setSmartSearchError("");
+    setSmartSearching(true);
+    try {
+      const result = await api("/api/smart-search", { method:"POST", body:JSON.stringify({ resumeText }) });
+      if (result.error) { setSmartSearchError(result.error); return; }
+      const q = result.searchQuery;
+      if (q) { setSearchInput(q); await handleSearch(q); }
+    } catch(e) { setSmartSearchError("Smart search failed: " + e.message); }
+    finally { setSmartSearching(false); }
+  }, [resumeText, handleSearch, navigate]);
+
+  // -- File upload -------------------------------------------
+  const handleFile = useCallback(async e => {
+    const file = e.target.files[0]; if (!file) return;
+    if (!activeProfileResumePath) {
+      setUploadError("Create or select a job profile before uploading a resume.");
+      return;
+    }
+    setFileName(file.name); setUploading(true); setUploadError("");
+    try {
+      const ext = file.name.split(".").pop().toLowerCase();
+      let text = "";
+      if (ext === "pdf") {
+        const fd = new FormData(); fd.append("file", file);
+        const r = await fetch("/api/parse-pdf", { method:"POST", credentials:"include", headers:authHeaders(), body:fd });
+        const d = await r.json(); if (d.error) throw new Error(d.error);
+        text = d.text;
+      } else if (ext === "docx") {
+        const mammoth = (await import("mammoth")).default;
+        text = (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value;
+      } else { text = await file.text(); }
+      setResumeText(text);
+      await api(activeProfileResumePath, { method:"POST", body:JSON.stringify({ content:text, name:file.name }) });
+    } catch(err) {
+      setUploadError("Error: " + err.message);
+      setFileName(""); if (fileRef.current) fileRef.current.value = "";
+    } finally { setUploading(false); }
+  }, [activeProfileResumePath]);
+
+  // -- Generate (actual logic) -------------------------------
+  const generateActual = useCallback(async (job, force = false, skipCompanyCheck = false, tool = "generate") => {
+    tool = normalizeTool(tool);
+    if (tool === A_PLUS_TOOL ? !canUseAPlusResume : !canUseGenerate) { return; }
+    if (!resumeText)            { return; }
+    const key = job.jobId, existing = generated[key];
+    if (loading[key]) { return; }
+    const existingArtifact = getActiveArtifact(existing, tool);
+    if (existingArtifact?.html && existingArtifact.html !== "__exists__" && !force) {
+      const entry = {...existing, ...existingArtifact, company:existingArtifact.company||job.company, title:existingArtifact.title||job.title};
+      openSandbox(entry);
+      openAtsPanel({ score:existingArtifact.atsScore, report:existingArtifact.atsReport, company:job.company, title:job.title });
+      return;
+    }
+    if (existing?.html === "__exists__" && existing.tool === tool && !force) {
+      // Resume exists in DB but not in memory — fetch on demand
+      setLoading(p => ({ ...p, [key]: tool }));
+      try {
+        const d = await api(`/api/resumes/${key}`);
+        const entry = buildArtifact(job, { html: d.html, ats_score: d.ats_score, atsReport: d.atsReport, company: d.company, role: d.role, tool }, tool);
+        setGenerated(p => ({ ...p, [key]: entry }));
+        openSandbox({ ...entry, company: entry.company, title: entry.title });
+        openAtsPanel({ score: d.ats_score, report: d.atsReport, company: d.company, title: d.role });
+      } catch(e) {
+        setSandbox({ generating: false, status:"missing", missing:true, error: e.message, company: job.company, title: job.title });
+      }
+      finally { setLoading(p => { const n = {...p}; delete n[key]; return n; }); }
+      return;
+    }
+
+    // Open sandbox with skeleton state immediately
+    openSandbox({ generating: true, status:"loading", company: job.company, title: job.title, jobId:key, tool, toolLabel:TOOL_LABELS[tool] });
+
+    // Cycle through generation stages
+    const stages = [
+      [0,    "Analysing job description…"],
+      [5000, "Selecting companies…"],
+      [12000,"Writing experience bullets…"],
+      [22000,"Formatting resume…"],
+    ];
+    if (genTimerRef.current) clearInterval(genTimerRef.current);
+    const startTime = Date.now();
+    const advanceStage = () => {
+      const elapsed = Date.now() - startTime;
+      const current = [...stages].reverse().find(([ms]) => elapsed >= ms);
+      const stage = current?.[1] || stages[0][1];
+      setGenStage(stage);
+      setSandbox(s => s?.generating ? { ...s, stage } : s);
+    };
+    advanceStage();
+    genTimerRef.current = setInterval(advanceStage, 1000);
+
+    setLoading(p => ({ ...p, [key]:tool }));
+    try {
+      const d = await api("/api/generate", { method:"POST",
+        body:JSON.stringify({ jobId:key, job, resumeText, forceRegen:force, tool }) });
+      if (d.limitReached) {
+        setSandbox({ generating: false, status:"error", error: d.error, company: job.company, title: job.title });
+        return; // don't throw, just show error in sandbox panel
+      }
+      if (d.error) throw new Error(d.error);
+      const artifact = buildArtifact(job, d, tool);
+      setGenerated(p => ({ ...p, [key]: mergeArtifact(p[key], artifact) }));
+      openSandbox(mergeArtifact(generated[key], artifact));
+      openAtsPanel({ score:d.atsScore, report:d.atsReport, company:job.company, title:job.title });
+    } catch(e) {
+      setSandbox({ generating: false, status:"error", error: e.message, company: job.company, title: job.title });
+    }
+    finally {
+      if (genTimerRef.current) { clearInterval(genTimerRef.current); genTimerRef.current = null; }
+      setGenStage("");
+      setLoading(p => { const n = {...p}; delete n[key]; return n; });
+    }
+  }, [resumeText, generated, loading, canUseGenerate, canUseAPlusResume, openSandbox]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -- Generate (with company-reuse check) ------------------
+  const generate = useCallback(async (job, force = false, tool = "generate") => {
+    tool = normalizeTool(tool);
+    if (tool === A_PLUS_TOOL ? !canUseAPlusResume : !canUseGenerate) { return; }
+    if (!resumeText)            { return; }
+    if (loading[job.jobId])     { return; }
+    // Company check: if we have a prior resume for this company and this is a fresh generate (not force),
+    // show the reuse modal instead of generating.
+    if (!force) {
+      const priorEntry = Object.values(generated).find(v =>
+        getActiveArtifact(v)?.html && getActiveArtifact(v)?.html !== "__exists__" &&
+        getActiveArtifact(v)?.company?.toLowerCase() === (job.company || "").toLowerCase()
+      );
+      if (priorEntry && !generated[job.jobId]?.html) {
+        setCompanyReuseTarget({ job, priorEntry, tool });
+        return;
+      }
+    }
+    await generateActual(job, force, false, tool);
+  }, [generated, generateActual, resumeText, canUseGenerate, canUseAPlusResume, loading]);
+
+  const saveSandboxHtml = useCallback(async (html, artifact = null) => {
+    const current = artifact || getActiveArtifact(sandbox);
+    if (!current) return;
+    const key = current.jobId || Object.entries(generated).find(([,v]) => getActiveArtifact(v)?.company === current.company)?.[0];
+    if (key) {
+      await api(`/api/resumes/${key}/html`, { method:"POST", body:JSON.stringify({ html, tool:current.tool, version:current.version }) });
+      setGenerated(p => {
+        const prev = p[key];
+        const updated = { ...current, html };
+        return { ...p, [key]: mergeArtifact(prev, updated) };
+      });
+    }
+    setSandbox(s => ({...s, html}));
+  }, [sandbox, generated]);
+
+  const exportAndTrack = useCallback(async (job, html, company, artifact = null) => {
+    const current = artifact || getActiveArtifact(sandbox);
+    const targetJob = job || (current?.jobId ? {
+      jobId: current.jobId, company: current.company, title: current.title,
+      url: current.jobUrl, source: current.source, location: current.location,
+    } : null);
+    const filename = `Resume_${(company||current?.company||"").replace(/\s+/g,"_")}`;
+    if (current?.jobId) {
+      await api(`/api/resumes/${current.jobId}/keep`, { method:"POST",
+        body:JSON.stringify({ tool:current.tool, version:current.version }) }).catch(()=>{});
+    }
+    printResume(html, filename);
+    if (targetJob) {
+      await api("/api/applications", { method:"POST", body:JSON.stringify({
+        jobId:targetJob.jobId, company:targetJob.company, role:targetJob.title,
+        jobUrl:targetJob.url, source:targetJob.source, location:targetJob.location,
+        applyMode: current?.tool === A_PLUS_TOOL ? "CUSTOM_SAMPLER" : applyMode, resumeFile:filename + ".pdf",
+      }) }).catch(()=>{});
+      await fetchJobs(currentPage);
+    }
+  }, [applyMode, fetchJobs, currentPage, sandbox]);
+
+  // -- Starred toggle ----------------------------------------
+  const toggleStar = useCallback(async (jobId, job = null) => {
+    if (isImportedBoardJob(job)) {
+      try {
+        const d = await api(`/api/imported-jobs/${job.importedJobId}/starred`, { method:"PATCH" });
+        setImportedLinkedInJobs(prev => prev.map(j =>
+          j.importedJobId === job.importedJobId ? { ...j, starred: d.starred, disliked: false } : j
+        ));
+      } catch {}
+      return;
+    }
+    try {
+      const d = await api(`/api/jobs/${jobId}/starred`, { method:"PATCH" });
+      setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, starred: d.starred, disliked: false} : j));
+    } catch {}
+  }, []);
+
+  // -- Dislike toggle — deferred removal ------------------------
+  // Card stays visible (faded/greyed) for the rest of the session.
+  // sessionDislikedRef ensures the card survives any fetchJobs call
+  // (sort change, filter change, pagination, etc.) within this session.
+  // Only a page reload clears the ref and lets the server exclusion apply.
+  const toggleDislike = useCallback(async (jobId, job = null) => {
+    if (isImportedBoardJob(job)) {
+      try {
+        const d = await api(`/api/imported-jobs/${job.importedJobId}/disliked`, { method:"PATCH" });
+        const isNowDisliked = !!d.disliked;
+        setImportedLinkedInJobs(prev => prev.map(j =>
+          j.importedJobId === job.importedJobId ? { ...j, disliked: isNowDisliked, starred: false } : j
+        ));
+      } catch {}
+      return;
+    }
+    try {
+      const d = await dislikeJob(jobId);
+      const isNowDisliked = !!d.disliked;
+      setJobs(prev => {
+        return prev.map(j => {
+          if (j.jobId !== jobId) return j;
+          const updated = { ...j, disliked: isNowDisliked, starred: isNowDisliked ? false : j.starred };
+          if (isNowDisliked) {
+            sessionDislikedRef.current.set(jobId, { ...updated, __profileKey: activeProfileKeyRef.current });
+          } else {
+            sessionDislikedRef.current.delete(jobId);
+          }
+          return updated;
+        });
+      });
+      setPendingJobs(prev => prev.map(j => j.jobId !== jobId ? j : {
+        ...j, disliked: isNowDisliked, starred: isNowDisliked ? false : j.starred,
+      }));
+    } catch {}
+  }, []);
+
+  // -- Mark visited in local state ---------------------------
+  const markVisited = useCallback((job) => {
+    if (isImportedBoardJob(job)) {
+      setImportedLinkedInJobs(prev => prev.map(j =>
+        j.importedJobId === job.importedJobId ? { ...j, visited: true } : j
+      ));
+      return;
+    }
+    setJobs(prev => prev.map(j => j.jobId === job.jobId ? {...j, visited:true} : j));
+  }, []);
+
+  // -- Direct URL open (no dialog) ------------------------------
+  const visitUrl = useCallback(async (job) => {
+    if (!job.url) return;
+    try {
+      if (isImportedBoardJob(job)) {
+        await api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" });
+      } else {
+        await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" });
+      }
+    } catch {}
+    markVisited(job);
+    window.open(job.url, "_blank", "noreferrer");
+  }, [markVisited]);
+
+  // -- Pagination --------------------------------------------
+  const goPage = async (p) => {
+    pinDock();                       // collapse dock immediately
+    scrollToTopRef.current?.();      // scroll job list to top (not window)
+    await fetchJobs(p);
+  };
+
+  // -- Filter reset ------------------------------------------
+  const resetFilters = () => {
+    setRoleFilter(""); setLocationFilter(""); setWorkType(""); setEmploymentTypePrefs(["full-time"]); setCatFilter("");
+    setSrcFilter(""); setMinYoe(""); setMaxYoe(""); setMaxApplicants(""); setVisitedFilter("");
+    setAgeFilter(""); setLocalSearch("");
+  };
+
+  // displayJobs: backend handles localSearch filtering across all pages
+  const displayJobs = useMemo(() => {
+    if (boardTab === "pending") return pendingJobs;
+    return jobs;
+  }, [jobs, pendingJobs, boardTab]);
+  displayJobsRef.current = displayJobs;
+
+  const genCount = Object.values(generated).filter(v=>v?.html && v.html !== "__exists__").length;
+  const normalisedPreview = ALIASES[searchInput.trim().toLowerCase()]
+    || (searchInput.trim() ? searchInput.trim().replace(/\b\w/g, c=>c.toUpperCase()) : "");
+  const showPreview = !searchCommitted && !!(normalisedPreview && normalisedPreview.toLowerCase() !== searchInput.trim().toLowerCase());
+  const boardTabs = [
+    ["all", "All Jobs"],
+    ["saved", "Saved ★"],
+    ["pending", "Pending"],
+  ];
+
+  const isLastPage = currentPage >= totalPages;
+
+  // BUTTON STATES: first click applies local role filter, second click triggers fresh scrape.
+  // To change labels edit the buttonLabel derived value below.
+  const roleIsSet = !!roleFilter &&
+    searchInput.trim().toLowerCase() === roleFilter.trim();
+  const runSearchButton = useCallback(async (overrideQuery) => {
+    const q = (overrideQuery || searchInput).trim();
+    if (!q) return;
+    if (!roleIsSet || searchPhase === "idle") {
+      const applied = await handleSetRole(q);
+      if (applied) setSearchPhase("local");
+      return;
+    }
+    const refreshed = await handlePullRefresh();
+    if (!refreshed) setSearchPhase("idle");
+  }, [handlePullRefresh, handleSetRole, roleIsSet, searchInput, searchPhase]);
+  const buttonLabel = scraping ? "Searching…" : searchPhase === "local" && roleIsSet ? "Search New" : "Set Role";
+  const buttonIcon = scraping ? "…" : searchPhase === "local" && roleIsSet ? "↻" : "⌕";
+  const setupBlock = !activeDomainProfile
+    ? {
+        title: "Create a job profile",
+        body: "Search and grouped jobs need an active profile so results stay in the right role family.",
+        actionLabel: "Add Profile",
+        onAction: () => setProfileWizardOpen(true),
+      }
+    : !resumeText.trim()
+      ? {
+          title: "Upload a profile resume",
+          body: "Search defaults and ATS sorting use extracted signals from this profile's own base resume. Manage it from the Job Profiles section.",
+          actionLabel: "Open Job Profiles",
+          onAction: () => navigate("/app/job-profiles"),
+        }
+      : null;
+
+  // Panel sizing is handled by react-resizable-panels + getPanelDefaults().
+  // See the getPanelDefaults() function above for default size rules.
+
+  return (
+    <div style={{ flex:1, minHeight:0, minWidth:0, display:"flex", flexDirection:"column", overflow:"hidden", background:theme.bg }}>
+
+      {/* Domain profile wizard modal (non-blocking "+ New Profile") */}
+      {profileWizardOpen && (
+        <DomainProfileWizard
+          initialDomainKey={profileWizardIntent?.domainKey || null}
+          bannerText={profileWizardIntent ? `Create ${profileWizardIntent.label} to search "${pendingIntentSearchRef.current || searchInput}" in the right profile.` : undefined}
+          onComplete={async profile => {
+            setDomainProfiles(prev => [...prev, profile]);
+            setProfileWizardOpen(false);
+            setProfileWizardIntent(null);
+            const pendingQuery = pendingIntentSearchRef.current;
+            pendingIntentSearchRef.current = null;
+            if (profile?.id) {
+              try {
+                await activateProfileForSearch(profile.id);
+              } catch(e) {
+                setScrapeError(e.message || "Profile created, but switching before search failed.");
+                return;
+              }
+            }
+            if (pendingQuery) {
+              const applied = await handleSetRole(pendingQuery, { skipProfileIntent: true });
+              if (applied) setSearchPhase("local");
+            }
+          }}
+          onDismiss={() => {
+            pendingIntentSearchRef.current = null;
+            setProfileWizardIntent(null);
+            setProfileWizardOpen(false);
+          }}
+        />
+      )}
+
+      {searchIntentPrompt && (
+        <SearchIntentDialog
+          theme={theme}
+          prompt={searchIntentPrompt}
+          onConfirm={() => closeSearchIntentPrompt(true)}
+          onCancel={() => closeSearchIntentPrompt(false)}
+        />
+      )}
+
+      <LinkedInInstallDialog
+        theme={theme}
+        open={linkedinInstallModalOpen}
+        onClose={() => setLinkedinInstallModalOpen(false)}
+        onImportNow={async () => {
+          setLinkedinInstallModalOpen(false);
+          await startLinkedInImport();
+        }}
+      />
+
+      <AnimatePresence>
+        {filtersOpen && (
+          <FiltersPanel
+            open={filtersOpen} onClose={() => setFiltersOpen(false)} onApply={applyPendingFilters} isDark={isDark}
+            categories={categories}
+            role={pendingFilters.roleFilter}         setRole={value => stageFilter("roleFilter", value)}
+            location={pendingFilters.locationFilter} setLocation={value => stageFilter("locationFilter", value)}
+            workType={pendingFilters.workType}       setWorkType={value => stageFilter("workType", value)}
+            employmentTypePrefs={pendingFilters.employmentTypePrefs} setEmploymentTypePrefs={value => stageFilter("employmentTypePrefs", value)}
+            catFilter={pendingFilters.catFilter}     setCatFilter={value => stageFilter("catFilter", value)}
+            srcFilter={pendingFilters.srcFilter}     setSrcFilter={value => stageFilter("srcFilter", value)}
+            minYoe={pendingFilters.minYoe}           setMinYoe={value => stageFilter("minYoe", value)}
+            maxYoe={pendingFilters.maxYoe}           setMaxYoe={value => stageFilter("maxYoe", value)}
+            maxApplicants={pendingFilters.maxApplicants} setMaxApplicants={value => stageFilter("maxApplicants", value)}
+            visitedFilter={pendingFilters.visitedFilter} setVisitedFilter={value => stageFilter("visitedFilter", value)}
+            ageFilter={pendingFilters.ageFilter}     setAgeFilter={value => stageFilter("ageFilter", value)}
+            onReset={resetPendingFilters}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* â”€â”€ Unified toolbar â€” hidden when dock is active (scrollProgress â‰¥ 0.5) â”€â”€ */}
+      {/* Row A: tabs | filters | sort | local-search | job count */}
+      {/* Row B (wraps): search input | Search | resume upload */}
+      {scrollProgress < 0.5 && <div style={{
+        background:theme.surface, borderBottom:`1px solid ${theme.border}`,
+        padding:"10px 20px", display:"flex", alignItems:"center", gap:8,
+        flexShrink:0, flexWrap:"wrap",
+      }}>
+
+        {/* â”€â”€ Row A â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* Board tabs */}
+        <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
+                      border:`2px solid ${theme.borderStrong}`, borderRadius:2 }}>
+          {boardTabs.map(([id,lbl], idx) => (
+            <button key={id} onClick={() => setBoardTab(id)}
+              style={{
+                padding:"6px 16px", border:"none", cursor:"pointer",
+                fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
+                background: boardTab===id ? theme.accent : theme.surface,
+                color: boardTab===id ? "#0f0f0f" : theme.text,
+                transition:"background 0.15s",
+                borderRight: idx === boardTabs.length - 1 ? "none" : `2px solid ${theme.borderStrong}`,
+              }}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        {/* Filters button â€” always visible, bold outline */}
+        <button
+          onClick={() => filtersOpen ? setFiltersOpen(false) : openFilterPanel()}
+          style={{
+            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
+            background: filtersOpen ? theme.accent : theme.surface,
+            border: `2px solid ${theme.borderStrong}`,
+            borderRadius:2, padding:"6px 16px",
+            fontFamily:"'Barlow Condensed',sans-serif",
+            fontWeight:800, fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
+            cursor:"pointer", color: filtersOpen ? "#0f0f0f" : theme.text,
+            transition:"background 0.15s",
+          }}>
+          Filters
+        </button>
+
+        {/* Sort */}
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+          style={{ height:34, padding:"0 10px", borderRadius:2, flexShrink:0,
+                   border:`2px solid ${theme.borderStrong}`, background:theme.surface,
+                   fontSize:13, color:theme.text, outline:"none",
+                   fontFamily:"'DM Sans',system-ui", cursor:"pointer" }}>
+          <option value="dateDesc">Newest</option>
+          <option value="dateAsc">Oldest</option>
+          <option value="compHigh">Pay high to low</option>
+          <option value="compLow">Pay low to high</option>
+          <option value="yoeLow">Exp low to high</option>
+          <option value="yoeHigh">Exp high to low</option>
+          <option value="atsScore">ATS Sort</option>
+        </select>
+
+        <ProfileSelectorDropdown
+          theme={theme}
+          profiles={domainProfiles}
+          activeProfile={activeDomainProfile}
+          onActivate={activateProfileForSearch}
+          onDelete={deleteDomainProfile}
+          onAdd={() => setProfileWizardOpen(true)}
+          title="Switch profile"
+        />
+
+        {/* Local search â€” live client-side, every keystroke */}
+        <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
+          placeholder="Filter loaded jobs..."
+          style={{ flex:"0 1 220px", minWidth:120, height:34, padding:"0 12px",
+                   borderRadius:2, border:`1px solid ${theme.border}`,
+                   background:theme.surface, color:theme.text,
+                   fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none" }}/>
+        {localSearch && (
+          <button onClick={() => setLocalSearch("")}
+            style={{ background:"none", border:"none", color:theme.textDim,
+                     cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>x</button>
+        )}
+
+        {/* Background loading indicator + job count */}
+        <span style={{ fontSize:11, color:theme.textMuted, whiteSpace:"nowrap", flexShrink:0,
+                       display:"flex", alignItems:"center", gap:5 }}>
+          {bgLoading && (
+            <span style={{ display:"inline-block", width:10, height:10,
+                           border:`2px solid ${theme.border}`, borderTop:`2px solid ${theme.accent}`,
+                           borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/>
+          )}
+          {boardTab === "pending" ? `${displayJobs.length}` : `${totalJobs}`} job{totalJobs !== 1 ? "s" : ""}
+          {localSearch && !bgLoading ? " matched" : ""}
+        </span>
+
+        <div style={{ flexBasis:"100%", height:0 }}/>
+
+        <div style={{ position:"relative", flex:1, minWidth:200 }}>
+          <input value={searchInput} onChange={e=>{ setSearchInput(e.target.value); setSearchCommitted(false); }}
+            onKeyDown={e => e.key==="Enter" && runSearchButton()}
+            placeholder="ATS search role, e.g. ML Engineer, SWE..."
+            style={{ width:"100%", height:38, paddingLeft:14, paddingRight:14,
+                     borderRadius:2, border:`1px solid ${theme.border}`,
+                     background:theme.surface, color:theme.text,
+                     fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none",
+                     boxSizing:"border-box" }}/>
+          {showPreview && (
+            <div style={{ position:"absolute", top:"calc(100% + 4px)", left:0,
+              fontSize:10, color:theme.textMuted, background:theme.surface,
+              border:`1px solid ${theme.border}`,
+              borderRadius:4, padding:"4px 10px", whiteSpace:"nowrap", zIndex:10 }}>
+              Will search as: <span style={{ color:theme.accentText, fontWeight:700 }}>{normalisedPreview}</span>
+            </div>
+          )}
+        </div>
+
+        <LucyBtn
+          onClick={() => runSearchButton()}
+          disabled={scraping || bgLoading}
+          title={searchPhase === "local" && roleIsSet
+            ? "Trigger a fresh profile-scoped scrape for this role"
+            : "Apply this role to the local board first"}>
+          <span aria-hidden="true">{buttonIcon}</span>
+          <span>{buttonLabel}</span>
+        </LucyBtn>
+        {smartSearchError && (
+          <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
+            Error: {smartSearchError}
+            <button onClick={() => setSmartSearchError("")} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:"#991b1b" }}>Dismiss</button>
           </div>
         )}
 
-        {jobs.length > 0 && (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))", gap:14 }}>
-            {jobs.map(job => <JobCard key={job.id || job.jobId || job.applyUrl} job={job} theme={theme}/>) }
+        {uploadError && (
+          <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
+            Error: {uploadError}
+            <button onClick={() => setUploadError("")} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:"#991b1b" }}>Dismiss</button>
           </div>
         )}
+
+        {linkedinExtensionNotice?.message && (
+          <div style={{ flexBasis:"100%", padding:"6px 0", fontSize:11, color:theme.text }}>
+            {linkedinExtensionNotice.message}
+            {linkedinExtensionNotice.actionLabel ? (
+              <button
+                onClick={openLinkedInExtensionPopup}
+                style={{ marginLeft:8, border:"none", borderRadius:999, padding:"4px 10px", cursor:"pointer",
+                  background:theme.accent, color:"#0f0f0f", fontWeight:800, fontSize:11 }}>
+                {linkedinExtensionNotice.actionLabel}
+              </button>
+            ) : null}
+            <button onClick={() => setLinkedinExtensionNotice(null)} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:theme.textMuted }}>Dismiss</button>
+          </div>
+        )}
+
+        {(applyQueue.length > 0 || applyQueueMsg || applyRuns.length > 0 || applyReviewJobs.length > 0) && (
+          <div style={{ flexBasis:"100%", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
+                        padding:"8px 10px", border:`1px solid ${theme.border}`,
+                        background:theme.surfaceHigh, borderRadius:6 }}>
+            <strong style={{ fontSize:12, color:theme.text }}>Auto Apply</strong>
+            {applyQueue.map(job => (
+              <span key={job.jobId} style={{ display:"inline-flex", alignItems:"center", gap:5,
+                                             padding:"3px 7px", borderRadius:4,
+                                             background:theme.surface, color:theme.text, fontSize:11 }}>
+                {job.company || job.title}
+                <button onClick={() => removeFromApplyQueue(job.jobId)}
+                  style={{ border:"none", background:"transparent", color:theme.textDim, cursor:"pointer", padding:0 }}>x</button>
+              </span>
+            ))}
+            {applyQueue.length > 0 && (
+              <>
+                <button onClick={() => startApplyRun("auto")}
+                  style={{ border:"none", borderRadius:6, padding:"6px 10px", background:theme.accent,
+                           color:"#0f0f0f", fontWeight:800, cursor:"pointer", fontSize:12 }}>
+                  Run Auto Apply
+                </button>
+                <button onClick={() => startApplyRun("manual")}
+                  style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"6px 10px",
+                           background:theme.surface, color:theme.text, fontWeight:700, cursor:"pointer", fontSize:12 }}>
+                  Autofill for Review
+                </button>
+              </>
+            )}
+            {applyQueueMsg && <span style={{ fontSize:11, color:theme.accentText }}>{applyQueueMsg}</span>}
+            {/* Run status summary badges */}
+            {applyRuns.slice(0, 3).map(run => (
+              <button key={run.id} onClick={() => loadApplyRunDetail(run.id)}
+                style={{ display:"inline-flex", alignItems:"center", gap:5, border:`1px solid ${theme.border}`,
+                         borderRadius:4, padding:"3px 8px", background:theme.surface,
+                         color:theme.text, cursor:"pointer", fontSize:11 }}>
+                <span style={{ width:6, height:6, borderRadius:"50%", flexShrink:0, background:
+                  run.status === "complete" ? "#16a34a" :
+                  run.status === "running"  ? theme.accent :
+                  run.status === "queued"   ? "#d97706" : "#6b7280" }}/>
+                {run.submittedCount}✓
+                {run.heldCount > 0 && <span style={{ color:"#d97706" }}> {run.heldCount} review</span>}
+                {run.failedCount > 0 && <span style={{ color:"#dc2626" }}> {run.failedCount} failed</span>}
+                <span style={{ color:theme.textDim }}>↗</span>
+              </button>
+            ))}
+            {applyReviewJobs.length > 0 && !applyQueue.length && (
+              <button onClick={() => setApplyRunDetailOpen(true)}
+                style={{ border:`1px solid #d97706`, borderRadius:4, padding:"3px 8px",
+                         background:"#fef3c7", color:"#92400e", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                {applyReviewJobs.length} need review ↗
+              </button>
+            )}
+          </div>
+        )}
+
+      </div>}
+      {/* Hidden file input â€” always mounted so TopBar resume upload button works even when toolbar is hidden */}
+      <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
+        onChange={handleFile} style={{ display:"none" }}/>
+
+      {/* â”€â”€ Resume Enhance modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Apply Runs Review Modal ──────────────────────────────────── */}
+      {applyRunDetailOpen && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) { setApplyRunDetailOpen(false); setApplyRunDetail(null); } }}
+          style={{
+            position:"fixed", inset:0, zIndex:700,
+            background:"rgba(0,0,0,0.55)", display:"flex",
+            alignItems:"flex-start", justifyContent:"center",
+            paddingTop:48, overflowY:"auto",
+          }}
+        >
+          <div style={{
+            background:theme.modalSurface || theme.surface,
+            borderRadius:8, width:"min(96vw, 820px)",
+            maxHeight:"82vh", display:"flex", flexDirection:"column",
+            border:`1px solid ${theme.border}`,
+            boxShadow:"0 24px 64px rgba(0,0,0,0.4)",
+          }}>
+            {/* Header */}
+            <div style={{
+              padding:"16px 20px", borderBottom:`1px solid ${theme.border}`,
+              display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, gap:12,
+            }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                             fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                {applyRunDetail
+                  ? `Apply Run #${applyRunDetail.run?.id} — ${applyRunDetail.run?.mode || "auto"}`
+                  : "Jobs Needing Review"}
+              </div>
+              {applyRunDetail?.run && (
+                <div style={{ display:"flex", gap:10, fontSize:11, flexWrap:"wrap" }}>
+                  {applyRunDetail.run.submittedCount > 0 && (
+                    <span style={{ color:"#16a34a", fontWeight:700 }}>✓ {applyRunDetail.run.submittedCount} submitted</span>
+                  )}
+                  {applyRunDetail.run.heldCount > 0 && (
+                    <span style={{ color:"#d97706", fontWeight:700 }}>⏸ {applyRunDetail.run.heldCount} held</span>
+                  )}
+                  {applyRunDetail.run.failedCount > 0 && (
+                    <span style={{ color:"#dc2626", fontWeight:700 }}>✗ {applyRunDetail.run.failedCount} failed</span>
+                  )}
+                  {applyRunDetail.run.startedAt && (
+                    <span style={{ color:theme.textDim }}>
+                      {new Date(applyRunDetail.run.startedAt).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              )}
+              <button
+                onClick={() => { setApplyRunDetailOpen(false); setApplyRunDetail(null); }}
+                style={{ background:"transparent", border:"none", cursor:"pointer",
+                          color:theme.textMuted, fontSize:20, lineHeight:1, padding:"0 4px",
+                          marginLeft:"auto", flexShrink:0 }}>
+                ×
+              </button>
+            </div>
+
+            {/* Job list */}
+            <div style={{ overflowY:"auto", flex:1, padding:"12px 20px", display:"flex", flexDirection:"column", gap:8 }}>
+              {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).length === 0 && (
+                <div style={{ padding:"24px 0", textAlign:"center", color:theme.textMuted, fontSize:12 }}>
+                  No jobs in this run yet.
+                </div>
+              )}
+              {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).map(job => {
+                const statusColor = job.status === "submitted" ? "#16a34a"
+                  : job.status === "held_review" ? "#d97706"
+                  : job.status === "failed" ? "#dc2626"
+                  : job.status === "running" ? theme.accent
+                  : theme.textMuted;
+                const statusLabel = job.status === "submitted" ? "Submitted"
+                  : job.status === "held_review" ? "Review"
+                  : job.status === "failed" ? "Failed"
+                  : job.status === "running" ? "Running"
+                  : job.status === "queued" ? "Queued"
+                  : job.status || "—";
+                return (
+                  <div key={job.id} style={{
+                    border:`1px solid ${theme.border}`, borderRadius:6,
+                    padding:"10px 14px", display:"flex", flexDirection:"column", gap:5,
+                    background:theme.surfaceHigh,
+                  }}>
+                    {/* title / company / status */}
+                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+                      <div>
+                        <span style={{ fontWeight:700, fontSize:13, color:theme.text }}>{job.title || "—"}</span>
+                        {job.company && (
+                          <span style={{ fontSize:12, color:theme.textMuted, marginLeft:8 }}>{job.company}</span>
+                        )}
+                      </div>
+                      <span style={{
+                        fontSize:10, fontWeight:700, padding:"2px 8px",
+                        borderRadius:999, background:`${statusColor}22`,
+                        color:statusColor, whiteSpace:"nowrap", flexShrink:0,
+                      }}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                    {/* reason + ATS score */}
+                    {(job.reasonCode || job.atsScore != null) && (
+                      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                        {job.reasonCode && (
+                          <span style={{ fontSize:11, color:statusColor, fontWeight:600 }}>
+                            {job.reasonCode.replace(/_/g, " ")}
+                            {job.reasonDetail ? ` — ${job.reasonDetail}` : ""}
+                          </span>
+                        )}
+                        {job.atsScore != null && (
+                          <span style={{
+                            fontSize:10, fontWeight:700, padding:"1px 6px", borderRadius:999,
+                            background: job.atsScore >= 80 ? "#dcfce7" : job.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
+                            color: job.atsScore >= 80 ? "#166534" : job.atsScore >= 60 ? "#854d0e" : "#991b1b",
+                          }}>
+                            ATS {job.atsScore}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {/* timestamps */}
+                    {(job.startedAt || job.finishedAt) && (
+                      <div style={{ fontSize:10, color:theme.textDim }}>
+                        {job.startedAt && `Started ${new Date(job.startedAt).toLocaleTimeString()}`}
+                        {job.startedAt && job.finishedAt && " · "}
+                        {job.finishedAt && `Finished ${new Date(job.finishedAt).toLocaleTimeString()}`}
+                        {" · "}Attempts: {job.attemptCount || 1}
+                      </div>
+                    )}
+                    {/* apply URL */}
+                    {job.applyUrl && (
+                      <a href={job.applyUrl} target="_blank" rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        style={{ fontSize:10, color:theme.accent, textDecoration:"none", wordBreak:"break-all" }}>
+                        {job.applyUrl.length > 90 ? job.applyUrl.slice(0, 90) + "…" : job.applyUrl}
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Logs section — run detail only */}
+            {applyRunDetail?.logs?.length > 0 && (
+              <details style={{ flexShrink:0, borderTop:`1px solid ${theme.border}` }}>
+                <summary style={{
+                  padding:"10px 20px", fontSize:11, fontWeight:700, cursor:"pointer",
+                  color:theme.textMuted, textTransform:"uppercase", letterSpacing:"0.06em",
+                  userSelect:"none", listStyle:"none",
+                }}>
+                  ▸ Logs ({applyRunDetail.logs.length})
+                </summary>
+                <div style={{
+                  maxHeight:200, overflowY:"auto", padding:"8px 20px 12px",
+                  fontFamily:"monospace", fontSize:10, display:"flex", flexDirection:"column", gap:3,
+                }}>
+                  {applyRunDetail.logs.map(log => (
+                    <div key={log.id} style={{
+                      color: log.level === "error" ? "#dc2626" : log.level === "warn" ? "#d97706" : theme.textMuted,
+                    }}>
+                      <span style={{ color:theme.textDim, marginRight:6 }}>
+                        {log.createdAt ? new Date(log.createdAt).toLocaleTimeString() : ""}
+                      </span>
+                      <span style={{
+                        color: log.level === "error" ? "#dc2626" : log.level === "warn" ? "#d97706" : theme.accent,
+                        marginRight:6, fontWeight:700,
+                      }}>
+                        [{log.event || log.level}]
+                      </span>
+                      {log.message}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {/* Footer */}
+            <div style={{
+              padding:"12px 20px", borderTop:`1px solid ${theme.border}`, flexShrink:0,
+              display:"flex", justifyContent:"flex-end",
+            }}>
+              <button
+                onClick={() => { setApplyRunDetailOpen(false); setApplyRunDetail(null); }}
+                style={{
+                  padding:"8px 20px", borderRadius:4, fontWeight:700, fontSize:12,
+                  background:"transparent", color:theme.textMuted,
+                  border:`1.5px solid ${theme.border}`, cursor:"pointer",
+                  fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.06em",
+                  textTransform:"uppercase",
+                }}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {enhanceModalOpen && enhanceResult && (
+        <div style={{
+          position:"fixed", inset:0, zIndex:600,
+          background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center",
+        }}>
+          <div style={{
+            background:theme.modalSurface || theme.surface, borderRadius:8, width:"min(92vw, 760px)",
+            maxHeight:"85vh", overflowY:"auto", padding:0,
+            border:`1px solid ${theme.border}`, boxShadow:"0 24px 64px rgba(0,0,0,0.35)",
+          }}>
+            {/* Header */}
+            <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${theme.border}` }}>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                             fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                Resume Enhancement
+              </div>
+              {enhanceResult.delta != null && (
+                <div style={{ fontSize:12, color:theme.textMuted, marginTop:4 }}>
+                  ATS score improved by
+                  <span style={{ color: enhanceResult.delta > 0 ? "#16a34a" : "#dc2626",
+                                  fontWeight:700, marginLeft:4 }}>
+                    {enhanceResult.delta > 0 ? "+" : ""}{enhanceResult.delta} points
+                  </span>
+                  {" "}({enhanceResult.original?.atsScore ?? "-"}{" -> "}{enhanceResult.enhanced?.atsScore ?? "-"})
+                </div>
+              )}
+            </div>
+            {/* Side-by-side comparison */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:0 }}>
+              <div style={{ padding:"16px 20px", borderRight:`1px solid ${theme.border}` }}>
+                <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase",
+                               letterSpacing:"0.06em", color:theme.textMuted, marginBottom:8 }}>
+                  Original
+                </div>
+                <pre style={{ fontSize:11, color:theme.text, whiteSpace:"pre-wrap",
+                               wordBreak:"break-word", maxHeight:340, overflowY:"auto",
+                               fontFamily:"monospace", margin:0 }}>
+                  {enhanceResult.original?.text}
+                </pre>
+              </div>
+              <div style={{ padding:"16px 20px" }}>
+                <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase",
+                               letterSpacing:"0.06em", color:"#16a34a", marginBottom:8 }}>
+                  Enhanced
+                </div>
+                <pre style={{ fontSize:11, color:theme.text, whiteSpace:"pre-wrap",
+                               wordBreak:"break-word", maxHeight:340, overflowY:"auto",
+                               fontFamily:"monospace", margin:0 }}>
+                  {enhanceResult.enhanced?.text}
+                </pre>
+              </div>
+            </div>
+            {/* Footer */}
+            <div style={{ padding:"16px 24px", borderTop:`1px solid ${theme.border}`,
+                           display:"flex", flexDirection:"column", gap:10, alignItems:"center" }}>
+              <div style={{ display:"flex", gap:10, width:"100%", justifyContent:"center" }}>
+                <button onClick={handleAdoptEnhanced}
+                  style={{
+                    padding:"10px 24px", borderRadius:4, fontWeight:800, fontSize:13,
+                    background:theme.accent, color:"#fff", border:"none", cursor:"pointer",
+                    fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.06em",
+                    textTransform:"uppercase",
+                  }}>
+                  Adopt Enhanced Version
+                </button>
+                <button onClick={() => setEnhanceModalOpen(false)}
+                  style={{
+                    padding:"10px 24px", borderRadius:4, fontWeight:800, fontSize:13,
+                    background:"transparent", color:theme.textMuted,
+                    border:`1.5px solid ${theme.border}`, cursor:"pointer",
+                    fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.06em",
+                    textTransform:"uppercase",
+                  }}>
+                  Keep Original
+                </button>
+              </div>
+              <div style={{ fontSize:10, color:theme.textDim, textAlign:"center", maxWidth:480 }}>
+                This is your one-time free enhancement. Your choice here does not affect whether it has been used.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* â”€â”€ Body: responsive layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+
+      {/* Company reuse modal (Task 6) */}
+      {companyReuseTarget && (
+        <CompanyReuseModal
+          company={companyReuseTarget.job.company}
+          theme={theme}
+          onUseExisting={() => {
+            const { job, priorEntry } = companyReuseTarget;
+            setCompanyReuseTarget(null);
+            const key = job.jobId;
+            setGenerated(p => ({ ...p, [key]: priorEntry }));
+            openSandbox({ ...priorEntry, company: job.company, title: job.title });
+            if (priorEntry.atsReport || priorEntry.atsScore != null) {
+              openAtsPanel({ score: priorEntry.atsScore, report: priorEntry.atsReport, company: job.company, title: job.title });
+            }
+          }}
+          onGenerateNew={() => {
+            const { job, tool } = companyReuseTarget;
+            setCompanyReuseTarget(null);
+            generateActual(job, false, true, tool);
+          }}
+          onCancel={() => setCompanyReuseTarget(null)}
+        />
+      )}
+
+      {/* â”€â”€ MOBILE / TABLET: single-pane + bottom nav â”€â”€ */}
+      {setupBlock ? (
+        <SetupGateNotice theme={theme} {...setupBlock} />
+      ) : isMobile && (
+        <div style={{ flex:1, minHeight:0, minWidth:0, display:"flex", flexDirection:"column", overflow:"hidden", position:"relative" }}>
+          {/* Full-screen job detail overlay for mobile */}
+          {selectedJob && (() => {
+            const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
+            return (
+              <div style={{ position:"absolute", inset:0, zIndex:60, display:"flex", flexDirection:"column",
+                            background:theme.bg }}>
+                <JobDetailPanel
+                  job={selectedJob} theme={theme} isDark={isDark}
+                  g={g2} done={done2} st={st2} applyMode={applyMode}
+                  canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
+                  canUseAPlusResume={!isImportedBoardJob(selectedJob) && canUseAPlusResume}
+                  onClose={() => setSelectedJob(null)}
+                  onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
+                  onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
+                  onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); setMobilePane("editor"); setSelectedJob(null); })}
+                  onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
+                  onVisit={() => visitUrl(selectedJob)}
+                  onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
+                  onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
+                  onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel(buildAtsPayload(selectedJob, g2)); setSelectedJob(null); })}
+                  onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
+                  onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
+                />
+              </div>
+            );
+          })()}
+          {/* Active pane */}
+          <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+            {mobilePane === "jobs" && (
+              <JobsColumn
+                jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
+                onClearScrapeError={() => setScrapeError("")}
+                pollStatus={pollStatus}
+                onRetryPoll={handlePullRefresh}
+                generated={generated} loading={loading}
+                applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+                theme={theme} isDark={isDark}
+                totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+                generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+                visitUrl={visitUrl} toggleStar={toggleStar} openAtsPanel={openAtsPanel}
+                goPage={goPage} onPullRefresh={handlePullRefresh}
+                setMobilePane={setMobilePane} isMobile={isMobile}
+                onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
+                showImportedLinkedInSection={boardTab === "saved"}
+                importedLinkedInJobs={importedLinkedInJobs}
+                linkedinImportSummary={linkedinImportSummary}
+                linkedinImporting={linkedinImporting}
+                onImportLinkedIn={startLinkedInImport}
+                onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
+                cardTier={1}
+              />
+            )}
+            {mobilePane === "editor" && (
+              <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+            )}
+            {mobilePane === "ats" && (
+              <div style={{ flex:1, minHeight:0, minWidth:0, overflowY:"auto" }}>
+                <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
+                              padding:"0 14px", flexShrink:0 }}>
+                  {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
+                    <button key={id} onClick={() => setRightTab(id)}
+                      style={{
+                        padding:"10px 16px", border:"none", background:"transparent",
+                        fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                        fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
+                        color: rightTab===id ? theme.text : theme.textDim,
+                        cursor:"pointer", position:"relative",
+                        borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
+                      }}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}/>}
+                {rightTab === "history" && (
+                  <HistoryList generated={generated}
+                    theme={theme}
+                    onOpen={e => {
+                      openSandbox(e);
+                      openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
+                    }}
+                    onExport={exportAndTrack}/>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Bottom nav */}
+          <div style={{ display:"flex", borderTop:`1px solid ${theme.border}`,
+                        background:theme.surface, flexShrink:0 }}>
+            {[
+              { id:"jobs",   label:"Jobs",   icon:"Jobs" },
+              { id:"editor", label:"Resume", icon:"Edit" },
+              { id:"ats",    label:"ATS",    icon:"ATS" },
+            ].map(({ id, label, icon }) => (
+              <button key={id} onClick={() => setMobilePane(id)}
+                style={{
+                  flex:1, padding:"10px 0", border:"none", cursor:"pointer",
+                  background:"transparent", display:"flex", flexDirection:"column",
+                  alignItems:"center", gap:2,
+                  color: mobilePane===id ? theme.accent : theme.textMuted,
+                  fontSize:10, fontWeight:700,
+                }}>
+                <span style={{ fontSize:18 }}>{icon}</span>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* â”€â”€ PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) â”€â”€ */}
+      {!setupBlock && (isWide || (isPortrait && !isMobile)) && (
+        <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex" }}>
+        <PanelGroup orientation="horizontal" style={{ flex: 1, minHeight:0, minWidth:0, overflow: "hidden" }}>
+
+          {/* PANEL A â€” Jobs list (always visible) */}
+          <Panel
+            ref={jobsPanelRef}
+            defaultSize={!!selectedJob ? 30 : 100}
+            minSize={6}
+            style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden" }}>
+            <JobsColumn
+              jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
+              onClearScrapeError={() => setScrapeError("")}
+              pollStatus={pollStatus}
+              onRetryPoll={handlePullRefresh}
+              generated={generated} loading={loading}
+              applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+              theme={theme} isDark={isDark}
+              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+              visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
+              openAtsPanel={openAtsPanel}
+              goPage={goPage} onPullRefresh={handlePullRefresh}
+              setMobilePane={setMobilePane} isMobile={isMobile}
+              compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
+              showImportedLinkedInSection={boardTab === "saved"}
+              importedLinkedInJobs={importedLinkedInJobs}
+              linkedinImportSummary={linkedinImportSummary}
+              linkedinImporting={linkedinImporting}
+              onImportLinkedIn={startLinkedInImport}
+              onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
+              cardTier={effectiveTier}
+              containerRef={jobsPanelElementRef}
+            />
+          </Panel>
+
+          {/* PANEL B â€” Job detail */}
+          {selectedJob && (() => {
+            const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
+            return (
+              <>
+                <ResizeHandle theme={theme} />
+                <Panel
+                  ref={detailPanelRef}
+                  defaultSize={70}
+                  minSize={10}
+                  style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
+                           borderLeft: `1px solid ${theme.border}` }}>
+                  <div ref={detailPanelElementRef} style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden" }}>
+                    <JobDetailPanel
+                      job={selectedJob} theme={theme} isDark={isDark}
+                      g={g2} done={done2} st={st2} applyMode={applyMode}
+                      canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
+                      canUseAPlusResume={!isImportedBoardJob(selectedJob) && canUseAPlusResume}
+                      onClose={() => setSelectedJob(null)}
+                      onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
+                      onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
+                      onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
+                      onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
+                      onVisit={() => visitUrl(selectedJob)}
+                      onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
+                      onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
+                      onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
+                      onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
+                      onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
+                    />
+                  </div>
+                </Panel>
+              </>
+            );
+          })()}
+
+          {/* PANEL C â€” Sandbox / Resume */}
+          {/* No maxSize cap â€” CSS scale transform in SandboxPanel handles wider-than-A4 display. */}
+          {sandboxOpen && (
+            <>
+              <ResizeHandle theme={theme} />
+              <Panel
+                ref={sandboxPanelRef}
+                defaultSize={40}
+                minSize={10}
+                style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
+                         borderLeft: `1px solid ${theme.border}` }}>
+                <SandboxPanel entry={sandbox} onClose={closeSandbox}
+                  onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+              </Panel>
+            </>
+          )}
+
+          {/* PANEL D â€” ATS + History */}
+          {rightPanelOpen && (
+            <>
+              <ResizeHandle theme={theme} />
+              <Panel
+                ref={atsPanelRef}
+                defaultSize={20}
+                minSize={10}
+                style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
+                         borderLeft: `1px solid ${theme.border}` }}>
+                <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
+                              padding:"0 14px", flexShrink:0, alignItems:"center" }}>
+                  {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
+                    <button key={id} onClick={() => setRightTab(id)}
+                      style={{
+                        padding:"10px 16px", border:"none", background:"transparent",
+                        fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                        fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
+                        color: rightTab===id ? theme.text : theme.textDim,
+                        cursor:"pointer",
+                        borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
+                      }}>
+                      {lbl}
+                    </button>
+                  ))}
+                  <button onClick={closeAtsPanel} title="Close panel"
+                    style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
+                             color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>x</button>
+                </div>
+                <div style={{ flex:1, minHeight:0, minWidth:0, overflowY:"auto" }}>
+                  {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}/>}
+                  {rightTab === "history" && (
+                    <HistoryList generated={generated} theme={theme}
+                      onOpen={e => {
+                        openSandbox(e);
+                        openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
+                      }}
+                      onExport={exportAndTrack}/>
+                  )}
+                </div>
+              </Panel>
+            </>
+          )}
+
+        </PanelGroup>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// â”€â”€ Drag resize handle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function ResizeHandle({ theme: themeProp }) {
+  const { theme: t } = useTheme();
+  const theme = themeProp || t;
+  const [active, setActive] = useState(false);
+  return (
+    <PanelResizeHandle
+      style={{
+        width: 7, flexShrink: 0, cursor: "col-resize",
+        display: "flex", alignItems: "stretch", background: "transparent",
+        zIndex: 10,
+      }}
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => setActive(false)}
+    >
+      <div style={{
+        width: active ? 3 : 2,
+        margin: "0 auto",
+        background: active ? theme.accent : theme.border,
+        transition: "all 0.15s ease",
+        borderRadius: 2,
+      }} />
+    </PanelResizeHandle>
+  );
+}
+
+// â”€â”€ Jobs column (shared across layout modes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
+                      pollStatus, onRetryPoll,
+                      generated, loading, applyMode, canUseGenerate, canUseAPlusResume, theme, isDark,
+                      totalPages, currentPage, isLastPage,
+                      generate, openSandbox, exportAndTrack,
+                      visitUrl, toggleStar, toggleDislike, openAtsPanel,
+                      goPage, onPullRefresh,
+                      setMobilePane, isMobile,
+                      compact, selectedJobId, onJobSelect,
+                      showImportedLinkedInSection = false,
+                      importedLinkedInJobs = [],
+                      linkedinImportSummary = { total: 0, lastImportedAt: null },
+                      linkedinImporting = false,
+                      onImportLinkedIn,
+                      onRefreshImportedLinkedIn,
+                      cardTier = 1, containerRef }) {
+  const [pageInput, setPageInput] = useState("");
+  const shouldShowEmptyState = jobs.length === 0 && !scraping && !showImportedLinkedInSection;
+  const visiblePages = buildVisiblePageItems(currentPage, totalPages);
+  useEffect(() => {
+    setPageInput(String(currentPage || ""));
+  }, [currentPage]);
+  const commitPageJump = () => {
+    if (!totalPages) return;
+    const parsed = Number.parseInt(pageInput, 10);
+    if (!Number.isFinite(parsed)) return;
+    const nextPage = Math.min(totalPages, Math.max(1, parsed));
+    goPage(nextPage);
+    setPageInput(String(nextPage));
+  };
+  return (
+    <div ref={containerRef} style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
+                  background: isDark
+                    ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
+                    : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
+      {shouldShowEmptyState ? <EmptyState theme={theme}/> : (
+        <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
+
+          {/* Scrape error banner */}
+          {scrapeError && (
+            <div style={{ margin:"8px 16px 0", padding:"10px 14px", borderRadius:4,
+                          background:"#fee2e2", border:"1px solid #fca5a5",
+                          display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+              <span style={{ fontSize:12, color:"#991b1b" }}>
+                Error: {scrapeError}
+              </span>
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                {pollStatus === "error" && onRetryPoll && (
+                  <button onClick={onRetryPoll}
+                    style={{ background:"none", border:`1px solid #991b1b`, borderRadius:4,
+                             cursor:"pointer", color:"#991b1b", fontSize:11, padding:"2px 8px",
+                             fontWeight:700 }}>
+                    Retry
+                  </button>
+                )}
+                <button onClick={onClearScrapeError} style={{ background:"none", border:"none",
+                  cursor:"pointer", color:"#991b1b", fontSize:14 }}>x</button>
+              </div>
+            </div>
+          )}
+
+          {showImportedLinkedInSection && (
+            <StarredLinkedInSection
+              jobs={importedLinkedInJobs}
+              theme={theme}
+              isDark={isDark}
+              onImport={onImportLinkedIn}
+              linkedinImporting={linkedinImporting}
+              onRefresh={onRefreshImportedLinkedIn}
+              importCount={linkedinImportSummary.total}
+              lastImportedAt={linkedinImportSummary.lastImportedAt}
+              onVisit={visitUrl}
+              onDislike={toggleDislike}
+              onJobSelect={onJobSelect}
+              selectedJobId={selectedJobId}
+            />
+          )}
+
+          {/* Job cards â€” always rendered (even when scraping) */}
+          {jobs.map(job => {
+            const key = job.jobId, g = generated[key],
+                  done = !!g?.html, st = loading[key];
+            return (
+              <JobCard
+                key={key} job={job} g={g} done={done} st={st}
+                applyMode={applyMode}
+                canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+                theme={theme} isDark={isDark}
+                showDislike={true}
+                showApplyButton={!compact}
+                compact={compact}
+                selected={selectedJobId === key}
+                onSelect={onJobSelect ? () => onJobSelect(job) : undefined}
+                cardTier={cardTier}
+                onGenerate={force => generate(job, force)}
+                onAPlusResume={force => generate(job, force, "a_plus_resume")}
+                onViewSandbox={() => {
+                  const entry = {...g, company:g.company||job.company, title:g.title||job.title};
+                  openSandbox(entry);
+                  openAtsPanel(buildAtsPayload(job, g));
+                }}
+                onExport={() => exportAndTrack(job, getActiveArtifact(g)?.html, job.company, getActiveArtifact(g))}
+                onVisit={() => visitUrl(job)}
+                onStar={() => toggleStar(key)}
+                onDislike={() => toggleDislike?.(key)}
+                onCardClick={!onJobSelect ? () => {
+                  if (done && g.html !== "__exists__") {
+                    const entry = {...g, company:g.company||job.company, title:g.title||job.title};
+                    openSandbox(entry);
+                    openAtsPanel(buildAtsPayload(job, g));
+                  } else if (job.url) {
+                    visitUrl(job);
+                  }
+                } : undefined}
+                onAts={() => {
+                  if (g?.atsReport || g?.atsScore != null || job?.baseAtsReport || job?.baseAtsScore != null) {
+                    openAtsPanel(buildAtsPayload(job, g));
+                  }
+                }}
+                onResume={() => generate(job, false)}
+              />
+            );
+          })}
+
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
+                           gap:8, padding:"16px 20px", borderTop:`1px solid ${theme.border}`, flexWrap:"wrap" }}>
+              <LucyBtn onClick={() => goPage(currentPage-1)}
+                        disabled={currentPage <= 1} accent={theme.surfaceHigh}>
+                Prev
+              </LucyBtn>
+              <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", justifyContent:"center" }}>
+                {visiblePages.map(item => typeof item === "string" ? (
+                  <span key={item} style={{ fontSize:12, color:theme.textDim, padding:"0 4px" }}>
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => goPage(item)}
+                    aria-label={item === currentPage ? `Current page, page ${item}` : `Go to page ${item}`}
+                    title={item === currentPage ? `Current page ${item}` : `Go to page ${item}`}
+                    style={{
+                      minWidth:32,
+                      height:32,
+                      borderRadius:999,
+                      border:`1px solid ${item === currentPage ? theme.accent : theme.border}`,
+                      background:item === currentPage ? theme.accent : theme.surface,
+                      color:item === currentPage ? theme.accentText : theme.text,
+                      fontSize:12,
+                      fontWeight:item === currentPage ? 800 : 600,
+                      cursor:item === currentPage ? "default" : "pointer",
+                      padding:"0 10px",
+                    }}>
+                    {item}
+                  </button>
+                ))}
+              </div>
+              <LucyBtn onClick={() => goPage(currentPage+1)}
+                        disabled={currentPage >= totalPages} accent={theme.surfaceHigh}>
+                Next
+              </LucyBtn>
+              <div style={{ display:"inline-flex", alignItems:"center", gap:6 }}>
+                <span style={{ fontSize:12, color:theme.textMuted }}>Go to page</span>
+                <input
+                  value={pageInput}
+                  onChange={e => setPageInput(e.target.value.replace(/[^\d]/g, ""))}
+                  onKeyDown={e => e.key === "Enter" && commitPageJump()}
+                  inputMode="numeric"
+                  aria-label="Go to page"
+                  style={{
+                    width:64,
+                    height:32,
+                    borderRadius:999,
+                    border:`1px solid ${theme.border}`,
+                    background:theme.surface,
+                    color:theme.text,
+                    fontSize:12,
+                    padding:"0 10px",
+                    outline:"none",
+                  }}
+                  placeholder={String(currentPage)}
+                />
+                <LucyBtn onClick={commitPageJump} accent={theme.surfaceHigh} title="Go to page">
+                  Go
+                </LucyBtn>
+              </div>
+            </div>
+          )}
+
+        </PullToRefresh>
+      )}
+      {attribution.length > 0 && (
+        <div style={{ padding:"8px 16px", display:"flex", gap:12, flexWrap:"wrap" }}>
+          {attribution.map(a => (
+            <a key={a.name} href={a.url} target="_blank" rel="noopener noreferrer"
+               style={{ fontSize:11, color:theme.textMuted, textDecoration:"none", opacity:0.7 }}>
+              Jobs powered by {a.name}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildVisiblePageItems(currentPage, totalPages) {
+  if (totalPages <= 1) return [1];
+  const pages = new Set([1, totalPages]);
+  for (let page = currentPage - 2; page <= currentPage + 2; page += 1) {
+    if (page >= 1 && page <= totalPages) pages.add(page);
+  }
+  const sorted = [...pages].sort((a, b) => a - b);
+  const items = [];
+  sorted.forEach((page, index) => {
+    if (index > 0 && page - sorted[index - 1] > 1) items.push("ellipsis-" + page);
+    items.push(page);
+  });
+  return items;
+}
+
+function StarredLinkedInSection({
+  jobs,
+  theme,
+  isDark,
+  onRefresh,
+  onImport,
+  linkedinImporting,
+  importCount,
+  lastImportedAt,
+  onVisit,
+  onDislike,
+  onJobSelect,
+  selectedJobId,
+}) {
+  const importedAgo = lastImportedAt ? ago(lastImportedAt * 1000) : null;
+  return (
+    <div style={{ margin:"10px 16px 12px", border:`1px solid ${theme.border}`, borderRadius:10,
+                  background:theme.surface, overflow:"hidden", boxShadow:theme.shadowSm }}>
+      <div style={{ padding:"12px 14px", display:"flex", alignItems:"center", gap:8,
+                    borderBottom:`1px solid ${theme.border}`, flexShrink:0 }}>
+        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:16, fontWeight:800,
+                       letterSpacing:"0.06em", textTransform:"uppercase", color:theme.text }}>
+          LinkedIn Jobs
+        </span>
+        <span style={{ fontSize:12, color:theme.textMuted }}>
+          {importCount} LinkedIn saved job{importCount !== 1 ? "s" : ""}
+        </span>
+        {importedAgo && (
+          <span style={{ fontSize:11, color:theme.textDim }}>
+            last import {importedAgo} ago
+          </span>
+        )}
+        <div style={{ flex:1 }}/>
+        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onImport} disabled={linkedinImporting}>
+          {linkedinImporting ? "Importing..." : "Import from LinkedIn"}
+        </button>
+        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
+      </div>
+      <div style={{ padding:"12px 14px", borderBottom:`1px solid ${theme.border}`,
+                    background:isDark ? `${theme.surfaceHigh}66` : theme.surfaceHigh }}>
+        <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6 }}>
+          Import visible LinkedIn job listings with the browser extension. Resume Master keeps the existing imported-job dedupe path and refreshes the job board automatically after import.
+        </div>
+      </div>
+      {jobs.length === 0 ? (
+        <div style={{ display:"flex", flexDirection:"column",
+                      alignItems:"center", justifyContent:"center", gap:12, padding:24 }}>
+          <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No imported LinkedIn jobs yet</div>
+          <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:420, lineHeight:1.8 }}>
+            Click <strong>Import from LinkedIn</strong>. Resume Master opens LinkedIn jobs for your active profile, the extension imports the visible listings, and the board refreshes automatically.
+          </div>
+          <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onImport} disabled={linkedinImporting}>
+            {linkedinImporting ? "Importing..." : "Import from LinkedIn"}
+          </button>
+        </div>
+      ) : (
+        <div style={{ paddingTop:8, paddingBottom:12 }}>
+          {jobs.map(job => (
+            <JobCard
+              key={job.jobId}
+              job={job}
+              theme={theme}
+              isDark={isDark}
+              showDislike={true}
+              showApplyButton={true}
+              applyMode="SIMPLE"
+              canUseGenerate={false}
+              canUseAPlusResume={false}
+              compact={false}
+              selected={selectedJobId === job.jobId}
+              onSelect={onJobSelect ? () => onJobSelect(job) : undefined}
+              onVisit={() => onVisit(job)}
+              onDislike={() => onDislike(job.jobId, job)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// JobCard is imported from ../components/JobCard.jsx
+
+// â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function EmptyState({ theme }) {
+  const { theme: t } = useTheme();
+  const th = theme || t;
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+                  justifyContent:"center", gap:16, padding:40, color:th.textDim }}>
+      <div style={{ fontSize:56 }}>Search</div>
+      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                    fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase", color:th.text }}>
+        Search for a role above
+      </div>
+      <div style={{ fontSize:12, textAlign:"center", color:th.textDim, maxWidth:320, lineHeight:1.8 }}>
+        LinkedIn + Indeed - full-time only - deduplicated - ghost jobs filtered
+      </div>
+    </div>
+  );
+}
+
+function SetupGateNotice({ theme, title, body, actionLabel, onAction }) {
+  return (
+    <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
+                  padding:32, background:theme.bg }}>
+      <div style={{ width:"min(92vw, 520px)", border:`1px solid ${theme.border}`,
+                    background:theme.surface, borderRadius:8, padding:24,
+                    boxShadow:"0 16px 40px rgba(0,0,0,0.12)" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                      fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase",
+                      color:theme.text, marginBottom:8 }}>
+          {title}
+        </div>
+        <div style={{ fontSize:13, lineHeight:1.6, color:theme.textMuted, marginBottom:18 }}>
+          {body}
+        </div>
+        <button onClick={onAction}
+          style={{ border:"none", borderRadius:6, padding:"10px 16px",
+                   background:theme.accent, color:"#0f0f0f", fontWeight:800,
+                   cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif",
+                   letterSpacing:"0.06em", textTransform:"uppercase" }}>
+          {actionLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SearchIntentDialog({ theme, prompt, onConfirm, onCancel }) {
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:750, background:"rgba(0,0,0,0.48)",
+                  display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div role="dialog" aria-modal="true" style={{ width:"min(92vw, 460px)",
+        background:theme.modalSurface || theme.surface, border:`1px solid ${theme.border}`,
+        borderRadius:8, boxShadow:"0 24px 72px rgba(0,0,0,0.32)", padding:22 }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                      fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase",
+                      color:theme.text, marginBottom:8 }}>
+          {prompt.title}
+        </div>
+        <div style={{ fontSize:13, lineHeight:1.6, color:theme.textMuted, marginBottom:20 }}>
+          {prompt.body}
+        </div>
+        <div style={{ display:"flex", justifyContent:"flex-end", gap:10, flexWrap:"wrap" }}>
+          <button onClick={onCancel}
+            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
+                     background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
+            {prompt.cancelLabel || "Cancel"}
+          </button>
+          <button onClick={onConfirm}
+            style={{ border:"none", borderRadius:6, padding:"8px 12px",
+                     background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
+            {prompt.confirmLabel || "Continue"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LinkedInInstallDialog({ theme, open, onClose, onImportNow }) {
+  if (!open) return null;
+  const [step, setStep] = useState("install");
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (!open || step !== "install") return;
+    setTimedOut(false);
+    const poll = setInterval(() => {
+      if (isLinkedInExtensionInstalled()) {
+        clearInterval(poll);
+        setStep("ready");
+      }
+    }, 1000);
+    const timeout = setTimeout(() => setTimedOut(true), 60000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(timeout);
+    };
+  }, [open, step]);
+
+  useEffect(() => {
+    if (!open) setStep("install");
+  }, [open]);
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:760, background:"rgba(0,0,0,0.48)",
+                  display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div role="dialog" aria-modal="true" style={{ width:"min(92vw, 560px)",
+        background:theme.modalSurface || theme.surface, border:`1px solid ${theme.border}`,
+        borderRadius:8, boxShadow:"0 24px 72px rgba(0,0,0,0.32)", padding:22, display:"flex",
+        flexDirection:"column", gap:14 }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                      fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase",
+                      color:theme.text }}>
+          {step === "ready" ? "Extension Installed!" : "Install the Resume Master Extension"}
+        </div>
+        <div style={{ fontSize:13, lineHeight:1.6, color:theme.textMuted }}>
+          {step === "ready"
+            ? "You're ready to import jobs from LinkedIn."
+            : "The browser extension lets you import jobs from LinkedIn in one click."}
+        </div>
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+          {step !== "ready" && (
+            <button onClick={() => window.open(getLinkedInExtensionInstallUrl(), "_blank", "noreferrer")}
+            style={{ border:"none", borderRadius:6, padding:"8px 12px",
+                     background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
+              Install Extension
+            </button>
+          )}
+          {step === "ready" && (
+            <button onClick={onImportNow}
+            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
+                     background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
+              Import Now
+            </button>
+          )}
+          <button onClick={onClose}
+            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
+                     background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
+            {step === "ready" ? "Close" : "Cancel"}
+          </button>
+        </div>
+        {step !== "ready" && (
+          <div style={{ background:theme.surfaceHigh, border:`1px solid ${theme.border}`, borderRadius:8, padding:12 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ width:16, height:16, borderRadius:"50%", border:`2px solid ${theme.border}`, borderTopColor:theme.accent,
+                animation:"spin 0.8s linear infinite" }} />
+              <div style={{ fontSize:12, color:theme.text }}>
+                Waiting for installation...
+              </div>
+            </div>
+            {timedOut && (
+              <div style={{ fontSize:11, color:theme.textMuted, marginTop:8 }}>
+                Didn't work? Try refreshing the page.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// â”€â”€ History list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
+  const { theme: t } = useTheme();
+  const theme = themeProp || t;
+  const entries = Object.entries(generated).filter(([,v]) => v?.html && v.html !== "__exists__");
+  if (!entries.length) return (
+    <div style={{ padding:24, color:theme.textDim, fontSize:12, textAlign:"center" }}>
+      No resumes generated yet.
+    </div>
+  );
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
+      {entries.map(([jid,v]) => {
+        const letter = (v.company||"?")[0].toUpperCase();
+        const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706","#9333ea"];
+        let hash = 0;
+        for (const c of v.company||"") hash = (hash*31+c.charCodeAt(0))&0xffff;
+        const bg = colors[hash%colors.length];
+        return (
+          <div key={jid} style={{ padding:"12px 16px", borderBottom:`1px solid ${theme.border}`,
+                                   display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ width:32, height:32, borderRadius:8, background:bg,
+                           display:"flex", alignItems:"center", justifyContent:"center",
+                           fontWeight:800, fontSize:11, color:"#fff", flexShrink:0 }}>
+              {letter}
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, fontSize:12, color:theme.text,
+                             overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {v.company}
+              </div>
+              <div style={{ fontSize:10, color:theme.textDim, overflow:"hidden",
+                             textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:3 }}>
+                {v.title||v.role}
+              </div>
+              <ATSBadge score={v.atsScore}/>
+            </div>
+            <div style={{ display:"flex", gap:5, flexShrink:0 }}>
+              <IconBtn bg="#0284c7" size={26} title="Open in sandbox" onClick={() => onOpen(v)}>ðŸ‘</IconBtn>
+              <IconBtn bg="#16a34a" size={26} title="Export PDF" onClick={() => onExport(null,v.html,v.company)}>ðŸ“¥</IconBtn>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// â”€â”€ Company Reuse Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function CompanyReuseModal({ company, onUseExisting, onGenerateNew, onCancel, theme }) {
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:1000, display:"flex",
+      alignItems:"center", justifyContent:"center",
+      background:"rgba(0,0,0,0.45)", backdropFilter:"blur(3px)",
+    }}
+    onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div style={{
+        background:theme.surface, borderRadius:12, padding:28,
+        maxWidth:380, width:"90%", boxShadow:theme.shadowLg,
+        border:`1px solid ${theme.border}`,
+        display:"flex", flexDirection:"column", gap:16,
+      }}>
+        <div style={{ fontSize:18, fontWeight:800, color:theme.text }}>
+          Previously applied to {company}
+        </div>
+        <div style={{ fontSize:13, color:theme.textMuted, lineHeight:1.6 }}>
+          You've already generated a resume for a role at <strong style={{ color:theme.text }}>{company}</strong>.
+          Use your existing resume for this role, or generate a new one?
+        </div>
+        <div style={{ display:"flex", gap:10, flexDirection:"column" }}>
+          <button onClick={onUseExisting} style={{
+            padding:"10px 0", borderRadius:999, border:`2px solid ${theme.accent}`,
+            background:theme.accent, color:"#0f0f0f", fontWeight:800, fontSize:13,
+            cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif",
+            letterSpacing:"0.06em", textTransform:"uppercase",
+          }}>
+            Use Existing Resume
+          </button>
+          <button onClick={onGenerateNew} style={{
+            padding:"10px 0", borderRadius:999, border:`2px solid ${theme.border}`,
+            background:"transparent", color:theme.text, fontWeight:800, fontSize:13,
+            cursor:"pointer", fontFamily:"'Barlow Condensed',sans-serif",
+            letterSpacing:"0.06em", textTransform:"uppercase",
+          }}>
+            Generate New
+          </button>
+          <button onClick={onCancel} style={{
+            padding:"6px 0", border:"none", background:"none",
+            color:theme.textMuted, fontSize:12, cursor:"pointer",
+          }}>
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
