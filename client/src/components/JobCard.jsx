@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/JobCard.jsx — shared expandable job card
 import { useState } from "react";
 
@@ -509,13 +509,7 @@ export default function JobCard({
                 {generateLoading ? "⏳" : done ? "↻" : "✦"}
               </IconBtn>
             )}
-            {canUseAPlusResume && onAPlusResume && showApplyButton && (
-              <IconBtn bg="#16a34a" title={done ? "Rebuild A+ Resume" : "A+ Resume"}
-                disabled={!!st} theme={theme} active={done && !aPlusLoading}
-                onClick={e => { e.stopPropagation(); onAPlusResume(done && g?.html !== "__exists__"); }}>
-                {aPlusLoading ? "⏳" : "A+"}
-              </IconBtn>
-            )}
+
 
             {/* View sandbox */}
             {done && g?.html !== "__exists__" && showApplyButton && (
@@ -580,7 +574,7 @@ export default function JobCard({
           </div>
 
           {/* Recruiter section — coming soon */}
-          {(canUseGenerate || canUseAPlusResume) && showApplyButton && (
+          {canUseGenerate && showApplyButton && (
             <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
               {canUseGenerate && onGenerate && (
                 <button onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}
@@ -589,15 +583,6 @@ export default function JobCard({
                            background:theme.accent, color:"#0f0f0f", cursor:st ? "not-allowed" : "pointer",
                            fontSize:12, fontWeight:800 }}>
                   {generateLoading ? "Generating..." : done ? "Regenerate" : "Generate"}
-                </button>
-              )}
-              {canUseAPlusResume && onAPlusResume && (
-                <button onClick={e => { e.stopPropagation(); onAPlusResume(done && g?.html !== "__exists__"); }}
-                  disabled={!!st}
-                  style={{ border:"none", borderRadius:6, padding:"8px 12px",
-                           background:"#16a34a", color:"#fff", cursor:st ? "not-allowed" : "pointer",
-                           fontSize:12, fontWeight:800 }}>
-                  {aPlusLoading ? "Building A+..." : "A+ Resume"}
                 </button>
               )}
             </div>

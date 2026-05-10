@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // routes/admin.js — Usage analytics and limits admin API
 import { Router } from "express";
 
@@ -126,7 +126,7 @@ export function createAdminRouter(db) {
     const offset = (page - 1) * pageSize;
     try {
       const users = db.prepare(`
-        SELECT id, username, created_at FROM users ORDER BY created_at DESC
+        SELECT id, username, created_at, aplus_resume FROM users ORDER BY created_at DESC
         LIMIT ? OFFSET ?
       `).all(pageSize, offset);
 
@@ -175,6 +175,7 @@ export function createAdminRouter(db) {
           avgAtsScoreAfter: ats.a,
           lastActiveAt: ev.last_active,
           limits: limits || null,
+          aplusResume: !!u.aplus_resume,
         };
       });
       res.json(result);
@@ -401,6 +402,20 @@ export function createAdminRouter(db) {
         notes ?? null, req.user.id, userId
       );
       res.json(db.prepare("SELECT * FROM user_limits WHERE user_id=?").get(userId));
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Per-user feature flags (admin only) ──────────────────────
+  router.patch("/users/:id/flags", requireAdmin, (req, res) => {
+    const userId = parseInt(req.params.id);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: "Invalid user id" });
+    const { aplus_resume } = req.body;
+    try {
+      db.prepare("UPDATE users SET aplus_resume=? WHERE id=?")
+        .run(aplus_resume ? 1 : 0, userId);
+      const user = db.prepare("SELECT id, username, aplus_resume FROM users WHERE id=?").get(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      res.json({ success: true, id: user.id, aplus_resume: !!user.aplus_resume });
     } catch(e) { res.status(500).json({ error: e.message }); }
   });
 

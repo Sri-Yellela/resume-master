@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/panels/AdminPanel.jsx — Lucy Brand (yellow accent)
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -418,6 +418,16 @@ function UsersTab({ theme }) {
     } catch(e) {}
   };
 
+  const toggleAplusResume = async (userId, current) => {
+    try {
+      const d = await api(`/api/admin/analytics/users/${userId}/flags`, {
+        method: "PATCH",
+        body: JSON.stringify({ aplus_resume: !current }),
+      });
+      setUsers(prev => prev.map(u => u.userId === userId ? { ...u, aplusResume: d.aplus_resume } : u));
+    } catch(e) {}
+  };
+
   const fmtNum = n => n == null ? "—" : n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}k` : String(Math.round(n));
   const fmtUsd = n => n == null ? "—" : `$${Number(n).toFixed(4)}`;
   const fmtPct = n => n == null ? "—" : `${(n*100).toFixed(0)}%`;
@@ -470,6 +480,20 @@ function UsersTab({ theme }) {
               {expanded === u.userId && (
                 <div style={{ padding:"12px 16px 16px", borderTop:`1px solid ${theme.border}`,
                               background:theme.surfaceHigh }}>
+                  {/* Feature flags */}
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+                    <span style={{ fontSize:11, fontWeight:700, color:theme.textMuted }}>Feature Flags:</span>
+                    <button
+                      onClick={() => toggleAplusResume(u.userId, u.aplusResume)}
+                      style={{
+                        fontSize:11, padding:"3px 10px", borderRadius:999, fontWeight:700, cursor:"pointer",
+                        border:`1px solid ${u.aplusResume ? "#16a34a" : theme.border}`,
+                        background: u.aplusResume ? "#dcfce7" : "transparent",
+                        color: u.aplusResume ? "#166534" : theme.textMuted,
+                      }}>
+                      A+ Resume: {u.aplusResume ? "ON" : "OFF"}
+                    </button>
+                  </div>
                   <div style={{ fontSize:11, fontWeight:700, color:theme.textMuted, marginBottom:8 }}>
                     Recent Events
                   </div>

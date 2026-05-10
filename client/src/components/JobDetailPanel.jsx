@@ -1,8 +1,9 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/JobDetailPanel.jsx — right-panel job detail in split view
 import { useState, useCallback } from "react";
 import { HighlightedDescription } from "./HighlightedDescription.jsx";
 import { api } from "../lib/api.js";
+import CoverLetterModal from "./CoverLetterModal.jsx";
 
 function ago(postedAt, scrapedAt) {
   let ms = postedAt ? new Date(postedAt).getTime() : NaN;
@@ -70,6 +71,7 @@ export default function JobDetailPanel({
   applyMode,
   canUseGenerate = applyMode !== "SIMPLE",
   canUseAPlusResume = false,
+  resumeText,
   onClose,
   onGenerate,
   onAPlusResume,
@@ -83,6 +85,7 @@ export default function JobDetailPanel({
   onQueueApply,
 }) {
   if (!job) return null;
+  const [showCoverLetter, setShowCoverLetter] = useState(false);
 
   // ── Apply automation state ───────────────────────────────────
   const [applyLoading,  setApplyLoading]  = useState(false);
@@ -195,12 +198,6 @@ export default function JobDetailPanel({
             {generateLoading ? "⏳ Generating" : done ? "↻ Regen" : "✦ Generate"}
           </ActionBtn>
         )}
-        {canUseAPlusResume && onAPlusResume && (
-          <ActionBtn onClick={() => onAPlusResume(done && g?.html !== "__exists__")}
-            title={done ? "Rebuild A+ Resume" : "A+ Resume"} accent="#16a34a" theme={theme} disabled={!!st}>
-            {aPlusLoading ? "⏳ Building A+" : "A+ Resume"}
-          </ActionBtn>
-        )}
         {done && g?.html !== "__exists__" && (
           <ActionBtn onClick={() => onViewSandbox?.()} title="View in sandbox" accent="#0284c7" theme={theme}>
             👁 Preview
@@ -241,7 +238,22 @@ export default function JobDetailPanel({
             Pass
           </ActionBtn>
         )}
+        <ActionBtn onClick={() => setShowCoverLetter(true)} title="Write a cover letter for this job"
+          accent="#7c3aed" theme={theme}>
+          ✉ Cover Letter
+        </ActionBtn>
       </div>
+
+      {/* Cover Letter modal */}
+      {showCoverLetter && (
+        <CoverLetterModal
+          resumeText={resumeText}
+          jobDescription={job.description}
+          jobTitle={job.title}
+          company={job.company}
+          onClose={() => setShowCoverLetter(false)}
+        />
+      )}
 
       {/* Apply result toast */}
       {applyResult && (

@@ -2951,10 +2951,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                   job={selectedJob} theme={theme} isDark={isDark}
                   g={g2} done={done2} st={st2} applyMode={applyMode}
                   canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
-                  canUseAPlusResume={!isImportedBoardJob(selectedJob) && canUseAPlusResume}
+                  canUseAPlusResume={false}
+                  resumeText={resumeText}
                   onClose={() => setSelectedJob(null)}
                   onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
-                  onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
                   onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); setMobilePane("editor"); setSelectedJob(null); })}
                   onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
                   onVisit={() => visitUrl(selectedJob)}
@@ -3106,10 +3106,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                       job={selectedJob} theme={theme} isDark={isDark}
                       g={g2} done={done2} st={st2} applyMode={applyMode}
                       canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
-                      canUseAPlusResume={!isImportedBoardJob(selectedJob) && canUseAPlusResume}
+                      canUseAPlusResume={false}
+                      resumeText={resumeText}
                       onClose={() => setSelectedJob(null)}
                       onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
-                      onAPlusResume={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force, "a_plus_resume"))}
                       onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
                       onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
                       onVisit={() => visitUrl(selectedJob)}

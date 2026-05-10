@@ -419,7 +419,7 @@ export function DatabasePanel({ user }) {
   const generateForSaved = useCallback(async (job, force = false, tool = "generate") => {
     const planTier = String(user?.planTier || "BASIC").toUpperCase();
     if (planTier === "BASIC") { alert("Upgrade from Plans to unlock Generate."); return; }
-    if (tool === "a_plus_resume" && planTier !== "PRO") { alert("Upgrade from Plans to unlock A+ Resume."); return; }
+    if (tool === "a_plus_resume") { return; } // A+ is silently applied server-side for eligible users
     if (!baseResume) { alert("Upload this job profile's base resume in Job Profiles first."); return; }
     setGenLoading(p => ({...p, [job.jobId]: true}));
     try {
@@ -1057,9 +1057,8 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasRe
               st={st}
               applyMode={applyMode}
               canUseGenerate={String(planTier || "BASIC").toUpperCase() !== "BASIC"}
-              canUseAPlusResume={String(planTier || "BASIC").toUpperCase() === "PRO"}
+              canUseAPlusResume={false}
               onGenerate={() => onGenerate(job, done && g?.html !== "__exists__")}
-              onAPlusResume={() => onGenerate(job, done && g?.html !== "__exists__", "a_plus_resume")}
               onExport={() => done && g?.html !== "__exists__" && onExport(job, g.html)}
               onVisit={() => job.url && window.open(job.url, "_blank", "noreferrer")}
               onStar={() => onUnsave(job.jobId)}

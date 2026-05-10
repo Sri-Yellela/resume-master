@@ -2053,6 +2053,10 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON profile_resume_enhancements(profile_id, created_at DESC);
       `,
     },
+    {
+      id: "054_aplus_resume_flag",
+      sql: `ALTER TABLE users ADD COLUMN aplus_resume INTEGER NOT NULL DEFAULT 0;`,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -4448,6 +4452,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       total:       result.total,
       page:        result.page,
       pageSize:    result.pageSize,
+      totalPages:  Math.ceil((result.total || 0) / sanitized.pageSize),
       sources:     result.sources,
       attribution: result.attribution,
     });
@@ -5360,7 +5365,12 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   // Strip excluded companies from employer list before any processing
   const employers = sanitiseEmployers(req.body.employers);
   if (!job||!resumeText) return res.status(400).json({ error:"job and resumeText required" });
-  const tool = req.body?.tool === "a_plus_resume" ? "a_plus_resume" : "generate";
+  let tool = req.body?.tool === "a_plus_resume" ? "a_plus_resume" : "generate";
+  // If the user has the admin-granted A+ flag, silently upgrade "generate" to A+ pipeline
+  if (tool === "generate") {
+    const userFlags = db.prepare("SELECT aplus_resume FROM users WHERE id=?").get(req.user.id);
+    if (userFlags?.aplus_resume) tool = "a_plus_resume";
+  }
   if (!requireToolEntitlement(req, res, tool)) return;
   const mode = legacyModeForTool(tool);
   const promptMode = promptModeForTool(tool);
@@ -5965,6 +5975,63 @@ app.post("/api/standalone/apply",
 );
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ── Cover Letter Generation ────────────────────────────────────────────────────
+app.post("/api/cover-letter/generate", requireAuth, async (req, res) => {
+  const { resumeText, jobDescription, tone = "professional", jobTitle, company } = req.body;
+  if (!resumeText) return res.status(400).json({ error: "resumeText is required" });
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured on server." });
+
+  const resumeTrimmed = resumeText.trim();
+  if (resumeTrimmed.length < 50) {
+    return res.status(400).json({ error: "Resume is too short to generate a cover letter." });
+  }
+
+  const toneMap = {
+    professional: "formal and professional",
+    conversational: "warm and personable while remaining professional",
+    enthusiastic: "energetic and passionate about the opportunity",
+  };
+  const toneDesc = toneMap[tone] || toneMap.professional;
+
+  const targetLine = [jobTitle, company].filter(Boolean).join(" at ");
+
+  const prompt = `You are an expert cover letter writer. Write a compelling, specific cover letter.
+
+CANDIDATE RESUME:
+${resumeTrimmed.slice(0, 3000)}
+
+TARGET ROLE: ${targetLine || "not specified"}
+
+JOB DESCRIPTION:
+${jobDescription ? String(jobDescription).slice(0, 2000) : "Not provided — write a strong general cover letter based on the resume."}
+
+TONE: ${toneDesc}
+
+REQUIREMENTS:
+- 3–4 paragraphs, under 400 words total
+- Opening: hook that references the specific role or company (if known)
+- Middle: 2 most relevant achievements from the resume, tied to the job requirements
+- Closing: clear call to action and gratitude
+- Do NOT repeat the resume verbatim — add context and personality
+- Do NOT use clichés like "I am writing to express my interest"
+- Do NOT use placeholders like [Company Name] or [Your Name]
+- Begin directly with "Dear Hiring Manager," unless a name appears in the job description
+- Plain text output only — no markdown, no bullet points`;
+
+  try {
+    const message = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 800,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = message.content?.[0]?.text || "";
+    res.json({ success: true, coverLetter: text });
+  } catch (err) {
+    console.error("[cover-letter] Anthropic error:", err.message);
+    res.status(500).json({ error: "Failed to generate cover letter. Please try again." });
+  }
+});
+
 // HEALTH + SPA
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 app.get("/api/health", (_req,res) => res.json({ ok:true, time:new Date().toISOString() }));
