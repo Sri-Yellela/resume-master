@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -21,10 +21,18 @@
     }
     .btn-primary { background: #01696F; color: #fff; }
     .btn-primary:hover { background: #0C4E54; }
+    .btn-primary:disabled { background: #6aacaf; cursor: default; }
     .btn-secondary { background: #F3F0EC; color: #28251D; border: 1px solid #D4D1CA; }
     .btn-secondary:hover { background: #E6E4DF; }
     .status { font-size: 11px; color: #7A7974; margin-top: 6px; text-align: center; min-height: 14px; }
     .divider { border: none; border-top: 1px solid #DCD9D5; margin: 10px 0; }
+    #job-preview {
+      display: none;
+      background: #fff; border: 1px solid #DCD9D5; border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 8px; font-size: 12px;
+    }
+    #job-preview .job-title { font-weight: 600; color: #28251D; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #job-preview .job-company { color: #7A7974; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   </style>
 </head>
 <body>
@@ -36,8 +44,14 @@
     <span class="header-title">Resume Master</span>
   </div>
 
+  <div id="job-preview">
+    <div class="job-title" id="preview-title"></div>
+    <div class="job-company" id="preview-company"></div>
+  </div>
+
+  <button class="btn btn-primary" id="btn-save-job" style="display:none">Save Job</button>
   <button class="btn btn-primary" id="btn-resume">Open Resume Builder</button>
-  <button class="btn btn-secondary" id="btn-linkedin">Import from LinkedIn</button>
+  <button class="btn btn-secondary" id="btn-linkedin">Connect LinkedIn</button>
   <hr class="divider">
   <button class="btn btn-secondary" id="btn-ats">ATS Score Tool</button>
 

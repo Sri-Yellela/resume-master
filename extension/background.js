@@ -1,4 +1,4 @@
-﻿const RESUME_MASTER_URL = 'https://YOUR_DOMAIN.com';
+﻿const RESUME_MASTER_URL = 'https://resumemaster.one';
 // For local dev: const RESUME_MASTER_URL = 'http://localhost:3000';
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

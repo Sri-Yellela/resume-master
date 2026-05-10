@@ -843,7 +843,7 @@ function buildAtsPayload(job, artifact = null) {
 }
 
 function isImportedBoardJob(job) {
-  return !!(["linkedin", "linkedin_saved"].includes(job?.boardSource) && job?.importedJobId != null);
+  return !!(["linkedin", "linkedin_saved", "linkedin_extension"].includes(job?.boardSource) && job?.importedJobId != null);
 }
 
 // -- Main panel ------------------------------------------------

@@ -3202,6 +3202,14 @@ function corsOrigin(origin, callback) {
   return callback(null, false);
 }
 
+function corsOriginExtension(origin, callback) {
+  if (!origin) return callback(null, true);
+  if (!IS_PRODUCTION) return callback(null, true);
+  if (ALLOWED_CORS_ORIGINS.has(origin)) return callback(null, true);
+  if (/^chrome-extension:\/\//.test(origin)) return callback(null, true);
+  return callback(null, false);
+}
+
 logOAuthReadiness();
 
 function publicUser(user) {
@@ -4183,6 +4191,50 @@ app.get("/api/auth/active-profile", requireAuth, (req, res) => {
 // /api/domain-profiles/generate-chips      â€” AI chip generation
 app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic, emitToUser));
 app.use("/api/imported-jobs", requireAuth, createImportedJobsRouter(db));
+
+// ─── CHROME EXTENSION — Save job from LinkedIn ───────────────────────────────
+// Allows chrome-extension:// origins (credentialed fetch with session cookie)
+app.options("/api/extension/save-job", cors({ origin: corsOriginExtension, credentials: true }));
+app.post("/api/extension/save-job",
+  cors({ origin: corsOriginExtension, credentials: true }),
+  requireAuth,
+  (req, res) => {
+    const { title, company, location, workType, description, jobUrl, externalJobId } = req.body || {};
+    if (!title || !company) return res.status(400).json({ error: "title and company required" });
+
+    const dedupe = externalJobId
+      ? `linkedin_ext_${externalJobId}`
+      : `linkedin_ext_${Buffer.from((jobUrl || title + company).slice(0, 200)).toString("base64").slice(0, 64)}`;
+
+    const existing = db.prepare(
+      "SELECT id FROM imported_jobs WHERE user_id=? AND source_key=? AND dedupe_key=?"
+    ).get(req.user.id, "linkedin_extension", dedupe);
+
+    if (existing) {
+      db.prepare("UPDATE imported_jobs SET import_count=import_count+1, last_seen_at=unixepoch() WHERE id=?").run(existing.id);
+      return res.json({ success: true, alreadySaved: true, id: existing.id });
+    }
+
+    const result = db.prepare(`
+      INSERT INTO imported_jobs
+        (user_id, source_key, source_label, source_platform, external_job_id, dedupe_key,
+         title, company, location, work_type, description, job_url, apply_url)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      req.user.id, "linkedin_extension", "LinkedIn (Extension)", "linkedin",
+      externalJobId || null, dedupe,
+      title.slice(0, 500), company.slice(0, 500),
+      (location || "").slice(0, 300),
+      (workType || "").slice(0, 100),
+      (description || "").slice(0, 20000),
+      (jobUrl || "").slice(0, 2000),
+      (jobUrl || "").slice(0, 2000)
+    );
+
+    res.json({ success: true, alreadySaved: false, id: result.lastInsertRowid });
+  }
+);
+
 // Metadata is also public â€” mount without requireAuth at a sub-path so
 // the chip registry is accessible from the wizard before login
 app.get("/api/domain-metadata",       (_req, res) => res.redirect(307, "/api/domain-profiles/metadata"));

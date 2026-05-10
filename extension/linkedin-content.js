@@ -1,4 +1,4 @@
-﻿/*
+/*
  * JOB DESCRIPTION EXTRACTOR - Resume Master Extension v1.1
  *
  * Reads only the VISIBLE job description text on job listing pages.
@@ -10,6 +10,8 @@
 
 (function () {
   if (document.getElementById('rm-send-btn')) return;
+
+  const RESUME_MASTER_URL = 'https://resumemaster.one';
 
   const EXTRACTORS = {
     'linkedin.com':  () => trySelectors([
@@ -43,6 +45,52 @@
     return extract();
   }
 
+  // Extract structured LinkedIn job data from the DOM
+  function extractLinkedInJobData() {
+    const title = (
+      document.querySelector('.jobs-unified-top-card__job-title h1')?.innerText ||
+      document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText ||
+      document.querySelector('h1.t-24')?.innerText ||
+      document.title.replace(/ \| LinkedIn$/, '') ||
+      ''
+    ).trim();
+
+    const company = (
+      document.querySelector('.jobs-unified-top-card__company-name a')?.innerText ||
+      document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText ||
+      document.querySelector('.jobs-unified-top-card__company-name')?.innerText ||
+      ''
+    ).trim();
+
+    const location = (
+      document.querySelector('.jobs-unified-top-card__bullet')?.innerText ||
+      document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText ||
+      ''
+    ).trim();
+
+    const workType = (
+      document.querySelector('.jobs-unified-top-card__workplace-type')?.innerText ||
+      document.querySelector('.job-details-jobs-unified-top-card__workplace-type')?.innerText ||
+      ''
+    ).trim();
+
+    const description = extractJobText();
+
+    // Extract LinkedIn job ID from URL  e.g. /jobs/view/1234567890/
+    const jobIdMatch = window.location.pathname.match(/\/jobs\/view\/(\d+)/);
+    const externalJobId = jobIdMatch ? jobIdMatch[1] : null;
+
+    return {
+      title,
+      company,
+      location,
+      workType,
+      description,
+      jobUrl: window.location.href,
+      externalJobId,
+    };
+  }
+
   function setButtonText(text, reset = true) {
     btn.textContent = text;
     if (reset) setTimeout(() => { btn.textContent = ' Send to Resume Master'; }, 2500);
@@ -63,6 +111,27 @@
         btn.style.background = '#01696F';
       }, 2500);
     });
+  }
+
+  async function saveJob() {
+    const data = extractLinkedInJobData();
+    if (!data.title || !data.company) {
+      return { success: false, error: 'Could not extract job title or company' };
+    }
+    try {
+      const res = await fetch(`${RESUME_MASTER_URL}/api/extension/save-job`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data),
+      });
+      if (res.status === 401) return { success: false, error: 'Not logged in' };
+      if (!res.ok) return { success: false, error: `Server error ${res.status}` };
+      const json = await res.json();
+      return { success: true, alreadySaved: json.alreadySaved || false };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
   }
 
   const btn = document.createElement('button');
@@ -99,6 +168,14 @@
       sendCurrentJob();
       sendResponse({ success: true });
       return true;
+    }
+    if (message.type === 'GET_CURRENT_JOB') {
+      sendResponse(extractLinkedInJobData());
+      return true;
+    }
+    if (message.type === 'SAVE_JOB') {
+      saveJob().then(sendResponse);
+      return true; // async
     }
     return false;
   });
