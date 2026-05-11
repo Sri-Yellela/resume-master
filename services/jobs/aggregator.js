@@ -1,19 +1,36 @@
 import { validatePlugin } from './sources/base.js';
 import { stripInternalFields } from './schema.js';
+import { classify } from './classifier.js';
+import { filterDirectApplyOnly } from './directApplyFilter.js';
 
 // ─── REGISTER SOURCES HERE ───────────────────────────────────────────────────
 // To add a new source: import it and add to SOURCES array.
 // To disable a source: comment out its line. Zero other changes needed.
 
-import adzunaPlugin from './sources/adzuna.js';
+import adzunaPlugin    from './sources/adzuna.js';
+import greenhousePlugin from './sources/greenhouse.js';
+import leverPlugin     from './sources/lever.js';
+import ashbyPlugin     from './sources/ashby.js';
 // import theMuse   from './sources/themusejobs.js';  // add when ready
 // import usaJobs   from './sources/usajobs.js';      // add when ready
 // import indeed    from './sources/indeed.js';        // add when approved
 
 const SOURCES = [
   adzunaPlugin,
+  greenhousePlugin,
+  leverPlugin,
+  ashbyPlugin,
 ];
 // ─────────────────────────────────────────────────────────────────────────────
+
+export const SOURCE_LABELS = {
+  adzuna:             'Adzuna',
+  greenhouse:         'Greenhouse',
+  lever:              'Lever',
+  ashby:              'Ashby',
+  serpapi:            'Google Jobs',
+  linkedin_extension: 'LinkedIn (Saved)',
+};
 
 // Validate all registered plugins at startup
 SOURCES.forEach(validatePlugin);
@@ -28,9 +45,11 @@ if (inactiveSources.length) {
 /**
  * Search jobs across all configured sources.
  * Fan-out in parallel — if one source fails, others continue.
+ * ATS plugins (greenhouse/lever/ashby) receive _companies from caller.
  */
 async function searchJobs({ query = '', location = '', country = 'us', page = 1, pageSize = 10,
-                            sort, employmentType, remote } = {}) {
+                            sort, employmentType, remote,
+                            _ghCompanies = [], _leverCompanies = [], _ashbyCompanies = [] } = {}) {
   const configured = SOURCES.filter(s => s.isConfigured());
 
   if (configured.length === 0) {
@@ -38,10 +57,18 @@ async function searchJobs({ query = '', location = '', country = 'us', page = 1,
     return { jobs: [], total: 0, page, pageSize, sources: [], attribution: [] };
   }
 
+  const companyMap = {
+    greenhouse: _ghCompanies,
+    lever:      _leverCompanies,
+    ashby:      _ashbyCompanies,
+  };
+
   const results = await Promise.allSettled(
     configured.map(source =>
-      source.search({ query, location, country, page, pageSize, sort, employmentType, remote })
-        .then(result => ({ ...result, source: source.name }))
+      source.search({
+        query, location, country, page, pageSize, sort, employmentType, remote,
+        _companies: companyMap[source.name] || [],
+      }).then(result => ({ ...result, source: source.name }))
     )
   );
 
@@ -68,8 +95,29 @@ async function searchJobs({ query = '', location = '', country = 'us', page = 1,
     }
   }
 
+  // Deduplicate by URL
+  const seen = new Set();
+  const unique = allJobs.filter(job => {
+    if (!job.url || seen.has(job.url)) return false;
+    seen.add(job.url);
+    return true;
+  });
+
+  // Apply direct-apply filter (Greenhouse/Lever/Ashby always pass)
+  const direct = filterDirectApplyOnly(unique);
+
+  // Classify + add source labels
+  const classified = direct.map(job => {
+    const buckets = classify(job);
+    return {
+      ...stripInternalFields(job),
+      ...buckets,
+      source_label: SOURCE_LABELS[job.source] || job.source,
+    };
+  });
+
   return {
-    jobs:        allJobs.map(stripInternalFields),
+    jobs:        classified,
     total:       totalCount,
     page,
     pageSize,

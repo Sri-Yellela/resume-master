@@ -2057,6 +2057,58 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       id: "054_aplus_resume_flag",
       sql: `ALTER TABLE users ADD COLUMN aplus_resume INTEGER NOT NULL DEFAULT 0;`,
     },
+    {
+      id: "055_user_profile_skills",
+      sql: `
+        ALTER TABLE user_profile ADD COLUMN confirmed_skills TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE user_profile ADD COLUMN target_skills    TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE user_profile ADD COLUMN target_domains   TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE user_profile ADD COLUMN target_locations TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE user_profile ADD COLUMN seniority_level  TEXT;
+        ALTER TABLE user_profile ADD COLUMN onboarded        INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
+    {
+      id: "056_company_ats_list",
+      sql: `
+        CREATE TABLE IF NOT EXISTS company_ats_list (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          company     TEXT NOT NULL,
+          ats_type    TEXT NOT NULL,
+          ats_slug    TEXT NOT NULL,
+          active      INTEGER NOT NULL DEFAULT 1,
+          bucket_role TEXT,
+          created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(ats_type, ats_slug)
+        );
+        INSERT OR IGNORE INTO company_ats_list (company, ats_type, ats_slug, bucket_role) VALUES
+          ('Stripe',     'greenhouse','stripe',        'software_engineer'),
+          ('Airbnb',     'greenhouse','airbnb',        'software_engineer'),
+          ('Figma',      'greenhouse','figma',         'software_engineer'),
+          ('Notion',     'greenhouse','notionhq',      'software_engineer'),
+          ('OpenAI',     'greenhouse','openai',        'software_engineer'),
+          ('Anthropic',  'greenhouse','anthropic',     'software_engineer'),
+          ('Rippling',   'greenhouse','rippling',      'software_engineer'),
+          ('Brex',       'greenhouse','brex',          'software_engineer'),
+          ('Duolingo',   'greenhouse','duolingo',      'software_engineer'),
+          ('Scale AI',   'greenhouse','scaleai',       'software_engineer'),
+          ('Ramp',       'lever',     'ramp',          'software_engineer'),
+          ('Mercury',    'lever',     'mercury',       'software_engineer'),
+          ('Retool',     'lever',     'retool',        'software_engineer'),
+          ('Linear',     'ashby',     'linear',        'software_engineer'),
+          ('Vercel',     'ashby',     'vercel',        'software_engineer');
+      `,
+    },
+    {
+      id: "057_scraped_jobs_buckets",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN bucket_role      TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN bucket_seniority TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN bucket_domain    TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN direct_apply     INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE scraped_jobs ADD COLUMN source_label     TEXT;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -4518,7 +4570,114 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/jobs/poll â€” returns new jobs since <since> ms timestamp + scraping status
+// GET /api/jobs/generic -- public cached feed (no auth, no personalization)
+app.get("/api/jobs/generic", async (req, res) => {
+  try {
+    const page   = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const ps     = Math.min(20, parseInt(req.query.pageSize, 10) || 12);
+    const offset = (page - 1) * ps;
+
+    const rows = db.prepare(`
+      SELECT job_id, title, company, location, work_type, url, source, source_label,
+             bucket_role, bucket_seniority, bucket_domain, posted_at, scraped_at,
+             salary_min, salary_max, salary_currency, compensation
+      FROM scraped_jobs
+      WHERE direct_apply = 1
+      ORDER BY scraped_at DESC
+      LIMIT ? OFFSET ?
+    `).all(ps, offset);
+
+    const total = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE direct_apply = 1").get()?.n || 0;
+
+    res.json({ success: true, jobs: rows, total, page, pageSize: ps });
+  } catch (err) {
+    console.error('[GET /api/jobs/generic]', err.message);
+    res.status(500).json({ success: false, error: 'Failed to load jobs.', jobs: [] });
+  }
+});
+
+// -- POST /api/jobs/search -- live search (auth required) ----------------------
+app.post("/api/jobs/search", requireAuth, async (req, res) => {
+  try {
+    const {
+      query = '', location = '', experience, domain,
+      contractType, remote, page = 1, pageSize = 20,
+    } = req.body || {};
+
+    if (!query.trim() && !location.trim()) {
+      return res.status(400).json({ success: false, error: 'Enter a job title or location to search.', jobs: [] });
+    }
+
+    // Load ATS company lists for direct-ATS plugins
+    const atsCos = db.prepare("SELECT * FROM company_ats_list WHERE active = 1").all();
+    const _ghCompanies    = atsCos.filter(r => r.ats_type === 'greenhouse');
+    const _leverCompanies = atsCos.filter(r => r.ats_type === 'lever');
+    const _ashbyCompanies = atsCos.filter(r => r.ats_type === 'ashby');
+
+    const result = await searchJobs({
+      query: [query.trim(), domain, experience].filter(Boolean).join(' '),
+      location, contractType, remote, page, pageSize,
+      sort: 'dateDesc',
+      _ghCompanies, _leverCompanies, _ashbyCompanies,
+    });
+
+    // Attach user interaction state for returned jobs
+    const interactionMap = {};
+    if (result.jobs.length) {
+      const placeholders = result.jobs.map(() => '?').join(',');
+      const jobIds = result.jobs.map(j => j.id);
+      const rows = db.prepare(
+        `SELECT job_id, starred, disliked FROM user_jobs WHERE user_id=? AND job_id IN (${placeholders})`
+      ).all(req.user.id, ...jobIds);
+      rows.forEach(r => { interactionMap[r.job_id] = r; });
+    }
+
+    const jobs = result.jobs.map(j => ({
+      ...j,
+      starred:  !!(interactionMap[j.id]?.starred),
+      disliked: !!(interactionMap[j.id]?.disliked),
+    }));
+
+    res.json({ ...result, jobs, success: true });
+  } catch (err) {
+    console.error('[POST /api/jobs/search]', err.message);
+    res.status(500).json({ success: false, error: 'Search failed.', jobs: [] });
+  }
+});
+
+// -- PATCH /api/profile/skills -- toggle confirmed/target skill -----------------
+app.patch("/api/profile/skills", requireAuth, (req, res) => {
+  const { skill, action } = req.body || {};
+  if (!skill || !action) return res.status(400).json({ error: 'skill and action required' });
+
+  const validActions = ['add_confirmed', 'add_target', 'remove'];
+  if (!validActions.includes(action)) return res.status(400).json({ error: 'invalid action' });
+
+  try {
+    const row = db.prepare("SELECT confirmed_skills, target_skills FROM user_profile WHERE user_id=?").get(req.user.id);
+    const confirmed = JSON.parse(row?.confirmed_skills || '[]');
+    const target    = JSON.parse(row?.target_skills    || '[]');
+    const key       = skill.toLowerCase();
+
+    const remove = arr => arr.filter(s => s.toLowerCase() !== key);
+
+    let newConfirmed = remove(confirmed);
+    let newTarget    = remove(target);
+
+    if (action === 'add_confirmed') newConfirmed = [...newConfirmed, key];
+    if (action === 'add_target')    newTarget    = [...newTarget,    key];
+
+    db.prepare(
+      "UPDATE user_profile SET confirmed_skills=?, target_skills=?, updated_at=unixepoch() WHERE user_id=?"
+    ).run(JSON.stringify(newConfirmed), JSON.stringify(newTarget), req.user.id);
+
+    res.json({ success: true, confirmed_skills: newConfirmed, target_skills: newTarget });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/jobs/poll -- returns new jobs since <since> ms timestamp + scraping status
 // Used by frontend to stream live results during an active background scrape.
 // LIVE POLLING: polls every 4s during active scrape (POLL_INTERVAL_MS on client).
 // Stops when scraping:false returned. Stale entries cleaned up every poll (>10 min).

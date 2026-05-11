@@ -23,6 +23,8 @@ import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
 
+import LandingPage from "./pages/LandingPage.jsx";
+
 // Marketing pages (lazy-loaded is fine but direct imports work too)
 import { FeaturesPage }    from "./pages/marketing/FeaturesPage.jsx";
 import { HowItWorksPage }  from "./pages/marketing/HowItWorksPage.jsx";
@@ -345,11 +347,12 @@ function AppRouter() {
         </UserRouteGate>
       }/>
 
-      {/* Root and catch-all: redirect based on auth state */}
+      {/* Root: landing page for logged-out, redirect for logged-in */}
       <Route path="/" element={
-        authStatus === "authenticated" && authUser
+        authStatus === "unknown" ? null
+        : authStatus === "authenticated" && authUser
           ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
-          : <Navigate to="/login" replace/>
+          : <LandingPage authUser={null}/>
       }/>
       <Route path="*" element={
         authStatus === "authenticated" && authUser

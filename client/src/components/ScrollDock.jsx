@@ -1,4 +1,11 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+/*
+ * ScrollDock — nav bar component (marketing + app variants)
+ * The hero search-bar role is superseded by UnifiedSearchBar (2026-05-11).
+ * ScrollDock itself remains active — it provides AppDockBar (authenticated)
+ * and MarketingToolsDock (public pages). Only search-bar wiring is deprecated.
+ * Remove search-bar integration after v2.1 release confirmation.
+ */
 // client/src/components/ScrollDock.jsx
 // Unified nav bar: full-width expanded → floating pill collapsed on scroll.
 // Variants: "marketing" | "app" | "tools"
