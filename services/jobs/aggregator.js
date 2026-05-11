@@ -9,6 +9,7 @@ import { classifyForIngest } from '../jobClassifier.js';
 // To disable a source: comment out its line. Zero other changes needed.
 
 import adzunaPlugin    from './sources/adzuna.js';
+import serpapiPlugin   from './sources/serpapi.js';
 import greenhousePlugin from './sources/greenhouse.js';
 import leverPlugin     from './sources/lever.js';
 import ashbyPlugin     from './sources/ashby.js';
@@ -18,6 +19,7 @@ import ashbyPlugin     from './sources/ashby.js';
 
 const SOURCES = [
   adzunaPlugin,
+  serpapiPlugin,
   greenhousePlugin,
   leverPlugin,
   ashbyPlugin,
