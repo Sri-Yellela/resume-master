@@ -71,7 +71,8 @@ import {
   getAutomationReadiness,
   publicIntegrationRow,
 } from "./services/integrationReadiness.js";
-import { searchJobs } from "./services/jobs/aggregator.js";
+import { searchJobs, cacheJobs } from "./services/jobs/aggregator.js";
+import { filterAndRankForProfile } from "./services/jobs/profileMatcher.js";
 
 console.log("[boot] server module loaded");
 
@@ -2154,6 +2155,21 @@ console.log("[boot] prompts loaded");
 }
 
 // â”€â”€ Seed admin user â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Warm job cache from ATS sources (non-blocking — runs after server starts)
+{
+  const scraped = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
+  if (scraped === 0) {
+    console.log("[boot] scraped_jobs empty — warming ATS cache...");
+    cacheJobs(db).then(n => {
+      console.log(`[boot] ATS cache warm complete: ${n} jobs cached`);
+    }).catch(err => {
+      console.error("[boot] ATS cache warm failed:", err.message);
+    });
+  } else {
+    console.log(`[boot] scraped_jobs: ${scraped} rows already cached`);
+  }
+}
+
 const adminExists = db.prepare("SELECT id FROM users WHERE username=?").get(ADMIN_USER);
 if (!adminExists) {
   db.prepare("INSERT INTO users (username,password_hash,is_admin) VALUES (?,?,1)")
@@ -4534,15 +4550,91 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       workType       = '',
     } = req.query;
 
-    // Client sends `role` (not `q`) — treat role as query keyword, fall back to q
     const rawQuery = (role || q || '').slice(0, 200).trim();
+    const pg       = Math.max(1, parseInt(page, 10) || 1);
+    const ps       = Math.min(50, Math.max(1, parseInt(pageSize, 10) || 10));
 
+    // --- Try profile-matched feed from scraped_jobs cache ---
+    const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
+
+    if (cacheCount > 0) {
+      // Load all cached jobs matching optional keyword filter
+      const keyFilter = rawQuery
+        ? `AND (title LIKE ? OR company LIKE ? OR description LIKE ?)`
+        : '';
+      const keyArgs   = rawQuery ? [`%${rawQuery}%`, `%${rawQuery}%`, `%${rawQuery}%`] : [];
+
+      const locFilter = location
+        ? `AND location LIKE ?`
+        : '';
+      const locArgs   = location ? [`%${location}%`] : [];
+
+      const cachedJobs = db.prepare(`
+        SELECT * FROM scraped_jobs
+        WHERE 1=1 ${keyFilter} ${locFilter}
+        ORDER BY scraped_at DESC
+        LIMIT 500
+      `).all(...keyArgs, ...locArgs);
+
+      // Load user profile for personalization
+      const profile = db.prepare(
+        "SELECT * FROM user_profile WHERE user_id=?"
+      ).get(req.user.id) || {};
+
+      const profileForMatcher = {
+        bucket_roles:     JSON.parse(profile.target_skills    || '[]'),
+        target_locations: JSON.parse(profile.target_locations || '[]'),
+        target_domains:   JSON.parse(profile.target_domains   || '[]'),
+        seniority_level:  profile.seniority_level || null,
+      };
+
+      // Load disliked URLs for this user
+      const dislikedRows = db.prepare(
+        "SELECT job_id FROM user_jobs WHERE user_id=? AND disliked=1"
+      ).all(req.user.id);
+      const dislikedUrls = dislikedRows.map(r => r.job_id);
+
+      // Rank by profile match
+      const ranked = filterAndRankForProfile(cachedJobs, profileForMatcher, dislikedUrls);
+
+      // Attach star/dislike state
+      const interactionMap = {};
+      if (ranked.length) {
+        const ids = ranked.map(j => j.job_id || j.url).filter(Boolean);
+        const placeholders = ids.map(() => '?').join(',');
+        const rows = db.prepare(
+          `SELECT job_id, starred, disliked FROM user_jobs WHERE user_id=? AND job_id IN (${placeholders})`
+        ).all(req.user.id, ...ids);
+        rows.forEach(r => { interactionMap[r.job_id] = r; });
+      }
+
+      const offset = (pg - 1) * ps;
+      const pageJobs = ranked.slice(offset, offset + ps).map(j => ({
+        ...j,
+        id:      j.job_id || j.url,
+        starred:  !!(interactionMap[j.job_id]?.starred),
+        disliked: !!(interactionMap[j.job_id]?.disliked),
+      }));
+
+      return res.json({
+        success:    true,
+        jobs:       pageJobs,
+        total:      ranked.length,
+        page:       pg,
+        pageSize:   ps,
+        totalPages: Math.ceil(ranked.length / ps),
+        sources:    ['scraped_jobs'],
+        fromCache:  true,
+      });
+    }
+
+    // --- Fallback: live search via aggregator ---
     const sanitized = {
       query:          rawQuery,
       location:       String(location).slice(0, 200).trim(),
       country:        String(country).slice(0, 2).toLowerCase() || 'us',
-      page:           Math.max(1, parseInt(page, 10) || 1),
-      pageSize:       Math.min(50, Math.max(1, parseInt(pageSize, 10) || 10)),
+      page:           pg,
+      pageSize:       ps,
       sort:           ['dateDesc','dateAsc','salaryDesc','salaryAsc','relevance'].includes(sort) ? sort : undefined,
       employmentType: employmentType ? String(employmentType).slice(0, 100) : undefined,
       remote:         workType === 'Remote' ? true : undefined,
@@ -4556,7 +4648,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       total:       result.total,
       page:        result.page,
       pageSize:    result.pageSize,
-      totalPages:  Math.ceil((result.total || 0) / sanitized.pageSize),
+      totalPages:  Math.ceil((result.total || 0) / ps),
       sources:     result.sources,
       attribution: result.attribution,
     });
