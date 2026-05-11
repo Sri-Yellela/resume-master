@@ -2427,7 +2427,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       }}>
 
         {/* â”€â”€ Row A â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        {/* Board tabs */}
+        {/* Board tabs — superseded by TopBar Pill 2 */}
+        {false && (
         <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
                       border:`2px solid ${theme.borderStrong}`, borderRadius:2 }}>
           {boardTabs.map(([id,lbl], idx) => (
@@ -2445,6 +2446,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             </button>
           ))}
         </div>
+        )}
         {/* Filters button â€” always visible, bold outline */}
         <button
           onClick={() => filtersOpen ? setFiltersOpen(false) : openFilterPanel()}
@@ -2512,6 +2514,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           {localSearch && !bgLoading ? " matched" : ""}
         </span>
 
+        {/* ATS role search + trigger — superseded by UnifiedSearchBar */}
+        {false && (<>
         <div style={{ flexBasis:"100%", height:0 }}/>
 
         <div style={{ position:"relative", flex:1, minWidth:200 }}>
@@ -2542,6 +2546,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           <span aria-hidden="true">{buttonIcon}</span>
           <span>{buttonLabel}</span>
         </LucyBtn>
+        </>)}
         {smartSearchError && (
           <div style={{ flexBasis:"100%", padding:"4px 0", fontSize:11, color:"#991b1b" }}>
             Error: {smartSearchError}
