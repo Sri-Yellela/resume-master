@@ -1,15 +1,16 @@
 // client/src/pages/LandingPage.jsx
-// Unified landing: hero (search bar centered) → dock (search bar sticks to top)
-// STATE A (logged-out): hero + public job feed + marketing sections below fold
-// STATE B (logged-in):  hero + personalized feed → redirect handled in App.jsx
-import { useState, useEffect, useCallback } from "react";
+// Auth is passed as a prop from App.jsx — no useAuth hook in this project.
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
+import BelowFoldContent from "../components/BelowFoldContent.jsx";
 import { useTheme } from "../styles/theme.jsx";
 import { api } from "../lib/api.js";
+import "./LandingPage.css";
 
-// Minimal read-only job card for the public feed
-function PublicJobCard({ job, theme }) {
+// ── Minimal read-only job card for logged-out public feed ─────────────────────
+function PublicJobCard({ job }) {
+  const { theme } = useTheme();
   return (
     <div style={{
       background: theme.surface,
@@ -24,9 +25,7 @@ function PublicJobCard({ job, theme }) {
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {job.title}
       </div>
-      <div style={{ fontSize: 12, color: theme.textMuted }}>
-        {job.company}
-      </div>
+      <div style={{ fontSize: 12, color: theme.textMuted }}>{job.company}</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         {job.location && (
           <span style={{ fontSize: 10, color: theme.textDim }}>{job.location}</span>
@@ -49,261 +48,225 @@ function PublicJobCard({ job, theme }) {
   );
 }
 
-// Below-fold marketing content (existing value props)
-function BelowFoldContent({ theme }) {
-  const features = [
-    {
-      icon: "✦",
-      title: "AI Resume Generation",
-      desc: "Tailored resumes built from your profile and the job description. ATS-optimized, recruiter-ready.",
-    },
-    {
-      icon: "🎯",
-      title: "ATS Score & Gap Analysis",
-      desc: "See exactly which keywords are missing. Fix them before applying.",
-    },
-    {
-      icon: "✉",
-      title: "Cover Letter Generator",
-      desc: "Professional, conversational, or enthusiastic — generated in seconds.",
-    },
-    {
-      icon: "⚡",
-      title: "Auto Apply",
-      desc: "Semi-automated application filling. You review, you submit.",
-    },
-  ];
-
+// ── Lazy-loaded JobCard wrapper (avoids circular imports) ─────────────────────
+function JobCardWrapper({ job, index, onDismiss }) {
+  const [JobCard, setJC] = useState(null);
+  useEffect(() => {
+    import("../components/JobCard.jsx")
+      .then(m => setJC(() => m.default))
+      .catch(() => {});
+  }, []);
+  if (!JobCard) return null;
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", padding: "60px 20px 80px" }}>
-      {/* Feature grid */}
-      <div style={{ textAlign: "center", marginBottom: 40 }}>
-        <div style={{
-          fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
-          fontWeight: 800, fontSize: 28, color: theme.text,
-          letterSpacing: "-0.02em",
-        }}>
-          Everything you need to land the job
-        </div>
-        <div style={{ fontSize: 14, color: theme.textMuted, marginTop: 8 }}>
-          From resume to offer — Resume Master has every step covered.
-        </div>
-      </div>
-
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-        gap: 16,
-        marginBottom: 48,
-      }}>
-        {features.map(f => (
-          <div key={f.title} style={{
-            background: theme.surface,
-            border: `1px solid ${theme.border}`,
-            borderRadius: 12,
-            padding: "20px 18px",
-          }}>
-            <div style={{ fontSize: 24, marginBottom: 10 }}>{f.icon}</div>
-            <div style={{ fontWeight: 700, fontSize: 13, color: theme.text, marginBottom: 6 }}>
-              {f.title}
-            </div>
-            <div style={{ fontSize: 12, color: theme.textMuted, lineHeight: 1.6 }}>
-              {f.desc}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* CTA */}
-      <div style={{ textAlign: "center" }}>
-        <Link to="/register" style={{
-          display: "inline-block",
-          background: theme.accent,
-          color: "#0f0f0f",
-          padding: "12px 32px",
-          borderRadius: 8,
-          fontWeight: 800,
-          fontSize: 14,
-          textDecoration: "none",
-          letterSpacing: "0.02em",
-        }}>
-          Get Started Free
-        </Link>
-        <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 10 }}>
-          No credit card required.
-        </div>
-      </div>
+    <div className="job-card--animated" style={{ "--ci": index }}>
+      <JobCard job={job} onDismiss={onDismiss} />
     </div>
   );
 }
 
+// ── LandingPage ───────────────────────────────────────────────────────────────
 export default function LandingPage({ authUser }) {
-  const { theme, isDark } = useTheme();
-  const [searchBarMode, setSearchBarMode] = useState("hero"); // "hero" | "dock"
-  const [jobs, setJobs]                   = useState([]);
-  const [total, setTotal]                 = useState(0);
-  const [loading, setLoading]             = useState(true);
-  const [searchResults, setSearchResults] = useState(null); // null = showing feed
+  const { theme } = useTheme();
+  const [uiMode,      setUiMode]      = useState("hero");
+  const [jobs,        setJobs]        = useState([]);
+  const [total,       setTotal]       = useState(0);
+  const [page,        setPage]        = useState(1);
+  const [loading,     setLoading]     = useState(true);
+  const [searchRes,   setSearchRes]   = useState(null);
+  const docked = useRef(false);
 
-  // Load public feed on mount
-  useEffect(() => {
-    api("/api/jobs/generic?pageSize=12")
-      .then(d => {
-        const loaded = d.jobs || [];
-        setJobs(loaded);
+  const pageSize   = authUser ? 20 : 12;
+  const displayJobs = searchRes ?? jobs;
+  const totalPages  = Math.ceil(total / pageSize);
+
+  const loadFeed = useCallback(async (p = 1) => {
+    setLoading(true);
+    try {
+      const ep = authUser
+        ? `/api/jobs?page=${p}&pageSize=20`
+        : `/api/jobs/generic?page=${p}&pageSize=12`;
+      const d = await api(ep);
+      if (d.success !== false) {
+        setJobs(d.jobs || []);
         setTotal(d.total || 0);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  // Animate to dock once jobs load
-  useEffect(() => {
-    if (!loading && jobs.length > 0 && searchBarMode === "hero") {
-      const t = setTimeout(() => setSearchBarMode("dock"), 300);
-      return () => clearTimeout(t);
+        setPage(p);
+      }
+    } catch (e) {
+      console.error("[LandingPage] loadFeed", e);
+    } finally {
+      setLoading(false);
     }
-  }, [loading, jobs.length, searchBarMode]);
+  }, [authUser]);
 
-  const handleLocalFilter = useCallback(({ query, location, experience, domain }) => {
-    const q = query.toLowerCase();
-    const loc = location.toLowerCase();
-    const filtered = jobs.filter(job => {
-      const text = `${job.title} ${job.company} ${job.location || ""}`.toLowerCase();
-      if (q && !text.includes(q)) return false;
-      if (loc && !(job.location || "").toLowerCase().includes(loc)) return false;
-      if (domain && !(text.includes(domain.toLowerCase()))) return false;
+  // Load feed on mount
+  useEffect(() => { loadFeed(1); }, [loadFeed]);
+
+  // Animate hero → dock once jobs arrive
+  useEffect(() => {
+    if (jobs.length > 0 && !docked.current) {
+      docked.current = true;
+      setTimeout(() => setUiMode("dock"), 80);
+    }
+  }, [jobs.length]);
+
+  const handleLocalFilter = useCallback(({ query, location, experience, domain, status }) => {
+    if (!query && !location && !experience && !domain && !status) {
+      setSearchRes(null);
+      return;
+    }
+    setSearchRes(jobs.filter(j => {
+      const t = `${j.title} ${j.company} ${j.location || ""} ${j.description || ""}`.toLowerCase();
+      if (query      && !t.includes(query.toLowerCase()))                          return false;
+      if (location   && !(j.location || "").toLowerCase().includes(location.toLowerCase())) return false;
+      if (experience && j.bucket_seniority !== experience)                         return false;
+      if (domain     && j.bucket_domain !== domain)                                return false;
+      if (status === "starred" && !j._user?.starred)                              return false;
+      if (status === "applied" && j._user?.status !== "applied")                  return false;
       return true;
-    });
-    setSearchResults(filtered);
+    }));
   }, [jobs]);
 
-  const handleSearch = useCallback(async ({ query, location, experience, domain }) => {
-    setSearchBarMode("dock");
+  const handleSearch = useCallback(async (params) => {
+    setUiMode("dock");
+    setLoading(true);
+    setSearchRes(null);
     try {
       const d = await api("/api/jobs/search", {
         method: "POST",
-        body: JSON.stringify({ query, location, experience, domain, pageSize: 20 }),
+        body: JSON.stringify({ ...params, page: 1, pageSize: 20 }),
       });
-      setSearchResults(d.jobs || []);
-      setTotal(d.total || 0);
-    } catch {
-      setSearchResults([]);
+      if (d.success !== false) {
+        setSearchRes(d.jobs || []);
+        setTotal(d.total || 0);
+        setPage(1);
+      }
+    } catch (e) {
+      console.error("[LandingPage] search", e);
+      setSearchRes([]);
+    } finally {
+      setLoading(false);
     }
+    return Promise.resolve();
   }, []);
 
-  const displayJobs = searchResults !== null ? searchResults : jobs;
+  function handleDismiss(url) {
+    setJobs(p => p.filter(j => j.url !== url));
+    setSearchRes(p => p ? p.filter(j => j.url !== url) : null);
+  }
+
+  const isDock = uiMode === "dock";
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: theme.bg,
-      fontFamily: "'DM Sans',system-ui,sans-serif",
-    }}>
-      {/* Nav */}
-      <nav style={{
-        position: "fixed", top: 0, left: 0, right: 0,
-        height: 52, zIndex: 300,
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 24px",
-        background: searchBarMode === "dock" ? "transparent" : `${theme.surface}f2`,
-        backdropFilter: searchBarMode === "dock" ? "none" : "blur(12px)",
-        WebkitBackdropFilter: searchBarMode === "dock" ? "none" : "blur(12px)",
-        borderBottom: searchBarMode === "dock" ? "none" : `1px solid ${theme.border}22`,
-        pointerEvents: searchBarMode === "dock" ? "none" : "auto",
-        transition: "all 0.4s",
-      }}>
-        <span style={{
-          fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
-          fontWeight: 800, fontSize: 17, letterSpacing: "0.04em",
-          textTransform: "uppercase", color: theme.text,
-          fontStyle: "italic",
+    <div className={`lp lp--${uiMode}`} style={{ background: theme.bg, color: theme.text,
+      fontFamily: "'DM Sans',system-ui,sans-serif" }}>
+
+      {/* Nav — fades out when dock takes over */}
+      {!isDock && (
+        <nav style={{
+          position: "fixed", top: 0, left: 0, right: 0,
+          height: 52, zIndex: 300,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0 24px",
+          background: `${theme.surface}f2`,
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderBottom: `1px solid ${theme.border}22`,
         }}>
-          Resume Master
-        </span>
-        <div style={{ display: "flex", gap: 10, pointerEvents: "auto" }}>
-          <Link to="/login" style={{
-            fontSize: 13, fontWeight: 600, color: theme.textMuted,
-            textDecoration: "none", padding: "6px 14px", borderRadius: 6,
+          <span style={{
+            fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
+            fontWeight: 800, fontSize: 17, letterSpacing: "0.04em",
+            textTransform: "uppercase", color: theme.text, fontStyle: "italic",
           }}>
-            Sign In
-          </Link>
-          <Link to="/register" style={{
-            fontSize: 13, fontWeight: 700, color: "#0f0f0f",
-            textDecoration: "none", padding: "6px 16px", borderRadius: 6,
-            background: theme.accent,
-          }}>
-            Get Started
-          </Link>
-        </div>
-      </nav>
-
-      {/* Hero / search bar */}
-      <div style={{
-        paddingTop: searchBarMode === "dock" ? 64 : "calc(50vh - 120px)",
-        transition: "padding-top 0.5s cubic-bezier(0.16, 1, 0.3, 1)",
-      }}>
-        <UnifiedSearchBar
-          mode={searchBarMode}
-          isLoggedOut={!authUser}
-          onSearch={handleSearch}
-          onLocalFilter={handleLocalFilter}
-        />
-      </div>
-
-      {/* Job grid */}
-      <div style={{
-        maxWidth: 960, margin: "0 auto",
-        padding: searchBarMode === "dock" ? "16px 20px" : "40px 20px",
-        transition: "padding 0.4s",
-      }}>
-        {loading ? (
-          <div style={{ textAlign: "center", color: theme.textMuted, padding: 40, fontSize: 13 }}>
-            Loading jobs…
+            Resume Master
+          </span>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Link to="/login" style={{ fontSize: 13, fontWeight: 600, color: theme.textMuted,
+              textDecoration: "none", padding: "6px 14px", borderRadius: 6 }}>
+              Sign In
+            </Link>
+            <Link to="/register" style={{ fontSize: 13, fontWeight: 700, color: "#0f0f0f",
+              textDecoration: "none", padding: "6px 16px", borderRadius: 6,
+              background: theme.accent }}>
+              Get Started
+            </Link>
           </div>
-        ) : displayJobs.length === 0 ? (
-          <div style={{ textAlign: "center", color: theme.textMuted, padding: 40, fontSize: 13 }}>
-            {searchResults !== null ? "No jobs match your search." : "No jobs available yet."}
+        </nav>
+      )}
+
+      {/* UnifiedSearchBar — hero centered → dock sticky-top */}
+      <UnifiedSearchBar
+        mode={uiMode}
+        isLoggedOut={!authUser}
+        onSearch={handleSearch}
+        onLocalFilter={handleLocalFilter}
+      />
+
+      {/* Main content */}
+      <main className={`lp__main${isDock ? " lp__main--pushed" : ""}`}>
+
+        {/* Skeleton loaders */}
+        {loading && (
+          <div className="lp__grid">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="lp__skel" style={{ animationDelay: `${i * 70}ms` }} />
+            ))}
           </div>
-        ) : (
+        )}
+
+        {/* Job grid */}
+        {!loading && displayJobs.length > 0 && (
           <>
             <div style={{
               fontSize: 12, color: theme.textMuted, marginBottom: 12,
-              display: "flex", justifyContent: "space-between",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
             }}>
-              <span>{displayJobs.length} jobs{searchResults === null && total > displayJobs.length ? ` of ${total}` : ""}</span>
-              {searchResults !== null && (
-                <button onClick={() => setSearchResults(null)}
+              <span>
+                {displayJobs.length} job{displayJobs.length !== 1 ? "s" : ""}
+                {searchRes === null && total > displayJobs.length ? ` of ${total}` : ""}
+              </span>
+              {searchRes !== null && (
+                <button onClick={() => setSearchRes(null)}
                   style={{ background: "none", border: "none", color: theme.accentText,
                            cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>
                   ← Back to feed
                 </button>
               )}
             </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-              gap: 12,
-            }}>
+
+            <div className="lp__grid">
               {displayJobs.map((job, i) => (
-                <div key={job.job_id || job.id || job.url || i}
-                  style={{
-                    animation: "cardEntrance 360ms cubic-bezier(0.16,1,0.3,1) both",
-                    animationDelay: `${Math.min(i * 45, 400)}ms`,
-                  }}>
-                  <PublicJobCard job={job} theme={theme}/>
-                </div>
+                authUser
+                  ? <JobCardWrapper key={job.job_id || job.id || job.url || i}
+                      job={job} index={i} onDismiss={handleDismiss} />
+                  : <div key={job.job_id || job.id || job.url || i}
+                      className="job-card--animated" style={{ "--ci": i }}>
+                      <PublicJobCard job={job} />
+                    </div>
               ))}
             </div>
 
-            {/* Sign-up prompt */}
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="lp__pages">
+                <button className="lp__page-btn"
+                  disabled={page <= 1} onClick={() => loadFeed(page - 1)}>
+                  ← Prev
+                </button>
+                <span className="lp__pageinfo">{page} / {totalPages}</span>
+                <button className="lp__page-btn"
+                  disabled={page >= totalPages} onClick={() => loadFeed(page + 1)}>
+                  Next →
+                </button>
+              </div>
+            )}
+
+            {/* Sign-up prompt for logged-out users */}
             {!authUser && (
               <div style={{
                 marginTop: 32, padding: "20px 24px",
                 background: `${theme.accent}18`,
                 border: `1px solid ${theme.accent}44`,
-                borderRadius: 10,
-                textAlign: "center",
+                borderRadius: 10, textAlign: "center",
               }}>
                 <div style={{ fontWeight: 700, fontSize: 14, color: theme.text, marginBottom: 6 }}>
                   Sign up to save jobs, score your resume, and generate tailored applications
@@ -320,17 +283,25 @@ export default function LandingPage({ authUser }) {
             )}
           </>
         )}
-      </div>
 
-      {/* Below fold — marketing content */}
-      {!authUser && <BelowFoldContent theme={theme}/>}
+        {/* Empty state */}
+        {!loading && displayJobs.length === 0 && isDock && (
+          <div className="lp__empty">
+            <p style={{ color: theme.textMuted }}>
+              {searchRes !== null ? "No jobs match your search." : "No jobs available yet."}
+            </p>
+            <button onClick={() => { setSearchRes(null); loadFeed(1); }}
+              style={{ marginTop: 12, padding: "8px 20px", borderRadius: 6,
+                       background: theme.accent, color: "#0f0f0f",
+                       border: "none", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+              Reset
+            </button>
+          </div>
+        )}
 
-      <style>{`
-        @keyframes cardEntrance {
-          from { opacity: 0; transform: translateY(20px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
+        {/* Below-fold marketing content (logged-out only) */}
+        {!authUser && <BelowFoldContent />}
+      </main>
     </div>
   );
 }
