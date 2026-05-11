@@ -1,6 +1,6 @@
 // SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/JobCard.jsx — shared expandable job card
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 // ── Helpers ─────────────────────────────────────────────────────
 // Compute elapsed time since posting.
@@ -222,6 +222,52 @@ export default function JobCard({
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
 
+  // Local star/dislike state — used when onStar/onDislike callbacks are not provided
+  // (e.g. when rendered from LandingPage without a parent managing state)
+  const [starred,  setStarred]  = useState(job._user?.starred  ?? job.starred  ?? false);
+  const [disliked, setDisliked] = useState(job._user?.disliked ?? job.disliked ?? false);
+
+  // Sync if job prop changes (e.g. parent re-fetches)
+  useEffect(() => {
+    setStarred(job._user?.starred  ?? job.starred  ?? false);
+    setDisliked(job._user?.disliked ?? job.disliked ?? false);
+  }, [job._user, job.starred, job.disliked]);
+
+  // Persist interact (star/dislike) when no parent callback provided
+  async function interact(patch) {
+    try {
+      await fetch("/api/jobs/interact", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          url: job.url || job.applyUrl,
+          title: job.title,
+          company: job.company,
+          source: job.source,
+          ...patch,
+        }),
+      });
+    } catch (e) {
+      console.warn("[JobCard] interact", e);
+    }
+  }
+
+  // Fallback handlers used when parent doesn't provide callbacks
+  const handleStar = onStar ?? (() => {
+    const next = !starred;
+    setStarred(next);
+    if (next) setDisliked(false);
+    interact({ starred: next, ...(next ? { disliked: false } : {}) });
+  });
+
+  const handleDislike = onDislike ?? (() => {
+    const next = !disliked;
+    setDisliked(next);
+    if (next) setStarred(false);
+    interact({ disliked: next, ...(next ? { starred: false } : {}) });
+  });
+
   const frostedBg = isDark
     ? (hov ? "rgba(28,28,28,0.88)" : "rgba(17,17,17,0.55)")
     : (hov ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.44)");
@@ -340,28 +386,26 @@ export default function JobCard({
               </span>
               <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt, job.scrapedAt)}</span>
               {(g?.atsScore != null || job?.baseAtsScore != null) && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>}
-              {onStar && (
-                <ToggleIconBtn
-                  bg="#f59e0b"
-                  size={28}
-                  theme={theme}
-                  active={job.starred}
-                  activeLabel="Remove from saved"
-                  inactiveLabel="Save job"
-                  onClick={e => { e.stopPropagation(); onStar(); }}
-                  activeChildren="★"
-                  inactiveChildren="☆"
-                />
-              )}
-              {showDislike && onDislike && (
+              <ToggleIconBtn
+                bg="#f59e0b"
+                size={28}
+                theme={theme}
+                active={starred}
+                activeLabel="Remove from saved"
+                inactiveLabel="Save job"
+                onClick={e => { e.stopPropagation(); handleStar(); }}
+                activeChildren="★"
+                inactiveChildren="☆"
+              />
+              {showDislike && (
                 <ToggleIconBtn
                   bg="#dc2626"
                   size={28}
                   theme={theme}
-                  active={job.disliked}
+                  active={disliked}
                   activeLabel="Undo pass"
                   inactiveLabel="Not interested"
-                  onClick={e => { e.stopPropagation(); onDislike(); }}
+                  onClick={e => { e.stopPropagation(); handleDislike(); }}
                   activeChildren={
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                       stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -440,6 +484,14 @@ export default function JobCard({
                   {job.applicantCount > 200 ? "200+ applicants" : `${job.applicantCount} applicants`}
                 </span>
               )}
+              {job.source_label && (
+                <span style={{
+                  fontSize: 9, color: theme.textDim,
+                  background: theme.surfaceHigh, padding: "1px 6px", borderRadius: 999,
+                }}>
+                  {job.source_label}
+                </span>
+              )}
             </div>
           </div>
 
@@ -460,30 +512,28 @@ export default function JobCard({
             )}
 
             {/* Star */}
-            {onStar && (
-              <ToggleIconBtn
-                bg="#f59e0b"
-                size={30}
-                theme={theme}
-                active={job.starred}
-                activeLabel="Remove from saved"
-                inactiveLabel="Save job"
-                onClick={e => { e.stopPropagation(); onStar(); }}
-                activeChildren="★"
-                inactiveChildren="☆"
-              />
-            )}
+            <ToggleIconBtn
+              bg="#f59e0b"
+              size={30}
+              theme={theme}
+              active={starred}
+              activeLabel="Remove from saved"
+              inactiveLabel="Save job"
+              onClick={e => { e.stopPropagation(); handleStar(); }}
+              activeChildren="★"
+              inactiveChildren="☆"
+            />
 
             {/* Dislike */}
-            {showDislike && onDislike && (
+            {showDislike && (
               <ToggleIconBtn
                 bg="#dc2626"
                 size={28}
                 theme={theme}
-                active={job.disliked}
+                active={disliked}
                 activeLabel="Undo pass"
                 inactiveLabel="Not interested"
-                onClick={e => { e.stopPropagation(); onDislike(); }}
+                onClick={e => { e.stopPropagation(); handleDislike(); }}
                 activeChildren={
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -544,6 +594,15 @@ export default function JobCard({
 
           {/* Extra meta row */}
           <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center", paddingTop:4 }}>
+            {job.source_label && (
+              <span style={{
+                fontSize: 11, color: theme.textFaint || theme.textDim,
+                background: theme.surfaceHigh, padding: "2px 8px",
+                borderRadius: 9999, border: `1px solid ${theme.border}44`,
+              }}>
+                {job.source_label}
+              </span>
+            )}
             {salaryStr && (
               <span style={{ fontSize:11, color:"#16a34a", fontWeight:700, background:"#dcfce733",
                               padding:"2px 8px", borderRadius:4 }}>
