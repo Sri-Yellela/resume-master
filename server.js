@@ -2155,6 +2155,27 @@ console.log("[boot] prompts loaded");
 }
 
 // â”€â”€ Seed admin user â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Cache cleanup — removes scraped_jobs older than 7 days, then re-warms if empty
+function runCacheCleanup() {
+  try {
+    const cutoff = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+    const removed = db.prepare("DELETE FROM scraped_jobs WHERE scraped_at < ?").run(cutoff);
+    if (removed.changes > 0) {
+      console.log(`[Cache] Removed ${removed.changes} expired jobs`);
+      // Also clean orphaned job_role_map entries
+      db.prepare("DELETE FROM job_role_map WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)").run();
+    }
+    const remaining = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
+    if (remaining === 0) {
+      console.log("[Cache] Empty after cleanup — re-warming from ATS...");
+      cacheJobs(db).then(n => console.log(`[Cache] Re-warm complete: ${n} jobs`))
+                   .catch(e => console.error("[Cache] Re-warm failed:", e.message));
+    }
+  } catch (e) {
+    console.error("[Cache cleanup]", e.message);
+  }
+}
+
 // Warm job cache from ATS sources (non-blocking — runs after server starts)
 {
   const scraped = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
@@ -2168,6 +2189,8 @@ console.log("[boot] prompts loaded");
   } else {
     console.log(`[boot] scraped_jobs: ${scraped} rows already cached`);
   }
+  // Schedule daily cleanup
+  setInterval(runCacheCleanup, 24 * 60 * 60 * 1000);
 }
 
 const adminExists = db.prepare("SELECT id FROM users WHERE username=?").get(ADMIN_USER);
@@ -4764,6 +4787,40 @@ app.patch("/api/profile/skills", requireAuth, (req, res) => {
     ).run(JSON.stringify(newConfirmed), JSON.stringify(newTarget), req.user.id);
 
     res.json({ success: true, confirmed_skills: newConfirmed, target_skills: newTarget });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/jobs/interact -- unified star/dislike/status persist for board jobs
+app.patch("/api/jobs/interact", requireAuth, (req, res) => {
+  const { url, title, company, source, starred, disliked, status } = req.body || {};
+  if (!url) return res.status(400).json({ error: "url required" });
+  try {
+    const existing = db.prepare(
+      "SELECT starred, disliked, status FROM user_jobs WHERE user_id=? AND job_id=?"
+    ).get(req.user.id, url);
+
+    const newStarred  = starred  != null ? (starred  ? 1 : 0) : (existing?.starred  ?? 0);
+    const newDisliked = disliked != null ? (disliked ? 1 : 0) : (existing?.disliked ?? 0);
+    const newStatus   = status   != null ? status              : (existing?.status   ?? null);
+
+    // Resolve a domain_profile_id for the interaction row
+    const activeProfile = db.prepare(
+      "SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1 LIMIT 1"
+    ).get(req.user.id);
+    const profileId = activeProfile?.id || null;
+
+    db.prepare(`
+      INSERT INTO user_jobs (user_id, job_id, domain_profile_id, starred, disliked, updated_at)
+      VALUES (?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(user_id, job_id) DO UPDATE SET
+        starred    = excluded.starred,
+        disliked   = excluded.disliked,
+        updated_at = unixepoch()
+    `).run(req.user.id, url, profileId, newStarred, newDisliked);
+
+    res.json({ success: true, starred: !!newStarred, disliked: !!newDisliked });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
