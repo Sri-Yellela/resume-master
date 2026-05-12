@@ -510,6 +510,14 @@ export default function JobCard({
                   {job.source_label}
                 </span>
               )}
+              {job.via && (
+                <span style={{
+                  fontSize: 9, color: theme.textDim,
+                  background: theme.surfaceHigh, padding: "1px 6px", borderRadius: 999,
+                }}>
+                  {job.via}
+                </span>
+              )}
             </div>
           </div>
 
@@ -623,6 +631,15 @@ export default function JobCard({
                 borderRadius: 9999, border: `1px solid ${theme.border}44`,
               }}>
                 {job.source_label}
+              </span>
+            )}
+            {job.via && (
+              <span style={{
+                fontSize: 11, color: theme.textFaint || theme.textDim,
+                background: theme.surfaceHigh, padding: "2px 8px",
+                borderRadius: 9999, border: `1px solid ${theme.border}44`,
+              }}>
+                {job.via}
               </span>
             )}
             {salaryStr && (

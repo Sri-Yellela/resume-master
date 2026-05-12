@@ -2110,6 +2110,10 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE scraped_jobs ADD COLUMN source_label     TEXT;
       `,
     },
+    {
+      id: "058_scraped_jobs_via",
+      sql: `ALTER TABLE scraped_jobs ADD COLUMN via TEXT;`,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -4695,7 +4699,8 @@ app.get("/api/jobs/generic", async (req, res) => {
     const rows = db.prepare(`
       SELECT job_id, title, company, location, work_type, url, source, source_label,
              bucket_role, bucket_seniority, bucket_domain, posted_at, scraped_at,
-             salary_min, salary_max, salary_currency, compensation
+             salary_min, salary_max, salary_currency, compensation,
+             company_icon_url, via
       FROM scraped_jobs
       WHERE direct_apply = 1
       ORDER BY scraped_at DESC
@@ -4921,6 +4926,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     applicantCount:  j.applicant_count,
     compensation:    j.compensation,
     companyIconUrl:  j.company_icon_url,
+    via:             j.via || null,
     isFrequentRepost: !!j.is_frequent_repost,
     visited:         !!j.visited,
     alreadyApplied:  !!j.applied,

@@ -115,7 +115,9 @@ async function searchJobs({ query = '', location = '', country = 'us', page = 1,
     return {
       ...stripInternalFields(job),
       ...buckets,
-      source_label: SOURCE_LABELS[job.source] || job.source,
+      source_label:   SOURCE_LABELS[job.source] || job.source,
+      companyIconUrl: job.thumbnail || null,
+      via:            job.via || null,
     };
   });
 
@@ -160,10 +162,12 @@ async function cacheJobs(db) {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO scraped_jobs
         (job_id, search_query, _hash, title, company, location, url, source, source_label,
-         posted_at, scraped_at, bucket_role, bucket_seniority, bucket_domain, direct_apply, description)
+         posted_at, scraped_at, bucket_role, bucket_seniority, bucket_domain, direct_apply, description,
+         company_icon_url, via)
       VALUES
         (@job_id, @search_query, @_hash, @title, @company, @location, @url, @source, @source_label,
-         @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description)
+         @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description,
+         @company_icon_url, @via)
     `);
 
     const roleMapStmt = db.prepare(`
@@ -196,6 +200,8 @@ async function cacheJobs(db) {
           bucket_domain:    job.bucket_domain || null,
           direct_apply:     job.direct_apply === false ? 0 : 1,
           description:      job.description || null,
+          company_icon_url: job.thumbnail || job.companyIconUrl || null,
+          via:              job.via || null,
         });
 
         // Populate job_role_map so star/dislike works via resolveUserJobDomainProfileId

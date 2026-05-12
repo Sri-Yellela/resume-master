@@ -25,7 +25,9 @@ function normalizeGoogleJob(raw) {
     posted_at:    new Date(
       Date.now() - parseDaysAgo(ext.posted_at) * 86400000
     ).toISOString(),
-    remote: !!ext.work_from_home,
+    remote:       !!ext.work_from_home,
+    thumbnail:    raw.thumbnail || null,
+    via:          raw.via       || null,
     _attribution: { name: 'Google Jobs via SerpApi', url: 'https://serpapi.com' },
   });
 }

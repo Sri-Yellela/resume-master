@@ -27,6 +27,8 @@ function normalizeJob({
   posted_at,       // string|null — ISO 8601 date string
   contract_type,   // string|null — 'full_time'|'part_time'|'contract'|'internship'
   remote,          // boolean|null — true if explicitly remote
+  thumbnail,       // string|null — company logo/thumbnail URL (SerpApi, etc.)
+  via,             // string|null — listing attribution e.g. "via LinkedIn"
   _attribution,    // object|null — { name, url } if source ToS requires attribution
   _raw,            // object — original source response (stripped before client)
 } = {}) {
@@ -50,6 +52,8 @@ function normalizeJob({
     posted_at:       posted_at || null,
     contract_type:   contract_type || null,
     remote:          remote != null ? Boolean(remote) : null,
+    thumbnail:       thumbnail || null,
+    via:             via || null,
     _attribution:    _attribution || null,
     _raw,
     _schema_version: JOB_SCHEMA_VERSION,
