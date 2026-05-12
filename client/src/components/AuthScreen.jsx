@@ -115,9 +115,9 @@ function PosterCard({ company, index }) {
 }
 
 // ── Auth modal ────────────────────────────────────────────────
-function AuthModal({ onLogin }) {
+function AuthModal({ onLogin, initialTab = "login" }) {
   const { theme, isDark } = useTheme();
-  const [tab,     setTab]   = useState("login");
+  const [tab,     setTab]   = useState(initialTab);
   const [regStep, setRegStep] = useState(1);
   // Login form
   const [login,   setLoginF]  = useState({ username:"", password:"" });
@@ -487,7 +487,7 @@ function AuthModal({ onLogin }) {
 }
 
 // ── Main AuthScreen ───────────────────────────────────────────
-export default function AuthScreen({ onLogin }) {
+export default function AuthScreen({ onLogin, initialTab = "login" }) {
   const { theme } = useTheme();
   const { mode: vpMode } = useViewport();
   const isMobile = vpMode === "mobile" || vpMode === "tablet";
@@ -554,7 +554,7 @@ export default function AuthScreen({ onLogin }) {
           </p>
 
           {/* Auth modal */}
-          <AuthModal onLogin={onLogin}/>
+          <AuthModal onLogin={onLogin} initialTab={initialTab}/>
         </div>
 
         {/* RIGHT — Scrolling poster cards — hidden on mobile */}

@@ -358,6 +358,16 @@ function AppRouter() {
         </PublicLoginRoute>
       }/>
 
+      {/* Register — same screen as login, opens register tab */}
+      <Route path="/register" element={
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser}>
+          <AuthScreen initialTab="register" onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
+      }/>
+
       {/* User app — redirect admin to /admin */}
       <Route path="/app/*" element={
         <UserRouteGate authStatus={authStatus} authUser={authUser}>
