@@ -23,7 +23,11 @@ import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
 
-import LandingPage from "./pages/LandingPage.jsx";
+import LandingPage    from "./pages/LandingPage.jsx";
+import NavBar         from "./components/NavBar.jsx";
+import ProductsPage   from "./pages/ProductsPage.jsx";
+import BlogPage       from "./pages/BlogPage.jsx";
+import NotFoundPage   from "./pages/NotFoundPage.jsx";
 
 // Marketing pages (lazy-loaded is fine but direct imports work too)
 import { FeaturesPage }    from "./pages/marketing/FeaturesPage.jsx";
@@ -277,6 +281,13 @@ function AppRouter() {
       .finally(() => setAuthStatus(prev => prev === "unknown" ? "unauthenticated" : prev));
   }, []);
 
+  const handlePublicLogout = useCallback(async () => {
+    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+    setAuthContext("");
+    setAuthUser(null);
+    setAuthStatus("unauthenticated");
+  }, []);
+
   if (authStatus === "unknown") return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column",
                   alignItems:"center", justifyContent:"center",
@@ -288,6 +299,9 @@ function AppRouter() {
       <span style={{ color:theme.textMuted, fontSize:13 }}>Loading…</span>
     </div>
   );
+
+  // NavBar helper — renders the shared public nav with current auth state
+  const navBar = <NavBar user={authUser} onLogout={handlePublicLogout}/>;
 
   return (
     <Routes>
@@ -305,6 +319,10 @@ function AppRouter() {
       <Route path="/faq"          element={<FAQPage/>}/>
       <Route path="/privacy"      element={<PrivacyPage/>}/>
       <Route path="/terms"        element={<TermsPage/>}/>
+
+      {/* New public pages with NavBar */}
+      <Route path="/products" element={<>{navBar}<ProductsPage/></>}/>
+      <Route path="/blog"     element={<>{navBar}<BlogPage/></>}/>
 
       {/* Admin login — redirect if already authenticated */}
       <Route path="/admin/login" element={
@@ -352,12 +370,14 @@ function AppRouter() {
         authStatus === "unknown" ? null
         : authStatus === "authenticated" && authUser
           ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
-          : <LandingPage authUser={null}/>
+          : <>{navBar}<LandingPage authUser={null}/></>
       }/>
+
+      {/* 404 — authenticated users redirect, logged-out users see NotFoundPage */}
       <Route path="*" element={
         authStatus === "authenticated" && authUser
           ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
-          : <Navigate to="/login" replace/>
+          : <>{navBar}<NotFoundPage/></>
       }/>
     </Routes>
   );

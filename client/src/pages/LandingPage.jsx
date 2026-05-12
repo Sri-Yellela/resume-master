@@ -1,7 +1,7 @@
 // client/src/pages/LandingPage.jsx
 // Auth is passed as a prop from App.jsx — no useAuth hook in this project.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router-dom"; // used in PublicJobCard + sign-up prompt
 import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
 import BelowFoldContent from "../components/BelowFoldContent.jsx";
 import { useTheme } from "../styles/theme.jsx";
@@ -172,40 +172,7 @@ export default function LandingPage({ authUser }) {
     <div className={`lp lp--${uiMode}`} style={{ background: theme.bg, color: theme.text,
       fontFamily: "'DM Sans',system-ui,sans-serif" }}>
 
-      {/* Nav — fades out when dock takes over */}
-      {!isDock && (
-        <nav style={{
-          position: "fixed", top: 0, left: 0, right: 0,
-          height: 52, zIndex: 300,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "0 24px",
-          background: `${theme.surface}f2`,
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          borderBottom: `1px solid ${theme.border}22`,
-        }}>
-          <span style={{
-            fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
-            fontWeight: 800, fontSize: 17, letterSpacing: "0.04em",
-            textTransform: "uppercase", color: theme.text, fontStyle: "italic",
-          }}>
-            Resume Master
-          </span>
-          <div style={{ display: "flex", gap: 10 }}>
-            <Link to="/login" style={{ fontSize: 13, fontWeight: 600, color: theme.textMuted,
-              textDecoration: "none", padding: "6px 14px", borderRadius: 6 }}>
-              Sign In
-            </Link>
-            <Link to="/register" style={{ fontSize: 13, fontWeight: 700, color: "#0f0f0f",
-              textDecoration: "none", padding: "6px 16px", borderRadius: 6,
-              background: theme.accent }}>
-              Get Started
-            </Link>
-          </div>
-        </nav>
-      )}
-
-      {/* UnifiedSearchBar — hero centered → dock sticky-top */}
+      {/* UnifiedSearchBar — hero centered → dock sticky-top (NavBar is rendered by App.jsx) */}
       <UnifiedSearchBar
         mode={uiMode}
         isLoggedOut={!authUser}

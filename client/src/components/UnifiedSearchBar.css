@@ -16,7 +16,7 @@
 }
 
 .usb--hero {
-  top: 50vh;
+  top: calc(50vh + 28px); /* shift down by half of 56px NavBar height */
   left: 50%;
   right: auto;
   width: min(920px, 94vw);
@@ -28,7 +28,7 @@
 }
 
 .usb--dock {
-  top: 0;
+  top: 56px; /* sit directly below 56px NavBar */
   left: 0;
   right: 0;
   width: 100%;
