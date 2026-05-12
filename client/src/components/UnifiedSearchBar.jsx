@@ -106,8 +106,8 @@ export default function UnifiedSearchBar({
     <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero')}
          role="search" aria-label="Job search">
 
-      {/* Branding — hero mode only */}
-      <div className={'usb__brand' + (isDock ? ' usb__brand--hidden' : '')}>
+      {/* Branding — hero: visible, dock: hidden via CSS */}
+      <div className="usb__brand">
         <h1 className="usb__title">{brandingText}</h1>
         <p className="usb__sub">
           {greeting

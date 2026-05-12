@@ -73,7 +73,8 @@ export default function LandingPage({ authUser }) {
   const [page,        setPage]        = useState(1);
   const [loading,     setLoading]     = useState(true);
   const [searchRes,   setSearchRes]   = useState(null);
-  const docked = useRef(false);
+  const liveSearchDone = useRef(false);
+  const DOCK_THRESHOLD = 60;
 
   const pageSize   = authUser ? 20 : 12;
   const displayJobs = searchRes ?? jobs;
@@ -101,13 +102,16 @@ export default function LandingPage({ authUser }) {
   // Load feed on mount
   useEffect(() => { loadFeed(1); }, [loadFeed]);
 
-  // Animate hero → dock once jobs arrive
+  // Scroll-driven hero ↔ dock (locked to dock after live search)
   useEffect(() => {
-    if (jobs.length > 0 && !docked.current) {
-      docked.current = true;
-      setTimeout(() => setUiMode("dock"), 80);
+    function onScroll() {
+      if (liveSearchDone.current) return;
+      setUiMode(window.scrollY > DOCK_THRESHOLD ? "dock" : "hero");
     }
-  }, [jobs.length]);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   const handleLocalFilter = useCallback(({ query, location, experience, domain, status }) => {
     if (!query && !location && !experience && !domain && !status) {
@@ -127,6 +131,7 @@ export default function LandingPage({ authUser }) {
   }, [jobs]);
 
   const handleSearch = useCallback(async (params) => {
+    liveSearchDone.current = true;
     setUiMode("dock");
     setLoading(true);
     setSearchRes(null);
@@ -152,6 +157,13 @@ export default function LandingPage({ authUser }) {
   function handleDismiss(url) {
     setJobs(p => p.filter(j => j.url !== url));
     setSearchRes(p => p ? p.filter(j => j.url !== url) : null);
+  }
+
+  function resetSearch() {
+    liveSearchDone.current = false;
+    setSearchRes(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    // scroll listener will animate back to hero
   }
 
   const isDock = uiMode === "dock";
@@ -202,7 +214,8 @@ export default function LandingPage({ authUser }) {
       />
 
       {/* Main content */}
-      <main className={`lp__main${isDock ? " lp__main--pushed" : ""}`}>
+      <main className="lp__main">
+        <div className="lp__spacer" aria-hidden="true" />
 
         {/* Skeleton loaders */}
         {loading && (
@@ -225,7 +238,7 @@ export default function LandingPage({ authUser }) {
                 {searchRes === null && total > displayJobs.length ? ` of ${total}` : ""}
               </span>
               {searchRes !== null && (
-                <button onClick={() => setSearchRes(null)}
+                <button onClick={resetSearch}
                   style={{ background: "none", border: "none", color: theme.accentText,
                            cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>
                   ← Back to feed
@@ -290,7 +303,7 @@ export default function LandingPage({ authUser }) {
             <p style={{ color: theme.textMuted }}>
               {searchRes !== null ? "No jobs match your search." : "No jobs available yet."}
             </p>
-            <button onClick={() => { setSearchRes(null); loadFeed(1); }}
+            <button onClick={() => { resetSearch(); loadFeed(1); }}
               style={{ marginTop: 12, padding: "8px 20px", borderRadius: 6,
                        background: theme.accent, color: "#0f0f0f",
                        border: "none", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>

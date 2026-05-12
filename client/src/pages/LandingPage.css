@@ -9,8 +9,16 @@
 .lp--dock { display: block; }
 
 .lp__main { min-height: 100dvh; }
-.lp__main--pushed {
-  padding-top: 72px;
+
+/* Spacer that pushes content below the bar — transitions with mode */
+.lp__spacer {
+  transition: height 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lp--hero .lp__spacer { height: 100vh; }
+.lp--dock .lp__spacer { height: 68px; }
+
+/* Content layout in dock mode */
+.lp--dock .lp__main {
   padding-inline: var(--space-4, 1rem);
   max-width: var(--content-wide, 1200px);
   margin-inline: auto;
