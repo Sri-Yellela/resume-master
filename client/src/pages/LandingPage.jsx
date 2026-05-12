@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom"; // used in sign-up prompt
 import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
 import BelowFoldContent from "../components/BelowFoldContent.jsx";
+import { useTheme } from "../styles/theme.jsx";
 import { api } from "../lib/api.js";
 import "./LandingPage.css";
 
