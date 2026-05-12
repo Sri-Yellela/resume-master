@@ -1,55 +1,14 @@
 // client/src/pages/LandingPage.jsx
 // Auth is passed as a prop from App.jsx — no useAuth hook in this project.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Link } from "react-router-dom"; // used in PublicJobCard + sign-up prompt
+import { Link } from "react-router-dom"; // used in sign-up prompt
 import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
 import BelowFoldContent from "../components/BelowFoldContent.jsx";
-import { useTheme } from "../styles/theme.jsx";
 import { api } from "../lib/api.js";
 import "./LandingPage.css";
 
-// ── Minimal read-only job card for logged-out public feed ─────────────────────
-function PublicJobCard({ job }) {
-  const { theme } = useTheme();
-  return (
-    <div style={{
-      background: theme.surface,
-      border: `1px solid ${theme.border}`,
-      borderRadius: 10,
-      padding: "14px 16px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 6,
-    }}>
-      <div style={{ fontWeight: 700, fontSize: 13, color: theme.text,
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {job.title}
-      </div>
-      <div style={{ fontSize: 12, color: theme.textMuted }}>{job.company}</div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        {job.location && (
-          <span style={{ fontSize: 10, color: theme.textDim }}>{job.location}</span>
-        )}
-        {job.source_label && (
-          <span style={{
-            fontSize: 10, color: theme.textMuted,
-            background: theme.surfaceHigh,
-            padding: "1px 6px", borderRadius: 999,
-          }}>
-            {job.source_label}
-          </span>
-        )}
-      </div>
-      <a href={job.url} target="_blank" rel="noreferrer"
-        style={{ fontSize: 11, color: theme.accentText, fontWeight: 700, marginTop: 4 }}>
-        View job ↗
-      </a>
-    </div>
-  );
-}
-
 // ── Lazy-loaded JobCard wrapper (avoids circular imports) ─────────────────────
-function JobCardWrapper({ job, index, onDismiss }) {
+function JobCardWrapper({ job, index, onDismiss, isLoggedOut = false }) {
   const [JobCard, setJC] = useState(null);
   useEffect(() => {
     import("../components/JobCard.jsx")
@@ -59,7 +18,7 @@ function JobCardWrapper({ job, index, onDismiss }) {
   if (!JobCard) return null;
   return (
     <div className="job-card--animated" style={{ "--ci": index }}>
-      <JobCard job={job} onDismiss={onDismiss} />
+      <JobCard job={job} onDismiss={onDismiss} isLoggedOut={isLoggedOut} />
     </div>
   );
 }
@@ -215,13 +174,9 @@ export default function LandingPage({ authUser }) {
 
             <div className="lp__grid">
               {displayJobs.map((job, i) => (
-                authUser
-                  ? <JobCardWrapper key={job.job_id || job.id || job.url || i}
-                      job={job} index={i} onDismiss={handleDismiss} />
-                  : <div key={job.job_id || job.id || job.url || i}
-                      className="job-card--animated" style={{ "--ci": i }}>
-                      <PublicJobCard job={job} />
-                    </div>
+                <JobCardWrapper key={job.job_id || job.id || job.url || i}
+                  job={job} index={i} onDismiss={handleDismiss}
+                  isLoggedOut={!authUser} />
               ))}
             </div>
 

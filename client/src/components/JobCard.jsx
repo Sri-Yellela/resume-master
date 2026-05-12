@@ -1,6 +1,7 @@
 // SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/JobCard.jsx — shared expandable job card
 import { useState, useEffect } from "react";
+import { useTheme } from "../styles/theme.jsx";
 
 // ── Helpers ─────────────────────────────────────────────────────
 // Compute elapsed time since posting.
@@ -194,8 +195,9 @@ function ToggleIconBtn({ active, activeLabel, inactiveLabel, activeChildren, ina
 // ── Main JobCard ─────────────────────────────────────────────────
 export default function JobCard({
   job,
-  theme,
-  isDark,
+  theme: themeProp,
+  isDark: isDarkProp,
+  isLoggedOut = false,
   showDislike = true,
   showApplyButton = true,
   g,                  // generated resume entry
@@ -219,6 +221,10 @@ export default function JobCard({
   compact,            // split-view: tighter layout
   cardTier = 1,       // 1=full, 2=medium (manual resize), 3=condensed (3+ panels open)
 }) {
+  const { theme: ctxTheme, isDark: ctxIsDark } = useTheme();
+  const theme = themeProp ?? ctxTheme;
+  const isDark = isDarkProp ?? ctxIsDark;
+
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -294,6 +300,11 @@ export default function JobCard({
 
   const handleCardClick = (e) => {
     if (e.target.closest("a") || e.target.closest("button")) return;
+    if (isLoggedOut) {
+      const url = job.url || job.applyUrl;
+      if (url) window.open(url, "_blank", "noreferrer");
+      return;
+    }
     if (onSelect) { onSelect(); return; }
     if (onCardClick) { onCardClick(); return; }
     setExpanded(prev => !prev);
@@ -310,6 +321,10 @@ export default function JobCard({
     <div
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
+      role={isLoggedOut ? "link" : undefined}
+      tabIndex={isLoggedOut ? 0 : undefined}
+      aria-label={isLoggedOut ? `${job.title} at ${job.company} — view job` : undefined}
+      onKeyDown={isLoggedOut ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const url = job.url || job.applyUrl; if (url) window.open(url, "_blank", "noreferrer"); } } : undefined}
       style={{
         background: frostedBg,
         backdropFilter: frostedBlur,
@@ -324,6 +339,7 @@ export default function JobCard({
         opacity: job.disliked ? 0.3 : job.visited ? 0.75 : 1,
         filter: job.disliked ? "grayscale(0.7)" : "none",
         overflow: "hidden",
+        cursor: isLoggedOut ? "pointer" : undefined,
       }}>
 
       {/* ── Frosted glass overlay (gradient + noise texture) ── */}
@@ -385,19 +401,21 @@ export default function JobCard({
                 {job.company}
               </span>
               <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt, job.scrapedAt)}</span>
-              {(g?.atsScore != null || job?.baseAtsScore != null) && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>}
-              <ToggleIconBtn
-                bg="#f59e0b"
-                size={28}
-                theme={theme}
-                active={starred}
-                activeLabel="Remove from saved"
-                inactiveLabel="Save job"
-                onClick={e => { e.stopPropagation(); handleStar(); }}
-                activeChildren="★"
-                inactiveChildren="☆"
-              />
-              {showDislike && (
+              {!isLoggedOut && (g?.atsScore != null || job?.baseAtsScore != null) && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>}
+              {!isLoggedOut && (
+                <ToggleIconBtn
+                  bg="#f59e0b"
+                  size={28}
+                  theme={theme}
+                  active={starred}
+                  activeLabel="Remove from saved"
+                  inactiveLabel="Save job"
+                  onClick={e => { e.stopPropagation(); handleStar(); }}
+                  activeChildren="★"
+                  inactiveChildren="☆"
+                />
+              )}
+              {!isLoggedOut && showDislike && (
                 <ToggleIconBtn
                   bg="#dc2626"
                   size={28}
@@ -497,12 +515,15 @@ export default function JobCard({
 
           {/* Right side */}
           <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
+            {isLoggedOut && hov && (
+              <span style={{ fontSize:13, color:theme.accentText, fontWeight:700, opacity:0.85 }}>↗</span>
+            )}
             <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
 
-            {(g?.atsScore != null || job?.baseAtsScore != null) && (
+            {!isLoggedOut && (g?.atsScore != null || job?.baseAtsScore != null) && (
               <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>
             )}
-            {done && (
+            {!isLoggedOut && done && (
               <span onClick={onResume ? e => { e.stopPropagation(); onResume(); } : undefined}
                 style={{ background:"#e8f6fb", color:"#1a6a8a", padding:"2px 8px",
                          borderRadius:999, fontSize:10, fontWeight:700, cursor:"pointer",
@@ -512,20 +533,22 @@ export default function JobCard({
             )}
 
             {/* Star */}
-            <ToggleIconBtn
-              bg="#f59e0b"
-              size={30}
-              theme={theme}
-              active={starred}
-              activeLabel="Remove from saved"
-              inactiveLabel="Save job"
-              onClick={e => { e.stopPropagation(); handleStar(); }}
-              activeChildren="★"
-              inactiveChildren="☆"
-            />
+            {!isLoggedOut && (
+              <ToggleIconBtn
+                bg="#f59e0b"
+                size={30}
+                theme={theme}
+                active={starred}
+                activeLabel="Remove from saved"
+                inactiveLabel="Save job"
+                onClick={e => { e.stopPropagation(); handleStar(); }}
+                activeChildren="★"
+                inactiveChildren="☆"
+              />
+            )}
 
             {/* Dislike */}
-            {showDislike && (
+            {!isLoggedOut && showDislike && (
               <ToggleIconBtn
                 bg="#dc2626"
                 size={28}
@@ -552,7 +575,7 @@ export default function JobCard({
             )}
 
             {/* Generate */}
-            {canUseGenerate && onGenerate && showApplyButton && (
+            {!isLoggedOut && canUseGenerate && onGenerate && showApplyButton && (
               <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
                 disabled={!!st} theme={theme} active={done && !generateLoading}
                 onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
@@ -560,9 +583,8 @@ export default function JobCard({
               </IconBtn>
             )}
 
-
             {/* View sandbox */}
-            {done && g?.html !== "__exists__" && showApplyButton && (
+            {!isLoggedOut && done && g?.html !== "__exists__" && showApplyButton && (
               <IconBtn bg="#0284c7" title="View in sandbox" theme={theme}
                 onClick={e => { e.stopPropagation(); onViewSandbox?.(); }}>
                 👁
@@ -570,7 +592,7 @@ export default function JobCard({
             )}
 
             {/* Visit URL */}
-            {onVisit && showApplyButton && job.url && (
+            {!isLoggedOut && onVisit && showApplyButton && job.url && (
               <IconBtn bg={theme.accent} title="Open job listing" theme={theme}
                 onClick={e => { e.stopPropagation(); onVisit(); }}>
                 ↗
@@ -621,7 +643,7 @@ export default function JobCard({
                 👥 {job.applicantCount > 200 ? "200+" : job.applicantCount} applicants
               </span>
             )}
-            {showApplyButton !== false && (job.applyUrl || job.url) && (
+            {!isLoggedOut && showApplyButton !== false && (job.applyUrl || job.url) && (
               <a href={job.applyUrl || job.url} target="_blank" rel="noreferrer"
                 onClick={e => e.stopPropagation()}
                 style={{ fontSize:11, color:theme.accentText, fontWeight:700,
@@ -633,7 +655,7 @@ export default function JobCard({
           </div>
 
           {/* Recruiter section — coming soon */}
-          {canUseGenerate && showApplyButton && (
+          {!isLoggedOut && canUseGenerate && showApplyButton && (
             <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
               {canUseGenerate && onGenerate && (
                 <button onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}
@@ -647,18 +669,20 @@ export default function JobCard({
             </div>
           )}
 
-          <div style={{
-            borderTop: `1px dashed ${theme.border}`,
-            paddingTop: 8, marginTop: 4,
-            display: "flex", alignItems: "center", gap: 8,
-          }}>
-            <span style={{ fontSize:10, color:theme.textDim, fontWeight:700,
-                            textTransform:"uppercase", letterSpacing:"0.06em" }}>
-              Recruiter
-            </span>
-            <ComingSoon label="auto-contact"/>
-            <ComingSoon label="LinkedIn reach-out"/>
-          </div>
+          {!isLoggedOut && (
+            <div style={{
+              borderTop: `1px dashed ${theme.border}`,
+              paddingTop: 8, marginTop: 4,
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <span style={{ fontSize:10, color:theme.textDim, fontWeight:700,
+                              textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Recruiter
+              </span>
+              <ComingSoon label="auto-contact"/>
+              <ComingSoon label="LinkedIn reach-out"/>
+            </div>
+          )}
         </div>
       )}
     </div>
