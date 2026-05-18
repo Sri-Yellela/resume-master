@@ -3,16 +3,18 @@
   position: fixed;
   z-index: 200;
   box-sizing: border-box;
+  /* single source of truth for all transitions */
   transition:
-    top            500ms cubic-bezier(0.16, 1, 0.3, 1),
-    left           500ms cubic-bezier(0.16, 1, 0.3, 1),
-    right          500ms cubic-bezier(0.16, 1, 0.3, 1),
-    width          500ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform      500ms cubic-bezier(0.16, 1, 0.3, 1),
-    padding        500ms cubic-bezier(0.16, 1, 0.3, 1),
-    border-radius  500ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow     500ms cubic-bezier(0.16, 1, 0.3, 1),
-    background     500ms cubic-bezier(0.16, 1, 0.3, 1);
+    top              700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    left             700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    right            700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    width            700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    transform        700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    padding          700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    border-radius    700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    box-shadow       700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    background-color 700ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    opacity          500ms ease;
 }
 
 .usb--hero {
@@ -46,18 +48,19 @@
   text-align: center;
   transform-origin: top center;
   transition:
-    max-height  480ms cubic-bezier(0.16, 1, 0.3, 1),
-    opacity     350ms ease,
-    margin      380ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform   480ms cubic-bezier(0.16, 1, 0.3, 1);
+    max-height  650ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    opacity     500ms ease 100ms,   /* 100ms delay — fades after layout starts */
+    margin      600ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    transform   650ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .usb--hero .usb__brand {
-  max-height: 200px;
+  max-height: 400px;
   opacity: 1;
   margin-bottom: var(--space-8, 2rem);
   transform: scaleY(1) translateY(0);
   pointer-events: auto;
+  transition-delay: 150ms; /* wait for bar to settle before brand appears */
 }
 
 .usb--dock .usb__brand {
@@ -66,17 +69,67 @@
   margin-bottom: 0;
   transform: scaleY(0) translateY(-8px);
   pointer-events: none;
+  transition-delay: 0ms;
 }
 
-.usb__title {
-  font-family: var(--font-display, sans-serif);
-  font-size: clamp(2rem, 4vw, 4rem);
-  font-weight: 700;
-  color: var(--color-primary, #4f98a3);
-  letter-spacing: -0.025em;
-  line-height: 1.1;
-  margin: 0;
+/* ── HeroLogo — phase-based icon + typewriter wordmark ── */
+.hero-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3, .75rem);
+  margin-bottom: var(--space-6, 1.5rem);
 }
+
+.hero-logo__icon {
+  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: center;
+}
+.hero-logo__icon--0 { transform: scale(1);    }
+.hero-logo__icon--1 { transform: scale(1.2);  }
+.hero-logo__icon--2 { transform: scale(1.15); }
+
+.hero-logo__wordmark {
+  display: flex;
+  align-items: baseline;
+  font-family: var(--font-display, var(--font-body, sans-serif));
+  font-size: clamp(1.75rem, 3.5vw, 2.75rem);
+  font-weight: 700;
+  color: var(--color-text, #cdccca);
+  letter-spacing: -0.025em;
+  line-height: 1;
+  overflow: hidden;
+}
+
+.hero-logo__r {
+  display: inline;
+  color: var(--color-primary, #4f98a3);
+}
+
+.hero-logo__typed {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.hero-logo__char {
+  display: inline;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity   120ms ease,
+    transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.hero-logo__char--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* When bar is docked, hide the hero logo wordmark */
+.usb--dock .hero-logo {
+  display: none;
+}
+
 .usb__sub {
   font-size: var(--text-base, 1rem);
   color: var(--color-text-muted, #797876);
@@ -159,7 +212,7 @@
   margin-left: .5rem;
   padding: .625rem 1.25rem;
   background: var(--color-primary, #4f98a3);
-  color: #fff;
+  color: var(--color-on-primary, #fff);
   border: none;
   border-radius: var(--radius-md, .5rem);
   font-size: .875rem;
@@ -175,7 +228,7 @@
 .usb__cdw {
   font-size: .75rem;
   font-weight: 700;
-  background: rgba(255,255,255,.22);
+  background: color-mix(in srgb, var(--color-on-primary, #fff) 22%, transparent);
   border-radius: 9999px;
   padding: 1px 6px;
   min-width: 24px;
@@ -185,8 +238,8 @@
   display: inline-block;
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255,255,255,.3);
-  border-top-color: #fff;
+  border: 2px solid color-mix(in srgb, var(--color-on-primary, #fff) 30%, transparent);
+  border-top-color: var(--color-on-primary, #fff);
   border-radius: 50%;
   animation: usb-spin 600ms linear infinite;
 }

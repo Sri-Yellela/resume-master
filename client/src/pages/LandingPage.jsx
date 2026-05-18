@@ -24,6 +24,13 @@ function JobCardWrapper({ job, index, onDismiss, isLoggedOut = false }) {
   );
 }
 
+const FEATURE_CARDS = [
+  { to: '/products', icon: '◈', label: 'Products', desc: 'Resume builder, ATS scanner & more' },
+  { to: '/pricing',  icon: '◇', label: 'Pricing',  desc: 'Free to start, upgrade anytime'    },
+  { to: '/about',    icon: '◉', label: 'About',    desc: 'Our mission and story'               },
+  { to: '/blog',     icon: '◎', label: 'Blog',     desc: 'Job search tips & product updates'  },
+];
+
 // ── LandingPage ───────────────────────────────────────────────────────────────
 export default function LandingPage({ authUser }) {
   const { theme } = useTheme();
@@ -34,7 +41,7 @@ export default function LandingPage({ authUser }) {
   const [loading,     setLoading]     = useState(true);
   const [searchRes,   setSearchRes]   = useState(null);
   const liveSearchDone = useRef(false);
-  const DOCK_THRESHOLD = 60;
+  const DOCK_THRESHOLD = 80;
 
   const pageSize   = authUser ? 20 : 12;
   const displayJobs = searchRes ?? jobs;
@@ -129,8 +136,7 @@ export default function LandingPage({ authUser }) {
   const isDock = uiMode === "dock";
 
   return (
-    <div className={`lp lp--${uiMode}`} style={{ background: theme.bg, color: theme.text,
-      fontFamily: "'DM Sans',system-ui,sans-serif" }}>
+    <div className={`lp lp--${uiMode}`} style={{ background: theme.bg }}>
 
       {/* UnifiedSearchBar — hero centered → dock sticky-top (NavBar is rendered by App.jsx) */}
       <UnifiedSearchBar
@@ -138,6 +144,20 @@ export default function LandingPage({ authUser }) {
         isLoggedOut={!authUser}
         onSearch={handleSearch}
         onLocalFilter={handleLocalFilter}
+        heroFooter={
+          <nav className="lp__feature-nav" aria-label="Product features">
+            {FEATURE_CARDS.map(({ to, icon, label, desc }) => (
+              <Link key={to} to={to} className="lp__feature-card">
+                <span className="lp__feature-card__icon">{icon}</span>
+                <span className="lp__feature-card__body">
+                  <span className="lp__feature-card__label">{label}</span>
+                  <span className="lp__feature-card__desc">{desc}</span>
+                </span>
+                <span className="lp__feature-card__arrow" aria-hidden="true">→</span>
+              </Link>
+            ))}
+          </nav>
+        }
       />
 
       {/* Main content */}
@@ -156,18 +176,13 @@ export default function LandingPage({ authUser }) {
         {/* Job grid */}
         {!loading && displayJobs.length > 0 && (
           <>
-            <div style={{
-              fontSize: 12, color: theme.textMuted, marginBottom: 12,
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-            }}>
+            <div className="lp__job-count-bar">
               <span>
                 {displayJobs.length} job{displayJobs.length !== 1 ? "s" : ""}
                 {searchRes === null && total > displayJobs.length ? ` of ${total}` : ""}
               </span>
               {searchRes !== null && (
-                <button onClick={resetSearch}
-                  style={{ background: "none", border: "none", color: theme.accentText,
-                           cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>
+                <button onClick={resetSearch} className="lp__reset-btn">
                   ← Back to feed
                 </button>
               )}
@@ -198,21 +213,11 @@ export default function LandingPage({ authUser }) {
 
             {/* Sign-up prompt for logged-out users */}
             {!authUser && (
-              <div style={{
-                marginTop: 32, padding: "20px 24px",
-                background: `${theme.accent}18`,
-                border: `1px solid ${theme.accent}44`,
-                borderRadius: 10, textAlign: "center",
-              }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: theme.text, marginBottom: 6 }}>
+              <div className="lp__signup-prompt">
+                <div className="lp__signup-prompt__title">
                   Sign up to save jobs, score your resume, and generate tailored applications
                 </div>
-                <Link to="/register" style={{
-                  display: "inline-block", marginTop: 8,
-                  background: theme.accent, color: "#0f0f0f",
-                  padding: "8px 24px", borderRadius: 6,
-                  fontWeight: 800, fontSize: 13, textDecoration: "none",
-                }}>
+                <Link to="/register" className="lp__cta-btn">
                   Create free account
                 </Link>
               </div>
@@ -223,13 +228,10 @@ export default function LandingPage({ authUser }) {
         {/* Empty state */}
         {!loading && displayJobs.length === 0 && isDock && (
           <div className="lp__empty">
-            <p style={{ color: theme.textMuted }}>
+            <p className="lp__empty-msg">
               {searchRes !== null ? "No jobs match your search." : "No jobs available yet."}
             </p>
-            <button onClick={() => { resetSearch(); loadFeed(1); }}
-              style={{ marginTop: 12, padding: "8px 20px", borderRadius: 6,
-                       background: theme.accent, color: "#0f0f0f",
-                       border: "none", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+            <button onClick={() => { resetSearch(); loadFeed(1); }} className="lp__cta-btn lp__cta-btn--sm">
               Reset
             </button>
           </div>
