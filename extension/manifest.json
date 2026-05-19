@@ -3,7 +3,8 @@
   "name": "Resume Master",
   "version": "1.1.0",
   "description": "Send job descriptions to Resume Master for ATS scoring. Quick access to your resume builder.",
-  "permissions": ["activeTab", "storage", "scripting"],
+  "permissions": ["activeTab", "scripting"],
+  "privacy_policy_url": "https://resumemaster.one/privacy",
   "host_permissions": [
     "https://*.linkedin.com/*",
     "https://*.indeed.com/*",
@@ -35,6 +36,14 @@
         "https://*.workable.com/j/*"
       ],
       "js": ["linkedin-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.linkedin.com/my-items/saved-jobs*",
+        "https://www.linkedin.com/my-items/*"
+      ],
+      "js": ["saved-jobs-content.js"],
       "run_at": "document_idle"
     }
   ],
