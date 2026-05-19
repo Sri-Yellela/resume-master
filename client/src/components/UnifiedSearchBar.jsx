@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, Briefcase, Building2, Tag, ChevronDown, X } from 'lucide-react';
 import { StampLogo } from './StampLogo.jsx';
 import './UnifiedSearchBar.css';
