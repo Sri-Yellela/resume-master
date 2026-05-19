@@ -222,6 +222,26 @@ export function ThemeProvider({ children }) {
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
 
+        /* ── Color token bridge: --color-* → live theme ── */
+        /* Accent + text are dynamic (change with accent/bg mode). */
+        /* Surface vars reference --bg-* which update per data-bg. */
+        :root {
+          --color-primary:         ${theme.accent};
+          --color-primary-hover:   color-mix(in srgb, ${theme.accent} 75%, black);
+          --color-on-primary:      #0f0f0f;
+          --color-warning:         ${theme.warning};
+          --color-text:            ${theme.text};
+          --color-text-muted:      ${theme.textMuted};
+          --color-text-faint:      ${theme.textDim};
+          --color-bg:              var(--bg-page);
+          --color-surface:         var(--bg-card);
+          --color-surface-offset:  var(--bg-panel);
+          --color-surface-2:       var(--bg-panel);
+          --color-border:          var(--border-glass);
+          --color-divider:         var(--border-glass);
+          --color-surface-dynamic: rgba(255,255,255,0.88); /* light shimmer highlight */
+        }
+
         /* ══ Default CSS vars (glass-light — no data-bg fallback) ══ */
         html {
           color-scheme: ${mode};
@@ -289,6 +309,7 @@ export function ThemeProvider({ children }) {
           --bg-blur:      blur(40px) saturate(180%);
           --bg-blur-sm:   blur(20px) saturate(160%);
           --border-glass: rgba(255,255,255,0.08);
+          --color-surface-dynamic: rgba(62,62,66,0.80);
         }
 
         /* ══ High Glass Light ══ */
@@ -333,6 +354,7 @@ export function ThemeProvider({ children }) {
           --bg-blur:      blur(60px) saturate(200%);
           --bg-blur-sm:   blur(30px) saturate(180%);
           --border-glass: rgba(255,255,255,0.15);
+          --color-surface-dynamic: rgba(62,62,66,0.60);
         }
 
         /* ══ Solid White ══ */
@@ -367,6 +389,7 @@ export function ThemeProvider({ children }) {
           --bg-blur:      none;
           --bg-blur-sm:   none;
           --border-glass: rgba(255,255,255,0.08);
+          --color-surface-dynamic: #3a3a3c;
         }
 
         body {
