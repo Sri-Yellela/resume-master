@@ -148,10 +148,16 @@ async function cacheJobs(db) {
     const _leverCompanies = atsCos.filter(r => r.ats_type === 'lever');
     const _ashbyCompanies = atsCos.filter(r => r.ats_type === 'ashby');
 
+    if (_leverCompanies.length === 0) {
+      console.log('[Lever] No companies configured — skipping');
+    }
+
     // Fetch all jobs (empty query = every open position)
     const result = await searchJobs({
       query: '', location: '', page: 1, pageSize: 300,
-      _ghCompanies, _leverCompanies, _ashbyCompanies,
+      _ghCompanies,
+      _leverCompanies: _leverCompanies.length > 0 ? _leverCompanies : [],
+      _ashbyCompanies,
     });
 
     if (!result.jobs.length) {

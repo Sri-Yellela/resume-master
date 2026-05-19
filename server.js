@@ -2883,6 +2883,18 @@ function runExpiredJobsCleanup() {
 // â”€â”€ Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 â”€â”€
 cron.schedule("0 3 * * *", runExpiredJobsCleanup);
 
+// Refresh ATS job cache daily at 04:00 ET
+cron.schedule("0 4 * * *", async () => {
+  console.log('[Cron] Daily ATS cache refresh starting...');
+  try {
+    const count = await cacheJobs(db);
+    console.log('[Cron] Daily ATS cache refresh complete —', count, 'jobs cached');
+  } catch(e) {
+    console.error('[Cron] ATS cache refresh error:', e.message);
+  }
+}, { timezone: 'America/New_York' });
+console.log('[Cron] Daily ATS cache refresh scheduled: 04:00 ET');
+
 cron.schedule("0 2 * * *", () => {
   try { createBackup("auto-daily"); }
   catch(e) { console.error("[backup-cron]", e.message); }
@@ -4791,6 +4803,51 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
     }));
 
     res.json({ ...result, jobs, success: true });
+
+    // Non-blocking write-back of live search results to scraped_jobs
+    if (result.jobs.length > 0) {
+      setImmediate(() => {
+        try {
+          const insert = db.prepare(`
+            INSERT OR IGNORE INTO scraped_jobs
+              (job_id, _hash, title, company, location, url, source, source_label,
+               via, bucket_role, bucket_seniority, bucket_domain,
+               company_icon_url, direct_apply, posted_at, scraped_at)
+            VALUES
+              (@job_id, @_hash, @title, @company, @location, @url, @source, @source_label,
+               @via, @bucket_role, @bucket_seniority, @bucket_domain,
+               @company_icon_url, @direct_apply, @posted_at, strftime('%s','now'))
+          `);
+          const insertMany = db.transaction((jobs) => {
+            for (const j of jobs) {
+              const id = j.id || j.url || '';
+              if (!id) continue;
+              insert.run({
+                job_id:           id,
+                _hash:            id,
+                title:            j.title        || '',
+                company:          j.company       || '',
+                location:         j.location      || '',
+                url:              j.url           || '',
+                source:           j.source        || 'serpapi',
+                source_label:     j.sourceLabel || j.source_label || '',
+                via:              j.via           || null,
+                bucket_role:      j.bucketRole  || j.bucket_role  || 'other',
+                bucket_seniority: j.bucketSeniority || j.bucket_seniority || null,
+                bucket_domain:    j.bucketDomain || j.bucket_domain || null,
+                company_icon_url: j.companyIconUrl || j.company_icon_url || j.thumbnail || null,
+                direct_apply:     (j.directApply ?? j.direct_apply) ? 1 : 0,
+                posted_at:        j.postedAt || j.posted_at || null,
+              });
+            }
+          });
+          insertMany(result.jobs);
+          console.log('[Search] Persisted', result.jobs.length, 'live results to scraped_jobs');
+        } catch(e) {
+          console.warn('[Search] Write-back non-fatal:', e.message);
+        }
+      });
+    }
   } catch (err) {
     console.error('[POST /api/jobs/search]', err.message);
     res.status(500).json({ success: false, error: 'Search failed.', jobs: [] });
