@@ -13,8 +13,14 @@
 
   const RESUME_MASTER_URL = 'https://resumemaster.one';
 
+  // ─── Description extractors per site ───────────────────────────────────────
+
   const EXTRACTORS = {
     'linkedin.com':  () => trySelectors([
+      '.job-details-module__content',
+      '.jobs-description__content',
+      '#job-details',
+      '[data-test-job-details-description]',
       '.jobs-description__content .jobs-box__html-content',
       '.jobs-description-content__text',
       '.job-view-layout',
@@ -45,24 +51,123 @@
     return extract();
   }
 
-  // Extract structured LinkedIn job data from the DOM
+  // ─── Apply URL extraction ───────────────────────────────────────────────────
+
+  function extractApplyUrl(jobUrl) {
+    const applySelectors = [
+      '.jobs-apply-button--top-card a[href]',
+      'a.jobs-apply-button[href]',
+      '.job-details-jobs-unified-top-card__container--two-pane a[href*="apply"]',
+      'a[href*="/apply"][href*="job"]',
+      'a[data-automation="job-detail-apply"]',
+      'a[id*="apply-button"]',
+      'a[class*="apply-button"]',
+    ];
+
+    for (const sel of applySelectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (el && el.href && !el.href.includes('linkedin.com/jobs/view')) {
+          return el.href;
+        }
+      } catch (e) {}
+    }
+
+    // Easy Apply is in-platform — no external URL; fall back to job page
+    const easyApplyBtn = document.querySelector('.jobs-apply-button .artdeco-button__text');
+    if (easyApplyBtn && easyApplyBtn.textContent.trim().toLowerCase().includes('easy apply')) {
+      return jobUrl;
+    }
+
+    return jobUrl;
+  }
+
+  // ─── Salary extraction ─────────────────────────────────────────────────────
+
+  function extractSalary() {
+    const salarySelectors = [
+      '.job-details-jobs-unified-top-card__job-insight span[aria-hidden="true"]',
+      '.compensation__salary',
+      '[data-test-compensation-summary]',
+      '.salary-main-rail__formatted-salary',
+    ];
+    for (const sel of salarySelectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (el) {
+          const txt = el.textContent.trim();
+          if (/\$|\£|\€|\/yr|\/hr|per year|per hour|salary/i.test(txt)) return txt;
+        }
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  // ─── Posted date extraction ─────────────────────────────────────────────────
+
+  function extractPostedDate() {
+    const dateSelectors = [
+      '.job-details-jobs-unified-top-card__posted-date',
+      '.jobs-unified-top-card__posted-date',
+      '[data-test-job-details-posted-date]',
+      'span.tvm__text:not(.tvm__text--positive)',
+    ];
+    for (const sel of dateSelectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (el) {
+          const txt = el.textContent.trim();
+          if (/ago|today|yesterday|posted|\d{4}/i.test(txt)) return txt;
+        }
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  // ─── Company logo extraction ────────────────────────────────────────────────
+
+  function extractCompanyLogo() {
+    const imgSelectors = [
+      '.job-details-jobs-unified-top-card__company-logo img',
+      '.artdeco-entity-image[alt*="logo"]',
+      '.jobs-unified-top-card__company-logo img',
+      'img.evi-image[data-ghost-url]',
+    ];
+    for (const sel of imgSelectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (el && el.src && !el.src.includes('ghost')) return el.src;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  // ─── Structured LinkedIn job data ──────────────────────────────────────────
+
   function extractLinkedInJobData() {
     const title = (
-      document.querySelector('.jobs-unified-top-card__job-title h1')?.innerText ||
       document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText ||
+      document.querySelector('.job-details-jobs-unified-top-card__job-title')?.innerText ||
+      document.querySelector('[data-test-job-details-title]')?.innerText ||
+      document.querySelector('.jobs-unified-top-card__job-title h1')?.innerText ||
       document.querySelector('h1.t-24')?.innerText ||
       document.title.replace(/ \| LinkedIn$/, '') ||
       ''
     ).trim();
 
     const company = (
-      document.querySelector('.jobs-unified-top-card__company-name a')?.innerText ||
       document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText ||
+      document.querySelector('.job-details-jobs-unified-top-card__primary-description-container a')?.innerText ||
+      document.querySelector('[data-test-job-details-company-name]')?.innerText ||
+      document.querySelector('.jobs-unified-top-card__company-name a')?.innerText ||
       document.querySelector('.jobs-unified-top-card__company-name')?.innerText ||
       ''
     ).trim();
 
     const location = (
+      document.querySelector('.job-details-jobs-unified-top-card__primary-description-container .tvm__text')?.innerText ||
+      document.querySelector('.job-details-jobs-unified-top-card__workplace-type')?.innerText ||
+      document.querySelector('[data-test-job-details-location]')?.innerText ||
       document.querySelector('.jobs-unified-top-card__bullet')?.innerText ||
       document.querySelector('.job-details-jobs-unified-top-card__bullet')?.innerText ||
       ''
@@ -76,9 +181,9 @@
 
     const description = extractJobText();
 
-    // Extract LinkedIn job ID from URL  e.g. /jobs/view/1234567890/
     const jobIdMatch = window.location.pathname.match(/\/jobs\/view\/(\d+)/);
     const externalJobId = jobIdMatch ? jobIdMatch[1] : null;
+    const jobUrl = window.location.href;
 
     return {
       title,
@@ -86,14 +191,20 @@
       location,
       workType,
       description,
-      jobUrl: window.location.href,
+      jobUrl,
       externalJobId,
+      applyUrl:    extractApplyUrl(jobUrl),
+      salary:      extractSalary(),
+      postedDate:  extractPostedDate(),
+      companyLogo: extractCompanyLogo(),
     };
   }
 
+  // ─── Floating button handlers ───────────────────────────────────────────────
+
   function setButtonText(text, reset = true) {
     btn.textContent = text;
-    if (reset) setTimeout(() => { btn.textContent = ' Send to Resume Master'; }, 2500);
+    if (reset) setTimeout(() => { btn.textContent = 'ATS Score this job'; }, 2500);
   }
 
   function sendCurrentJob() {
@@ -107,7 +218,7 @@
       btn.textContent = 'Opened in Resume Master';
       btn.style.background = '#437A22';
       setTimeout(() => {
-        btn.textContent = ' Send to Resume Master';
+        btn.textContent = 'ATS Score this job';
         btn.style.background = '#01696F';
       }, 2500);
     });
@@ -134,9 +245,12 @@
     }
   }
 
+  // ─── Floating ATS Score button ──────────────────────────────────────────────
+
   const btn = document.createElement('button');
   btn.id = 'rm-send-btn';
-  btn.textContent = ' Send to Resume Master';
+  btn.title = 'ATS Score this job';
+  btn.textContent = 'ATS Score this job';
   Object.assign(btn.style, {
     position: 'fixed', bottom: '24px', right: '24px',
     zIndex: '2147483647',
@@ -158,6 +272,8 @@
     btn.style.transform = 'scale(1)';
   });
   btn.addEventListener('click', sendCurrentJob);
+
+  // ─── Message listener ──────────────────────────────────────────────────────
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'EXTRACT_JOB_TEXT') {
