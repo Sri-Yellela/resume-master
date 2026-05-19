@@ -3,6 +3,7 @@ import { stripInternalFields } from './schema.js';
 import { classify } from './classifier.js';
 import { filterDirectApplyOnly } from './directApplyFilter.js';
 import { classifyForIngest } from '../jobClassifier.js';
+import { getKnownLogoUrl } from './enrichLogos.js';
 
 // ─── REGISTER SOURCES HERE ───────────────────────────────────────────────────
 // To add a new source: import it and add to SOURCES array.
@@ -227,6 +228,33 @@ async function cacheJobs(db) {
 
     upsertAll(result.jobs);
     console.log(`[cacheJobs] Cached ${result.jobs.length} jobs from ATS sources`);
+
+    // Background logo enrichment (non-blocking, max 25 per cache run)
+    setImmediate(async () => {
+      try {
+        const noLogo = db.prepare(`
+          SELECT DISTINCT company FROM scraped_jobs
+          WHERE company_icon_url IS NULL
+            AND company IS NOT NULL AND company != ''
+          LIMIT 25
+        `).all();
+        const updateLogo = db.prepare(`
+          UPDATE scraped_jobs SET company_icon_url = ?
+          WHERE company = ? AND company_icon_url IS NULL
+        `);
+        let count = 0;
+        for (const { company } of noLogo) {
+          // Use known-domain lookup first (offline-safe); fetchLogoUrl falls back to this anyway
+          const url = getKnownLogoUrl(company);
+          if (url) { updateLogo.run(url, company); count++; }
+          await new Promise(r => setTimeout(r, 50));
+        }
+        if (count > 0) console.log(`[EnrichLogos] Set logo URLs for ${count} companies`);
+      } catch(e) {
+        console.warn('[EnrichLogos] Background enrichment:', e.message);
+      }
+    });
+
     return result.jobs.length;
   } catch (err) {
     console.error('[cacheJobs] Failed:', err.message);
