@@ -26,6 +26,25 @@
     .btn-secondary:hover { background: #E6E4DF; }
     .status { font-size: 11px; color: #7A7974; margin-top: 6px; text-align: center; min-height: 14px; }
     .divider { border: none; border-top: 1px solid #DCD9D5; margin: 10px 0; }
+    .progress-bar {
+      width: 100%; height: 6px;
+      background: #DCD9D5; border-radius: 9999px;
+      margin: 8px 0 4px; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; background: #01696F;
+      border-radius: 9999px;
+      transition: width 300ms ease;
+    }
+    .progress-text {
+      font-size: 11px; color: #7A7974;
+      text-align: center; margin: 0;
+    }
+    .result-text {
+      font-size: 11px; text-align: center; margin: 4px 0 0;
+    }
+    .result-text.success { color: #437A22; }
+    .result-text.error   { color: #a12c2c; }
     #job-preview {
       display: none;
       background: #fff; border: 1px solid #DCD9D5; border-radius: 8px;
@@ -54,6 +73,20 @@
   <button class="btn btn-secondary" id="btn-linkedin">Sign in with LinkedIn</button>
   <hr class="divider">
   <button class="btn btn-secondary" id="btn-ats">ATS Score Tool</button>
+
+  <div id="saved-jobs-section" style="display:none">
+    <hr class="divider">
+    <button class="btn btn-primary" id="btn-import-saved">
+      Import Saved Jobs from LinkedIn
+    </button>
+    <div id="import-progress" style="display:none">
+      <div class="progress-bar">
+        <div id="import-progress-fill" class="progress-fill" style="width:0%"></div>
+      </div>
+      <p id="import-progress-text" class="progress-text">Loading saved jobs…</p>
+    </div>
+    <p id="import-result" class="result-text" style="display:none"></p>
+  </div>
 
   <p class="status" id="status"></p>
 
