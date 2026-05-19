@@ -74,6 +74,38 @@ import {
 import { searchJobs, cacheJobs } from "./services/jobs/aggregator.js";
 import { filterAndRankForProfile } from "./services/jobs/profileMatcher.js";
 
+// ── mapJobRow: normalise DB/aggregator rows to camelCase for the client ────────
+function mapJobRow(j) {
+  return {
+    id:              j.job_id || j.id,
+    title:           j.title,
+    company:         j.company,
+    location:        j.location,
+    description:     j.description,
+    url:             j.url,
+    applyUrl:        j.apply_url || j.applyUrl || j.url,
+    salaryMin:       j.salary_min  ?? j.salaryMin  ?? null,
+    salaryMax:       j.salary_max  ?? j.salaryMax  ?? null,
+    salaryCurrency:  j.salary_currency  || j.salaryCurrency  || null,
+    postedAt:        j.posted_at  || j.postedAt  || null,
+    contractType:    j.contract_type || j.contractType || null,
+    remote:          Boolean(j.remote),
+    source:          j.source,
+    sourceLabel:     j.source_label || j.sourceLabel || null,
+    sourcePlatform:  j.source || j.source_label || j.sourcePlatform || 'direct',
+    via:             j.via || null,
+    bucketRole:      j.bucket_role      || j.bucketRole      || null,
+    bucketSeniority: j.bucket_seniority || j.bucketSeniority || null,
+    bucketDomain:    j.bucket_domain    || j.bucketDomain    || null,
+    directApply:     Boolean(j.direct_apply ?? j.directApply),
+    companyIconUrl:  j.company_icon_url || j.companyIconUrl  || j.thumbnail || null,
+    matchScore:      j._matchScore || j.match_score || null,
+    starred:         Boolean(j.starred),
+    visited:         Boolean(j.visited),
+    disliked:        Boolean(j.disliked),
+  };
+}
+
 console.log("[boot] server module loaded");
 
 // â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -4609,10 +4641,11 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       ).get(req.user.id) || {};
 
       const profileForMatcher = {
-        bucket_roles:     JSON.parse(profile.target_skills    || '[]'),
-        target_locations: JSON.parse(profile.target_locations || '[]'),
-        target_domains:   JSON.parse(profile.target_domains   || '[]'),
-        seniority_level:  profile.seniority_level || null,
+        target_skills:    profile.target_skills    || '[]',
+        confirmed_skills: profile.confirmed_skills || '[]',
+        target_locations: profile.target_locations || '[]',
+        target_domains:   profile.target_domains   || '[]',
+        seniority_level:  profile.seniority_level  || null,
       };
 
       // Load disliked URLs for this user
@@ -4636,9 +4669,8 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       }
 
       const offset = (pg - 1) * ps;
-      const pageJobs = ranked.slice(offset, offset + ps).map(j => ({
+      const pageJobs = ranked.slice(offset, offset + ps).map(j => mapJobRow({
         ...j,
-        id:      j.job_id || j.url,
         starred:  !!(interactionMap[j.job_id]?.starred),
         disliked: !!(interactionMap[j.job_id]?.disliked),
       }));
@@ -4709,7 +4741,7 @@ app.get("/api/jobs/generic", async (req, res) => {
 
     const total = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE direct_apply = 1").get()?.n || 0;
 
-    res.json({ success: true, jobs: rows, total, page, pageSize: ps });
+    res.json({ success: true, jobs: rows.map(mapJobRow), total, page, pageSize: ps });
   } catch (err) {
     console.error('[GET /api/jobs/generic]', err.message);
     res.status(500).json({ success: false, error: 'Failed to load jobs.', jobs: [] });
@@ -4752,7 +4784,7 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
       rows.forEach(r => { interactionMap[r.job_id] = r; });
     }
 
-    const jobs = result.jobs.map(j => ({
+    const jobs = result.jobs.map(j => mapJobRow({
       ...j,
       starred:  !!(interactionMap[j.id]?.starred),
       disliked: !!(interactionMap[j.id]?.disliked),
@@ -4908,7 +4940,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     location:        j.location,
     workType:        j.work_type,
     source:          j.source,
-    sourcePlatform:  "linkedin",
+    sourcePlatform:  j.source || j.source_label || 'direct',
     url:             j.url,
     applyUrl:        j.apply_url,
     postedAt:        j.posted_at,
