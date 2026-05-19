@@ -14,6 +14,10 @@ function isLinkedInJobPage(url = '') {
   return /linkedin\.com\/jobs\/view\//.test(url);
 }
 
+function isSavedJobsPage(url = '') {
+  return /linkedin\.com\/my-items/.test(url);
+}
+
 function isJobPage(url = '') {
   return (
     isLinkedInJobPage(url) ||
@@ -25,11 +29,34 @@ function isJobPage(url = '') {
   );
 }
 
+function detectSource(url = '') {
+  if (url.includes('indeed.com'))     return 'Indeed';
+  if (url.includes('glassdoor.com'))  return 'Glassdoor';
+  if (url.includes('lever.co'))       return 'Lever';
+  if (url.includes('greenhouse.io'))  return 'Greenhouse';
+  if (url.includes('workable.com'))   return 'Workable';
+  return 'Direct';
+}
+
+function showJobPreview(jobData) {
+  document.getElementById('preview-title').textContent = jobData.title || '';
+  document.getElementById('preview-company').textContent =
+    (jobData.company || '') + (jobData.location ? ' · ' + jobData.location : '');
+  document.getElementById('job-preview').style.display = 'block';
+  document.getElementById('btn-save-job').style.display = 'flex';
+}
+
 let currentJobData = null;
 
 async function init() {
   const tab = await getCurrentTab();
   if (!tab?.url) return;
+
+  // Show Import Saved Jobs section only on the saved jobs page
+  const savedSection = document.getElementById('saved-jobs-section');
+  if (savedSection) {
+    savedSection.style.display = isSavedJobsPage(tab.url) ? 'block' : 'none';
+  }
 
   if (isLinkedInJobPage(tab.url) && tab.id) {
     // Query the content script for structured job data
@@ -37,10 +64,7 @@ async function init() {
       const jobData = await chrome.tabs.sendMessage(tab.id, { type: 'GET_CURRENT_JOB' });
       if (jobData?.title && jobData?.company) {
         currentJobData = jobData;
-        document.getElementById('preview-title').textContent = jobData.title;
-        document.getElementById('preview-company').textContent = jobData.company + (jobData.location ? ' · ' + jobData.location : '');
-        document.getElementById('job-preview').style.display = 'block';
-        document.getElementById('btn-save-job').style.display = 'flex';
+        showJobPreview(currentJobData);
         setStatus('LinkedIn job detected');
       } else {
         setStatus('Job listing detected');
@@ -48,8 +72,42 @@ async function init() {
     } catch (_) {
       setStatus('Job listing detected');
     }
-  } else if (isJobPage(tab.url)) {
-    setStatus('Job listing detected');
+  } else if (isJobPage(tab.url) && tab.id) {
+    // Generic ATS sites — extract text + parse title from page title
+    try {
+      const textRes = await chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_JOB_TEXT' });
+      const pageTitle = tab.title || '';
+      const cleanTitle = pageTitle
+        .replace(/\s*[-–—|]\s*(Indeed|Glassdoor|Workable|Greenhouse|Lever|Jobs).*$/i, '')
+        .trim();
+      const parts = cleanTitle.split(/\s+(?:at|@)\s+/i);
+
+      currentJobData = {
+        title:          parts[0]?.trim() || cleanTitle,
+        company:        parts[1]?.trim() || '',
+        location:       '',
+        workType:       '',
+        description:    textRes?.jobText || '',
+        jobUrl:         tab.url,
+        applyUrl:       tab.url,
+        externalJobId:  null,
+        salary:         null,
+        postedDate:     null,
+        companyLogo:    null,
+        sourceLabel:    detectSource(tab.url),
+      };
+
+      if (currentJobData.title) {
+        showJobPreview(currentJobData);
+        setStatus(detectSource(tab.url) + ' job detected');
+      } else {
+        setStatus('Job listing detected');
+      }
+    } catch (_) {
+      setStatus('Job listing detected');
+    }
+  } else if (isSavedJobsPage(tab.url)) {
+    setStatus('LinkedIn saved jobs page');
   } else if (/linkedin\.com\/in\//.test(tab.url)) {
     setStatus('LinkedIn profile page');
   }
@@ -89,7 +147,7 @@ document.getElementById('btn-resume').addEventListener('click', async () => {
 
 document.getElementById('btn-linkedin').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'OPEN_LINKEDIN_IMPORT' });
-  setStatus('Opening LinkedIn login...', 1000);
+  setStatus('Opening sign in...', 1000);
   setTimeout(() => window.close(), 900);
 });
 
