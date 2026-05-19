@@ -32,15 +32,6 @@
   text-decoration: none;
   flex-shrink: 0;
 }
-.navbar__wordmark {
-  font-family: 'Barlow Condensed', 'DM Sans', sans-serif;
-  font-size: 1.05rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-style: italic;
-  color: var(--color-text, #cdccca);
-}
 
 /* ── Desktop nav links ── */
 .navbar__links {

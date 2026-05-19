@@ -1,7 +1,7 @@
 // client/src/pages/LandingPage.jsx
 // Auth is passed as a prop from App.jsx — no useAuth hook in this project.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Link } from "react-router-dom"; // used in sign-up prompt
+import { Link } from "react-router-dom";
 import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
 import BelowFoldContent from "../components/BelowFoldContent.jsx";
 import { useTheme } from "../styles/theme.jsx";
@@ -23,13 +23,6 @@ function JobCardWrapper({ job, index, onDismiss, isLoggedOut = false }) {
     </div>
   );
 }
-
-const FEATURE_CARDS = [
-  { to: '/products', icon: '◈', label: 'Products', desc: 'Resume builder, ATS scanner & more' },
-  { to: '/pricing',  icon: '◇', label: 'Pricing',  desc: 'Free to start, upgrade anytime'    },
-  { to: '/about',    icon: '◉', label: 'About',    desc: 'Our mission and story'               },
-  { to: '/blog',     icon: '◎', label: 'Blog',     desc: 'Job search tips & product updates'  },
-];
 
 // ── LandingPage ───────────────────────────────────────────────────────────────
 export default function LandingPage({ authUser }) {
@@ -144,25 +137,10 @@ export default function LandingPage({ authUser }) {
         isLoggedOut={!authUser}
         onSearch={handleSearch}
         onLocalFilter={handleLocalFilter}
-        heroFooter={
-          <nav className="lp__feature-nav" aria-label="Product features">
-            {FEATURE_CARDS.map(({ to, icon, label, desc }) => (
-              <Link key={to} to={to} className="lp__feature-card">
-                <span className="lp__feature-card__icon">{icon}</span>
-                <span className="lp__feature-card__body">
-                  <span className="lp__feature-card__label">{label}</span>
-                  <span className="lp__feature-card__desc">{desc}</span>
-                </span>
-                <span className="lp__feature-card__arrow" aria-hidden="true">→</span>
-              </Link>
-            ))}
-          </nav>
-        }
       />
 
-      {/* Main content */}
+      {/* Main content — padding-top via CSS pushes below the fixed USBar */}
       <main className="lp__main">
-        <div className="lp__spacer" aria-hidden="true" />
 
         {/* Skeleton loaders */}
         {loading && (

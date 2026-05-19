@@ -23,9 +23,7 @@ const ROLE_PATTERNS = [
     /software\s+development/i,
     /\bprogrammer\b/i, /\bsoftware\s+dev\b/i,
     /backend/i, /frontend/i, /web dev/i,
-    /solutions\s+engineer/i, /systems\s+engineer/i,
-    /staff\s+engineer/i, /principal\s+engineer/i,
-    /engineering\s+manager/i,
+    /systems\s+(software|engineer)/i, /staff\s+engineer/i, /principal\s+engineer/i,
     /embedded\s+(engineer|developer|software)/i,
     /firmware\s+engineer/i,
   ]},
@@ -93,8 +91,18 @@ const DOMAIN_PATTERNS = [
   { domain: 'ecommerce',   patterns: [/e.?commerce/i, /marketplace/i, /retail/i, /shopify/i] },
 ];
 
+// Title-only blocklist: prevents non-tech titles from matching SWE patterns.
+// Tested against job.title only (not description) to avoid false negatives.
+const SWE_TITLE_BLOCKLIST = [
+  /\b(civil|structural|mechanical|aerospace|electrical|chemical|environmental|geological|mining|manufacturing|process|industrial)\s+(systems?\s+)?engineer/i,
+  /\bpre.?sales\b/i,
+  /\bsales\s+engineer/i,
+  /\bfield\s+(service\s+)?engineer/i,
+];
+
 function classify(job) {
   const text = `${job.title || ''} ${job.description || ''} ${job.company || ''}`;
+  const title = job.title || '';
 
   let seniority = 'mid'; // default
   for (const { level, patterns } of SENIORITY_PATTERNS) {
@@ -104,6 +112,11 @@ function classify(job) {
   let role = 'other';
   for (const { role: r, patterns } of ROLE_PATTERNS) {
     if (patterns.some(p => p.test(text))) { role = r; break; }
+  }
+
+  // Blocklist: demote clearly non-tech roles that may have matched SWE patterns
+  if (role === 'software_engineer' && SWE_TITLE_BLOCKLIST.some(p => p.test(title))) {
+    role = 'other';
   }
 
   let domain = 'general';

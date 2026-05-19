@@ -72,7 +72,7 @@ import {
   publicIntegrationRow,
 } from "./services/integrationReadiness.js";
 import { searchJobs, cacheJobs } from "./services/jobs/aggregator.js";
-import { filterAndRankForProfile } from "./services/jobs/profileMatcher.js";
+import { filterAndRankForProfile, resolveUserRoles } from "./services/jobs/profileMatcher.js";
 
 // ── mapJobRow: normalise DB/aggregator rows to camelCase for the client ────────
 function mapJobRow(j) {
@@ -4704,7 +4704,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
 
     if (cacheCount > 0) {
-      // Load all cached jobs matching optional keyword filter
+      // Build keyword + location filter clauses
       const keyFilter = rawQuery
         ? `AND (title LIKE ? OR company LIKE ? OR description LIKE ?)`
         : '';
@@ -4714,13 +4714,6 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         ? `AND location LIKE ?`
         : '';
       const locArgs   = location ? [`%${location}%`] : [];
-
-      const cachedJobs = db.prepare(`
-        SELECT * FROM scraped_jobs
-        WHERE 1=1 ${keyFilter} ${locFilter}
-        ORDER BY scraped_at DESC
-        LIMIT 500
-      `).all(...keyArgs, ...locArgs);
 
       // Load user profile for personalization
       const profile = db.prepare(
@@ -4734,6 +4727,19 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         target_domains:   profile.target_domains   || '[]',
         seniority_level:  profile.seniority_level  || null,
       };
+
+      // Pre-filter SQL to user's role buckets — only fetch matching jobs (+ 'other' as fallback)
+      const userBuckets = resolveUserRoles(profileForMatcher);
+      const bucketFilter = userBuckets.length > 0
+        ? `AND (bucket_role IN (${userBuckets.map(() => '?').join(',')}) OR bucket_role IS NULL)`
+        : '';
+
+      const cachedJobs = db.prepare(`
+        SELECT * FROM scraped_jobs
+        WHERE 1=1 ${keyFilter} ${locFilter} ${bucketFilter}
+        ORDER BY scraped_at DESC
+        LIMIT 500
+      `).all(...keyArgs, ...locArgs, ...userBuckets);
 
       // Load disliked URLs for this user
       const dislikedRows = db.prepare(

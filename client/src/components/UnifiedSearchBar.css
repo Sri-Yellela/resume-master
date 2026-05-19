@@ -37,9 +37,9 @@
   transform: none;
   padding: var(--space-2, .5rem) var(--space-6, 1.5rem);
   background: var(--color-surface, #1c1b19);
-  border-radius: 0;
+  border-radius: 0 0 12px 12px; /* rounded bottom corners — floating dock feel */
   border-bottom: 1px solid var(--color-border, #393836);
-  box-shadow: var(--shadow-sm, 0 1px 4px rgba(0,0,0,.2));
+  box-shadow: 0 4px 20px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.10);
 }
 
 /* ── Branding — bidirectional animation via parent class ── */
@@ -72,63 +72,6 @@
   transition-delay: 0ms;
 }
 
-/* ── HeroLogo — phase-based icon + typewriter wordmark ── */
-.hero-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3, .75rem);
-  margin-bottom: var(--space-6, 1.5rem);
-}
-
-.hero-logo__icon {
-  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
-  transform-origin: center;
-}
-.hero-logo__icon--0 { transform: scale(1);    }
-.hero-logo__icon--1 { transform: scale(1.2);  }
-.hero-logo__icon--2 { transform: scale(1.15); }
-
-.hero-logo__wordmark {
-  display: flex;
-  align-items: baseline;
-  font-family: var(--font-display, var(--font-body, sans-serif));
-  font-size: clamp(1.75rem, 3.5vw, 2.75rem);
-  font-weight: 700;
-  color: var(--color-text, #cdccca);
-  letter-spacing: -0.025em;
-  line-height: 1;
-  overflow: hidden;
-}
-
-.hero-logo__r {
-  display: inline;
-  color: var(--color-primary, #4f98a3);
-}
-
-.hero-logo__typed {
-  display: inline-flex;
-  align-items: baseline;
-}
-
-.hero-logo__char {
-  display: inline;
-  opacity: 0;
-  transform: translateY(6px);
-  transition:
-    opacity   120ms ease,
-    transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.hero-logo__char--visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-/* When bar is docked, hide the hero logo wordmark */
-.usb--dock .hero-logo {
-  display: none;
-}
 
 .usb__sub {
   font-size: var(--text-base, 1rem);

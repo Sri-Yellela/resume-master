@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
+import { StampLogo } from './StampLogo.jsx';
 import './NavBar.css';
 
 const PUBLIC_LINKS = [
@@ -39,14 +40,7 @@ export default function NavBar({ user = null, onLogout }) {
 
       {/* Logo */}
       <Link to="/" className="navbar__logo" aria-label="Resume Master home">
-        <svg width="32" height="32" viewBox="0 0 32 32" fill="none"
-             aria-hidden="true" focusable="false">
-          <rect width="32" height="32" rx="8" fill="var(--color-primary,#4f98a3)"/>
-          <rect x="8" y="10" width="16" height="2" rx="1" fill="white"/>
-          <rect x="8" y="15" width="12" height="2" rx="1" fill="white"/>
-          <rect x="8" y="20" width="10" height="2" rx="1" fill="white"/>
-        </svg>
-        <span className="navbar__wordmark">Resume Master</span>
+        <StampLogo />
       </Link>
 
       {/* Desktop nav links */}

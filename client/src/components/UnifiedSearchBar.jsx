@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useRef } from 'react';
 import { Search, MapPin, Briefcase, Building2, Tag, ChevronDown, X } from 'lucide-react';
+import { StampLogo } from './StampLogo.jsx';
 import './UnifiedSearchBar.css';
 
 const EXP_OPTIONS = [
@@ -34,63 +34,12 @@ const STATUS_OPTIONS = [
 
 const DCLICK_MS = 5000;
 
-// ── HeroLogo — phase-based icon + typewriter wordmark ────────────────────────
-// Phase 0 (0–400ms):   icon at rest
-// Phase 1 (400–700ms): icon scales up
-// Phase 2 (700ms+):    "esume Master" types in letter by letter
-const HERO_FULL_TEXT = 'esume Master';
-const HERO_LETTER_MS = 40;
-const HERO_PHASE2_MS = 700;
-
-function HeroLogo({ triggered }) {
-  const [phase, setPhase] = useState(0);
-
-  useEffect(() => {
-    if (!triggered) return;
-    const t1 = setTimeout(() => setPhase(1), 400);
-    const t2 = setTimeout(() => setPhase(2), HERO_PHASE2_MS);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [triggered]);
-
-  return (
-    <div className="hero-logo">
-      <div className={'hero-logo__icon hero-logo__icon--' + phase}>
-        <svg width="44" height="44" viewBox="0 0 32 32" fill="none" aria-hidden="true" focusable="false">
-          <rect width="32" height="32" rx="8" fill="var(--color-primary,#4f98a3)"/>
-          <rect x="8" y="10" width="16" height="2" rx="1" fill="white"/>
-          <rect x="8" y="15" width="12" height="2" rx="1" fill="white"/>
-          <rect x="8" y="20" width="10" height="2" rx="1" fill="white"/>
-        </svg>
-      </div>
-      <div className="hero-logo__wordmark" aria-label="Resume Master">
-        <span className="hero-logo__r" aria-hidden="true">R</span>
-        <span className="hero-logo__typed" aria-hidden="true">
-          {HERO_FULL_TEXT.split('').map((char, i) => (
-            <span
-              key={i}
-              className={'hero-logo__char' + (phase >= 2 ? ' hero-logo__char--visible' : '')}
-              style={{
-                transitionDelay: phase >= 2 ? (i * HERO_LETTER_MS) + 'ms' : '0ms',
-                display: char === ' ' ? 'inline-block' : 'inline',
-                width:   char === ' ' ? '0.28em' : 'auto',
-              }}
-            >
-              {char === ' ' ? '\u00A0' : char}
-            </span>
-          ))}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 export default function UnifiedSearchBar({
   mode = 'hero',
   onSearch,
   onLocalFilter,
   isLoggedOut = false,
   greeting,
-  heroFooter,
 }) {
   const [q,       setQ]       = useState('');
   const [loc,     setLoc]     = useState('');
@@ -99,12 +48,6 @@ export default function UnifiedSearchBar({
   const [status,  setStatus]  = useState('');
   const [uiState, setUiState] = useState('idle');
   const [cdw,     setCdw]     = useState(null);
-
-  const [logoTriggered, setLogoTriggered] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setLogoTriggered(true), 200);
-    return () => clearTimeout(t);
-  }, []);
 
   const clicks  = useRef(0);
   const cTmr    = useRef(null);
@@ -163,9 +106,9 @@ export default function UnifiedSearchBar({
     <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero')}
          role="search" aria-label="Job search">
 
-      {/* Branding — hero: visible, dock: hidden via CSS */}
+      {/* Branding — hero: visible, dock: hidden via max-height CSS */}
       <div className="usb__brand">
-        <HeroLogo triggered={logoTriggered} />
+        <StampLogo size="lg" />
         <p className="usb__sub">
           {greeting
             ? `Welcome back, ${greeting}`
@@ -173,7 +116,6 @@ export default function UnifiedSearchBar({
               ? 'Build the perfect resume. Land your next role.'
               : 'Your personalized job feed.'}
         </p>
-        {heroFooter}
       </div>
 
       {/* Search bar */}

@@ -90,8 +90,8 @@ function scoreJob(job, profile, now = Date.now()) {
   const mappedRoles = resolveUserRoles(profile);
   const roleMatch = mappedRoles.length > 0
     ? (mappedRoles.includes(job.bucket_role) ? 1.0
-       : job.bucket_role === 'other'          ? 0.5
-       :                                        0.2)
+       : job.bucket_role === 'other'          ? 0.1  // unclassified: nearly excluded when profile exists
+       :                                        0.0)  // wrong bucket: fully excluded
     : 0.5; // no profile preference set — neutral
   score += WEIGHTS.role_match * roleMatch;
 
@@ -140,4 +140,4 @@ function filterAndRankForProfile(jobs, profile, dislikedUrls = []) {
     .sort((a, b) => b._score - a._score);
 }
 
-export { scoreJob, filterAndRankForProfile };
+export { scoreJob, filterAndRankForProfile, resolveUserRoles };
