@@ -73,6 +73,7 @@ import {
 } from "./services/integrationReadiness.js";
 import { searchJobs, cacheJobs } from "./services/jobs/aggregator.js";
 import { filterAndRankForProfile, resolveUserRoles } from "./services/jobs/profileMatcher.js";
+import { isResumeRelevant } from "./services/jobs/relevanceFilter.js";
 
 // ── mapJobRow: normalise DB/aggregator rows to camelCase for the client ────────
 function mapJobRow(j) {
@@ -4747,8 +4748,9 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       ).all(req.user.id);
       const dislikedUrls = dislikedRows.map(r => r.job_id);
 
-      // Rank by profile match
-      const ranked = filterAndRankForProfile(cachedJobs, profileForMatcher, dislikedUrls);
+      // Rank by profile match, then strip any irrelevant jobs that slipped into DB
+      const ranked = filterAndRankForProfile(cachedJobs, profileForMatcher, dislikedUrls)
+        .filter(j => isResumeRelevant(j.title));
 
       // Attach star/dislike state
       const interactionMap = {};
@@ -4833,8 +4835,9 @@ app.get("/api/jobs/generic", async (req, res) => {
     `).all(ps, offset);
 
     const total = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE direct_apply = 1").get()?.n || 0;
+    const filteredRows = rows.filter(r => isResumeRelevant(r.title));
 
-    res.json({ success: true, jobs: rows.map(mapJobRow), total, page, pageSize: ps });
+    res.json({ success: true, jobs: filteredRows.map(mapJobRow), total, page, pageSize: ps });
   } catch (err) {
     console.error('[GET /api/jobs/generic]', err.message);
     res.status(500).json({ success: false, error: 'Failed to load jobs.', jobs: [] });
@@ -4922,8 +4925,9 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
               });
             }
           });
-          insertMany(result.jobs);
-          console.log('[Search] Persisted', result.jobs.length, 'live results to scraped_jobs');
+          const relevantJobs = result.jobs.filter(j => isResumeRelevant(j.title));
+          insertMany(relevantJobs);
+          console.log(`[Search] Persisted ${relevantJobs.length} live results (skipped ${result.jobs.length - relevantJobs.length} irrelevant)`);
         } catch(e) {
           console.warn('[Search] Write-back non-fatal:', e.message);
         }

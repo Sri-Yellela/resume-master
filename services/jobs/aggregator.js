@@ -4,6 +4,7 @@ import { classify } from './classifier.js';
 import { filterDirectApplyOnly } from './directApplyFilter.js';
 import { classifyForIngest } from '../jobClassifier.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
+import { isResumeRelevant } from './relevanceFilter.js';
 
 // ─── REGISTER SOURCES HERE ───────────────────────────────────────────────────
 // To add a new source: import it and add to SOURCES array.
@@ -226,8 +227,11 @@ async function cacheJobs(db) {
       }
     });
 
-    upsertAll(result.jobs);
-    console.log(`[cacheJobs] Cached ${result.jobs.length} jobs from ATS sources`);
+    const relevant = result.jobs.filter(j => isResumeRelevant(j.title));
+    const skipped  = result.jobs.length - relevant.length;
+    if (skipped > 0) console.log(`[cacheJobs] Skipped ${skipped} irrelevant jobs`);
+    upsertAll(relevant);
+    console.log(`[cacheJobs] Cached ${relevant.length} jobs from ATS sources`);
 
     // Background logo enrichment (non-blocking, max 25 per cache run)
     setImmediate(async () => {
