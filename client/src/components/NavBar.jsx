@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { StampLogo } from './StampLogo.jsx';
+import { useLogoSize } from '../hooks/useLogoSize.js';
 import './NavBar.css';
 
 const PUBLIC_LINKS = [
@@ -15,32 +16,18 @@ const PUBLIC_LINKS = [
 // onLogout: async function
 export default function NavBar({ user = null, onLogout }) {
   const loc = useLocation();
-  const [open,     setOpen]     = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-
-  const isLanding = loc.pathname === '/';
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 10);
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
+  const [open, setOpen] = useState(false);
+  const isWide = useLogoSize(); // true when >=768px → show full "RESUME MASTER"
 
   // Close drawer on route change
   useEffect(() => { setOpen(false); }, [loc.pathname]);
 
-  const navClass =
-    'navbar' +
-    (isLanding ? ' navbar--landing' : '') +
-    (scrolled  ? ' navbar--scrolled' : '');
-
   return (
-    <nav className={navClass} aria-label="Site navigation">
+    <nav className="navbar" aria-label="Site navigation">
 
-      {/* Logo */}
+      {/* Logo — full "RESUME MASTER" on wide, "RM" on narrow */}
       <Link to="/" className="navbar__logo" aria-label="Resume Master home">
-        <StampLogo />
+        <StampLogo progress={isWide ? 0 : 1} />
       </Link>
 
       {/* Desktop nav links */}

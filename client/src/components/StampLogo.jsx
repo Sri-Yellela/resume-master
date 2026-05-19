@@ -1,12 +1,18 @@
-// Shared stamp-badge logo — matches TopBar.jsx AnimatedLucyLogo exactly.
-// progress: 0 = full "RESUME MASTER", 1 = collapsed to "R" only.
+// Shared stamp-badge logo.
+// progress: 0 = full "RESUME MASTER", 1 = collapsed to "RM" only.
 // Uses var(--color-primary) for the accent shadow rect — no theme prop needed.
 
 export function StampLogo({ progress = 0, size = 'sm' }) {
   const pc = Math.min(Math.max(progress, 0), 1);
-  const maxW = size === 'lg' ? 175 : size === 'md' ? 148 : 128;
-  const textMaxW = Math.round((1 - pc) * maxW);
+
+  // Two collapsible spans: "esume " and "aster"
+  // At progress=1 both collapse → only "R" and "M" remain → "RM"
+  const esumeMaxW = size === 'lg' ? 88 : size === 'md' ? 74 : 64;
+  const asterMaxW = size === 'lg' ? 73 : size === 'md' ? 62 : 53;
+  const esumeW    = Math.round((1 - pc) * esumeMaxW);
+  const asterW    = Math.round((1 - pc) * asterMaxW);
   const textOpacity = Math.max(0, 1 - pc * 1.8);
+
   const fontSize = size === 'lg' ? 20 : size === 'md' ? 17 : 15;
   const height   = size === 'lg' ? 50 : size === 'md' ? 42 : 36;
   const padV     = size === 'lg' ? 5  : size === 'md' ? 4  : 3;
@@ -24,12 +30,21 @@ export function StampLogo({ progress = 0, size = 'sm' }) {
     whiteSpace: 'nowrap',
   };
 
+  const collapseStyle = {
+    ...letterStyle,
+    display: 'inline-block',
+    overflow: 'hidden',
+    opacity: textOpacity,
+    transition: 'max-width 400ms cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 350ms ease',
+    verticalAlign: 'bottom',
+  };
+
   return (
     <div style={{
       position: 'relative', display: 'inline-flex', alignItems: 'center',
       justifyContent: 'center', flexShrink: 0, height, minWidth: 50,
     }}>
-      {/* Accent shadow rect — sits behind and rotated slightly more */}
+      {/* Accent shadow rect — sits behind, rotated slightly more */}
       <div style={{
         position: 'absolute', inset: 0,
         background: 'var(--color-primary, #4f98a3)',
@@ -47,15 +62,9 @@ export function StampLogo({ progress = 0, size = 'sm' }) {
         overflow: 'hidden',
       }}>
         <span style={letterStyle}>R</span>
-        <span style={{
-          ...letterStyle,
-          display: 'inline-block',
-          maxWidth: textMaxW + 'px',
-          overflow: 'hidden',
-          opacity: textOpacity,
-          transition: 'max-width 0.075s linear, opacity 0.075s linear',
-          verticalAlign: 'bottom',
-        }}>esume Master</span>
+        <span style={{ ...collapseStyle, maxWidth: esumeW + 'px' }}>esume </span>
+        <span style={letterStyle}>M</span>
+        <span style={{ ...collapseStyle, maxWidth: asterW + 'px' }}>aster</span>
       </div>
     </div>
   );

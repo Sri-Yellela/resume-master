@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, Briefcase, Building2, Tag, ChevronDown, X } from 'lucide-react';
-import { StampLogo } from './StampLogo.jsx';
 import './UnifiedSearchBar.css';
 
 const EXP_OPTIONS = [
@@ -38,8 +37,6 @@ export default function UnifiedSearchBar({
   mode = 'hero',
   onSearch,
   onLocalFilter,
-  isLoggedOut = false,
-  greeting,
 }) {
   const [q,       setQ]       = useState('');
   const [loc,     setLoc]     = useState('');
@@ -105,18 +102,6 @@ export default function UnifiedSearchBar({
   return (
     <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero')}
          role="search" aria-label="Job search">
-
-      {/* Branding — hero: visible, dock: hidden via max-height CSS */}
-      <div className="usb__brand">
-        <StampLogo size="lg" />
-        <p className="usb__sub">
-          {greeting
-            ? `Welcome back, ${greeting}`
-            : isLoggedOut
-              ? 'Build the perfect resume. Land your next role.'
-              : 'Your personalized job feed.'}
-        </p>
-      </div>
 
       {/* Search bar */}
       <div className="usb__bar">

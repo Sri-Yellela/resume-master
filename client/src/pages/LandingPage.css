@@ -1,12 +1,37 @@
-.lp { min-height: 100dvh; }
+.lp { min-height: 100dvh; position: relative; }
 
-/* Hero: USBar positions itself fixed at viewport center.
-   Main content uses padding-top so first cards appear just below the bar.
-   As user scrolls down, cards naturally pass behind the fixed bar (z:200). */
-.lp--hero {
-  background: var(--color-bg, #171614);
-}
+/* NavBar (z:300) floats above everything.
+   USBar (z:200) is fixed — hero: centered, dock: just below NavBar.
+   Hero zone is absolute, scrolls away as user scrolls down.
+   Cards (z:1) scroll behind the fixed bars. */
+.lp--hero { background: var(--color-bg, #171614); }
 .lp--dock { display: block; }
+
+/* ── Hero logo zone — absolute so it doesn't affect card layout ── */
+.lp__hero-zone {
+  position: absolute;
+  top: 56px;          /* directly below NavBar */
+  left: 0; right: 0;
+  height: calc(50vh - 60px); /* fills space between NavBar and search bar */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  z-index: 1;         /* below both fixed bars */
+  pointer-events: none;
+  transition: opacity 300ms ease;
+}
+.lp__hero-zone--hidden { opacity: 0; }
+
+.lp__hero-tagline {
+  font-size: 1rem;
+  color: var(--color-text-muted, #797876);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  text-align: center;
+  margin: 0;
+  max-width: 40ch;
+}
 
 /* ── Main panel padding — transitions with mode ── */
 .lp__main {

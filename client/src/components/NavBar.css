@@ -13,17 +13,6 @@
   font-family: 'DM Sans', system-ui, sans-serif;
 }
 
-/* On landing page: transparent until scrolled */
-.navbar--landing {
-  background: transparent;
-  border-bottom-color: transparent;
-  transition: background 400ms ease, border-color 400ms ease;
-}
-.navbar--landing.navbar--scrolled {
-  background: var(--color-surface, #1c1b19);
-  border-bottom-color: var(--color-border, #393836);
-}
-
 /* ── Logo ── */
 .navbar__logo {
   display: flex;

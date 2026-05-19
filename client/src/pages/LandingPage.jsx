@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
 import BelowFoldContent from "../components/BelowFoldContent.jsx";
+import { StampLogo } from "../components/StampLogo.jsx";
+import { useLogoSize } from "../hooks/useLogoSize.js";
 import { useTheme } from "../styles/theme.jsx";
 import { api } from "../lib/api.js";
 import "./LandingPage.css";
@@ -27,6 +29,7 @@ function JobCardWrapper({ job, index, onDismiss, isLoggedOut = false }) {
 // ── LandingPage ───────────────────────────────────────────────────────────────
 export default function LandingPage({ authUser }) {
   const { theme } = useTheme();
+  const isWide = useLogoSize();
   const [uiMode,      setUiMode]      = useState("hero");
   const [jobs,        setJobs]        = useState([]);
   const [total,       setTotal]       = useState(0);
@@ -131,10 +134,17 @@ export default function LandingPage({ authUser }) {
   return (
     <div className={`lp lp--${uiMode}`} style={{ background: theme.bg }}>
 
+      {/* Hero logo zone — in absolute position, scrolls away naturally */}
+      <div className={`lp__hero-zone${uiMode === 'dock' ? ' lp__hero-zone--hidden' : ''}`}>
+        <StampLogo size="lg" progress={isWide ? 0 : 1} />
+        <p className="lp__hero-tagline">
+          {authUser ? 'Your personalized job feed.' : 'Build the perfect resume. Land your next role.'}
+        </p>
+      </div>
+
       {/* UnifiedSearchBar — hero centered → dock sticky-top (NavBar is rendered by App.jsx) */}
       <UnifiedSearchBar
         mode={uiMode}
-        isLoggedOut={!authUser}
         onSearch={handleSearch}
         onLocalFilter={handleLocalFilter}
       />

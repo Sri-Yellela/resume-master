@@ -18,12 +18,13 @@
 }
 
 .usb--hero {
-  top: calc(50vh + 28px); /* shift down by half of 56px NavBar height */
+  /* Sit just above viewport midpoint — hero logo zone is above, cards below */
+  top: calc(50vh + 28px);
   left: 50%;
   right: auto;
   width: min(920px, 94vw);
-  transform: translate(-50%, -54%);
-  padding: var(--space-8, 2rem);
+  transform: translate(-50%, -50%);
+  padding: var(--space-5, 1.25rem);
   background: var(--color-surface, #1c1b19);
   border-radius: var(--radius-xl, 1rem);
   box-shadow: var(--shadow-lg, 0 12px 40px rgba(0,0,0,.4));
@@ -40,45 +41,6 @@
   border-radius: 0 0 12px 12px; /* rounded bottom corners — floating dock feel */
   border-bottom: 1px solid var(--color-border, #393836);
   box-shadow: 0 4px 20px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.10);
-}
-
-/* ── Branding — bidirectional animation via parent class ── */
-.usb__brand {
-  overflow: hidden;
-  text-align: center;
-  transform-origin: top center;
-  transition:
-    max-height  650ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
-    opacity     500ms ease 100ms,   /* 100ms delay — fades after layout starts */
-    margin      600ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
-    transform   650ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
-
-.usb--hero .usb__brand {
-  max-height: 400px;
-  opacity: 1;
-  margin-bottom: var(--space-8, 2rem);
-  transform: scaleY(1) translateY(0);
-  pointer-events: auto;
-  transition-delay: 150ms; /* wait for bar to settle before brand appears */
-}
-
-.usb--dock .usb__brand {
-  max-height: 0;
-  opacity: 0;
-  margin-bottom: 0;
-  transform: scaleY(0) translateY(-8px);
-  pointer-events: none;
-  transition-delay: 0ms;
-}
-
-
-.usb__sub {
-  font-size: var(--text-base, 1rem);
-  color: var(--color-text-muted, #797876);
-  margin-top: .5rem;
-  max-width: 48ch;
-  margin-inline: auto;
 }
 
 .usb__bar {
