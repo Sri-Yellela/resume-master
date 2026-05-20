@@ -11,9 +11,10 @@ const SENIORITY_PATTERNS = [
 ];
 
 // Checked in order — more specific buckets first so broad patterns don't win early.
-// Order: security → mobile → data_engineer → data_scientist → software_engineer
-//        → devops → product_manager → designer
-//        → operations → marketing → sales_biz_dev → finance → hr_recruiting → other
+// Order: security → mobile → hardware_engineer → data_engineer → designer
+//        → data_scientist → software_engineer → devops → product_manager
+//        → technical_support → operations → marketing → sales_biz_dev
+//        → finance → hr_recruiting → legal → other
 const ROLE_PATTERNS = [
 
   // ── SECURITY ── (before SWE — "Security Engineer" must not fall through to SWE)
@@ -24,6 +25,14 @@ const ROLE_PATTERNS = [
     /security\s+(engineer|analyst|architect|researcher)/i,
     /information\s+security/i, /\binfosec\b/i,
     /\bdevsecops\b/i, /\bcybersecurity\b/i,
+    // Trust & Safety / Fraud / Abuse (operational security roles)
+    /\btrust\s+(and|&)\s+safety\b/i,
+    /\babuse\s+(investigator|analyst|specialist|operations)\b/i,
+    /\bfraud\s+(investigator|analyst|intelligence|operations|prevention)\b/i,
+    /\bthreat\s+(analyst|intelligence|investigator|modeler)\b/i,
+    /\brisk\s+strategist\b/i,
+    /\brisk\s+operations\b/i,
+    /\bsafety\s+(specialist|analyst|response|operations|lead|officer)\b/i,
     /\bsecurity\b/i,    // broad — last within bucket
   ]},
 
@@ -40,15 +49,48 @@ const ROLE_PATTERNS = [
     /\bmobile\b/i,
   ]},
 
+  // ── HARDWARE ENGINEER ── (before SWE — "HW/SW CoDesign" must not land in SWE)
+  { role: 'hardware_engineer', patterns: [
+    /\bhardware\s+(engineer|architect|architecture|design|systems|tools)\b/i,
+    /\brtl\b.*\b(engineer|design|designer)\b/i,
+    /\bphysical\s+design\s+engineer\b/i,
+    /\bvlsi\b/i,
+    /\bsignal\s+integrity\b/i,
+    /\bsilicon\s+(design|implementation|engineer|architect|technologist)\b/i,
+    /\bchip\s+(design|engineer|architect)\b/i,
+    /\bfpga\b/i, /\basic\s+design\b/i,
+    /\bmechanical\s+engineer\b/i,
+    /\bmanufacturing\s+(engineer|quality|test)\b/i,
+    /\bthermal.{0,20}engineer/i,
+    /\bpackaging\s+engineer\b/i,
+    /\bperformance\s+modeling\s+engineer\b/i,
+    /\boptical\s+network\s+engineer\b/i,
+    /\bco.?design\s+engineer\b/i,
+    /\bsimulation\s+(engineer|environments|realism)\b/i,
+    /\bworkload\s+(porting|performance)\s+engineer\b/i,
+    /\badvanced\s+packaging\b/i,
+  ]},
+
   // ── DATA ENGINEER ── (before data_scientist — "Analytics Engineer" → data_engineer)
   { role: 'data_engineer', patterns: [
     /data\s+engineer/i,
     /\betl\s+(developer|engineer)/i,
     /analytics\s+engineer/i,
     /data\s+(infrastructure|platform|warehouse)/i,
-    /data\s+architect/i, /database\s+architect/i, /analytics\s+architect/i,  // NEW
+    /data\s+architect/i, /database\s+architect/i, /analytics\s+architect/i,
     /\bspark\b.*engineer/i, /\bkafka\b.*engineer/i,
     /\betl\b/i, /\bdbt\b/i,
+  ]},
+
+  // ── DESIGNER ── (before data_scientist — UX Researcher must not fall through to /researcher/)
+  { role: 'designer', patterns: [
+    /\bdesigner\b/i, /user\s+experience/i, /user\s+interface/i,
+    /visual\s+designer/i, /interaction\s+designer/i,
+    /\bux\s+researcher/i, /\buser\s+researcher\b/i, /product\s+designer/i,
+    /\bui\/ux\b/i, /\bux\/ui\b/i,
+    // FIXED: /ux/i → /\bux\b/i — prevents "Luxembourg" / "Luxe" false positives
+    /\bux\b/i,
+    /product\s+design/i,
   ]},
 
   // ── DATA SCIENTIST ──
@@ -62,6 +104,8 @@ const ROLE_PATTERNS = [
     /quantitative\s+(analyst|researcher)/i, /\bquant\b/i,
     /data\s+analyst/i,
     /business\s+intelligence/i, /\bbi\s+developer/i,
+    /model\s+(behavior|policy|safety)\s+engineer/i,
+    /\bresearcher\b/i,   // "Researcher, Alignment" / AI safety researchers (designer check above prevents UX false positive)
     /\bml\b/i,
   ]},
 
@@ -75,8 +119,8 @@ const ROLE_PATTERNS = [
     /javascript\s+(developer|engineer)/i, /react\s+(developer|engineer)/i,
     /node\.?js\s+(developer|engineer)/i,
     /application\s+(developer|engineer)/i,
-    /research\s+engineer/i,       // NEW: Research Engineer → SWE
-    /\bengineering\s+manager\b/i, // NEW: Engineering Manager → SWE family
+    /research\s+engineer/i,
+    /\bengineering\s+manager\b/i,
     /software\s+development/i,
     /\bprogrammer\b/i, /\bsoftware\s+dev\b/i,
     /\bbackend\b/i, /\bfrontend\b/i, /\bweb\s+dev\b/i,
@@ -84,6 +128,8 @@ const ROLE_PATTERNS = [
     /staff\s+engineer/i, /principal\s+engineer/i,
     /embedded\s+(engineer|developer|software)/i,
     /firmware\s+engineer/i,
+    /\bintegration\s+engineer\b/i,
+    /developer\s+(advocate|evangelist|experience\s+engineer)/i,
   ]},
 
   // ── DEVOPS ── (AFTER mobile & SWE — tightened patterns prevent false positives)
@@ -104,23 +150,26 @@ const ROLE_PATTERNS = [
     /associate\s+product\s+manager/i,
     /group\s+product\s+manager/i,
     /director.*product/i,
-    /\bapm\b/i,   // NEW: Associate Product Manager abbreviation
-    /\bpm\b/i,    // standalone PM abbreviation
+    /\bapm\b/i,
+    /\bpm\b/i,
     // technical_program_manager REMOVED — goes to operations bucket
   ]},
 
-  // ── DESIGNER ──
-  { role: 'designer', patterns: [
-    /\bdesigner\b/i, /user\s+experience/i, /user\s+interface/i,
-    /visual\s+designer/i, /interaction\s+designer/i,
-    /\bux\s+researcher/i, /product\s+designer/i,
-    /\bui\/ux\b/i, /\bux\/ui\b/i,
-    // FIXED: /ux/i → /\bux\b/i — prevents "Luxembourg" / "Luxe" false positives
-    /\bux\b/i,
-    /product\s+design/i,
+  // ── TECHNICAL SUPPORT ──
+  { role: 'technical_support', patterns: [
+    /\btechnical\s+support\s+(engineer|specialist|manager|lead)\b/i,
+    /\bit\s+support\s+(engineer|specialist|analyst|manager)\b/i,
+    /\bproduct\s+support\s+(specialist|manager|operations|engineer|lead)\b/i,
+    /\bcustomer\s+support\s+(engineer|specialist|manager|lead)\b/i,
+    /\bsupport\s+engineer\b/i,
+    /\bhelp\s+desk\s+(engineer|specialist|analyst|manager)\b/i,
+    /\btier\s+[123]\s+support\b/i,
+    /\bpremium\s+support\b/i,
+    /\btechnical\s+account\s+manager\b/i,
+    /\bcustomer\s+enablement\b/i,
+    /\bsupport\s+(operations|ops)\b/i,
+    /\bsupport\s+(manager|lead|specialist)\b.*\b(amer|emea|apac|global)\b/i,
   ]},
-
-  // ══ NEW PROFESSIONAL BUCKETS ═══════════════════════════════════════════════
 
   // ── OPERATIONS ── (Program Managers, Project Managers, Ops Managers, BAs)
   { role: 'operations', patterns: [
@@ -131,6 +180,8 @@ const ROLE_PATTERNS = [
     /\bbusiness\s+(analyst|operations)\b/i,
     /\bchief\s+of\s+staff\b/i,
     /\bstrategy\s+(analyst|manager|associate|consultant)\b/i,
+    /\bstrategy\s+(and|&)\s+operations\b/i,
+    /\bgtm\s+(strategy|operations|lead|manager)\b/i,
     /\bcorporate\s+strategy\b/i,
     /\bimplementation\s+(manager|consultant|specialist)\b/i,
     /\bprocess\s+(improvement|excellence|manager)\b/i,
@@ -138,11 +189,20 @@ const ROLE_PATTERNS = [
     /\bagile\s+(coach|lead|delivery)\b/i,
     /\bchange\s+management\b/i,
     /\bpmo\b/i,
+    /\bai\s+deployment\s+manager\b/i,
+    /\bforward\s+deployed\s+(engineer|engineering|lead)\b/i,
+    /\bprofessional\s+services\s+(consultant|manager|engagement)\b/i,
+    /\boperations\s+associate\b/i,
+    /\bsales\s+strategy\b/i,
+    /\bsales\s+programs?\b/i,
+    /(?<!sales\s)\benablement\s+(manager|specialist|lead|business\s+partner)\b/i,
+    /\bmarket\s+(development|manager)\b/i,
+    /\bproposal\s+manager\b/i,
   ]},
 
   // ── MARKETING ──
   { role: 'marketing', patterns: [
-    /\bmarketing\s+(manager|director|analyst|coordinator|specialist|lead|associate)\b/i,
+    /\bmarketing\s+(manager|director|analyst|coordinator|specialist|lead|associate|ops|operations)\b/i,
     /\bgrowth\s+(manager|hacker|lead|marketer|analyst)\b/i,
     /\bdemand\s+gen(eration)?\b/i,
     /\bperformance\s+marketing\b/i,
@@ -154,13 +214,16 @@ const ROLE_PATTERNS = [
     /\bproduct\s+marketing\s+(manager|lead|director)\b/i,
     /\bfield\s+marketing\b/i,
     /\bcommunity\s+(manager|growth|lead)\b/i,
-    /\bsocial\s+media\s+(manager|strategist|coordinator)\b/i,
+    /\bsocial\s+media\s+(manager|strategist|coordinator|analyst)\b/i,
     /\bemail\s+marketing\b/i,
     /\bmarketing\s+operations\b/i,
     /\blifecycle\s+marketing\b/i,
     /\bpublic\s+relations\b/i,
     /\bpr\s+(manager|specialist|director)\b/i,
-    /\bcommunications\s+(manager|director|specialist)\b/i,
+    /\bcommunications\s+(manager|director|specialist|lead)\b/i,
+    /\bdeveloper\s+marketing\b/i,
+    /\bintegrated\s+campaigns?\b/i,
+    /\blaunch\s+(strategy|manager)\b/i,
   ]},
 
   // ── SALES / BIZ DEV ──
@@ -168,6 +231,7 @@ const ROLE_PATTERNS = [
     /\baccount\s+(executive|manager|director)\b/i,
     /\bbusiness\s+development\b/i,
     /\bbdr\b/i, /\bsdr\b/i,
+    /\bsales\s+development\s+rep(resentative)?\b/i,
     /\binside\s+sales\b/i, /\boutside\s+sales\b/i,
     /\bsales\s+(manager|director|executive|lead|associate|representative|engineer)\b/i,
     /\bsolutions?\s+(engineer|consultant|architect)\b/i,
@@ -175,22 +239,30 @@ const ROLE_PATTERNS = [
     /\bclient\s+(success|relations|services|partner)\b/i,
     /\brevenue\s+operations\b/i, /\brevops\b/i,
     /\bpartnerships?\s+(manager|lead|director)\b/i,
+    /\bpartner\s+(development|director|manager)\b/i,
     /\bstrategic\s+(alliances|partnerships)\b/i,
     /\bchannel\s+(manager|sales|partner)\b/i,
     /\benterprise\s+(account|sales)\b/i,
     /\brenewals?\s+(manager|specialist)\b/i,
     /\bpre.?sales\b/i,
+    /\bsales\s+enablement\b/i,
+    /\bvalue\s+engineer\b/i,
+    /\bscaled\s+partner\b/i,
   ]},
 
   // ── FINANCE ──
   { role: 'finance', patterns: [
-    /\bfinancial\s+(analyst|manager|director|controller|advisor|consultant)\b/i,
-    /\bfinance\s+(manager|director|analyst|partner|associate|lead)\b/i,
+    /\bfinancial\s+(analyst|manager|director|controller|advisor|consultant|crimes|risk)\b/i,
+    /\bfinance\s+(manager|director|analyst|partner|associate|lead|generalist)\b/i,
+    /\bstrategic\s+finance\b/i,
     /\bfp&?a\b/i, /\bfinancial\s+planning\b/i,
     /\baccountant\b/i,
-    /\baccounting\s+(manager|analyst|specialist)\b/i,
+    /\baccounting\s+(manager|analyst|specialist|lead|technical)\b/i,
+    /\baccounts\s+(payable|receivable)\b/i,
     /\bcontroller\b/i, /\baudit(or)?\b/i,
-    /\btax\s+(analyst|manager|director|associate|accountant)\b/i,
+    /\btax\s+(analyst|manager|director|associate|accountant|compliance|operations)\b/i,
+    /\bindirect\s+tax\b/i,
+    /\btransfer\s+pricing\b/i,
     /\btreasury\b/i,
     /\binvestment\s+(analyst|banker|associate)\b/i,
     /\bequity\s+research\b/i,
@@ -199,25 +271,54 @@ const ROLE_PATTERNS = [
     /\bunderwriter\b/i,
     /\bpayroll\s+(specialist|manager)\b/i,
     /\bcfo\b/i, /\bfinancial\s+reporting\b/i,
+    /\bsales\s+compensation\b/i,
+    /\bpayments?\s+(analyst|strategist|performance)\b/i,
+    /\bkyc\b/i,   // Know Your Customer — financial compliance
+    /\baml\b/i,   // Anti-Money Laundering
+    /\bsanctions\b/i,
+    /\bpayments?\s+(fraud|operations)\b/i,
   ]},
 
   // ── HR / RECRUITING ──
   { role: 'hr_recruiting', patterns: [
     /\bhuman\s+resources\b/i,
-    /\bhr\s+(manager|director|analyst|coordinator|business\s+partner|generalist|specialist)\b/i,
+    /\bhr\s+(manager|director|analyst|coordinator|business\s+partner|generalist|specialist|operations)\b/i,
     /\bhrbp\b/i,
-    /\bpeople\s+(operations|ops|partner|manager|analyst)\b/i,
-    /\btalent\s+(acquisition|management|development|partner)\b/i,
+    /\bhris\b/i,
+    /\bpeople\s+(operations|ops|partner|manager|analyst|consultant|process|science|support)\b/i,
+    /\btalent\s+(acquisition|management|development|partner|brand|sourcer|sourcing)\b/i,
     /\brecruiter\b/i, /\btechnical\s+recruiter\b/i,
     /\bheadhunter\b/i,
+    /\bsourcer\b/i,
     /\bstaffing\s+(manager|specialist|coordinator)\b/i,
-    /\bcompensation\s+(analyst|manager)\b/i,
+    /\bcompensation\s+(analyst|manager|business\s+partner)\b/i,
     /\bbenefits\s+(analyst|manager|administrator)\b/i,
     /\blearning\s+(and\s+)?development\b/i,
     /\bl&d\b/i,
     /\bdei\s+(manager|lead|director)\b/i,
     /\bworkforce\s+planning\b/i,
     /\bemployee\s+(experience|relations|engagement)\b/i,
+    /\bleave\s+(&|and)\s+accommodation\b/i,
+    /\bcandidate\s+experience\b/i,
+  ]},
+
+  // ── LEGAL ──
+  { role: 'legal', patterns: [
+    /\bcounsel\b/i,
+    /\battorney\b/i, /\blawyer\b/i,
+    /\bparalegal\b/i,
+    /\blegal\s+(ops|operations|intern|advisor|affairs|counsel)\b/i,
+    /\bgeneral\s+counsel\b/i,
+    /\bprivacy\s+(counsel|officer|manager|fellow|analyst|lead)\b/i,
+    /\bregulatory\s+(counsel|affairs|compliance|operations|lead)\b/i,
+    /\bcompliance\s+(officer|counsel|lead)\b/i,
+    /\bpolicy\s+(manager|director|counsel|officer|lead)\b/i,
+    /\bgovernment\s+relations\b/i,
+    /\bpublic\s+policy\b/i,
+    /\bexport\s+controls?\b/i,
+    /\btrade\s+compliance\b/i,
+    /\bip\s+(attorney|counsel|manager)\b/i,
+    /\blegal\b/i,   // broad — catches "Commercial Legal", "Head of Legal", etc.
   ]},
 ];
 
