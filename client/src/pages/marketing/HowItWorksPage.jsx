@@ -1,5 +1,4 @@
 // client/src/pages/marketing/HowItWorksPage.jsx
-import { useTheme } from "../../styles/theme.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
 
@@ -17,19 +16,18 @@ const STEPS = [
 ];
 
 export function HowItWorksPage() {
-  const { theme } = useTheme();
   return (
     <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
-                  background: theme.bg, color: theme.text,
+                  background: "transparent", color: "var(--color-text)",
                   fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       <ScrollDock variant="marketing" />
       <main style={{ flex: 1, maxWidth: 800, margin: "0 auto", padding: "64px 24px" }}>
         <h1 style={{ fontSize: "clamp(32px, 5vw, 52px)", fontWeight: 900, letterSpacing: "-1.5px",
-                      color: theme.text, marginBottom: 16, lineHeight: 1.1,
+                      color: "var(--color-text)", marginBottom: 16, lineHeight: 1.1,
                       fontFamily: "'Barlow Condensed', 'DM Sans', system-ui" }}>
           From job listing to submitted application in minutes
         </h1>
-        <p style={{ fontSize: 16, color: theme.textMuted, lineHeight: 1.6, marginBottom: 56, maxWidth: 560 }}>
+        <p style={{ fontSize: 16, color: "var(--color-text-muted)", lineHeight: 1.6, marginBottom: 56, maxWidth: 560 }}>
           One jobs console. Simple Apply is built in, and upgrades add tools when you need them.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
@@ -38,20 +36,20 @@ export function HowItWorksPage() {
               {/* Connector line */}
               {i < STEPS.length - 1 && (
                 <div style={{ position: "absolute", left: 23, top: 52, width: 2, bottom: 0,
-                               background: theme.border }}/>
+                               background: "var(--color-border)" }}/>
               )}
               {/* Step number */}
               <div style={{ width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
-                             background: theme.accentMuted, border: `2px solid ${theme.accent}`,
+                             background: "var(--color-primary-muted)", border: "2px solid var(--color-primary)",
                              display: "flex", alignItems: "center", justifyContent: "center",
-                             fontSize: 18, fontWeight: 900, color: theme.accentText, zIndex: 1 }}>
+                             fontSize: 18, fontWeight: 900, color: "var(--color-primary-text)", zIndex: 1 }}>
                 {s.n}
               </div>
               <div style={{ paddingTop: 8 }}>
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: theme.text, marginBottom: 8 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: "var(--color-text)", marginBottom: 8 }}>
                   {s.title}
                 </h2>
-                <p style={{ fontSize: 14, color: theme.textMuted, lineHeight: 1.7, margin: 0, maxWidth: 520 }}>
+                <p style={{ fontSize: 14, color: "var(--color-text-muted)", lineHeight: 1.7, margin: 0, maxWidth: 520 }}>
                   {s.body}
                 </p>
               </div>
