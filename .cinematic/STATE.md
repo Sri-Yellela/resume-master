@@ -253,3 +253,40 @@ Verifications run (with actual output observed):
   - grep rm:jobs-panel-zone: 0 matches
   - grep publishJobsZoneBounds: 0 matches
 Open issues: none for this step
+
+## Step 9 — Token-only panel migration (5 small panels)
+Commit: 480134d
+Files touched:
+  - client/src/panels/DatabasePanel.jsx (isDark removed, hex-alpha → color-mix)
+  - client/src/panels/SandboxPanel.jsx (isDark removed, hex-alpha → color-mix)
+  - client/src/components/SidebarProfile.jsx (hex-alpha → color-mix)
+  - client/src/components/ResumeSelector.jsx (hex-alpha → color-mix)
+  - client/src/components/TargetJobsManager.jsx (hex-alpha → color-mix)
+Decisions:
+  - Targeted only: isDark removals and hex-alpha string concatenation hacks
+  - Remaining theme.* color references kept; full CSS-var migration deferred to per-panel repaints
+  - color-mix() used for all accent alpha tints (consistent with Steps 7-8)
+Divergences: none
+Verifications run:
+  - npm run build: exit 0, 74.27 kB CSS, 4 pre-existing warnings, no new
+  - api-calls: clean
+  - routes: clean
+Open issues: none for this step
+
+## Step 10 — Modals + ProfilePanel token migration
+Commit: 8fe324d
+Files touched:
+  - client/src/components/CoverLetterModal.jsx (isDark removed, hex-alpha → color-mix)
+  - client/src/components/DomainProfileWizard.jsx (hex-alpha → color-mix, 2 instances)
+  - client/src/panels/ProfilePanel.jsx (hex-alpha → color-mix, 2 instances)
+Decisions:
+  - isDark removed from CoverLetterModal useTheme() destructure (only consumer in Step 10 batch)
+  - color-mix(in srgb, var(--color-primary) 13%/10%, transparent) replaces theme.accent+"22"/"18" pattern
+  - Remaining theme.* color refs kept; per-panel CSS-var migration deferred to Steps 11-12
+  - color-mix() approach handles both hex accent strings and CSS var accent strings (dynamic accent support)
+Divergences: none
+Verifications run:
+  - npm run build: exit 0, 8.64s, 74.27 kB CSS (unchanged), 4 pre-existing warnings, no new
+  - api-calls: clean
+  - routes: clean
+Open issues: none for this step
