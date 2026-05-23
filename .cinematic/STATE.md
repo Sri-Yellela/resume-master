@@ -323,3 +323,33 @@ Verifications run:
   - api-calls: content-identical endpoints, line numbers shifted; baseline regenerated
   - routes: content-identical; baseline regenerated
 Open issues: none for this step
+
+## Step 12 — Cleanup: remove isDark from DatabasePanel + JobsPanel
+Commit: 032a8a5
+Files touched:
+  - client/src/panels/DatabasePanel.jsx
+  - client/src/panels/JobsPanel.jsx
+Decisions:
+  - Scope of Step 12: only isDark removal + hex-alpha fixes in the 2 remaining files
+    (27 other files still use theme.* for colors; those are non-isDark refs and
+    deferred — the redesign goal was to remove isDark, not full CSS-var migration)
+  - isDark ternary collapses: always took the first (dark) branch
+  - StarredLinkedInSection isDark ternary: `${theme.surfaceHigh}66` = `var(--bg-panel)66`
+    was already invalid CSS (can't append hex-alpha to a CSS var string); collapsed to
+    `theme.surfaceHigh` = `var(--bg-panel)` which is already semi-transparent (0.72 alpha)
+  - FiltersPanel overlay: `rgba(0,0,0,0.42)` (dark branch)
+  - FiltersPanel modal: `#111827` (dark branch)
+  - DatabasePanel header: `rgba(17,17,17,0.92)` (dark branch)
+  - DatabasePanel/JobsColumn gradient: dark branch preserved (theme.accentMuted is a
+    hex color at runtime; ${theme.accentMuted}55 is valid hex-alpha CSS)
+  - DatabasePanel hex-alpha: theme.accent+"44" → color-mix 25%; theme.accent+"66" → color-mix 40%
+Divergences: none
+Verifications run:
+  - npm run build: exit 0, 20.11s, 74.27 kB CSS (unchanged), 4 pre-existing warnings, no new
+  - grep isDark across all src/*.jsx/*.js (excl. theme.jsx): 0 matches
+  - api-calls: clean
+  - routes: clean
+Open issues:
+  - 27 files still use theme.* color refs (no isDark); full CSS-var migration
+    deferred — not part of this sprint's scope
+  - JobCard still receives theme prop from callers; prop cleanup deferred
