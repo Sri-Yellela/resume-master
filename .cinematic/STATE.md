@@ -181,3 +181,41 @@ Verifications run (with actual output observed):
   - api-calls: clean
   - routes: clean
 Open issues: none for this step
+
+## Step 7 — TopBar flatten + ScrollDock split
+Commits: 3b79701 (7a), a61527b (7b)
+Files touched:
+  - client/src/components/ScrollDock.jsx (gutted: -874 lines)
+  - client/src/components/TopBar.jsx (-35 net: jobsZone state, listener, geometry removed)
+  - client/src/panels/JobsPanel.jsx (-27 net: publishJobsZoneBounds removed)
+  - .cinematic/api-calls.before.txt (baseline regenerated)
+  - .cinematic/routes.before.txt (baseline regenerated)
+Decisions:
+  - Sub-commit 7a: AppDockBar and all its sub-components (NotificationsBell,
+    QuickActions, UserAvatarMenu, DockSettingsPanel, ProfileSwitcher, etc.)
+    removed from ScrollDock. They were duplicates of TopBar helpers; TopBar is
+    the sole authenticated toolbar going forward. MarketingToolsDock retained.
+  - Sub-commit 7b: rm:jobs-panel-zone event pair removed atomically (TopBar
+    consumer + JobsPanel publisher). Zone-constraint geometry (dockCenter
+    offset, dockMaxWidth, constrainedPillWidth clamp, dockScale) removed; dock
+    now centers at vw/2 with full pillWidth and no scale() transform.
+  - api-calls baseline: 6 dead calls removed. /api/dock-preferences x3
+    (DockSettingsPanel, never mounted); /api/notifications + /api/domain-profiles x4
+    were ScrollDock duplicates — live copies remain in TopBar.jsx. Approved by
+    user as legitimate dead-code removal.
+  - routes baseline: content unchanged; regenerated to fix line-number and
+    indentation shift from Step 4 AppShell wrapper (verified content-identical).
+  - "Three sub-commits" from spec collapsed to two because helper extraction
+    was implicit — TopBar already owned all the helper components; ScrollDock
+    AppDockBar was just a duplicate consumer.
+Divergences:
+  - Spec warned about extracting helpers before removing AppDockBar; actual
+    state showed TopBar already owned all helpers, so no migration step needed.
+Verifications run (with actual output observed):
+  - npm run build: exit 0, 7.81s, 74.14 kB CSS (unchanged), 820.69 kB JS chunk
+  - 4 pre-existing warnings, none new
+  - api-calls: baseline regenerated; all live endpoints confirmed present
+  - routes: baseline regenerated; content-identical to prior baseline
+  - grep rm:jobs-panel-zone: 0 matches
+  - grep publishJobsZoneBounds: 0 matches
+Open issues: none for this step
