@@ -290,3 +290,36 @@ Verifications run:
   - api-calls: clean
   - routes: clean
 Open issues: none for this step
+
+## Step 11 — Marketing pages + MarketingNav CSS-var migration
+Commit: ba144ef
+Files touched:
+  - client/src/pages/marketing/AboutPage.jsx
+  - client/src/pages/marketing/ContactPage.jsx
+  - client/src/pages/marketing/FAQPage.jsx
+  - client/src/pages/marketing/FeaturesPage.jsx
+  - client/src/pages/marketing/HowItWorksPage.jsx
+  - client/src/pages/marketing/PricingPage.jsx
+  - client/src/pages/marketing/PrivacyPage.jsx
+  - client/src/pages/marketing/TermsPage.jsx
+  - client/src/components/MarketingNav.jsx
+  - .cinematic/api-calls.before.txt (baseline regen — line-number shifts only)
+  - .cinematic/routes.before.txt (baseline regen — content identical)
+Decisions:
+  - background: theme.bg → transparent (CinematicBackground shows through all marketing pages)
+  - theme.surface → var(--color-surface); theme.surfaceHigh → var(--color-surface-offset)
+  - theme.success hardcoded to #22c55e (no dedicated CSS var for success green)
+  - theme.successMuted → rgba(34, 197, 94, 0.12); theme.success+"44" → rgba(34, 197, 94, 0.25)
+  - theme.danger → var(--color-destructive)
+  - theme.textDim → var(--color-text-faint)
+  - PrivacyPage sub-components (Section, P, UL, LI, H3, Strong): theme prop removed entirely;
+    CSS vars used directly in each sub-component
+  - MarketingNav: ${theme.accent}44 hex-alpha → color-mix(in srgb, var(--color-primary) 25%, transparent)
+  - Baselines regenerated: api-calls line shifts (ContactPage -2, FeaturesPage -2);
+    routes content identical before/after regen
+Divergences: none
+Verifications run:
+  - npm run build: exit 0, 8.24s, 74.27 kB CSS (unchanged), 4 pre-existing warnings, no new
+  - api-calls: content-identical endpoints, line numbers shifted; baseline regenerated
+  - routes: content-identical; baseline regenerated
+Open issues: none for this step
