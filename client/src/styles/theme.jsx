@@ -1,5 +1,5 @@
 // client/src/styles/theme.jsx — Design System v5 (iOS 26 glass — 6 bg modes)
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, createContext, useContext } from "react";
 
 // Lucy brand accent colors:
 //   User board (JobsPanel, main UI) = soft sky blue #A8D8EA
@@ -14,80 +14,8 @@ export const ACCENT_OPTIONS = [
   { id:"sunset", label:"Sunset Orange", color:"#FFB07A", mutedLight:"#fff0e2", mutedDark:"#2a1400", textLight:"#8a3600", textDark:"#FFB07A" },
 ];
 
-export const BG_MODES = [
-  { id: "glass-light",      label: "Glass Light",    previewBg: "linear-gradient(135deg, rgba(100,180,255,0.35) 0%, rgba(200,120,255,0.25) 50%, rgba(255,200,150,0.30) 100%), #f0f4f8" },
-  { id: "glass-dark",       label: "Glass Dark",     previewBg: "linear-gradient(135deg, rgba(60,100,200,0.50) 0%, rgba(120,60,180,0.40) 50%, rgba(20,80,60,0.45) 100%), #080810" },
-  { id: "high-glass-light", label: "Hi-Glass Light", previewBg: "linear-gradient(135deg, rgba(80,160,255,0.55) 0%, rgba(180,90,255,0.45) 50%, rgba(255,180,100,0.50) 100%), #edf2fc" },
-  { id: "high-glass-dark",  label: "Hi-Glass Dark",  previewBg: "linear-gradient(135deg, rgba(60,100,220,0.65) 0%, rgba(130,50,200,0.55) 50%, rgba(20,90,60,0.60) 100%), #04040e" },
-  { id: "solid-white",      label: "Solid White",    previewBg: "#ffffff" },
-  { id: "solid-black",      label: "Solid Black",    previewBg: "#000000" },
-];
 
 export const THEMES = {
-  light: {
-    // ── Surfaces resolve via CSS vars per bg mode ─────────────
-    bg:           "var(--bg-page)",
-    surface:      "var(--bg-card)",
-    surfaceHigh:  "var(--bg-panel)",
-    menuSurface:  "var(--bg-menu)",
-    modalSurface: "var(--bg-modal)",
-    backdrop:     "var(--bg-blur)",
-    backdropCard: "var(--bg-blur-sm)",
-    // Solid hex fallbacks for alpha-concatenation (TopBar pillBg)
-    bgBase:       "#ffffff",
-    surfaceBase:  "#ffffff",
-    // ─────────────────────────────────────────────────────────
-    overlay:      "rgba(0,0,0,0.04)",
-    border:       "#d1d5db",
-    borderStrong: "#9ca3af",
-    text:         "#111827",
-    textMuted:    "#374151",
-    textDim:      "#4b5563",
-    accent:       "#A8D8EA",
-    accentMuted:  "#e8f6fb",
-    accentText:   "#1a6a8a",
-    success:      "#16a34a",
-    successMuted: "#f0fdf4",
-    danger:       "#dc2626",
-    dangerMuted:  "#fef2f2",
-    warning:      "#d97706",
-    warningMuted: "#fffbeb",
-    info:         "#0284c7",
-    infoMuted:    "#f0f9ff",
-    shadowSm:     "0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)",
-    shadowMd:     "0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04)",
-    shadowLg:     "0 20px 40px rgba(0,0,0,0.10), 0 8px 16px rgba(0,0,0,0.06)",
-    shadowXl:     "0 40px 80px rgba(0,0,0,0.12), 0 16px 32px rgba(0,0,0,0.08)",
-    gradAccent:   "#A8D8EA",
-    gradSubtle:   "linear-gradient(135deg, var(--bg-page) 0%, var(--bg-panel) 100%)",
-    fontDisplay:  "'Barlow Condensed', 'DM Sans', system-ui, sans-serif",
-    fontBody:     "'DM Sans', system-ui, sans-serif",
-    fontMono:     "'JetBrains Mono', monospace",
-    adminAccent:      "#F5E642",
-    adminAccentText:  "#5a5000",
-    adminAccentMuted: "#fdfbca",
-    // Legacy compat
-    colorPrimary:   "#A8D8EA",
-    colorSecondary: "#1a6a8a",
-    colorAccent:    "#1a6a8a",
-    colorSurface:   "var(--bg-card)",
-    colorBorder:    "#d1d5db",
-    colorText:      "#111827",
-    colorMuted:     "#374151",
-    colorDim:       "#4b5563",
-    colorCard:      "var(--bg-panel)",
-    colorInputBg:   "var(--bg-input)",
-    colorTag:       "#e8f6fb",
-    gradBg:         "var(--bg-page)",
-    gradPanel:      "var(--bg-card)",
-    gradHover:      "rgba(0,0,0,0.04)",
-    glowPrimary:    "0 0 0 3px #A8D8EA44",
-    shimmer1:       "rgba(245,245,247,0.65)",
-    shimmer2:       "#d1d5db",
-    radiusPill:     "999px",
-    radiusCard:     "16px",
-    radiusInput:    "10px",
-  },
   dark: {
     // ── Surfaces resolve via CSS vars per bg mode ─────────────
     bg:           "var(--bg-page)",
@@ -156,15 +84,8 @@ export const THEMES = {
 
 export const ThemeContext = createContext(null);
 
-export function isDarkBgMode(id) {
-  return ["glass-dark", "high-glass-dark", "solid-black"].includes(id);
-}
 
 export function ThemeProvider({ children }) {
-  const [bgMode, setBgModeRaw] = useState(() => {
-    return localStorage.getItem("rm-bg-mode") || "glass-light";
-  });
-
   const [accentId, setAccentIdRaw] = useState(() => {
     const saved = sessionStorage.getItem("rm_session_accent");
     if (saved && ACCENT_OPTIONS.find(a => a.id === saved)) return saved;
@@ -178,32 +99,20 @@ export function ThemeProvider({ children }) {
     sessionStorage.setItem("rm_session_accent", id);
   };
 
-  const setBgMode = (id) => {
-    setBgModeRaw(id);
-    localStorage.setItem("rm-bg-mode", id);
-    document.documentElement.setAttribute("data-bg", id);
-  };
-
-  // Sync data-bg attribute on mount and when bgMode changes
-  useEffect(() => {
-    document.documentElement.setAttribute("data-bg", bgMode);
-  }, [bgMode]);
-
   const accentOpt = ACCENT_OPTIONS.find(a => a.id === accentId) || ACCENT_OPTIONS[0];
-  const isDark = isDarkBgMode(bgMode);
-  const mode = isDark ? "dark" : "light";
-  const baseTheme = THEMES[mode] || THEMES.light;
+  const isDark = true;   // cinematic redesign is dark-only; kept for ternary consumers
+  const baseTheme = THEMES.dark;
   const theme = {
     ...baseTheme,
     accent:      accentOpt.color,
-    accentMuted: isDark ? accentOpt.mutedDark : accentOpt.mutedLight,
-    accentText:  isDark ? accentOpt.textDark  : accentOpt.textLight,
+    accentMuted: accentOpt.mutedDark,
+    accentText:  accentOpt.textDark,
     gradAccent:  accentOpt.color,
     glowPrimary: `0 0 0 3px ${accentOpt.color}44`,
     colorPrimary:   accentOpt.color,
-    colorSecondary: isDark ? accentOpt.textDark : accentOpt.textLight,
-    colorAccent:    isDark ? accentOpt.textDark : accentOpt.textLight,
-    colorTag:       isDark ? accentOpt.mutedDark : accentOpt.mutedLight,
+    colorSecondary: accentOpt.textDark,
+    colorAccent:    accentOpt.textDark,
+    colorTag:       accentOpt.mutedDark,
   };
 
   return (
@@ -215,13 +124,8 @@ export function ThemeProvider({ children }) {
       accentId,
       setAccentId,
       ACCENT_OPTIONS,
-      bgMode,
-      setBgMode,
-      BG_MODES,
     }}>
       <style>{`
-        *, *::before, *::after { box-sizing: border-box; }
-
         /* ── Color token bridge: --color-* → live theme ── */
         /* Accent + text are dynamic (change with accent/bg mode). */
         /* Surface vars reference --bg-* which update per data-bg. */
@@ -242,155 +146,23 @@ export function ThemeProvider({ children }) {
           --color-surface-dynamic: rgba(255,255,255,0.88); /* light shimmer highlight */
         }
 
-        /* ══ Default CSS vars (glass-light — no data-bg fallback) ══ */
+        /* ══ Cinematic dark vars ══ */
         html {
-          color-scheme: ${mode};
+          color-scheme: dark;
           min-height: 100vh;
-          background: #f0f4f8;
-          background-image:
-            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(100,180,255,0.35) 0%, transparent 70%),
-            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(200,120,255,0.25) 0%, transparent 70%),
-            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,200,150,0.30) 0%, transparent 70%);
-          background-attachment: fixed;
-          --bg-page:      rgba(255,255,255,0.64);
-          --bg-card:      rgba(255,255,255,0.68);
-          --bg-panel:     rgba(245,248,252,0.72);
-          --bg-menu:      rgba(255,255,255,0.98);
-          --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.78);
-          --popover:      0 0% 100%;
-          --popover-foreground: 0 0% 6%;
-          --bg-hover:     rgba(0,0,0,0.04);
+          background: transparent;
+          --bg-page:      hsl(201 100% 13% / 0.64);
+          --bg-card:      hsl(201 60% 16% / 0.68);
+          --bg-panel:     hsl(201 50% 18% / 0.72);
+          --bg-menu:      hsl(201 70% 10% / 0.98);
+          --bg-modal:     hsl(201 70% 10% / 0.97);
+          --bg-input:     hsl(0 0% 100% / 0.04);
+          --bg-hover:     hsl(0 0% 100% / 0.04);
           --bg-blur:      blur(40px) saturate(180%);
           --bg-blur-sm:   blur(20px) saturate(160%);
-          --border-glass: rgba(0,0,0,0.08);
-          transition: background 0.4s ease;
+          --border-glass: hsl(0 0% 100% / 0.08);
         }
 
-        /* ══ Glass Light ══ */
-        html[data-bg="glass-light"] {
-          background: #f0f4f8;
-          background-image:
-            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(100,180,255,0.35) 0%, transparent 70%),
-            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(200,120,255,0.25) 0%, transparent 70%),
-            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,200,150,0.30) 0%, transparent 70%);
-          background-attachment: fixed;
-          --bg-page:      rgba(255,255,255,0.64);
-          --bg-card:      rgba(255,255,255,0.68);
-          --bg-panel:     rgba(245,248,252,0.72);
-          --bg-menu:      rgba(255,255,255,0.98);
-          --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.78);
-          --popover:      0 0% 100%;
-          --popover-foreground: 0 0% 6%;
-          --bg-hover:     rgba(0,0,0,0.04);
-          --bg-blur:      blur(40px) saturate(180%);
-          --bg-blur-sm:   blur(20px) saturate(160%);
-          --border-glass: rgba(0,0,0,0.08);
-        }
-
-        /* ══ Glass Dark ══ */
-        html[data-bg="glass-dark"] {
-          background: #080810;
-          background-image:
-            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(60,100,200,0.40) 0%, transparent 70%),
-            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(120,60,180,0.30) 0%, transparent 70%),
-            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(20,80,60,0.40) 0%, transparent 70%);
-          background-attachment: fixed;
-          --bg-page:      rgba(0,0,0,0.72);
-          --bg-card:      rgba(28,28,30,0.60);
-          --bg-panel:     rgba(44,44,46,0.65);
-          --bg-menu:      rgba(28,28,30,0.98);
-          --bg-modal:     rgba(28,28,30,0.97);
-          --bg-input:     rgba(44,44,46,0.55);
-          --popover:      240 4% 11%;
-          --popover-foreground: 0 0% 96%;
-          --bg-hover:     rgba(255,255,255,0.04);
-          --bg-blur:      blur(40px) saturate(180%);
-          --bg-blur-sm:   blur(20px) saturate(160%);
-          --border-glass: rgba(255,255,255,0.08);
-          --color-surface-dynamic: rgba(62,62,66,0.80);
-        }
-
-        /* ══ High Glass Light ══ */
-        html[data-bg="high-glass-light"] {
-          background: #edf2fc;
-          background-image:
-            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(80,160,255,0.50) 0%, transparent 70%),
-            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(180,90,255,0.40) 0%, transparent 70%),
-            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(255,180,100,0.45) 0%, transparent 70%);
-          background-attachment: fixed;
-          --bg-page:      rgba(255,255,255,0.48);
-          --bg-card:      rgba(255,255,255,0.58);
-          --bg-panel:     rgba(245,248,252,0.64);
-          --bg-menu:      rgba(255,255,255,0.98);
-          --bg-modal:     rgba(255,255,255,0.97);
-          --bg-input:     rgba(255,255,255,0.72);
-          --popover:      0 0% 100%;
-          --popover-foreground: 0 0% 6%;
-          --bg-hover:     rgba(0,0,0,0.03);
-          --bg-blur:      blur(60px) saturate(200%);
-          --bg-blur-sm:   blur(30px) saturate(180%);
-          --border-glass: rgba(0,0,0,0.10);
-        }
-
-        /* ══ High Glass Dark ══ */
-        html[data-bg="high-glass-dark"] {
-          background: #04040e;
-          background-image:
-            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(60,100,220,0.60) 0%, transparent 70%),
-            radial-gradient(ellipse 50% 40% at 80% 15%, rgba(130,50,200,0.50) 0%, transparent 70%),
-            radial-gradient(ellipse 40% 60% at 60% 85%, rgba(20,90,60,0.60) 0%, transparent 70%);
-          background-attachment: fixed;
-          --bg-page:      rgba(0,0,0,0.45);
-          --bg-card:      rgba(28,28,30,0.35);
-          --bg-panel:     rgba(44,44,46,0.40);
-          --bg-menu:      rgba(28,28,30,0.98);
-          --bg-modal:     rgba(28,28,30,0.97);
-          --bg-input:     rgba(44,44,46,0.35);
-          --popover:      240 4% 11%;
-          --popover-foreground: 0 0% 96%;
-          --bg-hover:     rgba(255,255,255,0.03);
-          --bg-blur:      blur(60px) saturate(200%);
-          --bg-blur-sm:   blur(30px) saturate(180%);
-          --border-glass: rgba(255,255,255,0.15);
-          --color-surface-dynamic: rgba(62,62,66,0.60);
-        }
-
-        /* ══ Solid White ══ */
-        html[data-bg="solid-white"] {
-          background: #ffffff;
-          --bg-page:      #ffffff;
-          --bg-card:      #ffffff;
-          --bg-panel:     #f5f5f7;
-          --bg-menu:      #ffffff;
-          --bg-modal:     #ffffff;
-          --bg-input:     #f0f0f2;
-          --popover:      0 0% 100%;
-          --popover-foreground: 0 0% 6%;
-          --bg-hover:     rgba(0,0,0,0.04);
-          --bg-blur:      none;
-          --bg-blur-sm:   none;
-          --border-glass: rgba(0,0,0,0.08);
-        }
-
-        /* ══ Solid Black ══ */
-        html[data-bg="solid-black"] {
-          background: #000000;
-          --bg-page:      #000000;
-          --bg-card:      #1c1c1e;
-          --bg-panel:     #2c2c2e;
-          --bg-menu:      #1c1c1e;
-          --bg-modal:     #1c1c1e;
-          --bg-input:     #2c2c2e;
-          --popover:      240 4% 11%;
-          --popover-foreground: 0 0% 96%;
-          --bg-hover:     rgba(255,255,255,0.04);
-          --bg-blur:      none;
-          --bg-blur-sm:   none;
-          --border-glass: rgba(255,255,255,0.08);
-          --color-surface-dynamic: #3a3a3c;
-        }
 
         body {
           margin: 0;
@@ -401,21 +173,6 @@ export function ThemeProvider({ children }) {
           -moz-osx-font-smoothing: grayscale;
           transition: color 0.3s ease;
         }
-        /* Padding for fixed ScrollDock on public pages */
-        .scroll-dock-page {
-          padding-top: 56px;
-        }
-        @media (max-width: 768px) {
-          .scroll-dock-page { padding-top: 52px; }
-        }
-        ::-webkit-scrollbar { width: 5px; height: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: ${theme.border}; border-radius: 999px; }
-        ::-webkit-scrollbar-thumb:hover { background: ${theme.borderStrong}; }
-        ::selection { background: ${theme.accent}33; color: ${theme.text}; }
-        :focus-visible { outline: 2px solid ${theme.accent}; outline-offset: 2px; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         @keyframes scrollUp { 0% { transform: translateY(0); } 100% { transform: translateY(-50%); } }
@@ -547,7 +304,7 @@ export function ThemeProvider({ children }) {
           background: ${theme.overlay} !important;
         }
         .rm-skeleton {
-          background: linear-gradient(90deg, ${mode === "dark" ? "rgba(44,44,46,0.65)" : "rgba(245,245,247,0.65)"} 25%, ${theme.border} 50%, ${mode === "dark" ? "rgba(44,44,46,0.65)" : "rgba(245,245,247,0.65)"} 75%);
+          background: linear-gradient(90deg, rgba(44,44,46,0.65) 25%, ${theme.border} 50%, rgba(44,44,46,0.65) 75%);
           background-size: 200% 100%;
           animation: shimmer 1.5s ease infinite;
           border-radius: 8px;

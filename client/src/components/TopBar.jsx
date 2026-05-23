@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/TopBar.jsx — single animated nav (Lucy Brand)
 // position:fixed, converges from full-width bar → centered glassy pill on scroll.
 // Consumes AppScrollContext progress/pinned set by PullToRefresh in JobsPanel.
@@ -263,7 +263,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
   const triggerRef = useRef(null);
-  const { accentId, setAccentId, ACCENT_OPTIONS, bgMode, setBgMode, BG_MODES } = useTheme();
+  const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
   const planTier = user?.planTier || "BASIC";
   const planLabel = planTier === "PRO" ? "Pro" : planTier === "PLUS" ? "Plus" : "Basic";
   const toolLabel = planTier === "PRO" ? "Generate + A+ Resume"
@@ -367,38 +367,6 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
                     transform: accentId === opt.id ? "scale(1.25)" : "scale(1)",
                     transition: "transform 0.15s", padding: 0,
                   }}/>
-              ))}
-            </div>
-          </div>
-
-          {/* Background style */}
-          <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
-              Background
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {BG_MODES.map(m => (
-                <button key={m.id} title={m.label} onClick={() => setBgMode(m.id)}
-                  style={{
-                    width: 60, height: 38, borderRadius: 8, flexShrink: 0,
-                    background: m.previewBg,
-                    border: bgMode === m.id ? `2px solid ${theme.accent}` : `1px solid ${theme.border}`,
-                    outline: bgMode === m.id ? `2px solid ${theme.accent}44` : "none",
-                    outlineOffset: 1,
-                    cursor: "pointer", padding: 0,
-                    position: "relative", overflow: "hidden",
-                    transition: "border 0.15s, outline 0.15s",
-                  }}>
-                  {bgMode === m.id && (
-                    <span style={{
-                      position: "absolute", inset: 0,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      background: "rgba(0,0,0,0.25)", color: "#fff",
-                      fontSize: 14, fontWeight: 700,
-                    }}>On</span>
-                  )}
-                </button>
               ))}
             </div>
           </div>
