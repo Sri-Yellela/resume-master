@@ -129,7 +129,7 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
     return (
       <div style={{ padding:24, display:"flex", flexDirection:"column",
                     alignItems:"center", justifyContent:"center", gap:12,
-                    height:"100%", color:theme.textMuted, fontSize:13, textAlign:"center" }}>
+                    height:"100%", color:"var(--color-text-muted)", fontSize:13, textAlign:"center" }}>
         <div style={{ fontSize:40 }}>📊</div>
         <div>Add a base resume to see keyword analysis for this role.</div>
       </div>
@@ -141,14 +141,14 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
     return (
       <div style={{ padding:24, display:"flex", flexDirection:"column",
                     alignItems:"center", justifyContent:"center", gap:14,
-                    height:"100%", color:theme.textMuted, fontSize:13, textAlign:"center" }}>
+                    height:"100%", color:"var(--color-text-muted)", fontSize:13, textAlign:"center" }}>
         <div style={{ fontSize:28, animation:"spin 1.2s linear infinite" }}>⚙️</div>
-        <div style={{ color:theme.text, fontWeight:600 }}>Analysing keywords...</div>
+        <div style={{ color:"var(--color-text)", fontWeight:600 }}>Analysing keywords...</div>
         <div style={{ fontSize:11 }}>Checking your resume against the job description</div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:6, justifyContent:"center", marginTop:4 }}>
           {[80,60,100,75,55,90,65,85].map((w,i) => (
             <div key={i} style={{ height:22, width:w, borderRadius:4,
-              background:theme.surfaceHigh, opacity:0.6 }}/>
+              background:"var(--color-surface-offset)", opacity:0.6 }}/>
           ))}
         </div>
       </div>
@@ -160,12 +160,12 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
     return (
       <div style={{ padding:24, display:"flex", flexDirection:"column",
                     alignItems:"center", justifyContent:"center", gap:12,
-                    height:"100%", color:theme.textMuted, fontSize:13, textAlign:"center" }}>
+                    height:"100%", color:"var(--color-text-muted)", fontSize:13, textAlign:"center" }}>
         <div style={{ fontSize:40 }}>⚠️</div>
         <div>Could not analyse keywords — retry</div>
         <button onClick={() => { setKwError(false); setLocalReport(null); }}
           style={{ marginTop:8, padding:"6px 16px", borderRadius:6, border:"none",
-                   background:theme.accent, color:theme.accentText, cursor:"pointer",
+                   background:"var(--color-primary)", color:"var(--color-primary-text)", cursor:"pointer",
                    fontWeight:600, fontSize:12 }}>
           Retry
         </button>
@@ -178,7 +178,7 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   const R = 32, cx = 40, cy = 40, stroke = 7;
   const circumference = 2 * Math.PI * R;
   const pct = Math.max(0, Math.min(100, activeReport.score ?? score ?? 0));
-  const scoreColor = pct >= 80 ? theme.success : pct >= 60 ? theme.warning : theme.danger;
+  const scoreColor = pct >= 80 ? "#22c55e" : pct >= 60 ? "var(--color-warning)" : "#ef4444";
   const suggestionLookup = buildProfileSuggestionLookup(profileSuggestions || {});
   const selectedSkillLookup = new Set((profileSelections.activeSkills || []).map(profileSignalKey).filter(Boolean));
   const selectedVerbLookup = new Set((profileSelections.activeVerbs || []).map(profileSignalKey).filter(Boolean));
@@ -189,11 +189,11 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
 
       {/* Score card — shown when a score is available */}
       {activeReport.score != null && (
-        <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
+        <div style={{ background:"var(--color-surface)", border:`1px solid ${"var(--color-border)"}`,
                       borderRadius:16, padding:"16px", display:"flex", alignItems:"center", gap:16 }}>
           <div style={{ position:"relative", width:80, height:80, flexShrink:0 }}>
             <svg width={80} height={80} viewBox="0 0 80 80">
-              <circle cx={cx} cy={cy} r={R} fill="none" stroke={theme.surfaceHigh} strokeWidth={stroke}/>
+              <circle cx={cx} cy={cy} r={R} fill="none" stroke={"var(--color-surface-offset)"} strokeWidth={stroke}/>
               <circle cx={cx} cy={cy} r={R} fill="none" stroke={scoreColor} strokeWidth={stroke}
                 strokeLinecap="round" strokeDasharray={circumference}
                 strokeDashoffset={circumference * (1 - pct / 100)}
@@ -206,15 +206,15 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
             </div>
           </div>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:12, color:theme.textMuted, fontStyle:"italic",
+            <div style={{ fontSize:12, color:"var(--color-text-muted)", fontStyle:"italic",
                           lineHeight:1.6, marginBottom:8 }}>
               {activeReport.verdict || activeReport.experience?.summary || "Deterministic local ATS match against this profile."}
             </div>
             {activeReport.best_possible_score != null && (
               <div style={{ fontSize:11, padding:"6px 10px", borderRadius:8,
-                            background: pct === activeReport.best_possible_score ? theme.successMuted : theme.surfaceHigh,
-                            color: pct === activeReport.best_possible_score ? theme.success : theme.textMuted,
-                            border:`1px solid ${pct === activeReport.best_possible_score ? theme.success+"33" : theme.border}` }}>
+                            background: pct === activeReport.best_possible_score ? "#0a1f0a" : "var(--color-surface-offset)",
+                            color: pct === activeReport.best_possible_score ? "#22c55e" : "var(--color-text-muted)",
+                            border:`1px solid ${pct === activeReport.best_possible_score ? "color-mix(in srgb, #22c55e 20%, transparent)" : "var(--color-border)"}` }}>
                 {pct === activeReport.best_possible_score
                   ? "✓ Max achievable score for your profile"
                   : <>
@@ -231,14 +231,14 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
       {/* Skills matched */}
       {activeReport.tier1_matched?.length > 0 && (
         <TagSection title="✓ Skills Matched"
-          bg={theme.successMuted} fg={theme.success} border={theme.success+"33"}
+          bg={"#0a1f0a"} fg={"#22c55e"} border={"color-mix(in srgb, #22c55e 20%, transparent)"}
           items={activeReport.tier1_matched}/>
       )}
 
       {/* Skills missing */}
       {activeReport.tier1_missing?.length > 0 && (
         <TagSection title="✗ Skills Missing"
-          bg={theme.dangerMuted} fg={theme.danger} border={theme.danger+"33"}
+          bg={"#1f0a0a"} fg={"#ef4444"} border={"color-mix(in srgb, #ef4444 20%, transparent)"}
           items={activeReport.tier1_missing}
           onItemClick={clickableProfileId ? item => addSuggestion("skill", item) : null}
           addedItems={addedItems}
@@ -251,14 +251,14 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
       {/* Action verbs matched */}
       {activeReport.action_verbs_matched?.length > 0 && (
         <TagSection title="⚡ Verbs Matched"
-          bg={theme.infoMuted} fg={theme.info} border={theme.info+"33"}
+          bg={"#0a1525"} fg={"#38bdf8"} border={"color-mix(in srgb, #38bdf8 20%, transparent)"}
           items={activeReport.action_verbs_matched}/>
       )}
 
       {/* Action verbs missing */}
       {activeReport.action_verbs_missing?.length > 0 && (
         <TagSection title="⚠ Verbs Missing"
-          bg={theme.warningMuted} fg={theme.warning} border={theme.warning+"33"}
+          bg={"#1f1500"} fg={"var(--color-warning)"} border={"color-mix(in srgb, var(--color-warning) 20%, transparent)"}
           items={activeReport.action_verbs_missing}
           onItemClick={clickableProfileId ? item => addSuggestion("action_verb", item) : null}
           addedItems={addedItems}
@@ -269,23 +269,23 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
       )}
 
       {activeReport.experience && (
-        <ListSection title="Experience Fit" items={[activeReport.experience.summary]} color={activeReport.experience.fit ? theme.success : theme.warning} theme={theme}/>
+        <ListSection title="Experience Fit" items={[activeReport.experience.summary]} color={activeReport.experience.fit ? "#22c55e" : "var(--color-warning)"} theme={theme}/>
       )}
 
       {activeReport.hard_constraint_misses?.length > 0 && (
         <TagSection title="Profile Facts Missing"
-          bg={theme.dangerMuted} fg={theme.danger} border={theme.danger+"33"}
+          bg={"#1f0a0a"} fg={"#ef4444"} border={"color-mix(in srgb, #ef4444 20%, transparent)"}
           items={activeReport.hard_constraint_misses}/>
       )}
 
       {/* Strengths */}
       {activeReport.source !== "local_ats_v1" && activeReport.strengths?.length > 0 && (
-        <ListSection title="💪 Strengths" items={activeReport.strengths} color={theme.success} theme={theme}/>
+        <ListSection title="💪 Strengths" items={activeReport.strengths} color={"#22c55e"} theme={theme}/>
       )}
 
       {/* Improvements */}
       {activeReport.source !== "local_ats_v1" && activeReport.improvements?.length > 0 && (
-        <ListSection title="🔧 Improvements" items={activeReport.improvements} color={theme.accent} theme={theme}/>
+        <ListSection title="🔧 Improvements" items={activeReport.improvements} color={"var(--color-primary)"} theme={theme}/>
       )}
     </div>
   );
@@ -319,9 +319,9 @@ function TagSection({
             disabled={!onItemClick || alreadyAdded}
             title={onItemClick ? `Add "${k}" to this profile as an inactive suggestion` : undefined}
             style={{
-              background:alreadyAdded ? theme.successMuted : bg,
-              color:alreadyAdded ? theme.success : fg,
-              border:`1px solid ${alreadyAdded ? theme.success+"33" : border}`,
+              background:alreadyAdded ? "#0a1f0a" : bg,
+              color:alreadyAdded ? "#22c55e" : fg,
+              border:`1px solid ${alreadyAdded ? "color-mix(in srgb, #22c55e 20%, transparent)" : border}`,
               cursor:alreadyAdded ? "default" : (onItemClick ? "pointer" : "default"),
               opacity:alreadyAdded ? 1 : 1,
               pointerEvents:alreadyAdded ? "none" : "auto",
@@ -341,7 +341,7 @@ function ListSection({ title, items, color, theme }) {
       <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
         {items.map((t,i) => (
           <div key={i} style={{ display:"flex", gap:8, fontSize:12,
-                                 color:theme.textMuted, lineHeight:1.6 }}>
+                                 color:"var(--color-text-muted)", lineHeight:1.6 }}>
             <span style={{ color, flexShrink:0, fontWeight:700 }}>·</span>
             <span>{t}</span>
           </div>

@@ -15,15 +15,15 @@ function StatusPill({ status, healthy, theme }) {
 function Section({ title, subtitle, status, children, theme }) {
   const resolvedStatus = status || { healthy: false, status: "missing" };
   return (
-    <section style={{ border:`1px solid ${theme.border}`, background:theme.surface,
+    <section style={{ border:`1px solid ${"var(--color-border)"}`, background:"var(--color-surface)",
       borderRadius:8, padding:18, display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:12 }}>
         <div>
           <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-            fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase", color:theme.text }}>
+            fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase", color:"var(--color-text)" }}>
             {title}
           </div>
-          <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.5, marginTop:2 }}>{subtitle}</div>
+          <div style={{ fontSize:12, color:"var(--color-text-muted)", lineHeight:1.5, marginTop:2 }}>{subtitle}</div>
         </div>
         <StatusPill theme={theme} status={resolvedStatus.status} healthy={resolvedStatus.healthy}/>
       </div>
@@ -59,9 +59,9 @@ export function IntegrationsPanel() {
     load();
   };
 
-  const buttonStyle = { border:"none", borderRadius:6, background:theme.accent, color:"#0f0f0f",
+  const buttonStyle = { border:"none", borderRadius:6, background:"var(--color-primary)", color:"#0f0f0f",
     padding:"8px 12px", cursor:"pointer", fontWeight:800, fontSize:12 };
-  const secondaryButton = { ...buttonStyle, background:theme.surfaceHigh, color:theme.text, border:`1px solid ${theme.border}` };
+  const secondaryButton = { ...buttonStyle, background:"var(--color-surface-offset)", color:"var(--color-text)", border:`1px solid ${"var(--color-border)"}` };
   const oauthSectionStatus = (provider, userStatus) => {
     const operator = status?.oauth?.[provider];
     if (operator && !operator.configured) return { healthy:false, status:operator.status || "not_configured" };
@@ -76,24 +76,24 @@ export function IntegrationsPanel() {
   };
 
   if (!status) {
-    return <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", color:theme.textMuted }}>Loading integrations...</div>;
+    return <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", color:"var(--color-text-muted)" }}>Loading integrations...</div>;
   }
 
   return (
-    <div style={{ flex:1, overflowY:"auto", background:theme.bg, padding:"28px 24px 44px" }}>
+    <div style={{ flex:1, overflowY:"auto", background:"var(--color-bg)", padding:"28px 24px 44px" }}>
       <div style={{ maxWidth:980, margin:"0 auto", display:"flex", flexDirection:"column", gap:16 }}>
         <div>
           <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:28,
-            fontWeight:800, letterSpacing:"0.06em", textTransform:"uppercase", color:theme.text }}>
+            fontWeight:800, letterSpacing:"0.06em", textTransform:"uppercase", color:"var(--color-text)" }}>
             Integrations
           </div>
-          <div style={{ color:theme.textMuted, fontSize:13, lineHeight:1.6 }}>
+          <div style={{ color:"var(--color-text-muted)", fontSize:13, lineHeight:1.6 }}>
             Manage official data providers and profile import connections.
           </div>
         </div>
 
-        {msg && <div style={{ border:`1px solid ${theme.border}`, background:theme.surfaceHigh,
-          color:theme.text, borderRadius:6, padding:"9px 12px", fontSize:12 }}>{msg}</div>}
+        {msg && <div style={{ border:`1px solid ${"var(--color-border)"}`, background:"var(--color-surface-offset)",
+          color:"var(--color-text)", borderRadius:6, padding:"9px 12px", fontSize:12 }}>{msg}</div>}
 
         <Section theme={theme} title="LinkedIn Profile Import"
           subtitle="Import your name and email to pre-fill your resume."
@@ -103,7 +103,7 @@ export function IntegrationsPanel() {
               {status.linkedin?.identityLinked ? "Import Again" : "Import from LinkedIn"}
             </button>
             {status.linkedin?.identityLinked && <button onClick={() => disconnectProvider("linkedin")} style={secondaryButton}>Disconnect</button>}
-            <span style={{ color:status.oauth?.linkedin?.configured === false ? theme.danger : theme.textMuted, fontSize:12 }}>
+            <span style={{ color:status.oauth?.linkedin?.configured === false ? "#ef4444" : "var(--color-text-muted)", fontSize:12 }}>
               {status.linkedin?.identityLinked ? "Profile imported" : oauthHelp("linkedin")}
             </span>
           </div>
@@ -115,7 +115,7 @@ export function IntegrationsPanel() {
             healthy: (status.jobSources || []).some(s => s.configured),
             status:  (status.jobSources || []).some(s => s.configured) ? "configured" : "missing",
           }}>
-          <div style={{ fontSize:12, color:theme.textMuted }}>
+          <div style={{ fontSize:12, color:"var(--color-text-muted)" }}>
             {(status.jobSources || []).some(s => s.configured)
               ? `Job search active — ${(status.jobSources || []).filter(s => s.configured).length} provider(s) configured.`
               : "No job feed providers configured. Contact the app operator."}
@@ -125,11 +125,11 @@ export function IntegrationsPanel() {
         <Section theme={theme} title="Resume and Profile" subtitle="Manual application tracking and resume tools depend on local profile readiness."
           status={{ healthy:status.resume?.healthy && status.profile?.healthy, status:status.resume?.healthy && status.profile?.healthy ? "ready" : "missing_setup" }}>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:10 }}>
-            <div style={{ background:theme.surfaceHigh, borderRadius:6, padding:10 }}>
-              <strong>Base resume</strong><br/><span style={{ color:theme.textMuted }}>{status.resume?.name || status.resume?.status}</span>
+            <div style={{ background:"var(--color-surface-offset)", borderRadius:6, padding:10 }}>
+              <strong>Base resume</strong><br/><span style={{ color:"var(--color-text-muted)" }}>{status.resume?.name || status.resume?.status}</span>
             </div>
-            <div style={{ background:theme.surfaceHigh, borderRadius:6, padding:10 }}>
-              <strong>Active profile</strong><br/><span style={{ color:theme.textMuted }}>{status.profile?.activeProfileName || status.profile?.status}</span>
+            <div style={{ background:"var(--color-surface-offset)", borderRadius:6, padding:10 }}>
+              <strong>Active profile</strong><br/><span style={{ color:"var(--color-text-muted)" }}>{status.profile?.activeProfileName || status.profile?.status}</span>
             </div>
           </div>
         </Section>
