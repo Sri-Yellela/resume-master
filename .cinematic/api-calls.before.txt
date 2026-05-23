@@ -1,13 +1,13 @@
-src/App.jsx:148:    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
-src/App.jsx:191:        const d = await api("/api/auth/me");
-src/App.jsx:255:    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
-src/App.jsx:270:    api("/api/auth/me")
-src/App.jsx:285:    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+src/App.jsx:149:    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+src/App.jsx:192:        const d = await api("/api/auth/me");
+src/App.jsx:256:    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+src/App.jsx:271:    api("/api/auth/me")
+src/App.jsx:286:    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
 src/components/AuthScreen.jsx:158:    api("/api/auth/oauth/status")
 src/components/AuthScreen.jsx:174:      const d = await api("/api/auth/login", { method:"POST", body:JSON.stringify({ username:login.username.trim(), password:login.password }) });
-src/components/AuthScreen.jsx:219:      const d = await api("/api/auth/register", { method:"POST", body:JSON.stringify({
-src/components/AuthScreen.jsx:241:      const d = await api("/api/auth/password-reset/request", {
-src/components/AuthScreen.jsx:259:      await api("/api/auth/password-reset/confirm", {
+src/components/AuthScreen.jsx:207:      const d = await api("/api/auth/register", { method:"POST", body:JSON.stringify({
+src/components/AuthScreen.jsx:229:      const d = await api("/api/auth/password-reset/request", {
+src/components/AuthScreen.jsx:247:      await api("/api/auth/password-reset/confirm", {
 src/components/CoverLetterModal.jsx:23:      const d = await api("/api/cover-letter/generate", {
 src/components/DomainProfileWizard.jsx:134:    api("/api/domain-profiles/metadata")
 src/components/DomainProfileWizard.jsx:158:    api(`/api/domain-profiles/metadata/${domainKey}`).then(meta => {
@@ -17,31 +17,19 @@ src/components/DomainProfileWizard.jsx:243:      const profile = await api(
 src/components/JobCard.jsx:245:      await fetch("/api/jobs/interact", {
 src/components/JobDetailPanel.jsx:118:    await api(`/api/apply/close/${job.jobId}`, { method:"POST" }).catch(()=>{});
 src/components/JobDetailPanel.jsx:98:      const d = await api("/api/apply", { method:"POST", body:JSON.stringify({
-src/components/ScrollDock.jsx:105:      const d = await api("/api/notifications");
-src/components/ScrollDock.jsx:121:    try { await api("/api/notifications/read-all", { method: "PATCH" }); } catch {}
-src/components/ScrollDock.jsx:228:    api("/api/domain-profiles")
-src/components/ScrollDock.jsx:237:      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
-src/components/ScrollDock.jsx:392:    api("/api/dock-preferences")
-src/components/ScrollDock.jsx:400:      api("/api/dock-preferences", {
-src/components/ScrollDock.jsx:447:    api("/api/dock-preferences", {
-src/components/ScrollDock.jsx:602:    api("/api/domain-profiles")
-src/components/ScrollDock.jsx:609:      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
-src/components/ScrollDock.jsx:621:      await api(`/api/domain-profiles/${id}`, { method: "DELETE" });
-src/components/ScrollDock.jsx:622:      const next = await api("/api/domain-profiles");
-src/components/ScrollDock.jsx:891:    api("/api/dock-preferences")
 src/components/TopBar.jsx:112:    try { await api("/api/notifications/read-all", { method: "PATCH" }); } catch {}
-src/components/TopBar.jsx:501:    api("/api/domain-profiles")
-src/components/TopBar.jsx:526:      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
-src/components/TopBar.jsx:540:      await api(`/api/domain-profiles/${id}`, { method: "DELETE" });
-src/components/TopBar.jsx:542:      const next = await api("/api/domain-profiles");
+src/components/TopBar.jsx:454:    api("/api/domain-profiles")
+src/components/TopBar.jsx:479:      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
+src/components/TopBar.jsx:493:      await api(`/api/domain-profiles/${id}`, { method: "DELETE" });
+src/components/TopBar.jsx:495:      const next = await api("/api/domain-profiles");
 src/components/TopBar.jsx:97:      const d = await api("/api/notifications");
 src/lib/api.js:121:  api(`/api/jobs/${jobId}/disliked`, { method:"PATCH" });
 src/lib/api.js:70:export async function api(path, opts = {}) {
 src/lib/api.js:76:  const r = await fetch(path, {
 src/lib/profileSuggestions.js:43:  return api(`/api/domain-profiles/${profileId}/suggestions`, {
 src/pages/AdminLoginPage.jsx:16:      const d = await api("/api/auth/login", {
-src/pages/LandingPage.jsx:102:      const d = await api("/api/jobs/search", {
-src/pages/LandingPage.jsx:52:      const d = await api(ep);
+src/pages/LandingPage.jsx:100:      const d = await api("/api/jobs/search", {
+src/pages/LandingPage.jsx:50:      const d = await api(ep);
 src/pages/admin/DBInspector.jsx:106:    api("/api/admin/db/schema/graph").then(setGraph).catch(e => setError(e.message));
 src/pages/admin/DBInspector.jsx:1183:    api("/api/admin/users").then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
 src/pages/admin/DBInspector.jsx:1189:    try { setData(await api(`/api/admin/db/simulate-jobs/${selectedUser}`)); }
@@ -111,41 +99,41 @@ src/panels/JobProfilesPanel.jsx:22:      const response = await fetch("/api/pars
 src/panels/JobProfilesPanel.jsx:47:      const rows = await api("/api/domain-profiles");
 src/panels/JobProfilesPanel.jsx:61:      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
 src/panels/JobProfilesPanel.jsx:74:      await api(`/api/domain-profiles/${profile.id}`, { method: "DELETE" });
-src/panels/JobsPanel.jsx:1029:    api("/api/domain-profiles")
-src/panels/JobsPanel.jsx:1357:      api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }).catch(()=>{});
-src/panels/JobsPanel.jsx:1359:      api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" }).catch(()=>{});
-src/panels/JobsPanel.jsx:1416:      const data = await api("/api/imported-jobs/summary");
-src/panels/JobsPanel.jsx:1429:      const data = await api("/api/imported-jobs/linkedin");
-src/panels/JobsPanel.jsx:1490:      const rows = await api("/api/jobs/pending");
-src/panels/JobsPanel.jsx:1511:      const d = await api(`/api/jobs?${qs}`);
-src/panels/JobsPanel.jsx:1565:      api("/api/jobs?page=1&pageSize=25&sort=dateDesc"),
-src/panels/JobsPanel.jsx:1566:      api("/api/categories"),
-src/panels/JobsPanel.jsx:1567:      api("/api/resumes"),
-src/panels/JobsPanel.jsx:1568:      api("/api/imported-jobs/summary").catch(() => ({ sources: [] })),
-src/panels/JobsPanel.jsx:1601:      api(activeProfileResumePath),
-src/panels/JobsPanel.jsx:1602:      api(activeProfileEnhanceStatusPath),
-src/panels/JobsPanel.jsx:1728:        const pollData = await api(`/api/jobs/poll?${qs.toString()}`);
-src/panels/JobsPanel.jsx:1781:    await api(`/api/domain-profiles/${profileId}/activate`, { method: "POST" });
-src/panels/JobsPanel.jsx:1812:      const data = await api("/api/apply/runs");
-src/panels/JobsPanel.jsx:1820:      const data = await api(`/api/apply/runs/${runId}`);
-src/panels/JobsPanel.jsx:1831:      const data = await api("/api/apply/runs", {
-src/panels/JobsPanel.jsx:1851:      await api(`/api/domain-profiles/${profileId}`, { method: "DELETE" });
-src/panels/JobsPanel.jsx:1853:      const next = await api("/api/domain-profiles");
-src/panels/JobsPanel.jsx:1994:      const result = await api(activeProfileEnhancePath, { method: "POST" });
-src/panels/JobsPanel.jsx:2013:      await api(activeProfileAdoptEnhancedPath, { method: "PATCH" });
-src/panels/JobsPanel.jsx:2028:      const result = await api("/api/smart-search", { method:"POST", body:JSON.stringify({ resumeText }) });
-src/panels/JobsPanel.jsx:2049:        const r = await fetch("/api/parse-pdf", { method:"POST", credentials:"include", headers:authHeaders(), body:fd });
-src/panels/JobsPanel.jsx:2057:      await api(activeProfileResumePath, { method:"POST", body:JSON.stringify({ content:text, name:file.name }) });
-src/panels/JobsPanel.jsx:2082:        const d = await api(`/api/resumes/${key}`);
-src/panels/JobsPanel.jsx:2118:      const d = await api("/api/generate", { method:"POST",
-src/panels/JobsPanel.jsx:2165:      await api(`/api/resumes/${key}/html`, { method:"POST", body:JSON.stringify({ html, tool:current.tool, version:current.version }) });
-src/panels/JobsPanel.jsx:2183:      await api(`/api/resumes/${current.jobId}/keep`, { method:"POST",
-src/panels/JobsPanel.jsx:2188:      await api("/api/applications", { method:"POST", body:JSON.stringify({
-src/panels/JobsPanel.jsx:2201:        const d = await api(`/api/imported-jobs/${job.importedJobId}/starred`, { method:"PATCH" });
-src/panels/JobsPanel.jsx:2209:      const d = await api(`/api/jobs/${jobId}/starred`, { method:"PATCH" });
-src/panels/JobsPanel.jsx:2222:        const d = await api(`/api/imported-jobs/${job.importedJobId}/disliked`, { method:"PATCH" });
-src/panels/JobsPanel.jsx:2267:        await api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" });
-src/panels/JobsPanel.jsx:2269:        await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" });
+src/panels/JobsPanel.jsx:1013:    api("/api/domain-profiles")
+src/panels/JobsPanel.jsx:1336:      api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }).catch(()=>{});
+src/panels/JobsPanel.jsx:1338:      api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" }).catch(()=>{});
+src/panels/JobsPanel.jsx:1395:      const data = await api("/api/imported-jobs/summary");
+src/panels/JobsPanel.jsx:1408:      const data = await api("/api/imported-jobs/linkedin");
+src/panels/JobsPanel.jsx:1469:      const rows = await api("/api/jobs/pending");
+src/panels/JobsPanel.jsx:1490:      const d = await api(`/api/jobs?${qs}`);
+src/panels/JobsPanel.jsx:1544:      api("/api/jobs?page=1&pageSize=25&sort=dateDesc"),
+src/panels/JobsPanel.jsx:1545:      api("/api/categories"),
+src/panels/JobsPanel.jsx:1546:      api("/api/resumes"),
+src/panels/JobsPanel.jsx:1547:      api("/api/imported-jobs/summary").catch(() => ({ sources: [] })),
+src/panels/JobsPanel.jsx:1580:      api(activeProfileResumePath),
+src/panels/JobsPanel.jsx:1581:      api(activeProfileEnhanceStatusPath),
+src/panels/JobsPanel.jsx:1707:        const pollData = await api(`/api/jobs/poll?${qs.toString()}`);
+src/panels/JobsPanel.jsx:1760:    await api(`/api/domain-profiles/${profileId}/activate`, { method: "POST" });
+src/panels/JobsPanel.jsx:1791:      const data = await api("/api/apply/runs");
+src/panels/JobsPanel.jsx:1799:      const data = await api(`/api/apply/runs/${runId}`);
+src/panels/JobsPanel.jsx:1810:      const data = await api("/api/apply/runs", {
+src/panels/JobsPanel.jsx:1830:      await api(`/api/domain-profiles/${profileId}`, { method: "DELETE" });
+src/panels/JobsPanel.jsx:1832:      const next = await api("/api/domain-profiles");
+src/panels/JobsPanel.jsx:1973:      const result = await api(activeProfileEnhancePath, { method: "POST" });
+src/panels/JobsPanel.jsx:1992:      await api(activeProfileAdoptEnhancedPath, { method: "PATCH" });
+src/panels/JobsPanel.jsx:2007:      const result = await api("/api/smart-search", { method:"POST", body:JSON.stringify({ resumeText }) });
+src/panels/JobsPanel.jsx:2028:        const r = await fetch("/api/parse-pdf", { method:"POST", credentials:"include", headers:authHeaders(), body:fd });
+src/panels/JobsPanel.jsx:2036:      await api(activeProfileResumePath, { method:"POST", body:JSON.stringify({ content:text, name:file.name }) });
+src/panels/JobsPanel.jsx:2061:        const d = await api(`/api/resumes/${key}`);
+src/panels/JobsPanel.jsx:2097:      const d = await api("/api/generate", { method:"POST",
+src/panels/JobsPanel.jsx:2144:      await api(`/api/resumes/${key}/html`, { method:"POST", body:JSON.stringify({ html, tool:current.tool, version:current.version }) });
+src/panels/JobsPanel.jsx:2162:      await api(`/api/resumes/${current.jobId}/keep`, { method:"POST",
+src/panels/JobsPanel.jsx:2167:      await api("/api/applications", { method:"POST", body:JSON.stringify({
+src/panels/JobsPanel.jsx:2180:        const d = await api(`/api/imported-jobs/${job.importedJobId}/starred`, { method:"PATCH" });
+src/panels/JobsPanel.jsx:2188:      const d = await api(`/api/jobs/${jobId}/starred`, { method:"PATCH" });
+src/panels/JobsPanel.jsx:2201:        const d = await api(`/api/imported-jobs/${job.importedJobId}/disliked`, { method:"PATCH" });
+src/panels/JobsPanel.jsx:2246:        await api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" });
+src/panels/JobsPanel.jsx:2248:        await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" });
 src/panels/PlansPanel.jsx:22:  const load = () => api("/api/plans").then(d => {
 src/panels/PlansPanel.jsx:34:      await api("/api/plans/request-upgrade", {
 src/panels/ProfilePanel.jsx:144:      api(`/api/domain-profiles/${profileId}/base-resume`),

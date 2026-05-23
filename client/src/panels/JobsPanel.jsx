@@ -956,22 +956,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const jobsPanelElementRef = useRef(null);
   const [manualWidth, setManualWidth] = useState(null);
 
-  const publishJobsZoneBounds = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const jobsRect = jobsPanelElementRef.current?.getBoundingClientRect?.();
-    const detailRect = detailPanelElementRef.current?.getBoundingClientRect?.();
-    if (!jobsRect) return;
-    const left = jobsRect.left;
-    const right = detailRect ? Math.max(jobsRect.right, detailRect.right) : jobsRect.right;
-    window.dispatchEvent(new CustomEvent("rm:jobs-panel-zone", {
-      detail: {
-        left,
-        right,
-        width: Math.max(0, right - left),
-        top: Math.min(jobsRect.top, detailRect?.top ?? jobsRect.top),
-      },
-    }));
-  }, []);
 
   // effectiveTier: panel count is primary driver; ResizeObserver only overrides Tier 1 ? 2
   const effectiveTier = useMemo(() => {
@@ -1228,16 +1212,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             if (showDetail  && detailPanelRef.current)          detailPanelRef.current.resize(d.detail);
             if (showSandbox && sandboxPanelRef.current)         sandboxPanelRef.current.resize(d.sandbox);
             if (showAts     && atsPanelRef.current)             atsPanelRef.current.resize(d.ats);
-            publishJobsZoneBounds();
             initialPanelDefaultsAppliedRef.current = true;
           } catch(e) { console.warn("[panels] resize not ready:", e.message); }
         });
       });
     });
     return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
-  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile, publishJobsZoneBounds]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ResizeObserver — only used for Tier 1 ? 2 manual-drag fallback
+  // ResizeObserver — only used for Tier 1 → 2 manual-drag fallback
   useEffect(() => {
     const nodes = [jobsPanelElementRef.current, detailPanelElementRef.current].filter(Boolean);
     if (!nodes.length) return;
@@ -1248,18 +1231,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         const jobsEntry = entries.find(entry => entry.target === jobsPanelElementRef.current) || entries[0];
         const w = jobsEntry?.contentRect.width;
         if (w !== undefined) setManualWidth(w);
-        publishJobsZoneBounds();
       }, 50);
     });
     nodes.forEach(node => ro.observe(node));
-    window.addEventListener("resize", publishJobsZoneBounds, { passive: true });
-    publishJobsZoneBounds();
     return () => {
       clearTimeout(debounceTimer);
       ro.disconnect();
-      window.removeEventListener("resize", publishJobsZoneBounds);
     };
-  }, [publishJobsZoneBounds, !!selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [!!selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-open resume + ATS panel when a pending job card is selected
   useEffect(() => {
