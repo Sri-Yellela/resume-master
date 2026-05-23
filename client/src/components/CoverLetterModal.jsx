@@ -9,7 +9,7 @@ const TONES = [
 ];
 
 export default function CoverLetterModal({ resumeText, jobDescription, jobTitle, company, onClose }) {
-  const { theme, isDark } = useTheme();
+  const { theme } = useTheme();
   const [tone, setTone] = useState("professional");
   const [jd, setJd] = useState(jobDescription || "");
   const [loading, setLoading] = useState(false);
@@ -104,7 +104,7 @@ export default function CoverLetterModal({ resumeText, jobDescription, jobTitle,
                 <button key={t.value} onClick={() => setTone(t.value)}
                   style={{ ...btn(theme.accent, tone !== t.value), padding:"6px 12px",
                            border:`1px solid ${tone === t.value ? theme.accent : theme.border}`,
-                           background: tone === t.value ? theme.accent+"22" : "transparent",
+                           background: tone === t.value ? "color-mix(in srgb, var(--color-primary) 13%, transparent)" : "transparent",
                            color: tone === t.value ? theme.accent : theme.textMuted }}>
                   {t.label}
                 </button>
