@@ -14,9 +14,9 @@ src/components/DomainProfileWizard.jsx:158:    api(`/api/domain-profiles/metadat
 src/components/DomainProfileWizard.jsx:199:      const result = await api("/api/domain-profiles/generate-chips", {
 src/components/DomainProfileWizard.jsx:227:        await api("/api/domain-profiles/requests", {
 src/components/DomainProfileWizard.jsx:243:      const profile = await api(
-src/components/JobCard.jsx:245:      await fetch("/api/jobs/interact", {
-src/components/JobDetailPanel.jsx:118:    await api(`/api/apply/close/${job.jobId}`, { method:"POST" }).catch(()=>{});
-src/components/JobDetailPanel.jsx:98:      const d = await api("/api/apply", { method:"POST", body:JSON.stringify({
+src/components/JobCard.jsx:243:      await fetch("/api/jobs/interact", {
+src/components/JobDetailPanel.jsx:102:      const d = await api("/api/apply", { method:"POST", body:JSON.stringify({
+src/components/JobDetailPanel.jsx:122:    await api(`/api/apply/close/${job.jobId}`, { method:"POST" }).catch(()=>{});
 src/components/TopBar.jsx:112:    try { await api("/api/notifications/read-all", { method: "PATCH" }); } catch {}
 src/components/TopBar.jsx:454:    api("/api/domain-profiles")
 src/components/TopBar.jsx:479:      await api(`/api/domain-profiles/${id}/activate`, { method: "POST" });
