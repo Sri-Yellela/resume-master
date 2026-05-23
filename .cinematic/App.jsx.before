@@ -1,0 +1,402 @@
+// REVAMP v1 — App.jsx
+import { useState, useEffect, useCallback } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { api, setAuthContext }   from "./lib/api.js";
+import { useTheme }              from "./styles/theme.jsx";
+import { useViewport }           from "./hooks/useViewport.js";
+import { useInactivityLogout }   from "./hooks/useInactivityLogout.js";
+import { useSyncEvents }         from "./hooks/useSyncEvents.js";
+import AuthScreen                from "./components/AuthScreen.jsx";
+import AdminLayout               from "./components/AdminLayout.jsx";
+import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
+import DBInspector               from "./pages/admin/DBInspector.jsx";
+import TopBar                    from "./components/TopBar.jsx";
+import { AppScrollProvider, useAppScroll } from "./contexts/AppScrollContext.jsx";
+import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
+import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
+import { JobProfilesPanel }      from "./panels/JobProfilesPanel.jsx";
+import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
+import { PlansPanel }            from "./panels/PlansPanel.jsx";
+import { IntegrationsPanel }     from "./panels/IntegrationsPanel.jsx";
+import { JobsConsole }            from "./consoles/PlanConsoles.jsx";
+import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
+import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
+import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
+
+import LandingPage    from "./pages/LandingPage.jsx";
+import NavBar         from "./components/NavBar.jsx";
+import ProductsPage   from "./pages/ProductsPage.jsx";
+import BlogPage       from "./pages/BlogPage.jsx";
+import NotFoundPage   from "./pages/NotFoundPage.jsx";
+
+// Marketing pages (lazy-loaded is fine but direct imports work too)
+import { FeaturesPage }    from "./pages/marketing/FeaturesPage.jsx";
+import { HowItWorksPage }  from "./pages/marketing/HowItWorksPage.jsx";
+import { PricingPage }     from "./pages/marketing/PricingPage.jsx";
+import { AboutPage }       from "./pages/marketing/AboutPage.jsx";
+import { ContactPage }     from "./pages/marketing/ContactPage.jsx";
+import { FAQPage }         from "./pages/marketing/FAQPage.jsx";
+import { PrivacyPage }     from "./pages/marketing/PrivacyPage.jsx";
+import { TermsPage }       from "./pages/marketing/TermsPage.jsx";
+
+const CONSOLE_ROUTE = "jobs";
+const LEGACY_CONSOLE_ROUTES = new Set(["simple-apply", "tailored", "custom-sampler"]);
+
+function AuthBootstrapScreen({ theme }) {
+  return (
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column",
+                  alignItems:"center", justifyContent:"center",
+                  background:theme.bg, gap:14 }}>
+      <div style={{ width:32, height:32,
+                    border:`3px solid ${theme.border}`,
+                    borderTop:`3px solid ${theme.accent}`,
+                    borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+      <span style={{ color:theme.textMuted, fontSize:13 }}>Loading…</span>
+    </div>
+  );
+}
+
+function UserRouteGate({ authStatus, authUser, children }) {
+  if (authStatus === "unknown") return null;
+  if (authStatus !== "authenticated" || !authUser) return <Navigate to="/login" replace/>;
+  if (authUser.isAdmin) return <Navigate to="/admin" replace/>;
+  return children;
+}
+
+function AdminRouteGate({ authStatus, authUser, children }) {
+  if (authStatus === "unknown") return null;
+  if (authStatus !== "authenticated" || !authUser || !authUser.isAdmin) {
+    return <Navigate to="/admin/login" replace/>;
+  }
+  return children;
+}
+
+function PublicLoginRoute({ authStatus, authUser, children, admin = false }) {
+  if (authStatus === "unknown") return null;
+  if (authStatus === "authenticated" && authUser) {
+    if (admin) return authUser.isAdmin ? <Navigate to="/admin" replace/> : children;
+    return authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>;
+  }
+  return children;
+}
+// AppShell: inside AppScrollProvider — drives dynamic paddingTop + tab visibility
+function AppShell({ theme, isMobile, activeTab, handlePanelChange, appTabs, children }) {
+  const { progress: p } = useAppScroll();
+  const paddingTop = Math.round(52 * (1 - p));
+  const showTabs   = p < 0.5;
+  return (
+    <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column", paddingTop }}>
+      {showTabs && (
+        <nav style={{
+          display:"flex", alignItems:"center",
+          background: theme.surface,
+          borderBottom: `1px solid ${theme.border}`,
+          padding: isMobile ? "0 12px" : "0 20px",
+          flexShrink: 0,
+        }}>
+          {appTabs.map(t => {
+            const isActive = activeTab === t.id;
+            return (
+              <button key={t.id} onClick={() => handlePanelChange(t.id)}
+                style={{
+                  background: "transparent", border: "none",
+                  padding: isMobile ? "10px 8px" : "10px 14px",
+                  fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
+                  fontWeight: isActive ? 800 : 600,
+                  fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
+                  color: isActive ? theme.text : theme.textMuted,
+                  cursor: "pointer", position: "relative",
+                  transition: "color 0.15s",
+                }}>
+                {isMobile ? t.icon : t.label}
+                {isActive && (
+                  <div style={{
+                    position: "absolute", bottom: 0, left: "50%",
+                    transform: "translateX(-50%)",
+                    width: 16, height: 2, borderRadius: 999,
+                    background: theme.accent,
+                  }}/>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function AppDashboard({ authUser, setAuthUser }) {
+  const { theme } = useTheme();
+  const { mode: vpMode } = useViewport();
+  const isMobile = vpMode === "mobile" || vpMode === "tablet";
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
+  const consolePath = `/app/${CONSOLE_ROUTE}`;
+  const routeKey = location.pathname.replace(/^\/app\/?/, "") || "";
+  const activeTab = routeKey === CONSOLE_ROUTE || LEGACY_CONSOLE_ROUTES.has(routeKey) || routeKey === "" ? "console" : routeKey;
+  const renderRoute = activeTab === "console" ? CONSOLE_ROUTE : routeKey;
+  const appTabs = [
+    { id:"console", label:"Jobs", icon:"JB" },
+    { id:"job-profiles", label:"Job Profiles", icon:"JP" },
+    { id:"database", label:"Database", icon:"DB" },
+  ];
+
+  const handleLogout = useCallback(async () => {
+    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+    setAuthContext("");
+    setAuthUser(null);
+  }, [setAuthUser]);
+
+  const handlePanelChange = useCallback((tab) => {
+    if (tab === "jobs" || tab === "console") {
+      if (activeTab !== "console") setJobBoardRefreshKey(k => k + 1);
+      navigate(consolePath);
+      return;
+    }
+    if (["database","plans","profile","job-profiles","integrations"].includes(tab)) {
+      navigate(`/app/${tab}`);
+    }
+  }, [activeTab, consolePath, navigate]);
+
+  const handleProfileActivate = useCallback(() => {
+    setJobBoardRefreshKey(k => k + 1);
+  }, []);
+
+  useInactivityLogout(handleLogout, true);
+
+  useSyncEvents({
+    plan_updated: ({ planTier, applyMode }) => {
+      setAuthUser(u => u ? ({ ...u, planTier, applyMode, allowedModes:[applyMode] }) : u);
+      navigate(consolePath, { replace:true });
+    },
+  });
+
+  useEffect(() => {
+    if (!routeKey || LEGACY_CONSOLE_ROUTES.has(routeKey)) {
+      navigate(consolePath, { replace:true });
+      return;
+    }
+    if (routeKey !== CONSOLE_ROUTE && !["database","plans","profile","job-profiles","integrations"].includes(routeKey)) {
+      navigate(consolePath, { replace:true });
+    }
+  }, [routeKey, consolePath, navigate]);
+
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const d = await api("/api/auth/me");
+        if (!d.authenticated) handleLogout();
+      } catch {}
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [handleLogout]);
+
+  // Force-logout immediately when any API call gets a 401 (dispatched by api.js).
+  // Without this, users stay on the app page with broken state until the next
+  // visibilitychange triggers the /api/auth/me check.
+  useEffect(() => {
+    const handle = () => handleLogout();
+    window.addEventListener("rm:session-expired", handle);
+    return () => window.removeEventListener("rm:session-expired", handle);
+  }, [handleLogout]);
+
+  return (
+    <JobBoardProvider>
+      <AppScrollProvider>
+        <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
+                      background:theme.bg, height:"100vh",
+                      display:"flex", flexDirection:"column",
+                      overflow:"hidden", color:theme.text,
+                      backdropFilter: theme.backdrop,
+                      WebkitBackdropFilter: theme.backdrop }}>
+
+          {/* TopBar: position:fixed — takes no space in flex layout */}
+          <TopBar
+            user={authUser}
+            onTabChange={handlePanelChange}
+            onLogout={handleLogout}
+            onUserChange={setAuthUser}
+            onProfileActivate={handleProfileActivate}
+          />
+
+          {/* AppShell: reads scroll progress for dynamic paddingTop + tab visibility */}
+          <AppShell theme={theme} isMobile={isMobile} activeTab={activeTab} handlePanelChange={handlePanelChange} appTabs={appTabs}>
+            {/* Panels */}
+            <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+              {renderRoute === CONSOLE_ROUTE && (
+                <JobsConsole user={authUser} onUserChange={setAuthUser}
+                  refreshKey={jobBoardRefreshKey}
+                  isActive={activeTab === "console"}/>
+              )}
+              {renderRoute === "database" && <DatabasePanel user={authUser}/>}
+              {renderRoute === "integrations" && <IntegrationsPanel/>}
+              {renderRoute === "plans"    && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
+              {renderRoute === "profile"  && <ProfilePanel user={authUser} onOpenJobProfiles={() => handlePanelChange("job-profiles")}/>}
+              {renderRoute === "job-profiles" && <JobProfilesPanel/>}
+            </div>
+          </AppShell>
+        </div>
+      </AppScrollProvider>
+    </JobBoardProvider>
+  );
+}
+
+function AppRouter() {
+  const { theme } = useTheme();
+  const [authUser,    setAuthUser]    = useState(null);
+  const [authStatus,  setAuthStatus]  = useState("unknown");
+
+  const handleAdminLogout = useCallback(async () => {
+    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+    setAuthContext("");
+    setAuthUser(null);
+    setAuthStatus("unauthenticated");
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauthAuthContext = params.get("authContext");
+    if (oauthAuthContext) {
+      setAuthContext(oauthAuthContext);
+      params.delete("authContext");
+      const nextSearch = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+    }
+    api("/api/auth/me")
+      .then(d => {
+        if (d.authenticated && d.user) {
+          setAuthUser(d.user);
+          setAuthStatus("authenticated");
+          return;
+        }
+        setAuthUser(null);
+        setAuthStatus("unauthenticated");
+      })
+      .catch(() => {})
+      .finally(() => setAuthStatus(prev => prev === "unknown" ? "unauthenticated" : prev));
+  }, []);
+
+  const handlePublicLogout = useCallback(async () => {
+    try { await api("/api/auth/logout", { method:"POST" }); } catch {}
+    setAuthContext("");
+    setAuthUser(null);
+    setAuthStatus("unauthenticated");
+  }, []);
+
+  if (authStatus === "unknown") return (
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column",
+                  alignItems:"center", justifyContent:"center",
+                  background:theme.bg, gap:14 }}>
+      <div style={{ width:32, height:32,
+                    border:`3px solid ${theme.border}`,
+                    borderTop:`3px solid ${theme.accent}`,
+                    borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+      <span style={{ color:theme.textMuted, fontSize:13 }}>Loading…</span>
+    </div>
+  );
+
+  // NavBar helper — renders the shared public nav with current auth state
+  const navBar = <NavBar user={authUser} onLogout={handlePublicLogout}/>;
+
+  return (
+    <Routes>
+      {/* Standalone tool pages — always public */}
+      <Route path="/tools/ats"      element={<ATSToolPage/>}/>
+      <Route path="/tools/generate" element={<GenerateToolPage/>}/>
+      <Route path="/tools/apply"    element={<ApplyToolPage/>}/>
+
+      {/* Marketing pages — always public */}
+      <Route path="/features"     element={<FeaturesPage/>}/>
+      <Route path="/how-it-works" element={<HowItWorksPage/>}/>
+      <Route path="/pricing"      element={<PricingPage/>}/>
+      <Route path="/about"        element={<AboutPage/>}/>
+      <Route path="/contact"      element={<ContactPage/>}/>
+      <Route path="/faq"          element={<FAQPage/>}/>
+      <Route path="/privacy"      element={<PrivacyPage/>}/>
+      <Route path="/terms"        element={<TermsPage/>}/>
+
+      {/* New public pages with NavBar */}
+      <Route path="/products" element={<>{navBar}<ProductsPage/></>}/>
+      <Route path="/blog"     element={<>{navBar}<BlogPage/></>}/>
+
+      {/* Admin login — redirect if already authenticated */}
+      <Route path="/admin/login" element={
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser} admin>
+          <AdminLoginPage onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
+      }/>
+
+      {/* Admin dashboard — requires auth + isAdmin */}
+      <Route path="/admin" element={
+        <AdminRouteGate authStatus={authStatus} authUser={authUser}>
+          <AdminLayout user={authUser} onLogout={handleAdminLogout}/>
+        </AdminRouteGate>
+      }/>
+
+      {/* Admin DB Inspector */}
+      <Route path="/admin/db" element={
+        <AdminRouteGate authStatus={authStatus} authUser={authUser}>
+          <AdminLayout user={authUser} onLogout={handleAdminLogout}><DBInspector/></AdminLayout>
+        </AdminRouteGate>
+      }/>
+
+      {/* User login — redirect to /app if logged in as user, /admin if admin */}
+      <Route path="/login" element={
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser}>
+          <AuthScreen onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
+      }/>
+
+      {/* Register — same screen as login, opens register tab */}
+      <Route path="/register" element={
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser}>
+          <AuthScreen initialTab="register" onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
+      }/>
+
+      {/* User app — redirect admin to /admin */}
+      <Route path="/app/*" element={
+        <UserRouteGate authStatus={authStatus} authUser={authUser}>
+          <AppDashboard authUser={authUser} setAuthUser={setAuthUser}/>
+        </UserRouteGate>
+      }/>
+
+      {/* Root: landing page for logged-out, redirect for logged-in */}
+      <Route path="/" element={
+        authStatus === "unknown" ? null
+        : authStatus === "authenticated" && authUser
+          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
+          : <>{navBar}<LandingPage authUser={null}/></>
+      }/>
+
+      {/* 404 — authenticated users redirect, logged-out users see NotFoundPage */}
+      <Route path="*" element={
+        authStatus === "authenticated" && authUser
+          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
+          : <>{navBar}<NotFoundPage/></>
+      }/>
+    </Routes>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppRouter/>
+    </BrowserRouter>
+  );
+}
