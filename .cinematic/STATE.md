@@ -131,3 +131,32 @@ Verifications run (with actual output observed):
   - routes clean (indentation shifts only from AppShell wrapper; all path values identical)
   - DashboardTabsLayout: 0 remaining references to old "AppShell" name in App.jsx
 Open issues: none for this step
+
+## Step 5 — NavBar + AuthScreen cinematic reskin
+Commit: d54fa5f
+Files touched: client/src/components/AuthScreen.jsx, client/src/components/NavBar.css
+Decisions:
+  - isDark removed from AuthModal destructure; single ternary hardcoded to dark value.
+  - AuthModal card uses className="liquid-panel" (frosted glass) instead of
+    theme.surface + boxShadow inline styles.
+  - inputStyle/providerButtonStyle now use var(--bg-input) / var(--border-glass).
+  - Hero tiles use var(--bg-card) + var(--bg-blur-sm) for glass treatment.
+  - Outer AuthScreen background removed (transparent) — CinematicBackground shows through.
+  - Poster panel: var(--bg-panel) + backdrop-filter; fade overlays use CSS var in
+    linear-gradient() directly (valid — React passes inline styles as raw CSS).
+  - NavBar.css: all var(--color-surface-offset) hover states → rgba(255,255,255,0.06);
+    background → var(--bg-page) + backdrop-filter; drawer → var(--bg-menu).
+  - OAuth providerButton now returns null for unconfigured providers (after load).
+    Shows all 3 buttons while oauthStatus is null (loading) for progressive disclosure.
+  - Kept theme.* refs for text/accent colors; CSS-var replacement deferred to
+    per-panel repaints in Steps 7-12.
+  - CLAUDE_CODE_PROMPT.md not found at repo root — spec unavailable. Step executed
+    from conversation-prompt description + divergence list.
+Divergences:
+  - Spec said "rewrite JSX per master spec" — spec file absent, applied cinematic
+    glass treatment conservatively without full JSX rewrite.
+Verifications run (with actual output observed):
+  - npm run build: exit 0, 73.54 kB CSS, 4 pre-existing warnings, no new warnings
+  - api-calls: clean (endpoint content unchanged)
+  - routes: clean (path values unchanged)
+Open issues: none for this step
