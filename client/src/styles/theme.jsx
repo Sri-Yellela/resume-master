@@ -132,7 +132,10 @@ export function ThemeProvider({ children }) {
         :root {
           --color-primary:         ${theme.accent};
           --color-primary-hover:   color-mix(in srgb, ${theme.accent} 75%, black);
+          --color-primary-muted:   ${theme.accentMuted};
+          --color-primary-text:    ${theme.accentText};
           --color-on-primary:      #0f0f0f;
+          --shadow-sm:             ${theme.shadowSm};
           --color-warning:         ${theme.warning};
           --color-text:            ${theme.text};
           --color-text-muted:      ${theme.textMuted};

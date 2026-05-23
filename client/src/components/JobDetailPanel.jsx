@@ -22,7 +22,7 @@ function WorkBadge({ t, theme }) {
   const map = { Remote:{ bg:"#e8f6fb", fg:"#1a6a8a" }, Hybrid:{ bg:"#f0f9ff", fg:"#0284c7" } };
   const s = map[t] || null;
   if (s) return <span style={{ background:s.bg, color:s.fg, padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700 }}>{t}</span>;
-  return <span style={{ background:theme.surfaceHigh, color:theme.textMuted, padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700 }}>{t || "Onsite"}</span>;
+  return <span style={{ background:"var(--color-surface-offset)", color:"var(--color-text-muted)", padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700 }}>{t || "Onsite"}</span>;
 }
 
 function CompanyIcon({ company, iconUrl, size = 44 }) {
@@ -52,9 +52,13 @@ function ActionBtn({ onClick, title, children, accent = "#0284c7", theme, active
       onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{
         display:"flex", alignItems:"center", gap:5,
-        padding:"6px 12px", borderRadius:4, border:`1px solid ${active || hov ? accent : theme.border}`,
-        background: active ? accent+"22" : hov ? accent+"11" : "transparent",
-        color: active || hov ? accent : theme.textMuted,
+        padding:"6px 12px", borderRadius:4, border:`1px solid ${active || hov ? accent : "var(--color-border)"}`,
+        background: active
+          ? `color-mix(in srgb, ${accent} 13%, transparent)`
+          : hov
+            ? `color-mix(in srgb, ${accent} 7%, transparent)`
+            : "transparent",
+        color: active || hov ? accent : "var(--color-text-muted)",
         cursor: disabled ? "not-allowed" : "pointer", fontSize:11, fontWeight:600,
         opacity: disabled ? 0.55 : 1,
         transition:"all 0.15s", flexShrink:0,
@@ -66,7 +70,7 @@ function ActionBtn({ onClick, title, children, accent = "#0284c7", theme, active
 
 export default function JobDetailPanel({
   job,
-  theme, isDark,
+  theme,
   g, done, st,
   applyMode,
   canUseGenerate = applyMode !== "SIMPLE",
@@ -138,28 +142,30 @@ export default function JobDetailPanel({
   return (
     <div style={{
       display:"flex", flexDirection:"column", height:"100%", overflow:"hidden",
-      background: isDark ? "rgba(17,17,17,0.95)" : "rgba(255,255,255,0.97)",
+      background: "var(--bg-modal)",
+      backdropFilter: "var(--bg-blur)",
+      WebkitBackdropFilter: "var(--bg-blur)",
     }}>
       {/* Header */}
       <div style={{
         display:"flex", alignItems:"flex-start", gap:10,
-        padding:"12px 14px 10px", borderBottom:`1px solid ${theme.border}`,
-        flexShrink:0, background:theme.surface,
+        padding:"12px 14px 10px", borderBottom:"1px solid var(--border-glass)",
+        flexShrink:0, background:"var(--color-surface)",
       }}>
         <CompanyIcon company={job.company} iconUrl={job.companyIconUrl}/>
         <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontWeight:700, fontSize:14, color:theme.text,
+          <div style={{ fontWeight:700, fontSize:14, color:"var(--color-text)",
                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             {job.company}
           </div>
-          <div style={{ fontSize:12, color:theme.textMuted, marginTop:2,
+          <div style={{ fontSize:12, color:"var(--color-text-muted)", marginTop:2,
                         overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             {job.title}
           </div>
           <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:5, marginTop:5 }}>
             <WorkBadge t={job.workType} theme={theme}/>
-            {job.location && <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>}
-            {yoeStr && <span style={{ fontSize:10, color:theme.textDim }}>{yoeStr} exp</span>}
+            {job.location && <span style={{ fontSize:10, color:"var(--color-text-faint)" }}>{job.location}</span>}
+            {yoeStr && <span style={{ fontSize:10, color:"var(--color-text-faint)" }}>{yoeStr} exp</span>}
             {salaryStr && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>}
             {!salaryStr && job.compensation && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>}
             <span style={{ fontSize:10, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
@@ -180,7 +186,7 @@ export default function JobDetailPanel({
         </div>
         {/* Close button */}
         <button onClick={onClose}
-          style={{ background:"none", border:"none", cursor:"pointer", color:theme.textMuted,
+          style={{ background:"none", border:"none", cursor:"pointer", color:"var(--color-text-muted)",
                    fontSize:16, padding:"0 2px", flexShrink:0, lineHeight:1 }}>
           ✕
         </button>
@@ -189,12 +195,12 @@ export default function JobDetailPanel({
       {/* Action bar */}
       <div style={{
         display:"flex", alignItems:"center", gap:6, flexWrap:"wrap",
-        padding:"8px 14px", borderBottom:`1px solid ${theme.border}`,
-        flexShrink:0, background:theme.surface,
+        padding:"8px 14px", borderBottom:"1px solid var(--border-glass)",
+        flexShrink:0, background:"var(--color-surface)",
       }}>
         {canUseGenerate && onGenerate && (
           <ActionBtn onClick={() => onGenerate(done && g?.html !== "__exists__")}
-            title={done ? "Regenerate resume" : "Generate resume"} accent={theme.accent} theme={theme} disabled={!!st}>
+            title={done ? "Regenerate resume" : "Generate resume"} accent="var(--color-primary)" theme={theme} disabled={!!st}>
             {generateLoading ? "⏳ Generating" : done ? "↻ Regen" : "✦ Generate"}
           </ActionBtn>
         )}
@@ -210,7 +216,7 @@ export default function JobDetailPanel({
         )}
         {(job.applyUrl || job.url) && !semiActive && (
           <ActionBtn onClick={() => handleAutoApply("semi")} title="Open pre-filled application in browser"
-            accent={theme.accent} theme={theme} active={applyLoading}>
+            accent="var(--color-primary)" theme={theme} active={applyLoading}>
             {applyLoading ? "⏳" : "Apply"}
           </ActionBtn>
         )}
@@ -261,11 +267,11 @@ export default function JobDetailPanel({
           margin:"0 14px 0", padding:"8px 12px",
           background: applyResult.status === "success" ? "#dcfce7"
                     : applyResult.status === "error"   ? "#fee2e2"
-                    : applyResult.status === "semi"    ? theme.accentMuted
+                    : applyResult.status === "semi"    ? "var(--color-primary-muted)"
                     : "#fef9c3",
           color: applyResult.status === "success" ? "#166534"
                : applyResult.status === "error"   ? "#991b1b"
-               : applyResult.status === "semi"    ? theme.accentText
+               : applyResult.status === "semi"    ? "var(--color-primary-text)"
                : "#854d0e",
           borderRadius:6, fontSize:11, fontWeight:600,
           display:"flex", alignItems:"center", justifyContent:"space-between",
@@ -288,11 +294,11 @@ export default function JobDetailPanel({
         </div>
       )}
       {semiActive && (
-        <div style={{ margin:"6px 14px 0", padding:"6px 12px", background:theme.accentMuted,
-                      color:theme.accentText, borderRadius:6, fontSize:11,
+        <div style={{ margin:"6px 14px 0", padding:"6px 12px", background:"var(--color-primary-muted)",
+                      color:"var(--color-primary-text)", borderRadius:6, fontSize:11,
                       display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
           <span style={{ display:"inline-block", width:7, height:7, borderRadius:"50%",
-                          background:theme.accent, animation:"pulse 1.5s infinite" }}/>
+                          background:"var(--color-primary)", animation:"pulse 1.5s infinite" }}/>
           Automation browser is open — fill remaining fields and submit
         </div>
       )}
@@ -300,7 +306,7 @@ export default function JobDetailPanel({
       {/* Description */}
       <div style={{ flex:1, overflowY:"auto", padding:"14px 14px" }}>
         {job.applicantCount != null && (
-          <div style={{ fontSize:11, color:theme.textDim, marginBottom:10 }}>
+          <div style={{ fontSize:11, color:"var(--color-text-faint)", marginBottom:10 }}>
             👥 {job.applicantCount > 200 ? "200+" : job.applicantCount} applicants
           </div>
         )}
@@ -312,15 +318,15 @@ export default function JobDetailPanel({
             truncate={false}
           />
         ) : (
-          <p style={{ fontSize:12, color:theme.textDim, fontStyle:"italic" }}>No description available.</p>
+          <p style={{ fontSize:12, color:"var(--color-text-faint)", fontStyle:"italic" }}>No description available.</p>
         )}
 
         {/* Direct apply link */}
         {(job.applyUrl || job.url) && (
-          <div style={{ marginTop:16, paddingTop:12, borderTop:`1px solid ${theme.border}44` }}>
+          <div style={{ marginTop:16, paddingTop:12, borderTop:"1px solid var(--border-glass)" }}>
             <a href={job.applyUrl || job.url} target="_blank" rel="noreferrer"
-              style={{ fontSize:12, color:theme.accentText, fontWeight:700,
-                        textDecoration:"underline", background:theme.accentMuted,
+              style={{ fontSize:12, color:"var(--color-primary-text)", fontWeight:700,
+                        textDecoration:"underline", background:"var(--color-primary-muted)",
                         padding:"6px 14px", borderRadius:4, display:"inline-block" }}>
               Apply directly ↗
             </a>

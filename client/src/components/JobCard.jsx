@@ -1,27 +1,27 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
-// client/src/components/JobCard.jsx — shared expandable job card
+﻿// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
+// client/src/components/JobCard.jsx â€” shared expandable job card
 import { useState, useEffect } from "react";
 import { useTheme } from "../styles/theme.jsx";
 
-// ── Helpers ─────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Compute elapsed time since posting.
 // postedAt is stored as ISO date (e.g. "2024-03-15") after O1 normalization.
-// fallbackTs is scraped_at (Unix seconds) — used when postedAt is absent.
+// fallbackTs is scraped_at (Unix seconds) â€” used when postedAt is absent.
 function ago(postedAt, scrapedAt) {
   let ms = postedAt ? new Date(postedAt).getTime() : NaN;
   if (isNaN(ms) || ms <= 0) {
-    // Fall back to scraped_at (Unix seconds → ms)
+    // Fall back to scraped_at (Unix seconds â†’ ms)
     ms = scrapedAt != null ? Number(scrapedAt) * 1000 : NaN;
   }
-  if (isNaN(ms) || ms <= 0) return "—";
+  if (isNaN(ms) || ms <= 0) return "â€”";
   const d = Date.now() - ms;
-  if (d < 0) return "—";
+  if (d < 0) return "â€”";
   if (d < 3600000)  return `${Math.floor(d / 60000)}m`;
   if (d < 86400000) return `${Math.floor(d / 3600000)}h`;
   return `${Math.floor(d / 86400000)}d`;
 }
 
-// ── LinkedIn "in" logo ──────────────────────────────────────────
+// â”€â”€ LinkedIn "in" logo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function LinkedInLogo({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20" aria-label="LinkedIn" role="img">
@@ -34,10 +34,10 @@ function LinkedInLogo({ size = 16 }) {
 function PlatformLogo({ platform, size = 16, theme }) {
   const p = (platform || "").toLowerCase();
   if (p === "linkedin") return <LinkedInLogo size={size}/>;
-  return <span style={{ fontSize: size * 0.6, color: theme?.textMuted || "#888" }}>◆</span>;
+  return <span style={{ fontSize: size * 0.6, color: "var(--color-text-muted)" }}>â—†</span>;
 }
 
-// ── Company icon ────────────────────────────────────────────────
+// â”€â”€ Company icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function CompanyIcon({ company, iconUrl, size = 48 }) {
   const [failed, setFailed] = useState(false);
   const letter = (company || "?")[0].toUpperCase();
@@ -61,7 +61,7 @@ function CompanyIcon({ company, iconUrl, size = 48 }) {
   );
 }
 
-// ── Work badge ──────────────────────────────────────────────────
+// â”€â”€ Work badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function WorkBadge({ t, theme }) {
   const map = {
     Remote: { bg:"#e8f6fb", fg:"#1a6a8a" },
@@ -77,14 +77,14 @@ function WorkBadge({ t, theme }) {
     );
   }
   return (
-    <span style={{ background:theme?.surfaceHigh, color:theme?.textMuted, padding:"2px 8px",
+    <span style={{ background:"var(--color-surface-offset)", color:"var(--color-text-muted)", padding:"2px 8px",
                    borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
       {t || "Onsite"}
     </span>
   );
 }
 
-// ── ATS badge ───────────────────────────────────────────────────
+// â”€â”€ ATS badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function ATSBadge({ score, onClick }) {
   if (score == null) return null;
   const bg = score >= 80 ? "#dcfce7" : score >= 60 ? "#fef9c3" : "#fee2e2";
@@ -99,31 +99,31 @@ function ATSBadge({ score, onClick }) {
   );
 }
 
-// ── Plain description renderer ───────────────────────────────────
+// â”€â”€ Plain description renderer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DescriptionText({ text, theme, truncate = true, maxChars = 1200 }) {
   if (!text) return null;
   const shouldTruncate = truncate && Number.isFinite(maxChars);
   const trimmed = shouldTruncate ? text.slice(0, maxChars) : text;
   return (
-    <p style={{ fontSize:11, color:theme.textMuted, lineHeight:1.7, margin:0, whiteSpace:"pre-wrap" }}>
+    <p style={{ fontSize:11, color:"var(--color-text-muted)", lineHeight:1.7, margin:0, whiteSpace:"pre-wrap" }}>
       {trimmed}
-      {shouldTruncate && text.length > maxChars && <span style={{ color:theme.textDim }}> … (truncated)</span>}
+      {shouldTruncate && text.length > maxChars && <span style={{ color:"var(--color-text-faint)" }}> â€¦ (truncated)</span>}
     </p>
   );
 }
 
-// ── Coming-soon pill ────────────────────────────────────────────
+// â”€â”€ Coming-soon pill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function ComingSoon({ label }) {
   return (
     <span style={{ fontSize:9, padding:"1px 6px", borderRadius:999, fontWeight:700,
                    background:"#f3f4f6", color:"#9ca3af", border:"1px dashed #d1d5db",
                    whiteSpace:"nowrap", letterSpacing:"0.04em" }}>
-      {label} · soon
+      {label} Â· soon
     </span>
   );
 }
 
-// ── Icon button ─────────────────────────────────────────────────
+// â”€â”€ Icon button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function IconBtn({
   bg,
   onClick,
@@ -147,29 +147,29 @@ function IconBtn({
       style={{
         width:size, height:size, borderRadius:999,
         background: disabled
-          ? (theme?.surfaceHigh||"#f3f4f6")
+          ? "var(--color-surface-offset)"
           : active
             ? resolvedActiveBg
             : preview
               ? `${bg}18`
-              : (theme?.surfaceHigh||"#f3f4f6"),
+              : "var(--color-surface-offset)",
         border:`1px solid ${disabled
-          ? (theme?.border||"#e5e7eb")
+          ? "var(--color-border)"
           : active
             ? `${bg}55`
             : preview
               ? `${bg}44`
-              : (theme?.border||"#e5e7eb")}`,
+              : "var(--color-border)"}`,
         display:"flex", alignItems:"center", justifyContent:"center",
         cursor: disabled ? "not-allowed" : "pointer",
         fontSize:12,
         color: disabled
-          ? (theme?.textMuted||"#6b7280")
+          ? "var(--color-text-muted)"
           : active
             ? resolvedActiveColor
             : preview
               ? bg
-              : (theme?.textMuted||"#6b7280"),
+              : "var(--color-text-muted)",
         opacity: disabled ? 0.4 : 1,
         transition:"all 0.15s ease", flexShrink:0,
         transform: active ? "scale(1.08)" : preview ? "scale(1.08)" : "scale(1)",
@@ -192,11 +192,10 @@ function ToggleIconBtn({ active, activeLabel, inactiveLabel, activeChildren, ina
   );
 }
 
-// ── Main JobCard ─────────────────────────────────────────────────
+// â”€â”€ Main JobCard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function JobCard({
   job,
   theme: themeProp,
-  isDark: isDarkProp,
   isLoggedOut = false,
   showDislike = true,
   showApplyButton = true,
@@ -221,14 +220,13 @@ export default function JobCard({
   compact,            // split-view: tighter layout
   cardTier = 1,       // 1=full, 2=medium (manual resize), 3=condensed (3+ panels open)
 }) {
-  const { theme: ctxTheme, isDark: ctxIsDark } = useTheme();
+  const { theme: ctxTheme } = useTheme();
   const theme = themeProp ?? ctxTheme;
-  const isDark = isDarkProp ?? ctxIsDark;
 
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  // Local star/dislike state — used when onStar/onDislike callbacks are not provided
+  // Local star/dislike state â€” used when onStar/onDislike callbacks are not provided
   // (e.g. when rendered from LandingPage without a parent managing state)
   const [starred,  setStarred]  = useState(job._user?.starred  ?? job.starred  ?? false);
   const [disliked, setDisliked] = useState(job._user?.disliked ?? job.disliked ?? false);
@@ -274,13 +272,9 @@ export default function JobCard({
     interact({ disliked: next, ...(next ? { starred: false } : {}) });
   });
 
-  const frostedBg = isDark
-    ? (hov ? "rgba(28,28,28,0.88)" : "rgba(17,17,17,0.55)")
-    : (hov ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.44)");
+  const frostedBg = hov ? "rgba(28,28,28,0.88)" : "rgba(17,17,17,0.55)";
   const frostedBlur = hov ? "blur(20px) saturate(2)" : "blur(12px) saturate(1.6)";
-  const frostedOverlay = isDark
-    ? "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(200,200,200,0.02) 100%)"
-    : "linear-gradient(135deg, rgba(255,255,255,0.18) 0%, rgba(200,200,200,0.06) 100%)";
+  const frostedOverlay = "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(200,200,200,0.02) 100%)";
 
   const hasDesc    = !!(job.description || job.descriptionHtml);
   const generateLoading = st === "generate";
@@ -289,13 +283,13 @@ export default function JobCard({
   const salaryStr  = hasSalary
     ? [job.salaryMin, job.salaryMax].filter(Boolean).map(v =>
         `${job.salaryCurrency || "$"}${(v/1000).toFixed(0)}k`
-      ).join("–")
+      ).join("â€“")
     : null;
 
   const yoeStr = job.expRaw
     ? job.expRaw
     : job.minYearsExp != null
-      ? (job.maxYearsExp != null ? `${job.minYearsExp}–${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
+      ? (job.maxYearsExp != null ? `${job.minYearsExp}â€“${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
       : null;
 
   const handleCardClick = (e) => {
@@ -311,9 +305,9 @@ export default function JobCard({
   };
 
   // RESPONSIVE TIERS: driven by open-panel count (see getCardTier in JobsPanel.jsx).
-  // Tier 1 (full layout):   A alone or A+B — cardTier=1
-  // Tier 2 (medium):        manual drag to 180-279px — cardTier=2
-  // Tier 3 (condensed):     3+ panels open (A at 10%) — cardTier=3
+  // Tier 1 (full layout):   A alone or A+B â€” cardTier=1
+  // Tier 2 (medium):        manual drag to 180-279px â€” cardTier=2
+  // Tier 3 (condensed):     3+ panels open (A at 10%) â€” cardTier=3
   // To change tier triggers, edit getCardTier() in JobsPanel.jsx.
   const tier = cardTier;
 
@@ -323,17 +317,21 @@ export default function JobCard({
       onMouseLeave={() => setHov(false)}
       role={isLoggedOut ? "link" : undefined}
       tabIndex={isLoggedOut ? 0 : undefined}
-      aria-label={isLoggedOut ? `${job.title} at ${job.company} — view job` : undefined}
+      aria-label={isLoggedOut ? `${job.title} at ${job.company} â€” view job` : undefined}
       onKeyDown={isLoggedOut ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const url = job.url || job.applyUrl; if (url) window.open(url, "_blank", "noreferrer"); } } : undefined}
       style={{
         background: frostedBg,
         backdropFilter: frostedBlur,
         WebkitBackdropFilter: frostedBlur,
-        border: `1px solid ${selected ? theme.accent : (hov ? theme.accent + "66" : theme.border + "88")}`,
+        border: selected
+          ? "1px solid var(--color-primary)"
+          : hov
+            ? "1px solid color-mix(in srgb, var(--color-primary) 40%, transparent)"
+            : "1px solid var(--border-glass)",
         borderRadius: 4, margin: "0 16px 8px",
         boxShadow: hov
-          ? `0 0 0 2px ${theme.accent}, 0 8px 24px ${theme.accent}44`
-          : theme.shadowSm,
+          ? "0 0 0 2px var(--color-primary), 0 8px 24px color-mix(in srgb, var(--color-primary) 27%, transparent)"
+          : "var(--shadow-sm)",
         transform: hov ? "translateY(-3px) scale(1.008)" : "translateY(0) scale(1)",
         transition: "all 0.2s ease", position: "relative",
         opacity: job.disliked ? 0.3 : job.visited ? 0.75 : 1,
@@ -342,51 +340,51 @@ export default function JobCard({
         cursor: isLoggedOut ? "pointer" : undefined,
       }}>
 
-      {/* ── Frosted glass overlay (gradient + noise texture) ── */}
+      {/* â”€â”€ Frosted glass overlay (gradient + noise texture) â”€â”€ */}
       <div aria-hidden style={{
         position:"absolute", inset:0, pointerEvents:"none", borderRadius:"inherit", zIndex:0,
         background: frostedOverlay,
       }}/>
       <div aria-hidden style={{
         position:"absolute", inset:0, pointerEvents:"none", borderRadius:"inherit", zIndex:2,
-        opacity: isDark ? 0.12 : 0.08, mixBlendMode: isDark ? "overlay" : "multiply",
+        opacity: 0.12, mixBlendMode: "overlay",
         backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E")`,
         backgroundSize:"160px 160px",
       }}/>
 
-      {/* ── TIER_3_CONTENT: condensed narrow mode (< 180px) ── */}
+      {/* â”€â”€ TIER_3_CONTENT: condensed narrow mode (< 180px) â”€â”€ */}
       {tier === 3 && (
         <div onClick={handleCardClick}
-          title={`${job.company} — ${job.title}`}
+          title={`${job.company} â€” ${job.title}`}
           style={{ padding:"10px 8px 10px", display:"flex", flexDirection:"column",
                    alignItems:"center", gap:5, cursor:"pointer", position:"relative", zIndex:1,
                    minHeight:72 }}>
-          {/* Logo — fades in as tier changes */}
+          {/* Logo â€” fades in as tier changes */}
           <div style={{ opacity:1, transition:"opacity 0.15s ease 0.05s" }}>
             <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={32}/>
           </div>
           {/* Company name */}
-          <span style={{ fontSize:10, fontWeight:700, color:theme.text, textAlign:"center",
+          <span style={{ fontSize:10, fontWeight:700, color:"var(--color-text)", textAlign:"center",
                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
                          width:"100%", maxWidth:110,
                          opacity:1, transition:"opacity 0.15s ease 0.05s" }}>
             {job.company}
           </span>
-          {/* Resume badge — only if a resume has been generated */}
+          {/* Resume badge â€” only if a resume has been generated */}
           {done && (
             <span style={{
               fontSize:9, fontWeight:700, padding:"2px 6px", borderRadius:999,
-              background:theme.accentMuted, color:theme.accentText,
-              border:`1px solid ${theme.accent}44`, whiteSpace:"nowrap",
+              background:"var(--color-primary-muted)", color:"var(--color-primary-text)",
+              border:"1px solid color-mix(in srgb, var(--color-primary) 27%, transparent)", whiteSpace:"nowrap",
               opacity:1, transition:"opacity 0.2s ease 0.22s",
             }}>
-              ✓ Resume
+              âœ“ Resume
             </span>
           )}
         </div>
       )}
 
-      {/* ── Tier 2: condensed two-row (180–279px) ── */}
+      {/* â”€â”€ Tier 2: condensed two-row (180â€“279px) â”€â”€ */}
       {tier === 2 && (
         <div onClick={handleCardClick}
           style={{ padding:"10px 12px", display:"flex", alignItems:"center", gap:10,
@@ -396,7 +394,7 @@ export default function JobCard({
           <div style={{ flex:1, minWidth:0 }}>
             {/* Row 1: company + age + ATS + star + dislike */}
             <div style={{ display:"flex", alignItems:"center", gap:4, marginBottom:3 }}>
-              <span style={{ fontWeight:700, fontSize:12, color:theme.text,
+              <span style={{ fontWeight:700, fontSize:12, color:"var(--color-text)",
                               overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1, minWidth:0 }}>
                 {job.company}
               </span>
@@ -411,8 +409,8 @@ export default function JobCard({
                   activeLabel="Remove from saved"
                   inactiveLabel="Save job"
                   onClick={e => { e.stopPropagation(); handleStar(); }}
-                  activeChildren="★"
-                  inactiveChildren="☆"
+                  activeChildren="â˜…"
+                  inactiveChildren="â˜†"
                 />
               )}
               {!isLoggedOut && showDislike && (
@@ -442,7 +440,7 @@ export default function JobCard({
               )}
             </div>
             {/* Row 2: job title */}
-            <div style={{ fontSize:11, color:theme.textMuted,
+            <div style={{ fontSize:11, color:"var(--color-text-muted)",
                           overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
               {job.title}
             </div>
@@ -450,7 +448,7 @@ export default function JobCard({
         </div>
       )}
 
-      {/* ── Tier 1: full layout (>= 280px) — unchanged ── */}
+      {/* â”€â”€ Tier 1: full layout (>= 280px) â€” unchanged â”€â”€ */}
       {tier === 1 && (
         <div onClick={handleCardClick}
           style={{ padding: compact ? "10px 14px" : "14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer", position:"relative", zIndex:1 }}>
@@ -461,22 +459,22 @@ export default function JobCard({
           {/* Center info */}
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-              <span style={{ fontWeight:700, fontSize:14, color:theme.text,
+              <span style={{ fontWeight:700, fontSize:14, color:"var(--color-text)",
                               overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                 {job.company}
               </span>
               {job.alreadyApplied && (
-                <span title="Applied" style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>✓APPLIED</span>
+                <span title="Applied" style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>âœ“APPLIED</span>
               )}
               {!job.alreadyApplied && job.companyAppliedBefore && (
-                <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>↩prev</span>
+                <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>â†©prev</span>
               )}
               {job.visited && (
-                <span style={{ fontSize:9, color:theme.textDim, background:theme.surfaceHigh,
+                <span style={{ fontSize:9, color:"var(--color-text-faint)", background:"var(--color-surface-offset)",
                                 padding:"1px 6px", borderRadius:999 }}>visited</span>
               )}
             </div>
-            <div style={{ fontSize:12, color:theme.textMuted, marginBottom:6,
+            <div style={{ fontSize:12, color:"var(--color-text-muted)", marginBottom:6,
                           overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
               {job.title}
             </div>
@@ -486,10 +484,10 @@ export default function JobCard({
                 <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>
               </span>
               {job.location && (
-                <span style={{ fontSize:10, color:theme.textDim }}>{job.location}</span>
+                <span style={{ fontSize:10, color:"var(--color-text-faint)" }}>{job.location}</span>
               )}
               {yoeStr && (
-                <span style={{ fontSize:10, color:theme.textDim }}>{yoeStr} exp</span>
+                <span style={{ fontSize:10, color:"var(--color-text-faint)" }}>{yoeStr} exp</span>
               )}
               {salaryStr && (
                 <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>
@@ -498,22 +496,22 @@ export default function JobCard({
                 <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>
               )}
               {job.applicantCount != null && (
-                <span style={{ fontSize:10, color:theme.textDim }}>
+                <span style={{ fontSize:10, color:"var(--color-text-faint)" }}>
                   {job.applicantCount > 200 ? "200+ applicants" : `${job.applicantCount} applicants`}
                 </span>
               )}
               {job.source_label && (
                 <span style={{
-                  fontSize: 9, color: theme.textDim,
-                  background: theme.surfaceHigh, padding: "1px 6px", borderRadius: 999,
+                  fontSize: 9, color: "var(--color-text-faint)",
+                  background: "var(--color-surface-offset)", padding: "1px 6px", borderRadius: 999,
                 }}>
                   {job.source_label}
                 </span>
               )}
               {job.via && (
                 <span style={{
-                  fontSize: 9, color: theme.textDim,
-                  background: theme.surfaceHigh, padding: "1px 6px", borderRadius: 999,
+                  fontSize: 9, color: "var(--color-text-faint)",
+                  background: "var(--color-surface-offset)", padding: "1px 6px", borderRadius: 999,
                 }}>
                   {job.via}
                 </span>
@@ -524,7 +522,7 @@ export default function JobCard({
           {/* Right side */}
           <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
             {isLoggedOut && hov && (
-              <span style={{ fontSize:13, color:theme.accentText, fontWeight:700, opacity:0.85 }}>↗</span>
+              <span style={{ fontSize:13, color:"var(--color-primary-text)", fontWeight:700, opacity:0.85 }}>â†—</span>
             )}
             <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
 
@@ -536,7 +534,7 @@ export default function JobCard({
                 style={{ background:"#e8f6fb", color:"#1a6a8a", padding:"2px 8px",
                          borderRadius:999, fontSize:10, fontWeight:700, cursor:"pointer",
                          border:"1px solid #A8D8EA44", display:"inline-flex", alignItems:"center", gap:3 }}>
-                {st==="loading" ? "⏳" : "📄"} Resume
+                {st==="loading" ? "â³" : "ðŸ“„"} Resume
               </span>
             )}
 
@@ -550,8 +548,8 @@ export default function JobCard({
                 activeLabel="Remove from saved"
                 inactiveLabel="Save job"
                 onClick={e => { e.stopPropagation(); handleStar(); }}
-                activeChildren="★"
-                inactiveChildren="☆"
+                activeChildren="â˜…"
+                inactiveChildren="â˜†"
               />
             )}
 
@@ -584,10 +582,10 @@ export default function JobCard({
 
             {/* Generate */}
             {!isLoggedOut && canUseGenerate && onGenerate && showApplyButton && (
-              <IconBtn bg={theme.accent} title={done ? "Regenerate" : "Generate resume"}
+              <IconBtn bg="var(--color-primary)" title={done ? "Regenerate" : "Generate resume"}
                 disabled={!!st} theme={theme} active={done && !generateLoading}
                 onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
-                {generateLoading ? "⏳" : done ? "↻" : "✦"}
+                {generateLoading ? "â³" : done ? "â†»" : "âœ¦"}
               </IconBtn>
             )}
 
@@ -595,25 +593,25 @@ export default function JobCard({
             {!isLoggedOut && done && g?.html !== "__exists__" && showApplyButton && (
               <IconBtn bg="#0284c7" title="View in sandbox" theme={theme}
                 onClick={e => { e.stopPropagation(); onViewSandbox?.(); }}>
-                👁
+                ðŸ‘
               </IconBtn>
             )}
 
             {/* Visit URL */}
             {!isLoggedOut && onVisit && showApplyButton && job.url && (
-              <IconBtn bg={theme.accent} title="Open job listing" theme={theme}
+              <IconBtn bg="var(--color-primary)" title="Open job listing" theme={theme}
                 onClick={e => { e.stopPropagation(); onVisit(); }}>
-                ↗
+                â†—
               </IconBtn>
             )}
           </div>
         </div>
       )}
 
-      {/* ── Expanded section ──────────────────────────────────── */}
+      {/* â”€â”€ Expanded section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {expanded && (
         <div style={{
-          borderTop: `1px solid ${theme.border}44`,
+          borderTop: "1px solid var(--border-glass)",
           padding: "12px 18px 16px",
           display: "flex", flexDirection: "column", gap: 10,
         }}>
@@ -626,18 +624,18 @@ export default function JobCard({
           <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center", paddingTop:4 }}>
             {job.source_label && (
               <span style={{
-                fontSize: 11, color: theme.textFaint || theme.textDim,
-                background: theme.surfaceHigh, padding: "2px 8px",
-                borderRadius: 9999, border: `1px solid ${theme.border}44`,
+                fontSize: 11, color: "var(--color-text-faint)",
+                background: "var(--color-surface-offset)", padding: "2px 8px",
+                borderRadius: 9999, border: "1px solid var(--border-glass)",
               }}>
                 {job.source_label}
               </span>
             )}
             {job.via && (
               <span style={{
-                fontSize: 11, color: theme.textFaint || theme.textDim,
-                background: theme.surfaceHigh, padding: "2px 8px",
-                borderRadius: 9999, border: `1px solid ${theme.border}44`,
+                fontSize: 11, color: "var(--color-text-faint)",
+                background: "var(--color-surface-offset)", padding: "2px 8px",
+                borderRadius: 9999, border: "1px solid var(--border-glass)",
               }}>
                 {job.via}
               </span>
@@ -645,40 +643,40 @@ export default function JobCard({
             {salaryStr && (
               <span style={{ fontSize:11, color:"#16a34a", fontWeight:700, background:"#dcfce733",
                               padding:"2px 8px", borderRadius:4 }}>
-                💰 {salaryStr}
+                ðŸ’° {salaryStr}
               </span>
             )}
             {yoeStr && (
-              <span style={{ fontSize:11, color:theme.textMuted, background:theme.surfaceHigh,
+              <span style={{ fontSize:11, color:"var(--color-text-muted)", background:"var(--color-surface-offset)",
                               padding:"2px 8px", borderRadius:4 }}>
-                🎓 {yoeStr} exp required
+                ðŸŽ“ {yoeStr} exp required
               </span>
             )}
             {job.applicantCount != null && (
-              <span style={{ fontSize:11, color:theme.textMuted, background:theme.surfaceHigh,
+              <span style={{ fontSize:11, color:"var(--color-text-muted)", background:"var(--color-surface-offset)",
                               padding:"2px 8px", borderRadius:4 }}>
-                👥 {job.applicantCount > 200 ? "200+" : job.applicantCount} applicants
+                ðŸ‘¥ {job.applicantCount > 200 ? "200+" : job.applicantCount} applicants
               </span>
             )}
             {!isLoggedOut && showApplyButton !== false && (job.applyUrl || job.url) && (
               <a href={job.applyUrl || job.url} target="_blank" rel="noreferrer"
                 onClick={e => e.stopPropagation()}
-                style={{ fontSize:11, color:theme.accentText, fontWeight:700,
-                          textDecoration:"underline", background:theme.accentMuted,
+                style={{ fontSize:11, color:"var(--color-primary-text)", fontWeight:700,
+                          textDecoration:"underline", background:"var(--color-primary-muted)",
                           padding:"2px 8px", borderRadius:4 }}>
-                Apply directly ↗
+                Apply directly â†—
               </a>
             )}
           </div>
 
-          {/* Recruiter section — coming soon */}
+          {/* Recruiter section â€” coming soon */}
           {!isLoggedOut && canUseGenerate && showApplyButton && (
             <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
               {canUseGenerate && onGenerate && (
                 <button onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}
                   disabled={!!st}
                   style={{ border:"none", borderRadius:6, padding:"8px 12px",
-                           background:theme.accent, color:"#0f0f0f", cursor:st ? "not-allowed" : "pointer",
+                           background:"var(--color-primary)", color:"#0f0f0f", cursor:st ? "not-allowed" : "pointer",
                            fontSize:12, fontWeight:800 }}>
                   {generateLoading ? "Generating..." : done ? "Regenerate" : "Generate"}
                 </button>
@@ -688,11 +686,11 @@ export default function JobCard({
 
           {!isLoggedOut && (
             <div style={{
-              borderTop: `1px dashed ${theme.border}`,
+              borderTop: "1px dashed var(--border-glass)",
               paddingTop: 8, marginTop: 4,
               display: "flex", alignItems: "center", gap: 8,
             }}>
-              <span style={{ fontSize:10, color:theme.textDim, fontWeight:700,
+              <span style={{ fontSize:10, color:"var(--color-text-faint)", fontWeight:700,
                               textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Recruiter
               </span>

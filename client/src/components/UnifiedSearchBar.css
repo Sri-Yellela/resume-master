@@ -25,9 +25,12 @@
   width: min(920px, 94vw);
   transform: translate(-50%, -50%);
   padding: var(--space-5, 1.25rem);
-  background: var(--color-surface, #1c1b19);
+  background: var(--bg-card);
+  backdrop-filter: var(--bg-blur);
+  -webkit-backdrop-filter: var(--bg-blur);
+  border: 1px solid var(--border-glass);
   border-radius: var(--radius-xl, 1rem);
-  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0,0,0,.4));
+  box-shadow: 0 12px 40px rgba(0,0,0,.4), 0 0 0 1px var(--border-glass);
 }
 
 .usb--dock {
@@ -37,17 +40,19 @@
   width: 100%;
   transform: none;
   padding: var(--space-2, .5rem) var(--space-6, 1.5rem);
-  background: var(--color-surface, #1c1b19);
+  background: var(--bg-panel);
+  backdrop-filter: var(--bg-blur-sm);
+  -webkit-backdrop-filter: var(--bg-blur-sm);
   border-radius: 0 0 12px 12px; /* rounded bottom corners — floating dock feel */
-  border-bottom: 1px solid var(--color-border, #393836);
+  border-bottom: 1px solid var(--border-glass);
   box-shadow: 0 4px 20px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.10);
 }
 
 .usb__bar {
   display: flex;
   align-items: center;
-  background: var(--color-bg, #171614);
-  border: 1.5px solid var(--color-border, #393836);
+  background: var(--bg-input);
+  border: 1.5px solid var(--border-glass);
   border-radius: var(--radius-lg, .75rem);
   padding: .375rem;
   overflow: hidden;
