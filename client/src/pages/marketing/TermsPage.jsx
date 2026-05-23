@@ -1,5 +1,4 @@
 // client/src/pages/marketing/TermsPage.jsx
-import { useTheme } from "../../styles/theme.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
 
@@ -35,27 +34,26 @@ const SECTIONS = [
 ];
 
 export function TermsPage() {
-  const { theme } = useTheme();
   return (
     <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
-                  background: theme.bg, color: theme.text,
+                  background: "transparent", color: "var(--color-text)",
                   fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       <ScrollDock variant="marketing" />
       <main style={{ flex: 1, maxWidth: 720, margin: "0 auto", padding: "64px 24px" }}>
         <h1 style={{ fontSize: "clamp(28px, 4vw, 44px)", fontWeight: 900, letterSpacing: "-1px",
-                      color: theme.text, marginBottom: 8, lineHeight: 1.1,
+                      color: "var(--color-text)", marginBottom: 8, lineHeight: 1.1,
                       fontFamily: "'Barlow Condensed', 'DM Sans', system-ui" }}>
           Terms of Service
         </h1>
-        <p style={{ fontSize: 13, color: theme.textDim, marginBottom: 48 }}>
+        <p style={{ fontSize: 13, color: "var(--color-text-faint)", marginBottom: 48 }}>
           Last updated: April 2025
         </p>
         {SECTIONS.map((s, i) => (
           <div key={i} style={{ marginBottom: 40 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: theme.text, marginBottom: 12 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: "var(--color-text)", marginBottom: 12 }}>
               {s.title}
             </h2>
-            <p style={{ fontSize: 14, color: theme.textMuted, lineHeight: 1.8, margin: 0 }}>
+            <p style={{ fontSize: 14, color: "var(--color-text-muted)", lineHeight: 1.8, margin: 0 }}>
               {s.body}
             </p>
           </div>

@@ -387,7 +387,7 @@ export default function DomainProfileWizard({
                       <button type="button" key={d.key} onClick={() => setDomainKey(d.key)} style={{
                         padding: "14px 16px", borderRadius: 8, cursor: "pointer",
                         border: `2px solid ${domainKey === d.key ? theme.accent : theme.border}`,
-                        background: domainKey === d.key ? theme.accent + "18" : theme.bg,
+                        background: domainKey === d.key ? "color-mix(in srgb, var(--color-primary) 10%, transparent)" : theme.bg,
                         textAlign: "left", transition: "all 0.15s",
                       }}>
                         <div style={{ fontWeight: 700, fontSize: 13, color: theme.text, marginBottom: 4 }}>
@@ -423,7 +423,7 @@ export default function DomainProfileWizard({
                   <button type="button" key={opt.id} onClick={() => setSeniority(opt.id)} style={{
                     padding: "16px 20px", borderRadius: 8, cursor: "pointer",
                     border: `2px solid ${seniority === opt.id ? theme.accent : theme.border}`,
-                    background: seniority === opt.id ? theme.accent + "18" : theme.bg,
+                    background: seniority === opt.id ? "color-mix(in srgb, var(--color-primary) 10%, transparent)" : theme.bg,
                     textAlign: "left", display: "flex", alignItems: "center", gap: 16,
                     transition: "all 0.15s",
                   }}>

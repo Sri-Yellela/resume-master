@@ -11,7 +11,6 @@ import AdminLayout               from "./components/AdminLayout.jsx";
 import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
 import DBInspector               from "./pages/admin/DBInspector.jsx";
 import TopBar                    from "./components/TopBar.jsx";
-import AppShell                  from "./components/AppShell.jsx";
 import { AppScrollProvider, useAppScroll } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
@@ -80,8 +79,8 @@ function PublicLoginRoute({ authStatus, authUser, children, admin = false }) {
   }
   return children;
 }
-// DashboardTabsLayout: inside AppScrollProvider — drives dynamic paddingTop + tab visibility
-function DashboardTabsLayout({ theme, isMobile, activeTab, handlePanelChange, appTabs, children }) {
+// AppShell: inside AppScrollProvider — drives dynamic paddingTop + tab visibility
+function AppShell({ theme, isMobile, activeTab, handlePanelChange, appTabs, children }) {
   const { progress: p } = useAppScroll();
   const paddingTop = Math.round(52 * (1 - p));
   const showTabs   = p < 0.5;
@@ -225,8 +224,8 @@ function AppDashboard({ authUser, setAuthUser }) {
             onProfileActivate={handleProfileActivate}
           />
 
-          {/* DashboardTabsLayout: reads scroll progress for dynamic paddingTop + tab visibility */}
-          <DashboardTabsLayout theme={theme} isMobile={isMobile} activeTab={activeTab} handlePanelChange={handlePanelChange} appTabs={appTabs}>
+          {/* AppShell: reads scroll progress for dynamic paddingTop + tab visibility */}
+          <AppShell theme={theme} isMobile={isMobile} activeTab={activeTab} handlePanelChange={handlePanelChange} appTabs={appTabs}>
             {/* Panels */}
             <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
               {renderRoute === CONSOLE_ROUTE && (
@@ -240,7 +239,7 @@ function AppDashboard({ authUser, setAuthUser }) {
               {renderRoute === "profile"  && <ProfilePanel user={authUser} onOpenJobProfiles={() => handlePanelChange("job-profiles")}/>}
               {renderRoute === "job-profiles" && <JobProfilesPanel/>}
             </div>
-          </DashboardTabsLayout>
+          </AppShell>
         </div>
       </AppScrollProvider>
     </JobBoardProvider>
@@ -305,94 +304,92 @@ function AppRouter() {
   const navBar = <NavBar user={authUser} onLogout={handlePublicLogout}/>;
 
   return (
-    <AppShell>
-      <Routes>
-        {/* Standalone tool pages — always public */}
-        <Route path="/tools/ats"      element={<ATSToolPage/>}/>
-        <Route path="/tools/generate" element={<GenerateToolPage/>}/>
-        <Route path="/tools/apply"    element={<ApplyToolPage/>}/>
+    <Routes>
+      {/* Standalone tool pages — always public */}
+      <Route path="/tools/ats"      element={<ATSToolPage/>}/>
+      <Route path="/tools/generate" element={<GenerateToolPage/>}/>
+      <Route path="/tools/apply"    element={<ApplyToolPage/>}/>
 
-        {/* Marketing pages — always public */}
-        <Route path="/features"     element={<FeaturesPage/>}/>
-        <Route path="/how-it-works" element={<HowItWorksPage/>}/>
-        <Route path="/pricing"      element={<PricingPage/>}/>
-        <Route path="/about"        element={<AboutPage/>}/>
-        <Route path="/contact"      element={<ContactPage/>}/>
-        <Route path="/faq"          element={<FAQPage/>}/>
-        <Route path="/privacy"      element={<PrivacyPage/>}/>
-        <Route path="/terms"        element={<TermsPage/>}/>
+      {/* Marketing pages — always public */}
+      <Route path="/features"     element={<FeaturesPage/>}/>
+      <Route path="/how-it-works" element={<HowItWorksPage/>}/>
+      <Route path="/pricing"      element={<PricingPage/>}/>
+      <Route path="/about"        element={<AboutPage/>}/>
+      <Route path="/contact"      element={<ContactPage/>}/>
+      <Route path="/faq"          element={<FAQPage/>}/>
+      <Route path="/privacy"      element={<PrivacyPage/>}/>
+      <Route path="/terms"        element={<TermsPage/>}/>
 
-        {/* New public pages with NavBar */}
-        <Route path="/products" element={<>{navBar}<ProductsPage/></>}/>
-        <Route path="/blog"     element={<>{navBar}<BlogPage/></>}/>
+      {/* New public pages with NavBar */}
+      <Route path="/products" element={<>{navBar}<ProductsPage/></>}/>
+      <Route path="/blog"     element={<>{navBar}<BlogPage/></>}/>
 
-        {/* Admin login — redirect if already authenticated */}
-        <Route path="/admin/login" element={
-          <PublicLoginRoute authStatus={authStatus} authUser={authUser} admin>
-            <AdminLoginPage onLogin={(user) => {
-              setAuthUser(user);
-              setAuthStatus("authenticated");
-            }}/>
-          </PublicLoginRoute>
-        }/>
+      {/* Admin login — redirect if already authenticated */}
+      <Route path="/admin/login" element={
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser} admin>
+          <AdminLoginPage onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
+      }/>
 
-        {/* Admin dashboard — requires auth + isAdmin */}
-        <Route path="/admin" element={
-          <AdminRouteGate authStatus={authStatus} authUser={authUser}>
-            <AdminLayout user={authUser} onLogout={handleAdminLogout}/>
-          </AdminRouteGate>
-        }/>
+      {/* Admin dashboard — requires auth + isAdmin */}
+      <Route path="/admin" element={
+        <AdminRouteGate authStatus={authStatus} authUser={authUser}>
+          <AdminLayout user={authUser} onLogout={handleAdminLogout}/>
+        </AdminRouteGate>
+      }/>
 
-        {/* Admin DB Inspector */}
-        <Route path="/admin/db" element={
-          <AdminRouteGate authStatus={authStatus} authUser={authUser}>
-            <AdminLayout user={authUser} onLogout={handleAdminLogout}><DBInspector/></AdminLayout>
-          </AdminRouteGate>
-        }/>
+      {/* Admin DB Inspector */}
+      <Route path="/admin/db" element={
+        <AdminRouteGate authStatus={authStatus} authUser={authUser}>
+          <AdminLayout user={authUser} onLogout={handleAdminLogout}><DBInspector/></AdminLayout>
+        </AdminRouteGate>
+      }/>
 
-        {/* User login — redirect to /app if logged in as user, /admin if admin */}
-        <Route path="/login" element={
-          <PublicLoginRoute authStatus={authStatus} authUser={authUser}>
-            <AuthScreen onLogin={(user) => {
-              setAuthUser(user);
-              setAuthStatus("authenticated");
-            }}/>
-          </PublicLoginRoute>
-        }/>
+      {/* User login — redirect to /app if logged in as user, /admin if admin */}
+      <Route path="/login" element={
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser}>
+          <AuthScreen onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
+      }/>
 
-        {/* Register — same screen as login, opens register tab */}
-        <Route path="/register" element={
-          <PublicLoginRoute authStatus={authStatus} authUser={authUser}>
-            <AuthScreen initialTab="register" onLogin={(user) => {
-              setAuthUser(user);
-              setAuthStatus("authenticated");
-            }}/>
-          </PublicLoginRoute>
-        }/>
+      {/* Register — same screen as login, opens register tab */}
+      <Route path="/register" element={
+        <PublicLoginRoute authStatus={authStatus} authUser={authUser}>
+          <AuthScreen initialTab="register" onLogin={(user) => {
+            setAuthUser(user);
+            setAuthStatus("authenticated");
+          }}/>
+        </PublicLoginRoute>
+      }/>
 
-        {/* User app — redirect admin to /admin */}
-        <Route path="/app/*" element={
-          <UserRouteGate authStatus={authStatus} authUser={authUser}>
-            <AppDashboard authUser={authUser} setAuthUser={setAuthUser}/>
-          </UserRouteGate>
-        }/>
+      {/* User app — redirect admin to /admin */}
+      <Route path="/app/*" element={
+        <UserRouteGate authStatus={authStatus} authUser={authUser}>
+          <AppDashboard authUser={authUser} setAuthUser={setAuthUser}/>
+        </UserRouteGate>
+      }/>
 
-        {/* Root: landing page for logged-out, redirect for logged-in */}
-        <Route path="/" element={
-          authStatus === "unknown" ? null
-          : authStatus === "authenticated" && authUser
-            ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
-            : <>{navBar}<LandingPage authUser={null}/></>
-        }/>
+      {/* Root: landing page for logged-out, redirect for logged-in */}
+      <Route path="/" element={
+        authStatus === "unknown" ? null
+        : authStatus === "authenticated" && authUser
+          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
+          : <>{navBar}<LandingPage authUser={null}/></>
+      }/>
 
-        {/* 404 — authenticated users redirect, logged-out users see NotFoundPage */}
-        <Route path="*" element={
-          authStatus === "authenticated" && authUser
-            ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
-            : <>{navBar}<NotFoundPage/></>
-        }/>
-      </Routes>
-    </AppShell>
+      {/* 404 — authenticated users redirect, logged-out users see NotFoundPage */}
+      <Route path="*" element={
+        authStatus === "authenticated" && authUser
+          ? (authUser.isAdmin ? <Navigate to="/admin" replace/> : <Navigate to="/app" replace/>)
+          : <>{navBar}<NotFoundPage/></>
+      }/>
+    </Routes>
   );
 }
 

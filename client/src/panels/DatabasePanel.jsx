@@ -341,7 +341,7 @@ function DetailModal({ modal, onClose, theme }) {
 
 // ── Main panel ────────────────────────────────────────────────
 export function DatabasePanel({ user }) {
-  const { theme, isDark } = useTheme();
+  const { theme } = useTheme();
   const { activeProfileId, setActiveProfileId } = useJobBoard() || {};
   const [activeSheet,  setActiveSheet]  = useState("applications");
   const [apps,         setApps]         = useState([]);
@@ -602,7 +602,7 @@ export function DatabasePanel({ user }) {
 
       {/* ── Header ── */}
       <div style={{
-        background: isDark ? "rgba(17,17,17,0.92)" : "rgba(255,255,255,0.96)",
+        background: "rgba(17,17,17,0.92)",
         backdropFilter:"blur(16px)",
         borderBottom:`1px solid ${theme.border}`,
         display:"flex", alignItems:"stretch", flexShrink:0,
@@ -676,7 +676,7 @@ export function DatabasePanel({ user }) {
               style={{ display:"flex", alignItems:"center", gap:6,
                        background:filterDate ? theme.accentMuted : theme.surfaceHigh,
                        color:filterDate ? theme.accentText : theme.textMuted,
-                       border:`1px solid ${filterDate ? theme.accent+"44" : theme.border}`,
+                       border:`1px solid ${filterDate ? "color-mix(in srgb, var(--color-primary) 25%, transparent)" : theme.border}`,
                        borderRadius:999, padding:"6px 14px", cursor:"pointer", fontSize:12,
                        fontWeight:600, whiteSpace:"nowrap" }}
               onClick={() => setCalFilter(o => !o)}>
@@ -714,7 +714,7 @@ export function DatabasePanel({ user }) {
         <SavedJobsPane
           jobs={savedJobs} generated={savedGen} genLoading={genLoading}
           applyMode={user?.applyMode || "SIMPLE"} planTier={user?.planTier || "BASIC"} hasResume={!!baseResume}
-          theme={theme} isDark={isDark}
+          theme={theme}
           onGenerate={(job, force, tool) => generateForSaved(job, force, tool)}
           onExport={(job, html) => exportSavedPdf(job, html)}
           onUnsave={unsaveJob}
@@ -726,7 +726,7 @@ export function DatabasePanel({ user }) {
       {activeSheet === "pending" && (
         <PendingJobsPane
           jobs={pendingJobs}
-          theme={theme} isDark={isDark}
+          theme={theme}
           onRefresh={loadPending}
           onDislike={async (jobId) => {
             await api(`/api/jobs/${jobId}/disliked`, { method:"PATCH" }).catch(()=>{});
@@ -815,7 +815,7 @@ export function DatabasePanel({ user }) {
                             <div ref={isCalOpen ? calRef : null} style={{ position:"relative" }}>
                               <button
                                 style={{ background:"transparent",
-                                         border:`1px ${isoVal ? "solid" : "dashed"} ${isoVal ? theme.accent+"66" : theme.border}`,
+                                         border:`1px ${isoVal ? "solid" : "dashed"} ${isoVal ? "color-mix(in srgb, var(--color-primary) 40%, transparent)" : theme.border}`,
                                          borderRadius:8, color:isoVal ? theme.accent : theme.textDim,
                                          fontSize:11, padding:"3px 10px",
                                          cursor:"pointer", whiteSpace:"nowrap" }}
@@ -954,7 +954,7 @@ export function DatabasePanel({ user }) {
 }
 
 // ── Pending Apply pane ────────────────────────────────────────
-function PendingJobsPane({ jobs, theme, isDark, onRefresh, onDislike }) {
+function PendingJobsPane({ jobs, theme, onRefresh, onDislike }) {
   if (jobs.length === 0) return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
                   alignItems:"center", justifyContent:"center", gap:12, padding:40 }}>
@@ -984,7 +984,6 @@ function PendingJobsPane({ jobs, theme, isDark, onRefresh, onDislike }) {
               key={jid}
               job={{ ...job, jobId: jid }}
               theme={theme}
-              isDark={isDark}
               showDislike={true}
               showApplyButton={true}
               applyMode="SIMPLE"
@@ -1001,7 +1000,7 @@ function PendingJobsPane({ jobs, theme, isDark, onRefresh, onDislike }) {
 
 // ── Saved Jobs pane ───────────────────────────────────────────
 function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasResume,
-                          theme, isDark, onGenerate, onExport, onUnsave, onRefresh }) {
+                          theme, onGenerate, onExport, onUnsave, onRefresh }) {
 
   if (jobs.length === 0) return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
@@ -1017,9 +1016,7 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasRe
 
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
-                  background: isDark
-                    ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
-                    : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
+                  background: `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)` }}>
       {/* toolbar */}
       <div style={{ padding:"8px 16px", display:"flex", alignItems:"center", gap:8,
                     borderBottom:`1px solid ${theme.border}`, flexShrink:0,
@@ -1049,7 +1046,6 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasRe
               key={job.jobId}
               job={{ ...job, starred: true }}
               theme={theme}
-              isDark={isDark}
               showDislike={false}
               showApplyButton={true}
               g={g}

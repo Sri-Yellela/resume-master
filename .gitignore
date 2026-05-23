@@ -5,3 +5,4 @@ client/dist/
 data/
 !data/*.json
 env.sh
+

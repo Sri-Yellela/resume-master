@@ -692,7 +692,7 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
                   padding:"10px 12px",
                   borderRadius:10,
                   border:`1px solid ${profile.id === activeProfileId ? theme.accent : theme.border}`,
-                  background: profile.id === activeProfileId ? `${theme.accent}22` : theme.bg,
+                  background: profile.id === activeProfileId ? "color-mix(in srgb, var(--color-primary) 13%, transparent)" : theme.bg,
                   color: theme.text,
                   cursor:"pointer",
                   minWidth:160,
@@ -1008,7 +1008,7 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
                     onClick={() => toggleSuggestedSkill(skill.key, false)}
                     style={{
                       border:`1px solid ${theme.accent}`,
-                      background:`${theme.accent}22`,
+                      background:"color-mix(in srgb, var(--color-primary) 13%, transparent)",
                       color:theme.text,
                       borderRadius:999,
                       padding:"6px 10px",

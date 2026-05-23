@@ -118,7 +118,7 @@ export function JobProfilesPanel() {
   };
 
   return (
-    <div style={{ flex:1, overflow:"auto", padding:"24px 28px", background:theme.bg, color:theme.text }}>
+    <div style={{ flex:1, overflow:"auto", padding:"24px 28px", background:"var(--color-bg)", color:"var(--color-text)" }}>
       <div style={{ maxWidth:1100, margin:"0 auto" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:16, marginBottom:18 }}>
           <div>
@@ -132,7 +132,7 @@ export function JobProfilesPanel() {
             }}>
               Manage Job Profiles
             </h1>
-            <p style={{ margin:0, color:theme.textMuted, fontSize:13, maxWidth:640, lineHeight:1.5 }}>
+            <p style={{ margin:0, color:"var(--color-text-muted)", fontSize:13, maxWidth:640, lineHeight:1.5 }}>
               Create, edit, delete, and switch profile-specific search targets. Each job profile keeps its own titles,
               skills, base resume, extracted signals, ATS basis, and search behavior.
             </p>
@@ -143,7 +143,7 @@ export function JobProfilesPanel() {
         </div>
 
         {status && (
-          <div style={{ marginBottom:14, fontSize:12, color:theme.textMuted }}>
+          <div style={{ marginBottom:14, fontSize:12, color:"var(--color-text-muted)" }}>
             {status}
           </div>
         )}
@@ -153,16 +153,16 @@ export function JobProfilesPanel() {
             const active = !!profile.is_active;
             return (
               <div key={profile.id} style={{
-                border:`1px solid ${active ? theme.accent : theme.border}`,
-                background:active ? `${theme.accent}16` : theme.surface,
+                border:`1px solid ${active ? "var(--color-primary)" : "var(--color-border)"}`,
+                background:active ? "color-mix(in srgb, var(--color-primary) 9%, transparent)" : "var(--color-surface)",
                 borderRadius:16,
                 padding:"16px 18px",
-                boxShadow:theme.shadowSm,
+                boxShadow:"var(--shadow-sm)",
               }}>
                 <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start" }}>
                   <div>
                     <div style={{ fontWeight:800, fontSize:15 }}>{profile.profile_name}</div>
-                    <div style={{ fontSize:11, color:theme.textMuted, marginTop:4 }}>
+                    <div style={{ fontSize:11, color:"var(--color-text-muted)", marginTop:4 }}>
                       {profile.seniority || "mid"} | {profile.has_base_resume ? "resume linked" : "resume missing"}
                     </div>
                   </div>
@@ -171,8 +171,8 @@ export function JobProfilesPanel() {
                       fontSize:10,
                       fontWeight:800,
                       textTransform:"uppercase",
-                      color:theme.accentText,
-                      background:theme.accentMuted,
+                      color:"var(--color-primary-text)",
+                      background:"var(--color-primary-muted)",
                       borderRadius:999,
                       padding:"3px 8px",
                     }}>
@@ -181,20 +181,20 @@ export function JobProfilesPanel() {
                   )}
                 </div>
 
-                <div style={{ fontSize:12, color:theme.textMuted, marginTop:12, minHeight:36, lineHeight:1.45 }}>
+                <div style={{ fontSize:12, color:"var(--color-text-muted)", marginTop:12, minHeight:36, lineHeight:1.45 }}>
                   {(profile.target_titles || []).slice(0, 3).join(", ") || profile.role_family || "No target titles yet"}
                 </div>
 
                 <div style={{
                   marginTop:14,
-                  border:`1px solid ${theme.border}`,
-                  background:theme.surfaceHigh,
+                  border:`1px solid ${"var(--color-border)"}`,
+                  background:"var(--color-surface-offset)",
                   borderRadius:12,
                   padding:"10px 12px",
                 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"center" }}>
                     <div>
-                      <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.06em", color:theme.text }}>
+                      <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.06em", color:"var(--color-text)" }}>
                         Base Resume
                       </div>
                       <div style={{ fontSize:11, color:profile.has_base_resume ? "#16a34a" : "#d97706", marginTop:3 }}>
@@ -202,7 +202,7 @@ export function JobProfilesPanel() {
                           ? `Ready${profile.base_resume_updated_at ? ` · ${formatTimestamp(profile.base_resume_updated_at)}` : ""}`
                           : "Required before search, ATS, and enhancement"}
                       </div>
-                      <div style={{ fontSize:10, color:theme.textMuted, marginTop:2 }}>
+                      <div style={{ fontSize:10, color:"var(--color-text-muted)", marginTop:2 }}>
                         {profile.has_base_resume
                           ? "Extracted metadata ready for this profile only"
                           : "ATS scoring, new scrapes, and enhancement are blocked for this profile"}
@@ -221,7 +221,7 @@ export function JobProfilesPanel() {
                       />
                     </label>
                   </div>
-                  <div style={{ marginTop:7, fontSize:10, color:theme.textMuted, lineHeight:1.4 }}>
+                  <div style={{ marginTop:7, fontSize:10, color:"var(--color-text-muted)", lineHeight:1.4 }}>
                     Stored and extracted only for this profile. Other profiles keep their own resume, signals, ATS basis, and search readiness.
                   </div>
                 </div>
@@ -238,7 +238,7 @@ export function JobProfilesPanel() {
                     className="rm-btn rm-btn-sm"
                     onClick={() => deleteProfile(profile)}
                     disabled={profiles.length <= 1}
-                    style={{ color:profiles.length <= 1 ? theme.textMuted : "#dc2626" }}
+                    style={{ color:profiles.length <= 1 ? "var(--color-text-muted)" : "#dc2626" }}
                   >
                     Delete
                   </button>
@@ -250,12 +250,12 @@ export function JobProfilesPanel() {
 
         {profiles.length === 0 && (
           <div style={{
-            border:`1px dashed ${theme.border}`,
-            background:theme.surface,
+            border:`1px dashed ${"var(--color-border)"}`,
+            background:"var(--color-surface)",
             borderRadius:16,
             padding:"28px",
             textAlign:"center",
-            color:theme.textMuted,
+            color:"var(--color-text-muted)",
           }}>
             No job profiles yet. Add your first profile to unlock profile-scoped search, ATS, and resume signals.
           </div>
