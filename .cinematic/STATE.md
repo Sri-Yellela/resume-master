@@ -25,7 +25,7 @@ Key codebase facts (discovered during pre-flight):
 ---
 
 ## Step 0 — Baselines captured
-Commit: <step-0 sha>
+Commit: 796e7b7
 Files touched: .gitignore (fixed env.sh corruption from prior pre-flight run — the `echo .cinematic/ >> .gitignore` concatenated with `env.sh` due to missing trailing newline), .cinematic/ directory + all baseline files
 Decisions:
   - .cinematic/ left tracked in git (not gitignored) for cross-session
@@ -48,7 +48,7 @@ Open issues:
   - JobCard dynamic+static import warning — pre-existing, addressed structurally in Step 8
 
 ## Step 1 — Replace index.css with cinematic design system
-Commit: <step-1 sha>
+Commit: 1ec8a2a
 Files touched: client/src/index.css
 Decisions:
   - Added @plugin "tailwindcss-animate" since it was in package.json
@@ -75,4 +75,59 @@ Verifications run (with actual output observed):
     fade-rise / scroll-hint / spin / shimmer / accordion keyframes,
     prefers-reduced-motion gate, .scroll-dock-page utility preserved.
   - No stale bg-mode CSS-var references in index.css.
+Open issues: none for this step
+
+## Step 3 — Add CinematicBackground component
+Commit: aa7c7d9
+Files touched: client/src/components/CinematicBackground.jsx (new)
+Decisions:
+  - Component verbatim from spec
+  - CloudFront src URL used as default; self-hosting deferred to post-Step-4
+Divergences: none
+Verifications run (with actual output observed):
+  - Build pending user run (pure add, no callers yet)
+  - api-calls diff: TopBar line-number shifts from Step 2 only
+  - routes diff: clean
+Open issues: none for this step
+
+## Step 2 — Reduce theme.jsx to cinematic-only; accent management preserved
+Commit: 76cb682
+Files touched: client/src/styles/theme.jsx, client/src/components/TopBar.jsx
+Decisions:
+  - Kept isDark=true in context (8 files consume it; per-component cleanup deferred to Steps 7-12)
+  - Kept THEMES.dark + all Lucy CSS classes (.rm-card, .rm-btn, etc.) — panels still consume them
+  - Post-strip size is 320 lines (not spec's 80-120) because Lucy design-system CSS stays active
+  - .rm-skeleton mode ternary hardcoded to dark values
+Divergences:
+  - Spec references 'ACCENTS' but actual export is ACCENT_OPTIONS; kept as ACCENT_OPTIONS
+Verifications run (with actual output observed):
+  - npm run build: exit 0, 6.76s, 73.15 kB CSS (unchanged), JS -11 kB (reduced)
+  - 4 pre-existing warnings, none new
+  - api-calls diff: line-number shifts only (same endpoints)
+  - routes diff: clean (empty)
+  - providers diff: line-number shifts only (ThemeContext.Provider still mounted)
+  - grep bgMode/setBgMode/BG_MODES in theme.jsx: 0 matches
+  - grep bgMode/setBgMode/BG_MODES in TopBar.jsx: 0 matches
+  - isDark hardcoded true, baseTheme=THEMES.dark, 8 consumer ternaries pick dark branch
+Open issues: none for this step
+
+## Step 4 — AppShell + App.jsx wiring
+Commit: cc26289
+Files touched: client/src/components/AppShell.jsx (new), client/src/App.jsx
+Decisions:
+  - {children} pattern (not <Outlet/>) because App.jsx uses BrowserRouter + Routes.
+  - <AppShell> wraps <Routes> inside AppRouter (not at BrowserRouter level)
+    so the auth bootstrap spinner (authStatus === "unknown") can render
+    before reaching AppShell — keeps spinner outside the video wrapper.
+  - Local App.jsx function AppShell renamed to DashboardTabsLayout; both
+    call sites (JSX comment + element tag) updated.
+Divergences:
+  - Spec implied AppShell inside BrowserRouter but outside AppRouter; actual
+    placement is inside AppRouter, outside <Routes>, to preserve auth guard spinner.
+Verifications run (with actual output observed):
+  - npm run build: exit 0, 6.44s, 73.36 kB CSS (up 0.21 kB from AppShell import)
+  - 4 pre-existing warnings, none new
+  - api-endpoints clean (line-number shifts only; all endpoints identical)
+  - routes clean (indentation shifts only from AppShell wrapper; all path values identical)
+  - DashboardTabsLayout: 0 remaining references to old "AppShell" name in App.jsx
 Open issues: none for this step
