@@ -1,6 +1,5 @@
-﻿// client/src/pages/marketing/FAQPage.jsx
+// client/src/pages/marketing/FAQPage.jsx
 import { useState } from "react";
-import { useTheme } from "../../styles/theme.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
 
@@ -16,23 +15,22 @@ const FAQS = [
 ];
 
 function FAQItem({ q, a }) {
-  const { theme } = useTheme();
   const [open, setOpen] = useState(false);
   return (
-    <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 8 }}>
+    <div style={{ border: "1px solid var(--color-border)", borderRadius: 12, overflow: "hidden", marginBottom: 8 }}>
       <button onClick={() => setOpen(o => !o)}
-        style={{ width: "100%", padding: "16px 20px", background: theme.surface,
+        style={{ width: "100%", padding: "16px 20px", background: "var(--color-surface)",
                   border: "none", cursor: "pointer", display: "flex",
                   justifyContent: "space-between", alignItems: "center",
-                  color: theme.text, fontWeight: 700, fontSize: 14, textAlign: "left",
+                  color: "var(--color-text)", fontWeight: 700, fontSize: 14, textAlign: "left",
                   fontFamily: "'DM Sans', system-ui" }}>
         {q}
-        <span style={{ fontSize: 18, color: theme.accentText, transform: open ? "rotate(45deg)" : "none",
+        <span style={{ fontSize: 18, color: "var(--color-primary-text)", transform: open ? "rotate(45deg)" : "none",
                          transition: "transform 0.2s", flexShrink: 0, marginLeft: 12 }}>+</span>
       </button>
       {open && (
-        <div style={{ padding: "0 20px 18px", fontSize: 14, color: theme.textMuted,
-                       lineHeight: 1.7, background: theme.surface }}>
+        <div style={{ padding: "0 20px 18px", fontSize: 14, color: "var(--color-text-muted)",
+                       lineHeight: 1.7, background: "var(--color-surface)" }}>
           {a}
         </div>
       )}
@@ -41,15 +39,14 @@ function FAQItem({ q, a }) {
 }
 
 export function FAQPage() {
-  const { theme } = useTheme();
   return (
     <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
-                  background: theme.bg, color: theme.text,
+                  background: "transparent", color: "var(--color-text)",
                   fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       <ScrollDock variant="marketing" />
       <main style={{ flex: 1, maxWidth: 720, margin: "0 auto", padding: "64px 24px" }}>
         <h1 style={{ fontSize: "clamp(32px, 5vw, 52px)", fontWeight: 900, letterSpacing: "-1.5px",
-                      color: theme.text, marginBottom: 48, lineHeight: 1.1,
+                      color: "var(--color-text)", marginBottom: 48, lineHeight: 1.1,
                       fontFamily: "'Barlow Condensed', 'DM Sans', system-ui" }}>
           Frequently asked questions
         </h1>

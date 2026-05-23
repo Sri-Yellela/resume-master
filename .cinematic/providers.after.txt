@@ -1,0 +1,41 @@
+src/App.jsx:15:import { AppScrollProvider, useAppScroll } from "./contexts/AppScrollContext.jsx";
+src/App.jsx:16:import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
+src/App.jsx:210:    <JobBoardProvider>
+src/App.jsx:211:      <AppScrollProvider>
+src/App.jsx:245:      </AppScrollProvider>
+src/App.jsx:246:    </JobBoardProvider>
+src/App.jsx:83:// DashboardTabsLayout: inside AppScrollProvider — drives dynamic paddingTop + tab visibility
+src/components/AuthScreen.jsx:148:    const oauthProvider = params.get("oauthProvider");
+src/components/AuthScreen.jsx:150:    if (oauthStatus) setNotice(`${oauthLabel(oauthProvider)} ${oauthStatus.replace(/_/g, " ")}.`);
+src/components/ui/carousel.jsx:52:      <CarouselContext.Provider value={{ carouselRef, api, opts, orientation: orientation || (opts?.axis === "y" ? "vertical" : "horizontal"), scrollPrev, scrollNext, canScrollPrev, canScrollNext }}>
+src/components/ui/carousel.jsx:56:      </CarouselContext.Provider>
+src/components/ui/chart.jsx:26:    <ChartContext.Provider value={{ config }}>
+src/components/ui/chart.jsx:39:    </ChartContext.Provider>
+src/components/ui/form.jsx:14:    <FormFieldContext.Provider value={{ name: props.name }}>
+src/components/ui/form.jsx:16:    </FormFieldContext.Provider>
+src/components/ui/form.jsx:3:import { Controller, FormProvider, useFormContext } from "react-hook-form";
+src/components/ui/form.jsx:49:    <FormItemContext.Provider value={{ id }}>
+src/components/ui/form.jsx:51:    </FormItemContext.Provider>
+src/components/ui/form.jsx:8:const Form = FormProvider;
+src/components/ui/toast.jsx:67:export { ToastProvider, ToastViewport, Toast, ToastTitle, ToastDescription, ToastClose, ToastAction };
+src/components/ui/toast.jsx:7:const ToastProvider = ToastPrimitives.Provider;
+src/components/ui/toaster.jsx:21:    </ToastProvider>
+src/components/ui/toaster.jsx:2:import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "./toast";
+src/components/ui/toaster.jsx:7:    <ToastProvider>
+src/components/ui/toggle-group.jsx:14:    <ToggleGroupContext.Provider value={{ variant, size }}>{children}</ToggleGroupContext.Provider>
+src/components/ui/tooltip.jsx:25:export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
+src/components/ui/tooltip.jsx:6:const TooltipProvider = TooltipPrimitive.Provider;
+src/contexts/AppScrollContext.jsx:18:export function AppScrollProvider({ children }) {
+src/contexts/AppScrollContext.jsx:35:    <AppScrollContext.Provider value={{ progress, update, pinned, pin, unpin, scrollToTopRef }}>
+src/contexts/AppScrollContext.jsx:37:    </AppScrollContext.Provider>
+src/contexts/JobBoardContext.jsx:34:    <JobBoardContext.Provider value={{
+src/contexts/JobBoardContext.jsx:39:    </JobBoardContext.Provider>
+src/contexts/JobBoardContext.jsx:6:export function JobBoardProvider({ children }) {
+src/main.jsx:11:  </ThemeProvider>
+src/main.jsx:5:import { ThemeProvider } from "./styles/theme.jsx";
+src/main.jsx:9:  <ThemeProvider>
+src/panels/IntegrationsPanel.jsx:105:            {status.linkedin?.identityLinked && <button onClick={() => disconnectProvider("linkedin")} style={secondaryButton}>Disconnect</button>}
+src/panels/IntegrationsPanel.jsx:56:  const disconnectProvider = async (provider) => {
+src/styles/theme.jsx:119:    <ThemeContext.Provider value={{
+src/styles/theme.jsx:317:    </ThemeContext.Provider>
+src/styles/theme.jsx:88:export function ThemeProvider({ children }) {

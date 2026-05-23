@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/TopBar.jsx — single animated nav (Lucy Brand)
 // position:fixed, converges from full-width bar → centered glassy pill on scroll.
 // Consumes AppScrollContext progress/pinned set by PullToRefresh in JobsPanel.
@@ -263,7 +263,7 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
   const triggerRef = useRef(null);
-  const { accentId, setAccentId, ACCENT_OPTIONS, bgMode, setBgMode, BG_MODES } = useTheme();
+  const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
   const planTier = user?.planTier || "BASIC";
   const planLabel = planTier === "PRO" ? "Pro" : planTier === "PLUS" ? "Plus" : "Basic";
   const toolLabel = planTier === "PRO" ? "Generate + A+ Resume"
@@ -371,38 +371,6 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
             </div>
           </div>
 
-          {/* Background style */}
-          <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 8 }}>
-              Background
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {BG_MODES.map(m => (
-                <button key={m.id} title={m.label} onClick={() => setBgMode(m.id)}
-                  style={{
-                    width: 60, height: 38, borderRadius: 8, flexShrink: 0,
-                    background: m.previewBg,
-                    border: bgMode === m.id ? `2px solid ${theme.accent}` : `1px solid ${theme.border}`,
-                    outline: bgMode === m.id ? `2px solid ${theme.accent}44` : "none",
-                    outlineOffset: 1,
-                    cursor: "pointer", padding: 0,
-                    position: "relative", overflow: "hidden",
-                    transition: "border 0.15s, outline 0.15s",
-                  }}>
-                  {bgMode === m.id && (
-                    <span style={{
-                      position: "absolute", inset: 0,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      background: "rgba(0,0,0,0.25)", color: "#fff",
-                      fontSize: 14, fontWeight: 700,
-                    }}>On</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Plan */}
           <div style={{ padding: "8px 16px", borderBottom: `1px solid ${theme.border}` }}>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
@@ -473,25 +441,10 @@ export default function TopBar({
   } = useJobBoard() || {};
 
   const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
-  const [jobsZone, setJobsZone] = useState(null);
   useEffect(() => {
     const onResize = () => setVw(window.innerWidth);
     window.addEventListener("resize", onResize, { passive: true });
     return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const handleJobsZone = (event) => {
-      const detail = event.detail;
-      if (!detail?.width) return;
-      setJobsZone({
-        left: detail.left,
-        width: detail.width,
-      });
-    };
-    window.addEventListener("rm:jobs-panel-zone", handleJobsZone);
-    return () => window.removeEventListener("rm:jobs-panel-zone", handleJobsZone);
   }, []);
 
   // Domain profiles for docked pill switcher
@@ -553,15 +506,9 @@ export default function TopBar({
   // ── Geometry interpolation ──
   const [ar, ag, ab] = hexToRgb(theme.accent);
 
-  const pillWidth  = Math.round(vw - p * (vw - 400));
-  const zoneWidth = jobsZone?.width || vw;
-  const dockCenter = jobsZone ? jobsZone.left + jobsZone.width / 2 : vw / 2;
-  const dockPadding = 20;
-  const dockMaxWidth = Math.max(0, zoneWidth - dockPadding * 2);
-  const constrainedPillWidth = jobsZone
-    ? Math.max(0, Math.min(pillWidth, dockMaxWidth))
-    : pillWidth;
-  const dockScale = dockMaxWidth > 0 && constrainedPillWidth < 220 ? Math.max(0.68, constrainedPillWidth / 220) : 1;
+  const pillWidth           = Math.round(vw - p * (vw - 400));
+  const constrainedPillWidth = pillWidth;
+  const dockCenter           = vw / 2;
   const radius     = Math.round(p * 9999);
   const blur       = Math.round(12 + p * 8);
   const topOffset  = Math.round(p * 10);
@@ -598,8 +545,7 @@ export default function TopBar({
           position: "fixed",
           top: topOffset,
           left: dockCenter,
-          transform: `translateX(-50%) scale(${dockScale})`,
-          transformOrigin: "top center",
+          transform: "translateX(-50%)",
           width: constrainedPillWidth,
           height: 46,
           borderRadius: radius,
@@ -648,9 +594,8 @@ export default function TopBar({
             position: "fixed",
             top: topOffset + 46 + 8,
             left: dockCenter,
-            transform: `translateX(-50%) scale(${dockScale})`,
-            transformOrigin: "top center",
-            maxWidth: Math.max(180, dockMaxWidth),
+            transform: "translateX(-50%)",
+            maxWidth: Math.max(180, vw - 40),
             height: 36,
             borderRadius: 9999,
             background: pill2Bg,

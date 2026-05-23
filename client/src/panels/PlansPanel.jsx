@@ -44,44 +44,44 @@ export function PlansPanel({ user, onUserChange }) {
   const changeOptions = plan?.changeOptions || (plan?.nextPlan ? [plan.nextPlan] : []);
 
   return (
-    <div style={{ flex:1, overflowY:"auto", padding:24, background:theme.bg }}>
+    <div style={{ flex:1, overflowY:"auto", padding:24, background:"var(--color-bg)" }}>
       <div style={{ maxWidth:760 }}>
         <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
                       fontSize:24, letterSpacing:"0.06em", textTransform:"uppercase",
                       marginBottom:8 }}>
           Plans
         </div>
-        <div style={{ color:theme.textMuted, marginBottom:20 }}>
-          Current plan: <strong style={{ color:theme.text }}>{PLAN_LABELS[current]}</strong>. Plans control tool access in the shared jobs console.
+        <div style={{ color:"var(--color-text-muted)", marginBottom:20 }}>
+          Current plan: <strong style={{ color:"var(--color-text)" }}>{PLAN_LABELS[current]}</strong>. Plans control tool access in the shared jobs console.
         </div>
 
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))", gap:12 }}>
           {[current, ...changeOptions].filter(Boolean).map(tier => (
             <div key={tier} style={{
-              border:`1px solid ${tier === current ? theme.accent : theme.border}`,
-              background:theme.surface,
+              border:`1px solid ${tier === current ? "var(--color-primary)" : "var(--color-border)"}`,
+              background:"var(--color-surface)",
               borderRadius:8,
               padding:16,
             }}>
               <div style={{ fontWeight:800, fontSize:16 }}>{PLAN_LABELS[tier]}</div>
-              <div style={{ color:theme.textMuted, fontSize:12, lineHeight:1.5, marginTop:6 }}>
+              <div style={{ color:"var(--color-text-muted)", fontSize:12, lineHeight:1.5, marginTop:6 }}>
                 {PLAN_COPY[tier]}
               </div>
               {tier === current && (
-                <div style={{ marginTop:12, fontSize:11, color:theme.accentText, fontWeight:700 }}>
+                <div style={{ marginTop:12, fontSize:11, color:"var(--color-primary-text)", fontWeight:700 }}>
                   Active
                 </div>
               )}
               {tier !== current && !plan?.pendingRequest && (
                 <button onClick={() => requestPlanChange(tier)}
                   style={{ marginTop:14, border:"none", borderRadius:6, padding:"9px 14px",
-                           background:theme.accent, color:"#0f0f0f", cursor:"pointer",
+                           background:"var(--color-primary)", color:"#0f0f0f", cursor:"pointer",
                            fontWeight:800 }}>
                   Request {tier === "BASIC" ? "downgrade" : "upgrade"}
                 </button>
               )}
               {tier !== current && plan?.pendingRequest?.requested_tier === tier && (
-                <div style={{ marginTop:12, fontSize:11, color:theme.warning, fontWeight:700 }}>
+                <div style={{ marginTop:12, fontSize:11, color:"var(--color-warning)", fontWeight:700 }}>
                   Request pending
                 </div>
               )}
@@ -89,7 +89,7 @@ export function PlansPanel({ user, onUserChange }) {
           ))}
         </div>
 
-        {status && <div style={{ marginTop:16, color:theme.textMuted }}>{status}</div>}
+        {status && <div style={{ marginTop:16, color:"var(--color-text-muted)" }}>{status}</div>}
       </div>
     </div>
   );

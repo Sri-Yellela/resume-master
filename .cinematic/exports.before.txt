@@ -1,0 +1,90 @@
+src/App.jsx:396:export default function App() {
+src/components/AdminLayout.jsx:5:export default function AdminLayout({ user, onLogout, children }) {
+src/components/AuthScreen.jsx:19:export function AtomEmblem({ size = 120, textSize = 8.5, orbitSize = 28 }) {
+src/components/AuthScreen.jsx:490:export default function AuthScreen({ onLogin, initialTab = "login" }) {
+src/components/BelowFoldContent.jsx:28:export default function BelowFoldContent() {
+src/components/CTAButton.jsx:5:export function CTAButton({ label, onClick, disabled, loading, accent = "#ff6b35" }) {
+src/components/CountdownDisplay.jsx:3:export function CountdownDisplay({ slots = [] }) {
+src/components/CoverLetterModal.jsx:11:export default function CoverLetterModal({ resumeText, jobDescription, jobTitle, company, onClose }) {
+src/components/DockPortal.jsx:17:export function DockPortal({ children, anchorRect, theme, onClose, style = {} }) {
+src/components/DomainProfileWizard.jsx:97:export default function DomainProfileWizard({
+src/components/Footer.jsx:4:export function Footer() {
+src/components/HighlightedDescription.jsx:3:export function HighlightedDescription({ text, theme, maxChars = 2000, truncate = true }) {
+src/components/JobCard.jsx:196:export default function JobCard({
+src/components/JobDetailPanel.jsx:67:export default function JobDetailPanel({
+src/components/MarketingNav.jsx:5:export function MarketingNav() {
+src/components/MetaChips.jsx:5:export function MetaChips({
+src/components/NavBar.jsx:17:export default function NavBar({ user = null, onLogout }) {
+src/components/PosterBanner.jsx:20:export function PosterBanner() {
+src/components/ProfileSelectorDropdown.jsx:4:export default function ProfileSelectorDropdown({
+src/components/RotatingBadge.jsx:4:export function RotatingBadge({ text = "NEW", size = 60, color }) {
+src/components/ScrollDock.jsx:1122:export default function ScrollDock({
+src/components/SectionHeader.jsx:4:export function SectionHeader({ title, subtitle, divider = false }) {
+src/components/StampLogo.jsx:5:export function StampLogo({ progress = 0, size = 'sm' }) {
+src/components/TopBar.jsx:441:export default function TopBar({
+src/components/UnifiedSearchBar.jsx:36:export default function UnifiedSearchBar({
+src/components/reference/AuthSheetReference.jsx:8:export const AuthSheetReference = ({ isOpen, onClose }) => {
+src/components/reference/EventDescription.jsx:4:export function EventDescription() { return null; }
+src/components/reference/EventDetailPage.jsx:4:export function EventDetailPage() { return null; }
+src/components/reference/EventLocation.jsx:4:export function EventLocation() { return null; }
+src/components/reference/NavbarReference.jsx:9:export const NavbarReference = () => {
+src/components/reference/SEOHead.jsx:4:export function SEOHead() { return null; }
+src/components/ui/toaster.jsx:4:export function Toaster() {
+src/consoles/PlanConsoles.jsx:14:export function JobsConsole(props) {
+src/contexts/AppScrollContext.jsx:18:export function AppScrollProvider({ children }) {
+src/contexts/AppScrollContext.jsx:41:export function useAppScroll() {
+src/contexts/JobBoardContext.jsx:43:export function useJobBoard() { return useContext(JobBoardContext); }
+src/contexts/JobBoardContext.jsx:6:export function JobBoardProvider({ children }) {
+src/hooks/use-toast.js:31:export function toast({ ...props }) {
+src/hooks/use-toast.js:52:export function useToast() {
+src/hooks/useInactivityLogout.js:9:export function useInactivityLogout(onLogout, enabled = true) {
+src/hooks/useLogoSize.js:5:export function useLogoSize(breakpoint = 768) {
+src/hooks/useScrollCollapsed.js:7:export function useScrollCollapsed(threshold = 60, disabled = false) {
+src/hooks/useSyncEvents.js:15:export function useSyncEvents(handlers) {
+src/hooks/useViewport.js:3:export function useViewport() {
+src/lib/api.js:126:export function printResume(html, filename) {
+src/lib/api.js:12:export function setAuthContext(token) {
+src/lib/api.js:24:export function authHeaders(headers = {}) {
+src/lib/api.js:35:export function authContextQuery() {
+src/lib/api.js:55:export function cleanUiText(value) {
+src/lib/api.js:5:export function getAuthContext() {
+src/lib/profileSuggestions.js:21:export function hasProfileSuggestion(suggestions, kind, label) {
+src/lib/profileSuggestions.js:35:export function emitProfileSuggestionsUpdated(profileId, suggestions = null) {
+src/lib/profileSuggestions.js:4:export const PROFILE_SUGGESTIONS_UPDATED_EVENT = "rm:profile-suggestions-updated";
+src/lib/profileSuggestions.js:6:export function buildProfileSuggestionLookup(suggestions = {}) {
+src/lib/utils.js:3:export function cn(...inputs) { return twMerge(clsx(inputs)); }
+src/pages/AdminLoginPage.jsx:7:export default function AdminLoginPage({ onLogin }) {
+src/pages/BlogPage.jsx:1:export default function BlogPage() {
+src/pages/LandingPage.jsx:30:export default function LandingPage({ authUser }) {
+src/pages/NotFoundPage.jsx:3:export default function NotFoundPage() {
+src/pages/ProductsPage.jsx:1:export default function ProductsPage() {
+src/pages/admin/DBInspector.jsx:1704:export default function DBInspector() {
+src/pages/marketing/AboutPage.jsx:21:export function AboutPage() {
+src/pages/marketing/ContactPage.jsx:8:export function ContactPage() {
+src/pages/marketing/FAQPage.jsx:43:export function FAQPage() {
+src/pages/marketing/FeaturesPage.jsx:35:export function FeaturesPage() {
+src/pages/marketing/HowItWorksPage.jsx:19:export function HowItWorksPage() {
+src/pages/marketing/PricingPage.jsx:58:export function PricingPage() {
+src/pages/marketing/PrivacyPage.jsx:76:export function PrivacyPage() {
+src/pages/marketing/TermsPage.jsx:37:export function TermsPage() {
+src/pages/tools/ATSToolPage.jsx:27:export function ATSToolPage() {
+src/pages/tools/ApplyToolPage.jsx:8:export function ApplyToolPage() {
+src/pages/tools/GenerateToolPage.jsx:10:export function GenerateToolPage() {
+src/panels/ATSPanel.jsx:24:export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) {
+src/panels/AdminPanel.jsx:752:export function AdminPanel() {
+src/panels/DatabasePanel.jsx:343:export function DatabasePanel({ user }) {
+src/panels/IntegrationsPanel.jsx:35:export function IntegrationsPanel() {
+src/panels/JobProfilesPanel.jsx:8:export function JobProfilesPanel() {
+src/panels/JobsPanel.jsx:850:export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive = true }) {
+src/panels/PlansPanel.jsx:17:export function PlansPanel({ user, onUserChange }) {
+src/panels/ProfilePanel.jsx:79:export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
+src/panels/SandboxPanel.jsx:23:export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
+src/styles/theme.jsx:10:export const ACCENT_OPTIONS = [
+src/styles/theme.jsx:157:export const ThemeContext = createContext(null);
+src/styles/theme.jsx:159:export function isDarkBgMode(id) {
+src/styles/theme.jsx:163:export function ThemeProvider({ children }) {
+src/styles/theme.jsx:17:export const BG_MODES = [
+src/styles/theme.jsx:26:export const THEMES = {
+src/styles/theme.jsx:561:export function useTheme() {
+src/styles/theme.jsx:7:export const LUCY_USER_ACCENT  = "#A8D8EA";
+src/styles/theme.jsx:8:export const LUCY_ADMIN_ACCENT = "#F5E642";

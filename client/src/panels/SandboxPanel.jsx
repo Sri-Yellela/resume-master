@@ -21,7 +21,7 @@ const RESUME_PAGE_HEIGHT = 1123; // A4 at 96dpi
 const RESUME_PAGE_GAP    = 12;
 
 export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
-  const { theme, isDark } = useTheme();
+  const { theme } = useTheme();
   const [exporting,   setExporting]   = useState(false);
   const [exportError, setExportError] = useState("");
   const [dirty,       setDirty]       = useState(false);
@@ -193,14 +193,14 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const btnStyle = () => ({
     display:"inline-flex", alignItems:"center", gap:5,
     padding:"5px 14px", borderRadius:999,
-    background:"transparent", color:theme.textMuted,
-    border:`1px solid ${theme.border}`,
+    background:"transparent", color:"var(--color-text-muted)",
+    border:`1px solid ${"var(--color-border)"}`,
     fontSize:11, fontWeight:600, cursor:"pointer",
     transition:"all 0.15s",
   });
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100%", minHeight:0, minWidth:0, background:theme.bg }}>
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", minHeight:0, minWidth:0, background:"var(--color-bg)" }}>
       <style>{`
         @keyframes rmShimmer { from { opacity: 0.4; } to { opacity: 0.9; } }
       `}</style>
@@ -208,7 +208,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
       {/* Generating skeleton */}
       {activeEntry?.generating && (
         <div style={{ flex:1, padding:"24px 20px", display:"flex", flexDirection:"column", gap:12 }}>
-          <div style={{ fontSize:11, fontWeight:700, color:theme.accent,
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--color-primary)",
                         display:"flex", alignItems:"center", gap:8 }}>
             <span style={{ display:"inline-block", animation:"spin 0.8s linear infinite" }}>↻</span>
             {activeEntry?.stage || "Generating…"}
@@ -218,7 +218,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
               height: i % 4 === 0 ? 16 : 11,
               width: `${w}%`,
               borderRadius: 3,
-              background: theme.surfaceHigh,
+              background: "var(--color-surface-offset)",
               animation: `rmShimmer 1.2s ${i * 0.12}s ease-in-out infinite alternate`,
             }}/>
           ))}
@@ -229,15 +229,15 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
       {activeEntry?.missing && !activeEntry?.generating && (
         <div style={{ flex:1, padding:24, display:"flex", flexDirection:"column",
                       alignItems:"center", justifyContent:"center", gap:12, textAlign:"center" }}>
-          <div style={{ fontSize:13, color:theme.text, fontWeight:700 }}>Resume artifact missing</div>
-          <div style={{ fontSize:12, color:theme.textMuted }}>
+          <div style={{ fontSize:13, color:"var(--color-text)", fontWeight:700 }}>Resume artifact missing</div>
+          <div style={{ fontSize:12, color:"var(--color-text-muted)" }}>
             This resume was expected from a previous run, but the stored artifact could not be loaded.
           </div>
-          {activeEntry.error && <div style={{ fontSize:11, color:theme.textDim }}>{activeEntry.error}</div>}
+          {activeEntry.error && <div style={{ fontSize:11, color:"var(--color-text-faint)" }}>{activeEntry.error}</div>}
           <button onClick={onClose}
             style={{ marginTop:8, padding:"7px 20px", borderRadius:999,
-                     background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
-                     cursor:"pointer", fontSize:12, color:theme.text }}>
+                     background:"var(--color-surface-offset)", border:`1px solid ${"var(--color-border)"}`,
+                     cursor:"pointer", fontSize:12, color:"var(--color-text)" }}>
             Dismiss
           </button>
         </div>
@@ -248,12 +248,12 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
         <div style={{ flex:1, padding:24, display:"flex", flexDirection:"column",
                       alignItems:"center", justifyContent:"center", gap:12, textAlign:"center" }}>
           <div style={{ fontSize:32 }}>⚠</div>
-          <div style={{ fontSize:13, color:theme.text, fontWeight:700 }}>Generation failed</div>
-          <div style={{ fontSize:12, color:theme.textMuted }}>{activeEntry.error}</div>
+          <div style={{ fontSize:13, color:"var(--color-text)", fontWeight:700 }}>Generation failed</div>
+          <div style={{ fontSize:12, color:"var(--color-text-muted)" }}>{activeEntry.error}</div>
           <button onClick={onClose}
             style={{ marginTop:8, padding:"7px 20px", borderRadius:999,
-                     background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
-                     cursor:"pointer", fontSize:12, color:theme.text }}>
+                     background:"var(--color-surface-offset)", border:`1px solid ${"var(--color-border)"}`,
+                     cursor:"pointer", fontSize:12, color:"var(--color-text)" }}>
             Dismiss
           </button>
         </div>
@@ -264,33 +264,33 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
         <>
           {/* Toolbar */}
           <div style={{
-            background:theme.surface, borderBottom:`1px solid ${theme.border}`,
+            background:"var(--color-surface)", borderBottom:`1px solid ${"var(--color-border)"}`,
             padding:"8px 14px", display:"flex", alignItems:"center",
             gap:8, flexShrink:0,
           }}>
-            <span style={{ fontWeight:800, fontSize:12, color:theme.accent }}>✏ Sandbox</span>
+            <span style={{ fontWeight:800, fontSize:12, color:"var(--color-primary)" }}>✏ Sandbox</span>
             {entry && (
-              <span style={{ fontSize:11, color:theme.textMuted,
-                             borderLeft:`1px solid ${theme.border}`, paddingLeft:10 }}>
+              <span style={{ fontSize:11, color:"var(--color-text-muted)",
+                             borderLeft:`1px solid ${"var(--color-border)"}`, paddingLeft:10 }}>
                 {activeEntry.company} — {activeEntry.title}
               </span>
             )}
             {variantKeys.length > 1 && (
-              <div style={{ display:"flex", gap:4, borderLeft:`1px solid ${theme.border}`, paddingLeft:10 }}>
+              <div style={{ display:"flex", gap:4, borderLeft:`1px solid ${"var(--color-border)"}`, paddingLeft:10 }}>
                 {variantKeys.map(tool => (
                   <button key={tool} onClick={() => setSelectedTool(tool)}
                     style={{
                       ...btnStyle(),
                       padding:"4px 8px",
-                      color:selectedTool === tool ? theme.accent : theme.textMuted,
-                      borderColor:selectedTool === tool ? theme.accent : theme.border,
+                      color:selectedTool === tool ? "var(--color-primary)" : "var(--color-text-muted)",
+                      borderColor:selectedTool === tool ? "var(--color-primary)" : "var(--color-border)",
                     }}>
                     {variants[tool]?.toolLabel || (tool === "a_plus_resume" ? "A+ Resume" : "Generate")}
                   </button>
                 ))}
               </div>
             )}
-            {dirty && <span style={{ fontSize:10, color:theme.warning, fontWeight:700 }}>● unsaved</span>}
+            {dirty && <span style={{ fontSize:10, color:"var(--color-warning)", fontWeight:700 }}>● unsaved</span>}
             {saveMsg && <span style={{ fontSize:10, fontWeight:700,
               color: saveMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>{saveMsg}</span>}
             <div style={{ flex:1 }}/>
@@ -303,13 +303,13 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
               <span style={{ fontSize:10, color:"#991b1b" }}>✗ {exportError}</span>
             )}
             <button onClick={onClose}
-              style={{ ...btnStyle(), color:theme.danger, borderColor:theme.dangerMuted }}>✕</button>
+              style={{ ...btnStyle(), color:"#ef4444", borderColor:"#1f0a0a" }}>✕</button>
           </div>
 
           {!activeEntry ? (
             <div style={{ flex:1, display:"flex", flexDirection:"column",
                           alignItems:"center", justifyContent:"center", gap:12,
-                          color:theme.textMuted }}>
+                          color:"var(--color-text-muted)" }}>
               <div style={{ fontSize:48 }}>⚡</div>
               <div style={{ fontWeight:700, fontSize:14 }}>Generate a resume to populate the sandbox.</div>
             </div>
@@ -324,7 +324,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
                 minWidth:0,
                 overflowX: "hidden",  // never horizontal scroll
                 overflowY: "auto",    // one clean vertical scrollbar
-                background: isDark ? theme.bg : theme.surfaceHigh,
+                background: "var(--color-bg)",
                 padding: "4px",
                 boxSizing: "border-box",
               }}
@@ -353,9 +353,9 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
                       height:       RESUME_PAGE_HEIGHT + "px",
                       overflow:     "hidden",
                       position:     "relative",
-                      background:   theme.surface,
+                      background:   "var(--color-surface)",
                       borderRadius: 4,
-                      boxShadow:    theme.shadowXl,
+                      boxShadow:    "0 40px 80px rgba(0,0,0,0.7), 0 16px 32px rgba(0,0,0,0.5)",
                       flexShrink:   0,
                     }}
                   >

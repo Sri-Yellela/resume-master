@@ -333,7 +333,7 @@ function defaultFilterSnapshot() {
 
 // â”€â”€ Filters panel (collapsible) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function FiltersPanel({
-  open, onClose, onApply, isDark,
+  open, onClose, onApply,
   categories,
   role, setRole,
   location, setLocation,
@@ -361,7 +361,7 @@ function FiltersPanel({
     <div style={{
       position:"fixed", inset:0, zIndex:500,
       display:"flex", alignItems:"flex-start", justifyContent:"flex-end",
-      background:isDark ? "rgba(0,0,0,0.42)" : "rgba(15,23,42,0.18)",
+      background:"rgba(0,0,0,0.42)",
       isolation:"isolate",
     }}
     onClick={e => { if(e.target===e.currentTarget) onClose(); }}>
@@ -369,7 +369,7 @@ function FiltersPanel({
         initial={{ x:360 }} animate={{ x:0 }} exit={{ x:360 }}
         transition={{ type:"tween", duration:0.22 }}
         style={{
-          width:320, height:"100%", background:theme.modalSurface || (isDark ? "#111827" : "#ffffff"),
+          width:320, height:"100%", background:theme.modalSurface || "#111827",
           borderLeft:`3px solid ${theme.accent}`,
           padding:"24px 20px", overflowY:"auto",
           display:"flex", flexDirection:"column", gap:16,
@@ -848,7 +848,7 @@ function isImportedBoardJob(job) {
 
 // -- Main panel ------------------------------------------------
 export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive = true }) {
-  const { theme, isDark } = useTheme();
+  const { theme } = useTheme();
   const { mode: vpMode } = useViewport();
   const navigate = useNavigate();
   const { pin: pinDock, scrollToTopRef, progress: scrollProgress } = useAppScroll();
@@ -956,22 +956,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const jobsPanelElementRef = useRef(null);
   const [manualWidth, setManualWidth] = useState(null);
 
-  const publishJobsZoneBounds = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const jobsRect = jobsPanelElementRef.current?.getBoundingClientRect?.();
-    const detailRect = detailPanelElementRef.current?.getBoundingClientRect?.();
-    if (!jobsRect) return;
-    const left = jobsRect.left;
-    const right = detailRect ? Math.max(jobsRect.right, detailRect.right) : jobsRect.right;
-    window.dispatchEvent(new CustomEvent("rm:jobs-panel-zone", {
-      detail: {
-        left,
-        right,
-        width: Math.max(0, right - left),
-        top: Math.min(jobsRect.top, detailRect?.top ?? jobsRect.top),
-      },
-    }));
-  }, []);
 
   // effectiveTier: panel count is primary driver; ResizeObserver only overrides Tier 1 ? 2
   const effectiveTier = useMemo(() => {
@@ -1228,16 +1212,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             if (showDetail  && detailPanelRef.current)          detailPanelRef.current.resize(d.detail);
             if (showSandbox && sandboxPanelRef.current)         sandboxPanelRef.current.resize(d.sandbox);
             if (showAts     && atsPanelRef.current)             atsPanelRef.current.resize(d.ats);
-            publishJobsZoneBounds();
             initialPanelDefaultsAppliedRef.current = true;
           } catch(e) { console.warn("[panels] resize not ready:", e.message); }
         });
       });
     });
     return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
-  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile, publishJobsZoneBounds]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ResizeObserver — only used for Tier 1 ? 2 manual-drag fallback
+  // ResizeObserver — only used for Tier 1 → 2 manual-drag fallback
   useEffect(() => {
     const nodes = [jobsPanelElementRef.current, detailPanelElementRef.current].filter(Boolean);
     if (!nodes.length) return;
@@ -1248,18 +1231,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         const jobsEntry = entries.find(entry => entry.target === jobsPanelElementRef.current) || entries[0];
         const w = jobsEntry?.contentRect.width;
         if (w !== undefined) setManualWidth(w);
-        publishJobsZoneBounds();
       }, 50);
     });
     nodes.forEach(node => ro.observe(node));
-    window.addEventListener("resize", publishJobsZoneBounds, { passive: true });
-    publishJobsZoneBounds();
     return () => {
       clearTimeout(debounceTimer);
       ro.disconnect();
-      window.removeEventListener("resize", publishJobsZoneBounds);
     };
-  }, [publishJobsZoneBounds, !!selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [!!selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-open resume + ATS panel when a pending job card is selected
   useEffect(() => {
@@ -2399,7 +2378,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       <AnimatePresence>
         {filtersOpen && (
           <FiltersPanel
-            open={filtersOpen} onClose={() => setFiltersOpen(false)} onApply={applyPendingFilters} isDark={isDark}
+            open={filtersOpen} onClose={() => setFiltersOpen(false)} onApply={applyPendingFilters}
             categories={categories}
             role={pendingFilters.roleFilter}         setRole={value => stageFilter("roleFilter", value)}
             location={pendingFilters.locationFilter} setLocation={value => stageFilter("locationFilter", value)}
@@ -2953,7 +2932,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               <div style={{ position:"absolute", inset:0, zIndex:60, display:"flex", flexDirection:"column",
                             background:theme.bg }}>
                 <JobDetailPanel
-                  job={selectedJob} theme={theme} isDark={isDark}
+                  job={selectedJob} theme={theme}
                   g={g2} done={done2} st={st2} applyMode={applyMode}
                   canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
                   canUseAPlusResume={false}
@@ -2982,7 +2961,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 onRetryPoll={handlePullRefresh}
                 generated={generated} loading={loading}
                 applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
-                theme={theme} isDark={isDark}
+                theme={theme}
                 totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
                 generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
                 visitUrl={visitUrl} toggleStar={toggleStar} openAtsPanel={openAtsPanel}
@@ -3075,7 +3054,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               onRetryPoll={handlePullRefresh}
               generated={generated} loading={loading}
               applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
-              theme={theme} isDark={isDark}
+              theme={theme}
               totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
               generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
               visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
@@ -3108,7 +3087,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                            borderLeft: `1px solid ${theme.border}` }}>
                   <div ref={detailPanelElementRef} style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden" }}>
                     <JobDetailPanel
-                      job={selectedJob} theme={theme} isDark={isDark}
+                      job={selectedJob} theme={theme}
                       g={g2} done={done2} st={st2} applyMode={applyMode}
                       canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
                       canUseAPlusResume={false}
@@ -3238,8 +3217,8 @@ function ResizeHandle({ theme: themeProp }) {
 // â”€â”€ Jobs column (shared across layout modes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       pollStatus, onRetryPoll,
-                      generated, loading, applyMode, canUseGenerate, canUseAPlusResume, theme, isDark,
-                      totalPages, currentPage, isLastPage,
+                      generated, loading, applyMode, canUseGenerate, canUseAPlusResume,
+                      theme, totalPages, currentPage, isLastPage,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, toggleDislike, openAtsPanel,
                       goPage, onPullRefresh,
@@ -3268,9 +3247,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
   };
   return (
     <div ref={containerRef} style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
-                  background: isDark
-                    ? `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)`
-                    : `linear-gradient(160deg, ${theme.accentMuted} 0%, ${theme.bg} 50%)` }}>
+                  background: `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)` }}>
       {shouldShowEmptyState ? <EmptyState theme={theme}/> : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
@@ -3301,7 +3278,6 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
             <StarredLinkedInSection
               jobs={importedLinkedInJobs}
               theme={theme}
-              isDark={isDark}
               onImport={onImportLinkedIn}
               linkedinImporting={linkedinImporting}
               onRefresh={onRefreshImportedLinkedIn}
@@ -3323,7 +3299,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                 key={key} job={job} g={g} done={done} st={st}
                 applyMode={applyMode}
                 canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
-                theme={theme} isDark={isDark}
+                theme={theme}
                 showDislike={true}
                 showApplyButton={!compact}
                 compact={compact}
@@ -3452,7 +3428,6 @@ function buildVisiblePageItems(currentPage, totalPages) {
 function StarredLinkedInSection({
   jobs,
   theme,
-  isDark,
   onRefresh,
   onImport,
   linkedinImporting,
@@ -3488,7 +3463,7 @@ function StarredLinkedInSection({
         <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
       </div>
       <div style={{ padding:"12px 14px", borderBottom:`1px solid ${theme.border}`,
-                    background:isDark ? `${theme.surfaceHigh}66` : theme.surfaceHigh }}>
+                    background:theme.surfaceHigh }}>
         <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6 }}>
           Import visible LinkedIn job listings with the browser extension. Resume Master keeps the existing imported-job dedupe path and refreshes the job board automatically after import.
         </div>
@@ -3511,7 +3486,6 @@ function StarredLinkedInSection({
               key={job.jobId}
               job={job}
               theme={theme}
-              isDark={isDark}
               showDislike={true}
               showApplyButton={true}
               applyMode="SIMPLE"

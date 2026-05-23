@@ -4,7 +4,6 @@
    USBar (z:200) is fixed — hero: centered, dock: just below NavBar.
    Hero zone is absolute, scrolls away as user scrolls down.
    Cards (z:1) scroll behind the fixed bars. */
-.lp--hero { background: var(--color-bg, #171614); }
 .lp--dock { display: block; }
 
 /* ── Hero logo zone — absolute so it doesn't affect card layout ── */
@@ -32,6 +31,24 @@
   margin: 0;
   max-width: 40ch;
 }
+
+.lp__hero-cta {
+  pointer-events: auto; /* override zone's pointer-events: none */
+  margin-top: 0.75rem;
+  padding: 10px 24px;
+  border-radius: 999px;
+  border: 1px solid var(--border-glass, hsl(0 0% 100% / 0.08));
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: var(--bg-blur-sm, blur(20px) saturate(160%));
+  -webkit-backdrop-filter: var(--bg-blur-sm, blur(20px) saturate(160%));
+  color: var(--color-text, #cdccca);
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  transition: background 180ms ease;
+}
+.lp__hero-cta:hover { background: rgba(255, 255, 255, 0.1); }
 
 /* ── Main panel padding — transitions with mode ── */
 .lp__main {
@@ -87,8 +104,10 @@
 .lp__page-btn {
   padding: 6px 16px;
   border-radius: 6px;
-  border: 1px solid var(--color-border, #393836);
-  background: var(--color-surface, #1c1b19);
+  border: 1px solid var(--border-glass, hsl(0 0% 100% / 0.08));
+  background: var(--bg-input, rgba(255,255,255,0.04));
+  backdrop-filter: var(--bg-blur-sm, blur(20px) saturate(160%));
+  -webkit-backdrop-filter: var(--bg-blur-sm, blur(20px) saturate(160%));
   color: var(--color-text, #cdccca);
   font-size: 0.875rem;
   font-weight: 600;
