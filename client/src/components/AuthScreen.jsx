@@ -116,7 +116,7 @@ function PosterCard({ company, index }) {
 
 // ── Auth modal ────────────────────────────────────────────────
 function AuthModal({ onLogin, initialTab = "login" }) {
-  const { theme, isDark } = useTheme();
+  const { theme } = useTheme();
   const [tab,     setTab]   = useState(initialTab);
   const [regStep, setRegStep] = useState(1);
   // Login form
@@ -178,26 +178,14 @@ function AuthModal({ onLogin, initialTab = "login" }) {
     setLoading(false);
   };
 
-  const startProviderOAuth = (provider, event) => {
-    setError(""); setNotice("");
-    const readiness = oauthStatus?.[provider];
-    if (readiness && !readiness.configured) {
-      event?.preventDefault();
-      setError(`${oauthLabel(provider)} sign-in is not configured for this deployment yet.`);
-      return;
-    }
-  };
-
   const providerButton = (provider) => {
-    const label = oauthLabel(provider);
     const readiness = oauthStatus?.[provider];
-    const configured = readiness?.configured !== false;
+    if (oauthStatus !== null && !readiness?.configured) return null;
+    const label = oauthLabel(provider);
     const brand = provider === "linkedin" ? "#0A66C2" : provider === "github" ? "#24292e" : "#4285F4";
     return (
-      <a href={`/auth/${provider}`} onClick={event => startProviderOAuth(provider, event)}
-        title={!configured ? `${label} OAuth is not configured by the app operator.` : `Continue with ${label}`}
-        aria-disabled={!configured}
-        style={{ ...providerButtonStyle, background:brand, color:"#fff", border:"none", opacity:configured ? 1 : 0.55, cursor:configured ? "pointer" : "not-allowed", textDecoration:"none" }}>
+      <a href={`/auth/${provider}`} title={`Continue with ${label}`}
+        style={{ ...providerButtonStyle, background:brand, color:"#fff", border:"none", textDecoration:"none" }}>
         Continue with {label}
       </a>
     );
@@ -272,29 +260,28 @@ function AuthModal({ onLogin, initialTab = "login" }) {
 
   const inputStyle = {
     width:"100%", height:42, padding:"0 14px",
-    borderRadius:10, border:`1px solid ${theme.border}`,
-    background:theme.surface, color:theme.text,
+    borderRadius:10, border:"1px solid var(--border-glass)",
+    background:"var(--bg-input)", color:theme.text,
     fontFamily:"'DM Sans',system-ui", fontSize:13,
     outline:"none", boxSizing:"border-box",
     transition:"border-color 0.15s",
   };
   const halfInput = { ...inputStyle, flex:1 };
   const providerButtonStyle = {
-    width:"100%", height:40, borderRadius:999, border:`1px solid ${theme.border}`,
-    background:theme.surface, color:theme.text, fontWeight:800, cursor:"pointer",
+    width:"100%", height:40, borderRadius:999, border:"1px solid var(--border-glass)",
+    background:"var(--bg-input)", color:theme.text, fontWeight:800, cursor:"pointer",
     fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", gap:8,
   };
 
   return (
     <motion.div initial={{ opacity:0, scale:0.95 }} animate={{ opacity:1, scale:1 }}
       transition={{ duration:0.2 }}
-      style={{ background:theme.surface, borderRadius:24, padding:36,
-               width:"100%", maxWidth:400, boxShadow:theme.shadowXl,
-               border:`1px solid ${theme.border}` }}>
+      className="liquid-panel"
+      style={{ borderRadius:24, padding:36, width:"100%", maxWidth:400 }}>
 
       {/* Tab switcher */}
       <div style={{ display:"flex", gap:4, marginBottom:28,
-                    background:isDark?"rgba(255,255,255,0.06)":"rgba(0,0,0,0.05)",
+                    background:"rgba(255,255,255,0.06)",
                     borderRadius:999, padding:4 }}>
         {["login","register"].map(t => (
           <button key={t} onClick={() => { setTab(t); setRegStep(1); setError(""); setNotice(""); }}
@@ -499,7 +486,7 @@ export default function AuthScreen({ onLogin, initialTab = "login" }) {
       {/* Main content area — flex:1 fills space between top of page and footer */}
       <div style={{ display:"flex", flexDirection: isMobile ? "column" : "row",
                     flex:1,
-                    background:theme.bg, fontFamily:"'DM Sans',system-ui,sans-serif" }}>
+                    fontFamily:"'DM Sans',system-ui,sans-serif" }}>
 
         {/* LEFT/TOP — Hero + login form, vertically centered */}
         <div style={{ flex: isMobile ? "1 1 auto" : "0 0 55%",
@@ -518,7 +505,9 @@ export default function AuthScreen({ onLogin, initialTab = "login" }) {
             <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
               <div style={{
                 padding:"14px 28px", borderRadius:14,
-                border:`1.5px solid ${theme.border}`, background:theme.surface,
+                background:"var(--bg-card)", backdropFilter:"var(--bg-blur-sm)",
+                WebkitBackdropFilter:"var(--bg-blur-sm)",
+                border:"1.5px solid var(--border-glass)",
                 fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
                 letterSpacing:"-3px", color:theme.text, lineHeight:1,
               }}>Land</div>
@@ -533,13 +522,17 @@ export default function AuthScreen({ onLogin, initialTab = "login" }) {
             <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
               <div style={{
                 padding:"14px 28px", borderRadius:14,
-                border:`1.5px solid ${theme.border}`, background:theme.surface,
+                background:"var(--bg-card)", backdropFilter:"var(--bg-blur-sm)",
+                WebkitBackdropFilter:"var(--bg-blur-sm)",
+                border:"1.5px solid var(--border-glass)",
                 fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
                 letterSpacing:"-3px", color:theme.text, lineHeight:1,
               }}>role</div>
               <div style={{
                 padding:"14px 28px", borderRadius:14,
-                border:`1.5px solid ${theme.border}`, background:theme.surface,
+                background:"var(--bg-card)", backdropFilter:"var(--bg-blur-sm)",
+                WebkitBackdropFilter:"var(--bg-blur-sm)",
+                border:"1.5px solid var(--border-glass)",
                 fontSize:"clamp(36px,4.5vw,60px)", fontWeight:900,
                 letterSpacing:"-3px", color:theme.text, lineHeight:1,
               }}>faster</div>
@@ -560,15 +553,16 @@ export default function AuthScreen({ onLogin, initialTab = "login" }) {
         {/* RIGHT — Scrolling poster cards — hidden on mobile */}
         {!isMobile && <div style={{
           flex:"0 0 45%", overflow:"hidden", position:"relative",
-          background: theme.surfaceHigh, minHeight:0,
+          background:"var(--bg-panel)", backdropFilter:"var(--bg-blur-sm)",
+          WebkitBackdropFilter:"var(--bg-blur-sm)", minHeight:0,
         }}>
           {/* Top fade */}
           <div style={{ position:"absolute", top:0, left:0, right:0, height:80,
-                        background:`linear-gradient(to bottom, ${theme.surfaceHigh}, transparent)`,
+                        background:"linear-gradient(to bottom, var(--bg-panel), transparent)",
                         zIndex:10 }}/>
           {/* Bottom fade */}
           <div style={{ position:"absolute", bottom:0, left:0, right:0, height:80,
-                        background:`linear-gradient(to top, ${theme.surfaceHigh}, transparent)`,
+                        background:"linear-gradient(to top, var(--bg-panel), transparent)",
                         zIndex:10 }}/>
 
           <div style={{ display:"flex", gap:12, height:"100%", padding:"0 16px" }}>

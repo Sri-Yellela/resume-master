@@ -6,8 +6,10 @@
   align-items: center;
   gap: var(--space-6, 1.5rem);
   padding: var(--space-3, .75rem) var(--space-6, 1.5rem);
-  background: var(--color-surface, #1c1b19);
-  border-bottom: 1px solid var(--color-border, #393836);
+  background: var(--bg-page, hsl(201 100% 13% / 0.64));
+  backdrop-filter: var(--bg-blur-sm, blur(20px) saturate(160%));
+  -webkit-backdrop-filter: var(--bg-blur-sm, blur(20px) saturate(160%));
+  border-bottom: 1px solid var(--border-glass, hsl(0 0% 100% / 0.08));
   height: 56px;
   box-sizing: border-box;
   font-family: 'DM Sans', system-ui, sans-serif;
@@ -42,7 +44,7 @@
 .navbar__link:hover,
 .navbar__link--active {
   color: var(--color-text, #cdccca);
-  background: var(--color-surface-offset, #1d1c1a);
+  background: rgba(255, 255, 255, 0.06);
 }
 .navbar__link--admin { color: var(--color-warning, #bb653b); }
 
@@ -66,13 +68,13 @@
   font-family: inherit;
 }
 .navbar__btn--ghost {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.04);
   color: var(--color-text-muted, #797876);
-  border: 1px solid var(--color-border, #393836);
+  border: 1px solid var(--border-glass, hsl(0 0% 100% / 0.08));
 }
 .navbar__btn--ghost:hover {
   color: var(--color-text, #cdccca);
-  background: var(--color-surface-offset, #1d1c1a);
+  background: rgba(255, 255, 255, 0.08);
 }
 .navbar__btn--primary {
   background: var(--color-primary, #4f98a3);
@@ -94,20 +96,21 @@
   cursor: pointer;
   transition: background 180ms ease;
 }
-.navbar__hamburger:hover { background: var(--color-surface-offset, #1d1c1a); }
+.navbar__hamburger:hover { background: rgba(255, 255, 255, 0.06); }
 
 /* ── Mobile drawer ── */
 .navbar__drawer {
   position: fixed;
   top: 56px; left: 0; right: 0;
-  background: var(--color-surface, #1c1b19);
-  border-bottom: 1px solid var(--color-border, #393836);
+  background: var(--bg-menu, hsl(201 70% 10% / 0.98));
+  backdrop-filter: var(--bg-blur-sm, blur(20px) saturate(160%));
+  -webkit-backdrop-filter: var(--bg-blur-sm, blur(20px) saturate(160%));
+  border-bottom: 1px solid var(--border-glass, hsl(0 0% 100% / 0.08));
   padding: var(--space-3, .75rem);
   display: flex;
   flex-direction: column;
   gap: var(--space-1, .25rem);
   z-index: 299;
-  box-shadow: 0 4px 12px rgba(0,0,0,.3);
   animation: navbar-drawer-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes navbar-drawer-in {
@@ -130,7 +133,7 @@
   width: 100%;
   font-family: inherit;
 }
-.navbar__drawer-link:hover { background: var(--color-surface-offset, #1d1c1a); }
+.navbar__drawer-link:hover { background: rgba(255, 255, 255, 0.06); }
 .navbar__drawer-divider {
   border: none;
   border-top: 1px solid var(--color-divider, #262523);
