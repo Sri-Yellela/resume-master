@@ -47,7 +47,7 @@ src/pages/admin/DBInspector.jsx:773:    try { setData(await api(`/api/admin/db/u
 src/pages/admin/DBInspector.jsx:781:    try { setCleanResult(await api(`/api/admin/db/clean-user-pool/${selectedUser}`, { method:"POST" })); }
 src/pages/admin/DBInspector.jsx:790:    try { setRetagResult(await api(`/api/admin/db/retag-user-pool/${selectedUser}`, { method:"POST" })); }
 src/pages/admin/DBInspector.jsx:982:    try { setData(await api(`/api/admin/db/job-trace/${encodeURIComponent(jobId.trim())}`)); }
-src/pages/marketing/ContactPage.jsx:19:      await api("/api/contact", { method: "POST", body: JSON.stringify(form) });
+src/pages/marketing/ContactPage.jsx:17:      await api("/api/contact", { method: "POST", body: JSON.stringify(form) });
 src/pages/tools/ATSToolPage.jsx:43:      const r = await fetch("/api/standalone/ats", { method: "POST", credentials: "include", body: fd });
 src/pages/tools/ApplyToolPage.jsx:33:      const r = await fetch("/api/standalone/apply", { method: "POST", credentials: "include", body: fd });
 src/pages/tools/GenerateToolPage.jsx:27:      const r = await fetch("/api/standalone/generate", { method: "POST", credentials: "include", body: fd });

@@ -1,5 +1,4 @@
 // client/src/pages/marketing/AboutPage.jsx
-import { useTheme } from "../../styles/theme.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
 
@@ -19,26 +18,25 @@ const SECTIONS = [
 ];
 
 export function AboutPage() {
-  const { theme } = useTheme();
   return (
     <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
-                  background: theme.bg, color: theme.text,
+                  background: "transparent", color: "var(--color-text)",
                   fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       <ScrollDock variant="marketing" />
       <main style={{ flex: 1, maxWidth: 720, margin: "0 auto", padding: "64px 24px" }}>
         <h1 style={{ fontSize: "clamp(32px, 5vw, 52px)", fontWeight: 900, letterSpacing: "-1.5px",
-                      color: theme.text, marginBottom: 16, lineHeight: 1.1,
+                      color: "var(--color-text)", marginBottom: 16, lineHeight: 1.1,
                       fontFamily: "'Barlow Condensed', 'DM Sans', system-ui" }}>
           Built for job seekers who are serious about landing
         </h1>
         <div style={{ display: "flex", flexDirection: "column", gap: 40, marginTop: 48 }}>
           {SECTIONS.map((s, i) => (
             <div key={i}>
-              <h2 style={{ fontSize: 20, fontWeight: 800, color: theme.accent,
+              <h2 style={{ fontSize: 20, fontWeight: 800, color: "var(--color-primary)",
                             marginBottom: 12, letterSpacing: "-0.3px" }}>
                 {s.title}
               </h2>
-              <p style={{ fontSize: 15, color: theme.textMuted, lineHeight: 1.8, margin: 0 }}>
+              <p style={{ fontSize: 15, color: "var(--color-text-muted)", lineHeight: 1.8, margin: 0 }}>
                 {s.body}
               </p>
             </div>

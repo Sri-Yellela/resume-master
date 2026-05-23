@@ -19,6 +19,6 @@ src/App.jsx:364:        <Route path="/register" element={
 src/App.jsx:374:        <Route path="/app/*" element={
 src/App.jsx:381:        <Route path="/" element={
 src/App.jsx:389:        <Route path="*" element={
-src/pages/marketing/FeaturesPage.jsx:90:              { path: "/tools/ats",      title: "ATS Scorer",       desc: "Score your resume against any job description.", limit: "3 free scores / month" },
-src/pages/marketing/FeaturesPage.jsx:91:              { path: "/tools/generate", title: "Resume Generator", desc: "Generate a focused resume for any job in 30 seconds.", limit: "2 free resumes / month" },
-src/pages/marketing/FeaturesPage.jsx:92:              { path: "/tools/apply",    title: "Auto Apply",       desc: "Fill applications at any job portal automatically.", limit: "2 free runs / month (sign in required)" },
+src/pages/marketing/FeaturesPage.jsx:88:              { path: "/tools/ats",      title: "ATS Scorer",       desc: "Score your resume against any job description.", limit: "3 free scores / month" },
+src/pages/marketing/FeaturesPage.jsx:89:              { path: "/tools/generate", title: "Resume Generator", desc: "Generate a focused resume for any job in 30 seconds.", limit: "2 free resumes / month" },
+src/pages/marketing/FeaturesPage.jsx:90:              { path: "/tools/apply",    title: "Auto Apply",       desc: "Fill applications at any job portal automatically.", limit: "2 free runs / month (sign in required)" },
