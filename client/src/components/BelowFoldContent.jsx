@@ -52,8 +52,10 @@ export default function BelowFoldContent() {
       }}>
         {FEATURES.map(f => (
           <div key={f.title} style={{
-            background: theme.surface,
-            border: `1px solid ${theme.border}`,
+            background: "var(--bg-card)",
+            backdropFilter: "var(--bg-blur-sm)",
+            WebkitBackdropFilter: "var(--bg-blur-sm)",
+            border: "1px solid var(--border-glass)",
             borderRadius: 12,
             padding: "20px 18px",
           }}>

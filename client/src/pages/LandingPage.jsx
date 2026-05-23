@@ -6,7 +6,6 @@ import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
 import BelowFoldContent from "../components/BelowFoldContent.jsx";
 import { StampLogo } from "../components/StampLogo.jsx";
 import { useLogoSize } from "../hooks/useLogoSize.js";
-import { useTheme } from "../styles/theme.jsx";
 import { api } from "../lib/api.js";
 import "./LandingPage.css";
 
@@ -28,7 +27,6 @@ function JobCardWrapper({ job, index, onDismiss, isLoggedOut = false }) {
 
 // ── LandingPage ───────────────────────────────────────────────────────────────
 export default function LandingPage({ authUser }) {
-  const { theme } = useTheme();
   const isWide = useLogoSize();
   const [uiMode,      setUiMode]      = useState("hero");
   const [jobs,        setJobs]        = useState([]);
@@ -132,14 +130,21 @@ export default function LandingPage({ authUser }) {
   const isDock = uiMode === "dock";
 
   return (
-    <div className={`lp lp--${uiMode}`} style={{ background: theme.bg }}>
+    <div className={`lp lp--${uiMode}`}>
 
       {/* Hero logo zone — in absolute position, scrolls away naturally */}
       <div className={`lp__hero-zone${uiMode === 'dock' ? ' lp__hero-zone--hidden' : ''}`}>
         <StampLogo size="lg" progress={isWide ? 0 : 1} />
         <p className="lp__hero-tagline">
-          {authUser ? 'Your personalized job feed.' : 'Build the perfect resume. Land your next role.'}
+          {authUser ? 'Your personalized job feed.' : 'Apply smarter. Track everything. Land faster.'}
         </p>
+        {!authUser && (
+          <button className="lp__hero-cta" onClick={() =>
+            document.getElementById('auth-section')?.scrollIntoView({ behavior: 'smooth' })
+          }>
+            Get Started Free →
+          </button>
+        )}
       </div>
 
       {/* UnifiedSearchBar — hero centered → dock sticky-top (NavBar is rendered by App.jsx) */}
@@ -199,9 +204,9 @@ export default function LandingPage({ authUser }) {
               </div>
             )}
 
-            {/* Sign-up prompt for logged-out users */}
+            {/* Sign-up prompt for logged-out users — #auth-section anchor for hero CTA */}
             {!authUser && (
-              <div className="lp__signup-prompt">
+              <div id="auth-section" className="lp__signup-prompt">
                 <div className="lp__signup-prompt__title">
                   Sign up to save jobs, score your resume, and generate tailored applications
                 </div>
