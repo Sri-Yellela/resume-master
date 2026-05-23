@@ -160,3 +160,24 @@ Verifications run (with actual output observed):
   - api-calls: clean (endpoint content unchanged)
   - routes: clean (path values unchanged)
 Open issues: none for this step
+
+## Step 6 — LandingPage cinematic redesign
+Commit: 0a0fa7d
+Files touched: client/src/pages/LandingPage.jsx, client/src/pages/LandingPage.css,
+               client/src/components/BelowFoldContent.jsx
+Decisions:
+  - Removed useTheme from LandingPage.jsx entirely (only use was background:theme.bg).
+  - Hero copy: "Build the perfect resume..." → "Apply smarter. Track everything. Land faster."
+  - #auth-section placed on sign-up prompt (end of job grid); hero CTA smooth-scrolls there.
+  - .lp__hero-cta uses pointer-events: auto (overrides zone's none) to avoid
+    interference with the fixed UnifiedSearchBar.
+  - BelowFoldContent feature cards: var(--bg-card) + backdrop-filter + var(--border-glass).
+  - .lp__page-btn pagination: var(--bg-input) + var(--border-glass) + backdrop-filter.
+  - MarketingToolsDock (in ScrollDock.jsx) untouched — convergence preserved.
+Divergences:
+  - CLAUDE_CODE_PROMPT.md not available; spec guidance from conversation-prompt only.
+Verifications run (with actual output observed):
+  - npm run build: exit 0, 74.14 kB CSS, 4 pre-existing warnings, no new warnings
+  - api-calls: clean
+  - routes: clean
+Open issues: none for this step
