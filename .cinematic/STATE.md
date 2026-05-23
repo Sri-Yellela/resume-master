@@ -182,6 +182,40 @@ Verifications run (with actual output observed):
   - routes: clean
 Open issues: none for this step
 
+## Step 8 — Repaint JobCard, JobDetailPanel, UnifiedSearchBar
+Commit: 2c41985
+Files touched:
+  - client/src/styles/theme.jsx (added --color-primary-muted, --color-primary-text, --shadow-sm)
+  - client/src/components/JobCard.jsx (isDark removed, all theme.* → CSS vars)
+  - client/src/components/JobDetailPanel.jsx (isDark removed, theme.* → CSS vars, glass bg)
+  - client/src/components/UnifiedSearchBar.css (hero/dock → cinematic glass treatment)
+  - .cinematic/api-calls.before.txt (line-number shift regen)
+  - .cinematic/routes.before.txt (unchanged, regen confirmed identical)
+Decisions:
+  - Portaled drawer conversion deferred: selectedJob lives in JobsPanel state,
+    not JobBoardContext. Lifting to context is a large structural change and risky
+    without the master spec. Current split-panel rendering preserved.
+    Noted for revisit post-spec recovery or Step 13 acceptance.
+  - theme prop retained on sub-components (WorkBadge, IconBtn, etc.) — vestigial
+    after CSS-var migration; full prop removal cleanup deferred to Step 12.
+  - isDark removed from JobCard and JobDetailPanel function signatures; callers
+    (JobsPanel) still pass it but React silently ignores the unused prop.
+  - Hex alpha concatenation (accent+"66") replaced with color-mix() — works for
+    both hex accent strings AND CSS var accent strings (dynamic accent support).
+  - All border "theme.border+44" replaced with var(--border-glass) which is
+    already semi-transparent (8% white glass border from cinematic system).
+Divergences:
+  - Spec said "JobDetailPanel converts to portaled drawer" — skipped per above.
+  - Spec said "verify selected-job state in JobBoardContext" — it is NOT in context;
+    lifting deferred.
+Verifications run (with actual output observed):
+  - npm run build: exit 0, 5.94s, 74.27 kB CSS (+0.13 kB from new vars), 821.70 kB JS
+  - 4 pre-existing warnings, none new
+  - api-calls: content-identical, line numbers shifted (+/-2 from isDark removal)
+  - routes: content-identical (unchanged)
+Open issues:
+  - Portaled drawer + selectedJob context lift deferred
+
 ## Step 7 — TopBar flatten + ScrollDock split
 Commits: 3b79701 (7a), a61527b (7b)
 Files touched:
