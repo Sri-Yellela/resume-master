@@ -4,4 +4,4 @@ client/node_modules/
 client/dist/
 data/
 !data/*.json
-env.sh
+env.sh.cinematic/
