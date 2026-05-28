@@ -424,3 +424,30 @@ contrast / label issues pre-dating this redesign.
 - JS chunk size 823 KB (pre-existing); code-splitting deferred
 - Accessibility 89 on /login: pre-existing form label/contrast issues
 - Performance on dev: production build + CDN expected to score 70+
+
+## Audit pass (between Sprint 1 and Sprint 2) — verify + regen baselines
+
+Trigger: Sprint 1 was merged to main via squash; cinematic-redesign
+feature branch remained local-only. Verifying nothing was lost in the
+squash and the merged code is build-clean before starting Sprint 2.
+
+Verifications run:
+- main branch confirmed (`git branch --show-current` → main)
+- Top commit confirmed (`7fba760 feat: cinematic redesign (Steps 0-13)`)
+- npm run build (audit): exit 0, 74.27 kB CSS, 4 pre-existing warnings
+- Sprint 1 deliverable files present: CinematicBackground, AppShell,
+  cinematic index.css, reduced theme.jsx (323 lines, within 280-380 range)
+- Mojibake grep on JobCard.jsx: fixed — initial pass (523 replacements) +
+  residuals pass (11 replacements via fix-jobcard-residuals.mjs). Also
+  fixed rendered emoji in JobsPanel.jsx (👁, 📥 on lines 3709-3710).
+  api.js intentional mojibake-detection regex left untouched.
+  JobsPanel comment line 251 (decorative box-drawing) left as-is.
+- Contract diffs: line-number shifts only — all endpoints and routes intact
+- Baselines regenerated for Sprint 2 reference
+
+Commits:
+- 123257d  fix: restore UTF-8 in JobCard.jsx + JobsPanel.jsx (mojibake)
+- 2e167c3  fix: add emoji + symbol font fallbacks to --font-body
+- 4a1fa88  audit: regenerate Sprint 1 baselines for Sprint 2 reference
+
+Open issues: none — Sprint 1 verified clean on main, ready for Sprint 2.
