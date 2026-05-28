@@ -1,27 +1,27 @@
-﻿// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
-// client/src/components/JobCard.jsx â€” shared expandable job card
+﻿// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// client/src/components/JobCard.jsx — shared expandable job card
 import { useState, useEffect } from "react";
 import { useTheme } from "../styles/theme.jsx";
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Helpers ─────────────────────────────────────────────────────
 // Compute elapsed time since posting.
 // postedAt is stored as ISO date (e.g. "2024-03-15") after O1 normalization.
-// fallbackTs is scraped_at (Unix seconds) â€” used when postedAt is absent.
+// fallbackTs is scraped_at (Unix seconds) — used when postedAt is absent.
 function ago(postedAt, scrapedAt) {
   let ms = postedAt ? new Date(postedAt).getTime() : NaN;
   if (isNaN(ms) || ms <= 0) {
-    // Fall back to scraped_at (Unix seconds â†’ ms)
+    // Fall back to scraped_at (Unix seconds → ms)
     ms = scrapedAt != null ? Number(scrapedAt) * 1000 : NaN;
   }
-  if (isNaN(ms) || ms <= 0) return "â€”";
+  if (isNaN(ms) || ms <= 0) return "—";
   const d = Date.now() - ms;
-  if (d < 0) return "â€”";
+  if (d < 0) return "—";
   if (d < 3600000)  return `${Math.floor(d / 60000)}m`;
   if (d < 86400000) return `${Math.floor(d / 3600000)}h`;
   return `${Math.floor(d / 86400000)}d`;
 }
 
-// â”€â”€ LinkedIn "in" logo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── LinkedIn "in" logo ──────────────────────────────────────────
 function LinkedInLogo({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20" aria-label="LinkedIn" role="img">
@@ -34,10 +34,10 @@ function LinkedInLogo({ size = 16 }) {
 function PlatformLogo({ platform, size = 16, theme }) {
   const p = (platform || "").toLowerCase();
   if (p === "linkedin") return <LinkedInLogo size={size}/>;
-  return <span style={{ fontSize: size * 0.6, color: "var(--color-text-muted)" }}>â—†</span>;
+  return <span style={{ fontSize: size * 0.6, color: "var(--color-text-muted)" }}>◆</span>;
 }
 
-// â”€â”€ Company icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Company icon ────────────────────────────────────────────────
 function CompanyIcon({ company, iconUrl, size = 48 }) {
   const [failed, setFailed] = useState(false);
   const letter = (company || "?")[0].toUpperCase();
@@ -61,7 +61,7 @@ function CompanyIcon({ company, iconUrl, size = 48 }) {
   );
 }
 
-// â”€â”€ Work badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Work badge ──────────────────────────────────────────────────
 function WorkBadge({ t, theme }) {
   const map = {
     Remote: { bg:"#e8f6fb", fg:"#1a6a8a" },
@@ -84,7 +84,7 @@ function WorkBadge({ t, theme }) {
   );
 }
 
-// â”€â”€ ATS badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── ATS badge ───────────────────────────────────────────────────
 function ATSBadge({ score, onClick }) {
   if (score == null) return null;
   const bg = score >= 80 ? "#dcfce7" : score >= 60 ? "#fef9c3" : "#fee2e2";
@@ -99,7 +99,7 @@ function ATSBadge({ score, onClick }) {
   );
 }
 
-// â”€â”€ Plain description renderer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Plain description renderer ───────────────────────────────────
 function DescriptionText({ text, theme, truncate = true, maxChars = 1200 }) {
   if (!text) return null;
   const shouldTruncate = truncate && Number.isFinite(maxChars);
@@ -107,23 +107,23 @@ function DescriptionText({ text, theme, truncate = true, maxChars = 1200 }) {
   return (
     <p style={{ fontSize:11, color:"var(--color-text-muted)", lineHeight:1.7, margin:0, whiteSpace:"pre-wrap" }}>
       {trimmed}
-      {shouldTruncate && text.length > maxChars && <span style={{ color:"var(--color-text-faint)" }}> â€¦ (truncated)</span>}
+      {shouldTruncate && text.length > maxChars && <span style={{ color:"var(--color-text-faint)" }}> … (truncated)</span>}
     </p>
   );
 }
 
-// â”€â”€ Coming-soon pill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Coming-soon pill ────────────────────────────────────────────
 function ComingSoon({ label }) {
   return (
     <span style={{ fontSize:9, padding:"1px 6px", borderRadius:999, fontWeight:700,
                    background:"#f3f4f6", color:"#9ca3af", border:"1px dashed #d1d5db",
                    whiteSpace:"nowrap", letterSpacing:"0.04em" }}>
-      {label} Â· soon
+      {label} · soon
     </span>
   );
 }
 
-// â”€â”€ Icon button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Icon button ─────────────────────────────────────────────────
 function IconBtn({
   bg,
   onClick,
@@ -192,7 +192,7 @@ function ToggleIconBtn({ active, activeLabel, inactiveLabel, activeChildren, ina
   );
 }
 
-// â”€â”€ Main JobCard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Main JobCard ─────────────────────────────────────────────────
 export default function JobCard({
   job,
   theme: themeProp,
@@ -226,7 +226,7 @@ export default function JobCard({
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  // Local star/dislike state â€” used when onStar/onDislike callbacks are not provided
+  // Local star/dislike state — used when onStar/onDislike callbacks are not provided
   // (e.g. when rendered from LandingPage without a parent managing state)
   const [starred,  setStarred]  = useState(job._user?.starred  ?? job.starred  ?? false);
   const [disliked, setDisliked] = useState(job._user?.disliked ?? job.disliked ?? false);
@@ -283,13 +283,13 @@ export default function JobCard({
   const salaryStr  = hasSalary
     ? [job.salaryMin, job.salaryMax].filter(Boolean).map(v =>
         `${job.salaryCurrency || "$"}${(v/1000).toFixed(0)}k`
-      ).join("â€“")
+      ).join("→")
     : null;
 
   const yoeStr = job.expRaw
     ? job.expRaw
     : job.minYearsExp != null
-      ? (job.maxYearsExp != null ? `${job.minYearsExp}â€“${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
+      ? (job.maxYearsExp != null ? `${job.minYearsExp}→${job.maxYearsExp}y` : `${job.minYearsExp}y+`)
       : null;
 
   const handleCardClick = (e) => {
@@ -305,9 +305,9 @@ export default function JobCard({
   };
 
   // RESPONSIVE TIERS: driven by open-panel count (see getCardTier in JobsPanel.jsx).
-  // Tier 1 (full layout):   A alone or A+B â€” cardTier=1
-  // Tier 2 (medium):        manual drag to 180-279px â€” cardTier=2
-  // Tier 3 (condensed):     3+ panels open (A at 10%) â€” cardTier=3
+  // Tier 1 (full layout):   A alone or A+B — cardTier=1
+  // Tier 2 (medium):        manual drag to 180-279px — cardTier=2
+  // Tier 3 (condensed):     3+ panels open (A at 10%) — cardTier=3
   // To change tier triggers, edit getCardTier() in JobsPanel.jsx.
   const tier = cardTier;
 
@@ -317,7 +317,7 @@ export default function JobCard({
       onMouseLeave={() => setHov(false)}
       role={isLoggedOut ? "link" : undefined}
       tabIndex={isLoggedOut ? 0 : undefined}
-      aria-label={isLoggedOut ? `${job.title} at ${job.company} â€” view job` : undefined}
+      aria-label={isLoggedOut ? `${job.title} at ${job.company} — view job` : undefined}
       onKeyDown={isLoggedOut ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const url = job.url || job.applyUrl; if (url) window.open(url, "_blank", "noreferrer"); } } : undefined}
       style={{
         background: frostedBg,
@@ -340,7 +340,7 @@ export default function JobCard({
         cursor: isLoggedOut ? "pointer" : undefined,
       }}>
 
-      {/* â”€â”€ Frosted glass overlay (gradient + noise texture) â”€â”€ */}
+      {/* ── Frosted glass overlay (gradient + noise texture) ── */}
       <div aria-hidden style={{
         position:"absolute", inset:0, pointerEvents:"none", borderRadius:"inherit", zIndex:0,
         background: frostedOverlay,
@@ -352,14 +352,14 @@ export default function JobCard({
         backgroundSize:"160px 160px",
       }}/>
 
-      {/* â”€â”€ TIER_3_CONTENT: condensed narrow mode (< 180px) â”€â”€ */}
+      {/* ── TIER_3_CONTENT: condensed narrow mode (< 180px) ── */}
       {tier === 3 && (
         <div onClick={handleCardClick}
-          title={`${job.company} â€” ${job.title}`}
+          title={`${job.company} — ${job.title}`}
           style={{ padding:"10px 8px 10px", display:"flex", flexDirection:"column",
                    alignItems:"center", gap:5, cursor:"pointer", position:"relative", zIndex:1,
                    minHeight:72 }}>
-          {/* Logo â€” fades in as tier changes */}
+          {/* Logo — fades in as tier changes */}
           <div style={{ opacity:1, transition:"opacity 0.15s ease 0.05s" }}>
             <CompanyIcon company={job.company} iconUrl={job.companyIconUrl} size={32}/>
           </div>
@@ -370,7 +370,7 @@ export default function JobCard({
                          opacity:1, transition:"opacity 0.15s ease 0.05s" }}>
             {job.company}
           </span>
-          {/* Resume badge â€” only if a resume has been generated */}
+          {/* Resume badge — only if a resume has been generated */}
           {done && (
             <span style={{
               fontSize:9, fontWeight:700, padding:"2px 6px", borderRadius:999,
@@ -378,13 +378,13 @@ export default function JobCard({
               border:"1px solid color-mix(in srgb, var(--color-primary) 27%, transparent)", whiteSpace:"nowrap",
               opacity:1, transition:"opacity 0.2s ease 0.22s",
             }}>
-              âœ“ Resume
+              ✓ Resume
             </span>
           )}
         </div>
       )}
 
-      {/* â”€â”€ Tier 2: condensed two-row (180â€“279px) â”€â”€ */}
+      {/* ── Tier 2: condensed two-row (180→279px) ── */}
       {tier === 2 && (
         <div onClick={handleCardClick}
           style={{ padding:"10px 12px", display:"flex", alignItems:"center", gap:10,
@@ -409,8 +409,8 @@ export default function JobCard({
                   activeLabel="Remove from saved"
                   inactiveLabel="Save job"
                   onClick={e => { e.stopPropagation(); handleStar(); }}
-                  activeChildren="â˜…"
-                  inactiveChildren="â˜†"
+                  activeChildren="★"
+                  inactiveChildren="☆"
                 />
               )}
               {!isLoggedOut && showDislike && (
@@ -448,7 +448,7 @@ export default function JobCard({
         </div>
       )}
 
-      {/* â”€â”€ Tier 1: full layout (>= 280px) â€” unchanged â”€â”€ */}
+      {/* ── Tier 1: full layout (>= 280px) — unchanged ── */}
       {tier === 1 && (
         <div onClick={handleCardClick}
           style={{ padding: compact ? "10px 14px" : "14px 18px", display:"flex", alignItems:"center", gap:14, cursor:"pointer", position:"relative", zIndex:1 }}>
@@ -464,10 +464,10 @@ export default function JobCard({
                 {job.company}
               </span>
               {job.alreadyApplied && (
-                <span title="Applied" style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>âœ“APPLIED</span>
+                <span title="Applied" style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>✓APPLIED</span>
               )}
               {!job.alreadyApplied && job.companyAppliedBefore && (
-                <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>â†©prev</span>
+                <span title="Applied to this company before" style={{ fontSize:10, color:"#d97706" }}>↩prev</span>
               )}
               {job.visited && (
                 <span style={{ fontSize:9, color:"var(--color-text-faint)", background:"var(--color-surface-offset)",
@@ -522,7 +522,7 @@ export default function JobCard({
           {/* Right side */}
           <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
             {isLoggedOut && hov && (
-              <span style={{ fontSize:13, color:"var(--color-primary-text)", fontWeight:700, opacity:0.85 }}>â†—</span>
+              <span style={{ fontSize:13, color:"var(--color-primary-text)", fontWeight:700, opacity:0.85 }}>↗</span>
             )}
             <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
 
@@ -534,7 +534,7 @@ export default function JobCard({
                 style={{ background:"#e8f6fb", color:"#1a6a8a", padding:"2px 8px",
                          borderRadius:999, fontSize:10, fontWeight:700, cursor:"pointer",
                          border:"1px solid #A8D8EA44", display:"inline-flex", alignItems:"center", gap:3 }}>
-                {st==="loading" ? "â³" : "ðŸ“„"} Resume
+                {st==="loading" ? "⏳" : "📄"} Resume
               </span>
             )}
 
@@ -548,8 +548,8 @@ export default function JobCard({
                 activeLabel="Remove from saved"
                 inactiveLabel="Save job"
                 onClick={e => { e.stopPropagation(); handleStar(); }}
-                activeChildren="â˜…"
-                inactiveChildren="â˜†"
+                activeChildren="★"
+                inactiveChildren="☆"
               />
             )}
 
@@ -585,7 +585,7 @@ export default function JobCard({
               <IconBtn bg="var(--color-primary)" title={done ? "Regenerate" : "Generate resume"}
                 disabled={!!st} theme={theme} active={done && !generateLoading}
                 onClick={e => { e.stopPropagation(); onGenerate(done && g?.html !== "__exists__"); }}>
-                {generateLoading ? "â³" : done ? "â†»" : "âœ¦"}
+                {generateLoading ? "⏳" : done ? "↻" : "✦"}
               </IconBtn>
             )}
 
@@ -593,7 +593,7 @@ export default function JobCard({
             {!isLoggedOut && done && g?.html !== "__exists__" && showApplyButton && (
               <IconBtn bg="#0284c7" title="View in sandbox" theme={theme}
                 onClick={e => { e.stopPropagation(); onViewSandbox?.(); }}>
-                ðŸ‘
+                👁
               </IconBtn>
             )}
 
@@ -601,14 +601,14 @@ export default function JobCard({
             {!isLoggedOut && onVisit && showApplyButton && job.url && (
               <IconBtn bg="var(--color-primary)" title="Open job listing" theme={theme}
                 onClick={e => { e.stopPropagation(); onVisit(); }}>
-                â†—
+                ↗
               </IconBtn>
             )}
           </div>
         </div>
       )}
 
-      {/* â”€â”€ Expanded section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Expanded section ──────────────────────────────────── */}
       {expanded && (
         <div style={{
           borderTop: "1px solid var(--border-glass)",
@@ -643,19 +643,19 @@ export default function JobCard({
             {salaryStr && (
               <span style={{ fontSize:11, color:"#16a34a", fontWeight:700, background:"#dcfce733",
                               padding:"2px 8px", borderRadius:4 }}>
-                ðŸ’° {salaryStr}
+                💰 {salaryStr}
               </span>
             )}
             {yoeStr && (
               <span style={{ fontSize:11, color:"var(--color-text-muted)", background:"var(--color-surface-offset)",
                               padding:"2px 8px", borderRadius:4 }}>
-                ðŸŽ“ {yoeStr} exp required
+                🎓 {yoeStr} exp required
               </span>
             )}
             {job.applicantCount != null && (
               <span style={{ fontSize:11, color:"var(--color-text-muted)", background:"var(--color-surface-offset)",
                               padding:"2px 8px", borderRadius:4 }}>
-                ðŸ‘¥ {job.applicantCount > 200 ? "200+" : job.applicantCount} applicants
+                👥 {job.applicantCount > 200 ? "200+" : job.applicantCount} applicants
               </span>
             )}
             {!isLoggedOut && showApplyButton !== false && (job.applyUrl || job.url) && (
@@ -664,12 +664,12 @@ export default function JobCard({
                 style={{ fontSize:11, color:"var(--color-primary-text)", fontWeight:700,
                           textDecoration:"underline", background:"var(--color-primary-muted)",
                           padding:"2px 8px", borderRadius:4 }}>
-                Apply directly â†—
+                Apply directly ↗
               </a>
             )}
           </div>
 
-          {/* Recruiter section â€” coming soon */}
+          {/* Recruiter section — coming soon */}
           {!isLoggedOut && canUseGenerate && showApplyButton && (
             <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center" }}>
               {canUseGenerate && onGenerate && (
