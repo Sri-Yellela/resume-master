@@ -483,3 +483,33 @@ Build: exit 0, 74.37 kB CSS (unchanged), 4 pre-existing warnings, none new
   from current scan (grep 'path=' does not match 'path:'); pre-existing baseline discrepancy
 
 ### Open issues: none
+
+## Step 15 — Inline login popover on landing
+Commit: TBD
+Branch: main
+Build: exit 0, 74.43 kB CSS (+0.06 kB), 4 pre-existing warnings, none new
+JS bundle +65 kB (Radix Popover entering bundle for first time — expected)
+
+### Files created
+- client/src/components/InlineLoginPopover.jsx — Radix Popover with credentials form +
+  OAuth buttons gated by /api/auth/oauth/status (loaded on open). Submit calls existing
+  /api/auth/login endpoint, sets authContext, invokes onLogin callback.
+
+### Files modified
+- client/src/components/NavBar.jsx — added onLogin prop; imported InlineLoginPopover;
+  desktop Sign In Link → button trigger wrapped in InlineLoginPopover; /login route
+  preserved in mobile drawer as fallback
+- client/src/App.jsx — navBar const now passes onLogin callback that calls
+  setAuthUser + setAuthStatus("authenticated")
+
+### Decisions
+- Sign In Link converted to <button> for Radix asChild trigger (Link would navigate AND
+  open popover simultaneously; button lets popover intercept click cleanly)
+- Mobile drawer Sign In still links to /login (popover UX doesn't translate to mobile drawer)
+- /login route preserved as-is for direct URL access
+
+### Contract diffs
+- api-calls: endpoint content identical (OAuth status already in baseline from AuthScreen)
+- routes: App.jsx routes unchanged
+
+### Open issues: none
