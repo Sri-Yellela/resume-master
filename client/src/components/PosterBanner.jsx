@@ -1,85 +1,48 @@
-// PosterBanner.jsx — adapted from EventsCarousel.tsx (no supabase, static data)
 const POSTER_CARDS = [
-  { icon:"📊", headline:"ATS-Optimised Resumes", sub:"Generated from the job description" },
-  { icon:"🎯", headline:"Land Your Next Role",   sub:"Intelligent resume generation" },
-  { icon:"🚀", headline:"Apply Smarter",          sub:"Not harder — let AI do the heavy lifting" },
-  { icon:"📈", headline:"Track Every Application",sub:"Never lose a lead again" },
-  { icon:"🤖", headline:"AI-Powered Writing",     sub:"Claude Sonnet rewrites every bullet" },
-  { icon:"👻", headline:"Ghost Job Detection",    sub:"Filtered before you even see them" },
-  { icon:"⚡", headline:"One-Click Autofill",     sub:"Chrome extension fills forms instantly" },
-  { icon:"🏆", headline:"Beat the Screener",      sub:"ATS scoring on every generated resume" },
+  { headline: "ATS-Optimised Resumes", sub: "Generated from the job description" },
+  { headline: "Land Your Next Role",   sub: "Intelligent resume generation" },
+  { headline: "Apply Smarter",          sub: "Not harder — let AI do the heavy lifting" },
+  { headline: "Track Every Application",sub: "Never lose a lead again" },
+  { headline: "AI-Powered Writing",     sub: "Claude rewrites every bullet" },
+  { headline: "Ghost Job Detection",    sub: "Filtered before you even see them" },
+  { headline: "One-Click Autofill",     sub: "Chrome extension fills forms instantly" },
+  { headline: "Beat the Screener",      sub: "ATS scoring on every generated resume" },
 ];
 
-const col1 = POSTER_CARDS.slice(0, 4);
-const col2 = POSTER_CARDS.slice(4);
-
-// Double cards for seamless loop
-const col1Items = [...col1, ...col1];
-const col2Items = [...col2, ...col2];
+const items = [...POSTER_CARDS, ...POSTER_CARDS];
 
 export function PosterBanner() {
   return (
-    <div style={{ display:"flex", gap:12, height:"100%", overflow:"hidden" }}>
+    <div style={{
+      width: "100%", overflow: "hidden", padding: "60px 0",
+      maskImage: "linear-gradient(to right, transparent, black 8%, black 92%, transparent)",
+      WebkitMaskImage: "linear-gradient(to right, transparent, black 8%, black 92%, transparent)",
+    }}>
       <style>{`
-        @keyframes scrollUp {
-          0%   { transform: translateY(0); }
-          100% { transform: translateY(-50%); }
+        @keyframes posterScrollLeft {
+          0%   { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
         }
-        .poster-col1 { animation: scrollUp 35s linear infinite; }
-        .poster-col2 { animation: scrollUp 28s linear infinite; }
-        .poster-col1:hover, .poster-col2:hover { animation-play-state: paused; }
+        .poster-track { animation: posterScrollLeft 60s linear infinite; }
+        .poster-track:hover { animation-play-state: paused; }
       `}</style>
-
-      {/* Column 1 */}
-      <div style={{
-        flex: 1, overflow:"hidden",
-        maskImage:"linear-gradient(transparent, black 10%, black 90%, transparent)",
-        WebkitMaskImage:"linear-gradient(transparent, black 10%, black 90%, transparent)",
-      }}>
-        <div className="poster-col1">
-          {col1Items.map((c, i) => (
-            <div key={i} style={{
-              background:"rgba(255,255,255,0.04)",
-              border:"1px solid rgba(255,255,255,0.08)",
-              borderRadius:12, padding:"14px 16px",
-              marginBottom:12, flexShrink:0,
-            }}>
-              <div style={{ fontSize:22, marginBottom:6 }}>{c.icon}</div>
-              <div style={{ fontWeight:700, fontSize:13, color:"var(--tw-text-opacity,#f8fafc)", marginBottom:3 }}>
-                {c.headline}
-              </div>
-              <div style={{ fontSize:11, color:"rgba(255,255,255,0.45)", lineHeight:1.6 }}>
-                {c.sub}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Column 2 */}
-      <div style={{
-        flex: 1, overflow:"hidden",
-        maskImage:"linear-gradient(transparent, black 10%, black 90%, transparent)",
-        WebkitMaskImage:"linear-gradient(transparent, black 10%, black 90%, transparent)",
-      }}>
-        <div className="poster-col2" style={{ marginTop:40 }}>
-          {col2Items.map((c, i) => (
-            <div key={i} style={{
-              background:"rgba(255,255,255,0.04)",
-              border:"1px solid rgba(255,255,255,0.08)",
-              borderRadius:12, padding:"14px 16px",
-              marginBottom:12, flexShrink:0,
-            }}>
-              <div style={{ fontSize:22, marginBottom:6 }}>{c.icon}</div>
-              <div style={{ fontWeight:700, fontSize:13, color:"var(--tw-text-opacity,#f8fafc)", marginBottom:3 }}>
-                {c.headline}
-              </div>
-              <div style={{ fontSize:11, color:"rgba(255,255,255,0.45)", lineHeight:1.6 }}>
-                {c.sub}
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="poster-track" style={{ display: "flex", gap: 16, width: "max-content" }}>
+        {items.map((c, i) => (
+          <div key={i} style={{
+            flexShrink: 0, width: 280,
+            background: "var(--bg-card)",
+            backdropFilter: "var(--bg-blur-sm)", WebkitBackdropFilter: "var(--bg-blur-sm)",
+            border: "1px solid var(--border-glass)", borderRadius: 14,
+            padding: "20px 22px",
+          }}>
+            <div style={{
+              fontFamily: "var(--font-display, 'Instrument Serif', serif)",
+              fontSize: 18, fontWeight: 400, color: "var(--color-text)",
+              marginBottom: 6, letterSpacing: "-0.01em", lineHeight: 1.2,
+            }}>{c.headline}</div>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)", lineHeight: 1.5 }}>{c.sub}</div>
+          </div>
+        ))}
       </div>
     </div>
   );

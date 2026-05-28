@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
 import BelowFoldContent from "../components/BelowFoldContent.jsx";
+import { PosterBanner } from "../components/PosterBanner.jsx";
 import { StampLogo } from "../components/StampLogo.jsx";
 import { useLogoSize } from "../hooks/useLogoSize.js";
 import { api } from "../lib/api.js";
@@ -232,6 +233,7 @@ export default function LandingPage({ authUser }) {
 
         {/* Below-fold marketing content (logged-out only) */}
         {!authUser && <BelowFoldContent />}
+        {!authUser && <PosterBanner />}
       </main>
     </div>
   );

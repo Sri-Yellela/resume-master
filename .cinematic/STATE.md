@@ -535,3 +535,32 @@ Build: exit 0, 74.43 kB CSS (unchanged), 4 pre-existing warnings, none new
 - routes: unchanged
 
 ### Open issues: none
+
+## Step 17 — Relocate PosterBanner to landing bottom, horizontalize
+Commit: TBD
+Branch: main
+Build: exit 0, 74.41 kB CSS (-0.02 kB from removing COMPANY_POSTERS), 4 pre-existing warnings
+
+### Files modified
+- client/src/components/PosterBanner.jsx — full rewrite: vertical 2-column → horizontal
+  marquee (posterScrollLeft keyframe, 60s, pauses on hover). Emoji icons removed; cards
+  are typography-only with Instrument Serif display headline + muted sub. Items doubled
+  for seamless loop. Edge fade via maskImage gradient.
+- client/src/components/AuthScreen.jsx — removed COMPANY_POSTERS array, PosterCard
+  component, and right column (0 0 45%). Main layout changed 2-col → 1-col; left
+  column alignItems flex-start → center; subtitle textAlign: center. All form
+  functionality preserved. COMPANY_POSTERS-based poster cards gone from /login.
+- client/src/pages/LandingPage.jsx — imported PosterBanner; mounted after BelowFoldContent
+  inside <main>, guarded by {!authUser}
+
+### Decisions
+- PosterBanner renders only when logged out (consistent with BelowFoldContent gate)
+- AuthScreen: isMobile variable retained (still used for padding + gap values)
+- PosterBanner uses its own @keyframes posterScrollLeft (not conflicting with existing
+  @keyframes scrollUp used by the old vertical columns)
+
+### Contract diffs
+- api-calls: clean (no API changes)
+- routes: unchanged
+
+### Open issues: none
