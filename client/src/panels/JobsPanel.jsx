@@ -3706,8 +3706,8 @@ function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
               <ATSBadge score={v.atsScore}/>
             </div>
             <div style={{ display:"flex", gap:5, flexShrink:0 }}>
-              <IconBtn bg="#0284c7" size={26} title="Open in sandbox" onClick={() => onOpen(v)}>ðŸ‘</IconBtn>
-              <IconBtn bg="#16a34a" size={26} title="Export PDF" onClick={() => onExport(null,v.html,v.company)}>ðŸ“¥</IconBtn>
+              <IconBtn bg="#0284c7" size={26} title="Open in sandbox" onClick={() => onOpen(v)}>👁</IconBtn>
+              <IconBtn bg="#16a34a" size={26} title="Export PDF" onClick={() => onExport(null,v.html,v.company)}>📥</IconBtn>
             </div>
           </div>
         );
