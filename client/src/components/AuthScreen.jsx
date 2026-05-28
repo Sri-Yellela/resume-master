@@ -68,52 +68,6 @@ export function AtomEmblem({ size = 120, textSize = 8.5, orbitSize = 28 }) {
   );
 }
 
-// ── Company poster cards ───────────────────────────────────────
-const COMPANY_POSTERS = [
-  { name:"Google",     cat:"Tech Giant",      bg:"#4285F4", fg:"#fff", accent:"#fbbc04" },
-  { name:"Meta",       cat:"Social Platform", bg:"#0866FF", fg:"#fff", accent:"#23d5ab" },
-  { name:"Amazon",     cat:"E-Commerce",      bg:"#FF9900", fg:"#111", accent:"#146eb4" },
-  { name:"Stripe",     cat:"Fintech",         bg:"#635BFF", fg:"#fff", accent:"#00d4ff" },
-  { name:"Airbnb",     cat:"Travel & Stay",   bg:"#FF5A5F", fg:"#fff", accent:"#fff" },
-  { name:"Netflix",    cat:"Streaming",       bg:"#E50914", fg:"#fff", accent:"#fff" },
-  { name:"Snowflake",  cat:"Data Cloud",      bg:"#29B5E8", fg:"#fff", accent:"#fff" },
-  { name:"Databricks", cat:"AI Platform",     bg:"#FF3621", fg:"#fff", accent:"#fff" },
-  { name:"OpenAI",     cat:"AI Research",     bg:"#10A37F", fg:"#fff", accent:"#fff" },
-  { name:"Anthropic",  cat:"AI Safety",       bg:"#CC785C", fg:"#fff", accent:"#fff" },
-  { name:"Uber",       cat:"Mobility",        bg:"#1C1C1C", fg:"#fff", accent:"#fff" },
-  { name:"DoorDash",   cat:"Delivery",        bg:"#FF3008", fg:"#fff", accent:"#fff" },
-  { name:"Spotify",    cat:"Music & Audio",   bg:"#1DB954", fg:"#fff", accent:"#fff" },
-  { name:"Palantir",   cat:"Data Analytics",  bg:"#101113", fg:"#fff", accent:"#7b8cde" },
-  { name:"Datadog",    cat:"Observability",   bg:"#632CA6", fg:"#fff", accent:"#fff" },
-  { name:"Cloudflare", cat:"Edge Network",    bg:"#F48120", fg:"#fff", accent:"#fff" },
-];
-
-function PosterCard({ company, index }) {
-  return (
-    <div style={{
-      background: company.bg, borderRadius: 16, padding:"18px 16px",
-      marginBottom: 12, flexShrink: 0,
-      transform: `rotate(${index % 2 === 0 ? "1.2deg" : "-1.2deg"})`,
-      boxShadow: "0 8px 32px rgba(0,0,0,0.35)",
-      position: "relative", overflow: "hidden",
-      minHeight: 110, display: "flex", flexDirection: "column",
-      justifyContent: "space-between",
-    }}>
-      <div style={{ fontSize:9, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase",
-                    color:company.fg, opacity:0.7, background:"rgba(255,255,255,0.15)",
-                    borderRadius:999, padding:"3px 10px", alignSelf:"flex-start" }}>
-        {company.cat}
-      </div>
-      <div style={{ fontSize:"clamp(24px,3.5vw,42px)", fontWeight:900, letterSpacing:"-1.5px",
-                    color:company.fg, lineHeight:1, fontFamily:"'DM Sans',system-ui,sans-serif", marginTop:8 }}>
-        {company.name}
-      </div>
-      <div style={{ position:"absolute", right:-16, bottom:-16, width:64, height:64,
-                    borderRadius:"50%", background:company.accent, opacity:0.25 }}/>
-    </div>
-  );
-}
-
 // ── Auth modal ────────────────────────────────────────────────
 function AuthModal({ onLogin, initialTab = "login" }) {
   const { theme } = useTheme();
@@ -478,21 +432,18 @@ export default function AuthScreen({ onLogin, initialTab = "login" }) {
   const { theme } = useTheme();
   const { mode: vpMode } = useViewport();
   const isMobile = vpMode === "mobile" || vpMode === "tablet";
-  const col1 = COMPANY_POSTERS.slice(0, 8);
-  const col2 = COMPANY_POSTERS.slice(8);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", minHeight:"100vh" }}>
-      {/* Main content area — flex:1 fills space between top of page and footer */}
-      <div style={{ display:"flex", flexDirection: isMobile ? "column" : "row",
-                    flex:1,
+      {/* Main content area — 1-column centered */}
+      <div style={{ display:"flex", flexDirection:"column", flex:1,
                     fontFamily:"'DM Sans',system-ui,sans-serif" }}>
 
-        {/* LEFT/TOP — Hero + login form, vertically centered */}
-        <div style={{ flex: isMobile ? "1 1 auto" : "0 0 55%",
+        {/* Centered content column */}
+        <div style={{ flex:"1 1 auto",
                       display:"flex", flexDirection:"column",
-                      alignItems:"flex-start", justifyContent:"center",
-                      padding: isMobile ? "32px 24px" : "40px 64px",
+                      alignItems:"center", justifyContent:"center",
+                      padding: isMobile ? "32px 24px" : "40px 24px",
                       overflowY:"auto" }}>
           {/* Logo */}
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: isMobile ? 28 : 48 }}>
@@ -541,7 +492,7 @@ export default function AuthScreen({ onLogin, initialTab = "login" }) {
 
           {/* Subtitle */}
           <p style={{ fontSize: isMobile ? 13 : 15, color:theme.textMuted, lineHeight:1.6,
-                      marginBottom: isMobile ? 24 : 36, maxWidth:420 }}>
+                      marginBottom: isMobile ? 24 : 36, maxWidth:420, textAlign:"center" }}>
             Start with the shared jobs console, ATS Search, and Simple Apply.<br/>
             Upgrade from Plans when you need Generate or A+ Resume.
           </p>
@@ -549,37 +500,6 @@ export default function AuthScreen({ onLogin, initialTab = "login" }) {
           {/* Auth modal */}
           <AuthModal onLogin={onLogin} initialTab={initialTab}/>
         </div>
-
-        {/* RIGHT — Scrolling poster cards — hidden on mobile */}
-        {!isMobile && <div style={{
-          flex:"0 0 45%", overflow:"hidden", position:"relative",
-          background:"var(--bg-panel)", backdropFilter:"var(--bg-blur-sm)",
-          WebkitBackdropFilter:"var(--bg-blur-sm)", minHeight:0,
-        }}>
-          {/* Top fade */}
-          <div style={{ position:"absolute", top:0, left:0, right:0, height:80,
-                        background:"linear-gradient(to bottom, var(--bg-panel), transparent)",
-                        zIndex:10 }}/>
-          {/* Bottom fade */}
-          <div style={{ position:"absolute", bottom:0, left:0, right:0, height:80,
-                        background:"linear-gradient(to top, var(--bg-panel), transparent)",
-                        zIndex:10 }}/>
-
-          <div style={{ display:"flex", gap:12, height:"100%", padding:"0 16px" }}>
-            {/* Column 1 — scrolls up */}
-            <div style={{ flex:1, overflow:"hidden" }}>
-              <div style={{ display:"flex", flexDirection:"column", animation:"scrollUp 30s linear infinite" }}>
-                {[...col1,...col1].map((c,i) => <PosterCard key={i} company={c} index={i}/>)}
-              </div>
-            </div>
-            {/* Column 2 — scrolls up slightly slower */}
-            <div style={{ flex:1, overflow:"hidden" }}>
-              <div style={{ display:"flex", flexDirection:"column", animation:"scrollUp 38s linear infinite", marginTop:60 }}>
-                {[...col2,...col2].map((c,i) => <PosterCard key={i} company={c} index={i+1}/>)}
-              </div>
-            </div>
-          </div>
-        </div>}
       </div>
       <Footer/>
     </div>
