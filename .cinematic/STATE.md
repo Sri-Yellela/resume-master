@@ -513,3 +513,25 @@ JS bundle +65 kB (Radix Popover entering bundle for first time — expected)
 - routes: App.jsx routes unchanged
 
 ### Open issues: none
+
+## Step 16 — Remove emoji icons from BelowFoldContent
+Commit: TBD
+Branch: main
+Build: exit 0, 74.43 kB CSS (unchanged), 4 pre-existing warnings, none new
+
+### Files modified
+- client/src/components/BelowFoldContent.jsx — removed icon field from FEATURES array;
+  removed useTheme() import and theme destructure; icon <div> replaced with numbered badge
+  (01/02/03/04) in display serif + thin accent rule; all theme.text / theme.textMuted /
+  theme.accent replaced with CSS vars (--color-text, --color-text-muted, --color-primary)
+
+### Decisions
+- Card padding bumped 20px 18px → 24px 22px per spec to give numbers room to breathe
+- Section header font/size retained; only color changed to CSS var
+- useTheme import removed entirely (no remaining theme.* refs in file)
+
+### Contract diffs
+- api-calls: clean (BelowFoldContent makes no API calls)
+- routes: unchanged
+
+### Open issues: none
