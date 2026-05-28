@@ -1,758 +1,706 @@
-src/App.jsx:131:  const { theme } = useTheme();
-src/App.jsx:132:  const { mode: vpMode } = useViewport();
-src/App.jsx:134:  const location = useLocation();
-src/App.jsx:135:  const navigate = useNavigate();
-src/App.jsx:136:  const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
-src/App.jsx:147:  const handleLogout = useCallback(async () => {
-src/App.jsx:153:  const handlePanelChange = useCallback((tab) => {
-src/App.jsx:164:  const handleProfileActivate = useCallback(() => {
-src/App.jsx:168:  useInactivityLogout(handleLogout, true);
-src/App.jsx:170:  useSyncEvents({
-src/App.jsx:177:  useEffect(() => {
-src/App.jsx:187:  useEffect(() => {
-src/App.jsx:202:  useEffect(() => {
-src/App.jsx:250:  const { theme } = useTheme();
-src/App.jsx:251:  const [authUser,    setAuthUser]    = useState(null);
-src/App.jsx:252:  const [authStatus,  setAuthStatus]  = useState("unknown");
-src/App.jsx:254:  const handleAdminLogout = useCallback(async () => {
-src/App.jsx:261:  useEffect(() => {
-src/App.jsx:284:  const handlePublicLogout = useCallback(async () => {
-src/App.jsx:84:  const { progress: p } = useAppScroll();
-src/components/AdminLayout.jsx:6:  const { theme } = useTheme();
-src/components/AuthScreen.jsx:119:  const { theme, isDark } = useTheme();
-src/components/AuthScreen.jsx:120:  const [tab,     setTab]   = useState(initialTab);
-src/components/AuthScreen.jsx:121:  const [regStep, setRegStep] = useState(1);
-src/components/AuthScreen.jsx:123:  const [login,   setLoginF]  = useState({ username:"", password:"" });
-src/components/AuthScreen.jsx:125:  const [step1,   setStep1]   = useState({ username:"", password:"", confirmPassword:"", apify_token:"" });
-src/components/AuthScreen.jsx:127:  const [step2,   setStep2]   = useState({ first_name:"", middle_name:"", last_name:"", name_suffix:"", email:"", phone:"" });
-src/components/AuthScreen.jsx:128:  const [reset,   setReset]   = useState({ email:"", otp:"", password:"", confirmPassword:"", token:"" });
-src/components/AuthScreen.jsx:129:  const [resetSent, setResetSent] = useState(false);
-src/components/AuthScreen.jsx:130:  const [oauthStatus, setOauthStatus] = useState(null);
-src/components/AuthScreen.jsx:131:  const [error,   setError]   = useState("");
-src/components/AuthScreen.jsx:132:  const [notice,  setNotice]  = useState("");
-src/components/AuthScreen.jsx:133:  const [loading, setLoading] = useState(false);
-src/components/AuthScreen.jsx:143:  useEffect(() => {
-src/components/AuthScreen.jsx:157:  useEffect(() => {
-src/components/AuthScreen.jsx:164:  useEffect(() => {
-src/components/AuthScreen.jsx:20:  const { theme } = useTheme();
-src/components/AuthScreen.jsx:491:  const { theme } = useTheme();
-src/components/AuthScreen.jsx:492:  const { mode: vpMode } = useViewport();
-src/components/BelowFoldContent.jsx:29:  const { theme } = useTheme();
-src/components/CTAButton.jsx:6:  const [hovered, setHovered] = useState(false);
-src/components/CoverLetterModal.jsx:12:  const { theme, isDark } = useTheme();
-src/components/CoverLetterModal.jsx:13:  const [tone, setTone] = useState("professional");
-src/components/CoverLetterModal.jsx:14:  const [jd, setJd] = useState(jobDescription || "");
-src/components/CoverLetterModal.jsx:15:  const [loading, setLoading] = useState(false);
-src/components/CoverLetterModal.jsx:16:  const [result, setResult] = useState("");
-src/components/CoverLetterModal.jsx:17:  const [error, setError] = useState("");
-src/components/CoverLetterModal.jsx:18:  const [copied, setCopied] = useState(false);
-src/components/DomainProfileWizard.jsx:105:  const { theme } = useTheme();
-src/components/DomainProfileWizard.jsx:107:  const [step,       setStep]       = useState(1);
-src/components/DomainProfileWizard.jsx:108:  const [domains,    setDomains]    = useState([]);
-src/components/DomainProfileWizard.jsx:109:  const [domainKey,  setDomainKey]  = useState(initialProfile?.domain || null);
-src/components/DomainProfileWizard.jsx:110:  const [domainMeta, setDomainMeta] = useState(null);
-src/components/DomainProfileWizard.jsx:111:  const [seniority,  setSeniority]  = useState(initialProfile?.seniority || "mid");
-src/components/DomainProfileWizard.jsx:112:  const [titles,     setTitles]     = useState(() => new Set(arrayField(initialProfile?.target_titles)));
-src/components/DomainProfileWizard.jsx:113:  const [keywords,   setKeywords]   = useState(() => new Set(arrayField(initialProfile?.selected_keywords)));
-src/components/DomainProfileWizard.jsx:114:  const [verbs,      setVerbs]      = useState(() => new Set(arrayField(initialProfile?.selected_verbs)));
-src/components/DomainProfileWizard.jsx:115:  const [tools,      setTools]      = useState(() => new Set(arrayField(initialProfile?.selected_tools)));
-src/components/DomainProfileWizard.jsx:116:  const [industries, setIndustries] = useState(new Set());
-src/components/DomainProfileWizard.jsx:117:  const [otherRoleTitle, setOtherRoleTitle] = useState("");
-src/components/DomainProfileWizard.jsx:118:  const [otherRoleFamily, setOtherRoleFamily] = useState("");
-src/components/DomainProfileWizard.jsx:119:  const [otherWorkPreference, setOtherWorkPreference] = useState("");
-src/components/DomainProfileWizard.jsx:120:  const [otherNotes, setOtherNotes] = useState("");
-src/components/DomainProfileWizard.jsx:121:  const [aiChips,    setAiChips]    = useState(null);
-src/components/DomainProfileWizard.jsx:122:  const [loadingAi,  setLoadingAi]  = useState(false);
-src/components/DomainProfileWizard.jsx:123:  const [profileName, setProfileName] = useState(initialProfile?.profile_name || "");
-src/components/DomainProfileWizard.jsx:124:  const [saving,        setSaving]        = useState(false);
-src/components/DomainProfileWizard.jsx:125:  const [error,         setError]         = useState("");
-src/components/DomainProfileWizard.jsx:126:  const [loadingDomains, setLoadingDomains] = useState(true);
-src/components/DomainProfileWizard.jsx:127:  const [domainsError,   setDomainsError]   = useState(false);
-src/components/DomainProfileWizard.jsx:138:  useEffect(() => { loadDomains(); }, []);
-src/components/DomainProfileWizard.jsx:140:  useEffect(() => {
-src/components/DomainProfileWizard.jsx:144:  useEffect(() => {
-src/components/DomainProfileWizard.jsx:156:  useEffect(() => {
-src/components/DomainProfileWizard.jsx:183:  const toggleSet = useCallback((setter, value) => {
-src/components/DomainProfileWizard.jsx:191:  const addToSet = useCallback((setter, value) => {
-src/components/DomainProfileWizard.jsx:26:  const { theme } = useTheme();
-src/components/DomainProfileWizard.jsx:47:  const { theme } = useTheme();
-src/components/DomainProfileWizard.jsx:48:  const [val, setVal] = useState("");
-src/components/DomainProfileWizard.jsx:76:  const { theme } = useTheme();
-src/components/JobCard.jsx:139:  const [hov, setHov] = useState(false);
-src/components/JobCard.jsx:224:  const { theme: ctxTheme, isDark: ctxIsDark } = useTheme();
-src/components/JobCard.jsx:228:  const [hov,      setHov]      = useState(false);
-src/components/JobCard.jsx:229:  const [expanded, setExpanded] = useState(false);
-src/components/JobCard.jsx:233:  const [starred,  setStarred]  = useState(job._user?.starred  ?? job.starred  ?? false);
-src/components/JobCard.jsx:234:  const [disliked, setDisliked] = useState(job._user?.disliked ?? job.disliked ?? false);
-src/components/JobCard.jsx:237:  useEffect(() => {
-src/components/JobCard.jsx:42:  const [failed, setFailed] = useState(false);
-src/components/JobDetailPanel.jsx:117:  const closeSemi = useCallback(async () => {
-src/components/JobDetailPanel.jsx:29:  const [failed, setFailed] = useState(false);
-src/components/JobDetailPanel.jsx:49:  const [hov, setHov] = useState(false);
-src/components/JobDetailPanel.jsx:88:  const [showCoverLetter, setShowCoverLetter] = useState(false);
-src/components/JobDetailPanel.jsx:91:  const [applyLoading,  setApplyLoading]  = useState(false);
-src/components/JobDetailPanel.jsx:92:  const [applyResult,   setApplyResult]   = useState(null); // { status, message, error }
-src/components/JobDetailPanel.jsx:93:  const [semiActive,    setSemiActive]    = useState(false);
-src/components/JobDetailPanel.jsx:95:  const handleAutoApply = useCallback(async (mode = "semi") => {
-src/components/MarketingNav.jsx:6:  const { theme } = useTheme();
-src/components/MetaChips.jsx:10:  const { theme } = useTheme();
-src/components/NavBar.jsx:18:  const loc = useLocation();
-src/components/NavBar.jsx:19:  const [open, setOpen] = useState(false);
-src/components/NavBar.jsx:20:  const isWide = useLogoSize(); // true when >=768px → show full "RESUME MASTER"
-src/components/NavBar.jsx:23:  useEffect(() => { setOpen(false); }, [loc.pathname]);
-src/components/ProfileSelectorDropdown.jsx:14:  const [open, setOpen] = useState(false);
-src/components/ProfileSelectorDropdown.jsx:15:  const [rect, setRect] = useState(null);
-src/components/ProfileSelectorDropdown.jsx:16:  const buttonRef = useRef(null);
-src/components/RotatingBadge.jsx:5:  const { theme } = useTheme();
-src/components/ScrollDock.jsx:100:  const ref = useRef(null);
-src/components/ScrollDock.jsx:101:  useClickOutside(ref, () => setOpen(false));
-src/components/ScrollDock.jsx:103:  const load = useCallback(async () => {
-src/components/ScrollDock.jsx:111:  useEffect(() => { load(); }, [load]);
-src/components/ScrollDock.jsx:1148:  const [hovered, setHovered] = useState(false);
-src/components/ScrollDock.jsx:114:  useSyncEvents({
-src/components/ScrollDock.jsx:222:  const [open, setOpen] = useState(false);
-src/components/ScrollDock.jsx:223:  const [profiles, setProfiles] = useState([]);
-src/components/ScrollDock.jsx:224:  const ref = useRef(null);
-src/components/ScrollDock.jsx:225:  useClickOutside(ref, () => setOpen(false));
-src/components/ScrollDock.jsx:227:  useEffect(() => {
-src/components/ScrollDock.jsx:313:  const [open, setOpen] = useState(false);
-src/components/ScrollDock.jsx:314:  const ref = useRef(null);
-src/components/ScrollDock.jsx:315:  useClickOutside(ref, () => setOpen(false));
-src/components/ScrollDock.jsx:367:  const [open, setOpen] = useState(false);
-src/components/ScrollDock.jsx:368:  const ref = useRef(null);
-src/components/ScrollDock.jsx:369:  useClickOutside(ref, () => setOpen(false));
-src/components/ScrollDock.jsx:388:  const [prefs, setPrefs] = useState({ itemsOrder: DEFAULT_ORDER, dockEnabled: true });
-src/components/ScrollDock.jsx:389:  const saveTimer = useRef(null);
-src/components/ScrollDock.jsx:391:  useEffect(() => {
-src/components/ScrollDock.jsx:397:  const save = useCallback((updated) => {
-src/components/ScrollDock.jsx:591:  const [open, setOpen] = useState(false);
-src/components/ScrollDock.jsx:592:  const [profiles, setProfiles] = useState([]);
-src/components/ScrollDock.jsx:593:  const ref = useRef(null);
-src/components/ScrollDock.jsx:594:  useClickOutside(ref, () => setOpen(false));
-src/components/ScrollDock.jsx:595:  const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
-src/components/ScrollDock.jsx:600:  useEffect(() => {
-src/components/ScrollDock.jsx:61:function useClickOutside(ref, onClose) {
-src/components/ScrollDock.jsx:62:  useEffect(() => {
-src/components/ScrollDock.jsx:729:  useEffect(() => {
-src/components/ScrollDock.jsx:735:  useEffect(() => {
-src/components/ScrollDock.jsx:793:function useProximityReveal(dockEnabled) {
-src/components/ScrollDock.jsx:794:  const [nearTop, setNearTop] = useState(false);
-src/components/ScrollDock.jsx:795:  const hideTimer = useRef(null);
-src/components/ScrollDock.jsx:797:  useEffect(() => {
-src/components/ScrollDock.jsx:875:  const { theme } = useTheme();
-src/components/ScrollDock.jsx:876:  const { progress: rawProgress, pinned } = useAppScroll();
-src/components/ScrollDock.jsx:879:  const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
-src/components/ScrollDock.jsx:881:  useEffect(() => {
-src/components/ScrollDock.jsx:888:  const [dockEnabled, setDockEnabled] = useState(true);
-src/components/ScrollDock.jsx:889:  useEffect(() => {
-src/components/ScrollDock.jsx:974:  const { theme } = useTheme();
-src/components/ScrollDock.jsx:975:  const { mode: vpMode } = useViewport();
-src/components/ScrollDock.jsx:978:  const scrolled = useScrollCollapsed(60, false);
-src/components/ScrollDock.jsx:97:  const [open, setOpen] = useState(false);
-src/components/ScrollDock.jsx:981:  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-src/components/ScrollDock.jsx:98:  const [notifs, setNotifs] = useState([]);
-src/components/ScrollDock.jsx:99:  const [unread, setUnread] = useState(0);
-src/components/SectionHeader.jsx:5:  const { theme } = useTheme();
-src/components/TopBar.jsx:103:  useEffect(() => { load(); }, [load]);
-src/components/TopBar.jsx:105:  useSyncEvents({
-src/components/TopBar.jsx:205:  const [open, setOpen] = useState(false);
-src/components/TopBar.jsx:206:  const [rect, setRect] = useState(null);
-src/components/TopBar.jsx:207:  const triggerRef = useRef(null);
-src/components/TopBar.jsx:263:  const [open,        setOpen]        = useState(false);
-src/components/TopBar.jsx:264:  const [rect,        setRect]        = useState(null);
-src/components/TopBar.jsx:265:  const triggerRef = useRef(null);
-src/components/TopBar.jsx:266:  const { accentId, setAccentId, ACCENT_OPTIONS, bgMode, setBgMode, BG_MODES } = useTheme();
-src/components/TopBar.jsx:444:  const { theme } = useTheme();
-src/components/TopBar.jsx:445:  const { progress: rawProgress, pinned } = useAppScroll();
-src/components/TopBar.jsx:450:  const [hovered,       setHovered]       = useState(false);
-src/components/TopBar.jsx:451:  const [searchFocused, setSearchFocused] = useState(false);
-src/components/TopBar.jsx:452:  const hoverTimerRef = useRef(null);
-src/components/TopBar.jsx:455:  useEffect(() => { if (!scrolled) { setHovered(false); setSearchFocused(false); } }, [scrolled]);
-src/components/TopBar.jsx:458:  useEffect(() => { injectKeyframes(); }, []);
-src/components/TopBar.jsx:461:  const handleMouseEnter = useCallback(() => {
-src/components/TopBar.jsx:466:  const handleMouseLeave = useCallback(() => {
-src/components/TopBar.jsx:473:  } = useJobBoard() || {};
-src/components/TopBar.jsx:475:  const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
-src/components/TopBar.jsx:476:  const [jobsZone, setJobsZone] = useState(null);
-src/components/TopBar.jsx:477:  useEffect(() => {
-src/components/TopBar.jsx:483:  useEffect(() => {
-src/components/TopBar.jsx:498:  const [profiles, setProfiles] = useState([]);
-src/components/TopBar.jsx:499:  const loadProfiles = useCallback(() => {
-src/components/TopBar.jsx:511:  useEffect(() => { loadProfiles(); }, [loadProfiles]);
-src/components/TopBar.jsx:513:  useSyncEvents({
-src/components/TopBar.jsx:89:  const [open, setOpen] = useState(false);
-src/components/TopBar.jsx:90:  const [rect, setRect] = useState(null);
-src/components/TopBar.jsx:91:  const [notifs, setNotifs] = useState([]);
-src/components/TopBar.jsx:92:  const [unread, setUnread] = useState(0);
-src/components/TopBar.jsx:93:  const triggerRef = useRef(null);
-src/components/TopBar.jsx:95:  const load = useCallback(async () => {
-src/components/UnifiedSearchBar.jsx:41:  const [q,       setQ]       = useState('');
-src/components/UnifiedSearchBar.jsx:42:  const [loc,     setLoc]     = useState('');
-src/components/UnifiedSearchBar.jsx:43:  const [exp,     setExp]     = useState('');
-src/components/UnifiedSearchBar.jsx:44:  const [domain,  setDomain]  = useState('');
-src/components/UnifiedSearchBar.jsx:45:  const [status,  setStatus]  = useState('');
-src/components/UnifiedSearchBar.jsx:46:  const [uiState, setUiState] = useState('idle');
-src/components/UnifiedSearchBar.jsx:47:  const [cdw,     setCdw]     = useState(null);
-src/components/UnifiedSearchBar.jsx:49:  const clicks  = useRef(0);
-src/components/UnifiedSearchBar.jsx:50:  const cTmr    = useRef(null);
-src/components/UnifiedSearchBar.jsx:51:  const cdwInt  = useRef(null);
-src/components/UnifiedSearchBar.jsx:54:  useEffect(() => {
-src/components/reference/AuthSheetReference.jsx:10:  const [email, setEmail] = useState('');
-src/components/reference/AuthSheetReference.jsx:11:  const [password, setPassword] = useState('');
-src/components/reference/AuthSheetReference.jsx:12:  const [loading, setLoading] = useState(false);
-src/components/reference/AuthSheetReference.jsx:9:  const [isSignUp, setIsSignUp] = useState(false);
-src/components/reference/NavbarReference.jsx:10:  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-src/components/ui/carousel.jsx:10:  const context = React.useContext(CarouselContext);
-src/components/ui/carousel.jsx:17:    const [carouselRef, api] = useEmblaCarousel(
-src/components/ui/carousel.jsx:21:    const [canScrollPrev, setCanScrollPrev] = React.useState(false);
-src/components/ui/carousel.jsx:22:    const [canScrollNext, setCanScrollNext] = React.useState(false);
-src/components/ui/carousel.jsx:24:    const onSelect = React.useCallback((api) => {
-src/components/ui/carousel.jsx:30:    const scrollPrev = React.useCallback(() => { api?.scrollPrev(); }, [api]);
-src/components/ui/carousel.jsx:31:    const scrollNext = React.useCallback(() => { api?.scrollNext(); }, [api]);
-src/components/ui/carousel.jsx:33:    const handleKeyDown = React.useCallback((event) => {
-src/components/ui/carousel.jsx:38:    React.useEffect(() => {
-src/components/ui/carousel.jsx:43:    React.useEffect(() => {
-src/components/ui/carousel.jsx:63:  const { carouselRef, orientation } = useCarousel();
-src/components/ui/carousel.jsx:73:  const { orientation } = useCarousel();
-src/components/ui/carousel.jsx:81:  const { orientation, scrollPrev, canScrollPrev } = useCarousel();
-src/components/ui/carousel.jsx:92:  const { orientation, scrollNext, canScrollNext } = useCarousel();
-src/components/ui/carousel.jsx:9:function useCarousel() {
-src/components/ui/chart.jsx:11:function useChart() {
-src/components/ui/chart.jsx:12:  const context = React.useContext(ChartContext);
-src/components/ui/chart.jsx:204:  const { config } = useChart();
-src/components/ui/chart.jsx:22:  const uniqueId = React.useId();
-src/components/ui/chart.jsx:94:    const { config } = useChart();
-src/components/ui/chart.jsx:96:    const tooltipLabel = React.useMemo(() => {
-src/components/ui/form.jsx:21:  const fieldContext = React.useContext(FormFieldContext);
-src/components/ui/form.jsx:22:  const itemContext = React.useContext(FormItemContext);
-src/components/ui/form.jsx:23:  const { getFieldState, formState } = useFormContext();
-src/components/ui/form.jsx:46:  const id = React.useId();
-src/components/ui/form.jsx:57:  const { error, formItemId } = useFormField();
-src/components/ui/form.jsx:64:  const { error, formItemId, formDescriptionId, formMessageId } = useFormField();
-src/components/ui/form.jsx:79:  const { formDescriptionId } = useFormField();
-src/components/ui/form.jsx:86:  const { error, formMessageId } = useFormField();
-src/components/ui/input-otp.jsx:22:  const inputOTPContext = React.useContext(OTPInputContext);
-src/components/ui/sonner.jsx:5:  const { theme = "system" } = useTheme();
-src/components/ui/toaster.jsx:5:  const { toasts } = useToast();
-src/components/ui/toggle-group.jsx:21:  const context = React.useContext(ToggleGroupContext);
-src/contexts/AppScrollContext.jsx:19:  const [progress, setProgress] = useState(0);
-src/contexts/AppScrollContext.jsx:20:  const [pinned,   setPinned]   = useState(false);
-src/contexts/AppScrollContext.jsx:22:  const scrollToTopRef = useRef(null);
-src/contexts/AppScrollContext.jsx:24:  const update = useCallback((p) => {
-src/contexts/AppScrollContext.jsx:31:  const pin   = useCallback(() => setPinned(true),  []);
-src/contexts/AppScrollContext.jsx:32:  const unpin = useCallback(() => setPinned(false), []);
-src/contexts/AppScrollContext.jsx:41:export function useAppScroll() {
-src/contexts/AppScrollContext.jsx:42:  return useContext(AppScrollContext);
-src/contexts/JobBoardContext.jsx:10:  const [activeProfileId, setActiveProfileId] = useState(null);
-src/contexts/JobBoardContext.jsx:11:  const profileCacheRef = useRef(new Map());
-src/contexts/JobBoardContext.jsx:13:  const getProfileCache = useCallback((profileId) => {
-src/contexts/JobBoardContext.jsx:18:  const setProfileCache = useCallback((profileId, snapshot) => {
-src/contexts/JobBoardContext.jsx:23:  const deleteProfileCache = useCallback((profileId) => {
-src/contexts/JobBoardContext.jsx:43:export function useJobBoard() { return useContext(JobBoardContext); }
-src/contexts/JobBoardContext.jsx:7:  const [boardTab,    setBoardTab]    = useState("all");
-src/contexts/JobBoardContext.jsx:8:  const [localSearch, setLocalSearch] = useState("");
-src/contexts/JobBoardContext.jsx:9:  const [sortBy,      setSortBy]      = useState("dateDesc");
-src/hooks/use-toast.js:52:export function useToast() {
-src/hooks/use-toast.js:53:  const [state, setState] = useState(toastState);
-src/hooks/use-toast.js:55:  const subscribe = useCallback((listener) => {
-src/hooks/use-toast.js:62:  useState(() => {
-src/hooks/useInactivityLogout.js:10:  const timerRef    = useRef(null);
-src/hooks/useInactivityLogout.js:11:  const hiddenAtRef = useRef(null);
-src/hooks/useInactivityLogout.js:13:  useEffect(() => {
-src/hooks/useInactivityLogout.js:9:export function useInactivityLogout(onLogout, enabled = true) {
-src/hooks/useLogoSize.js:5:export function useLogoSize(breakpoint = 768) {
-src/hooks/useLogoSize.js:6:  const [isWide, setIsWide] = useState(
-src/hooks/useLogoSize.js:9:  useEffect(() => {
-src/hooks/useScrollCollapsed.js:10:  useEffect(() => {
-src/hooks/useScrollCollapsed.js:7:export function useScrollCollapsed(threshold = 60, disabled = false) {
-src/hooks/useScrollCollapsed.js:8:  const [collapsed, setCollapsed] = useState(false);
-src/hooks/useSyncEvents.js:15:export function useSyncEvents(handlers) {
-src/hooks/useSyncEvents.js:16:  const handlersRef = useRef(handlers);
-src/hooks/useSyncEvents.js:19:  useEffect(() => {
-src/hooks/useViewport.js:3:export function useViewport() {
-src/hooks/useViewport.js:4:  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
-src/hooks/useViewport.js:5:  useEffect(() => {
-src/pages/AdminLoginPage.jsx:10:  const [error,   setError]   = useState("");
-src/pages/AdminLoginPage.jsx:11:  const [loading, setLoading] = useState(false);
-src/pages/AdminLoginPage.jsx:8:  const { theme } = useTheme();
-src/pages/AdminLoginPage.jsx:9:  const [form,    setForm]    = useState({ username:"", password:"" });
-src/pages/LandingPage.jsx:15:  const [JobCard, setJC] = useState(null);
-src/pages/LandingPage.jsx:16:  useEffect(() => {
-src/pages/LandingPage.jsx:31:  const { theme } = useTheme();
-src/pages/LandingPage.jsx:32:  const isWide = useLogoSize();
-src/pages/LandingPage.jsx:33:  const [uiMode,      setUiMode]      = useState("hero");
-src/pages/LandingPage.jsx:34:  const [jobs,        setJobs]        = useState([]);
-src/pages/LandingPage.jsx:35:  const [total,       setTotal]       = useState(0);
-src/pages/LandingPage.jsx:36:  const [page,        setPage]        = useState(1);
-src/pages/LandingPage.jsx:37:  const [loading,     setLoading]     = useState(true);
-src/pages/LandingPage.jsx:38:  const [searchRes,   setSearchRes]   = useState(null);
-src/pages/LandingPage.jsx:39:  const liveSearchDone = useRef(false);
-src/pages/LandingPage.jsx:46:  const loadFeed = useCallback(async (p = 1) => {
-src/pages/LandingPage.jsx:66:  useEffect(() => { loadFeed(1); }, [loadFeed]);
-src/pages/LandingPage.jsx:69:  useEffect(() => {
-src/pages/LandingPage.jsx:79:  const handleLocalFilter = useCallback(({ query, location, experience, domain, status }) => {
-src/pages/LandingPage.jsx:96:  const handleSearch = useCallback(async (params) => {
-src/pages/admin/DBInspector.jsx:100:  const [selected, setSelected] = useState(null);
-src/pages/admin/DBInspector.jsx:101:  const [scale, setScale] = useState(1);
-src/pages/admin/DBInspector.jsx:102:  const [offset, setOffset] = useState({ x: 20, y: 20 });
-src/pages/admin/DBInspector.jsx:103:  const [drag, setDrag] = useState(null);
-src/pages/admin/DBInspector.jsx:105:  useEffect(() => {
-src/pages/admin/DBInspector.jsx:1171:  const [users, setUsers] = useState([]);
-src/pages/admin/DBInspector.jsx:1172:  const [selectedUser, setSelectedUser] = useState("");
-src/pages/admin/DBInspector.jsx:1173:  const [data, setData] = useState(null);
-src/pages/admin/DBInspector.jsx:1174:  const [loading, setLoading] = useState(false);
-src/pages/admin/DBInspector.jsx:1175:  const [error, setError] = useState(null);
-src/pages/admin/DBInspector.jsx:1176:  const [showSql, setShowSql] = useState(false);
-src/pages/admin/DBInspector.jsx:1177:  const [rawSql, setRawSql] = useState("SELECT * FROM scraped_jobs ORDER BY scraped_at DESC LIMIT 10;");
-src/pages/admin/DBInspector.jsx:1178:  const [rawResults, setRawResults] = useState(null);
-src/pages/admin/DBInspector.jsx:1179:  const [rawLoading, setRawLoading] = useState(false);
-src/pages/admin/DBInspector.jsx:1180:  const [rawError, setRawError] = useState(null);
-src/pages/admin/DBInspector.jsx:1182:  useEffect(() => {
-src/pages/admin/DBInspector.jsx:1460:  const [tables, setTables] = useState([]);
-src/pages/admin/DBInspector.jsx:1461:  const [selected, setSelected] = useState("");
-src/pages/admin/DBInspector.jsx:1462:  const [data, setData] = useState(null);
-src/pages/admin/DBInspector.jsx:1463:  const [page, setPage] = useState(1);
-src/pages/admin/DBInspector.jsx:1464:  const [loading, setLoading] = useState(false);
-src/pages/admin/DBInspector.jsx:1465:  const [error, setError] = useState(null);
-src/pages/admin/DBInspector.jsx:1467:  useEffect(() => {
-src/pages/admin/DBInspector.jsx:1475:  useEffect(() => {
-src/pages/admin/DBInspector.jsx:1571:  const [data, setData] = useState({ jobs: [], profiles: [] });
-src/pages/admin/DBInspector.jsx:1572:  const [query, setQuery] = useState("");
-src/pages/admin/DBInspector.jsx:1573:  const [roleKey, setRoleKey] = useState("");
-src/pages/admin/DBInspector.jsx:1574:  const [saving, setSaving] = useState(null);
-src/pages/admin/DBInspector.jsx:1575:  const [error, setError] = useState(null);
-src/pages/admin/DBInspector.jsx:1576:  const [status, setStatus] = useState("");
-src/pages/admin/DBInspector.jsx:1578:  const load = useCallback(() => {
-src/pages/admin/DBInspector.jsx:1588:  useEffect(() => { load(); }, [load]);
-src/pages/admin/DBInspector.jsx:1705:  const { theme } = useTheme();
-src/pages/admin/DBInspector.jsx:1706:  const [activeTab, setActiveTab] = useState("scrape");
-src/pages/admin/DBInspector.jsx:1707:  const [lastUpdated, setLastUpdated] = useState(null);
-src/pages/admin/DBInspector.jsx:1708:  const [autoRefresh, setAutoRefresh] = useState(0);
-src/pages/admin/DBInspector.jsx:1709:  const [refreshKey, setRefreshKey] = useState(0);
-src/pages/admin/DBInspector.jsx:1710:  const refreshTimerRef = useRef(null);
-src/pages/admin/DBInspector.jsx:1711:  const [traceJobId, setTraceJobId] = useState(null);
-src/pages/admin/DBInspector.jsx:1713:  useEffect(() => {
-src/pages/admin/DBInspector.jsx:239:  const [data, setData] = useState(null);
-src/pages/admin/DBInspector.jsx:240:  const [loading, setLoading] = useState(false);
-src/pages/admin/DBInspector.jsx:241:  const [error, setError] = useState(null);
-src/pages/admin/DBInspector.jsx:242:  const [expanded, setExpanded] = useState(null);
-src/pages/admin/DBInspector.jsx:243:  const [filterUser, setFilterUser] = useState("");
-src/pages/admin/DBInspector.jsx:244:  const [copied, setCopied] = useState(null); // 'text' | 'html' | null
-src/pages/admin/DBInspector.jsx:246:  const load = useCallback(async () => {
-src/pages/admin/DBInspector.jsx:257:  useEffect(() => { load(); }, [load]);
-src/pages/admin/DBInspector.jsx:449:  const [data, setData] = useState(null);
-src/pages/admin/DBInspector.jsx:450:  const [loading, setLoading] = useState(false);
-src/pages/admin/DBInspector.jsx:451:  const [error, setError] = useState(null);
-src/pages/admin/DBInspector.jsx:452:  const [selected, setSelected] = useState(null);
-src/pages/admin/DBInspector.jsx:453:  const [recentRows, setRecentRows] = useState(null);
-src/pages/admin/DBInspector.jsx:454:  const [recentLoading, setRecentLoading] = useState(false);
-src/pages/admin/DBInspector.jsx:455:  const [schemaCopied, setSchemaCopied] = useState(false);
-src/pages/admin/DBInspector.jsx:456:  const [schemaView, setSchemaView] = useState("tables");
-src/pages/admin/DBInspector.jsx:458:  const load = useCallback(async () => {
-src/pages/admin/DBInspector.jsx:465:  useEffect(() => { load(); }, [load]);
-src/pages/admin/DBInspector.jsx:756:  const [users, setUsers] = useState([]);
-src/pages/admin/DBInspector.jsx:757:  const [selectedUser, setSelectedUser] = useState("");
-src/pages/admin/DBInspector.jsx:758:  const [data, setData] = useState(null);
-src/pages/admin/DBInspector.jsx:759:  const [loading, setLoading] = useState(false);
-src/pages/admin/DBInspector.jsx:760:  const [error, setError] = useState(null);
-src/pages/admin/DBInspector.jsx:761:  const [poolFilter, setPoolFilter] = useState("All");
-src/pages/admin/DBInspector.jsx:762:  const [cleanResult, setCleanResult] = useState(null);
-src/pages/admin/DBInspector.jsx:763:  const [retagResult, setRetagResult] = useState(null);
-src/pages/admin/DBInspector.jsx:764:  const [actionLoading, setActionLoading] = useState(null);
-src/pages/admin/DBInspector.jsx:766:  useEffect(() => {
-src/pages/admin/DBInspector.jsx:770:  const loadPool = useCallback(async (userId) => {
-src/pages/admin/DBInspector.jsx:974:  const [jobId, setJobId] = useState(initialJobId || "");
-src/pages/admin/DBInspector.jsx:975:  const [data, setData] = useState(null);
-src/pages/admin/DBInspector.jsx:976:  const [loading, setLoading] = useState(false);
-src/pages/admin/DBInspector.jsx:977:  const [error, setError] = useState(null);
-src/pages/admin/DBInspector.jsx:98:  const [graph, setGraph] = useState(null);
-src/pages/admin/DBInspector.jsx:99:  const [error, setError] = useState(null);
-src/pages/marketing/AboutPage.jsx:22:  const { theme } = useTheme();
-src/pages/marketing/ContactPage.jsx:10:  const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
-src/pages/marketing/ContactPage.jsx:11:  const [status, setStatus] = useState(null); // "sending" | "ok" | "error"
-src/pages/marketing/ContactPage.jsx:9:  const { theme } = useTheme();
-src/pages/marketing/FAQPage.jsx:19:  const { theme } = useTheme();
-src/pages/marketing/FAQPage.jsx:20:  const [open, setOpen] = useState(false);
-src/pages/marketing/FAQPage.jsx:44:  const { theme } = useTheme();
-src/pages/marketing/FeaturesPage.jsx:36:  const { theme } = useTheme();
-src/pages/marketing/HowItWorksPage.jsx:20:  const { theme } = useTheme();
-src/pages/marketing/PricingPage.jsx:59:  const { theme } = useTheme();
-src/pages/marketing/PrivacyPage.jsx:77:  const { theme } = useTheme();
-src/pages/marketing/TermsPage.jsx:38:  const { theme } = useTheme();
-src/pages/tools/ATSToolPage.jsx:28:  const { theme } = useTheme();
-src/pages/tools/ATSToolPage.jsx:29:  const [pdfFile,   setPdfFile]   = useState(null);
-src/pages/tools/ATSToolPage.jsx:30:  const [jdText,    setJdText]    = useState("");
-src/pages/tools/ATSToolPage.jsx:31:  const [loading,   setLoading]   = useState(false);
-src/pages/tools/ATSToolPage.jsx:32:  const [result,    setResult]    = useState(null);
-src/pages/tools/ATSToolPage.jsx:33:  const [error,     setError]     = useState("");
-src/pages/tools/ATSToolPage.jsx:34:  const fileRef = useRef();
-src/pages/tools/ATSToolPage.jsx:8:  const { theme } = useTheme();
-src/pages/tools/ApplyToolPage.jsx:10:  const [pdfFile,    setPdfFile]    = useState(null);
-src/pages/tools/ApplyToolPage.jsx:11:  const [urlsText,   setUrlsText]   = useState("");
-src/pages/tools/ApplyToolPage.jsx:12:  const [profile,    setProfile]    = useState({ name:"", email:"", phone:"", linkedin:"", location:"", work_auth:"" });
-src/pages/tools/ApplyToolPage.jsx:13:  const [loading,    setLoading]    = useState(false);
-src/pages/tools/ApplyToolPage.jsx:14:  const [results,    setResults]    = useState(null);
-src/pages/tools/ApplyToolPage.jsx:15:  const [error,      setError]      = useState("");
-src/pages/tools/ApplyToolPage.jsx:16:  const [authNeeded, setAuthNeeded] = useState(false);
-src/pages/tools/ApplyToolPage.jsx:17:  const fileRef = useRef();
-src/pages/tools/ApplyToolPage.jsx:9:  const { theme } = useTheme();
-src/pages/tools/GenerateToolPage.jsx:11:  const { theme } = useTheme();
-src/pages/tools/GenerateToolPage.jsx:12:  const [pdfFile,  setPdfFile]  = useState(null);
-src/pages/tools/GenerateToolPage.jsx:13:  const [jdText,   setJdText]   = useState("");
-src/pages/tools/GenerateToolPage.jsx:14:  const [loading,  setLoading]  = useState(false);
-src/pages/tools/GenerateToolPage.jsx:15:  const [result,   setResult]   = useState(null);
-src/pages/tools/GenerateToolPage.jsx:16:  const [error,    setError]    = useState("");
-src/pages/tools/GenerateToolPage.jsx:17:  const fileRef  = useRef();
-src/pages/tools/GenerateToolPage.jsx:18:  const iframeRef = useRef();
-src/panels/ATSPanel.jsx:25:  const { theme } = useTheme();
-src/panels/ATSPanel.jsx:26:  const [localReport, setLocalReport] = useState(null);
-src/panels/ATSPanel.jsx:27:  const [kwLoading,   setKwLoading]   = useState(false);
-src/panels/ATSPanel.jsx:28:  const [kwError,     setKwError]     = useState(false);
-src/panels/ATSPanel.jsx:29:  const [addedItems,  setAddedItems]  = useState(new Set());
-src/panels/ATSPanel.jsx:30:  const [profileSuggestions, setProfileSuggestions] = useState(null);
-src/panels/ATSPanel.jsx:31:  const [profileSelections, setProfileSelections] = useState({ activeSkills: [], activeVerbs: [] });
-src/panels/ATSPanel.jsx:34:  useEffect(() => {
-src/panels/ATSPanel.jsx:41:  useEffect(() => {
-src/panels/ATSPanel.jsx:81:  useEffect(() => {
-src/panels/ATSPanel.jsx:85:  useEffect(() => {
-src/panels/ATSPanel.jsx:97:  useSyncEvents({
-src/panels/AdminPanel.jsx:120:  const [from, setFrom] = useState(Math.floor(Date.now()/1000) - 30*86400);
-src/panels/AdminPanel.jsx:121:  const [to,   setTo]   = useState(Math.floor(Date.now()/1000) + 86400);
-src/panels/AdminPanel.jsx:122:  const [overview, setOverview] = useState(null);
-src/panels/AdminPanel.jsx:123:  const [timeseries, setTimeseries] = useState({});
-src/panels/AdminPanel.jsx:124:  const [modelCalls, setModelCalls] = useState([]);
-src/panels/AdminPanel.jsx:125:  const [loading, setLoading] = useState(false);
-src/panels/AdminPanel.jsx:127:  const loadData = useCallback(async () => {
-src/panels/AdminPanel.jsx:143:  useEffect(() => { loadData(); }, [loadData]);
-src/panels/AdminPanel.jsx:20:  const { theme } = useTheme();
-src/panels/AdminPanel.jsx:303:  const [limits, setLimits] = useState({
-src/panels/AdminPanel.jsx:314:  const [saving, setSaving] = useState(false);
-src/panels/AdminPanel.jsx:394:  const [from, setFrom] = useState(Math.floor(Date.now()/1000) - 30*86400);
-src/panels/AdminPanel.jsx:395:  const [to,   setTo]   = useState(Math.floor(Date.now()/1000) + 86400);
-src/panels/AdminPanel.jsx:396:  const [users, setUsers] = useState([]);
-src/panels/AdminPanel.jsx:397:  const [loading, setLoading] = useState(false);
-src/panels/AdminPanel.jsx:398:  const [editLimits, setEditLimits] = useState(null);
-src/panels/AdminPanel.jsx:399:  const [expanded, setExpanded] = useState(null);
-src/panels/AdminPanel.jsx:400:  const [events, setEvents] = useState({});
-src/panels/AdminPanel.jsx:402:  const loadUsers = useCallback(async () => {
-src/panels/AdminPanel.jsx:411:  useEffect(() => { loadUsers(); }, [loadUsers]);
-src/panels/AdminPanel.jsx:50:  const { theme } = useTheme();
-src/panels/AdminPanel.jsx:542:  const [data, setData] = useState(null);
-src/panels/AdminPanel.jsx:543:  useEffect(() => {
-src/panels/AdminPanel.jsx:619:  const [messages, setMessages]   = useState([]);
-src/panels/AdminPanel.jsx:620:  const [loading,  setLoading]    = useState(true);
-src/panels/AdminPanel.jsx:621:  const [expanded, setExpanded]   = useState(null);
-src/panels/AdminPanel.jsx:622:  const [unreadOnly, setUnreadOnly] = useState(false);
-src/panels/AdminPanel.jsx:624:  const loadMessages = useCallback(async () => {
-src/panels/AdminPanel.jsx:633:  useEffect(() => { loadMessages(); }, [loadMessages]);
-src/panels/AdminPanel.jsx:753:  const { theme } = useTheme();
-src/panels/AdminPanel.jsx:754:  const [users,    setUsers]    = useState([]);
-src/panels/AdminPanel.jsx:755:  const [upgradeRequests, setUpgradeRequests] = useState([]);
-src/panels/AdminPanel.jsx:756:  const [profileRequests, setProfileRequests] = useState([]);
-src/panels/AdminPanel.jsx:757:  const [backups,  setBackups]  = useState([]);
-src/panels/AdminPanel.jsx:758:  const [newU,     setNewU]     = useState({ username:"", password:"", isAdmin:false });
-src/panels/AdminPanel.jsx:759:  const [status,   setStatus]   = useState("");
-src/panels/AdminPanel.jsx:760:  const [bStatus,  setBStatus]  = useState("");
-src/panels/AdminPanel.jsx:761:  const [backing,  setBacking]  = useState(false);
-src/panels/AdminPanel.jsx:762:  const [section,  setSection]  = useState("users");
-src/panels/AdminPanel.jsx:765:  const [topTab, setTopTab] = useState("system");
-src/panels/AdminPanel.jsx:767:  useEffect(() => { loadUsers(); loadBackups(); loadUpgradeRequests(); loadProfileRequests(); }, []);
-src/panels/AdminPanel.jsx:77:  const { theme } = useTheme();
-src/panels/DatabasePanel.jsx:17:  const [view, setView] = useState({ year: init.getFullYear(), month: init.getMonth() });
-src/panels/DatabasePanel.jsx:201:  const [view,      setView]      = useState(null); // "resume" | "ats"
-src/panels/DatabasePanel.jsx:205:  useEffect(() => { if (modal) setView(modal.type); }, [modal?.type, modal?.company]);
-src/panels/DatabasePanel.jsx:344:  const { theme, isDark } = useTheme();
-src/panels/DatabasePanel.jsx:345:  const { activeProfileId, setActiveProfileId } = useJobBoard() || {};
-src/panels/DatabasePanel.jsx:346:  const [activeSheet,  setActiveSheet]  = useState("applications");
-src/panels/DatabasePanel.jsx:347:  const [apps,         setApps]         = useState([]);
-src/panels/DatabasePanel.jsx:348:  const [resumes,      setResumes]      = useState([]);
-src/panels/DatabasePanel.jsx:349:  const [detailModal,  setDetailModal]  = useState(null);
-src/panels/DatabasePanel.jsx:350:  const [detailLoading,setDetailLoading]= useState(false);
-src/panels/DatabasePanel.jsx:351:  const [loading,      setLoading]      = useState(false);
-src/panels/DatabasePanel.jsx:352:  const [saving,       setSaving]       = useState({});
-src/panels/DatabasePanel.jsx:353:  const [editCell,     setEditCell]     = useState(null);
-src/panels/DatabasePanel.jsx:354:  const [editVal,      setEditVal]      = useState("");
-src/panels/DatabasePanel.jsx:355:  const [calCell,      setCalCell]      = useState(null);
-src/panels/DatabasePanel.jsx:356:  const [flashRow,     setFlashRow]     = useState(null);
-src/panels/DatabasePanel.jsx:357:  const [search,       setSearch]       = useState("");
-src/panels/DatabasePanel.jsx:358:  const [sortCol,      setSortCol]      = useState("applied_at");
-src/panels/DatabasePanel.jsx:359:  const [sortDir,      setSortDir]      = useState("desc");
-src/panels/DatabasePanel.jsx:360:  const [filterDate,   setFilterDate]   = useState("");
-src/panels/DatabasePanel.jsx:361:  const [calFilter,    setCalFilter]    = useState(false);
-src/panels/DatabasePanel.jsx:364:  const [savedJobs,    setSavedJobs]    = useState([]);
-src/panels/DatabasePanel.jsx:365:  const [savedGen,     setSavedGen]     = useState({}); // jobId→{html,atsScore}
-src/panels/DatabasePanel.jsx:366:  const [baseResume,   setBaseResume]   = useState("");
-src/panels/DatabasePanel.jsx:367:  const [genLoading,   setGenLoading]   = useState({});
-src/panels/DatabasePanel.jsx:370:  const [pendingJobs,  setPendingJobs]  = useState([]);
-src/panels/DatabasePanel.jsx:372:  const inputRef = useRef();
-src/panels/DatabasePanel.jsx:373:  const calRef   = useRef();
-src/panels/DatabasePanel.jsx:375:  const load = useCallback(async () => {
-src/panels/DatabasePanel.jsx:388:  const loadSaved = useCallback(async () => {
-src/panels/DatabasePanel.jsx:412:  const loadPending = useCallback(async () => {
-src/panels/DatabasePanel.jsx:419:  const generateForSaved = useCallback(async (job, force = false, tool = "generate") => {
-src/panels/DatabasePanel.jsx:434:  const exportSavedPdf = useCallback(async (job, html) => {
-src/panels/DatabasePanel.jsx:444:  const unsaveJob = useCallback(async (jobId) => {
-src/panels/DatabasePanel.jsx:449:  useEffect(() => { load(); }, [load]);
-src/panels/DatabasePanel.jsx:450:  useEffect(() => { if (activeSheet === "saved") loadSaved(); }, [activeSheet, loadSaved]);
-src/panels/DatabasePanel.jsx:451:  useEffect(() => { if (activeSheet === "pending") loadPending(); }, [activeSheet, loadPending]);
-src/panels/DatabasePanel.jsx:452:  useEffect(() => { if (editCell && inputRef.current) inputRef.current.focus(); }, [editCell]);
-src/panels/DatabasePanel.jsx:454:  useEffect(() => {
-src/panels/IntegrationsPanel.jsx:36:  const { theme } = useTheme();
-src/panels/IntegrationsPanel.jsx:37:  const [status, setStatus] = useState(null);
-src/panels/IntegrationsPanel.jsx:38:  const [msg, setMsg] = useState("");
-src/panels/IntegrationsPanel.jsx:41:  useEffect(() => { load(); }, []);
-src/panels/JobProfilesPanel.jsx:10:  const { setActiveProfileId, deleteProfileCache } = useJobBoard() || {};
-src/panels/JobProfilesPanel.jsx:11:  const [profiles, setProfiles] = useState([]);
-src/panels/JobProfilesPanel.jsx:12:  const [status, setStatus] = useState("");
-src/panels/JobProfilesPanel.jsx:13:  const [wizardMode, setWizardMode] = useState(null);
-src/panels/JobProfilesPanel.jsx:14:  const [editingProfile, setEditingProfile] = useState(null);
-src/panels/JobProfilesPanel.jsx:15:  const [uploadingProfileId, setUploadingProfileId] = useState(null);
-src/panels/JobProfilesPanel.jsx:45:  const loadProfiles = useCallback(async () => {
-src/panels/JobProfilesPanel.jsx:57:  useEffect(() => { loadProfiles(); }, [loadProfiles]);
-src/panels/JobProfilesPanel.jsx:9:  const { theme } = useTheme();
-src/panels/JobsPanel.jsx:1000:  const [linkedinInstallModalOpen, setLinkedinInstallModalOpen] = useState(false);
-src/panels/JobsPanel.jsx:1001:  const [linkedinImporting, setLinkedinImporting] = useState(false);
-src/panels/JobsPanel.jsx:1002:  const [linkedinExtensionNotice, setLinkedinExtensionNotice] = useState(null);
-src/panels/JobsPanel.jsx:1007:  const activeDomainProfile = useMemo(() => (
-src/panels/JobsPanel.jsx:1028:  useEffect(() => {
-src/panels/JobsPanel.jsx:1046:  const [enhanceUsed,    setEnhanceUsed]    = useState(false);
-src/panels/JobsPanel.jsx:1047:  const [enhancePaid,    setEnhancePaid]    = useState(false);
-src/panels/JobsPanel.jsx:1048:  const [enhancing,      setEnhancing]      = useState(false);
-src/panels/JobsPanel.jsx:1049:  const [enhanceResult,  setEnhanceResult]  = useState(null); // { original, enhanced, delta }
-src/panels/JobsPanel.jsx:1050:  const [enhanceModalOpen, setEnhanceModalOpen] = useState(false);
-src/panels/JobsPanel.jsx:1053:  const [filtersOpen, setFiltersOpen] = useState(false);
-src/panels/JobsPanel.jsx:1056:  const [employmentTypePrefs, setEmploymentTypePrefsRaw] = useState(() => {
-src/panels/JobsPanel.jsx:1068:  const [searchInput, setSearchInput] = useState("");
-src/panels/JobsPanel.jsx:1071:  const [searchCommitted, setSearchCommitted] = useState(false);
-src/panels/JobsPanel.jsx:1074:  const [roleFilter,    setRoleFilter]    = useState("");
-src/panels/JobsPanel.jsx:1075:  const [locationFilter,setLocationFilter]= useState("");
-src/panels/JobsPanel.jsx:1076:  const [workType,      setWorkType]      = useState("");
-src/panels/JobsPanel.jsx:1077:  const [catFilter,     setCatFilter]     = useState("");
-src/panels/JobsPanel.jsx:1078:  const [srcFilter,     setSrcFilter]     = useState("");
-src/panels/JobsPanel.jsx:1079:  const [minYoe,        setMinYoe]        = useState("");
-src/panels/JobsPanel.jsx:1080:  const [maxYoe,        setMaxYoe]        = useState("");
-src/panels/JobsPanel.jsx:1081:  const [maxApplicants, setMaxApplicants] = useState("");
-src/panels/JobsPanel.jsx:1082:  const [visitedFilter, setVisitedFilter] = useState("");
-src/panels/JobsPanel.jsx:1083:  const [ageFilter,     setAgeFilter]     = useState("");
-src/panels/JobsPanel.jsx:1084:  const [pendingFilters, setPendingFilters] = useState(defaultFilterSnapshot);
-src/panels/JobsPanel.jsx:1086:  const activeProfileKeyRef = useRef(activeProfileKey);
-src/panels/JobsPanel.jsx:1087:  const switchingProfileRef = useRef(false);
-src/panels/JobsPanel.jsx:1088:  const latestSnapshotRef = useRef(null);
-src/panels/JobsPanel.jsx:1089:  const jobsFetchSeqRef = useRef(0);
-src/panels/JobsPanel.jsx:1090:  const nextFetchPageRef = useRef(1);
-src/panels/JobsPanel.jsx:1091:  const pendingIntentSearchRef = useRef(null);
-src/panels/JobsPanel.jsx:1092:  const searchIntentResolveRef = useRef(null);
-src/panels/JobsPanel.jsx:1094:  const fetchJobsRef = useRef(null);
-src/panels/JobsPanel.jsx:1096:  const activeFilterSnapshot = useCallback(() => ({
-src/panels/JobsPanel.jsx:1115:  const stageFilter = useCallback((key, value) => {
-src/panels/JobsPanel.jsx:1119:  const openFilterPanel = useCallback(() => {
-src/panels/JobsPanel.jsx:1124:  const applyPendingFilters = useCallback(() => {
-src/panels/JobsPanel.jsx:1144:  const resetPendingFilters = useCallback(() => {
-src/panels/JobsPanel.jsx:1148:  const makeProfileSnapshot = useCallback((overrides = {}) => ({
-src/panels/JobsPanel.jsx:1176:  const applyProfileSnapshot = useCallback((snapshot) => {
-src/panels/JobsPanel.jsx:1199:  const fileRef        = useRef();
-src/panels/JobsPanel.jsx:1200:  const jobCountRef    = useRef(0);
-src/panels/JobsPanel.jsx:1201:  const displayJobsRef = useRef([]);
-src/panels/JobsPanel.jsx:1210:  useEffect(() => {
-src/panels/JobsPanel.jsx:1241:  useEffect(() => {
-src/panels/JobsPanel.jsx:1265:  useEffect(() => {
-src/panels/JobsPanel.jsx:1302:  useEffect(() => {
-src/panels/JobsPanel.jsx:1340:  useEffect(() => {
-src/panels/JobsPanel.jsx:1350:  const handleJobSelect = useCallback((job) => {
-src/panels/JobsPanel.jsx:1364:  useEffect(() => {
-src/panels/JobsPanel.jsx:1389:  const buildParams = useCallback((page = 1, overrideStarred = null, overrides = {}) => {
-src/panels/JobsPanel.jsx:1414:  const fetchImportedSummary = useCallback(async () => {
-src/panels/JobsPanel.jsx:1427:  const fetchImportedLinkedInJobs = useCallback(async () => {
-src/panels/JobsPanel.jsx:1436:  const openLinkedInExtensionPopup = useCallback(async () => {
-src/panels/JobsPanel.jsx:1444:  const closeLinkedInImportTab = useCallback(async (tabId) => {
-src/panels/JobsPanel.jsx:1450:  const startLinkedInImport = useCallback(async () => {
-src/panels/JobsPanel.jsx:1487:  const fetchPending = useCallback(async () => {
-src/panels/JobsPanel.jsx:1497:  const fetchJobs = useCallback(async (page = 1, mergeMode = false, options = {}) => {
-src/panels/JobsPanel.jsx:1562:  useEffect(() => {
-src/panels/JobsPanel.jsx:1591:  useEffect(() => {
-src/panels/JobsPanel.jsx:1616:  useEffect(() => {
-src/panels/JobsPanel.jsx:161:  const [failed, setFailed] = useState(false);
-src/panels/JobsPanel.jsx:1621:  useEffect(() => {
-src/panels/JobsPanel.jsx:1638:  useEffect(() => {
-src/panels/JobsPanel.jsx:1655:  useEffect(() => {
-src/panels/JobsPanel.jsx:1659:  useEffect(() => {
-src/panels/JobsPanel.jsx:1666:  useEffect(() => {
-src/panels/JobsPanel.jsx:1675:  useEffect(() => {
-src/panels/JobsPanel.jsx:1680:  useEffect(() => {
-src/panels/JobsPanel.jsx:1690:  useSyncEvents({
-src/panels/JobsPanel.jsx:1718:  const startPollLoop = useCallback((roleQ, pollSince) => {
-src/panels/JobsPanel.jsx:1780:  const activateProfileForSearch = useCallback(async (profileId) => {
-src/panels/JobsPanel.jsx:1787:  const askSearchIntent = useCallback((prompt) => new Promise(resolve => {
-src/panels/JobsPanel.jsx:1792:  const closeSearchIntentPrompt = useCallback((accepted) => {
-src/panels/JobsPanel.jsx:1799:  const addToApplyQueue = useCallback((job) => {
-src/panels/JobsPanel.jsx:1806:  const removeFromApplyQueue = useCallback((jobId) => {
-src/panels/JobsPanel.jsx:1810:  const loadApplyRuns = useCallback(async () => {
-src/panels/JobsPanel.jsx:1818:  const loadApplyRunDetail = useCallback(async (runId) => {
-src/panels/JobsPanel.jsx:1826:  useEffect(() => { if (user) loadApplyRuns(); }, [user, loadApplyRuns]);
-src/panels/JobsPanel.jsx:1828:  const startApplyRun = useCallback(async (mode = "auto") => {
-src/panels/JobsPanel.jsx:1846:  const deleteDomainProfile = useCallback(async (profileId) => {
-src/panels/JobsPanel.jsx:1864:  const ensureSearchProfileAlignment = useCallback(async (query) => {
-src/panels/JobsPanel.jsx:1911:  const handleSetRole = useCallback(async (overrideQuery, options = {}) => {
-src/panels/JobsPanel.jsx:1937:  const handleSearch = useCallback(async (overrideQuery, options = {}) => {
-src/panels/JobsPanel.jsx:1963:  const handlePullRefresh = useCallback(async () => {
-src/panels/JobsPanel.jsx:1986:  const handleEnhance = useCallback(async () => {
-src/panels/JobsPanel.jsx:2010:  const handleAdoptEnhanced = useCallback(async () => {
-src/panels/JobsPanel.jsx:2019:  const handleSmartSearch = useCallback(async () => {
-src/panels/JobsPanel.jsx:2037:  const handleFile = useCallback(async e => {
-src/panels/JobsPanel.jsx:2065:  const generateActual = useCallback(async (job, force = false, skipCompanyCheck = false, tool = "generate") => {
-src/panels/JobsPanel.jsx:2140:  const generate = useCallback(async (job, force = false, tool = "generate") => {
-src/panels/JobsPanel.jsx:2153:        setCompanyReuseTarget({ job, priorEntry, tool });
-src/panels/JobsPanel.jsx:2160:  const saveSandboxHtml = useCallback(async (html, artifact = null) => {
-src/panels/JobsPanel.jsx:2175:  const exportAndTrack = useCallback(async (job, html, company, artifact = null) => {
-src/panels/JobsPanel.jsx:2198:  const toggleStar = useCallback(async (jobId, job = null) => {
-src/panels/JobsPanel.jsx:2219:  const toggleDislike = useCallback(async (jobId, job = null) => {
-src/panels/JobsPanel.jsx:2252:  const markVisited = useCallback((job) => {
-src/panels/JobsPanel.jsx:2263:  const visitUrl = useCallback(async (job) => {
-src/panels/JobsPanel.jsx:2291:  const displayJobs = useMemo(() => {
-src/panels/JobsPanel.jsx:2313:  const runSearchButton = useCallback(async (overrideQuery) => {
-src/panels/JobsPanel.jsx:254:  const [hov, setHov] = useState(false);
-src/panels/JobsPanel.jsx:255:  const { theme } = useTheme();
-src/panels/JobsPanel.jsx:289:  const [hov, setHov] = useState(false);
-src/panels/JobsPanel.jsx:290:  const { theme } = useTheme();
-src/panels/JobsPanel.jsx:2927:            setCompanyReuseTarget(null);
-src/panels/JobsPanel.jsx:2937:            setCompanyReuseTarget(null);
-src/panels/JobsPanel.jsx:2940:          onCancel={() => setCompanyReuseTarget(null)}
-src/panels/JobsPanel.jsx:3214:  const { theme: t } = useTheme();
-src/panels/JobsPanel.jsx:3216:  const [active, setActive] = useState(false);
-src/panels/JobsPanel.jsx:3255:  const [pageInput, setPageInput] = useState("");
-src/panels/JobsPanel.jsx:3258:  useEffect(() => {
-src/panels/JobsPanel.jsx:351:  const { theme } = useTheme();
-src/panels/JobsPanel.jsx:3537:  const { theme: t } = useTheme();
-src/panels/JobsPanel.jsx:3615:  const [step, setStep] = useState("install");
-src/panels/JobsPanel.jsx:3616:  const [timedOut, setTimedOut] = useState(false);
-src/panels/JobsPanel.jsx:3618:  useEffect(() => {
-src/panels/JobsPanel.jsx:3634:  useEffect(() => {
-src/panels/JobsPanel.jsx:3699:  const { theme: t } = useTheme();
-src/panels/JobsPanel.jsx:3746:function CompanyReuseModal({ company, onUseExisting, onGenerateNew, onCancel, theme }) {
-src/panels/JobsPanel.jsx:670:  const scrollRef = useRef(null);
-src/panels/JobsPanel.jsx:671:  const { update: updateScroll, scrollToTopRef } = useAppScroll();
-src/panels/JobsPanel.jsx:672:  const [pullY,   setPullY]   = useState(0);
-src/panels/JobsPanel.jsx:673:  const [ready,   setReady]   = useState(false);
-src/panels/JobsPanel.jsx:674:  const startY = useRef(null);
-src/panels/JobsPanel.jsx:678:  useEffect(() => {
-src/panels/JobsPanel.jsx:851:  const { theme, isDark } = useTheme();
-src/panels/JobsPanel.jsx:852:  const { mode: vpMode } = useViewport();
-src/panels/JobsPanel.jsx:853:  const navigate = useNavigate();
-src/panels/JobsPanel.jsx:854:  const { pin: pinDock, scrollToTopRef, progress: scrollProgress } = useAppScroll();
-src/panels/JobsPanel.jsx:860:  const [mobilePane, setMobilePane] = useState("jobs"); // "jobs" | "editor" | "ats"
-src/panels/JobsPanel.jsx:864:  const sessionDislikedRef = useRef(new Map()); // jobId ? job object
-src/panels/JobsPanel.jsx:867:  const [jobs,        setJobs]        = useState([]);
-src/panels/JobsPanel.jsx:868:  const [totalJobs,   setTotalJobs]   = useState(0);
-src/panels/JobsPanel.jsx:869:  const [totalPages,  setTotalPages]  = useState(0);
-src/panels/JobsPanel.jsx:870:  const [currentPage, setCurrentPage] = useState(1);
-src/panels/JobsPanel.jsx:873:  const [scraping,    setScraping]    = useState(false);  // Apify live scrape
-src/panels/JobsPanel.jsx:874:  const [bgLoading,   setBgLoading]   = useState(false);  // background DB fetch
-src/panels/JobsPanel.jsx:875:  const [categories,  setCategories]  = useState([]);
-src/panels/JobsPanel.jsx:876:  const [resumeText,  setResumeText]  = useState("");
-src/panels/JobsPanel.jsx:877:  const [fileName,    setFileName]    = useState("");
-src/panels/JobsPanel.jsx:878:  const [uploading,   setUploading]   = useState(false);
-src/panels/JobsPanel.jsx:879:  const [generated,   setGenerated]   = useState({});
-src/panels/JobsPanel.jsx:880:  const [loading,     setLoading]     = useState({});
-src/panels/JobsPanel.jsx:881:  const [sandbox,     setSandbox]     = useState(null);
-src/panels/JobsPanel.jsx:882:  const [sandboxOpen, setSandboxOpen] = useState(false);
-src/panels/JobsPanel.jsx:883:  const [rightTab,      setRightTab]      = useState("history");
-src/panels/JobsPanel.jsx:884:  const [rightPanelOpen, setRightPanelOpen] = useState(false);
-src/panels/JobsPanel.jsx:887:  const [selectedJob,  setSelectedJob]  = useState(null);
-src/panels/JobsPanel.jsx:890:  const openSandbox = useCallback((entry) => {
-src/panels/JobsPanel.jsx:896:  const closeSandbox = useCallback(() => {
-src/panels/JobsPanel.jsx:901:  const openAtsPanel = useCallback((atsData) => {
-src/panels/JobsPanel.jsx:908:  const closeAtsPanel = useCallback(() => {
-src/panels/JobsPanel.jsx:912:  const [activeAts,   setActiveAts]   = useState(null);
-src/panels/JobsPanel.jsx:913:  const [smartSearching, setSmartSearching] = useState(false);
-src/panels/JobsPanel.jsx:914:  const [attribution, setAttribution] = useState([]); // job source attribution from aggregator
-src/panels/JobsPanel.jsx:917:  const [domainProfiles,   setDomainProfiles]   = useState([]);
-src/panels/JobsPanel.jsx:918:  const [profileWizardOpen, setProfileWizardOpen] = useState(false);
-src/panels/JobsPanel.jsx:919:  const [profileWizardIntent, setProfileWizardIntent] = useState(null);
-src/panels/JobsPanel.jsx:920:  const [searchIntentPrompt, setSearchIntentPrompt] = useState(null);
-src/panels/JobsPanel.jsx:922:  const [profileSwitchKey, setProfileSwitchKey] = useState(0);
-src/panels/JobsPanel.jsx:925:  const [scrapeError,    setScrapeError]    = useState("");
-src/panels/JobsPanel.jsx:926:  const [applyQueue, setApplyQueue] = useState([]);
-src/panels/JobsPanel.jsx:927:  const [applyRuns, setApplyRuns] = useState([]);
-src/panels/JobsPanel.jsx:928:  const [applyReviewJobs, setApplyReviewJobs] = useState([]); // held_review items across all runs
-src/panels/JobsPanel.jsx:929:  const [applyQueueMsg, setApplyQueueMsg] = useState("");
-src/panels/JobsPanel.jsx:930:  const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
-src/panels/JobsPanel.jsx:931:  const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
-src/panels/JobsPanel.jsx:937:  const [pollStatus,   setPollStatus]   = useState("idle"); // "idle"|"polling"|"complete"|"error"
-src/panels/JobsPanel.jsx:938:  const pollIntervalRef = useRef(null);
-src/panels/JobsPanel.jsx:940:  const [searchPhase, setSearchPhase] = useState("idle");
-src/panels/JobsPanel.jsx:943:  const [genStage, setGenStage] = useState("");
-src/panels/JobsPanel.jsx:944:  const genTimerRef = useRef(null);
-src/panels/JobsPanel.jsx:947:  const jobsPanelRef    = useRef(null);
-src/panels/JobsPanel.jsx:948:  const detailPanelRef  = useRef(null);
-src/panels/JobsPanel.jsx:949:  const sandboxPanelRef = useRef(null);
-src/panels/JobsPanel.jsx:950:  const atsPanelRef     = useRef(null);
-src/panels/JobsPanel.jsx:951:  const detailPanelElementRef = useRef(null);
-src/panels/JobsPanel.jsx:952:  const initialPanelDefaultsAppliedRef = useRef(false);
-src/panels/JobsPanel.jsx:953:  const prevPanelVisibilityRef = useRef({ detail: false, sandbox: false, ats: false });
-src/panels/JobsPanel.jsx:956:  const jobsPanelElementRef = useRef(null);
-src/panels/JobsPanel.jsx:957:  const [manualWidth, setManualWidth] = useState(null);
-src/panels/JobsPanel.jsx:959:  const publishJobsZoneBounds = useCallback(() => {
-src/panels/JobsPanel.jsx:977:  const effectiveTier = useMemo(() => {
-src/panels/JobsPanel.jsx:986:  const [smartSearchError, setSmartSearchError] = useState("");
-src/panels/JobsPanel.jsx:987:  const [uploadError,      setUploadError]      = useState("");
-src/panels/JobsPanel.jsx:990:  const [companyReuseTarget, setCompanyReuseTarget] = useState(null);
-src/panels/JobsPanel.jsx:996:  } = useJobBoard();
-src/panels/JobsPanel.jsx:997:  const [pendingJobs, setPendingJobs] = useState([]);
-src/panels/JobsPanel.jsx:998:  const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
-src/panels/JobsPanel.jsx:999:  const [linkedinImportSummary, setLinkedinImportSummary] = useState({ total: 0, lastImportedAt: null });
-src/panels/PlansPanel.jsx:18:  const { theme } = useTheme();
-src/panels/PlansPanel.jsx:19:  const [plan, setPlan] = useState(null);
-src/panels/PlansPanel.jsx:20:  const [status, setStatus] = useState("");
-src/panels/PlansPanel.jsx:28:  useEffect(() => { load(); }, []);
-src/panels/ProfilePanel.jsx:100:  const [structuredFactsForm, setStructuredFactsForm] = useState({
-src/panels/ProfilePanel.jsx:108:  const [suggestedSignals, setSuggestedSignals] = useState({
-src/panels/ProfilePanel.jsx:117:  const [enhancementStatus, setEnhancementStatus] = useState({
-src/panels/ProfilePanel.jsx:126:  const [enhancementHistory, setEnhancementHistory] = useState([]);
-src/panels/ProfilePanel.jsx:127:  const [enhancingProfileResume, setEnhancingProfileResume] = useState(false);
-src/panels/ProfilePanel.jsx:128:  const [enhancePreview, setEnhancePreview] = useState(null);
-src/panels/ProfilePanel.jsx:129:  const [suggestionStatus, setSuggestionStatus] = useState("");
-src/panels/ProfilePanel.jsx:130:  const [resumeDraft, setResumeDraft] = useState("");
-src/panels/ProfilePanel.jsx:131:  const [resumeName, setResumeName] = useState("");
-src/panels/ProfilePanel.jsx:132:  const [profileStatus, setProfileStatus] = useState("");
-src/panels/ProfilePanel.jsx:133:  const [resumeStatus, setResumeStatus] = useState("");
-src/panels/ProfilePanel.jsx:134:  const [signalStatus, setSignalStatus] = useState("");
-src/panels/ProfilePanel.jsx:135:  const [loadingProfileAssets, setLoadingProfileAssets] = useState(false);
-src/panels/ProfilePanel.jsx:136:  const [uploadingResume, setUploadingResume] = useState(false);
-src/panels/ProfilePanel.jsx:137:  const [showProfileWizard, setShowProfileWizard] = useState(false);
-src/panels/ProfilePanel.jsx:138:  const resumeInputRef = useRef(null);
-src/panels/ProfilePanel.jsx:140:  const loadProfileAssets = useCallback(async (profileId) => {
-src/panels/ProfilePanel.jsx:187:  const loadProfiles = useCallback(async () => {
-src/panels/ProfilePanel.jsx:197:  useEffect(() => {
-src/panels/ProfilePanel.jsx:207:  useEffect(() => { loadProfiles(); }, [loadProfiles]);
-src/panels/ProfilePanel.jsx:209:  useEffect(() => {
-src/panels/ProfilePanel.jsx:251:  useEffect(() => {
-src/panels/ProfilePanel.jsx:80:  const { theme } = useTheme();
-src/panels/ProfilePanel.jsx:92:  const [form,   setForm]   = useState(BLANK);
-src/panels/ProfilePanel.jsx:93:  const [status, setStatus] = useState("");
-src/panels/ProfilePanel.jsx:94:  const [profiles, setProfiles] = useState([]);
-src/panels/ProfilePanel.jsx:95:  const [activeProfileId, setActiveProfileId] = useState(null);
-src/panels/ProfilePanel.jsx:96:  const [profileForm, setProfileForm] = useState(null);
-src/panels/ProfilePanel.jsx:97:  const [signalsForm, setSignalsForm] = useState({
-src/panels/SandboxPanel.jsx:24:  const { theme, isDark } = useTheme();
-src/panels/SandboxPanel.jsx:25:  const [exporting,   setExporting]   = useState(false);
-src/panels/SandboxPanel.jsx:26:  const [exportError, setExportError] = useState("");
-src/panels/SandboxPanel.jsx:27:  const [dirty,       setDirty]       = useState(false);
-src/panels/SandboxPanel.jsx:28:  const [saveMsg,     setSaveMsg]     = useState("");
-src/panels/SandboxPanel.jsx:29:  const [selectedTool, setSelectedTool] = useState(entry?.activeTool || entry?.tool || "generate");
-src/panels/SandboxPanel.jsx:30:  const [pageCount, setPageCount] = useState(1);
-src/panels/SandboxPanel.jsx:37:  const frameRefs    = useRef([]);
-src/panels/SandboxPanel.jsx:38:  const containerRef = useRef(null);  // outer scroll container, observed by ResizeObserver
-src/panels/SandboxPanel.jsx:39:  const innerRef     = useRef(null);  // scale host — transform applied directly to DOM
-src/panels/SandboxPanel.jsx:40:  const scaleRef     = useRef(1);     // current scale value — never stored in state
-src/panels/SandboxPanel.jsx:41:  const frameCleanupRef = useRef([]);
-src/panels/SandboxPanel.jsx:42:  const currentHtmlRef = useRef(activeEntry?.html || "");
-src/panels/SandboxPanel.jsx:43:  const syncingFramesRef = useRef(false);
-src/panels/SandboxPanel.jsx:45:  useEffect(() => {
-src/panels/SandboxPanel.jsx:64:  useEffect(() => {
-src/panels/SandboxPanel.jsx:68:  useEffect(() => () => {
-src/panels/SandboxPanel.jsx:74:  useEffect(() => {
-src/styles/theme.jsx:164:  const [bgMode, setBgModeRaw] = useState(() => {
-src/styles/theme.jsx:168:  const [accentId, setAccentIdRaw] = useState(() => {
-src/styles/theme.jsx:188:  useEffect(() => {
-src/styles/theme.jsx:561:export function useTheme() {
-src/styles/theme.jsx:562:  return useContext(ThemeContext);
+client/src/App.jsx:132:  const { theme } = useTheme();
+client/src/App.jsx:133:  const { mode: vpMode } = useViewport();
+client/src/App.jsx:135:  const location = useLocation();
+client/src/App.jsx:136:  const navigate = useNavigate();
+client/src/App.jsx:137:  const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
+client/src/App.jsx:148:  const handleLogout = useCallback(async () => {
+client/src/App.jsx:154:  const handlePanelChange = useCallback((tab) => {
+client/src/App.jsx:165:  const handleProfileActivate = useCallback(() => {
+client/src/App.jsx:169:  useInactivityLogout(handleLogout, true);
+client/src/App.jsx:171:  useSyncEvents({
+client/src/App.jsx:178:  useEffect(() => {
+client/src/App.jsx:188:  useEffect(() => {
+client/src/App.jsx:203:  useEffect(() => {
+client/src/App.jsx:251:  const { theme } = useTheme();
+client/src/App.jsx:252:  const [authUser,    setAuthUser]    = useState(null);
+client/src/App.jsx:253:  const [authStatus,  setAuthStatus]  = useState("unknown");
+client/src/App.jsx:255:  const handleAdminLogout = useCallback(async () => {
+client/src/App.jsx:262:  useEffect(() => {
+client/src/App.jsx:285:  const handlePublicLogout = useCallback(async () => {
+client/src/App.jsx:85:  const { progress: p } = useAppScroll();
+client/src/components/AdminLayout.jsx:6:  const { theme } = useTheme();
+client/src/components/AuthScreen.jsx:119:  const { theme } = useTheme();
+client/src/components/AuthScreen.jsx:120:  const [tab,     setTab]   = useState(initialTab);
+client/src/components/AuthScreen.jsx:121:  const [regStep, setRegStep] = useState(1);
+client/src/components/AuthScreen.jsx:123:  const [login,   setLoginF]  = useState({ username:"", password:"" });
+client/src/components/AuthScreen.jsx:125:  const [step1,   setStep1]   = useState({ username:"", password:"", confirmPassword:"", apify_token:"" });
+client/src/components/AuthScreen.jsx:127:  const [step2,   setStep2]   = useState({ first_name:"", middle_name:"", last_name:"", name_suffix:"", email:"", phone:"" });
+client/src/components/AuthScreen.jsx:128:  const [reset,   setReset]   = useState({ email:"", otp:"", password:"", confirmPassword:"", token:"" });
+client/src/components/AuthScreen.jsx:129:  const [resetSent, setResetSent] = useState(false);
+client/src/components/AuthScreen.jsx:130:  const [oauthStatus, setOauthStatus] = useState(null);
+client/src/components/AuthScreen.jsx:131:  const [error,   setError]   = useState("");
+client/src/components/AuthScreen.jsx:132:  const [notice,  setNotice]  = useState("");
+client/src/components/AuthScreen.jsx:133:  const [loading, setLoading] = useState(false);
+client/src/components/AuthScreen.jsx:143:  useEffect(() => {
+client/src/components/AuthScreen.jsx:157:  useEffect(() => {
+client/src/components/AuthScreen.jsx:164:  useEffect(() => {
+client/src/components/AuthScreen.jsx:20:  const { theme } = useTheme();
+client/src/components/AuthScreen.jsx:478:  const { theme } = useTheme();
+client/src/components/AuthScreen.jsx:479:  const { mode: vpMode } = useViewport();
+client/src/components/BelowFoldContent.jsx:29:  const { theme } = useTheme();
+client/src/components/CTAButton.jsx:6:  const [hovered, setHovered] = useState(false);
+client/src/components/CinematicBackground.jsx:14:  const videoRef = useRef(null);
+client/src/components/CinematicBackground.jsx:15:  const [ready, setReady] = useState(false);
+client/src/components/CinematicBackground.jsx:16:  const [skipVideo, setSkipVideo] = useState(false);
+client/src/components/CinematicBackground.jsx:18:  useEffect(() => {
+client/src/components/CinematicBackground.jsx:25:  useEffect(() => {
+client/src/components/CoverLetterModal.jsx:12:  const { theme } = useTheme();
+client/src/components/CoverLetterModal.jsx:13:  const [tone, setTone] = useState("professional");
+client/src/components/CoverLetterModal.jsx:14:  const [jd, setJd] = useState(jobDescription || "");
+client/src/components/CoverLetterModal.jsx:15:  const [loading, setLoading] = useState(false);
+client/src/components/CoverLetterModal.jsx:16:  const [result, setResult] = useState("");
+client/src/components/CoverLetterModal.jsx:17:  const [error, setError] = useState("");
+client/src/components/CoverLetterModal.jsx:18:  const [copied, setCopied] = useState(false);
+client/src/components/DomainProfileWizard.jsx:105:  const { theme } = useTheme();
+client/src/components/DomainProfileWizard.jsx:107:  const [step,       setStep]       = useState(1);
+client/src/components/DomainProfileWizard.jsx:108:  const [domains,    setDomains]    = useState([]);
+client/src/components/DomainProfileWizard.jsx:109:  const [domainKey,  setDomainKey]  = useState(initialProfile?.domain || null);
+client/src/components/DomainProfileWizard.jsx:110:  const [domainMeta, setDomainMeta] = useState(null);
+client/src/components/DomainProfileWizard.jsx:111:  const [seniority,  setSeniority]  = useState(initialProfile?.seniority || "mid");
+client/src/components/DomainProfileWizard.jsx:112:  const [titles,     setTitles]     = useState(() => new Set(arrayField(initialProfile?.target_titles)));
+client/src/components/DomainProfileWizard.jsx:113:  const [keywords,   setKeywords]   = useState(() => new Set(arrayField(initialProfile?.selected_keywords)));
+client/src/components/DomainProfileWizard.jsx:114:  const [verbs,      setVerbs]      = useState(() => new Set(arrayField(initialProfile?.selected_verbs)));
+client/src/components/DomainProfileWizard.jsx:115:  const [tools,      setTools]      = useState(() => new Set(arrayField(initialProfile?.selected_tools)));
+client/src/components/DomainProfileWizard.jsx:116:  const [industries, setIndustries] = useState(new Set());
+client/src/components/DomainProfileWizard.jsx:117:  const [otherRoleTitle, setOtherRoleTitle] = useState("");
+client/src/components/DomainProfileWizard.jsx:118:  const [otherRoleFamily, setOtherRoleFamily] = useState("");
+client/src/components/DomainProfileWizard.jsx:119:  const [otherWorkPreference, setOtherWorkPreference] = useState("");
+client/src/components/DomainProfileWizard.jsx:120:  const [otherNotes, setOtherNotes] = useState("");
+client/src/components/DomainProfileWizard.jsx:121:  const [aiChips,    setAiChips]    = useState(null);
+client/src/components/DomainProfileWizard.jsx:122:  const [loadingAi,  setLoadingAi]  = useState(false);
+client/src/components/DomainProfileWizard.jsx:123:  const [profileName, setProfileName] = useState(initialProfile?.profile_name || "");
+client/src/components/DomainProfileWizard.jsx:124:  const [saving,        setSaving]        = useState(false);
+client/src/components/DomainProfileWizard.jsx:125:  const [error,         setError]         = useState("");
+client/src/components/DomainProfileWizard.jsx:126:  const [loadingDomains, setLoadingDomains] = useState(true);
+client/src/components/DomainProfileWizard.jsx:127:  const [domainsError,   setDomainsError]   = useState(false);
+client/src/components/DomainProfileWizard.jsx:138:  useEffect(() => { loadDomains(); }, []);
+client/src/components/DomainProfileWizard.jsx:140:  useEffect(() => {
+client/src/components/DomainProfileWizard.jsx:144:  useEffect(() => {
+client/src/components/DomainProfileWizard.jsx:156:  useEffect(() => {
+client/src/components/DomainProfileWizard.jsx:183:  const toggleSet = useCallback((setter, value) => {
+client/src/components/DomainProfileWizard.jsx:191:  const addToSet = useCallback((setter, value) => {
+client/src/components/DomainProfileWizard.jsx:26:  const { theme } = useTheme();
+client/src/components/DomainProfileWizard.jsx:47:  const { theme } = useTheme();
+client/src/components/DomainProfileWizard.jsx:48:  const [val, setVal] = useState("");
+client/src/components/DomainProfileWizard.jsx:76:  const { theme } = useTheme();
+client/src/components/JobCard.jsx:139:  const [hov, setHov] = useState(false);
+client/src/components/JobCard.jsx:223:  const { theme: ctxTheme } = useTheme();
+client/src/components/JobCard.jsx:226:  const [hov,      setHov]      = useState(false);
+client/src/components/JobCard.jsx:227:  const [expanded, setExpanded] = useState(false);
+client/src/components/JobCard.jsx:231:  const [starred,  setStarred]  = useState(job._user?.starred  ?? job.starred  ?? false);
+client/src/components/JobCard.jsx:232:  const [disliked, setDisliked] = useState(job._user?.disliked ?? job.disliked ?? false);
+client/src/components/JobCard.jsx:235:  useEffect(() => {
+client/src/components/JobCard.jsx:42:  const [failed, setFailed] = useState(false);
+client/src/components/JobDetailPanel.jsx:121:  const closeSemi = useCallback(async () => {
+client/src/components/JobDetailPanel.jsx:29:  const [failed, setFailed] = useState(false);
+client/src/components/JobDetailPanel.jsx:49:  const [hov, setHov] = useState(false);
+client/src/components/JobDetailPanel.jsx:92:  const [showCoverLetter, setShowCoverLetter] = useState(false);
+client/src/components/JobDetailPanel.jsx:95:  const [applyLoading,  setApplyLoading]  = useState(false);
+client/src/components/JobDetailPanel.jsx:96:  const [applyResult,   setApplyResult]   = useState(null); // { status, message, error }
+client/src/components/JobDetailPanel.jsx:97:  const [semiActive,    setSemiActive]    = useState(false);
+client/src/components/JobDetailPanel.jsx:99:  const handleAutoApply = useCallback(async (mode = "semi") => {
+client/src/components/MetaChips.jsx:10:  const { theme } = useTheme();
+client/src/components/NavBar.jsx:18:  const loc = useLocation();
+client/src/components/NavBar.jsx:19:  const [open, setOpen] = useState(false);
+client/src/components/NavBar.jsx:20:  const isWide = useLogoSize(); // true when >=768px → show full "RESUME MASTER"
+client/src/components/NavBar.jsx:23:  useEffect(() => { setOpen(false); }, [loc.pathname]);
+client/src/components/ProfileSelectorDropdown.jsx:14:  const [open, setOpen] = useState(false);
+client/src/components/ProfileSelectorDropdown.jsx:15:  const [rect, setRect] = useState(null);
+client/src/components/ProfileSelectorDropdown.jsx:16:  const buttonRef = useRef(null);
+client/src/components/RotatingBadge.jsx:5:  const { theme } = useTheme();
+client/src/components/ScrollDock.jsx:127:  const { theme } = useTheme();
+client/src/components/ScrollDock.jsx:128:  const { mode: vpMode } = useViewport();
+client/src/components/ScrollDock.jsx:131:  const scrolled = useScrollCollapsed(60, false);
+client/src/components/ScrollDock.jsx:134:  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+client/src/components/ScrollDock.jsx:281:  const [hovered, setHovered] = useState(false);
+client/src/components/ScrollDock.jsx:60:  useEffect(() => {
+client/src/components/ScrollDock.jsx:66:  useEffect(() => {
+client/src/components/SectionHeader.jsx:5:  const { theme } = useTheme();
+client/src/components/TopBar.jsx:103:  useEffect(() => { load(); }, [load]);
+client/src/components/TopBar.jsx:105:  useSyncEvents({
+client/src/components/TopBar.jsx:205:  const [open, setOpen] = useState(false);
+client/src/components/TopBar.jsx:206:  const [rect, setRect] = useState(null);
+client/src/components/TopBar.jsx:207:  const triggerRef = useRef(null);
+client/src/components/TopBar.jsx:263:  const [open,        setOpen]        = useState(false);
+client/src/components/TopBar.jsx:264:  const [rect,        setRect]        = useState(null);
+client/src/components/TopBar.jsx:265:  const triggerRef = useRef(null);
+client/src/components/TopBar.jsx:266:  const { accentId, setAccentId, ACCENT_OPTIONS } = useTheme();
+client/src/components/TopBar.jsx:412:  const { theme } = useTheme();
+client/src/components/TopBar.jsx:413:  const { progress: rawProgress, pinned } = useAppScroll();
+client/src/components/TopBar.jsx:418:  const [hovered,       setHovered]       = useState(false);
+client/src/components/TopBar.jsx:419:  const [searchFocused, setSearchFocused] = useState(false);
+client/src/components/TopBar.jsx:420:  const hoverTimerRef = useRef(null);
+client/src/components/TopBar.jsx:423:  useEffect(() => { if (!scrolled) { setHovered(false); setSearchFocused(false); } }, [scrolled]);
+client/src/components/TopBar.jsx:426:  useEffect(() => { injectKeyframes(); }, []);
+client/src/components/TopBar.jsx:429:  const handleMouseEnter = useCallback(() => {
+client/src/components/TopBar.jsx:434:  const handleMouseLeave = useCallback(() => {
+client/src/components/TopBar.jsx:441:  } = useJobBoard() || {};
+client/src/components/TopBar.jsx:443:  const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
+client/src/components/TopBar.jsx:444:  useEffect(() => {
+client/src/components/TopBar.jsx:451:  const [profiles, setProfiles] = useState([]);
+client/src/components/TopBar.jsx:452:  const loadProfiles = useCallback(() => {
+client/src/components/TopBar.jsx:464:  useEffect(() => { loadProfiles(); }, [loadProfiles]);
+client/src/components/TopBar.jsx:466:  useSyncEvents({
+client/src/components/TopBar.jsx:89:  const [open, setOpen] = useState(false);
+client/src/components/TopBar.jsx:90:  const [rect, setRect] = useState(null);
+client/src/components/TopBar.jsx:91:  const [notifs, setNotifs] = useState([]);
+client/src/components/TopBar.jsx:92:  const [unread, setUnread] = useState(0);
+client/src/components/TopBar.jsx:93:  const triggerRef = useRef(null);
+client/src/components/TopBar.jsx:95:  const load = useCallback(async () => {
+client/src/components/UnifiedSearchBar.jsx:41:  const [q,       setQ]       = useState('');
+client/src/components/UnifiedSearchBar.jsx:42:  const [loc,     setLoc]     = useState('');
+client/src/components/UnifiedSearchBar.jsx:43:  const [exp,     setExp]     = useState('');
+client/src/components/UnifiedSearchBar.jsx:44:  const [domain,  setDomain]  = useState('');
+client/src/components/UnifiedSearchBar.jsx:45:  const [status,  setStatus]  = useState('');
+client/src/components/UnifiedSearchBar.jsx:46:  const [uiState, setUiState] = useState('idle');
+client/src/components/UnifiedSearchBar.jsx:47:  const [cdw,     setCdw]     = useState(null);
+client/src/components/UnifiedSearchBar.jsx:49:  const clicks  = useRef(0);
+client/src/components/UnifiedSearchBar.jsx:50:  const cTmr    = useRef(null);
+client/src/components/UnifiedSearchBar.jsx:51:  const cdwInt  = useRef(null);
+client/src/components/UnifiedSearchBar.jsx:54:  useEffect(() => {
+client/src/components/reference/AuthSheetReference.jsx:10:  const [email, setEmail] = useState('');
+client/src/components/reference/AuthSheetReference.jsx:11:  const [password, setPassword] = useState('');
+client/src/components/reference/AuthSheetReference.jsx:12:  const [loading, setLoading] = useState(false);
+client/src/components/reference/AuthSheetReference.jsx:9:  const [isSignUp, setIsSignUp] = useState(false);
+client/src/components/reference/NavbarReference.jsx:10:  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+client/src/components/ui/carousel.jsx:10:  const context = React.useContext(CarouselContext);
+client/src/components/ui/carousel.jsx:17:    const [carouselRef, api] = useEmblaCarousel(
+client/src/components/ui/carousel.jsx:21:    const [canScrollPrev, setCanScrollPrev] = React.useState(false);
+client/src/components/ui/carousel.jsx:22:    const [canScrollNext, setCanScrollNext] = React.useState(false);
+client/src/components/ui/carousel.jsx:24:    const onSelect = React.useCallback((api) => {
+client/src/components/ui/carousel.jsx:30:    const scrollPrev = React.useCallback(() => { api?.scrollPrev(); }, [api]);
+client/src/components/ui/carousel.jsx:31:    const scrollNext = React.useCallback(() => { api?.scrollNext(); }, [api]);
+client/src/components/ui/carousel.jsx:33:    const handleKeyDown = React.useCallback((event) => {
+client/src/components/ui/carousel.jsx:38:    React.useEffect(() => {
+client/src/components/ui/carousel.jsx:43:    React.useEffect(() => {
+client/src/components/ui/carousel.jsx:63:  const { carouselRef, orientation } = useCarousel();
+client/src/components/ui/carousel.jsx:73:  const { orientation } = useCarousel();
+client/src/components/ui/carousel.jsx:81:  const { orientation, scrollPrev, canScrollPrev } = useCarousel();
+client/src/components/ui/carousel.jsx:92:  const { orientation, scrollNext, canScrollNext } = useCarousel();
+client/src/components/ui/carousel.jsx:9:function useCarousel() {
+client/src/components/ui/chart.jsx:11:function useChart() {
+client/src/components/ui/chart.jsx:12:  const context = React.useContext(ChartContext);
+client/src/components/ui/chart.jsx:204:  const { config } = useChart();
+client/src/components/ui/chart.jsx:22:  const uniqueId = React.useId();
+client/src/components/ui/chart.jsx:94:    const { config } = useChart();
+client/src/components/ui/chart.jsx:96:    const tooltipLabel = React.useMemo(() => {
+client/src/components/ui/form.jsx:21:  const fieldContext = React.useContext(FormFieldContext);
+client/src/components/ui/form.jsx:22:  const itemContext = React.useContext(FormItemContext);
+client/src/components/ui/form.jsx:23:  const { getFieldState, formState } = useFormContext();
+client/src/components/ui/form.jsx:46:  const id = React.useId();
+client/src/components/ui/form.jsx:57:  const { error, formItemId } = useFormField();
+client/src/components/ui/form.jsx:64:  const { error, formItemId, formDescriptionId, formMessageId } = useFormField();
+client/src/components/ui/form.jsx:79:  const { formDescriptionId } = useFormField();
+client/src/components/ui/form.jsx:86:  const { error, formMessageId } = useFormField();
+client/src/components/ui/input-otp.jsx:22:  const inputOTPContext = React.useContext(OTPInputContext);
+client/src/components/ui/sonner.jsx:5:  const { theme = "system" } = useTheme();
+client/src/components/ui/toaster.jsx:5:  const { toasts } = useToast();
+client/src/components/ui/toggle-group.jsx:21:  const context = React.useContext(ToggleGroupContext);
+client/src/contexts/AppScrollContext.jsx:19:  const [progress, setProgress] = useState(0);
+client/src/contexts/AppScrollContext.jsx:20:  const [pinned,   setPinned]   = useState(false);
+client/src/contexts/AppScrollContext.jsx:22:  const scrollToTopRef = useRef(null);
+client/src/contexts/AppScrollContext.jsx:24:  const update = useCallback((p) => {
+client/src/contexts/AppScrollContext.jsx:31:  const pin   = useCallback(() => setPinned(true),  []);
+client/src/contexts/AppScrollContext.jsx:32:  const unpin = useCallback(() => setPinned(false), []);
+client/src/contexts/AppScrollContext.jsx:41:export function useAppScroll() {
+client/src/contexts/AppScrollContext.jsx:42:  return useContext(AppScrollContext);
+client/src/contexts/JobBoardContext.jsx:10:  const [activeProfileId, setActiveProfileId] = useState(null);
+client/src/contexts/JobBoardContext.jsx:11:  const profileCacheRef = useRef(new Map());
+client/src/contexts/JobBoardContext.jsx:13:  const getProfileCache = useCallback((profileId) => {
+client/src/contexts/JobBoardContext.jsx:18:  const setProfileCache = useCallback((profileId, snapshot) => {
+client/src/contexts/JobBoardContext.jsx:23:  const deleteProfileCache = useCallback((profileId) => {
+client/src/contexts/JobBoardContext.jsx:43:export function useJobBoard() { return useContext(JobBoardContext); }
+client/src/contexts/JobBoardContext.jsx:7:  const [boardTab,    setBoardTab]    = useState("all");
+client/src/contexts/JobBoardContext.jsx:8:  const [localSearch, setLocalSearch] = useState("");
+client/src/contexts/JobBoardContext.jsx:9:  const [sortBy,      setSortBy]      = useState("dateDesc");
+client/src/hooks/use-toast.js:52:export function useToast() {
+client/src/hooks/use-toast.js:53:  const [state, setState] = useState(toastState);
+client/src/hooks/use-toast.js:55:  const subscribe = useCallback((listener) => {
+client/src/hooks/use-toast.js:62:  useState(() => {
+client/src/hooks/useInactivityLogout.js:10:  const timerRef    = useRef(null);
+client/src/hooks/useInactivityLogout.js:11:  const hiddenAtRef = useRef(null);
+client/src/hooks/useInactivityLogout.js:13:  useEffect(() => {
+client/src/hooks/useInactivityLogout.js:9:export function useInactivityLogout(onLogout, enabled = true) {
+client/src/hooks/useLogoSize.js:5:export function useLogoSize(breakpoint = 768) {
+client/src/hooks/useLogoSize.js:6:  const [isWide, setIsWide] = useState(
+client/src/hooks/useLogoSize.js:9:  useEffect(() => {
+client/src/hooks/useScrollCollapsed.js:10:  useEffect(() => {
+client/src/hooks/useScrollCollapsed.js:7:export function useScrollCollapsed(threshold = 60, disabled = false) {
+client/src/hooks/useScrollCollapsed.js:8:  const [collapsed, setCollapsed] = useState(false);
+client/src/hooks/useSyncEvents.js:15:export function useSyncEvents(handlers) {
+client/src/hooks/useSyncEvents.js:16:  const handlersRef = useRef(handlers);
+client/src/hooks/useSyncEvents.js:19:  useEffect(() => {
+client/src/hooks/useViewport.js:3:export function useViewport() {
+client/src/hooks/useViewport.js:4:  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+client/src/hooks/useViewport.js:5:  useEffect(() => {
+client/src/pages/AdminLoginPage.jsx:10:  const [error,   setError]   = useState("");
+client/src/pages/AdminLoginPage.jsx:11:  const [loading, setLoading] = useState(false);
+client/src/pages/AdminLoginPage.jsx:8:  const { theme } = useTheme();
+client/src/pages/AdminLoginPage.jsx:9:  const [form,    setForm]    = useState({ username:"", password:"" });
+client/src/pages/LandingPage.jsx:14:  const [JobCard, setJC] = useState(null);
+client/src/pages/LandingPage.jsx:15:  useEffect(() => {
+client/src/pages/LandingPage.jsx:30:  const isWide = useLogoSize();
+client/src/pages/LandingPage.jsx:31:  const [uiMode,      setUiMode]      = useState("hero");
+client/src/pages/LandingPage.jsx:32:  const [jobs,        setJobs]        = useState([]);
+client/src/pages/LandingPage.jsx:33:  const [total,       setTotal]       = useState(0);
+client/src/pages/LandingPage.jsx:34:  const [page,        setPage]        = useState(1);
+client/src/pages/LandingPage.jsx:35:  const [loading,     setLoading]     = useState(true);
+client/src/pages/LandingPage.jsx:36:  const [searchRes,   setSearchRes]   = useState(null);
+client/src/pages/LandingPage.jsx:37:  const liveSearchDone = useRef(false);
+client/src/pages/LandingPage.jsx:44:  const loadFeed = useCallback(async (p = 1) => {
+client/src/pages/LandingPage.jsx:64:  useEffect(() => { loadFeed(1); }, [loadFeed]);
+client/src/pages/LandingPage.jsx:67:  useEffect(() => {
+client/src/pages/LandingPage.jsx:77:  const handleLocalFilter = useCallback(({ query, location, experience, domain, status }) => {
+client/src/pages/LandingPage.jsx:94:  const handleSearch = useCallback(async (params) => {
+client/src/pages/admin/DBInspector.jsx:100:  const [selected, setSelected] = useState(null);
+client/src/pages/admin/DBInspector.jsx:101:  const [scale, setScale] = useState(1);
+client/src/pages/admin/DBInspector.jsx:102:  const [offset, setOffset] = useState({ x: 20, y: 20 });
+client/src/pages/admin/DBInspector.jsx:103:  const [drag, setDrag] = useState(null);
+client/src/pages/admin/DBInspector.jsx:105:  useEffect(() => {
+client/src/pages/admin/DBInspector.jsx:1171:  const [users, setUsers] = useState([]);
+client/src/pages/admin/DBInspector.jsx:1172:  const [selectedUser, setSelectedUser] = useState("");
+client/src/pages/admin/DBInspector.jsx:1173:  const [data, setData] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1174:  const [loading, setLoading] = useState(false);
+client/src/pages/admin/DBInspector.jsx:1175:  const [error, setError] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1176:  const [showSql, setShowSql] = useState(false);
+client/src/pages/admin/DBInspector.jsx:1177:  const [rawSql, setRawSql] = useState("SELECT * FROM scraped_jobs ORDER BY scraped_at DESC LIMIT 10;");
+client/src/pages/admin/DBInspector.jsx:1178:  const [rawResults, setRawResults] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1179:  const [rawLoading, setRawLoading] = useState(false);
+client/src/pages/admin/DBInspector.jsx:1180:  const [rawError, setRawError] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1182:  useEffect(() => {
+client/src/pages/admin/DBInspector.jsx:1460:  const [tables, setTables] = useState([]);
+client/src/pages/admin/DBInspector.jsx:1461:  const [selected, setSelected] = useState("");
+client/src/pages/admin/DBInspector.jsx:1462:  const [data, setData] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1463:  const [page, setPage] = useState(1);
+client/src/pages/admin/DBInspector.jsx:1464:  const [loading, setLoading] = useState(false);
+client/src/pages/admin/DBInspector.jsx:1465:  const [error, setError] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1467:  useEffect(() => {
+client/src/pages/admin/DBInspector.jsx:1475:  useEffect(() => {
+client/src/pages/admin/DBInspector.jsx:1571:  const [data, setData] = useState({ jobs: [], profiles: [] });
+client/src/pages/admin/DBInspector.jsx:1572:  const [query, setQuery] = useState("");
+client/src/pages/admin/DBInspector.jsx:1573:  const [roleKey, setRoleKey] = useState("");
+client/src/pages/admin/DBInspector.jsx:1574:  const [saving, setSaving] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1575:  const [error, setError] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1576:  const [status, setStatus] = useState("");
+client/src/pages/admin/DBInspector.jsx:1578:  const load = useCallback(() => {
+client/src/pages/admin/DBInspector.jsx:1588:  useEffect(() => { load(); }, [load]);
+client/src/pages/admin/DBInspector.jsx:1705:  const { theme } = useTheme();
+client/src/pages/admin/DBInspector.jsx:1706:  const [activeTab, setActiveTab] = useState("scrape");
+client/src/pages/admin/DBInspector.jsx:1707:  const [lastUpdated, setLastUpdated] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1708:  const [autoRefresh, setAutoRefresh] = useState(0);
+client/src/pages/admin/DBInspector.jsx:1709:  const [refreshKey, setRefreshKey] = useState(0);
+client/src/pages/admin/DBInspector.jsx:1710:  const refreshTimerRef = useRef(null);
+client/src/pages/admin/DBInspector.jsx:1711:  const [traceJobId, setTraceJobId] = useState(null);
+client/src/pages/admin/DBInspector.jsx:1713:  useEffect(() => {
+client/src/pages/admin/DBInspector.jsx:239:  const [data, setData] = useState(null);
+client/src/pages/admin/DBInspector.jsx:240:  const [loading, setLoading] = useState(false);
+client/src/pages/admin/DBInspector.jsx:241:  const [error, setError] = useState(null);
+client/src/pages/admin/DBInspector.jsx:242:  const [expanded, setExpanded] = useState(null);
+client/src/pages/admin/DBInspector.jsx:243:  const [filterUser, setFilterUser] = useState("");
+client/src/pages/admin/DBInspector.jsx:244:  const [copied, setCopied] = useState(null); // 'text' | 'html' | null
+client/src/pages/admin/DBInspector.jsx:246:  const load = useCallback(async () => {
+client/src/pages/admin/DBInspector.jsx:257:  useEffect(() => { load(); }, [load]);
+client/src/pages/admin/DBInspector.jsx:449:  const [data, setData] = useState(null);
+client/src/pages/admin/DBInspector.jsx:450:  const [loading, setLoading] = useState(false);
+client/src/pages/admin/DBInspector.jsx:451:  const [error, setError] = useState(null);
+client/src/pages/admin/DBInspector.jsx:452:  const [selected, setSelected] = useState(null);
+client/src/pages/admin/DBInspector.jsx:453:  const [recentRows, setRecentRows] = useState(null);
+client/src/pages/admin/DBInspector.jsx:454:  const [recentLoading, setRecentLoading] = useState(false);
+client/src/pages/admin/DBInspector.jsx:455:  const [schemaCopied, setSchemaCopied] = useState(false);
+client/src/pages/admin/DBInspector.jsx:456:  const [schemaView, setSchemaView] = useState("tables");
+client/src/pages/admin/DBInspector.jsx:458:  const load = useCallback(async () => {
+client/src/pages/admin/DBInspector.jsx:465:  useEffect(() => { load(); }, [load]);
+client/src/pages/admin/DBInspector.jsx:756:  const [users, setUsers] = useState([]);
+client/src/pages/admin/DBInspector.jsx:757:  const [selectedUser, setSelectedUser] = useState("");
+client/src/pages/admin/DBInspector.jsx:758:  const [data, setData] = useState(null);
+client/src/pages/admin/DBInspector.jsx:759:  const [loading, setLoading] = useState(false);
+client/src/pages/admin/DBInspector.jsx:760:  const [error, setError] = useState(null);
+client/src/pages/admin/DBInspector.jsx:761:  const [poolFilter, setPoolFilter] = useState("All");
+client/src/pages/admin/DBInspector.jsx:762:  const [cleanResult, setCleanResult] = useState(null);
+client/src/pages/admin/DBInspector.jsx:763:  const [retagResult, setRetagResult] = useState(null);
+client/src/pages/admin/DBInspector.jsx:764:  const [actionLoading, setActionLoading] = useState(null);
+client/src/pages/admin/DBInspector.jsx:766:  useEffect(() => {
+client/src/pages/admin/DBInspector.jsx:770:  const loadPool = useCallback(async (userId) => {
+client/src/pages/admin/DBInspector.jsx:974:  const [jobId, setJobId] = useState(initialJobId || "");
+client/src/pages/admin/DBInspector.jsx:975:  const [data, setData] = useState(null);
+client/src/pages/admin/DBInspector.jsx:976:  const [loading, setLoading] = useState(false);
+client/src/pages/admin/DBInspector.jsx:977:  const [error, setError] = useState(null);
+client/src/pages/admin/DBInspector.jsx:98:  const [graph, setGraph] = useState(null);
+client/src/pages/admin/DBInspector.jsx:99:  const [error, setError] = useState(null);
+client/src/pages/marketing/ContactPage.jsx:8:  const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
+client/src/pages/marketing/ContactPage.jsx:9:  const [status, setStatus] = useState(null); // "sending" | "ok" | "error"
+client/src/pages/marketing/FAQPage.jsx:18:  const [open, setOpen] = useState(false);
+client/src/pages/tools/ATSToolPage.jsx:28:  const { theme } = useTheme();
+client/src/pages/tools/ATSToolPage.jsx:29:  const [pdfFile,   setPdfFile]   = useState(null);
+client/src/pages/tools/ATSToolPage.jsx:30:  const [jdText,    setJdText]    = useState("");
+client/src/pages/tools/ATSToolPage.jsx:31:  const [loading,   setLoading]   = useState(false);
+client/src/pages/tools/ATSToolPage.jsx:32:  const [result,    setResult]    = useState(null);
+client/src/pages/tools/ATSToolPage.jsx:33:  const [error,     setError]     = useState("");
+client/src/pages/tools/ATSToolPage.jsx:34:  const fileRef = useRef();
+client/src/pages/tools/ATSToolPage.jsx:8:  const { theme } = useTheme();
+client/src/pages/tools/ApplyToolPage.jsx:10:  const [pdfFile,    setPdfFile]    = useState(null);
+client/src/pages/tools/ApplyToolPage.jsx:11:  const [urlsText,   setUrlsText]   = useState("");
+client/src/pages/tools/ApplyToolPage.jsx:12:  const [profile,    setProfile]    = useState({ name:"", email:"", phone:"", linkedin:"", location:"", work_auth:"" });
+client/src/pages/tools/ApplyToolPage.jsx:13:  const [loading,    setLoading]    = useState(false);
+client/src/pages/tools/ApplyToolPage.jsx:14:  const [results,    setResults]    = useState(null);
+client/src/pages/tools/ApplyToolPage.jsx:15:  const [error,      setError]      = useState("");
+client/src/pages/tools/ApplyToolPage.jsx:16:  const [authNeeded, setAuthNeeded] = useState(false);
+client/src/pages/tools/ApplyToolPage.jsx:17:  const fileRef = useRef();
+client/src/pages/tools/ApplyToolPage.jsx:9:  const { theme } = useTheme();
+client/src/pages/tools/GenerateToolPage.jsx:11:  const { theme } = useTheme();
+client/src/pages/tools/GenerateToolPage.jsx:12:  const [pdfFile,  setPdfFile]  = useState(null);
+client/src/pages/tools/GenerateToolPage.jsx:13:  const [jdText,   setJdText]   = useState("");
+client/src/pages/tools/GenerateToolPage.jsx:14:  const [loading,  setLoading]  = useState(false);
+client/src/pages/tools/GenerateToolPage.jsx:15:  const [result,   setResult]   = useState(null);
+client/src/pages/tools/GenerateToolPage.jsx:16:  const [error,    setError]    = useState("");
+client/src/pages/tools/GenerateToolPage.jsx:17:  const fileRef  = useRef();
+client/src/pages/tools/GenerateToolPage.jsx:18:  const iframeRef = useRef();
+client/src/panels/ATSPanel.jsx:25:  const { theme } = useTheme();
+client/src/panels/ATSPanel.jsx:26:  const [localReport, setLocalReport] = useState(null);
+client/src/panels/ATSPanel.jsx:27:  const [kwLoading,   setKwLoading]   = useState(false);
+client/src/panels/ATSPanel.jsx:28:  const [kwError,     setKwError]     = useState(false);
+client/src/panels/ATSPanel.jsx:29:  const [addedItems,  setAddedItems]  = useState(new Set());
+client/src/panels/ATSPanel.jsx:30:  const [profileSuggestions, setProfileSuggestions] = useState(null);
+client/src/panels/ATSPanel.jsx:31:  const [profileSelections, setProfileSelections] = useState({ activeSkills: [], activeVerbs: [] });
+client/src/panels/ATSPanel.jsx:34:  useEffect(() => {
+client/src/panels/ATSPanel.jsx:41:  useEffect(() => {
+client/src/panels/ATSPanel.jsx:81:  useEffect(() => {
+client/src/panels/ATSPanel.jsx:85:  useEffect(() => {
+client/src/panels/ATSPanel.jsx:97:  useSyncEvents({
+client/src/panels/AdminPanel.jsx:120:  const [from, setFrom] = useState(Math.floor(Date.now()/1000) - 30*86400);
+client/src/panels/AdminPanel.jsx:121:  const [to,   setTo]   = useState(Math.floor(Date.now()/1000) + 86400);
+client/src/panels/AdminPanel.jsx:122:  const [overview, setOverview] = useState(null);
+client/src/panels/AdminPanel.jsx:123:  const [timeseries, setTimeseries] = useState({});
+client/src/panels/AdminPanel.jsx:124:  const [modelCalls, setModelCalls] = useState([]);
+client/src/panels/AdminPanel.jsx:125:  const [loading, setLoading] = useState(false);
+client/src/panels/AdminPanel.jsx:127:  const loadData = useCallback(async () => {
+client/src/panels/AdminPanel.jsx:143:  useEffect(() => { loadData(); }, [loadData]);
+client/src/panels/AdminPanel.jsx:20:  const { theme } = useTheme();
+client/src/panels/AdminPanel.jsx:303:  const [limits, setLimits] = useState({
+client/src/panels/AdminPanel.jsx:314:  const [saving, setSaving] = useState(false);
+client/src/panels/AdminPanel.jsx:394:  const [from, setFrom] = useState(Math.floor(Date.now()/1000) - 30*86400);
+client/src/panels/AdminPanel.jsx:395:  const [to,   setTo]   = useState(Math.floor(Date.now()/1000) + 86400);
+client/src/panels/AdminPanel.jsx:396:  const [users, setUsers] = useState([]);
+client/src/panels/AdminPanel.jsx:397:  const [loading, setLoading] = useState(false);
+client/src/panels/AdminPanel.jsx:398:  const [editLimits, setEditLimits] = useState(null);
+client/src/panels/AdminPanel.jsx:399:  const [expanded, setExpanded] = useState(null);
+client/src/panels/AdminPanel.jsx:400:  const [events, setEvents] = useState({});
+client/src/panels/AdminPanel.jsx:402:  const loadUsers = useCallback(async () => {
+client/src/panels/AdminPanel.jsx:411:  useEffect(() => { loadUsers(); }, [loadUsers]);
+client/src/panels/AdminPanel.jsx:50:  const { theme } = useTheme();
+client/src/panels/AdminPanel.jsx:542:  const [data, setData] = useState(null);
+client/src/panels/AdminPanel.jsx:543:  useEffect(() => {
+client/src/panels/AdminPanel.jsx:619:  const [messages, setMessages]   = useState([]);
+client/src/panels/AdminPanel.jsx:620:  const [loading,  setLoading]    = useState(true);
+client/src/panels/AdminPanel.jsx:621:  const [expanded, setExpanded]   = useState(null);
+client/src/panels/AdminPanel.jsx:622:  const [unreadOnly, setUnreadOnly] = useState(false);
+client/src/panels/AdminPanel.jsx:624:  const loadMessages = useCallback(async () => {
+client/src/panels/AdminPanel.jsx:633:  useEffect(() => { loadMessages(); }, [loadMessages]);
+client/src/panels/AdminPanel.jsx:753:  const { theme } = useTheme();
+client/src/panels/AdminPanel.jsx:754:  const [users,    setUsers]    = useState([]);
+client/src/panels/AdminPanel.jsx:755:  const [upgradeRequests, setUpgradeRequests] = useState([]);
+client/src/panels/AdminPanel.jsx:756:  const [profileRequests, setProfileRequests] = useState([]);
+client/src/panels/AdminPanel.jsx:757:  const [backups,  setBackups]  = useState([]);
+client/src/panels/AdminPanel.jsx:758:  const [newU,     setNewU]     = useState({ username:"", password:"", isAdmin:false });
+client/src/panels/AdminPanel.jsx:759:  const [status,   setStatus]   = useState("");
+client/src/panels/AdminPanel.jsx:760:  const [bStatus,  setBStatus]  = useState("");
+client/src/panels/AdminPanel.jsx:761:  const [backing,  setBacking]  = useState(false);
+client/src/panels/AdminPanel.jsx:762:  const [section,  setSection]  = useState("users");
+client/src/panels/AdminPanel.jsx:765:  const [topTab, setTopTab] = useState("system");
+client/src/panels/AdminPanel.jsx:767:  useEffect(() => { loadUsers(); loadBackups(); loadUpgradeRequests(); loadProfileRequests(); }, []);
+client/src/panels/AdminPanel.jsx:77:  const { theme } = useTheme();
+client/src/panels/DatabasePanel.jsx:17:  const [view, setView] = useState({ year: init.getFullYear(), month: init.getMonth() });
+client/src/panels/DatabasePanel.jsx:201:  const [view,      setView]      = useState(null); // "resume" | "ats"
+client/src/panels/DatabasePanel.jsx:205:  useEffect(() => { if (modal) setView(modal.type); }, [modal?.type, modal?.company]);
+client/src/panels/DatabasePanel.jsx:344:  const { theme } = useTheme();
+client/src/panels/DatabasePanel.jsx:345:  const { activeProfileId, setActiveProfileId } = useJobBoard() || {};
+client/src/panels/DatabasePanel.jsx:346:  const [activeSheet,  setActiveSheet]  = useState("applications");
+client/src/panels/DatabasePanel.jsx:347:  const [apps,         setApps]         = useState([]);
+client/src/panels/DatabasePanel.jsx:348:  const [resumes,      setResumes]      = useState([]);
+client/src/panels/DatabasePanel.jsx:349:  const [detailModal,  setDetailModal]  = useState(null);
+client/src/panels/DatabasePanel.jsx:350:  const [detailLoading,setDetailLoading]= useState(false);
+client/src/panels/DatabasePanel.jsx:351:  const [loading,      setLoading]      = useState(false);
+client/src/panels/DatabasePanel.jsx:352:  const [saving,       setSaving]       = useState({});
+client/src/panels/DatabasePanel.jsx:353:  const [editCell,     setEditCell]     = useState(null);
+client/src/panels/DatabasePanel.jsx:354:  const [editVal,      setEditVal]      = useState("");
+client/src/panels/DatabasePanel.jsx:355:  const [calCell,      setCalCell]      = useState(null);
+client/src/panels/DatabasePanel.jsx:356:  const [flashRow,     setFlashRow]     = useState(null);
+client/src/panels/DatabasePanel.jsx:357:  const [search,       setSearch]       = useState("");
+client/src/panels/DatabasePanel.jsx:358:  const [sortCol,      setSortCol]      = useState("applied_at");
+client/src/panels/DatabasePanel.jsx:359:  const [sortDir,      setSortDir]      = useState("desc");
+client/src/panels/DatabasePanel.jsx:360:  const [filterDate,   setFilterDate]   = useState("");
+client/src/panels/DatabasePanel.jsx:361:  const [calFilter,    setCalFilter]    = useState(false);
+client/src/panels/DatabasePanel.jsx:364:  const [savedJobs,    setSavedJobs]    = useState([]);
+client/src/panels/DatabasePanel.jsx:365:  const [savedGen,     setSavedGen]     = useState({}); // jobId→{html,atsScore}
+client/src/panels/DatabasePanel.jsx:366:  const [baseResume,   setBaseResume]   = useState("");
+client/src/panels/DatabasePanel.jsx:367:  const [genLoading,   setGenLoading]   = useState({});
+client/src/panels/DatabasePanel.jsx:370:  const [pendingJobs,  setPendingJobs]  = useState([]);
+client/src/panels/DatabasePanel.jsx:372:  const inputRef = useRef();
+client/src/panels/DatabasePanel.jsx:373:  const calRef   = useRef();
+client/src/panels/DatabasePanel.jsx:375:  const load = useCallback(async () => {
+client/src/panels/DatabasePanel.jsx:388:  const loadSaved = useCallback(async () => {
+client/src/panels/DatabasePanel.jsx:412:  const loadPending = useCallback(async () => {
+client/src/panels/DatabasePanel.jsx:419:  const generateForSaved = useCallback(async (job, force = false, tool = "generate") => {
+client/src/panels/DatabasePanel.jsx:434:  const exportSavedPdf = useCallback(async (job, html) => {
+client/src/panels/DatabasePanel.jsx:444:  const unsaveJob = useCallback(async (jobId) => {
+client/src/panels/DatabasePanel.jsx:449:  useEffect(() => { load(); }, [load]);
+client/src/panels/DatabasePanel.jsx:450:  useEffect(() => { if (activeSheet === "saved") loadSaved(); }, [activeSheet, loadSaved]);
+client/src/panels/DatabasePanel.jsx:451:  useEffect(() => { if (activeSheet === "pending") loadPending(); }, [activeSheet, loadPending]);
+client/src/panels/DatabasePanel.jsx:452:  useEffect(() => { if (editCell && inputRef.current) inputRef.current.focus(); }, [editCell]);
+client/src/panels/DatabasePanel.jsx:454:  useEffect(() => {
+client/src/panels/IntegrationsPanel.jsx:36:  const { theme } = useTheme();
+client/src/panels/IntegrationsPanel.jsx:37:  const [status, setStatus] = useState(null);
+client/src/panels/IntegrationsPanel.jsx:38:  const [msg, setMsg] = useState("");
+client/src/panels/IntegrationsPanel.jsx:41:  useEffect(() => { load(); }, []);
+client/src/panels/JobProfilesPanel.jsx:10:  const { setActiveProfileId, deleteProfileCache } = useJobBoard() || {};
+client/src/panels/JobProfilesPanel.jsx:11:  const [profiles, setProfiles] = useState([]);
+client/src/panels/JobProfilesPanel.jsx:12:  const [status, setStatus] = useState("");
+client/src/panels/JobProfilesPanel.jsx:13:  const [wizardMode, setWizardMode] = useState(null);
+client/src/panels/JobProfilesPanel.jsx:14:  const [editingProfile, setEditingProfile] = useState(null);
+client/src/panels/JobProfilesPanel.jsx:15:  const [uploadingProfileId, setUploadingProfileId] = useState(null);
+client/src/panels/JobProfilesPanel.jsx:45:  const loadProfiles = useCallback(async () => {
+client/src/panels/JobProfilesPanel.jsx:57:  useEffect(() => { loadProfiles(); }, [loadProfiles]);
+client/src/panels/JobProfilesPanel.jsx:9:  const { theme } = useTheme();
+client/src/panels/JobsPanel.jsx:1012:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1030:  const [enhanceUsed,    setEnhanceUsed]    = useState(false);
+client/src/panels/JobsPanel.jsx:1031:  const [enhancePaid,    setEnhancePaid]    = useState(false);
+client/src/panels/JobsPanel.jsx:1032:  const [enhancing,      setEnhancing]      = useState(false);
+client/src/panels/JobsPanel.jsx:1033:  const [enhanceResult,  setEnhanceResult]  = useState(null); // { original, enhanced, delta }
+client/src/panels/JobsPanel.jsx:1034:  const [enhanceModalOpen, setEnhanceModalOpen] = useState(false);
+client/src/panels/JobsPanel.jsx:1037:  const [filtersOpen, setFiltersOpen] = useState(false);
+client/src/panels/JobsPanel.jsx:1040:  const [employmentTypePrefs, setEmploymentTypePrefsRaw] = useState(() => {
+client/src/panels/JobsPanel.jsx:1052:  const [searchInput, setSearchInput] = useState("");
+client/src/panels/JobsPanel.jsx:1055:  const [searchCommitted, setSearchCommitted] = useState(false);
+client/src/panels/JobsPanel.jsx:1058:  const [roleFilter,    setRoleFilter]    = useState("");
+client/src/panels/JobsPanel.jsx:1059:  const [locationFilter,setLocationFilter]= useState("");
+client/src/panels/JobsPanel.jsx:1060:  const [workType,      setWorkType]      = useState("");
+client/src/panels/JobsPanel.jsx:1061:  const [catFilter,     setCatFilter]     = useState("");
+client/src/panels/JobsPanel.jsx:1062:  const [srcFilter,     setSrcFilter]     = useState("");
+client/src/panels/JobsPanel.jsx:1063:  const [minYoe,        setMinYoe]        = useState("");
+client/src/panels/JobsPanel.jsx:1064:  const [maxYoe,        setMaxYoe]        = useState("");
+client/src/panels/JobsPanel.jsx:1065:  const [maxApplicants, setMaxApplicants] = useState("");
+client/src/panels/JobsPanel.jsx:1066:  const [visitedFilter, setVisitedFilter] = useState("");
+client/src/panels/JobsPanel.jsx:1067:  const [ageFilter,     setAgeFilter]     = useState("");
+client/src/panels/JobsPanel.jsx:1068:  const [pendingFilters, setPendingFilters] = useState(defaultFilterSnapshot);
+client/src/panels/JobsPanel.jsx:1070:  const activeProfileKeyRef = useRef(activeProfileKey);
+client/src/panels/JobsPanel.jsx:1071:  const switchingProfileRef = useRef(false);
+client/src/panels/JobsPanel.jsx:1072:  const latestSnapshotRef = useRef(null);
+client/src/panels/JobsPanel.jsx:1073:  const jobsFetchSeqRef = useRef(0);
+client/src/panels/JobsPanel.jsx:1074:  const nextFetchPageRef = useRef(1);
+client/src/panels/JobsPanel.jsx:1075:  const pendingIntentSearchRef = useRef(null);
+client/src/panels/JobsPanel.jsx:1076:  const searchIntentResolveRef = useRef(null);
+client/src/panels/JobsPanel.jsx:1078:  const fetchJobsRef = useRef(null);
+client/src/panels/JobsPanel.jsx:1080:  const activeFilterSnapshot = useCallback(() => ({
+client/src/panels/JobsPanel.jsx:1099:  const stageFilter = useCallback((key, value) => {
+client/src/panels/JobsPanel.jsx:1103:  const openFilterPanel = useCallback(() => {
+client/src/panels/JobsPanel.jsx:1108:  const applyPendingFilters = useCallback(() => {
+client/src/panels/JobsPanel.jsx:1128:  const resetPendingFilters = useCallback(() => {
+client/src/panels/JobsPanel.jsx:1132:  const makeProfileSnapshot = useCallback((overrides = {}) => ({
+client/src/panels/JobsPanel.jsx:1160:  const applyProfileSnapshot = useCallback((snapshot) => {
+client/src/panels/JobsPanel.jsx:1183:  const fileRef        = useRef();
+client/src/panels/JobsPanel.jsx:1184:  const jobCountRef    = useRef(0);
+client/src/panels/JobsPanel.jsx:1185:  const displayJobsRef = useRef([]);
+client/src/panels/JobsPanel.jsx:1194:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1224:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1244:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1281:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1319:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1329:  const handleJobSelect = useCallback((job) => {
+client/src/panels/JobsPanel.jsx:1343:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1368:  const buildParams = useCallback((page = 1, overrideStarred = null, overrides = {}) => {
+client/src/panels/JobsPanel.jsx:1393:  const fetchImportedSummary = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1406:  const fetchImportedLinkedInJobs = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1415:  const openLinkedInExtensionPopup = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1423:  const closeLinkedInImportTab = useCallback(async (tabId) => {
+client/src/panels/JobsPanel.jsx:1429:  const startLinkedInImport = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1466:  const fetchPending = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1476:  const fetchJobs = useCallback(async (page = 1, mergeMode = false, options = {}) => {
+client/src/panels/JobsPanel.jsx:1541:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1570:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1595:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1600:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1617:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:161:  const [failed, setFailed] = useState(false);
+client/src/panels/JobsPanel.jsx:1634:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1638:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1645:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1654:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1659:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:1669:  useSyncEvents({
+client/src/panels/JobsPanel.jsx:1697:  const startPollLoop = useCallback((roleQ, pollSince) => {
+client/src/panels/JobsPanel.jsx:1759:  const activateProfileForSearch = useCallback(async (profileId) => {
+client/src/panels/JobsPanel.jsx:1766:  const askSearchIntent = useCallback((prompt) => new Promise(resolve => {
+client/src/panels/JobsPanel.jsx:1771:  const closeSearchIntentPrompt = useCallback((accepted) => {
+client/src/panels/JobsPanel.jsx:1778:  const addToApplyQueue = useCallback((job) => {
+client/src/panels/JobsPanel.jsx:1785:  const removeFromApplyQueue = useCallback((jobId) => {
+client/src/panels/JobsPanel.jsx:1789:  const loadApplyRuns = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1797:  const loadApplyRunDetail = useCallback(async (runId) => {
+client/src/panels/JobsPanel.jsx:1805:  useEffect(() => { if (user) loadApplyRuns(); }, [user, loadApplyRuns]);
+client/src/panels/JobsPanel.jsx:1807:  const startApplyRun = useCallback(async (mode = "auto") => {
+client/src/panels/JobsPanel.jsx:1825:  const deleteDomainProfile = useCallback(async (profileId) => {
+client/src/panels/JobsPanel.jsx:1843:  const ensureSearchProfileAlignment = useCallback(async (query) => {
+client/src/panels/JobsPanel.jsx:1890:  const handleSetRole = useCallback(async (overrideQuery, options = {}) => {
+client/src/panels/JobsPanel.jsx:1916:  const handleSearch = useCallback(async (overrideQuery, options = {}) => {
+client/src/panels/JobsPanel.jsx:1942:  const handlePullRefresh = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1965:  const handleEnhance = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1989:  const handleAdoptEnhanced = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:1998:  const handleSmartSearch = useCallback(async () => {
+client/src/panels/JobsPanel.jsx:2016:  const handleFile = useCallback(async e => {
+client/src/panels/JobsPanel.jsx:2044:  const generateActual = useCallback(async (job, force = false, skipCompanyCheck = false, tool = "generate") => {
+client/src/panels/JobsPanel.jsx:2119:  const generate = useCallback(async (job, force = false, tool = "generate") => {
+client/src/panels/JobsPanel.jsx:2132:        setCompanyReuseTarget({ job, priorEntry, tool });
+client/src/panels/JobsPanel.jsx:2139:  const saveSandboxHtml = useCallback(async (html, artifact = null) => {
+client/src/panels/JobsPanel.jsx:2154:  const exportAndTrack = useCallback(async (job, html, company, artifact = null) => {
+client/src/panels/JobsPanel.jsx:2177:  const toggleStar = useCallback(async (jobId, job = null) => {
+client/src/panels/JobsPanel.jsx:2198:  const toggleDislike = useCallback(async (jobId, job = null) => {
+client/src/panels/JobsPanel.jsx:2231:  const markVisited = useCallback((job) => {
+client/src/panels/JobsPanel.jsx:2242:  const visitUrl = useCallback(async (job) => {
+client/src/panels/JobsPanel.jsx:2270:  const displayJobs = useMemo(() => {
+client/src/panels/JobsPanel.jsx:2292:  const runSearchButton = useCallback(async (overrideQuery) => {
+client/src/panels/JobsPanel.jsx:254:  const [hov, setHov] = useState(false);
+client/src/panels/JobsPanel.jsx:255:  const { theme } = useTheme();
+client/src/panels/JobsPanel.jsx:289:  const [hov, setHov] = useState(false);
+client/src/panels/JobsPanel.jsx:2906:            setCompanyReuseTarget(null);
+client/src/panels/JobsPanel.jsx:290:  const { theme } = useTheme();
+client/src/panels/JobsPanel.jsx:2916:            setCompanyReuseTarget(null);
+client/src/panels/JobsPanel.jsx:2919:          onCancel={() => setCompanyReuseTarget(null)}
+client/src/panels/JobsPanel.jsx:3193:  const { theme: t } = useTheme();
+client/src/panels/JobsPanel.jsx:3195:  const [active, setActive] = useState(false);
+client/src/panels/JobsPanel.jsx:3234:  const [pageInput, setPageInput] = useState("");
+client/src/panels/JobsPanel.jsx:3237:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:3511:  const { theme: t } = useTheme();
+client/src/panels/JobsPanel.jsx:351:  const { theme } = useTheme();
+client/src/panels/JobsPanel.jsx:3589:  const [step, setStep] = useState("install");
+client/src/panels/JobsPanel.jsx:3590:  const [timedOut, setTimedOut] = useState(false);
+client/src/panels/JobsPanel.jsx:3592:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:3608:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:3673:  const { theme: t } = useTheme();
+client/src/panels/JobsPanel.jsx:3720:function CompanyReuseModal({ company, onUseExisting, onGenerateNew, onCancel, theme }) {
+client/src/panels/JobsPanel.jsx:670:  const scrollRef = useRef(null);
+client/src/panels/JobsPanel.jsx:671:  const { update: updateScroll, scrollToTopRef } = useAppScroll();
+client/src/panels/JobsPanel.jsx:672:  const [pullY,   setPullY]   = useState(0);
+client/src/panels/JobsPanel.jsx:673:  const [ready,   setReady]   = useState(false);
+client/src/panels/JobsPanel.jsx:674:  const startY = useRef(null);
+client/src/panels/JobsPanel.jsx:678:  useEffect(() => {
+client/src/panels/JobsPanel.jsx:851:  const { theme } = useTheme();
+client/src/panels/JobsPanel.jsx:852:  const { mode: vpMode } = useViewport();
+client/src/panels/JobsPanel.jsx:853:  const navigate = useNavigate();
+client/src/panels/JobsPanel.jsx:854:  const { pin: pinDock, scrollToTopRef, progress: scrollProgress } = useAppScroll();
+client/src/panels/JobsPanel.jsx:860:  const [mobilePane, setMobilePane] = useState("jobs"); // "jobs" | "editor" | "ats"
+client/src/panels/JobsPanel.jsx:864:  const sessionDislikedRef = useRef(new Map()); // jobId ? job object
+client/src/panels/JobsPanel.jsx:867:  const [jobs,        setJobs]        = useState([]);
+client/src/panels/JobsPanel.jsx:868:  const [totalJobs,   setTotalJobs]   = useState(0);
+client/src/panels/JobsPanel.jsx:869:  const [totalPages,  setTotalPages]  = useState(0);
+client/src/panels/JobsPanel.jsx:870:  const [currentPage, setCurrentPage] = useState(1);
+client/src/panels/JobsPanel.jsx:873:  const [scraping,    setScraping]    = useState(false);  // Apify live scrape
+client/src/panels/JobsPanel.jsx:874:  const [bgLoading,   setBgLoading]   = useState(false);  // background DB fetch
+client/src/panels/JobsPanel.jsx:875:  const [categories,  setCategories]  = useState([]);
+client/src/panels/JobsPanel.jsx:876:  const [resumeText,  setResumeText]  = useState("");
+client/src/panels/JobsPanel.jsx:877:  const [fileName,    setFileName]    = useState("");
+client/src/panels/JobsPanel.jsx:878:  const [uploading,   setUploading]   = useState(false);
+client/src/panels/JobsPanel.jsx:879:  const [generated,   setGenerated]   = useState({});
+client/src/panels/JobsPanel.jsx:880:  const [loading,     setLoading]     = useState({});
+client/src/panels/JobsPanel.jsx:881:  const [sandbox,     setSandbox]     = useState(null);
+client/src/panels/JobsPanel.jsx:882:  const [sandboxOpen, setSandboxOpen] = useState(false);
+client/src/panels/JobsPanel.jsx:883:  const [rightTab,      setRightTab]      = useState("history");
+client/src/panels/JobsPanel.jsx:884:  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+client/src/panels/JobsPanel.jsx:887:  const [selectedJob,  setSelectedJob]  = useState(null);
+client/src/panels/JobsPanel.jsx:890:  const openSandbox = useCallback((entry) => {
+client/src/panels/JobsPanel.jsx:896:  const closeSandbox = useCallback(() => {
+client/src/panels/JobsPanel.jsx:901:  const openAtsPanel = useCallback((atsData) => {
+client/src/panels/JobsPanel.jsx:908:  const closeAtsPanel = useCallback(() => {
+client/src/panels/JobsPanel.jsx:912:  const [activeAts,   setActiveAts]   = useState(null);
+client/src/panels/JobsPanel.jsx:913:  const [smartSearching, setSmartSearching] = useState(false);
+client/src/panels/JobsPanel.jsx:914:  const [attribution, setAttribution] = useState([]); // job source attribution from aggregator
+client/src/panels/JobsPanel.jsx:917:  const [domainProfiles,   setDomainProfiles]   = useState([]);
+client/src/panels/JobsPanel.jsx:918:  const [profileWizardOpen, setProfileWizardOpen] = useState(false);
+client/src/panels/JobsPanel.jsx:919:  const [profileWizardIntent, setProfileWizardIntent] = useState(null);
+client/src/panels/JobsPanel.jsx:920:  const [searchIntentPrompt, setSearchIntentPrompt] = useState(null);
+client/src/panels/JobsPanel.jsx:922:  const [profileSwitchKey, setProfileSwitchKey] = useState(0);
+client/src/panels/JobsPanel.jsx:925:  const [scrapeError,    setScrapeError]    = useState("");
+client/src/panels/JobsPanel.jsx:926:  const [applyQueue, setApplyQueue] = useState([]);
+client/src/panels/JobsPanel.jsx:927:  const [applyRuns, setApplyRuns] = useState([]);
+client/src/panels/JobsPanel.jsx:928:  const [applyReviewJobs, setApplyReviewJobs] = useState([]); // held_review items across all runs
+client/src/panels/JobsPanel.jsx:929:  const [applyQueueMsg, setApplyQueueMsg] = useState("");
+client/src/panels/JobsPanel.jsx:930:  const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
+client/src/panels/JobsPanel.jsx:931:  const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
+client/src/panels/JobsPanel.jsx:937:  const [pollStatus,   setPollStatus]   = useState("idle"); // "idle"|"polling"|"complete"|"error"
+client/src/panels/JobsPanel.jsx:938:  const pollIntervalRef = useRef(null);
+client/src/panels/JobsPanel.jsx:940:  const [searchPhase, setSearchPhase] = useState("idle");
+client/src/panels/JobsPanel.jsx:943:  const [genStage, setGenStage] = useState("");
+client/src/panels/JobsPanel.jsx:944:  const genTimerRef = useRef(null);
+client/src/panels/JobsPanel.jsx:947:  const jobsPanelRef    = useRef(null);
+client/src/panels/JobsPanel.jsx:948:  const detailPanelRef  = useRef(null);
+client/src/panels/JobsPanel.jsx:949:  const sandboxPanelRef = useRef(null);
+client/src/panels/JobsPanel.jsx:950:  const atsPanelRef     = useRef(null);
+client/src/panels/JobsPanel.jsx:951:  const detailPanelElementRef = useRef(null);
+client/src/panels/JobsPanel.jsx:952:  const initialPanelDefaultsAppliedRef = useRef(false);
+client/src/panels/JobsPanel.jsx:953:  const prevPanelVisibilityRef = useRef({ detail: false, sandbox: false, ats: false });
+client/src/panels/JobsPanel.jsx:956:  const jobsPanelElementRef = useRef(null);
+client/src/panels/JobsPanel.jsx:957:  const [manualWidth, setManualWidth] = useState(null);
+client/src/panels/JobsPanel.jsx:961:  const effectiveTier = useMemo(() => {
+client/src/panels/JobsPanel.jsx:970:  const [smartSearchError, setSmartSearchError] = useState("");
+client/src/panels/JobsPanel.jsx:971:  const [uploadError,      setUploadError]      = useState("");
+client/src/panels/JobsPanel.jsx:974:  const [companyReuseTarget, setCompanyReuseTarget] = useState(null);
+client/src/panels/JobsPanel.jsx:980:  } = useJobBoard();
+client/src/panels/JobsPanel.jsx:981:  const [pendingJobs, setPendingJobs] = useState([]);
+client/src/panels/JobsPanel.jsx:982:  const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
+client/src/panels/JobsPanel.jsx:983:  const [linkedinImportSummary, setLinkedinImportSummary] = useState({ total: 0, lastImportedAt: null });
+client/src/panels/JobsPanel.jsx:984:  const [linkedinInstallModalOpen, setLinkedinInstallModalOpen] = useState(false);
+client/src/panels/JobsPanel.jsx:985:  const [linkedinImporting, setLinkedinImporting] = useState(false);
+client/src/panels/JobsPanel.jsx:986:  const [linkedinExtensionNotice, setLinkedinExtensionNotice] = useState(null);
+client/src/panels/JobsPanel.jsx:991:  const activeDomainProfile = useMemo(() => (
+client/src/panels/PlansPanel.jsx:18:  const { theme } = useTheme();
+client/src/panels/PlansPanel.jsx:19:  const [plan, setPlan] = useState(null);
+client/src/panels/PlansPanel.jsx:20:  const [status, setStatus] = useState("");
+client/src/panels/PlansPanel.jsx:28:  useEffect(() => { load(); }, []);
+client/src/panels/ProfilePanel.jsx:100:  const [structuredFactsForm, setStructuredFactsForm] = useState({
+client/src/panels/ProfilePanel.jsx:108:  const [suggestedSignals, setSuggestedSignals] = useState({
+client/src/panels/ProfilePanel.jsx:117:  const [enhancementStatus, setEnhancementStatus] = useState({
+client/src/panels/ProfilePanel.jsx:126:  const [enhancementHistory, setEnhancementHistory] = useState([]);
+client/src/panels/ProfilePanel.jsx:127:  const [enhancingProfileResume, setEnhancingProfileResume] = useState(false);
+client/src/panels/ProfilePanel.jsx:128:  const [enhancePreview, setEnhancePreview] = useState(null);
+client/src/panels/ProfilePanel.jsx:129:  const [suggestionStatus, setSuggestionStatus] = useState("");
+client/src/panels/ProfilePanel.jsx:130:  const [resumeDraft, setResumeDraft] = useState("");
+client/src/panels/ProfilePanel.jsx:131:  const [resumeName, setResumeName] = useState("");
+client/src/panels/ProfilePanel.jsx:132:  const [profileStatus, setProfileStatus] = useState("");
+client/src/panels/ProfilePanel.jsx:133:  const [resumeStatus, setResumeStatus] = useState("");
+client/src/panels/ProfilePanel.jsx:134:  const [signalStatus, setSignalStatus] = useState("");
+client/src/panels/ProfilePanel.jsx:135:  const [loadingProfileAssets, setLoadingProfileAssets] = useState(false);
+client/src/panels/ProfilePanel.jsx:136:  const [uploadingResume, setUploadingResume] = useState(false);
+client/src/panels/ProfilePanel.jsx:137:  const [showProfileWizard, setShowProfileWizard] = useState(false);
+client/src/panels/ProfilePanel.jsx:138:  const resumeInputRef = useRef(null);
+client/src/panels/ProfilePanel.jsx:140:  const loadProfileAssets = useCallback(async (profileId) => {
+client/src/panels/ProfilePanel.jsx:187:  const loadProfiles = useCallback(async () => {
+client/src/panels/ProfilePanel.jsx:197:  useEffect(() => {
+client/src/panels/ProfilePanel.jsx:207:  useEffect(() => { loadProfiles(); }, [loadProfiles]);
+client/src/panels/ProfilePanel.jsx:209:  useEffect(() => {
+client/src/panels/ProfilePanel.jsx:251:  useEffect(() => {
+client/src/panels/ProfilePanel.jsx:80:  const { theme } = useTheme();
+client/src/panels/ProfilePanel.jsx:92:  const [form,   setForm]   = useState(BLANK);
+client/src/panels/ProfilePanel.jsx:93:  const [status, setStatus] = useState("");
+client/src/panels/ProfilePanel.jsx:94:  const [profiles, setProfiles] = useState([]);
+client/src/panels/ProfilePanel.jsx:95:  const [activeProfileId, setActiveProfileId] = useState(null);
+client/src/panels/ProfilePanel.jsx:96:  const [profileForm, setProfileForm] = useState(null);
+client/src/panels/ProfilePanel.jsx:97:  const [signalsForm, setSignalsForm] = useState({
+client/src/panels/SandboxPanel.jsx:24:  const { theme } = useTheme();
+client/src/panels/SandboxPanel.jsx:25:  const [exporting,   setExporting]   = useState(false);
+client/src/panels/SandboxPanel.jsx:26:  const [exportError, setExportError] = useState("");
+client/src/panels/SandboxPanel.jsx:27:  const [dirty,       setDirty]       = useState(false);
+client/src/panels/SandboxPanel.jsx:28:  const [saveMsg,     setSaveMsg]     = useState("");
+client/src/panels/SandboxPanel.jsx:29:  const [selectedTool, setSelectedTool] = useState(entry?.activeTool || entry?.tool || "generate");
+client/src/panels/SandboxPanel.jsx:30:  const [pageCount, setPageCount] = useState(1);
+client/src/panels/SandboxPanel.jsx:37:  const frameRefs    = useRef([]);
+client/src/panels/SandboxPanel.jsx:38:  const containerRef = useRef(null);  // outer scroll container, observed by ResizeObserver
+client/src/panels/SandboxPanel.jsx:39:  const innerRef     = useRef(null);  // scale host — transform applied directly to DOM
+client/src/panels/SandboxPanel.jsx:40:  const scaleRef     = useRef(1);     // current scale value — never stored in state
+client/src/panels/SandboxPanel.jsx:41:  const frameCleanupRef = useRef([]);
+client/src/panels/SandboxPanel.jsx:42:  const currentHtmlRef = useRef(activeEntry?.html || "");
+client/src/panels/SandboxPanel.jsx:43:  const syncingFramesRef = useRef(false);
+client/src/panels/SandboxPanel.jsx:45:  useEffect(() => {
+client/src/panels/SandboxPanel.jsx:64:  useEffect(() => {
+client/src/panels/SandboxPanel.jsx:68:  useEffect(() => () => {
+client/src/panels/SandboxPanel.jsx:74:  useEffect(() => {
+client/src/styles/theme.jsx:321:export function useTheme() {
+client/src/styles/theme.jsx:322:  return useContext(ThemeContext);
+client/src/styles/theme.jsx:89:  const [accentId, setAccentIdRaw] = useState(() => {

@@ -1,1 +1,27 @@
-/usr/bin/bash: line 1: npm: command not found
+
+> resume-master-client@4.0.0 build
+> vite build
+
+[33mThe CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.[39m
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+(node:5468) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/duggi/WebstormProjects/resume-master/client/postcss.config.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\C:\Users\duggi\WebstormProjects\resume-master\client\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[32m✓[39m 2592 modules transformed.
+rendering chunks...
+[1m[33m[plugin:vite:reporter][39m[22m [33m[plugin vite:reporter] 
+(!) C:/Users/duggi/WebstormProjects/resume-master/client/src/components/JobCard.jsx is dynamically imported by C:/Users/duggi/WebstormProjects/resume-master/client/src/pages/LandingPage.jsx but also statically imported by C:/Users/duggi/WebstormProjects/resume-master/client/src/panels/DatabasePanel.jsx, C:/Users/duggi/WebstormProjects/resume-master/client/src/panels/JobsPanel.jsx, dynamic import will not move module into another chunk.
+[39m
+computing gzip size...
+[2mdist/[22m[32mindex.html                 [39m[1m[2m  2.07 kB[22m[1m[22m[2m │ gzip:   1.00 kB[22m
+[2mdist/[22m[35massets/index-B2KNNPBz.css  [39m[1m[2m 74.37 kB[22m[1m[22m[2m │ gzip:  13.75 kB[22m
+[2mdist/[22m[36massets/index-CyhVNffQ.js   [39m[1m[2m494.42 kB[22m[1m[22m[2m │ gzip: 129.56 kB[22m
+[2mdist/[22m[36massets/index-BqcO6pZm.js   [39m[1m[33m823.72 kB[39m[22m[2m │ gzip: 228.83 kB[22m
+[33m
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+[32m✓ built in 14.66s[39m
