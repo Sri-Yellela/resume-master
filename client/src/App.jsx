@@ -302,7 +302,10 @@ function AppRouter() {
   );
 
   // NavBar helper — renders the shared public nav with current auth state
-  const navBar = <NavBar user={authUser} onLogout={handlePublicLogout}/>;
+  const navBar = (
+    <NavBar user={authUser} onLogout={handlePublicLogout}
+      onLogin={(user) => { setAuthUser(user); setAuthStatus("authenticated"); }}/>
+  );
 
   return (
     <AppShell>

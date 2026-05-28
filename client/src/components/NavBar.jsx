@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { StampLogo } from './StampLogo.jsx';
 import { useLogoSize } from '../hooks/useLogoSize.js';
+import InlineLoginPopover from './InlineLoginPopover.jsx';
 import './NavBar.css';
 
 const PUBLIC_LINKS = [
@@ -14,7 +15,8 @@ const PUBLIC_LINKS = [
 
 // user: authUser object | null
 // onLogout: async function
-export default function NavBar({ user = null, onLogout }) {
+// onLogin: callback(user) invoked after successful inline login
+export default function NavBar({ user = null, onLogout, onLogin }) {
   const loc = useLocation();
   const [open, setOpen] = useState(false);
   const isWide = useLogoSize(); // true when >=768px → show full "RESUME MASTER"
@@ -54,7 +56,12 @@ export default function NavBar({ user = null, onLogout }) {
           </>
         ) : (
           <>
-            <Link to="/login"    className="navbar__btn navbar__btn--ghost">Sign In</Link>
+            <InlineLoginPopover
+              onLogin={onLogin}
+              trigger={
+                <button className="navbar__btn navbar__btn--ghost" type="button">Sign In</button>
+              }
+            />
             <Link to="/register" className="navbar__btn navbar__btn--primary">Get Started</Link>
           </>
         )}
