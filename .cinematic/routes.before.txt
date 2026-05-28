@@ -1,24 +1,24 @@
-src/App.jsx:311:        <Route path="/tools/ats"      element={<ATSToolPage/>}/>
-src/App.jsx:312:        <Route path="/tools/generate" element={<GenerateToolPage/>}/>
-src/App.jsx:313:        <Route path="/tools/apply"    element={<ApplyToolPage/>}/>
-src/App.jsx:316:        <Route path="/features"     element={<FeaturesPage/>}/>
-src/App.jsx:317:        <Route path="/how-it-works" element={<HowItWorksPage/>}/>
-src/App.jsx:318:        <Route path="/pricing"      element={<PricingPage/>}/>
-src/App.jsx:319:        <Route path="/about"        element={<AboutPage/>}/>
-src/App.jsx:320:        <Route path="/contact"      element={<ContactPage/>}/>
-src/App.jsx:321:        <Route path="/faq"          element={<FAQPage/>}/>
-src/App.jsx:322:        <Route path="/privacy"      element={<PrivacyPage/>}/>
-src/App.jsx:323:        <Route path="/terms"        element={<TermsPage/>}/>
-src/App.jsx:326:        <Route path="/products" element={<>{navBar}<ProductsPage/></>}/>
-src/App.jsx:327:        <Route path="/blog"     element={<>{navBar}<BlogPage/></>}/>
-src/App.jsx:330:        <Route path="/admin/login" element={
-src/App.jsx:340:        <Route path="/admin" element={
-src/App.jsx:347:        <Route path="/admin/db" element={
-src/App.jsx:354:        <Route path="/login" element={
-src/App.jsx:364:        <Route path="/register" element={
-src/App.jsx:374:        <Route path="/app/*" element={
-src/App.jsx:381:        <Route path="/" element={
-src/App.jsx:389:        <Route path="*" element={
-src/pages/marketing/FeaturesPage.jsx:88:              { path: "/tools/ats",      title: "ATS Scorer",       desc: "Score your resume against any job description.", limit: "3 free scores / month" },
-src/pages/marketing/FeaturesPage.jsx:89:              { path: "/tools/generate", title: "Resume Generator", desc: "Generate a focused resume for any job in 30 seconds.", limit: "2 free resumes / month" },
-src/pages/marketing/FeaturesPage.jsx:90:              { path: "/tools/apply",    title: "Auto Apply",       desc: "Fill applications at any job portal automatically.", limit: "2 free runs / month (sign in required)" },
+client/src/App.jsx:311:        <Route path="/tools/ats"      element={<ATSToolPage/>}/>
+client/src/App.jsx:312:        <Route path="/tools/generate" element={<GenerateToolPage/>}/>
+client/src/App.jsx:313:        <Route path="/tools/apply"    element={<ApplyToolPage/>}/>
+client/src/App.jsx:316:        <Route path="/features"     element={<FeaturesPage/>}/>
+client/src/App.jsx:317:        <Route path="/how-it-works" element={<HowItWorksPage/>}/>
+client/src/App.jsx:318:        <Route path="/pricing"      element={<PricingPage/>}/>
+client/src/App.jsx:319:        <Route path="/about"        element={<AboutPage/>}/>
+client/src/App.jsx:320:        <Route path="/contact"      element={<ContactPage/>}/>
+client/src/App.jsx:321:        <Route path="/faq"          element={<FAQPage/>}/>
+client/src/App.jsx:322:        <Route path="/privacy"      element={<PrivacyPage/>}/>
+client/src/App.jsx:323:        <Route path="/terms"        element={<TermsPage/>}/>
+client/src/App.jsx:326:        <Route path="/products" element={<>{navBar}<ProductsPage/></>}/>
+client/src/App.jsx:327:        <Route path="/blog"     element={<>{navBar}<BlogPage/></>}/>
+client/src/App.jsx:330:        <Route path="/admin/login" element={
+client/src/App.jsx:340:        <Route path="/admin" element={
+client/src/App.jsx:347:        <Route path="/admin/db" element={
+client/src/App.jsx:354:        <Route path="/login" element={
+client/src/App.jsx:364:        <Route path="/register" element={
+client/src/App.jsx:374:        <Route path="/app/*" element={
+client/src/App.jsx:381:        <Route path="/" element={
+client/src/App.jsx:389:        <Route path="*" element={
+client/src/pages/marketing/FeaturesPage.jsx:88:              { path: "/tools/ats",      title: "ATS Scorer",       desc: "Score your resume against any job description.", limit: "3 free scores / month" },
+client/src/pages/marketing/FeaturesPage.jsx:89:              { path: "/tools/generate", title: "Resume Generator", desc: "Generate a focused resume for any job in 30 seconds.", limit: "2 free resumes / month" },
+client/src/pages/marketing/FeaturesPage.jsx:90:              { path: "/tools/apply",    title: "Auto Apply",       desc: "Fill applications at any job portal automatically.", limit: "2 free runs / month (sign in required)" },
