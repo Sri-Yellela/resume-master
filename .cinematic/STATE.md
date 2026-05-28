@@ -451,3 +451,35 @@ Commits:
 - 4a1fa88  audit: regenerate Sprint 1 baselines for Sprint 2 reference
 
 Open issues: none — Sprint 1 verified clean on main, ready for Sprint 2.
+
+## Step 14 — Theme framework refactor
+Commit: TBD
+Branch: main
+Build: exit 0, 74.37 kB CSS (unchanged), 4 pre-existing warnings, none new
+
+### Files created
+- client/src/themes/cinematic.js — extracted cinematic palette (baseTheme, cssVars, styles fn, Wrapper, fonts)
+- client/src/themes/index.js — THEMES_REGISTRY, DEFAULT_THEME_ID, AVAILABLE_THEMES, getTheme()
+
+### Files modified
+- client/src/styles/theme.jsx — ThemeProvider now reads activeTheme from registry; injects
+  cssVars into html block + calls activeTheme.styles(theme) for the CSS block; context now
+  exposes themeId, setThemeId, availableThemes alongside existing theme/tokens/isDark/accent
+- client/src/components/AppShell.jsx — uses theme.Wrapper from context (via availableThemes
+  lookup) instead of hardcoded CinematicBackground import; Wrapper rendered only if present
+- client/src/components/TopBar.jsx — UserAvatarMenu destructures themeId, setThemeId,
+  availableThemes; theme picker section added after accent picker, guarded by
+  availableThemes.length > 1 (hidden until a second theme is registered)
+
+### Decisions
+- styles is a function (theme) => string in cinematic.js (spec shows string literal, but
+  accent-dependent CSS requires dynamic generation; function approach handles both)
+- THEMES export preserved from theme.jsx for backward compat (= { dark: cinematicBase })
+- themeId persisted in localStorage key "rm_theme_id"
+
+### Contract diffs
+- api-calls: endpoint content identical; TopBar line numbers shifted +23 (theme picker addition)
+- routes: App.jsx 21 routes all intact; FeaturesPage { path: } data-object lines absent
+  from current scan (grep 'path=' does not match 'path:'); pre-existing baseline discrepancy
+
+### Open issues: none

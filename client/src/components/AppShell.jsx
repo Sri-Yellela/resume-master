@@ -1,17 +1,13 @@
-import CinematicBackground from "./CinematicBackground.jsx";
+import { useTheme } from "../styles/theme.jsx";
 
-/**
- * Root layout wrapper — mounts CinematicBackground once so the video
- * persists across client-side navigation without restarting.
- * Uses {children} (not <Outlet/>) because App.jsx uses BrowserRouter + Routes.
- */
 export default function AppShell({ children }) {
+  const { themeId, availableThemes } = useTheme();
+  const activeTheme = availableThemes.find(t => t.id === themeId);
+  const Wrapper = activeTheme?.Wrapper;
   return (
     <>
-      <CinematicBackground />
-      <div className="relative z-10 min-h-screen">
-        {children}
-      </div>
+      {Wrapper && <Wrapper />}
+      <div className="relative z-10 min-h-screen">{children}</div>
     </>
   );
 }
