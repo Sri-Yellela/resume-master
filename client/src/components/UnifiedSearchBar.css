@@ -48,6 +48,33 @@
   box-shadow: 0 4px 20px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.10);
 }
 
+/* ── App-dashboard inline variant ──────────────────────────────────────────
+   On the dashboard the search bar shares the viewport with job cards and panel
+   content that are visible above the fold. The floating (position:fixed)
+   placement used on the marketing landing would overlap that content — which is
+   the "embossing upon content" bug. The inline variant keeps the bar in normal
+   document flow and uses position:sticky so it reserves its own space (no
+   overlap) and still pins under the 56px TopBar when the page scrolls.
+   These rules override the fixed-float positioning above via higher specificity
+   (two classes) so the landing-page behavior is untouched. */
+.usb--inline.usb--hero,
+.usb--inline.usb--dock {
+  position: sticky;
+  top: 56px;
+  left: auto;
+  right: auto;
+  transform: none;
+  margin-left: auto;
+  margin-right: auto;
+  z-index: 50;
+}
+.usb--inline.usb--hero {
+  width: min(920px, 94vw);
+}
+.usb--inline.usb--dock {
+  width: min(1180px, 96vw);
+}
+
 .usb__bar {
   display: flex;
   align-items: center;

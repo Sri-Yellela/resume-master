@@ -198,6 +198,7 @@ function AppDashboard({ authUser, setAuthUser }) {
 
           <UnifiedSearchBar
             mode={uiMode}
+            variant="inline"
             tabs={appTabs}
             activeTab={activeTab}
             onTabChange={handlePanelChange}
@@ -205,7 +206,7 @@ function AppDashboard({ authUser, setAuthUser }) {
             onLocalFilter={() => {}}
           />
 
-          <main style={{ flex:1, paddingTop: uiMode === "dock" ? 80 : 24 }}>
+          <main style={{ flex:1, paddingTop: 24 }}>
             {activeTab === "console" && (
               <JobsConsole user={authUser} onUserChange={setAuthUser}
                 refreshKey={jobBoardRefreshKey} isActive={activeTab === "console"}/>
