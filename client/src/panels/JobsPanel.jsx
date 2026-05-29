@@ -883,7 +883,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [rightTab,      setRightTab]      = useState("history");
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
 
-  // Split view — selectedJob lifted to JobBoardContext
+  // Split view — selectedJob lifted to JobBoardContext (must be declared here,
+  // before the useMemo at ~line 962 that uses !!selectedJob in its dep array)
+  const {
+    boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
+    activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
+    selectedJob, setSelectedJob, setSelectedJobMeta,
+  } = useJobBoard();
 
   // Open / close sandbox — panel size rebalancing handled by useEffect below
   const openSandbox = useCallback((entry) => {
@@ -972,12 +978,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // Task 6 — Company reuse modal
   const [companyReuseTarget, setCompanyReuseTarget] = useState(null);
 
-  // Board tabs — shared via JobBoardContext so TopBar compact row can drive them
-  const {
-    boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
-    activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
-    selectedJob, setSelectedJob, setSelectedJobMeta,
-  } = useJobBoard();
+  // Board tabs — shared via JobBoardContext (destructured earlier, near line 887)
   const [pendingJobs, setPendingJobs] = useState([]);
   const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
   const [linkedinImportSummary, setLinkedinImportSummary] = useState({ total: 0, lastImportedAt: null });
