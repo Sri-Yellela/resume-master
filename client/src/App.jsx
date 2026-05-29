@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { api, setAuthContext }   from "./lib/api.js";
 import { useTheme }              from "./styles/theme.jsx";
-import { useViewport }           from "./hooks/useViewport.js";
 import { useInactivityLogout }   from "./hooks/useInactivityLogout.js";
 import { useSyncEvents }         from "./hooks/useSyncEvents.js";
 import AuthScreen                from "./components/AuthScreen.jsx";
@@ -12,7 +11,7 @@ import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
 import DBInspector               from "./pages/admin/DBInspector.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import AppShell                  from "./components/AppShell.jsx";
-import { AppScrollProvider, useAppScroll } from "./contexts/AppScrollContext.jsx";
+import { AppScrollProvider } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { JobProfilesPanel }      from "./panels/JobProfilesPanel.jsx";
@@ -21,6 +20,7 @@ import { PlansPanel }            from "./panels/PlansPanel.jsx";
 import { IntegrationsPanel }     from "./panels/IntegrationsPanel.jsx";
 import { JobsConsole }            from "./consoles/PlanConsoles.jsx";
 import JobDetailPanel            from "./components/JobDetailPanel.jsx";
+import UnifiedSearchBar          from "./components/UnifiedSearchBar.jsx";
 import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
@@ -81,69 +81,21 @@ function PublicLoginRoute({ authStatus, authUser, children, admin = false }) {
   }
   return children;
 }
-// DashboardTabsLayout: inside AppScrollProvider — drives dynamic paddingTop + tab visibility
-function DashboardTabsLayout({ theme, isMobile, activeTab, handlePanelChange, appTabs, children }) {
-  const { progress: p } = useAppScroll();
-  const paddingTop = Math.round(52 * (1 - p));
-  const showTabs   = p < 0.5;
-  return (
-    <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column", paddingTop }}>
-      {showTabs && (
-        <nav style={{
-          display:"flex", alignItems:"center",
-          background: theme.surface,
-          borderBottom: `1px solid ${theme.border}`,
-          padding: isMobile ? "0 12px" : "0 20px",
-          flexShrink: 0,
-        }}>
-          {appTabs.map(t => {
-            const isActive = activeTab === t.id;
-            return (
-              <button key={t.id} onClick={() => handlePanelChange(t.id)}
-                style={{
-                  background: "transparent", border: "none",
-                  padding: isMobile ? "10px 8px" : "10px 14px",
-                  fontFamily: "'Barlow Condensed','DM Sans',sans-serif",
-                  fontWeight: isActive ? 800 : 600,
-                  fontSize: 14, letterSpacing: "0.06em", textTransform: "uppercase",
-                  color: isActive ? theme.text : theme.textMuted,
-                  cursor: "pointer", position: "relative",
-                  transition: "color 0.15s",
-                }}>
-                {isMobile ? t.icon : t.label}
-                {isActive && (
-                  <div style={{
-                    position: "absolute", bottom: 0, left: "50%",
-                    transform: "translateX(-50%)",
-                    width: 16, height: 2, borderRadius: 999,
-                    background: theme.accent,
-                  }}/>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-      )}
-      {children}
-    </div>
-  );
-}
-
 function AppDashboard({ authUser, setAuthUser }) {
   const { theme } = useTheme();
-  const { mode: vpMode } = useViewport();
-  const isMobile = vpMode === "mobile" || vpMode === "tablet";
   const location = useLocation();
   const navigate = useNavigate();
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
+  const [uiMode, setUiMode] = useState("hero");
+  const DOCK_THRESHOLD = 80;
   const consolePath = `/app/${CONSOLE_ROUTE}`;
   const routeKey = location.pathname.replace(/^\/app\/?/, "") || "";
-  const activeTab = routeKey === CONSOLE_ROUTE || LEGACY_CONSOLE_ROUTES.has(routeKey) || routeKey === "" ? "console" : routeKey;
-  const renderRoute = activeTab === "console" ? CONSOLE_ROUTE : routeKey;
+  const activeTab = routeKey === CONSOLE_ROUTE || LEGACY_CONSOLE_ROUTES.has(routeKey) || routeKey === ""
+    ? "console" : routeKey;
   const appTabs = [
-    { id:"console", label:"Jobs", icon:"JB" },
-    { id:"job-profiles", label:"Job Profiles", icon:"JP" },
-    { id:"database", label:"Database", icon:"DB" },
+    { id: "console",      label: "Jobs" },
+    { id: "job-profiles", label: "Job Profiles" },
+    { id: "database",     label: "Database" },
   ];
 
   const handleLogout = useCallback(async () => {
@@ -199,25 +151,27 @@ function AppDashboard({ authUser, setAuthUser }) {
   }, [handleLogout]);
 
   // Force-logout immediately when any API call gets a 401 (dispatched by api.js).
-  // Without this, users stay on the app page with broken state until the next
-  // visibilitychange triggers the /api/auth/me check.
   useEffect(() => {
     const handle = () => handleLogout();
     window.addEventListener("rm:session-expired", handle);
     return () => window.removeEventListener("rm:session-expired", handle);
   }, [handleLogout]);
 
+  // Scroll-driven hero <-> dock
+  useEffect(() => {
+    const onScroll = () => setUiMode(window.scrollY > DOCK_THRESHOLD ? "dock" : "hero");
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
     <JobBoardProvider>
       <AppScrollProvider>
         <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
-                      background:theme.bg, height:"100vh",
-                      display:"flex", flexDirection:"column",
-                      overflow:"hidden", color:theme.text,
-                      backdropFilter: theme.backdrop,
-                      WebkitBackdropFilter: theme.backdrop }}>
+                      minHeight:"100vh", display:"flex", flexDirection:"column",
+                      color:theme.text }}>
 
-          {/* TopBar: position:fixed — takes no space in flex layout */}
           <TopBar
             user={authUser}
             onTabChange={handlePanelChange}
@@ -226,22 +180,43 @@ function AppDashboard({ authUser, setAuthUser }) {
             onProfileActivate={handleProfileActivate}
           />
 
-          {/* DashboardTabsLayout: reads scroll progress for dynamic paddingTop + tab visibility */}
-          <DashboardTabsLayout theme={theme} isMobile={isMobile} activeTab={activeTab} handlePanelChange={handlePanelChange} appTabs={appTabs}>
-            {/* Panels */}
-            <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-              {renderRoute === CONSOLE_ROUTE && (
-                <JobsConsole user={authUser} onUserChange={setAuthUser}
-                  refreshKey={jobBoardRefreshKey}
-                  isActive={activeTab === "console"}/>
-              )}
-              {renderRoute === "database" && <DatabasePanel user={authUser}/>}
-              {renderRoute === "integrations" && <IntegrationsPanel/>}
-              {renderRoute === "plans"    && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
-              {renderRoute === "profile"  && <ProfilePanel user={authUser} onOpenJobProfiles={() => handlePanelChange("job-profiles")}/>}
-              {renderRoute === "job-profiles" && <JobProfilesPanel/>}
+          {activeTab === "console" && uiMode === "hero" && (
+            <div style={{ textAlign:"center", padding:"80px 20px 40px",
+                          animation:"fadeUp 0.6s ease both" }}>
+              <div style={{
+                fontFamily:"var(--font-display, 'Instrument Serif', serif)",
+                fontSize:"clamp(2rem, 5vw, 4rem)", fontWeight:400,
+                color:"var(--color-text)", letterSpacing:"-0.025em", marginBottom:8,
+              }}>
+                {authUser?.first_name ? `Welcome back, ${authUser.first_name}.` : "Your jobs."}
+              </div>
+              <div style={{ fontSize:14, color:"var(--color-text-muted)", maxWidth:520, margin:"0 auto" }}>
+                Pick up where you left off.
+              </div>
             </div>
-          </DashboardTabsLayout>
+          )}
+
+          <UnifiedSearchBar
+            mode={uiMode}
+            tabs={appTabs}
+            activeTab={activeTab}
+            onTabChange={handlePanelChange}
+            onSearch={() => {}}
+            onLocalFilter={() => {}}
+          />
+
+          <main style={{ flex:1, paddingTop: uiMode === "dock" ? 80 : 24 }}>
+            {activeTab === "console" && (
+              <JobsConsole user={authUser} onUserChange={setAuthUser}
+                refreshKey={jobBoardRefreshKey} isActive={activeTab === "console"}/>
+            )}
+            {activeTab === "database"     && <DatabasePanel user={authUser}/>}
+            {activeTab === "integrations" && <IntegrationsPanel/>}
+            {activeTab === "plans"        && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
+            {activeTab === "profile"      && <ProfilePanel user={authUser} onOpenJobProfiles={() => handlePanelChange("job-profiles")}/>}
+            {activeTab === "job-profiles" && <JobProfilesPanel/>}
+          </main>
+
           <JobDetailPanel/>
         </div>
       </AppScrollProvider>
