@@ -37,6 +37,9 @@ export default function UnifiedSearchBar({
   mode = 'hero',
   onSearch,
   onLocalFilter,
+  tabs,
+  activeTab,
+  onTabChange,
 }) {
   const [q,       setQ]       = useState('');
   const [loc,     setLoc]     = useState('');
@@ -102,6 +105,26 @@ export default function UnifiedSearchBar({
   return (
     <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero')}
          role="search" aria-label="Job search">
+
+      {tabs && tabs.length > 0 && (
+        <div style={{
+          display: "flex", gap: 4, padding: "8px 12px 0",
+          borderBottom: "1px solid var(--border-glass)",
+        }}>
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => onTabChange?.(t.id)}
+              style={{
+                padding: "8px 14px",
+                background: activeTab === t.id ? "rgba(255,255,255,0.06)" : "transparent",
+                border: activeTab === t.id ? "1px solid var(--color-primary)" : "1px solid transparent",
+                borderRadius: 999,
+                color: activeTab === t.id ? "var(--color-text)" : "var(--color-text-muted)",
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+                textTransform: "uppercase", letterSpacing: "0.08em",
+              }}>{t.label}</button>
+          ))}
+        </div>
+      )}
 
       {/* Search bar */}
       <div className="usb__bar">
