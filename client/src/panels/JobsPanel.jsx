@@ -1,4 +1,4 @@
-﻿// client/src/panels/JobsPanel.jsx â€” Lucy Brand, shared job pool
+﻿// client/src/panels/JobsPanel.jsx â€" Lucy Brand, shared job pool
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -75,7 +75,7 @@ function buildProfileScrapeRequest(query) {
   return { query };
 }
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function ago(ts) {
   if (!ts) return "-";
   const d = Date.now() - new Date(ts).getTime();
@@ -84,7 +84,7 @@ function ago(ts) {
   return `${Math.floor(d/86400000)}d`;
 }
 
-// â”€â”€ LinkedIn "in" logo (inline SVG) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ LinkedIn "in" logo (inline SVG) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const GENERATE_TOOL = "generate";
 const A_PLUS_TOOL = "a_plus_resume";
 const TOOL_LABELS = { [GENERATE_TOOL]: "Generate", [A_PLUS_TOOL]: "A+ Resume" };
@@ -137,7 +137,7 @@ function LinkedInLogo({ size = 20 }) {
   );
 }
 
-// â”€â”€ Indeed logo (inline SVG) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Indeed logo (inline SVG) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function IndeedLogo({ size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20" aria-label="Indeed" role="img">
@@ -148,7 +148,7 @@ function IndeedLogo({ size = 20 }) {
   );
 }
 
-// â”€â”€ Platform logo dispatcher â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Platform logo dispatcher â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function PlatformLogo({ platform, size = 20, theme }) {
   const p = (platform || "").toLowerCase();
   if (p === "linkedin") return <LinkedInLogo size={size}/>;
@@ -156,7 +156,7 @@ function PlatformLogo({ platform, size = 20, theme }) {
   return <span style={{ fontSize:size*0.5, color:theme?.textMuted||"#888" }}>◆</span>;
 }
 
-// â”€â”€ Company icon with monogram fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Company icon with monogram fallback â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function CompanyIcon({ company, iconUrl, size = 48 }) {
   const [failed, setFailed] = useState(false);
   const letter = (company || "?")[0].toUpperCase();
@@ -193,9 +193,9 @@ function CompanyIcon({ company, iconUrl, size = 48 }) {
   );
 }
 
-// â”€â”€ Work type badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Work type badge â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function WorkBadge({ t, theme }) {
-  // Use semantic colors that work in both light/dark â€” the fg/bg are theme tokens
+  // Use semantic colors that work in both light/dark â€" the fg/bg are theme tokens
   const map = {
     Remote: { bg:"#e8f6fb", fg:"#1a6a8a" },
     Hybrid: { bg:"#f0f9ff", fg:"#0284c7" },
@@ -217,7 +217,7 @@ function WorkBadge({ t, theme }) {
   );
 }
 
-// â”€â”€ ATS badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ ATS badge â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function ATSBadge({ score, onClick }) {
   if (score == null) return null;
   const bg = score>=80 ? "#dcfce7" : score>=60 ? "#fef9c3" : "#fee2e2";
@@ -234,7 +234,7 @@ function ATSBadge({ score, onClick }) {
   );
 }
 
-// â”€â”€ Resume badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Resume badge â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function ResumeBadge({ onClick, loading }) {
   return (
     <span
@@ -248,7 +248,7 @@ function ResumeBadge({ onClick, loading }) {
   );
 }
 
-// â”€â”€ Lucy button (rectangular â†’ pill on hover, 1s) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Lucy button (rectangular â†' pill on hover, 1s) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function LucyBtn({ children, onClick, disabled, accent: accentProp,
                     style = {}, title }) {
   const [hov, setHov] = useState(false);
@@ -284,7 +284,7 @@ function LucyBtn({ children, onClick, disabled, accent: accentProp,
   );
 }
 
-// â”€â”€ Icon button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Icon button â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function IconBtn({ bg, onClick, title, children, disabled = false, size = 28 }) {
   const [hov, setHov] = useState(false);
   const { theme } = useTheme();
@@ -331,7 +331,7 @@ function defaultFilterSnapshot() {
   };
 }
 
-// â”€â”€ Filters panel (collapsible) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Filters panel (collapsible) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function FiltersPanel({
   open, onClose, onApply,
   categories,
@@ -883,8 +883,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [rightTab,      setRightTab]      = useState("history");
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
 
-  // Split view
-  const [selectedJob,  setSelectedJob]  = useState(null);
+  // Split view — selectedJob lifted to JobBoardContext
 
   // Open / close sandbox — panel size rebalancing handled by useEffect below
   const openSandbox = useCallback((entry) => {
@@ -977,6 +976,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const {
     boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
     activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
+    selectedJob, setSelectedJob, setSelectedJobMeta,
   } = useJobBoard();
   const [pendingJobs, setPendingJobs] = useState([]);
   const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
@@ -1239,6 +1239,32 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       ro.disconnect();
     };
   }, [!!selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync drawer meta to context whenever selectedJob or related state changes
+  useEffect(() => {
+    if (!selectedJob) { setSelectedJobMeta(null); return; }
+    const g2 = generated[selectedJob.jobId];
+    const done2 = !!g2?.html;
+    const st2 = loading[selectedJob.jobId];
+    const isImported = isImportedBoardJob(selectedJob);
+    setSelectedJobMeta({
+      g: g2, done: done2, st: st2,
+      applyMode, canUseGenerate: !isImported && canUseGenerate, canUseAPlusResume: false,
+      resumeText,
+      onGenerate: isImported ? undefined : (force) => generate(selectedJob, force),
+      onViewSandbox: isImported ? undefined : () => {
+        const e2 = { ...g2, company: g2?.company || selectedJob.company, title: g2?.title || selectedJob.title };
+        openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2));
+      },
+      onExport: isImported ? undefined : () => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)),
+      onVisit: () => visitUrl(selectedJob),
+      onStar: isImported ? undefined : () => toggleStar(selectedJob.jobId, selectedJob),
+      onDislike: () => toggleDislike?.(selectedJob.jobId, selectedJob),
+      onAts: isImported ? undefined : () => openAtsPanel(buildAtsPayload(selectedJob, g2)),
+      onResume: isImported ? undefined : () => generate(selectedJob, false),
+      onQueueApply: isImported ? undefined : addToApplyQueue,
+    });
+  }, [selectedJob, generated, loading, applyMode, canUseGenerate, resumeText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-open resume + ATS panel when a pending job card is selected
   useEffect(() => {
@@ -2396,7 +2422,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         )}
       </AnimatePresence>
 
-      {/* â”€â”€ Unified toolbar â€” hidden when dock is active (scrollProgress â‰¥ 0.5) â”€â”€ */}
+      {/* â"€â"€ Unified toolbar â€" hidden when dock is active (scrollProgress â‰¥ 0.5) â"€â"€ */}
       {/* Row A: tabs | filters | sort | local-search | job count */}
       {/* Row B (wraps): search input | Search | resume upload */}
       {scrollProgress < 0.5 && <div style={{
@@ -2405,7 +2431,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         flexShrink:0, flexWrap:"wrap",
       }}>
 
-        {/* â”€â”€ Row A â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* â"€â"€ Row A â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
         {/* Board tabs — superseded by TopBar Pill 2 */}
         {false && (
         <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
@@ -2426,7 +2452,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           ))}
         </div>
         )}
-        {/* Filters button â€” always visible, bold outline */}
+        {/* Filters button â€" always visible, bold outline */}
         <button
           onClick={() => filtersOpen ? setFiltersOpen(false) : openFilterPanel()}
           style={{
@@ -2467,7 +2493,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           title="Switch profile"
         />
 
-        {/* Local search â€” live client-side, every keystroke */}
+        {/* Local search â€" live client-side, every keystroke */}
         <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
           onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
           placeholder="Filter loaded jobs..."
@@ -2611,11 +2637,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         )}
 
       </div>}
-      {/* Hidden file input â€” always mounted so TopBar resume upload button works even when toolbar is hidden */}
+      {/* Hidden file input â€" always mounted so TopBar resume upload button works even when toolbar is hidden */}
       <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
         onChange={handleFile} style={{ display:"none" }}/>
 
-      {/* â”€â”€ Resume Enhance modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* â"€â"€ Resume Enhance modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {/* ── Apply Runs Review Modal ──────────────────────────────────── */}
       {applyRunDetailOpen && (
         <div
@@ -2894,7 +2920,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         </div>
       )}
 
-      {/* â”€â”€ Body: responsive layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* â"€â"€ Body: responsive layout â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
 
       {/* Company reuse modal (Task 6) */}
       {companyReuseTarget && (
@@ -2920,37 +2946,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         />
       )}
 
-      {/* â”€â”€ MOBILE / TABLET: single-pane + bottom nav â”€â”€ */}
+      {/* â"€â"€ MOBILE / TABLET: single-pane + bottom nav â"€â"€ */}
       {setupBlock ? (
         <SetupGateNotice theme={theme} {...setupBlock} />
       ) : isMobile && (
         <div style={{ flex:1, minHeight:0, minWidth:0, display:"flex", flexDirection:"column", overflow:"hidden", position:"relative" }}>
-          {/* Full-screen job detail overlay for mobile */}
-          {selectedJob && (() => {
-            const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
-            return (
-              <div style={{ position:"absolute", inset:0, zIndex:60, display:"flex", flexDirection:"column",
-                            background:theme.bg }}>
-                <JobDetailPanel
-                  job={selectedJob} theme={theme}
-                  g={g2} done={done2} st={st2} applyMode={applyMode}
-                  canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
-                  canUseAPlusResume={false}
-                  resumeText={resumeText}
-                  onClose={() => setSelectedJob(null)}
-                  onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
-                  onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); setMobilePane("editor"); setSelectedJob(null); })}
-                  onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
-                  onVisit={() => visitUrl(selectedJob)}
-                  onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
-                  onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
-                  onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel(buildAtsPayload(selectedJob, g2)); setSelectedJob(null); })}
-                  onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
-                  onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
-                />
-              </div>
-            );
-          })()}
           {/* Active pane */}
           <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:"column" }}>
             {mobilePane === "jobs" && (
@@ -3036,15 +3036,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         </div>
       )}
 
-      {/* â”€â”€ PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) â”€â”€ */}
+      {/* â"€â"€ PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) â"€â"€ */}
       {!setupBlock && (isWide || (isPortrait && !isMobile)) && (
         <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex" }}>
         <PanelGroup orientation="horizontal" style={{ flex: 1, minHeight:0, minWidth:0, overflow: "hidden" }}>
 
-          {/* PANEL A â€” Jobs list (always visible) */}
+          {/* PANEL A - Jobs list (always visible, full width - detail in portal drawer) */}
           <Panel
             ref={jobsPanelRef}
-            defaultSize={!!selectedJob ? 30 : 100}
+            defaultSize={100}
             minSize={6}
             style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden" }}>
             <JobsColumn
@@ -3061,7 +3061,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               openAtsPanel={openAtsPanel}
               goPage={goPage} onPullRefresh={handlePullRefresh}
               setMobilePane={setMobilePane} isMobile={isMobile}
-              compact={!!selectedJob} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
+              compact={false} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
               showImportedLinkedInSection={boardTab === "saved"}
               importedLinkedInJobs={importedLinkedInJobs}
               linkedinImportSummary={linkedinImportSummary}
@@ -3073,44 +3073,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             />
           </Panel>
 
-          {/* PANEL B â€” Job detail */}
-          {selectedJob && (() => {
-            const g2 = generated[selectedJob.jobId], done2 = !!g2?.html, st2 = loading[selectedJob.jobId];
-            return (
-              <>
-                <ResizeHandle theme={theme} />
-                <Panel
-                  ref={detailPanelRef}
-                  defaultSize={70}
-                  minSize={10}
-                  style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
-                           borderLeft: `1px solid ${theme.border}` }}>
-                  <div ref={detailPanelElementRef} style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden" }}>
-                    <JobDetailPanel
-                      job={selectedJob} theme={theme}
-                      g={g2} done={done2} st={st2} applyMode={applyMode}
-                      canUseGenerate={!isImportedBoardJob(selectedJob) && canUseGenerate}
-                      canUseAPlusResume={false}
-                      resumeText={resumeText}
-                      onClose={() => setSelectedJob(null)}
-                      onGenerate={isImportedBoardJob(selectedJob) ? undefined : (force => generate(selectedJob, force))}
-                      onViewSandbox={isImportedBoardJob(selectedJob) ? undefined : (() => { const e2 = {...g2, company:g2?.company||selectedJob.company, title:g2?.title||selectedJob.title}; openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
-                      onExport={isImportedBoardJob(selectedJob) ? undefined : (() => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)))}
-                      onVisit={() => visitUrl(selectedJob)}
-                      onStar={isImportedBoardJob(selectedJob) ? undefined : (() => toggleStar(selectedJob.jobId, selectedJob))}
-                      onDislike={() => toggleDislike?.(selectedJob.jobId, selectedJob)}
-                      onAts={isImportedBoardJob(selectedJob) ? undefined : (() => { openAtsPanel(buildAtsPayload(selectedJob, g2)); })}
-                      onResume={isImportedBoardJob(selectedJob) ? undefined : (() => generate(selectedJob, false))}
-                      onQueueApply={isImportedBoardJob(selectedJob) ? undefined : addToApplyQueue}
-                    />
-                  </div>
-                </Panel>
-              </>
-            );
-          })()}
-
-          {/* PANEL C â€” Sandbox / Resume */}
-          {/* No maxSize cap â€” CSS scale transform in SandboxPanel handles wider-than-A4 display. */}
+          {/* PANEL C â€" Sandbox / Resume */}
+          {/* No maxSize cap â€" CSS scale transform in SandboxPanel handles wider-than-A4 display. */}
           {sandboxOpen && (
             <>
               <ResizeHandle theme={theme} />
@@ -3126,7 +3090,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             </>
           )}
 
-          {/* PANEL D â€” ATS + History */}
+          {/* PANEL D â€" ATS + History */}
           {rightPanelOpen && (
             <>
               <ResizeHandle theme={theme} />
@@ -3188,7 +3152,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   );
 }
 
-// â”€â”€ Drag resize handle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Drag resize handle â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function ResizeHandle({ theme: themeProp }) {
   const { theme: t } = useTheme();
   const theme = themeProp || t;
@@ -3214,7 +3178,7 @@ function ResizeHandle({ theme: themeProp }) {
   );
 }
 
-// â”€â”€ Jobs column (shared across layout modes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Jobs column (shared across layout modes) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       pollStatus, onRetryPoll,
                       generated, loading, applyMode, canUseGenerate, canUseAPlusResume,
@@ -3290,7 +3254,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
             />
           )}
 
-          {/* Job cards â€” always rendered (even when scraping) */}
+          {/* Job cards â€" always rendered (even when scraping) */}
           {jobs.map(job => {
             const key = job.jobId, g = generated[key],
                   done = !!g?.html, st = loading[key];
@@ -3506,7 +3470,7 @@ function StarredLinkedInSection({
 
 // JobCard is imported from ../components/JobCard.jsx
 
-// â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Empty state â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function EmptyState({ theme }) {
   const { theme: t } = useTheme();
   const th = theme || t;
@@ -3668,7 +3632,7 @@ function LinkedInInstallDialog({ theme, open, onClose, onImportNow }) {
   );
 }
 
-// â”€â”€ History list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ History list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
   const { theme: t } = useTheme();
   const theme = themeProp || t;
@@ -3716,7 +3680,7 @@ function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
   );
 }
 
-// â”€â”€ Company Reuse Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Company Reuse Modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function CompanyReuseModal({ company, onUseExisting, onGenerateNew, onCancel, theme }) {
   return (
     <div style={{

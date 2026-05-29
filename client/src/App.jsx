@@ -20,6 +20,7 @@ import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
 import { PlansPanel }            from "./panels/PlansPanel.jsx";
 import { IntegrationsPanel }     from "./panels/IntegrationsPanel.jsx";
 import { JobsConsole }            from "./consoles/PlanConsoles.jsx";
+import JobDetailPanel            from "./components/JobDetailPanel.jsx";
 import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
@@ -241,6 +242,7 @@ function AppDashboard({ authUser, setAuthUser }) {
               {renderRoute === "job-profiles" && <JobProfilesPanel/>}
             </div>
           </DashboardTabsLayout>
+          <JobDetailPanel/>
         </div>
       </AppScrollProvider>
     </JobBoardProvider>
