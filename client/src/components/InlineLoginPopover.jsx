@@ -24,9 +24,11 @@ export default function InlineLoginPopover({ trigger, onLogin, align = "end", si
     try {
       const d = await api("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
-      if (d.success && d.user) {
+      // The server returns { user, authContext } on success (no `success` field).
+      // Match AuthScreen's check exactly: presence of d.user means logged in.
+      if (d.user) {
         if (d.authContext) setAuthContext(d.authContext);
         setOpen(false);
         onLogin?.(d.user);
