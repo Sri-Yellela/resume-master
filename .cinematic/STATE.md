@@ -564,3 +564,67 @@ Build: exit 0, 74.41 kB CSS (-0.02 kB from removing COMPANY_POSTERS), 4 pre-exis
 - routes: unchanged
 
 ### Open issues: none
+
+## Step 18 — Portaled drawer for JobDetailPanel
+Commit: 25a89d0
+Branch: main
+Build: exit 0, 74.41 kB CSS (unchanged), 4 pre-existing warnings, none new
+
+### Files modified
+- client/src/contexts/JobBoardContext.jsx — added selectedJob, setSelectedJob (useState)
+  + selectedJobMeta, setSelectedJobMeta (useState) to context state and provider value
+- client/src/panels/JobsPanel.jsx — replaced local selectedJob useState with context
+  destructure; added meta-sync useEffect (syncs g, done, st, all handlers to
+  selectedJobMeta on every selectedJob/generated/loading/applyMode/canUseGenerate change);
+  removed desktop split-panel Panel B and mobile overlay JobDetailPanel renders;
+  Panel A compact=false, defaultSize=100 (full width)
+- client/src/components/JobDetailPanel.jsx — full rewrite: portal via createPortal to
+  document.body; AnimatePresence + motion.div spring slide-in (x:560->0, spring
+  damping:26 stiffness:220); backdrop with blur; ESC + backdrop-click to close;
+  closeBtnRef focused on open; reads selectedJob + selectedJobMeta from context;
+  apply automation state self-contained in portal; all action handlers preserved
+  via meta object
+- client/src/App.jsx — added JobDetailPanel import; mounted <JobDetailPanel/> inside
+  AppDashboard (inside JobBoardProvider scope)
+
+### Decisions
+- selectedJobMeta as useState (not useRef) for reactivity during generate loading states
+- Handlers registered via meta sync effect — closure captures JobsPanel functions cleanly
+- Apply automation re-implemented as self-contained API calls in portal component
+- Mobile overlay removed along with desktop split panel — portal handles both viewports
+
+### Contract diffs
+- api-calls: endpoint content identical; line shifts only
+- routes: unchanged
+
+### Open issues: none
+
+## Step 19 — Unified signed-in home architecture
+Commit: 9401a09
+Branch: main
+Build: exit 0, 74.41 kB CSS (unchanged), 4 pre-existing warnings, none new
+
+### Files modified
+- client/src/components/UnifiedSearchBar.jsx — added tabs, activeTab, onTabChange props;
+  tab strip rendered above search bar when tabs.length > 0; active tab pill with
+  primary border + subtle glass background; uppercase 0.08em tracking
+- client/src/App.jsx — deleted DashboardTabsLayout function; rewrote AppDashboard:
+  removed vpMode/isMobile/renderRoute; added uiMode state (hero/dock) driven by
+  window.scrollY > 80 passive listener; hero text block (console + hero mode only,
+  firstName greeting or "Your jobs." fallback); UnifiedSearchBar with tabs+activeTab
+  +onTabChange; main uses paddingTop:80 dock / 24 hero; outer div changed from
+  height:100vh+overflow:hidden to minHeight:100vh for natural scroll;
+  removed useViewport + useAppScroll imports (no longer used in this file);
+  added UnifiedSearchBar import
+
+### Decisions
+- Hero only on console tab (out of place on other panels)
+- AppScrollProvider preserved — TopBar + JobsPanel still consume it
+- minHeight:100vh allows window.scrollY to reflect real scroll position
+- paddingTop 80 in dock mode = TopBar fixed height offset
+
+### Contract diffs
+- api-calls: endpoint content identical; line shifts only
+- routes: unchanged
+
+### Open issues: none
