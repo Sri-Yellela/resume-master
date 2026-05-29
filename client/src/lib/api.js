@@ -2,9 +2,19 @@
 
 const AUTH_CONTEXT_KEY = "rm_auth_context";
 
+// One-time migration / hardening: older builds persisted the auth-context token
+// in localStorage. That created an *immortal* credential — it survived browser
+// restarts with no server-controlled expiry, so reopening the site silently
+// re-authenticated the user (straight into /app). The durable session must live
+// only in the HTTP-only session cookie (server-controlled lifetime); the
+// auth-context token is a same-session fallback for cookie-blocked browsers and
+// therefore belongs in sessionStorage (cleared on browser close). Purge any
+// legacy localStorage copy so it can't resurrect a session after this ships.
+try { localStorage.removeItem(AUTH_CONTEXT_KEY); } catch {}
+
 export function getAuthContext() {
   try {
-    return sessionStorage.getItem(AUTH_CONTEXT_KEY) || localStorage.getItem(AUTH_CONTEXT_KEY) || "";
+    return sessionStorage.getItem(AUTH_CONTEXT_KEY) || "";
   }
   catch { return ""; }
 }
@@ -13,11 +23,11 @@ export function setAuthContext(token) {
   try {
     if (token) {
       sessionStorage.setItem(AUTH_CONTEXT_KEY, token);
-      localStorage.setItem(AUTH_CONTEXT_KEY, token);
     } else {
       sessionStorage.removeItem(AUTH_CONTEXT_KEY);
-      localStorage.removeItem(AUTH_CONTEXT_KEY);
     }
+    // Never write to localStorage; also clear any stale legacy token.
+    localStorage.removeItem(AUTH_CONTEXT_KEY);
   } catch {}
 }
 
