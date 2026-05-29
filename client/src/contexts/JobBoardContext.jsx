@@ -8,6 +8,8 @@ export function JobBoardProvider({ children }) {
   const [localSearch, setLocalSearch] = useState("");
   const [sortBy,      setSortBy]      = useState("dateDesc");
   const [activeProfileId, setActiveProfileId] = useState(null);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [selectedJobMeta, setSelectedJobMeta] = useState(null);
   const profileCacheRef = useRef(new Map());
 
   const getProfileCache = useCallback((profileId) => {
@@ -34,6 +36,7 @@ export function JobBoardProvider({ children }) {
     <JobBoardContext.Provider value={{
       boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
       activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
+      selectedJob, setSelectedJob, selectedJobMeta, setSelectedJobMeta,
     }}>
       {children}
     </JobBoardContext.Provider>
