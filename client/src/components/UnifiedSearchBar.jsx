@@ -35,6 +35,8 @@ const DCLICK_MS = 5000;
 
 export default function UnifiedSearchBar({
   mode = 'hero',
+  variant = 'floating',  // 'floating' = marketing landing (position:fixed over empty hero)
+                         // 'inline'   = app dashboard (position:sticky, in flow, no overlap)
   onSearch,
   onLocalFilter,
   tabs,
@@ -103,7 +105,7 @@ export default function UnifiedSearchBar({
   const isDock = mode === 'dock';
 
   return (
-    <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero')}
+    <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero') + (variant === 'inline' ? ' usb--inline' : '')}
          role="search" aria-label="Job search">
 
       {tabs && tabs.length > 0 && (
