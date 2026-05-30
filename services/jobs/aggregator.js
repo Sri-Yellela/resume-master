@@ -1,10 +1,8 @@
 import { validatePlugin } from './sources/base.js';
 import { stripInternalFields } from './schema.js';
-import { classify } from './classifier.js';
 import { filterDirectApplyOnly } from './directApplyFilter.js';
 import { classifyJob } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
-import { isResumeRelevant } from './relevanceFilter.js';
 
 // ─── REGISTER SOURCES HERE ───────────────────────────────────────────────────
 // To add a new source: import it and add to SOURCES array.
@@ -111,17 +109,23 @@ async function searchJobs({ query = '', location = '', country = 'us', page = 1,
   // Apply direct-apply filter (Greenhouse/Lever/Ashby always pass)
   const direct = filterDirectApplyOnly(unique);
 
-  // Classify + add source labels
-  const classified = direct.map(job => {
-    const buckets = classify(job);
-    return {
-      ...stripInternalFields(job),
-      ...buckets,
-      source_label:   SOURCE_LABELS[job.source] || job.source,
-      companyIconUrl: job.thumbnail || null,
-      via:            job.via || null,
-    };
-  });
+  // Classify with unified classifier; filter blue-collar from live results
+  const classified = direct
+    .map(job => {
+      const v = classifyJob(job.title || '', job.description || '', job.company || '');
+      return {
+        ...stripInternalFields(job),
+        bucket_role:      v.roleKey      || null,
+        bucket_seniority: v.seniority    || null,
+        bucket_domain:    v.domain       || null,
+        _collar:          v.collar,
+        source_label:     SOURCE_LABELS[job.source] || job.source,
+        companyIconUrl:   job.thumbnail || null,
+        via:              job.via || null,
+      };
+    })
+    .filter(job => job._collar === 'white' && job.bucket_role !== null)
+    .map(({ _collar, ...rest }) => rest);
 
   return {
     jobs:        classified,
@@ -260,11 +264,7 @@ async function cacheJobs(db) {
       return { cached, ejected, dropped };
     });
 
-    // isResumeRelevant kept as a redundant safety net (superseded by collar gate; removed in Phase 6)
-    const relevant = result.jobs.filter(j => isResumeRelevant(j.title));
-    const skipped  = result.jobs.length - relevant.length;
-    if (skipped > 0) console.log(`[cacheJobs] Skipped ${skipped} jobs (safety net)`);
-    const { cached, ejected, dropped } = upsertAll(relevant);
+    const { cached, ejected, dropped } = upsertAll(result.jobs);
     if (ejected > 0) console.log(`[cacheJobs] Ejected ${ejected} blue-collar jobs`);
     if (dropped > 0) console.log(`[cacheJobs] Dropped ${dropped} unclassifiable jobs`);
     console.log(`[cacheJobs] Cached ${cached} jobs from ATS sources`);

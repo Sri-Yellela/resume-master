@@ -1,201 +1,24 @@
-// Ranks jobs from scraped_jobs/job_live_cache for a specific user profile.
-// Profile comes from SQLite user_profile row.
+// Ranks jobs within an already role-correct board (board is pre-filtered via job_role_map join).
+// Taxonomy A retired in Phase 6; board is already role-correct via job_role_map join.
+// scoreJob ranks by recency / location / seniority / domain only.
 
 const WEIGHTS = {
-  role_match:      0.35,
-  seniority_match: 0.20,
-  location_match:  0.15,
-  domain_match:    0.10,
-  recency:         0.15,
+  seniority_match: 0.25,
+  location_match:  0.25,
+  domain_match:    0.15,
+  recency:         0.30,
   salary:          0.05,
 };
 
-// Maps skill/title keywords to bucket_role values used in scraped_jobs
-const SKILL_TO_ROLE = {
-  'data scientist':       'data_scientist',
-  'machine learning':     'data_scientist',
-  'ml engineer':          'data_scientist',
-  'applied scientist':    'data_scientist',
-  'research scientist':   'data_scientist',
-  'data analyst':         'data_scientist',
-  'analytics engineer':   'data_engineer',
-  'data engineer':        'data_engineer',
-  'etl':                  'data_engineer',
-  'software engineer':    'software_engineer',
-  'software developer':   'software_engineer',
-  'full stack':           'software_engineer',
-  'full-stack':           'software_engineer',
-  'frontend':             'software_engineer',
-  'front-end':            'software_engineer',
-  'backend':              'software_engineer',
-  'back-end':             'software_engineer',
-  'web developer':        'software_engineer',
-  'sde':                  'software_engineer',
-  'swe':                  'software_engineer',
-  'programmer':           'software_engineer',
-  'product manager':      'product_manager',
-  'product owner':        'product_manager',
-  'designer':             'designer',
-  'ux':                   'designer',
-  'ui designer':          'designer',
-  'product designer':     'designer',
-  'devops':               'devops',
-  'site reliability':     'devops',
-  'platform engineer':    'devops',
-  'cloud engineer':       'devops',
-  'sre':                  'devops',
-  'mobile':               'mobile_engineer',
-  'ios':                  'mobile_engineer',
-  'android':              'mobile_engineer',
-  'react native':         'mobile_engineer',
-  'flutter':              'mobile_engineer',
-  'security':             'security',
-  'cybersecurity':        'security',
-  'infosec':              'security',
-  // OPERATIONS
-  'program management':   'operations',
-  'project management':   'operations',
-  'program manager':      'operations',
-  'project manager':      'operations',
-  'technical program':    'operations',
-  'tpm':                  'operations',
-  'scrum':                'operations',
-  'agile coach':          'operations',
-  'operations manager':   'operations',
-  'business analyst':     'operations',
-  'chief of staff':       'operations',
-  'pmo':                  'operations',
-  // MARKETING
-  'marketing':            'marketing',
-  'seo':                  'marketing',
-  'sem':                  'marketing',
-  'content strategist':   'marketing',
-  'content marketing':    'marketing',
-  'brand manager':        'marketing',
-  'growth marketing':     'marketing',
-  'demand generation':    'marketing',
-  'product marketing':    'marketing',
-  'social media':         'marketing',
-  'email marketing':      'marketing',
-  'copywriter':           'marketing',
-  'public relations':     'marketing',
-  // SALES / BIZ DEV
-  'sales':                'sales_biz_dev',
-  'business development': 'sales_biz_dev',
-  'account executive':    'sales_biz_dev',
-  'account manager':      'sales_biz_dev',
-  'customer success':     'sales_biz_dev',
-  'solutions engineer':   'sales_biz_dev',
-  'pre-sales':            'sales_biz_dev',
-  'presales':             'sales_biz_dev',
-  'bdr':                  'sales_biz_dev',
-  'sdr':                  'sales_biz_dev',
-  'revenue operations':   'sales_biz_dev',
-  'revops':               'sales_biz_dev',
-  // FINANCE
-  'finance':              'finance',
-  'financial analysis':   'finance',
-  'financial analyst':    'finance',
-  'fp&a':                 'finance',
-  'accounting':           'finance',
-  'accountant':           'finance',
-  'controller':           'finance',
-  'auditor':              'finance',
-  'investment banking':   'finance',
-  'equity research':      'finance',
-  'risk analyst':         'finance',
-  'treasury':             'finance',
-  'tax analyst':          'finance',
-  // HARDWARE ENGINEERING
-  'hardware':             'hardware_engineer',
-  'hardware engineer':    'hardware_engineer',
-  'rtl':                  'hardware_engineer',
-  'fpga':                 'hardware_engineer',
-  'vlsi':                 'hardware_engineer',
-  'chip design':          'hardware_engineer',
-  'silicon':              'hardware_engineer',
-  'physical design':      'hardware_engineer',
-  'mechanical engineer':  'hardware_engineer',
-  'manufacturing engineer': 'hardware_engineer',
-  // TECHNICAL SUPPORT
-  'technical support':    'technical_support',
-  'it support':           'technical_support',
-  'product support':      'technical_support',
-  'customer support':     'technical_support',
-  'help desk':            'technical_support',
-  'premium support':      'technical_support',
-  'technical account':    'technical_support',
-  // LEGAL
-  'legal':                'legal',
-  'counsel':              'legal',
-  'attorney':             'legal',
-  'paralegal':            'legal',
-  'compliance officer':   'legal',
-  'privacy counsel':      'legal',
-  'regulatory':           'legal',
-  'public policy':        'legal',
-  'government relations': 'legal',
-  // HR / RECRUITING
-  'recruiting':           'hr_recruiting',
-  'talent acquisition':   'hr_recruiting',
-  'human resources':      'hr_recruiting',
-  'hr ':                  'hr_recruiting',
-  'hrbp':                 'hr_recruiting',
-  'people operations':    'hr_recruiting',
-  'people ops':           'hr_recruiting',
-  'compensation':         'hr_recruiting',
-  'learning and development': 'hr_recruiting',
-  'l&d':                  'hr_recruiting',
-  'workforce planning':   'hr_recruiting',
-};
-
-function resolveUserRoles(profile) {
-  // Parse user skills from target_skills or confirmed_skills
-  // Handles JSON array strings, comma-separated strings, and plain arrays
-  let userSkills = [];
-  try {
-    const raw = profile.target_skills || profile.confirmed_skills || '';
-    if (Array.isArray(raw)) {
-      userSkills = raw.map(s => String(s).toLowerCase().trim()).filter(Boolean);
-    } else if (typeof raw === 'string' && raw.startsWith('[')) {
-      userSkills = JSON.parse(raw)
-        .map(s => (typeof s === 'string' ? s : s.value || s.label || '').toLowerCase().trim())
-        .filter(Boolean);
-    } else if (typeof raw === 'string' && raw.length > 0) {
-      userSkills = raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-    }
-  } catch {
-    userSkills = [];
-  }
-
-  // Map skill keywords → bucket roles
-  return [...new Set(
-    userSkills.flatMap(skill =>
-      Object.entries(SKILL_TO_ROLE)
-        .filter(([k]) => skill.includes(k))
-        .map(([, v]) => v)
-    )
-  )];
-}
-
 function scoreJob(job, profile, now = Date.now()) {
   let score = 0;
-
-  // Role match: map user skills/targets to bucket roles, compare to job.bucket_role
-  const mappedRoles = resolveUserRoles(profile);
-  const roleMatch = mappedRoles.length > 0
-    ? (mappedRoles.includes(job.bucket_role) ? 1.0
-       : job.bucket_role === 'other'          ? 0.1  // unclassified: nearly excluded when profile exists
-       :                                        0.0)  // wrong bucket: fully excluded
-    : 0.5; // no profile preference set — neutral
-  score += WEIGHTS.role_match * roleMatch;
 
   // Location match: remote, or location text match
   const targetLocs = Array.isArray(profile.target_locations) ? profile.target_locations
     : (profile.target_locations ? JSON.parse(profile.target_locations || '[]') : []);
   const jobLoc = (job.location || '').toLowerCase();
   if (job.remote === 1 || job.remote === true) {
-    score += WEIGHTS.location_match; // remote always counts
+    score += WEIGHTS.location_match;
   } else if (targetLocs.length === 0 || targetLocs.some(l => jobLoc.includes(l.toLowerCase()))) {
     score += WEIGHTS.location_match * 0.7;
   }
@@ -204,8 +27,7 @@ function scoreJob(job, profile, now = Date.now()) {
   if (job.scraped_at || job.posted_at) {
     const ts = job.scraped_at ? job.scraped_at * 1000 : new Date(job.posted_at).getTime();
     const ageDays = (now - ts) / (1000 * 60 * 60 * 24);
-    const recencyScore = Math.max(0, 1 - ageDays / 14);
-    score += WEIGHTS.recency * recencyScore;
+    score += WEIGHTS.recency * Math.max(0, 1 - ageDays / 14);
   }
 
   // Domain match
@@ -216,7 +38,7 @@ function scoreJob(job, profile, now = Date.now()) {
     score += WEIGHTS.domain_match;
   }
 
-  // Seniority match (basic)
+  // Seniority match
   const seniorityPref = profile.seniority_level;
   if (!seniorityPref || job.bucket_seniority === seniorityPref) {
     score += WEIGHTS.seniority_match;
@@ -235,4 +57,4 @@ function filterAndRankForProfile(jobs, profile, dislikedUrls = []) {
     .sort((a, b) => b._score - a._score);
 }
 
-export { scoreJob, filterAndRankForProfile, resolveUserRoles };
+export { scoreJob, filterAndRankForProfile };

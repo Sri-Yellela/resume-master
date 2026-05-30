@@ -331,3 +331,88 @@ test("firmware pool with role_key=engineering_embedded_firmware surfaces firmwar
   assert.ok(ids.includes("emb-job"),  "Embedded job must appear in firmware pool");
   assert.ok(ids.includes("bsp-job"),  "BSP job must appear in firmware pool");
 });
+
+// ── Phase 6: data profile returns zero PM/ops/sales rows from mixed seed ─────
+test("phase6: data profile board returns zero PM, ops, and sales rows from seeded mixed set", () => {
+  const db = setupDb();
+  db.exec(`
+    INSERT INTO users VALUES (1, 'a');
+    INSERT INTO domain_profiles VALUES (10, 1, 'Data Science', 'data', 'data', 1);
+    INSERT INTO scraped_jobs VALUES
+      ('data-ok',   'Data Scientist',          'Acme', 'data scientist',    10, 1000, NULL),
+      ('data-ok2',  'Data Analyst',            'Acme', 'data analyst',      10, 1000, NULL),
+      ('pm-bad',    'Product Manager',         'Acme', 'product manager',   NULL, 1000, NULL),
+      ('ops-bad',   'Operations Manager',      'Acme', 'operations',        NULL, 1000, NULL),
+      ('sales-bad', 'Account Executive',       'Acme', 'sales',             NULL, 1000, NULL),
+      ('eng-bad',   'Software Engineer',       'Acme', 'software engineer', NULL, 1000, NULL),
+      ('hr-bad',    'Recruiter',               'Acme', 'hr',                NULL, 1000, NULL);
+    INSERT INTO job_role_map VALUES
+      ('data-ok',   'data',       'data',       'data'),
+      ('data-ok2',  'data',       'data',       'data'),
+      ('pm-bad',    'pm',         'pm',         'pm_general'),
+      ('ops-bad',   'operations', 'operations', 'general'),
+      ('sales-bad', 'sales',      'sales',      'general'),
+      ('eng-bad',   'engineering','engineering','it_digital'),
+      ('hr-bad',    'hr',         'hr',         'general');
+  `);
+
+  // Simulate the Phase 6 board query: job_role_map join with role_key = 'data'
+  const rows = db.prepare(`
+    SELECT sj.job_id
+    FROM scraped_jobs sj
+    JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
+    LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
+    WHERE (uj.disliked IS NULL OR uj.disliked = 0)
+    ORDER BY sj.scraped_at DESC
+  `).all('data', 1);
+
+  const ids = rows.map(r => r.job_id);
+  assert.ok(ids.includes('data-ok'),   'data-ok must appear in data board');
+  assert.ok(ids.includes('data-ok2'),  'data-ok2 must appear in data board');
+  assert.ok(!ids.includes('pm-bad'),   'PM job must NOT appear in data board');
+  assert.ok(!ids.includes('ops-bad'),  'ops job must NOT appear in data board');
+  assert.ok(!ids.includes('sales-bad'),'sales job must NOT appear in data board');
+  assert.ok(!ids.includes('eng-bad'),  'eng job must NOT appear in data board');
+  assert.ok(!ids.includes('hr-bad'),   'hr job must NOT appear in data board');
+  assert.equal(ids.length, 2, 'exactly 2 data jobs must be visible');
+});
+
+test("phase6: server.js /api/jobs no longer uses bucket_role or resolveUserRoles", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const routeStart = server.indexOf('app.get("/api/jobs"');
+  const routeEnd   = server.indexOf("\napp.", routeStart + 10);
+  const block      = server.slice(routeStart, routeEnd);
+
+  assert.match(block, /jrm\.role_key = \?/, "must join job_role_map on role_key");
+  assert.match(block, /profileTitleSql\(/, "profileTitleSql must be applied as additive filter");
+  assert.match(block, /if \(!sessionActiveProfile\)/, "must guard on missing active profile");
+  assert.doesNotMatch(block, /resolveUserRoles\(/, "resolveUserRoles must not appear (Taxonomy A retired)");
+  assert.doesNotMatch(block, /bucket_role IN/, "bucket_role IN filter must not appear (job_role_map replaces it)");
+  assert.doesNotMatch(block, /isResumeRelevant\(/, "isResumeRelevant must not gate the board (collar gate replaced it)");
+});
+
+test("phase6: /api/jobs/poll no longer applies roleTitleSql (job_role_map join is sufficient)", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const pollStart = server.indexOf('app.get("/api/jobs/poll"');
+  const pollEnd   = server.indexOf("\napp.", pollStart + 10);
+  const block     = server.slice(pollStart, pollEnd);
+
+  assert.match(block, /jrm\.role_key = \?/, "poll must still join job_role_map on role_key");
+  assert.match(block, /pollProfileTitleFilter/, "poll must still apply profileTitleSql as additive filter");
+  assert.doesNotMatch(block, /roleTitleSql\("sj\.title"/, "roleTitleSql must be removed from poll (redundant re-derivation)");
+});
+
+test("phase6: profileMatcher no longer exports resolveUserRoles or contains SKILL_TO_ROLE", () => {
+  const src = fs.readFileSync("services/jobs/profileMatcher.js", "utf8");
+  assert.doesNotMatch(src, /SKILL_TO_ROLE/, "SKILL_TO_ROLE map must be removed (Taxonomy A retirement)");
+  assert.doesNotMatch(src, /resolveUserRoles/, "resolveUserRoles must be removed");
+  assert.doesNotMatch(src, /role_match/, "role_match weight must be removed from scoreJob");
+  assert.match(src, /scoreJob/, "scoreJob must still exist for ranking");
+  assert.match(src, /filterAndRankForProfile/, "filterAndRankForProfile must still exist");
+});
+
+test("phase6: classifier.js (Taxonomy A) has classify() removed", () => {
+  const src = fs.readFileSync("services/jobs/classifier.js", "utf8");
+  assert.doesNotMatch(src, /^export \{ classify \}/m, "classify() must no longer be exported");
+  assert.doesNotMatch(src, /^function classify\(/m, "classify() function must be removed");
+});

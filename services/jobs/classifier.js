@@ -1,5 +1,6 @@
-// Classifies a job into role/seniority/domain buckets.
-// Used by aggregator after fetching, before caching.
+// Taxonomy A classifier — RETIRED in Phase 6 (jobs-segregation).
+// classify() and SKILL_TO_ROLE have been removed; use classifyJob() from classifyJob.js.
+// File kept for git history; safe to delete after confirming no remaining importers.
 
 const SENIORITY_PATTERNS = [
   { level: 'intern',   patterns: [/intern/i, /internship/i, /co.?op/i] },
@@ -342,31 +343,4 @@ const SWE_TITLE_BLOCKLIST = [
   /\bsales\s+engineer\b/i,
 ];
 
-function classify(job) {
-  const text  = `${job.title || ''} ${job.description || ''} ${job.company || ''}`;
-  const title = job.title || '';
-
-  let seniority = 'mid';
-  for (const { level, patterns } of SENIORITY_PATTERNS) {
-    if (patterns.some(p => p.test(text))) { seniority = level; break; }
-  }
-
-  let role = 'other';
-  for (const { role: r, patterns } of ROLE_PATTERNS) {
-    if (patterns.some(p => p.test(text))) { role = r; break; }
-  }
-
-  // Demote titles that matched SWE via description but aren't engineering roles
-  if (role === 'software_engineer' && SWE_TITLE_BLOCKLIST.some(p => p.test(title))) {
-    role = 'other';
-  }
-
-  let domain = 'general';
-  for (const { domain: d, patterns } of DOMAIN_PATTERNS) {
-    if (patterns.some(p => p.test(text))) { domain = d; break; }
-  }
-
-  return { bucket_role: role, bucket_seniority: seniority, bucket_domain: domain };
-}
-
-export { classify };
+// classify() removed — use classifyJob() from services/jobs/classifyJob.js

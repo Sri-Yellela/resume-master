@@ -32,7 +32,7 @@ import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
 import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, buildProfileSearchTerms, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
-import { getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRoleFamilyDomainForKey, roleTitleSql } from "./services/jobClassifier.js";
+import { getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRoleFamilyDomainForKey } from "./services/jobClassifier.js";
 import { inferWorkType, jobHash, normaliseItem, isFullTimeNorm, isEmploymentTypeWanted, parseYearsExperience, ghostJobScoreNorm, isReposted } from "./services/jobNormalization.js";
 import { profileTitleSql } from "./services/profileTitleFilter.js";
 import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
@@ -73,7 +73,7 @@ import {
 } from "./services/integrationReadiness.js";
 import { searchJobs, cacheJobs } from "./services/jobs/aggregator.js";
 import { classifyJob as unifiedClassifyJob } from "./services/jobs/classifyJob.js";
-import { filterAndRankForProfile, resolveUserRoles } from "./services/jobs/profileMatcher.js";
+import { filterAndRankForProfile } from "./services/jobs/profileMatcher.js";
 import { isResumeRelevant } from "./services/jobs/relevanceFilter.js";
 
 // ── mapJobRow: normalise DB/aggregator rows to camelCase for the client ────────
@@ -3883,7 +3883,6 @@ function resolveUserJobDomainProfileId(userId, jobId) {
     JOIN job_role_map jrm ON jrm.job_id = uj.job_id AND jrm.role_key = ?
     JOIN scraped_jobs sj ON sj.job_id = uj.job_id
     WHERE uj.user_id=? AND uj.job_id=?
-      AND ${roleTitleSql("sj.title", activeRoleKey)}
   `).get(activeRoleKey, userId, String(jobId));
   if (existing?.domain_profile_id) return existing.domain_profile_id;
 
@@ -3893,7 +3892,6 @@ function resolveUserJobDomainProfileId(userId, jobId) {
     JOIN job_role_map jrm ON jrm.role_key = LOWER(COALESCE(NULLIF(dp.role_family, ''), dp.domain))
     JOIN scraped_jobs sj ON sj.job_id = jrm.job_id
     WHERE dp.user_id = ? AND dp.is_active = 1 AND jrm.job_id = ?
-      AND ${roleTitleSql("sj.title", activeRoleKey)}
   `).get(userId, String(jobId));
   if (activeProfile?.id) return activeProfile.id;
 
@@ -4697,7 +4695,6 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     WHERE (uj.disliked IS NULL OR uj.disliked = 0)
       AND (uj.applied  IS NULL OR uj.applied  = 0)
-      AND ${roleTitleSql("sj.title", roleKey)}
       AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
            OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
@@ -4741,94 +4738,111 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       sort           = '',
       employmentType = '',
       workType       = '',
+      ageFilter      = '',
+      maxYoe         = null,
     } = req.query;
 
     const rawQuery = (role || q || '').slice(0, 200).trim();
     const pg       = Math.max(1, parseInt(page, 10) || 1);
     const ps       = Math.min(50, Math.max(1, parseInt(pageSize, 10) || 10));
 
-    // --- Try profile-matched feed from scraped_jobs cache ---
+    // Phase 6: board is profile-scoped via job_role_map join — profile required
+    const sessionActiveProfile = getOrRepairActiveProfile(req.user.id);
+    if (!sessionActiveProfile) {
+      return res.json({
+        success:           true,
+        jobs:              [],
+        total:             0,
+        page:              pg,
+        pageSize:          ps,
+        totalPages:        0,
+        needsProfileSetup: true,
+        reason:            'no_active_profile',
+      });
+    }
+
+    const roleKey = roleKeyForProfile(sessionActiveProfile);
+
+    // profileTitleSql: additive narrowing within the already role-correct board
+    const titleFilter = profileTitleSql("sj.title", sessionActiveProfile);
+
+    // Keyword + location (opt-in)
+    const keyFilter = rawQuery ? `AND (sj.title LIKE ? OR sj.company LIKE ? OR sj.description LIKE ?)` : '';
+    const keyArgs   = rawQuery ? [`%${rawQuery}%`, `%${rawQuery}%`, `%${rawQuery}%`] : [];
+    const locFilter = location ? `AND sj.location LIKE ?` : '';
+    const locArgs   = location ? [`%${location}%`] : [];
+
+    // Work-type / employment-type (opt-in)
+    const wtFilter = workType       ? `AND sj.work_type       = ?` : '';
+    const wtArgs   = workType       ? [workType]                   : [];
+    const etFilter = employmentType ? `AND sj.employment_type = ?` : '';
+    const etArgs   = employmentType ? [employmentType]             : [];
+
+    // Age filter (opt-in — no hidden cutoff in base conditions)
+    let ageSql  = '', ageArgs = [];
+    const ageDays = parseInt(ageFilter, 10);
+    if (ageFilter && !isNaN(ageDays) && ageDays > 0) {
+      ageSql  = `AND sj.scraped_at >= ?`;
+      ageArgs = [Math.floor(Date.now() / 1000) - ageDays * 86400];
+    }
+
+    // YoE: auto-apply from stored signals when no explicit maxYoe is set
+    const signals = loadSimpleApplyProfile(db, { userId: req.user.id, profileId: sessionActiveProfile.id });
+    const explicitMaxYoe = maxYoe !== null && maxYoe !== '' ? parseInt(maxYoe, 10) : null;
+    const effectiveMaxYoe = explicitMaxYoe !== null
+      ? explicitMaxYoe
+      : (signals?.yearsExperience != null ? signals.yearsExperience + 2 : null);
+    const yoeSql  = effectiveMaxYoe !== null ? `AND (sj.min_years_exp IS NULL OR sj.min_years_exp <= ?)` : '';
+    const yoeArgs = effectiveMaxYoe !== null ? [effectiveMaxYoe] : [];
+
     const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
-
     if (cacheCount > 0) {
-      // Build keyword + location filter clauses
-      const keyFilter = rawQuery
-        ? `AND (title LIKE ? OR company LIKE ? OR description LIKE ?)`
-        : '';
-      const keyArgs   = rawQuery ? [`%${rawQuery}%`, `%${rawQuery}%`, `%${rawQuery}%`] : [];
+      const orderBy = sort === 'atsScore'      ? 'sj.ats_score DESC, sj.scraped_at DESC'
+                    : sort === 'applicantCount' ? 'sj.applicant_count ASC, sj.scraped_at DESC'
+                    :                            'sj.scraped_at DESC';
+      const offset  = (pg - 1) * ps;
 
-      const locFilter = location
-        ? `AND location LIKE ?`
-        : '';
-      const locArgs   = location ? [`%${location}%`] : [];
+      const joinClause = `
+        FROM scraped_jobs sj
+        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
+        LEFT JOIN user_jobs uj
+          ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
+      `;
+      const whereClause = `
+        WHERE 1=1
+          ${keyFilter}
+          ${locFilter}
+          AND ${titleFilter.sql}
+          ${wtFilter}
+          ${etFilter}
+          ${ageSql}
+          ${yoeSql}
+          AND (uj.disliked IS NULL OR uj.disliked = 0)
+      `;
+      const baseArgs = [
+        roleKey, req.user.id, sessionActiveProfile.id,
+        ...keyArgs, ...locArgs, ...titleFilter.params,
+        ...wtArgs, ...etArgs, ...ageArgs, ...yoeArgs,
+      ];
 
-      // Load user profile for personalization
-      const profile = db.prepare(
-        "SELECT * FROM user_profile WHERE user_id=?"
-      ).get(req.user.id) || {};
+      const rows  = db.prepare(`SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked ${joinClause} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...baseArgs, ps, offset);
+      const total = db.prepare(`SELECT COUNT(*) as n ${joinClause} ${whereClause}`).get(...baseArgs)?.n || 0;
 
-      const profileForMatcher = {
-        target_skills:    profile.target_skills    || '[]',
-        confirmed_skills: profile.confirmed_skills || '[]',
-        target_locations: profile.target_locations || '[]',
-        target_domains:   profile.target_domains   || '[]',
-        seniority_level:  profile.seniority_level  || null,
-      };
-
-      // Pre-filter SQL to user's role buckets — only fetch matching jobs (+ 'other' as fallback)
-      const userBuckets = resolveUserRoles(profileForMatcher);
-      const bucketFilter = userBuckets.length > 0
-        ? `AND (bucket_role IN (${userBuckets.map(() => '?').join(',')}) OR bucket_role IS NULL)`
-        : '';
-
-      const cachedJobs = db.prepare(`
-        SELECT * FROM scraped_jobs
-        WHERE 1=1 ${keyFilter} ${locFilter} ${bucketFilter}
-        ORDER BY scraped_at DESC
-        LIMIT 500
-      `).all(...keyArgs, ...locArgs, ...userBuckets);
-
-      // Load disliked URLs for this user
-      const dislikedRows = db.prepare(
-        "SELECT job_id FROM user_jobs WHERE user_id=? AND disliked=1"
-      ).all(req.user.id);
-      const dislikedUrls = dislikedRows.map(r => r.job_id);
-
-      // Rank by profile match, then strip any irrelevant jobs that slipped into DB
-      const ranked = filterAndRankForProfile(cachedJobs, profileForMatcher, dislikedUrls)
-        .filter(j => isResumeRelevant(j.title));
-
-      // Attach star/dislike state
-      const interactionMap = {};
-      if (ranked.length) {
-        const ids = ranked.map(j => j.job_id || j.url).filter(Boolean);
-        const placeholders = ids.map(() => '?').join(',');
-        const rows = db.prepare(
-          `SELECT job_id, starred, disliked FROM user_jobs WHERE user_id=? AND job_id IN (${placeholders})`
-        ).all(req.user.id, ...ids);
-        rows.forEach(r => { interactionMap[r.job_id] = r; });
-      }
-
-      const offset = (pg - 1) * ps;
-      const pageJobs = ranked.slice(offset, offset + ps).map(j => mapJobRow({
-        ...j,
-        starred:  !!(interactionMap[j.job_id]?.starred),
-        disliked: !!(interactionMap[j.job_id]?.disliked),
-      }));
+      console.log(JSON.stringify({ msg: '[jobs]', profile: sessionActiveProfile.profile_name, sort, total, returned: rows.length }));
 
       return res.json({
         success:    true,
-        jobs:       pageJobs,
-        total:      ranked.length,
+        jobs:       rows.map(j => ({ ...mapJobRow(j), scrapedAt: j.scraped_at })),
+        total,
         page:       pg,
         pageSize:   ps,
-        totalPages: Math.ceil(ranked.length / ps),
+        totalPages: Math.ceil(total / ps),
         sources:    ['scraped_jobs'],
         fromCache:  true,
       });
     }
 
-    // --- Fallback: live search via aggregator ---
+    // --- Fallback: live search via aggregator (empty cache) ---
     const sanitized = {
       query:          rawQuery,
       location:       String(location).slice(0, 200).trim(),
@@ -5103,7 +5117,6 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     WHERE LOWER(sj.search_query) = ?
-      AND ${roleTitleSql("sj.title", roleKey)}
       AND ${pollProfileTitleFilter.sql}
       AND (? IS NULL OR sj.min_years_exp IS NULL OR sj.min_years_exp <= ?)
       AND sj.scraped_at >= ?
@@ -5368,7 +5381,6 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
       AND r.html IS NOT NULL
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
-      AND ${roleTitleSql("sj.title", roleKey)}
       AND ${pendingProfileTitleFilter.sql}
     ORDER BY uj.updated_at DESC
   `).all(roleKey, userId, activeProfile.id, userId, ...pendingProfileTitleFilter.params);
