@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // ============================================================
 // services/jobClassifier.js — Modular job profile-classification engine
 // ============================================================
@@ -38,7 +38,7 @@ const DESCRIPTION_ANCHOR_WEIGHT = 2;   // domain tool/concept hits in descriptio
 const CONFIDENCE_STRONG_ONLY_THRESHOLD = 3;  // score must reach at least this via strong anchors
 export const INGEST_CONFIDENCE_THRESHOLD = 0.75; // min confidence to assign role at ingest time
 
-const SIGNALS = {
+export const SIGNALS = {
   engineering_embedded_firmware: {
     strongAnchors: [
       "firmware engineer",
@@ -520,7 +520,8 @@ const SIGNALS = {
       "logistics network", "3pl", "last mile", "demand planning",
       "purchase order", "rfq", "supplier management", "bom",
     ],
-    exclusions: [],
+    // revenue operations is a sales/GTM function, not supply-chain ops
+    exclusions: ["revenue operations"],
   },
 
   healthcare: {
@@ -559,6 +560,76 @@ const SIGNALS = {
       "patient assessment", "clinical trial", "icd code", "icd-10",
       "medication management", "care coordination", "patient outcomes",
       "clinical protocol", "bedside", "vital signs", "nursing assessment",
+    ],
+    exclusions: [],
+  },
+
+  sales: {
+    strongAnchors: [
+      "account executive",
+      "enterprise account executive",
+      "commercial account executive",
+      "regional account executive",
+      "account manager",
+      "strategic account manager",
+      "national account manager",
+      "business development representative",
+      "sales development representative",
+      "bdr",
+      "sdr",
+      "inside sales representative",
+      "inside sales",
+      "outside sales",
+      "enterprise sales",
+      "customer success manager",
+      "customer success engineer",
+      "customer success specialist",
+      "customer success lead",
+      "customer success director",
+      "revenue operations",
+      "revops",
+      "solutions engineer",
+      "sales engineer",
+      "solutions consultant",
+      "pre-sales engineer",
+      "pre-sales consultant",
+      "pre-sales",
+      "presales",
+      "sales manager",
+      "regional sales manager",
+      "district sales manager",
+      "senior sales manager",
+      "sales director",
+      "vp of sales",
+      "head of sales",
+      "vp of revenue",
+      "chief revenue officer",
+      "sales enablement",
+      "sales enablement manager",
+      "partnerships manager",
+      "partnerships lead",
+      "partnerships director",
+      "partner development manager",
+      "partner success manager",
+      "strategic partnerships",
+      "strategic alliances",
+      "channel manager",
+      "channel sales manager",
+      "channel partner manager",
+      "renewals manager",
+      "renewals specialist",
+      "value engineer",
+      "client success manager",
+      "client partner manager",
+    ],
+    weakSignals: [
+      "sales", "account", "revenue", "partnerships",
+    ],
+    descriptionAnchors: [
+      "salesforce", "quota", "prospecting", "outbound",
+      "cold outreach", "deal close", "arr", "mrr", "churn",
+      "upsell", "cross-sell", "renewal", "sales cycle",
+      "lead generation", "pipeline management",
     ],
     exclusions: [],
   },
@@ -851,6 +922,35 @@ export const ROLE_TITLE_SQL = {
     ],
     excludes: [],
   },
+
+  sales: {
+    includes: [
+      "%account executive%",
+      "%business development%",
+      "%sales development%",
+      "% bdr %", "bdr %",
+      "% sdr %", "sdr %",
+      "%customer success%",
+      "%revenue operations%", "%revops%",
+      "%solutions engineer%",
+      "%sales engineer%",
+      "%sales manager%",
+      "%sales director%",
+      "%inside sales%",
+      "%outside sales%",
+      "%enterprise sales%",
+      "%channel sales%",
+      "%pre-sales%", "%presales%",
+      "%sales enablement%",
+      "%partnerships manager%",
+      "%strategic partnerships%",
+      "%strategic alliances%",
+      "%renewals manager%",
+      "%value engineer%",
+      "%account manager%",
+    ],
+    excludes: [],
+  },
 };
 
 // ── Conservative ingest-time classification ───────────────────
@@ -1131,6 +1231,35 @@ export function roleTitleSql(column, roleKey) {
     OR LOWER(${column}) LIKE '%patient care%'
     OR LOWER(${column}) LIKE '%clinical research%'
     OR LOWER(${column}) LIKE '%clinical coordinator%'
+  )`;
+  if (roleKey === "sales") return `(
+    LOWER(${column}) LIKE '%account executive%'
+    OR LOWER(${column}) LIKE '%business development%'
+    OR LOWER(${column}) LIKE '%sales development%'
+    OR LOWER(${column}) LIKE '% bdr %'
+    OR LOWER(${column}) LIKE 'bdr %'
+    OR LOWER(${column}) LIKE '% sdr %'
+    OR LOWER(${column}) LIKE 'sdr %'
+    OR LOWER(${column}) LIKE '%customer success%'
+    OR LOWER(${column}) LIKE '%revenue operations%'
+    OR LOWER(${column}) LIKE '%revops%'
+    OR LOWER(${column}) LIKE '%solutions engineer%'
+    OR LOWER(${column}) LIKE '%sales engineer%'
+    OR LOWER(${column}) LIKE '%sales manager%'
+    OR LOWER(${column}) LIKE '%sales director%'
+    OR LOWER(${column}) LIKE '%inside sales%'
+    OR LOWER(${column}) LIKE '%outside sales%'
+    OR LOWER(${column}) LIKE '%enterprise sales%'
+    OR LOWER(${column}) LIKE '%channel sales%'
+    OR LOWER(${column}) LIKE '%pre-sales%'
+    OR LOWER(${column}) LIKE '%presales%'
+    OR LOWER(${column}) LIKE '%sales enablement%'
+    OR LOWER(${column}) LIKE '%partnerships manager%'
+    OR LOWER(${column}) LIKE '%strategic partnerships%'
+    OR LOWER(${column}) LIKE '%strategic alliances%'
+    OR LOWER(${column}) LIKE '%renewals manager%'
+    OR LOWER(${column}) LIKE '%value engineer%'
+    OR LOWER(${column}) LIKE '%account manager%'
   )`;
   return "1 = 1";
 }
