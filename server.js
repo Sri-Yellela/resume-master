@@ -2642,7 +2642,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
       const hash    = jobHash(item);
       const yoe     = parseYearsExperience(item.description);
       const wt      = inferWorkType(
-        (item.workTypeHint || “”) + “ “ + (item.location || “”) + “ “ + (item.description || “”)
+        (item.workTypeHint || '') + ' ' + (item.location || '') + ' ' + (item.description || '')
       );
       const empType = item.jobType || null;
 
@@ -2665,10 +2665,10 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         query.toLowerCase(),
         item.company,
         item.title,
-        item._category || “Other”,
-        item.location  || “United States”,
+        item._category || 'Other',
+        item.location  || 'United States',
         wt,
-        “LinkedIn”,
+        'LinkedIn',
         item.url        || null,
         item.applyUrl   || null,
         normalizePostedAt(item.postedAt, nowUnix),
@@ -2682,7 +2682,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         isReposted(item) ? 1 : 0,
         hash,
         nowUnix,
-        “linkedin”,
+        'linkedin',
         item.salaryMin      || null,
         item.salaryMax      || null,
         item.salaryCurrency || null,
