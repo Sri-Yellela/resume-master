@@ -4453,13 +4453,13 @@ app.post("/api/extension/save-jobs-bulk",
         const jobUrl = (j.jobUrl || j.job_url || "").slice(0, 2000);
         const externalJobId = j.externalJobId || j.external_job_id || null;
         const dedupeKey = externalJobId
-          ? `linkedin_saved_${externalJobId}`
-          : `linkedin_saved_${Buffer.from((jobUrl || (j.title || "") + (j.company || "")).slice(0, 200)).toString("base64").slice(0, 64)}`;
+          ? `linkedin_ext_saved_${externalJobId}`
+          : `linkedin_ext_saved_${Buffer.from((jobUrl || (j.title || "") + (j.company || "")).slice(0, 200)).toString("base64").slice(0, 64)}`;
 
         const info = insert.run({
           userId,
-          sourceKey:      "linkedin_saved",
-          sourceLabel:    j.sourceLabel || j.source_label || "LinkedIn Saved",
+          sourceKey:      "linkedin_extension",
+          sourceLabel:    "LinkedIn (Extension)",
           sourcePlatform: "linkedin",
           externalJobId,
           dedupeKey,
@@ -4477,7 +4477,7 @@ app.post("/api/extension/save-jobs-bulk",
         if (info.changes > 0) {
           imported++;
         } else {
-          bumpSeen.run(userId, "linkedin_saved", dedupeKey);
+          bumpSeen.run(userId, "linkedin_extension", dedupeKey);
           skipped++;
         }
       }
