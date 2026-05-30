@@ -2147,6 +2147,27 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       id: "058_scraped_jobs_via",
       sql: `ALTER TABLE scraped_jobs ADD COLUMN via TEXT;`,
     },
+    {
+      // Adds collar + confidence columns to scraped_jobs and the rejected_jobs
+      // audit table used by the blue-collar eject gate (Phase 4+).
+      // ALTER TABLE ADD COLUMN runs once; idempotency is guaranteed by the
+      // schema_migrations tracker (this id is never re-applied).
+      // CREATE TABLE/INDEX IF NOT EXISTS are unconditionally idempotent.
+      id: "059_jobs_segregation",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN collar TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN classification_confidence REAL;
+        CREATE TABLE IF NOT EXISTS rejected_jobs (
+          job_id      TEXT    PRIMARY KEY,
+          title       TEXT,
+          company     TEXT,
+          source      TEXT,
+          reason      TEXT,
+          rejected_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_rejected_at ON rejected_jobs(rejected_at);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
