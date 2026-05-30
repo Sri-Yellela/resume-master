@@ -45,8 +45,7 @@ function AnimatedLucyLogo({ theme, progress: p }) {
       position: "relative", display: "inline-flex", alignItems: "center",
       justifyContent: "center", flexShrink: 0, height: 36, minWidth: 50,
     }}>
-      <div style={{ position: "absolute", inset: 0, background: theme.accent,
-                    transform: "rotate(-3deg)", borderRadius: 2 }}/>
+      {/* Outer accent rect removed — inner white stamp is sufficient */}
       <div style={{
         position: "relative", zIndex: 1, padding: "3px 10px",
         background: "#ffffff", border: "2.5px solid #0f0f0f",
@@ -537,18 +536,24 @@ export default function TopBar({
   const topOffset  = Math.round(p * 10);
   const padH       = 20;
 
-  // Background: solid surface → glassy accent gradient
-  const surfaceAlphaHex = Math.round((0.95 - p * 0.45) * 255).toString(16).padStart(2, "0");
-  const bgBase = `${theme.surfaceBase}${surfaceAlphaHex}`;
+  // Background: 100% translucent — the bar reads as "nothing is there", only the
+  // logo + utility icons float over the page. The faint glass treatment is kept
+  // ONLY for the collapsed pill state (scrolled), where a subtle surface helps
+  // legibility of the floating controls; at rest (p≈0) it is fully transparent.
   const a1 = (p * 0.18).toFixed(3);
   const a2 = (p * 0.08).toFixed(3);
   const a3 = (p * 0.12).toFixed(3);
-  const pillBg = `linear-gradient(135deg, rgba(${ar},${ag},${ab},${a1}) 0%, rgba(${ar},${ag},${ab},${a2}) 40%, rgba(255,255,255,${a3}) 100%), ${bgBase}`;
+  const pillBg = p < 0.02
+    ? "transparent"
+    : `linear-gradient(135deg, rgba(${ar},${ag},${ab},${a1}) 0%, rgba(${ar},${ag},${ab},${a2}) 40%, rgba(255,255,255,${a3}) 100%), ${theme.surfaceBase}${Math.round(p * 0.55 * 255).toString(16).padStart(2, "0")}`;
 
-  // Border: barely visible at full width → accent pill border when collapsed
+  // Border: none at rest (fully translucent) → accent pill border when collapsed
   const borderColor = p < 0.02
-    ? `${theme.border}33`
+    ? "transparent"
     : `rgba(${ar},${ag},${ab},${(p * 0.25).toFixed(3)})`;
+
+  // Backdrop blur only once the pill begins to form; none at rest
+  const effectiveBlur = p < 0.02 ? 0 : blur;
 
   // Shadow: elevation + glassy inset highlight
   const shadow = p > 0.05
@@ -573,8 +578,8 @@ export default function TopBar({
           height: 46,
           borderRadius: radius,
           background: pillBg,
-          backdropFilter: `blur(${blur}px)`,
-          WebkitBackdropFilter: `blur(${blur}px)`,
+          backdropFilter: `blur(${effectiveBlur}px)`,
+          WebkitBackdropFilter: `blur(${effectiveBlur}px)`,
           border: `1px solid ${borderColor}`,
           boxShadow: shadow,
           display: "flex",

@@ -44,13 +44,7 @@ export function StampLogo({ progress = 0, size = 'sm' }) {
       position: 'relative', display: 'inline-flex', alignItems: 'center',
       justifyContent: 'center', flexShrink: 0, height, minWidth: 50,
     }}>
-      {/* Accent shadow rect — sits behind, rotated slightly more */}
-      <div style={{
-        position: 'absolute', inset: 0,
-        background: 'var(--color-primary, #4f98a3)',
-        transform: 'rotate(-3deg)', borderRadius: 2,
-      }}/>
-      {/* White stamp rect */}
+      {/* White stamp rect (outer accent rect removed — inner stamp is sufficient) */}
       <div style={{
         position: 'relative', zIndex: 1,
         padding: `${padV}px ${padH}px`,
