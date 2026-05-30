@@ -1,6 +1,7 @@
-﻿// Apply routes - manual application tracking only
-// LinkedIn automation removed 2026-05-08
-// Auto-apply via official ATS APIs (Greenhouse, Lever) is a future feature
+import os from "os";
+import path from "path";
+import { writeFileSync, unlinkSync } from "fs";
+import { autoApply } from "../services/applyAutomation.js";
 
 function publicApplication(row) {
   if (!row) return null;
@@ -21,7 +22,9 @@ function publicApplication(row) {
   };
 }
 
-export default function applyRoutes(app, db, requireAuth) {
+export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf) {
+  // ── Manual tracking endpoints ────────────────────────────────────────────────
+
   app.post("/api/apply", requireAuth, (req, res) => {
     const {
       jobId,
@@ -105,18 +108,290 @@ export default function applyRoutes(app, db, requireAuth) {
     res.json({ applications: rows.map(publicApplication) });
   });
 
-  const automationRemoved = (_req, res) => {
-    res.status(410).json({
-      error: "LinkedIn automation has been removed. Open the official application page and track the application manually.",
-      manualTracking: true,
-    });
+  // ── Queue infrastructure ─────────────────────────────────────────────────────
+
+  const APPLY_WORKER_LIMIT = 2;
+  const ATS_AUTO_APPLY_THRESHOLD = 65;
+  let activeWorkers = 0;
+
+  function logEvent(runId, runJobId, userId, jobId, event, message, details = null) {
+    try {
+      db.prepare(`
+        INSERT INTO apply_job_logs (run_id, run_job_id, user_id, job_id, event, message, details_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(runId, runJobId, userId, String(jobId), event, message, details ? JSON.stringify(details) : null);
+    } catch (e) {
+      console.warn("[applyRoutes] logEvent error:", e.message);
+    }
+  }
+
+  async function processRunJob(runJob, run) {
+    const { id: runJobId, run_id: runId, job_id: jobId, user_id: userId } = runJob;
+    const mode = run.mode || "auto";
+    let resumeTmpPath = null;
+
+    const setJobStatus = (status, reasonCode = null, reasonDetail = null) => {
+      db.prepare(`
+        UPDATE apply_run_jobs
+        SET status=?, reason_code=?, reason_detail=?, finished_at=unixepoch()
+        WHERE id=?
+      `).run(status, reasonCode, reasonDetail, runJobId);
+    };
+
+    try {
+      db.prepare(`UPDATE apply_run_jobs SET status='running', started_at=unixepoch() WHERE id=?`).run(runJobId);
+
+      const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(String(jobId));
+      if (!job) { setJobStatus("failed", "job_not_found", "Job not found in DB"); return; }
+
+      const jobUrl = job.apply_url || job.url;
+      if (!jobUrl) { setJobStatus("failed", "no_job_url", "Job has no apply URL"); return; }
+
+      db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(userId);
+      const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(userId);
+      const autofillPayload = buildAutofillPayload(profile, "APPLY");
+
+      const toolType = run.tool_type || "generate";
+
+      const artifact = db.prepare(
+        "SELECT id, ats_score, html FROM resumes WHERE user_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1"
+      ).get(userId, String(jobId));
+
+      let result;
+
+      if (artifact?.html) {
+        // CASE A: existing artifact — ATS gate, then PDF convert and apply
+        const atsScore = artifact.ats_score ?? null;
+        if (mode === "auto" && atsScore !== null && atsScore < ATS_AUTO_APPLY_THRESHOLD) {
+          logEvent(runId, runJobId, userId, jobId, "ats_review", `ATS score ${atsScore} below threshold`, { atsScore });
+          db.prepare(`UPDATE apply_run_jobs SET status='held_review', reason_code='ats_below_threshold', finished_at=unixepoch() WHERE id=?`).run(runJobId);
+          db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+          return;
+        }
+        const pdfBuf = await htmlToPdf(artifact.html);
+        resumeTmpPath = path.join(os.tmpdir(), `resume_${userId}_${jobId}_${Date.now()}.pdf`);
+        writeFileSync(resumeTmpPath, pdfBuf);
+        logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page in browser");
+        result = await autoApply(jobUrl, autofillPayload, {
+          mode: mode === "auto" ? "full" : "semi",
+          jobId,
+          resumePath: resumeTmpPath,
+        });
+
+      } else if (mode === "semi") {
+        // CASE B: no artifact + semi (manual review) mode
+        // Generation and browser run in parallel; browser starts immediately in semi mode
+        // so the user can review the pre-filled form while generation completes in the background.
+        logEvent(runId, runJobId, userId, jobId, "generation_started", "Starting resume generation in background");
+        const genPromise = generateResumeForApply(userId, jobId, toolType).then(async (gen) => {
+          if (!gen?.html) return null;
+          logEvent(runId, runJobId, userId, jobId, "generation_ready", "Resume generation completed", { atsScore: gen.atsScore });
+          try {
+            const pdfBuf = await htmlToPdf(gen.html);
+            const tmpPath = path.join(os.tmpdir(), `resume_${userId}_${jobId}_${Date.now()}.pdf`);
+            writeFileSync(tmpPath, pdfBuf);
+            resumeTmpPath = tmpPath;
+            return tmpPath;
+          } catch { return null; }
+        });
+        logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page for review");
+        const browserPromise = autoApply(jobUrl, autofillPayload, {
+          mode: "semi",
+          jobId,
+          resumePathPromise: genPromise,
+        });
+        const [, applySettled] = await Promise.allSettled([genPromise, browserPromise]);
+        result = applySettled.status === "fulfilled" ? applySettled.value : { status: "awaiting_user", fieldsFilled: 0 };
+        db.prepare(`UPDATE apply_run_jobs SET status='held_review', reason_code='manual_review', finished_at=unixepoch() WHERE id=?`).run(runJobId);
+        logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform });
+        db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+        return;
+
+      } else {
+        // CASE C: no artifact + auto mode
+        // Browser and generation run in parallel; browser awaits resumePathPromise at the upload step,
+        // so navigation and form-fill can proceed while generation runs.
+        // ATS gate is embedded inside the resumePathPromise chain — it gates the PDF path, not the browser launch.
+        logEvent(runId, runJobId, userId, jobId, "generation_started", "Starting resume generation in parallel with browser");
+        const resumePathPromise = generateResumeForApply(userId, jobId, toolType).then(async (gen) => {
+          if (gen?.error === "generation_timed_out") {
+            logEvent(runId, runJobId, userId, jobId, "generation_timed_out", "Resume generation timed out — no file to upload");
+            return null;
+          }
+          if (gen?.error) {
+            logEvent(runId, runJobId, userId, jobId, "generation_failed", `Generation failed: ${gen.error}`);
+            return null;
+          }
+          logEvent(runId, runJobId, userId, jobId, "generation_ready", "Resume generated", { atsScore: gen.atsScore });
+          const atsScore = gen.atsScore ?? 0;
+          logEvent(runId, runJobId, userId, jobId, "ats_review", `ATS score: ${atsScore}`, { atsScore });
+          if (atsScore < ATS_AUTO_APPLY_THRESHOLD) {
+            logEvent(runId, runJobId, userId, jobId, "ats_below_threshold", `Score ${atsScore} below threshold ${ATS_AUTO_APPLY_THRESHOLD}`);
+            db.prepare(`UPDATE apply_run_jobs SET status='held_review', reason_code='ats_below_threshold', finished_at=unixepoch() WHERE id=?`).run(runJobId);
+            db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+            return null;
+          }
+          try {
+            const pdfBuf = await htmlToPdf(gen.html);
+            const tmpPath = path.join(os.tmpdir(), `resume_${userId}_${jobId}_${Date.now()}.pdf`);
+            writeFileSync(tmpPath, pdfBuf);
+            resumeTmpPath = tmpPath;
+            return tmpPath;
+          } catch { return null; }
+        });
+        logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page in browser");
+        const applyPromise = autoApply(jobUrl, autofillPayload, {
+          mode: "full",
+          jobId,
+          resumePathPromise,
+        });
+        const [, applySettled] = await Promise.allSettled([resumePathPromise, applyPromise]);
+        result = applySettled.status === "fulfilled" ? applySettled.value : { status: "error", fieldsFilled: 0 };
+      }
+
+      // Record final result for CASE A and CASE C (CASE B returns early above)
+      const submitted = result.status === "submitted";
+      const atsHeld   = result.status === "ats_held";
+      const finalStatus = submitted ? "submitted"
+        : atsHeld || result.status === "awaiting_user" ? "held_review"
+        : result.status === "error" ? "failed"
+        : "held_review";
+      const reasonCode = atsHeld ? "ats_below_threshold"
+        : result.status === "awaiting_user" ? "manual_review"
+        : result.reasonCode || null;
+
+      setJobStatus(finalStatus, reasonCode, result.reasonDetail || null);
+      logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform });
+
+      if (submitted) {
+        logEvent(runId, runJobId, userId, jobId, "submitted", "Application submitted successfully");
+        db.prepare(`UPDATE apply_runs SET submitted_count=submitted_count+1 WHERE id=?`).run(runId);
+      } else if (finalStatus === "held_review") {
+        db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+      } else {
+        db.prepare(`UPDATE apply_runs SET failed_count=failed_count+1 WHERE id=?`).run(runId);
+      }
+
+    } catch (e) {
+      console.error(`[applyRoutes] processRunJob error job=${jobId}: ${e.message}`);
+      db.prepare(`UPDATE apply_run_jobs SET status='failed', reason_code='internal_error', reason_detail=?, finished_at=unixepoch() WHERE id=?`)
+        .run(e.message?.slice(0, 500) || "Unknown error", runJobId);
+      db.prepare(`UPDATE apply_runs SET failed_count=failed_count+1 WHERE id=?`).run(runId);
+      logEvent(runId, runJobId, userId, jobId, "error", e.message?.slice(0, 500) || "Unknown error");
+    } finally {
+      if (resumeTmpPath) { try { unlinkSync(resumeTmpPath); } catch {} }
+    }
+  }
+
+  const processRun = async (run) => {
+    try {
+      db.prepare(`UPDATE apply_runs SET status='running', started_at=unixepoch() WHERE id=?`).run(run.id);
+      const jobs = db.prepare(`SELECT * FROM apply_run_jobs WHERE run_id=? AND status='queued' ORDER BY id`).all(run.id);
+
+      const runningJobs = [];
+      for (const job of jobs) {
+        while (activeWorkers >= APPLY_WORKER_LIMIT) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+        activeWorkers++;
+        const p = processRunJob(job, run)
+          .catch(e => console.error(`[applyRoutes] uncaught job error job=${job.job_id}: ${e.message}`))
+          .finally(() => { activeWorkers--; });
+        runningJobs.push(p);
+      }
+
+      await Promise.allSettled(runningJobs);
+      db.prepare(`UPDATE apply_runs SET status='completed', finished_at=unixepoch() WHERE id=?`).run(run.id);
+    } catch (e) {
+      console.error(`[applyRoutes] processRun error run=${run.id}: ${e.message}`);
+      db.prepare(`UPDATE apply_runs SET status='failed', finished_at=unixepoch() WHERE id=?`).run(run.id);
+    }
   };
 
-  app.post("/api/apply/runs", requireAuth, automationRemoved);
-  app.get("/api/apply/runs", requireAuth, (_req, res) => res.json({ runs: [], review: [] }));
-  app.get("/api/apply/runs/:runId", requireAuth, automationRemoved);
-  app.get("/api/apply/review", requireAuth, (_req, res) => res.json({ jobs: [] }));
-  app.post("/api/apply/close/:jobId", requireAuth, automationRemoved);
-  app.post("/api/apply/session/save", requireAuth, automationRemoved);
-  app.get("/api/apply/session/:domain", requireAuth, (_req, res) => res.json({ exists: false }));
+  // ── Queue endpoints ──────────────────────────────────────────────────────────
+
+  app.post("/api/apply/runs", requireAuth, (req, res) => {
+    const { jobIds = [], mode = "auto", toolType } = req.body || {};
+    if (!Array.isArray(jobIds) || jobIds.length === 0)
+      return res.status(400).json({ error: "jobIds array required" });
+    if (jobIds.length > 25)
+      return res.status(400).json({ error: "Max 25 jobs per run" });
+
+    const duplicates = db.prepare(`
+      SELECT job_id FROM apply_run_jobs
+      WHERE user_id=? AND status IN ('submitted', 'running', 'queued')
+    `).pluck().all(req.user.id);
+    const duplicateSet = new Set(duplicates);
+
+    const filtered = jobIds.map(String).filter(id => !duplicateSet.has(id));
+    if (filtered.length === 0)
+      return res.status(400).json({ error: "All selected jobs are already applied or in progress" });
+
+    const runResult = db.prepare(`
+      INSERT INTO apply_runs (user_id, mode, tool_type, status, total_jobs)
+      VALUES (?, ?, ?, 'queued', ?)
+    `).run(req.user.id, mode === "semi" ? "semi" : "auto", toolType || "generate", filtered.length);
+    const runId = runResult.lastInsertRowid;
+
+    const insertJob = db.prepare(`
+      INSERT OR IGNORE INTO apply_run_jobs (run_id, user_id, job_id, status)
+      VALUES (?, ?, ?, 'queued')
+    `);
+    db.transaction(() => { for (const id of filtered) insertJob.run(runId, req.user.id, id); })();
+
+    const run = db.prepare("SELECT * FROM apply_runs WHERE id=?").get(runId);
+    setImmediate(() => processRun(run).catch(e => console.error("[applyRoutes] processRun:", e.message)));
+
+    res.status(202).json({ ok: true, runId, mode: run.mode, totalJobs: filtered.length });
+  });
+
+  app.get("/api/apply/runs", requireAuth, (req, res) => {
+    const runs = db.prepare(`
+      SELECT * FROM apply_runs WHERE user_id=? ORDER BY created_at DESC LIMIT 20
+    `).all(req.user.id);
+    const review = db.prepare(`
+      SELECT rj.*, r.mode FROM apply_run_jobs rj
+      JOIN apply_runs r ON r.id = rj.run_id
+      WHERE rj.user_id=? AND rj.status='held_review'
+      ORDER BY rj.created_at DESC LIMIT 50
+    `).all(req.user.id);
+    res.json({ runs, review });
+  });
+
+  app.get("/api/apply/runs/:runId", requireAuth, (req, res) => {
+    const run = db.prepare("SELECT * FROM apply_runs WHERE id=? AND user_id=?")
+      .get(Number(req.params.runId), req.user.id);
+    if (!run) return res.status(404).json({ error: "Run not found" });
+    const jobs = db.prepare("SELECT * FROM apply_run_jobs WHERE run_id=? ORDER BY id").all(run.id);
+    const logs = db.prepare("SELECT * FROM apply_job_logs WHERE run_id=? ORDER BY created_at").all(run.id);
+    res.json({ run, jobs, logs });
+  });
+
+  app.get("/api/apply/review", requireAuth, (req, res) => {
+    const jobs = db.prepare(`
+      SELECT rj.*, r.mode, sj.title, sj.company AS sj_company, sj.url, sj.apply_url
+      FROM apply_run_jobs rj
+      JOIN apply_runs r ON r.id = rj.run_id
+      LEFT JOIN scraped_jobs sj ON sj.job_id = rj.job_id
+      WHERE rj.user_id=? AND rj.status='held_review'
+      ORDER BY rj.created_at DESC LIMIT 50
+    `).all(req.user.id);
+    res.json({ jobs });
+  });
+
+  app.post("/api/apply/close/:jobId", requireAuth, (req, res) => {
+    db.prepare(`
+      UPDATE apply_run_jobs SET status='dismissed', finished_at=unixepoch()
+      WHERE job_id=? AND user_id=? AND status='held_review'
+    `).run(String(req.params.jobId), req.user.id);
+    res.json({ ok: true });
+  });
+
+  app.post("/api/apply/session/save", requireAuth, (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.get("/api/apply/session/:domain", requireAuth, (_req, res) => {
+    res.json({ exists: false });
+  });
 }
