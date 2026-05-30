@@ -2,7 +2,7 @@ import { validatePlugin } from './sources/base.js';
 import { stripInternalFields } from './schema.js';
 import { classify } from './classifier.js';
 import { filterDirectApplyOnly } from './directApplyFilter.js';
-import { classifyForIngest } from '../jobClassifier.js';
+import { classifyJob } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
 import { isResumeRelevant } from './relevanceFilter.js';
 
@@ -171,67 +171,103 @@ async function cacheJobs(db) {
       INSERT OR REPLACE INTO scraped_jobs
         (job_id, search_query, _hash, title, company, location, url, source, source_label,
          posted_at, scraped_at, bucket_role, bucket_seniority, bucket_domain, direct_apply, description,
-         company_icon_url, via)
+         company_icon_url, via, collar, classification_confidence)
       VALUES
         (@job_id, @search_query, @_hash, @title, @company, @location, @url, @source, @source_label,
          @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description,
-         @company_icon_url, @via)
+         @company_icon_url, @via, @collar, @classification_confidence)
     `);
 
     const roleMapStmt = db.prepare(`
-      INSERT OR IGNORE INTO job_role_map
+      INSERT OR REPLACE INTO job_role_map
         (job_id, role_key, role_family, domain, confidence, matched_by)
       VALUES
         (@job_id, @role_key, @role_family, @domain, @confidence, @matched_by)
     `);
 
+    const rejectStmt = db.prepare(`
+      INSERT OR REPLACE INTO rejected_jobs (job_id, title, company, source, reason, rejected_at)
+      VALUES (@job_id, @title, @company, @source, @reason, @rejected_at)
+    `);
+
+    const deleteJobStmt  = db.prepare(`DELETE FROM scraped_jobs  WHERE job_id = ?`);
+    const deleteRoleStmt = db.prepare(`DELETE FROM job_role_map  WHERE job_id = ?`);
+
     const upsertAll = db.transaction((jobs) => {
       const now = Math.floor(Date.now() / 1000);
+      let ejected = 0, dropped = 0, cached = 0;
+
       for (const job of jobs) {
         const jobId = job.id || job.url || '';
         if (!jobId) continue;
 
+        const verdict = classifyJob(job.title || '', job.description || '', job.company || '');
+
+        if (verdict.collar === 'blue') {
+          deleteJobStmt.run(jobId);
+          deleteRoleStmt.run(jobId);
+          rejectStmt.run({
+            job_id:      jobId,
+            title:       job.title   || '',
+            company:     job.company || '',
+            source:      job.source  || '',
+            reason:      'blue_collar',
+            rejected_at: now,
+          });
+          ejected++;
+          continue;
+        }
+
+        if (verdict.roleKey === null) {
+          dropped++;
+          continue;
+        }
+
         stmt.run({
-          job_id:           jobId,
-          search_query:     job.source || 'ats',
-          _hash:            jobId,
-          title:            job.title || '',
-          company:          job.company || '',
-          location:         job.location || '',
-          url:              job.url || '',
-          source:           job.source || '',
-          source_label:     job.source_label || '',
-          posted_at:        job.posted_at || null,
-          scraped_at:       now,
-          bucket_role:      job.bucket_role || null,
-          bucket_seniority: job.bucket_seniority || null,
-          bucket_domain:    job.bucket_domain || null,
-          direct_apply:     job.direct_apply === false ? 0 : 1,
-          description:      job.description || null,
-          company_icon_url: job.thumbnail || job.companyIconUrl || null,
-          via:              job.via || null,
+          job_id:                    jobId,
+          search_query:              job.source || 'ats',
+          _hash:                     jobId,
+          title:                     job.title || '',
+          company:                   job.company || '',
+          location:                  job.location || '',
+          url:                       job.url || '',
+          source:                    job.source || '',
+          source_label:              job.source_label || '',
+          posted_at:                 job.posted_at || null,
+          scraped_at:                now,
+          bucket_role:               verdict.roleKey,
+          bucket_seniority:          verdict.seniority || null,
+          bucket_domain:             verdict.domain || null,
+          direct_apply:              job.direct_apply === false ? 0 : 1,
+          description:               job.description || null,
+          company_icon_url:          job.thumbnail || job.companyIconUrl || null,
+          via:                       job.via || null,
+          collar:                    'white',
+          classification_confidence: verdict.confidence || 0,
         });
 
-        // Populate job_role_map so star/dislike works via resolveUserJobDomainProfileId
-        const classification = classifyForIngest(job.title || '', job.description || '');
-        if (classification?.roleKey) {
-          roleMapStmt.run({
-            job_id:      jobId,
-            role_key:    classification.roleKey,
-            role_family: classification.roleFamily || classification.roleKey,
-            domain:      classification.domain || null,
-            confidence:  classification.confidence || 0.5,
-            matched_by:  'ats_cache',
-          });
-        }
+        // Canonical verdict → job_role_map (supersedes old classifyForIngest path)
+        roleMapStmt.run({
+          job_id:      jobId,
+          role_key:    verdict.roleKey,
+          role_family: verdict.roleKey,
+          domain:      verdict.domain || null,
+          confidence:  verdict.confidence || 0,
+          matched_by:  'ats_cache',
+        });
+        cached++;
       }
+      return { cached, ejected, dropped };
     });
 
+    // isResumeRelevant kept as a redundant safety net (superseded by collar gate; removed in Phase 6)
     const relevant = result.jobs.filter(j => isResumeRelevant(j.title));
     const skipped  = result.jobs.length - relevant.length;
-    if (skipped > 0) console.log(`[cacheJobs] Skipped ${skipped} irrelevant jobs`);
-    upsertAll(relevant);
-    console.log(`[cacheJobs] Cached ${relevant.length} jobs from ATS sources`);
+    if (skipped > 0) console.log(`[cacheJobs] Skipped ${skipped} jobs (safety net)`);
+    const { cached, ejected, dropped } = upsertAll(relevant);
+    if (ejected > 0) console.log(`[cacheJobs] Ejected ${ejected} blue-collar jobs`);
+    if (dropped > 0) console.log(`[cacheJobs] Dropped ${dropped} unclassifiable jobs`);
+    console.log(`[cacheJobs] Cached ${cached} jobs from ATS sources`);
 
     // Background logo enrichment (non-blocking, max 25 per cache run)
     setImmediate(async () => {
@@ -259,7 +295,7 @@ async function cacheJobs(db) {
       }
     });
 
-    return result.jobs.length;
+    return cached;
   } catch (err) {
     console.error('[cacheJobs] Failed:', err.message);
     return 0;
