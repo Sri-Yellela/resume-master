@@ -321,3 +321,67 @@ test("/api/jobs auto-applies YoE hard constraint from stored signals when no exp
   // The constraint must exclude jobs requiring more than user's band
   assert.match(block, /sj\.min_years_exp IS NULL OR sj\.min_years_exp <= \?/, "must filter by min_years_exp");
 });
+
+// ── Phase 4: collar gate wired into every ingest point ───────────────────────
+import { classifyJob } from "../services/jobs/classifyJob.js";
+
+test("phase4: aggregator imports classifyJob (unified collar gate) not classifyForIngest", () => {
+  const agg = fs.readFileSync("services/jobs/aggregator.js", "utf8");
+  assert.match(agg, /import \{ classifyJob \} from '\.\/classifyJob\.js'/, "aggregator must import classifyJob");
+  assert.doesNotMatch(agg, /import \{ classifyForIngest \}/, "aggregator must not import classifyForIngest (replaced by classifyJob)");
+});
+
+test("phase4: aggregator cacheJobs ejects blue-collar into rejected_jobs", () => {
+  const agg = fs.readFileSync("services/jobs/aggregator.js", "utf8");
+  assert.match(agg, /INSERT OR REPLACE INTO rejected_jobs/, "cacheJobs must upsert rejected_jobs for blue-collar jobs");
+  assert.match(agg, /blue_collar/, "rejection reason must be blue_collar");
+  assert.match(agg, /collar === 'blue'/, "must check collar === 'blue'");
+  assert.match(agg, /DELETE FROM scraped_jobs/, "must DELETE existing scraped_jobs row on eject");
+  assert.match(agg, /DELETE FROM job_role_map/, "must DELETE existing job_role_map row on eject");
+});
+
+test("phase4: aggregator cacheJobs stores collar and confidence on every insert", () => {
+  const agg = fs.readFileSync("services/jobs/aggregator.js", "utf8");
+  assert.match(agg, /collar.*classification_confidence/, "INSERT must include collar and classification_confidence columns");
+  assert.match(agg, /collar:\s*'white'/, "inserted jobs must carry collar='white'");
+});
+
+test("phase4: server.js LinkedIn ingest imports unifiedClassifyJob and gates on collar", () => {
+  assert.match(server, /import \{ classifyJob as unifiedClassifyJob \} from "\.\/services\/jobs\/classifyJob\.js"/, "server.js must import unifiedClassifyJob");
+  assert.match(server, /unifiedClassifyJob\(item\.title/, "insertMany must call unifiedClassifyJob per job");
+  assert.match(server, /collar === 'blue'.*skip insert|skip insert.*collar === 'blue'/s, "insertMany must skip insert for blue-collar jobs");
+});
+
+test("phase4: classifyJob correctly ejects canonical blue-collar titles", () => {
+  const blue = [
+    ["Delivery Driver",        ""],
+    ["Warehouse Associate",    ""],
+    ["Warehouse Manager",      ""],   // Policy #1 — supervisory blue
+    ["Line Cook",              ""],
+    ["Restaurant Manager",     ""],   // Policy #1 — supervisory blue
+    ["Store Manager",          ""],   // Policy #1 — supervisory blue
+    ["Construction Superintendent", ""], // Policy #1
+    ["Cashier",                ""],
+    ["Forklift Operator",      ""],
+    ["Home Health Aide",       ""],
+  ];
+  for (const [title, desc] of blue) {
+    const r = classifyJob(title, desc, "");
+    assert.equal(r.collar, "blue", `"${title}" should be blue-collar`);
+    assert.equal(r.roleKey, null, `"${title}" should have null roleKey`);
+  }
+});
+
+test("phase4: classifyJob keeps white-collar titles with a strong role anchor even when blue token present", () => {
+  const white = [
+    ["Warehouse Operations Analyst",  ""],  // blue token + strong white anchor
+    ["Fleet Software Engineer",       ""],  // blue token + strong white anchor
+    ["Security Engineer",             ""],  // "security" is blue-adjacent, but engineer rescues
+    ["Field Service Engineer",        ""],  // service/field could be ambiguous; engineer rescues
+  ];
+  for (const [title, desc] of white) {
+    const r = classifyJob(title, desc, "");
+    assert.equal(r.collar, "white", `"${title}" should be white-collar`);
+    assert.notEqual(r.roleKey, null, `"${title}" should have a non-null roleKey (got ${r.roleKey})`);
+  }
+});

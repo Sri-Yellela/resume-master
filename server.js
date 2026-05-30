@@ -72,6 +72,7 @@ import {
   publicIntegrationRow,
 } from "./services/integrationReadiness.js";
 import { searchJobs, cacheJobs } from "./services/jobs/aggregator.js";
+import { classifyJob as unifiedClassifyJob } from "./services/jobs/classifyJob.js";
 import { filterAndRankForProfile, resolveUserRoles } from "./services/jobs/profileMatcher.js";
 import { isResumeRelevant } from "./services/jobs/relevanceFilter.js";
 
@@ -2623,9 +2624,16 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
      ghost_score, years_experience, min_years_exp, max_years_exp, exp_raw,
      is_frequent_repost, _hash, scraped_at, source_platform,
      salary_min, salary_max, salary_currency, applicant_count, company_icon_url,
-     employment_type, domain_profile_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     employment_type, domain_profile_id, collar, classification_confidence)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
+
+  const rejectJobStmt  = db.prepare(`
+    INSERT OR REPLACE INTO rejected_jobs (job_id, title, company, source, reason, rejected_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const deleteScrapedStmt  = db.prepare(`DELETE FROM scraped_jobs WHERE job_id = ?`);
+  const deleteRoleMapStmt  = db.prepare(`DELETE FROM job_role_map  WHERE job_id = ?`);
 
   const insertMany = db.transaction((jobs) => {
     let inserted = 0;
@@ -2634,18 +2642,33 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
       const hash    = jobHash(item);
       const yoe     = parseYearsExperience(item.description);
       const wt      = inferWorkType(
-        (item.workTypeHint || "") + " " + (item.location || "") + " " + (item.description || "")
+        (item.workTypeHint || “”) + “ “ + (item.location || “”) + “ “ + (item.description || “”)
       );
       const empType = item.jobType || null;
+
+      // ── Collar gate (blue-collar eject) ───────────────────────────────────
+      const collarVerdict = unifiedClassifyJob(item.title || '', item.description || '', item.company || '');
+      if (collarVerdict.collar === 'blue') {
+        deleteScrapedStmt.run(jobId);
+        deleteRoleMapStmt.run(jobId);
+        rejectJobStmt.run(jobId, item.title || '', item.company || '', 'linkedin', 'blue_collar',
+          Math.floor(Date.now() / 1000));
+        return; // skip insert
+      }
+      if (collarVerdict.roleKey === null) {
+        return; // white-ish but no signal → drop
+      }
+      // ──────────────────────────────────────────────────────────────────────
+
       const result = insertJob.run(
         jobId,
         query.toLowerCase(),
         item.company,
         item.title,
-        item._category || "Other",
-        item.location  || "United States",
+        item._category || “Other”,
+        item.location  || “United States”,
         wt,
-        "LinkedIn",
+        “LinkedIn”,
         item.url        || null,
         item.applyUrl   || null,
         normalizePostedAt(item.postedAt, nowUnix),
@@ -2659,7 +2682,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         isReposted(item) ? 1 : 0,
         hash,
         nowUnix,
-        "linkedin",
+        “linkedin”,
         item.salaryMin      || null,
         item.salaryMax      || null,
         item.salaryCurrency || null,
@@ -2667,6 +2690,8 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         item.companyLogoUrl || null,
         empType,
         domainProfileId,
+        'white',
+        collarVerdict.confidence || 0,
       );
       if (result.changes > 0) inserted++;
       else if (domainProfileId) {
