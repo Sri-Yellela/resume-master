@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/panels/ProfilePanel.jsx — Design System v4
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api }      from "../lib/api.js";
@@ -76,6 +76,56 @@ const PHint = ({ children, theme }) => (
   </span>
 );
 
+function CustomAnswerAdder({ onAdd, theme }) {
+  const [q, setQ] = useState("");
+  const [a, setA] = useState("");
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <button type="button" className="rm-btn"
+        onClick={() => setOpen(true)}
+        style={{ fontSize:12, border:`1px dashed ${theme.border}`,
+                 background:theme.bg, color:theme.textMuted, cursor:"pointer",
+                 borderRadius:8, padding:"6px 12px" }}>
+        + Add Question
+      </button>
+    );
+  }
+  return (
+    <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end", marginTop:8 }}>
+      <div style={{ flex:"1 1 200px" }}>
+        <span style={{ fontSize:11, fontWeight:600, textTransform:"uppercase",
+                       letterSpacing:"0.05em", color:theme.textMuted,
+                       display:"block", marginBottom:4 }}>Question</span>
+        <input className="rm-input" value={q}
+          onChange={e => setQ(e.target.value)}
+          placeholder="How did you hear about us?"/>
+      </div>
+      <div style={{ flex:"1 1 200px" }}>
+        <span style={{ fontSize:11, fontWeight:600, textTransform:"uppercase",
+                       letterSpacing:"0.05em", color:theme.textMuted,
+                       display:"block", marginBottom:4 }}>Answer</span>
+        <input className="rm-input" value={a}
+          onChange={e => setA(e.target.value)}
+          placeholder="LinkedIn"/>
+      </div>
+      <div style={{ display:"flex", gap:6 }}>
+        <button type="button" className="rm-btn rm-btn-primary"
+          onClick={() => { onAdd(q, a); setQ(""); setA(""); setOpen(false); }}
+          style={{ fontSize:12 }}>
+          Add
+        </button>
+        <button type="button" className="rm-btn"
+          onClick={() => setOpen(false)}
+          style={{ fontSize:12, border:`1px solid ${theme.border}`,
+                   background:theme.surface, color:theme.text }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
   const { theme } = useTheme();
 
@@ -87,6 +137,12 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
     gender:"", ethnicity:"", veteran_status:"", disability_status:"",
     requires_sponsorship:false, has_clearance:false,
     clearance_level:"", visa_type:"", work_auth:"",
+    website_url:"", portfolio_url:"",
+    desired_salary:"", salary_currency:"USD",
+    available_start_date:"", willing_to_relocate:false,
+    highest_degree:"", field_of_study:"", university:"", graduation_year:"",
+    current_job_title:"", current_company:"", years_of_experience:"",
+    custom_answers:{},
   };
 
   const [form,   setForm]   = useState(BLANK);
@@ -200,6 +256,8 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
         ...f, ...d,
         requires_sponsorship: !!d.requires_sponsorship,
         has_clearance:        !!d.has_clearance,
+        willing_to_relocate:  !!d.willing_to_relocate,
+        custom_answers: (() => { try { return typeof d.custom_answers === 'object' && d.custom_answers !== null ? d.custom_answers : JSON.parse(d.custom_answers || '{}'); } catch { return {}; } })(),
       })))
       .catch(() => {});
   }, []);
@@ -261,11 +319,13 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const blurPhone    = () => set("phone",        normalisePhone(form.phone));
-  const blurLinkedin = () => set("linkedin_url", normaliseUrl(form.linkedin_url));
-  const blurGithub   = () => set("github_url",   normaliseUrl(form.github_url));
-  const blurZip      = () => set("zip",          normaliseZip(form.zip));
-  const blurState    = () => set("state",        normaliseState(form.state));
+  const blurPhone     = () => set("phone",         normalisePhone(form.phone));
+  const blurLinkedin  = () => set("linkedin_url",  normaliseUrl(form.linkedin_url));
+  const blurGithub    = () => set("github_url",    normaliseUrl(form.github_url));
+  const blurWebsite   = () => set("website_url",   normaliseUrl(form.website_url));
+  const blurPortfolio = () => set("portfolio_url", normaliseUrl(form.portfolio_url));
+  const blurZip       = () => set("zip",           normaliseZip(form.zip));
+  const blurState     = () => set("state",         normaliseState(form.state));
 
   const syncLocation = () => {
     if (form.city || form.state) {
@@ -277,14 +337,18 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
     e.preventDefault();
     const cleaned = {
       ...form,
-      phone:        normalisePhone(form.phone),
-      linkedin_url: normaliseUrl(form.linkedin_url),
-      github_url:   normaliseUrl(form.github_url),
-      zip:          normaliseZip(form.zip),
-      state:        normaliseState(form.state),
-      location:     form.city && form.state
-                      ? `${form.city}, ${form.state}`
-                      : (form.city || form.state || form.location || ""),
+      phone:         normalisePhone(form.phone),
+      linkedin_url:  normaliseUrl(form.linkedin_url),
+      github_url:    normaliseUrl(form.github_url),
+      website_url:   normaliseUrl(form.website_url),
+      portfolio_url: normaliseUrl(form.portfolio_url),
+      zip:           normaliseZip(form.zip),
+      state:         normaliseState(form.state),
+      location:      form.city && form.state
+                       ? `${form.city}, ${form.state}`
+                       : (form.city || form.state || form.location || ""),
+      custom_answers: typeof form.custom_answers === 'object' && form.custom_answers !== null
+                       ? form.custom_answers : {},
     };
     try {
       await api("/api/profile", { method:"POST", body:JSON.stringify(cleaned) });
@@ -674,6 +738,126 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
           </PRow>
         </PSec>
 
+        {/* ── Application Extras ── */}
+        <PSec title="Application Extras" theme={theme}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <PRow label="Website URL" theme={theme}>
+              <input className="rm-input" value={form.website_url || ""}
+                onChange={e => set("website_url", e.target.value)}
+                onBlur={blurWebsite}
+                placeholder="yoursite.com"/>
+            </PRow>
+            <PRow label="Portfolio URL" theme={theme}>
+              <input className="rm-input" value={form.portfolio_url || ""}
+                onChange={e => set("portfolio_url", e.target.value)}
+                onBlur={blurPortfolio}
+                placeholder="portfolio.example.com"/>
+            </PRow>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <PRow label="Current Job Title" theme={theme}>
+              <input className="rm-input" value={form.current_job_title || ""}
+                onChange={e => set("current_job_title", e.target.value)}
+                placeholder="Software Engineer"/>
+            </PRow>
+            <PRow label="Current Company" theme={theme}>
+              <input className="rm-input" value={form.current_company || ""}
+                onChange={e => set("current_company", e.target.value)}
+                placeholder="Acme Corp"/>
+            </PRow>
+          </div>
+          <PRow label="Years of Experience" theme={theme}>
+            <input className="rm-input" type="number" min="0" max="60" value={form.years_of_experience || ""}
+              onChange={e => set("years_of_experience", e.target.value)}
+              placeholder="5"/>
+          </PRow>
+          <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:12 }}>
+            <PRow label="Desired Salary" theme={theme}>
+              <input className="rm-input" type="number" min="0" value={form.desired_salary || ""}
+                onChange={e => set("desired_salary", e.target.value)}
+                placeholder="100000"/>
+            </PRow>
+            <PRow label="Currency" theme={theme}>
+              <select style={selStyle} value={form.salary_currency || "USD"}
+                onChange={e => set("salary_currency", e.target.value)}>
+                <option>USD</option><option>EUR</option><option>GBP</option>
+                <option>CAD</option><option>AUD</option>
+              </select>
+            </PRow>
+          </div>
+          <PRow label="Available Start Date" theme={theme}>
+            <input className="rm-input" type="date" value={form.available_start_date || ""}
+              onChange={e => set("available_start_date", e.target.value)}/>
+          </PRow>
+          <label style={{ display:"flex", alignItems:"center", gap:8,
+                          marginBottom:10, cursor:"pointer",
+                          fontSize:13, color:theme.text }}>
+            <input type="checkbox" checked={!!form.willing_to_relocate}
+              onChange={e => set("willing_to_relocate", e.target.checked)}
+              style={{ accentColor:theme.accent, width:16, height:16 }}/>
+            Willing to relocate
+          </label>
+        </PSec>
+
+        {/* ── Education ── */}
+        <PSec title="Education" theme={theme}>
+          <PRow label="Highest Degree" theme={theme}>
+            <select style={selStyle} value={form.highest_degree || ""}
+              onChange={e => set("highest_degree", e.target.value)}>
+              <option value="">Select…</option>
+              <option>High School</option>
+              <option>{"Associate's"}</option>
+              <option>{"Bachelor's"}</option>
+              <option>{"Master's"}</option>
+              <option>PhD/Doctorate</option>
+              <option>Other</option>
+            </select>
+          </PRow>
+          <PRow label="Field of Study" theme={theme}>
+            <input className="rm-input" value={form.field_of_study || ""}
+              onChange={e => set("field_of_study", e.target.value)}
+              placeholder="Computer Science"/>
+          </PRow>
+          <PRow label="University / College" theme={theme}>
+            <input className="rm-input" value={form.university || ""}
+              onChange={e => set("university", e.target.value)}
+              placeholder="State University"/>
+          </PRow>
+          <PRow label="Graduation Year" theme={theme}>
+            <input className="rm-input" type="number" min="1950" max="2099" value={form.graduation_year || ""}
+              onChange={e => set("graduation_year", e.target.value)}
+              placeholder="2022"/>
+          </PRow>
+        </PSec>
+
+        {/* ── Custom Answers ── */}
+        <PSec title="Custom Answers" theme={theme}>
+          <p style={{ fontSize:12, color:theme.textMuted, lineHeight:1.5, marginBottom:14 }}>
+            Pre-fill answers to common application questions (e.g. "How did you hear about us?").
+          </p>
+          {Object.entries(form.custom_answers || {}).map(([q, a]) => (
+            <div key={q} style={{ display:"flex", gap:8, alignItems:"center", marginBottom:8 }}>
+              <div style={{ flex:1, fontSize:12, color:theme.text, fontWeight:600 }}>{q}</div>
+              <div style={{ flex:2, fontSize:12, color:theme.textMuted }}>{String(a)}</div>
+              <button type="button"
+                onClick={() => {
+                  const next = { ...form.custom_answers };
+                  delete next[q];
+                  set("custom_answers", next);
+                }}
+                style={{ border:"none", background:"transparent", color:theme.danger,
+                         cursor:"pointer", fontSize:16, lineHeight:1, padding:"0 4px" }}>
+                &times;
+              </button>
+            </div>
+          ))}
+          <CustomAnswerAdder onAdd={(q, a) => {
+            if (!q.trim()) return;
+            set("custom_answers", { ...form.custom_answers, [q.trim()]: a });
+          }} theme={theme} selStyle={selStyle} />
+        </PSec>
+
+        {/* ── Job Profiles ── */}
         <PSec title="Job Profiles" theme={theme}>
           <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.5, marginBottom:14 }}>
             Job profile creation, editing, switching, and deletion now live in the dedicated Job Profiles section.
