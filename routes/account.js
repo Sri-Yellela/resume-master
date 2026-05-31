@@ -272,13 +272,28 @@ export function createAccountRouter({
       address_line1=?,address_line2=?,city=?,state=?,zip=?,country=?,
       gender=?,ethnicity=?,veteran_status=?,disability_status=?,
       requires_sponsorship=?,has_clearance=?,clearance_level=?,
-      visa_type=?,work_auth=?,updated_at=unixepoch() WHERE user_id=?`
+      visa_type=?,work_auth=?,
+      website_url=?,portfolio_url=?,desired_salary=?,salary_currency=?,
+      available_start_date=?,willing_to_relocate=?,highest_degree=?,
+      field_of_study=?,university=?,graduation_year=?,
+      current_job_title=?,current_company=?,years_of_experience=?,
+      custom_answers=?,
+      updated_at=unixepoch() WHERE user_id=?`
     ).run(
       f.full_name || null, f.email || null, f.phone || null, f.linkedin_url || null, f.github_url || null, f.location || null,
       f.address_line1 || null, f.address_line2 || null, f.city || null, f.state || null, f.zip || null, f.country || "United States",
       f.gender || null, f.ethnicity || null, f.veteran_status || null, f.disability_status || null,
       f.requires_sponsorship ? 1 : 0, f.has_clearance ? 1 : 0, f.clearance_level || null,
-      f.visa_type || null, f.work_auth || null, req.user.id
+      f.visa_type || null, f.work_auth || null,
+      f.website_url || null, f.portfolio_url || null,
+      f.desired_salary ? Number(f.desired_salary) : null, f.salary_currency || null,
+      f.available_start_date || null, f.willing_to_relocate ? 1 : 0,
+      f.highest_degree || null, f.field_of_study || null, f.university || null,
+      f.graduation_year ? Number(f.graduation_year) : null,
+      f.current_job_title || null, f.current_company || null,
+      f.years_of_experience ? Number(f.years_of_experience) : null,
+      JSON.stringify(typeof f.custom_answers === 'object' && f.custom_answers !== null ? f.custom_answers : {}),
+      req.user.id
     );
     res.json({ ok: true });
   });

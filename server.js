@@ -2169,6 +2169,25 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         CREATE INDEX IF NOT EXISTS idx_rejected_at ON rejected_jobs(rejected_at);
       `,
     },
+    {
+      id: "060_user_profile_extended",
+      sql: `
+        ALTER TABLE user_profile ADD COLUMN website_url TEXT;
+        ALTER TABLE user_profile ADD COLUMN portfolio_url TEXT;
+        ALTER TABLE user_profile ADD COLUMN desired_salary INTEGER;
+        ALTER TABLE user_profile ADD COLUMN salary_currency TEXT;
+        ALTER TABLE user_profile ADD COLUMN available_start_date TEXT;
+        ALTER TABLE user_profile ADD COLUMN willing_to_relocate INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE user_profile ADD COLUMN highest_degree TEXT;
+        ALTER TABLE user_profile ADD COLUMN field_of_study TEXT;
+        ALTER TABLE user_profile ADD COLUMN university TEXT;
+        ALTER TABLE user_profile ADD COLUMN graduation_year INTEGER;
+        ALTER TABLE user_profile ADD COLUMN current_job_title TEXT;
+        ALTER TABLE user_profile ADD COLUMN current_company TEXT;
+        ALTER TABLE user_profile ADD COLUMN years_of_experience INTEGER;
+        ALTER TABLE user_profile ADD COLUMN custom_answers TEXT NOT NULL DEFAULT '{}';
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -3168,7 +3187,8 @@ function buildAutofillPayload(profile, mode) {
       address_line2:profile?.address_line2||"", addressLine2:profile?.address_line2||"",
       linkedin:linkedinUrl, linkedinUrl, linkedin_url:linkedinUrl, linkedin_profile:linkedinUrl,
       github:githubUrl, githubUrl, github_url:githubUrl,
-      website:githubUrl||linkedinUrl||"",
+      website:normaliseUrl(profile?.website_url||"")||githubUrl||linkedinUrl||"",
+      portfolio:normaliseUrl(profile?.portfolio_url||""),
       gender:profile?.gender||"", ethnicity:profile?.ethnicity||"", race:profile?.ethnicity||"",
       veteran_status:profile?.veteran_status||"", veteranStatus:profile?.veteran_status||"",
       disability_status:profile?.disability_status||"", disabilityStatus:profile?.disability_status||"",
@@ -3178,7 +3198,53 @@ function buildAutofillPayload(profile, mode) {
       sponsorship:profile?.requires_sponsorship?"Yes":"No",
       clearance_level:profile?.clearance_level||"", clearanceLevel:profile?.clearance_level||"",
       has_clearance:profile?.has_clearance?"Yes":"No",
+      // New fields
+      desired_salary:profile?.desired_salary ? String(profile.desired_salary) : "",
+      available_start_date:profile?.available_start_date||"",
+      willing_to_relocate:profile?.willing_to_relocate ? "Yes" : "No",
+      highest_degree:profile?.highest_degree||"",
+      field_of_study:profile?.field_of_study||"",
+      university:profile?.university||"",
+      graduation_year:profile?.graduation_year ? String(profile.graduation_year) : "",
+      current_job_title:profile?.current_job_title||"",
+      current_company:profile?.current_company||"",
+      years_of_experience:profile?.years_of_experience ? String(profile.years_of_experience) : "",
     },
+    handler_map:{
+      'first-name': firstName,
+      'last-name': lastName,
+      'full-name': profile?.full_name || '',
+      'email': profile?.email || '',
+      'phone': phone,
+      'linkedin': linkedinUrl,
+      'github': githubUrl,
+      'website': normaliseUrl(profile?.website_url || ''),
+      'portfolio': normaliseUrl(profile?.portfolio_url || ''),
+      'address1': profile?.address_line1 || '',
+      'address2': profile?.address_line2 || '',
+      'city': city,
+      'state': state,
+      'zip': profile?.zip || '',
+      'country': profile?.country || 'United States',
+      'location': loc,
+      'sponsorship': profile?.requires_sponsorship ? 'Yes' : 'No',
+      'work-auth': profile?.work_auth || '',
+      'gender': profile?.gender || '',
+      'ethnicity': profile?.ethnicity || '',
+      'veteran': profile?.veteran_status || '',
+      'disability': profile?.disability_status || '',
+      'salary': profile?.desired_salary ? String(profile.desired_salary) : '',
+      'start-date': profile?.available_start_date || '',
+      'relocate': profile?.willing_to_relocate ? 'Yes' : 'No',
+      'degree': profile?.highest_degree || '',
+      'field-of-study': profile?.field_of_study || '',
+      'school': profile?.university || '',
+      'grad-year': profile?.graduation_year ? String(profile.graduation_year) : '',
+      'years-experience': profile?.years_of_experience ? String(profile.years_of_experience) : '',
+      'current-title': profile?.current_job_title || '',
+      'current-company': profile?.current_company || '',
+    },
+    custom_answers: (() => { try { return JSON.parse(profile?.custom_answers || '{}'); } catch { return {}; } })(),
     dropdown_map:{
       gender:   profile?.gender          ? [profile.gender]          : [],
       work_auth:profile?.work_auth       ? [profile.work_auth]        : [],
