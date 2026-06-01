@@ -594,27 +594,65 @@ async function fillContext(pageOrFrame, autofillData, labelMap) {
   }
 }
 
-async function handleResumeUpload(page, resumePath) {
-  if (!resumePath || !fs.existsSync(resumePath)) return;
+async function uploadToFileInput(input, filePath) {
+  await input.uploadFile(filePath);
+  await input.evaluate(inp => {
+    if (!inp.files?.length || typeof DataTransfer === "undefined") {
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+    const transfer = new DataTransfer();
+    for (const file of inp.files) transfer.items.add(file);
+    inp.files = transfer.files;
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    inp.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 800));
+}
+
+async function handleTypedFileUploads(page, resumePath, coverLetterPath) {
+  if (!resumePath && !coverLetterPath) return;
   try {
     const inputs = await page.$$("input[type='file']");
-    if (inputs.length > 0) {
-      await inputs[0].uploadFile(resumePath);
-      await inputs[0].evaluate(input => {
-        if (!input.files?.length || typeof DataTransfer === "undefined") {
-          input.dispatchEvent(new Event("change", { bubbles: true }));
-          return;
-        }
-        const transfer = new DataTransfer();
-        for (const file of input.files) transfer.items.add(file);
-        input.files = transfer.files;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      });
-      await new Promise(r => setTimeout(r, 800));
+    if (!inputs.length) return;
+
+    // Classify each file input by examining label + name + id attributes
+    const slots = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("input[type='file']")).map((el, idx) => {
+        const labelEl = el.id ? document.querySelector('label[for="' + el.id + '"]') : null;
+        const labelText = labelEl?.textContent || el.closest('label')?.textContent ||
+                          el.getAttribute('aria-label') || el.placeholder || '';
+        const attrs = [el.id || '', el.name || '', el.getAttribute('aria-label') || ''].join(' ');
+        const combined = (labelText + ' ' + attrs).toLowerCase();
+        const isCover  = /cover|letter/.test(combined);
+        const isResume = /resume|\bcv\b/.test(combined);
+        return { idx, isCover, isResume };
+      })
+    );
+
+    let resumeUploaded = false;
+    let coverUploaded  = false;
+
+    for (const slot of slots) {
+      const input = inputs[slot.idx];
+      if (!input) continue;
+      if (slot.isCover && !coverUploaded && coverLetterPath && fs.existsSync(coverLetterPath)) {
+        await uploadToFileInput(input, coverLetterPath);
+        coverUploaded = true;
+      } else if (slot.isResume && !resumeUploaded && resumePath && fs.existsSync(resumePath)) {
+        await uploadToFileInput(input, resumePath);
+        resumeUploaded = true;
+      }
+    }
+
+    // Fallback: upload resume to first file input when no typed resume slot was found
+    if (!resumeUploaded && resumePath && fs.existsSync(resumePath) && inputs.length > 0) {
+      if (!slots[0]?.isCover) {
+        await uploadToFileInput(inputs[0], resumePath);
+      }
     }
   } catch (e) {
-    console.warn("[applyAutomation] file upload:", e.message);
+    console.warn("[applyAutomation] file upload routing:", e.message);
   }
 }
 
@@ -657,7 +695,9 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // or null if generation failed / ATS score is below threshold / PDF conversion failed.
     // The browser awaits this before the first resume upload attempt, enabling parallel
     // site-visit + generation without blocking navigation or form-fill.
-    resumePathPromise = null,
+    resumePathPromise        = null,
+    coverLetterPath          = null,
+    coverLetterPathPromise   = null,
     jobId             = `tmp_${Date.now()}`,
     storageStatePath  = null,
   } = options;
@@ -728,13 +768,23 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       } catch { effectiveResumePath = null; }
     }
 
-    await handleResumeUpload(page, effectiveResumePath);
+    let effectiveCoverLetterPath = coverLetterPath;
+    if (!effectiveCoverLetterPath && coverLetterPathPromise) {
+      try {
+        effectiveCoverLetterPath = await Promise.race([
+          coverLetterPathPromise,
+          new Promise(r => setTimeout(() => r(null), 90_000)),
+        ]);
+      } catch { effectiveCoverLetterPath = null; }
+    }
+
+    await handleTypedFileUploads(page, effectiveResumePath, effectiveCoverLetterPath);
 
     // Multi-step pagination
     for (let step = 0; step < 8; step++) {
       if (!await clickNext(page)) break;
       totalFilled += await discoverAndFill(page, [page, ...page.frames()], detected, autofillData, labelMap);
-      await handleResumeUpload(page, effectiveResumePath);
+      await handleTypedFileUploads(page, effectiveResumePath, effectiveCoverLetterPath);
     }
 
     // ATS gate: if a resumePathPromise was provided but resolved to null (generation failed,

@@ -22,7 +22,7 @@ function publicApplication(row) {
   };
 }
 
-export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf) {
+export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply) {
   // ── Manual tracking endpoints ────────────────────────────────────────────────
 
   app.post("/api/apply", requireAuth, (req, res) => {
@@ -129,6 +129,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const { id: runJobId, run_id: runId, job_id: jobId, user_id: userId } = runJob;
     const mode = run.mode || "auto";
     let resumeTmpPath = null;
+    let coverLetterTmpPath = null;
 
     const setJobStatus = (status, reasonCode = null, reasonDetail = null) => {
       db.prepare(`
@@ -168,14 +169,30 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
           return;
         }
+        // Cover letter generation runs in parallel with PDF conversion
+        const clPromise = generateCoverLetterForApply(userId, jobId).then(async (cl) => {
+          if (!cl?.html) {
+            logEvent(runId, runJobId, userId, jobId, "cover_letter_unavailable", cl?.error || "no cover letter");
+            return null;
+          }
+          try {
+            const pdfBuf = await htmlToPdf(cl.html);
+            const tmpPath = path.join(os.tmpdir(), `cl_${userId}_${jobId}_${Date.now()}.pdf`);
+            writeFileSync(tmpPath, pdfBuf);
+            coverLetterTmpPath = tmpPath;
+            return tmpPath;
+          } catch { return null; }
+        }).catch(() => null);
         const pdfBuf = await htmlToPdf(artifact.html);
         resumeTmpPath = path.join(os.tmpdir(), `resume_${userId}_${jobId}_${Date.now()}.pdf`);
         writeFileSync(resumeTmpPath, pdfBuf);
+        const clPath = await clPromise;
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page in browser");
         result = await autoApply(jobUrl, autofillPayload, {
           mode: mode === "auto" ? "full" : "semi",
           jobId,
           resumePath: resumeTmpPath,
+          coverLetterPath: clPath,
         });
 
       } else if (mode === "semi") {
@@ -194,13 +211,27 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
             return tmpPath;
           } catch { return null; }
         });
+        const coverLetterPathPromise = generateCoverLetterForApply(userId, jobId).then(async (cl) => {
+          if (!cl?.html) {
+            logEvent(runId, runJobId, userId, jobId, "cover_letter_unavailable", cl?.error || "no cover letter");
+            return null;
+          }
+          try {
+            const pdfBuf = await htmlToPdf(cl.html);
+            const tmpPath = path.join(os.tmpdir(), `cl_${userId}_${jobId}_${Date.now()}.pdf`);
+            writeFileSync(tmpPath, pdfBuf);
+            coverLetterTmpPath = tmpPath;
+            return tmpPath;
+          } catch { return null; }
+        }).catch(() => null);
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page for review");
         const browserPromise = autoApply(jobUrl, autofillPayload, {
           mode: "semi",
           jobId,
           resumePathPromise: genPromise,
+          coverLetterPathPromise,
         });
-        const [, applySettled] = await Promise.allSettled([genPromise, browserPromise]);
+        const [,, applySettled] = await Promise.allSettled([genPromise, coverLetterPathPromise, browserPromise]);
         result = applySettled.status === "fulfilled" ? applySettled.value : { status: "awaiting_user", fieldsFilled: 0 };
         db.prepare(`UPDATE apply_run_jobs SET status='held_review', reason_code='manual_review', finished_at=unixepoch() WHERE id=?`).run(runJobId);
         logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform });
@@ -239,13 +270,27 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
             return tmpPath;
           } catch { return null; }
         });
+        const coverLetterPathPromiseCaseC = generateCoverLetterForApply(userId, jobId).then(async (cl) => {
+          if (!cl?.html) {
+            logEvent(runId, runJobId, userId, jobId, "cover_letter_unavailable", cl?.error || "no cover letter");
+            return null;
+          }
+          try {
+            const pdfBuf = await htmlToPdf(cl.html);
+            const tmpPath = path.join(os.tmpdir(), `cl_${userId}_${jobId}_${Date.now()}.pdf`);
+            writeFileSync(tmpPath, pdfBuf);
+            coverLetterTmpPath = tmpPath;
+            return tmpPath;
+          } catch { return null; }
+        }).catch(() => null);
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page in browser");
         const applyPromise = autoApply(jobUrl, autofillPayload, {
           mode: "full",
           jobId,
           resumePathPromise,
+          coverLetterPathPromise: coverLetterPathPromiseCaseC,
         });
-        const [, applySettled] = await Promise.allSettled([resumePathPromise, applyPromise]);
+        const [,, applySettled] = await Promise.allSettled([resumePathPromise, coverLetterPathPromiseCaseC, applyPromise]);
         result = applySettled.status === "fulfilled" ? applySettled.value : { status: "error", fieldsFilled: 0 };
       }
 
@@ -280,6 +325,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       logEvent(runId, runJobId, userId, jobId, "error", e.message?.slice(0, 500) || "Unknown error");
     } finally {
       if (resumeTmpPath) { try { unlinkSync(resumeTmpPath); } catch {} }
+      if (coverLetterTmpPath) { try { unlinkSync(coverLetterTmpPath); } catch {} }
     }
   }
 
