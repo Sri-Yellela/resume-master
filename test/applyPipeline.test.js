@@ -1,4 +1,4 @@
-// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -89,10 +89,10 @@ test("coreGenerateResume is extracted and callable from generateResumeForApply",
   assert.match(server, /async function coreGenerateResume/);
   assert.match(server, /function generateResumeForApply/);
   assert.match(server, /const pendingGenerationPromises = new Map/);
-  // generateResumeForApply AND htmlToPdf must be passed to applyRoutes
-  assert.match(server, /applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf\)/);
-  // The apply routes must accept both as parameters
-  assert.match(applyRoute, /function applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf\)/);
+  // generateResumeForApply, htmlToPdf, AND generateCoverLetterForApply must be passed to applyRoutes
+  assert.match(server, /applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply\)/);
+  // The apply routes must accept all as parameters
+  assert.match(applyRoute, /function applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply\)/);
 });
 
 test("generateResumeForApply reuses existing artifact without triggering a new generation", () => {
@@ -171,4 +171,36 @@ test("job detail panel has single Apply action and no redundant Manual button", 
   // Semi-auto apply mechanism must remain intact
   assert.match(detailPanel, /handleAutoApply/, "semi-auto apply handler must still be present");
   assert.match(detailPanel, /mode.*semi|semi.*mode/, "Apply action must use semi mode");
+});
+
+test("worker generates cover letter in parallel and passes coverLetterPath to autoApply", () => {
+  // generateCoverLetterForApply must exist in server.js and be wired into applyRoutes
+  assert.match(server, /async function generateCoverLetterForApply/);
+  assert.match(server, /generateCoverLetterForApply\(userId, jobId\)/);
+  // Routes must pass coverLetterPath (CASE A) and coverLetterPathPromise (CASE B/C) to autoApply
+  assert.match(applyRoute, /coverLetterPath/);
+  assert.match(applyRoute, /coverLetterPathPromise/);
+  assert.match(applyRoute, /cover_letter_unavailable/);
+  // Cover letter temp file must be cleaned up alongside resume temp file
+  assert.match(applyRoute, /coverLetterTmpPath/);
+  assert.match(applyRoute, /unlinkSync\(coverLetterTmpPath\)/);
+});
+
+test("autoApply accepts coverLetterPath and coverLetterPathPromise options", () => {
+  // The engine must destructure both new options from the options object
+  assert.match(automation, /coverLetterPath\s*=/);
+  assert.match(automation, /coverLetterPathPromise\s*=/);
+  assert.match(automation, /effectiveCoverLetterPath/);
+});
+
+test("handler-typed file upload routes resume and cover-letter inputs by handler_type", () => {
+  // handleTypedFileUploads must classify file inputs via label/name/id keywords
+  assert.match(automation, /handleTypedFileUploads/);
+  assert.match(automation, /isCover.*cover|cover.*isCover/);
+  assert.match(automation, /isResume.*resume|resume.*isResume/);
+  // uploadToFileInput must keep the DataTransfer dispatch intact
+  assert.match(automation, /uploadToFileInput/);
+  assert.match(automation, /DataTransfer/);
+  // Fallback: resume goes to first file input when no typed slot is found
+  assert.match(automation, /slots\[0\]/);
 });

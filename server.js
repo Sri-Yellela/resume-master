@@ -6024,6 +6024,67 @@ function generateResumeForApply(userId, jobId, toolType) {
   return p;
 }
 
+// ── generateCoverLetterForApply ───────────────────────────────────────────────
+// Called by the apply worker to produce a JD-tailored cover letter for a job.
+// Returns { html, text } on success, or { error } on any failure.
+// Non-fatal: the worker logs cover_letter_unavailable and proceeds without it.
+async function generateCoverLetterForApply(userId, jobId) {
+  if (!ANTHROPIC_KEY) return { error: 'no_api_key' };
+
+  const jobRow = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(String(jobId));
+  if (!jobRow) return { error: 'job_not_found' };
+
+  const resumeRow = db.prepare(
+    "SELECT html FROM resumes WHERE user_id=? ORDER BY updated_at DESC LIMIT 1"
+  ).get(userId);
+  const resumeText = resumeRow?.html
+    ? resumeRow.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 3000)
+    : '';
+  if (!resumeText || resumeText.length < 50) return { error: 'no_resume_text' };
+
+  const jd = (jobRow.description || '').slice(0, 2000);
+  const targetLine = [jobRow.title, jobRow.company].filter(Boolean).join(' at ');
+
+  const prompt = `You are an expert cover letter writer. Write a compelling, specific cover letter.
+
+CANDIDATE RESUME:
+${resumeText}
+
+TARGET ROLE: ${targetLine || 'not specified'}
+
+JOB DESCRIPTION:
+${jd || 'Not provided — write a strong general cover letter based on the resume.'}
+
+TONE: formal and professional
+
+REQUIREMENTS:
+- 3–4 paragraphs, under 400 words total
+- Opening: hook that references the specific role or company (if known)
+- Middle: 2 most relevant achievements from the resume, tied to the job requirements
+- Closing: clear call to action and gratitude
+- Do NOT repeat the resume verbatim — add context and personality
+- Do NOT use clichés like "I am writing to express my interest"
+- Do NOT use placeholders like [Company Name] or [Your Name]
+- Begin directly with "Dear Hiring Manager," unless a name appears in the job description
+- Plain text output only — no markdown, no bullet points`;
+
+  try {
+    const message = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 800,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = message.content?.[0]?.text || '';
+    if (!text) return { error: 'empty_response' };
+    const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:650px;margin:40px auto;line-height:1.6;font-size:14px;color:#222"><div style="white-space:pre-wrap">${escaped}</div></body></html>`;
+    return { html, text };
+  } catch (e) {
+    console.error('[generateCoverLetterForApply] error:', e.message);
+    return { error: e.message };
+  }
+}
+
 app.post("/api/generate", requireAuth, async (req, res) => {
   const { jobId, job, resumeText, forceRegen } = req.body;
   // Strip excluded companies from employer list before any processing
@@ -6431,7 +6492,7 @@ app.post("/api/smart-search", requireAuth, async (req, res) => {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // APPLY AUTOMATION (Playwright)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf);
+applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply);
 
 // â”€â”€ Contact form (public â€” no auth required) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.post("/api/contact", (req, res) => {
