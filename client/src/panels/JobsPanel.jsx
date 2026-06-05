@@ -1160,8 +1160,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   latestSnapshotRef.current = makeProfileSnapshot();
 
   const applyProfileSnapshot = useCallback((snapshot) => {
-    setJobs(snapshot.jobs || []);
-    setPendingJobs(snapshot.pendingJobs || []);
+    // Do NOT restore stale job rows from cache — they cause the "jobs appear then vanish"
+    // flicker when the fresh fetch arrives with a filtered subset. Filter settings and
+    // pagination state are still restored so the board refetches with the right params.
+    setJobs([]);
+    setPendingJobs([]);
     setTotalJobs(snapshot.totalJobs || 0);
     setTotalPages(snapshot.totalPages || 0);
     setCurrentPage(snapshot.currentPage || 1);
