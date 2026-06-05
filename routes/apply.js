@@ -2,6 +2,8 @@ import os from "os";
 import path from "path";
 import { writeFileSync, unlinkSync } from "fs";
 import { autoApply } from "../services/applyAutomation.js";
+import { probeBrowserAvailability } from "../services/browserLauncher.js";
+import { detectPlatformFromUrl } from "../services/platformDetector.js";
 
 function publicApplication(row) {
   if (!row) return null;
@@ -147,6 +149,20 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
       const jobUrl = job.apply_url || job.url;
       if (!jobUrl) { setJobStatus("failed", "no_job_url", "Job has no apply URL"); return; }
+
+      // v1 provider scope: only greenhouse/lever/ashby get full-auto; others fall to held_review.
+      const V1_AUTO_PROVIDERS = new Set(["greenhouse", "lever", "ashby"]);
+      if (mode === "auto") {
+        const detectedProvider = detectPlatformFromUrl(jobUrl);
+        if (!V1_AUTO_PROVIDERS.has(detectedProvider)) {
+          logEvent(runId, runJobId, userId, jobId, "provider_review_only",
+            `Provider '${detectedProvider || "unknown"}' not in v1 auto-apply scope; routing to review`);
+          setJobStatus("held_review", "provider_review_only",
+            `Provider ${detectedProvider || "unknown"} not supported for full-auto in v1`);
+          db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+          return;
+        }
+      }
 
       db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(userId);
       const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(userId);
@@ -340,6 +356,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         while (activeWorkers >= APPLY_WORKER_LIMIT) {
           await new Promise(r => setTimeout(r, 500));
         }
+        // Small jitter (1–3 s) between job launches to avoid hammering a provider.
+        if (runningJobs.length > 0) {
+          await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+        }
         activeWorkers++;
         const p = processRunJob(job, run)
           .catch(e => console.error(`[applyRoutes] uncaught job error job=${job.job_id}: ${e.message}`))
@@ -354,6 +374,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       db.prepare(`UPDATE apply_runs SET status='failed', finished_at=unixepoch() WHERE id=?`).run(run.id);
     }
   };
+
+  // ── Browser readiness ────────────────────────────────────────────────────────
+
+  app.get("/api/apply/readiness", requireAuth, async (_req, res) => {
+    try {
+      const probe = await probeBrowserAvailability();
+      res.json({ available: probe.available, reason: probe.reasonCode || null });
+    } catch (e) {
+      res.json({ available: false, reason: "probe_error" });
+    }
+  });
 
   // ── Queue endpoints ──────────────────────────────────────────────────────────
 
