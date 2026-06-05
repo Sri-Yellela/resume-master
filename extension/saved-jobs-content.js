@@ -8,6 +8,40 @@
  * User is already logged in and browsing their own saved jobs page.
  */
 
+// ─── JSON-LD first-strategy (best-effort for saved-jobs list page) ────────────
+
+function extractPageJsonLdPostings() {
+  const postings = [];
+  const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+  for (const s of scripts) {
+    try {
+      let data = JSON.parse(s.textContent);
+      if (data['@graph']) data = data['@graph'];
+      const items = Array.isArray(data) ? data : [data];
+      for (const item of items) {
+        if (item['@type'] === 'JobPosting') postings.push(item);
+      }
+    } catch (_) {}
+  }
+  return postings;
+}
+
+function buildLdPostingMap(postings) {
+  const map = new Map();
+  for (const p of postings) {
+    const urlStr = p.url || '';
+    const idMatch = urlStr.match(/\/jobs\/view\/(\d+)/);
+    if (idMatch) map.set(idMatch[1], p);
+  }
+  return map;
+}
+
+function stripHtmlText(html) {
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return (div.innerText || div.textContent || '').trim();
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'SCRAPE_SAVED_JOBS') {
     scrapeSavedJobs()
@@ -39,6 +73,8 @@ async function scrapeSavedJobs() {
   // Scroll to load all infinite-scroll items
   await scrollToLoadAll();
 
+  const ldMap = buildLdPostingMap(extractPageJsonLdPostings());
+
   // Try multiple card selector strategies
   const cardSelectors = [
     '.jobs-save-button__job-card',
@@ -64,7 +100,7 @@ async function scrapeSavedJobs() {
 
   for (const card of cards) {
     try {
-      const job = extractJobFromCard(card);
+      const job = extractJobFromCard(card, ldMap);
       if (job && job.jobUrl && !seen.has(job.jobUrl)) {
         seen.add(job.jobUrl);
         jobs.push(job);
@@ -77,7 +113,7 @@ async function scrapeSavedJobs() {
   return jobs;
 }
 
-function extractJobFromCard(card) {
+function extractJobFromCard(card, ldMap = new Map()) {
   // Title
   const titleEl = card.querySelector([
     '.job-card-list__title',
@@ -140,9 +176,16 @@ function extractJobFromCard(card) {
 
   if (!title && !company) return null;
 
+  // Overlay any richer values from page-level JSON-LD (best-effort; rarely fires on list pages)
+  const ld = externalJobId ? ldMap.get(externalJobId) : null;
+  const ldOrg = ld?.hiringOrganization;
+  const ldTitle   = ld?.title?.trim()                                              || title;
+  const ldCompany = (typeof ldOrg === 'string' ? ldOrg : ldOrg?.name)?.trim()     || company;
+  const ldDesc    = ld?.description ? stripHtmlText(ld.description) : '';
+
   return {
-    title,
-    company,
+    title:          ldTitle,
+    company:        ldCompany,
     location,
     jobUrl,
     applyUrl:       jobUrl,
@@ -151,7 +194,7 @@ function extractJobFromCard(card) {
     postedDate,
     salary:         null,
     workType:       '',
-    description:    '',
+    description:    ldDesc,
     sourceLabel:    'LinkedIn Saved',
   };
 }
