@@ -35,7 +35,7 @@
         "https://boards.greenhouse.io/*/*",
         "https://*.workable.com/j/*"
       ],
-      "js": ["linkedin-content.js"],
+      "js": ["config.js", "linkedin-content.js"],
       "run_at": "document_idle"
     },
     {
