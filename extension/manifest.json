@@ -6,6 +6,7 @@
   "permissions": ["activeTab", "scripting"],
   "privacy_policy_url": "https://resumemaster.one/privacy",
   "host_permissions": [
+    "https://resumemaster.one/*",
     "https://*.linkedin.com/*",
     "https://*.indeed.com/*",
     "https://*.glassdoor.com/*",

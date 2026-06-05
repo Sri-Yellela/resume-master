@@ -17,7 +17,6 @@ Companion extension for Resume Master. Lightweight, privacy-first.
 ## Permissions Explained
 - activeTab: reads the page you are on only when you click the extension button.
 - scripting: lets the popup collect visible page text from the active tab after you click ATS Score Tool.
-- storage: reserved for local Resume Master preferences.
 
 ## Install (Development)
 1. Chrome -> chrome://extensions -> Enable Developer Mode.
