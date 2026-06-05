@@ -13,6 +13,31 @@
 
   // RESUME_MASTER_URL is defined by config.js (loaded first in the content_scripts js array).
 
+  // ─── JSON-LD first-strategy extractor ─────────────────────────────────────
+
+  function extractJsonLdJobPosting() {
+    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+    for (const s of scripts) {
+      try {
+        let data = JSON.parse(s.textContent);
+        if (data['@graph']) data = data['@graph'];
+        if (Array.isArray(data)) {
+          const hit = data.find(item => item['@type'] === 'JobPosting');
+          if (hit) return hit;
+        } else if (data['@type'] === 'JobPosting') {
+          return data;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function stripHtml(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    return (div.innerText || div.textContent || '').trim();
+  }
+
   // ─── Description extractors per site ───────────────────────────────────────
 
   const EXTRACTORS = {
@@ -46,6 +71,8 @@
   }
 
   function extractJobText() {
+    const posting = extractJsonLdJobPosting();
+    if (posting?.description) return stripHtml(posting.description).slice(0, 8000);
     const siteKey = getSiteKey();
     const extract = siteKey ? EXTRACTORS[siteKey] : () => trySelectors(['main']);
     return extract();
@@ -145,7 +172,14 @@
   // ─── Structured LinkedIn job data ──────────────────────────────────────────
 
   function extractLinkedInJobData() {
-    const title = (
+    const ld = extractJsonLdJobPosting();
+    const ldOrg = ld?.hiringOrganization;
+    const ldLoc = ld?.jobLocation;
+    const ldLocCity = Array.isArray(ldLoc)
+      ? ldLoc[0]?.address?.addressLocality
+      : ldLoc?.address?.addressLocality;
+
+    const title = ld?.title?.trim() || (
       document.querySelector('.job-details-jobs-unified-top-card__job-title h1')?.innerText ||
       document.querySelector('.job-details-jobs-unified-top-card__job-title')?.innerText ||
       document.querySelector('[data-test-job-details-title]')?.innerText ||
@@ -155,7 +189,7 @@
       ''
     ).trim();
 
-    const company = (
+    const company = (typeof ldOrg === 'string' ? ldOrg : ldOrg?.name)?.trim() || (
       document.querySelector('.job-details-jobs-unified-top-card__company-name a')?.innerText ||
       document.querySelector('.job-details-jobs-unified-top-card__primary-description-container a')?.innerText ||
       document.querySelector('[data-test-job-details-company-name]')?.innerText ||
@@ -164,7 +198,7 @@
       ''
     ).trim();
 
-    const location = (
+    const location = ldLocCity?.trim() || (
       document.querySelector('.job-details-jobs-unified-top-card__primary-description-container .tvm__text')?.innerText ||
       document.querySelector('.job-details-jobs-unified-top-card__workplace-type')?.innerText ||
       document.querySelector('[data-test-job-details-location]')?.innerText ||
@@ -179,7 +213,7 @@
       ''
     ).trim();
 
-    const description = extractJobText();
+    const description = extractJobText(); // tries JSON-LD description first
 
     const jobIdMatch = window.location.pathname.match(/\/jobs\/view\/(\d+)/);
     const externalJobId = jobIdMatch ? jobIdMatch[1] : null;
