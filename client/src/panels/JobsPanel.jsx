@@ -934,6 +934,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [applyQueueMsg, setApplyQueueMsg] = useState("");
   const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
   const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
+  const [applyReadiness, setApplyReadiness] = useState(null); // null=unknown, {available,reason}
 
   // LIVE POLLING: polls /api/jobs/poll every 4s during active scrape.
   // Stops when scraping:false returned or after 3 consecutive failures.
@@ -1831,6 +1832,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   useEffect(() => { if (user) loadApplyRuns(); }, [user, loadApplyRuns]);
 
+  useEffect(() => {
+    if (!user) return;
+    api("/api/apply/readiness").then(d => setApplyReadiness(d)).catch(() => setApplyReadiness({ available: false, reason: "probe_error" }));
+  }, [user]);
+
   const startApplyRun = useCallback(async (mode = "auto") => {
     if (!applyQueue.length) return;
     try {
@@ -2599,10 +2605,20 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             {applyQueue.length > 0 && (
               <>
                 <button onClick={() => startApplyRun("auto")}
-                  style={{ border:"none", borderRadius:6, padding:"6px 10px", background:theme.accent,
-                           color:"#0f0f0f", fontWeight:800, cursor:"pointer", fontSize:12 }}>
+                  disabled={applyReadiness !== null && !applyReadiness.available}
+                  title={applyReadiness && !applyReadiness.available ? `Auto Apply unavailable: ${applyReadiness.reason}` : undefined}
+                  style={{ border:"none", borderRadius:6, padding:"6px 10px",
+                           background: applyReadiness && !applyReadiness.available ? (theme.surfaceHigh || "#555") : theme.accent,
+                           color:"#0f0f0f", fontWeight:800,
+                           cursor: applyReadiness && !applyReadiness.available ? "not-allowed" : "pointer",
+                           fontSize:12, opacity: applyReadiness && !applyReadiness.available ? 0.5 : 1 }}>
                   Run Auto Apply
                 </button>
+                {applyReadiness && !applyReadiness.available && (
+                  <span style={{ fontSize:11, color: theme.textDim || theme.textMuted }}>
+                    Browser unavailable: {applyReadiness.reason}
+                  </span>
+                )}
                 <button onClick={() => startApplyRun("manual")}
                   style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"6px 10px",
                            background:theme.surface, color:theme.text, fontWeight:700, cursor:"pointer", fontSize:12 }}>
