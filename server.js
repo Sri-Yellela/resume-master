@@ -4946,6 +4946,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       country:        String(country).slice(0, 2).toLowerCase() || 'us',
       page:           pg,
       pageSize:       ps,
+      maxResults:     150,  // paginate Adzuna up to 150 results on the live path
       sort:           ['dateDesc','dateAsc','salaryDesc','salaryAsc','relevance'].includes(sort) ? sort : undefined,
       employmentType: employmentType ? String(employmentType).slice(0, 100) : undefined,
       remote:         workType === 'Remote' ? true : undefined,

@@ -51,7 +51,7 @@ if (inactiveSources.length) {
  * ATS plugins (greenhouse/lever/ashby) receive _companies from caller.
  */
 async function searchJobs({ query = '', location = '', country = 'us', page = 1, pageSize = 10,
-                            sort, employmentType, remote,
+                            sort, employmentType, remote, maxResults = 0,
                             _ghCompanies = [], _leverCompanies = [], _ashbyCompanies = [] } = {}) {
   const configured = SOURCES.filter(s => s.isConfigured());
 
@@ -69,7 +69,7 @@ async function searchJobs({ query = '', location = '', country = 'us', page = 1,
   const results = await Promise.allSettled(
     configured.map(source =>
       source.search({
-        query, location, country, page, pageSize, sort, employmentType, remote,
+        query, location, country, page, pageSize, sort, employmentType, remote, maxResults,
         _companies: companyMap[source.name] || [],
       }).then(result => ({ ...result, source: source.name }))
     )
