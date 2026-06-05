@@ -1,4 +1,4 @@
-// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
 // services/browserLauncher.js â€” environment-aware Puppeteer browser launcher
 //
 // Shared by services/applyAutomation.js and server.js (htmlToPdf).
@@ -223,7 +223,7 @@ export async function launchBrowser({ headless = "new", mode = "auto", viewport 
   const resolution = await resolveBrowserExecutable();
   if (!resolution) {
     const err = new Error(
-      "No browser binary found. Install Chrome/Chromium or set PUPPETEER_EXECUTABLE_PATH."
+      "No browser binary found. Install Chrome/Chromium or set BROWSER_EXECUTABLE_PATH (or PUPPETEER_EXECUTABLE_PATH)."
     );
     err.reasonCode = "browser_binary_not_found";
     throw err;
@@ -248,7 +248,7 @@ export async function launchBrowser({ headless = "new", mode = "auto", viewport 
       reasonCode === "browser_runtime_missing_dependency"
         ? "Browser is missing required system libraries (e.g. libnspr4). Check server dependencies."
         : reasonCode === "browser_binary_not_found"
-          ? "Browser binary not found. Install Chrome or set PUPPETEER_EXECUTABLE_PATH."
+          ? "Browser binary not found. Install Chrome or set BROWSER_EXECUTABLE_PATH (or PUPPETEER_EXECUTABLE_PATH)."
           : `Browser launch failed: ${e.message}`
     );
     classified.reasonCode = reasonCode;
