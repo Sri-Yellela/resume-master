@@ -116,6 +116,13 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   const ATS_AUTO_APPLY_THRESHOLD = 65;
   let activeWorkers = 0;
 
+  const BROWSER_FAILURE_CODES = [
+    "browser_runtime_missing_dependency",
+    "browser_binary_not_found",
+    "browser_launch_failed",
+  ];
+  const isBrowserFailure = (reasonCode) => BROWSER_FAILURE_CODES.includes(reasonCode);
+
   function logEvent(runId, runJobId, userId, jobId, event, message, details = null) {
     try {
       db.prepare(`
@@ -322,8 +329,9 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         : result.status === "filled_not_submitted" ? "no_submit_button"
         : result.reasonCode || null;
 
-      setJobStatus(finalStatus, reasonCode, result.reasonDetail || null);
-      logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform });
+      const fallbackUrl = isBrowserFailure(reasonCode) ? jobUrl : null;
+      setJobStatus(finalStatus, reasonCode, result.reasonDetail || (fallbackUrl ? `fallbackUrl:${fallbackUrl}` : null));
+      logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform, fallbackUrl });
 
       if (submitted) {
         logEvent(runId, runJobId, userId, jobId, "submitted", "Application submitted successfully");
@@ -336,10 +344,12 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
     } catch (e) {
       console.error(`[applyRoutes] processRunJob error job=${jobId}: ${e.message}`);
-      db.prepare(`UPDATE apply_run_jobs SET status='failed', reason_code='internal_error', reason_detail=?, finished_at=unixepoch() WHERE id=?`)
-        .run(e.message?.slice(0, 500) || "Unknown error", runJobId);
+      const errReasonCode = e.reasonCode || (isBrowserFailure(e.reasonCode) ? e.reasonCode : "internal_error");
+      const fallbackUrl = isBrowserFailure(e.reasonCode) ? (job?.apply_url || job?.url || null) : null;
+      db.prepare(`UPDATE apply_run_jobs SET status='failed', reason_code=?, reason_detail=?, finished_at=unixepoch() WHERE id=?`)
+        .run(errReasonCode, (e.message?.slice(0, 500) || "Unknown error") + (fallbackUrl ? ` fallbackUrl:${fallbackUrl}` : ""), runJobId);
       db.prepare(`UPDATE apply_runs SET failed_count=failed_count+1 WHERE id=?`).run(runId);
-      logEvent(runId, runJobId, userId, jobId, "error", e.message?.slice(0, 500) || "Unknown error");
+      logEvent(runId, runJobId, userId, jobId, "error", e.message?.slice(0, 500) || "Unknown error", { fallbackUrl });
     } finally {
       if (resumeTmpPath) { try { unlinkSync(resumeTmpPath); } catch {} }
       if (coverLetterTmpPath) { try { unlinkSync(coverLetterTmpPath); } catch {} }
@@ -380,9 +390,12 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   app.get("/api/apply/readiness", requireAuth, async (_req, res) => {
     try {
       const probe = await probeBrowserAvailability();
-      res.json({ available: probe.available, reason: probe.reasonCode || null });
+      if (!probe.available) {
+        return res.status(503).json({ available: false, reason: probe.reasonCode || null });
+      }
+      res.json({ available: true, reason: null });
     } catch (e) {
-      res.json({ available: false, reason: "probe_error" });
+      res.status(503).json({ available: false, reason: "probe_error" });
     }
   });
 
