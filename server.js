@@ -4806,9 +4806,15 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       workType       = '',
       ageFilter      = '',
       maxYoe         = null,
+      minYoe         = null,
+      category       = '',
+      source         = '',
+      maxApplicants  = null,
+      visited        = '',
+      localSearch    = '',
     } = req.query;
 
-    const rawQuery = (role || q || '').slice(0, 200).trim();
+    const rawQuery = (role || q || localSearch || '').slice(0, 200).trim();
     const pg       = Math.max(1, parseInt(page, 10) || 1);
     const ps       = Math.min(50, Math.max(1, parseInt(pageSize, 10) || 10));
 
@@ -4844,15 +4850,31 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     const etFilter = employmentType ? `AND sj.employment_type = ?` : '';
     const etArgs   = employmentType ? [employmentType]             : [];
 
-    // Age filter (opt-in — no hidden cutoff in base conditions)
+    // Category / source (opt-in)
+    const catSql  = category ? `AND sj.category = ?` : '';
+    const catArgs = category ? [category]            : [];
+    const srcSql  = source   ? `AND sj.source   = ?` : '';
+    const srcArgs = source   ? [source]              : [];
+
+    // Applicant count cap (opt-in)
+    const maxAppVal = maxApplicants !== null && maxApplicants !== '' ? parseInt(maxApplicants, 10) : null;
+    const maxAppSql  = maxAppVal !== null ? `AND (sj.applicant_count IS NULL OR sj.applicant_count <= ?)` : '';
+    const maxAppArgs = maxAppVal !== null ? [maxAppVal] : [];
+
+    // Visited filter (opt-in)
+    const visitedSql  = visited === '1' ? `AND uj.visited = 1`
+                      : visited === '0' ? `AND (uj.visited IS NULL OR uj.visited = 0)` : '';
+
+    // Age filter — support named intervals ("1d","2d","3d","1w","1m") + raw day counts
     let ageSql  = '', ageArgs = [];
-    const ageDays = parseInt(ageFilter, 10);
+    const AGE_MAP = { '1d': 1, '2d': 2, '3d': 3, '1w': 7, '1m': 30 };
+    const ageDays = AGE_MAP[ageFilter] ?? parseInt(ageFilter, 10);
     if (ageFilter && !isNaN(ageDays) && ageDays > 0) {
       ageSql  = `AND sj.scraped_at >= ?`;
       ageArgs = [Math.floor(Date.now() / 1000) - ageDays * 86400];
     }
 
-    // YoE: auto-apply from stored signals when no explicit maxYoe is set
+    // YoE range: auto-apply from stored signals when no explicit maxYoe is set
     const signals = loadSimpleApplyProfile(db, { userId: req.user.id, profileId: sessionActiveProfile.id });
     const explicitMaxYoe = maxYoe !== null && maxYoe !== '' ? parseInt(maxYoe, 10) : null;
     const effectiveMaxYoe = explicitMaxYoe !== null
@@ -4860,6 +4882,9 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       : (signals?.yearsExperience != null ? signals.yearsExperience + 2 : null);
     const yoeSql  = effectiveMaxYoe !== null ? `AND (sj.min_years_exp IS NULL OR sj.min_years_exp <= ?)` : '';
     const yoeArgs = effectiveMaxYoe !== null ? [effectiveMaxYoe] : [];
+    const minYoeVal = minYoe !== null && minYoe !== '' ? parseInt(minYoe, 10) : null;
+    const minYoeSql  = minYoeVal !== null ? `AND (sj.min_years_exp IS NULL OR sj.min_years_exp >= ?)` : '';
+    const minYoeArgs = minYoeVal !== null ? [minYoeVal] : [];
 
     const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
     if (cacheCount > 0) {
@@ -4881,14 +4906,20 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
           AND ${titleFilter.sql}
           ${wtFilter}
           ${etFilter}
+          ${catSql}
+          ${srcSql}
+          ${maxAppSql}
+          ${visitedSql}
           ${ageSql}
           ${yoeSql}
+          ${minYoeSql}
           AND (uj.disliked IS NULL OR uj.disliked = 0)
       `;
       const baseArgs = [
         roleKey, req.user.id, sessionActiveProfile.id,
         ...keyArgs, ...locArgs, ...titleFilter.params,
-        ...wtArgs, ...etArgs, ...ageArgs, ...yoeArgs,
+        ...wtArgs, ...etArgs, ...catArgs, ...srcArgs,
+        ...maxAppArgs, ...ageArgs, ...yoeArgs, ...minYoeArgs,
       ];
 
       const rows  = db.prepare(`SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked ${joinClause} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...baseArgs, ps, offset);
