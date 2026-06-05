@@ -1,5 +1,7 @@
-﻿const RESUME_MASTER_URL = 'https://resumemaster.one';
-// For local dev: const RESUME_MASTER_URL = 'http://localhost:3000';
+﻿// Keep in sync with config.js (service workers cannot share plain-script globals).
+// DEV SWITCH: comment line A, uncomment line B.
+const RESUME_MASTER_URL = 'https://resumemaster.one'; // A: production
+// const RESUME_MASTER_URL = 'http://localhost:3000'; // B: local dev
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'OPEN_ATS_SCORE') {

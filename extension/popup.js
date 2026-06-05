@@ -1,4 +1,4 @@
-const RESUME_MASTER_URL = 'https://resumemaster.one';
+// RESUME_MASTER_URL is defined by config.js, loaded before this script.
 
 function setStatus(msg, timeout = 0) {
   document.getElementById('status').textContent = msg;

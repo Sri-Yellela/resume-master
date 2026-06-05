@@ -24,4 +24,4 @@ Companion extension for Resume Master. Lightweight, privacy-first.
 2. Load Unpacked -> select this folder.
 
 ## Privacy
-This extension collects no personal data. Job description text is sent to Resume Master only when you explicitly click Send to Resume Master. See resumemaster.app/privacy for the full policy.
+This extension collects no personal data. Job description text is sent to Resume Master only when you explicitly click Send to Resume Master. See resumemaster.one/privacy for the full policy.

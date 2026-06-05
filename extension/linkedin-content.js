@@ -11,7 +11,7 @@
 (function () {
   if (document.getElementById('rm-send-btn')) return;
 
-  const RESUME_MASTER_URL = 'https://resumemaster.one';
+  // RESUME_MASTER_URL is defined by config.js (loaded first in the content_scripts js array).
 
   // ─── Description extractors per site ───────────────────────────────────────
 
