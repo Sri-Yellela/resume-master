@@ -204,3 +204,26 @@ test("handler-typed file upload routes resume and cover-letter inputs by handler
   // Fallback: resume goes to first file input when no typed slot is found
   assert.match(automation, /slots\[0\]/);
 });
+
+test("completeness gate holds full-auto submit when required fields are still empty", () => {
+  // DISCOVER_FN_SRC must capture current_value so the gate can read page state
+  assert.match(automation, /current_value/, "DISCOVER_FN_SRC must record current_value");
+  // Gate must re-discover fields after fill using discoverFields across all frames
+  assert.match(automation, /postFillFields/, "must re-discover fields post-fill");
+  assert.match(automation, /missingRequired/, "must collect unfilled required fields");
+  // Gate must fire only in full-auto mode and only for non-file required fields
+  assert.match(automation, /f\.is_required.*f\.type !== 'file'|is_required.*type !== 'file'/, "must skip file fields in completeness check");
+  // Gate must return held_review / incomplete_form when required fields are unfilled
+  assert.match(automation, /reasonCode:\s*'incomplete_form'/, "must return incomplete_form reason code");
+  assert.match(automation, /status:\s*'held_review'/, "must return held_review status on incompleteness");
+  // Gate must not submit (must return early) before submit button loop
+  const gateIdx = automation.indexOf("missingRequired.length > 0");
+  const submitLoopIdx = automation.indexOf("SUBMIT_RE = /^(submit|apply");
+  assert.ok(gateIdx < submitLoopIdx, "completeness gate must appear before submit button loop");
+});
+
+test("filled_not_submitted is explicitly mapped to no_submit_button reason code", () => {
+  // Worker must record 'no_submit_button' when autoApply finds no submit button (not generic null)
+  assert.match(applyRoute, /filled_not_submitted.*no_submit_button|no_submit_button.*filled_not_submitted/,
+    "apply worker must map filled_not_submitted to no_submit_button reason code");
+});

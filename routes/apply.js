@@ -303,6 +303,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         : "held_review";
       const reasonCode = atsHeld ? "ats_below_threshold"
         : result.status === "awaiting_user" ? "manual_review"
+        : result.status === "filled_not_submitted" ? "no_submit_button"
         : result.reasonCode || null;
 
       setJobStatus(finalStatus, reasonCode, result.reasonDetail || null);
