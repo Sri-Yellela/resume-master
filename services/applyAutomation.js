@@ -311,6 +311,16 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
       options = Array.from(radios).map(r => ({ value: r.value, label: getLabel(r) }));
     }
 
+    let current_value = '';
+    if (fieldType === 'checkbox') {
+      current_value = el.checked ? 'true' : '';
+    } else if (fieldType === 'radio') {
+      const checked = document.querySelector('input[type="radio"][name="' + name + '"]:checked');
+      current_value = checked ? checked.value : '';
+    } else {
+      current_value = (el.value !== undefined ? el.value : (el.textContent || '')).trim();
+    }
+
     fields.push({
       field_id: el.id || name,
       name,
@@ -319,6 +329,7 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
       is_required: !!is_required,
       options,
       handler_type: handler_type || null,
+      current_value,
     });
   }
 
@@ -829,6 +840,31 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
     let status, pageTitle;
     if (isFullAuto) {
+      // Completeness gate: re-discover all frames; hold if any required non-file field is still empty.
+      const postFillFields = (await Promise.all(
+        [page, ...page.frames()].map(f => discoverFields(f, detected).catch(() => []))
+      )).flat();
+      const missingRequired = postFillFields
+        .filter(f => f.is_required && f.type !== 'file' && (f.current_value === '' || f.current_value == null))
+        .map(f => f.label || f.field_id || '(unknown)');
+      if (missingRequired.length > 0) {
+        const pageTitle2 = await page.title().catch(() => '');
+        const ss2 = await takeScreenshot(page, jobId);
+        inProgress.set(String(jobId), { status: 'held_review', browser: null });
+        await browser.close();
+        return {
+          status:           'held_review',
+          reasonCode:       'incomplete_form',
+          flowState:        'form_ready',
+          fieldsFilled:     totalFilled,
+          missingRequired,
+          platform:         detected,
+          pageTitle:        pageTitle2,
+          screenshotBase64: ss2.base64,
+          screenshotPath:   ss2.path,
+        };
+      }
+
       inProgress.set(String(jobId), { status: "submitting", browser });
       const SUBMIT_RE = /^(submit|apply|apply now|submit application|send application)/i;
       let submitted = false;
