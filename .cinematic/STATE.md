@@ -628,3 +628,122 @@ Build: exit 0, 74.41 kB CSS (unchanged), 4 pre-existing warnings, none new
 - routes: unchanged
 
 ### Open issues: none
+
+---
+
+## Catch-up: post-Step-19 work (jobs, logo, apply, flicker, ext)
+
+This block journals everything committed after Step 19 (`9401a09`) through
+the current HEAD. It covers work from the following planning docs:
+`CLAUDE_CODE_FIXES_AND_JOBS_SEGREGATION.md`, `CLAUDE_CODE_JOB_FILTERING_FLICKER.md`,
+`CLAUDE_CODE_UI_AUTOAPPLY_EXTENSION.md`, and `CLAUDE_CODE_FINISH_REMAINING.md`.
+
+### Cinematic squash + 4 immediate bug fixes
+Commits: `3311da7`, `7ae2326`, `ffe4081`, `8daa93b`, `671d9c1`
+- `3311da7` — Phase 3 Sprint 2 squash commit (Steps 14–19 landed on main).
+- `7ae2326` — fix: move `useJobBoard()` destructure before hooks that reference
+  `selectedJob` in deps (Rules of Hooks violation causing stale-closure bug).
+- `ffe4081` — fix: inline-login popover treated a success response as failure
+  (condition was inverted; users couldn't log in via popover).
+- `8daa93b` — fix: session auth leak — extension token was stored in
+  `localStorage` (persisted across sessions); moved to `sessionStorage`.
+- `671d9c1` — fix: dashboard search bar overlapped job cards/content area.
+
+### Logo + TopBar
+Commit: `8e69719`
+- Removed outer accent rect from `StampLogo`; TopBar is now transparent at
+  rest (no opaque background until scrolled / in dock mode).
+
+### LinkedIn ingest encoding fix
+Commit: `0f71b42`
+- Replaced curly/smart quotes with ASCII in the LinkedIn job ingest function
+  (same CP1252→UTF-8 mojibake class as the earlier JobCard fix).
+
+### Jobs segregation (jobs-1 … jobs-6)
+Commits: `8309484`, `e842a28`, `97408cd`, `c6d4206`, `3e3b78c`, `e15c5fa`
+- `jobs-1` — `services/jobs/jobTaxonomy.js`: unified taxonomy module, added
+  sales family (`sales`, `account_manager`, `biz_dev`, …).
+- `jobs-2` — `services/jobs/collarClassifier.js` + `classifyJob.js`: white /
+  blue-collar classifier; unified verdict function.
+- `jobs-3` — DB migration: added `collar`, `confidence`, `rejected_jobs`
+  columns to the jobs schema.
+- `jobs-4` — Eject blue-collar at ingest; unified verdict applied on every
+  new row before insert.
+- `jobs-5` — Backfill reclassification; ejects existing blue-collar rows from
+  the live board.
+- `jobs-6` — `/api/jobs` query switched to join `job_role_map`; retired
+  `roleTitleSql` and Taxonomy A. Board now drives role filtering from the
+  server-side map, ending the duplicate taxonomy problem.
+
+### Docs
+Commits: `b39631e`, `542707b`
+- `b39631e` — audits for auto-apply, linkedin-extension, jobs-segregation.
+- `542707b` — jobo auto-apply architecture analysis.
+
+### Auto-apply engine (apply-2 … apply-7)
+Commits: `0f63b54`, `5ce8fbb`, `f9b7727`, `d80e137`, `f283ef9`, `53a26e9`, `cd47e13`
+- `apply-2` (`0f63b54`) — async apply queue reconnected: `apply_runs`,
+  `apply_run_jobs`, `apply_job_logs` schema; worker pool (`APPLY_WORKER_LIMIT`);
+  `POST /api/apply/runs` (202); `/runs`, `/runs/:id`, `/review`, `/close/:jobId`;
+  dedupe; ATS gate (`ATS_AUTO_APPLY_THRESHOLD`).
+- `apply-3` (`5ce8fbb`) — field-discovery engine: `discoverFields` +
+  `DISCOVER_FN_SRC`; `buildAnswers`; `applyTypeaheadAnswer`; `classifyFlowState`
+  (login/captcha/expired/redirect/submit/next); FIELD_TYPES / HANDLER_BY_ATTR /
+  PROFILE_KEY_TO_HANDLER; profile extensions (`custom_answers`, `education`,
+  `availability`).
+- `apply-4` (`f9b7727`) — cover-letter generation wired; `handleTypedFileUploads`
+  routes resume vs cover-letter; 7-arg `applyRoutes(…)`.
+- `apply-5` (`f283ef9`) — completeness gate: before any full-auto submit,
+  re-discovers required fields; if any still empty returns `held_review` /
+  `incomplete_form` instead of clicking submit.
+- `apply-6` (`53a26e9`) — production browser readiness: `GET /api/apply/readiness`
+  backed by cached `probeBrowserAvailability()`; UI disables full-auto when
+  unavailable; v1 provider scope (greenhouse/lever/ashby → auto, others forced
+  to `semi` / `provider_review_only`); per-job jitter delay in `processRun`.
+- `apply-7` (`cd47e13`) — apply pipeline tests green; confirmed
+  `routes/adminDb.js` exposes all three apply tables.
+- `d80e137` — fix: restored ASCII in `applyAutomation.js` comments (mojibake /
+  replacement-char class; comments only, no logic touched).
+
+### Extension hardening (ext-1 … ext-4)
+Commits: `d2a31fc`, `b896b7e`, `a2dbae7`, `2c648a4`, `942a8b6`
+- `ext-1` (`d2a31fc`) — fix: `source_key` normalization in `save-jobs-bulk`
+  ingest pipeline.
+- `ext-1b` (`b896b7e`) — extension import pipeline tests added.
+- `ext-2` (`a2dbae7`) — canonical domain: `extension/config.js` created as
+  single source of truth for `RESUME_MASTER_URL = 'https://resumemaster.one'`
+  with dev-switch comment; loaded before `popup.js` and `linkedin-content.js`;
+  `background.js` keeps own constant with pointer to `config.js`; README
+  `resumemaster.app` → `resumemaster.one`; `resumemaster.one/*` added to
+  `host_permissions` in `manifest.json`.
+- `ext-3` (`2c648a4`) — JSON-LD fallback: `extractJsonLdJobPosting()` added to
+  `linkedin-content.js`; tries `<script type="application/ld+json">` JobPosting
+  entries first for description/title/company/location, falls back to CSS
+  selectors; `saved-jobs-content.js` gets a page-level LD map overlaid on card
+  extraction (best-effort — rarely fires on list pages).
+- `ext-4` (`942a8b6`) — logged-out popup UX: `probeAuth()` calls
+  `GET /api/auth/me` on popup open; if not authenticated, shows a
+  "Sign in to Resume Master" CTA (opens `/login`) instead of letting save
+  actions fail with a 401 toast; `storage` permission claim removed from
+  README (not used in code or manifest).
+
+### Board flicker + Adzuna volume (W1, W3)
+Commits: `eaedcb9`, `7c256d5`
+- `W1` (`eaedcb9`) — server-side job filtering: `/api/jobs` now accepts
+  `location`, `workType`, `employmentType`, `minYoe`, `maxYoe`, `ageDays`,
+  `source`, `boardTab`, `page`, `pageSize`; filters applied in SQL; response
+  is `{ jobs, total, page, pageSize }`; `JobsPanel.jsx` post-fetch filtering
+  memo removed; client keeps only instant `localSearch` substring + sort;
+  eliminates the render-then-vanish flicker caused by optimistic-then-smaller
+  cache replace.
+- `W3` (`7c256d5`) — Adzuna pagination: `search()` now loops
+  `/{country}/search/{n}` with `results_per_page=50` up to `maxResults`
+  (≈150–200), with small inter-page delay and URL-dedup; live interactive
+  `pageSize` raised; `what` mapping verified; classification gate confirmed
+  (`collar==='white' && roleKey`).
+
+### Open issues (deferred)
+- 27 files still use `theme.*` color refs (no `isDark`); full CSS-var
+  migration deferred beyond Sprint 2.
+- JS chunk size ~823 KB (pre-existing); code-splitting deferred.
+- Portaled drawer `selectedJob` context lift from Step 8 deferred.
