@@ -48,7 +48,26 @@ function showJobPreview(jobData) {
 
 let currentJobData = null;
 
+async function probeAuth() {
+  try {
+    const res = await fetch(`${RESUME_MASTER_URL}/api/auth/me`, { credentials: 'include' });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.authenticated === true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function init() {
+  const isAuthed = await probeAuth();
+
+  if (!isAuthed) {
+    document.getElementById('btn-sign-in').style.display = 'flex';
+    setStatus('Sign in to save and import jobs');
+    return;
+  }
+
   const tab = await getCurrentTab();
   if (!tab?.url) return;
 
@@ -137,6 +156,11 @@ document.getElementById('btn-save-job').addEventListener('click', async () => {
     btn.disabled = false;
     setStatus('Error: ' + (e.message || 'unknown'), 3000);
   }
+});
+
+document.getElementById('btn-sign-in').addEventListener('click', () => {
+  chrome.tabs.create({ url: `${RESUME_MASTER_URL}/login` });
+  setTimeout(() => window.close(), 300);
 });
 
 document.getElementById('btn-resume').addEventListener('click', async () => {
