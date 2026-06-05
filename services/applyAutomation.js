@@ -1,8 +1,8 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
-// services/applyAutomation.js — Server-side Puppeteer apply automation
+// SCRAPING -- SCHEDULED FOR REMOVAL AFTER MIGRATION
+// services/applyAutomation.js -- Server-side Puppeteer apply automation
 // Replaces the Chrome extension form-fill logic with a Node.js service.
 //
-// autoApply(jobUrl, autofillData, options) — main entry point
+// autoApply(jobUrl, autofillData, options) -- main entry point
 //   options.mode: 'full'  = headless, auto-submit after fill
 //               | 'semi'  = visible browser, form pre-filled, user reviews/submits
 //   options.platform:        override ATS detection
@@ -18,14 +18,14 @@ import {
   getPlatformLabelMap,
 } from "./platformDetector.js";
 
-// ── Field-type catalogue ──────────────────────────────────────────────────────
+// -- Field-type catalogue ------------------------------------------------------
 export const FIELD_TYPES = [
   'text', 'text_area', 'select', 'multi_select', 'radio', 'checkbox',
   'file', 'date', 'number', 'typeahead', 'toggle', 'rich_text',
   'hidden', 'password', 'static', 'complex', 'unknown',
 ];
 
-// name/id/autocomplete attribute substrings → handler_type
+// name/id/autocomplete attribute substrings -> handler_type
 export const HANDLER_BY_ATTR = {
   'given-name':'first-name','given_name':'first-name','first-name':'first-name','first_name':'first-name','fname':'first-name',
   'family-name':'last-name','family_name':'last-name','last-name':'last-name','last_name':'last-name','lname':'last-name','surname':'last-name',
@@ -61,7 +61,7 @@ export const HANDLER_BY_ATTR = {
   'current_company':'current-company',
 };
 
-// profile field key → handler_type (used by buildAutofillPayload to build handler_map)
+// profile field key -> handler_type (used by buildAutofillPayload to build handler_map)
 export const PROFILE_KEY_TO_HANDLER = {
   first_name:'first-name', last_name:'last-name', full_name:'full-name',
   email:'email', phone:'phone',
@@ -85,10 +85,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = path.join(__dirname, "..", "data", "screenshots");
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-// In-progress tracker: jobId → { status, browser }
+// In-progress tracker: jobId -> { status, browser }
 const inProgress = new Map();
 
-// ── Fill script injected into page context ────────────────────────────────────
+// -- Fill script injected into page context ------------------------------------
 // Logic ported directly from extension/content.js and background.js
 const FILL_FN_SRC = `
 function(autofillData, labelMap) {
@@ -209,7 +209,7 @@ function(autofillData, labelMap) {
 }
 `;
 
-// ── Field discovery script (injected into page context) ──────────────────────
+// -- Field discovery script (injected into page context) ----------------------
 const DISCOVER_FN_SRC = `
 function(handlerByAttr, profileKeyToHandler, labelMap) {
   const SKIP_TYPES = new Set(['hidden','submit','button','image','reset']);
@@ -268,7 +268,7 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
       if (combined.includes('resume') || combined.includes('cv')) return 'resume';
       if (combined.includes('cover') || combined.includes('letter')) return 'cover-letter';
     }
-    // label map → profile key → handler
+    // label map -> profile key -> handler
     const labelLower = label.toLowerCase();
     for (const [k, profileKey] of Object.entries(labelMap)) {
       if (labelLower.includes(k.toLowerCase()) && profileKeyToHandler[profileKey]) {
@@ -326,7 +326,7 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
 }
 `;
 
-// ── Apply answers script (injected into page context) ─────────────────────────
+// -- Apply answers script (injected into page context) -------------------------
 const APPLY_FN_SRC = `
 function(answers) {
   function setNativeValue(el, value) {
@@ -378,7 +378,7 @@ function(answers) {
 }
 `;
 
-// ── discoverFields ────────────────────────────────────────────────────────────
+// -- discoverFields ------------------------------------------------------------
 export async function discoverFields(pageOrFrame, provider) {
   try {
     const labelMap = getPlatformLabelMap(provider || 'generic');
@@ -391,7 +391,7 @@ export async function discoverFields(pageOrFrame, provider) {
   }
 }
 
-// ── buildAnswers ──────────────────────────────────────────────────────────────
+// -- buildAnswers --------------------------------------------------------------
 export function buildAnswers(fields, profilePayload) {
   const { field_map = {}, handler_map = {}, custom_answers = {} } = profilePayload || {};
   const SKIP_TYPES = new Set(['file','hidden','password','static','unknown','complex']);
@@ -407,7 +407,7 @@ export function buildAnswers(fields, profilePayload) {
       value = handler_map[field.handler_type];
     }
 
-    // 2. field_map lookup by handler_type (with dash → underscore fallback)
+    // 2. field_map lookup by handler_type (with dash -> underscore fallback)
     if (value === null && field.handler_type) {
       const fm1 = field_map[field.handler_type];
       const fm2 = field_map[field.handler_type.replace(/-/g,'_')];
@@ -467,7 +467,7 @@ export function buildAnswers(fields, profilePayload) {
   return answers;
 }
 
-// ── applyTypeaheadAnswer ──────────────────────────────────────────────────────
+// -- applyTypeaheadAnswer ------------------------------------------------------
 async function applyTypeaheadAnswer(page, answer) {
   try {
     const el = answer.field_id
@@ -496,7 +496,7 @@ async function applyTypeaheadAnswer(page, answer) {
   }
 }
 
-// ── classifyFlowState ─────────────────────────────────────────────────────────
+// -- classifyFlowState ---------------------------------------------------------
 export async function classifyFlowState(page, originalDomain) {
   try {
     // 1. Cross-domain redirect
@@ -562,7 +562,7 @@ export async function classifyFlowState(page, originalDomain) {
   }
 }
 
-// ── discoverAndFill ───────────────────────────────────────────────────────────
+// -- discoverAndFill -----------------------------------------------------------
 async function discoverAndFill(page, frames, provider, autofillData, labelMap) {
   let n = 0;
   for (const frame of frames) {
@@ -579,10 +579,10 @@ async function discoverAndFill(page, frames, provider, autofillData, labelMap) {
   return n;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// -- Helpers -------------------------------------------------------------------
 async function fillContext(pageOrFrame, autofillData, labelMap) {
   try {
-    // FILL_FN_SRC is an anonymous function expression — invoke as IIFE with args.
+    // FILL_FN_SRC is an anonymous function expression -- invoke as IIFE with args.
     // Named function expressions (function foo(){}) have their name scoped only
     // inside the body; calling foo() after the expression would ReferenceError.
     return await pageOrFrame.evaluate(
@@ -685,13 +685,13 @@ async function takeScreenshot(page, jobId) {
   }
 }
 
-// ── Main entry point ──────────────────────────────────────────────────────────
+// -- Main entry point ----------------------------------------------------------
 export async function autoApply(jobUrl, autofillData, options = {}) {
   const {
     mode              = "semi",
     platform          = null,
     resumePath        = null,
-    // Promise<string|null> — resolves to a PDF file path when generation+ATS gate completes,
+    // Promise<string|null> -- resolves to a PDF file path when generation+ATS gate completes,
     // or null if generation failed / ATS score is below threshold / PDF conversion failed.
     // The browser awaits this before the first resume upload attempt, enabling parallel
     // site-visit + generation without blocking navigation or form-fill.
@@ -754,7 +754,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
     totalFilled += await discoverAndFill(page, [page, ...page.frames()], detected, autofillData, labelMap);
 
-    // Resolve effective resume path — await resumePathPromise if no direct path provided.
+    // Resolve effective resume path -- await resumePathPromise if no direct path provided.
     // resumePathPromise is set by the apply worker when generation runs in parallel;
     // it resolves to a temp PDF path once generation + ATS gate complete, or null on failure.
     let effectiveResumePath = resumePath;
@@ -788,7 +788,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     }
 
     // ATS gate: if a resumePathPromise was provided but resolved to null (generation failed,
-    // ATS below threshold, or PDF conversion failed) — do NOT auto-submit.
+    // ATS below threshold, or PDF conversion failed) -- do NOT auto-submit.
     if (isFullAuto && resumePathPromise && !effectiveResumePath) {
       const pageTitle = await page.title().catch(() => "");
       const ss = await takeScreenshot(page, jobId);
