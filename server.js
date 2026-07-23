@@ -2231,6 +2231,21 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         CREATE INDEX IF NOT EXISTS idx_scraped_jobs_fingerprint ON scraped_jobs(fingerprint);
       `,
     },
+    {
+      id: "064_job_enrichment",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN content_hash TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN enriched_at  INTEGER;
+        CREATE TABLE IF NOT EXISTS company_technographics (
+          company        TEXT    NOT NULL,
+          skill          TEXT    NOT NULL,
+          weight         REAL    NOT NULL DEFAULT 0,
+          last_seen      INTEGER NOT NULL,
+          posting_count  INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (company, skill)
+        );
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -2289,7 +2304,7 @@ function runCacheCleanup() {
     const remaining = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE is_active = 1").get()?.n || 0;
     if (remaining === 0) {
       console.log("[Cache] Empty after cleanup — re-warming from ATS...");
-      cacheJobs(db).then(n => console.log(`[Cache] Re-warm complete: ${n} jobs`))
+      cacheJobs(db, ANTHROPIC_KEY ? anthropic : null).then(n => console.log(`[Cache] Re-warm complete: ${n} jobs`))
                    .catch(e => console.error("[Cache] Re-warm failed:", e.message));
     }
   } catch (e) {
@@ -2297,12 +2312,22 @@ function runCacheCleanup() {
   }
 }
 
+// â”€â”€ Anthropic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Guard: if ANTHROPIC_KEY is missing, log a clear warning at startup
+// (endpoints that call Anthropic will return 500 with a descriptive error)
+// Declared here (before the ATS cache warm below) so cacheJobs() can pass it through for
+// background job-description enrichment (services/jobs/enrichJob.js) at every call site.
+if (!ANTHROPIC_KEY) {
+  console.error("[startup] WARNING: ANTHROPIC_KEY is not set in .env â€” PDF parsing and resume generation will fail.");
+}
+const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
+
 // Warm job cache from ATS sources (non-blocking — runs after server starts)
 {
   const scraped = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE is_active = 1").get()?.n || 0;
   if (scraped === 0) {
     console.log("[boot] scraped_jobs empty — warming ATS cache...");
-    cacheJobs(db).then(n => {
+    cacheJobs(db, ANTHROPIC_KEY ? anthropic : null).then(n => {
       console.log(`[boot] ATS cache warm complete: ${n} jobs cached`);
     }).catch(err => {
       console.error("[boot] ATS cache warm failed:", err.message);
@@ -2319,14 +2344,6 @@ if (!adminExists) {
   db.prepare("INSERT INTO users (username,password_hash,is_admin) VALUES (?,?,1)")
     .run(ADMIN_USER, hashPassword(ADMIN_PASSWORD));
 }
-
-// â”€â”€ Anthropic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Guard: if ANTHROPIC_KEY is missing, log a clear warning at startup
-// (endpoints that call Anthropic will return 500 with a descriptive error)
-if (!ANTHROPIC_KEY) {
-  console.error("[startup] WARNING: ANTHROPIC_KEY is not set in .env â€” PDF parsing and resume generation will fail.");
-}
-const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
 // PRICING: Anthropic per-token costs in USD as of 2025.
 // Update these when Anthropic changes pricing.
@@ -3015,7 +3032,7 @@ cron.schedule("0 3 * * *", runExpiredJobsCleanup);
 cron.schedule("0 4 * * *", async () => {
   console.log('[Cron] Daily ATS cache refresh starting...');
   try {
-    const count = await cacheJobs(db);
+    const count = await cacheJobs(db, ANTHROPIC_KEY ? anthropic : null);
     console.log('[Cron] Daily ATS cache refresh complete —', count, 'jobs cached');
   } catch(e) {
     console.error('[Cron] ATS cache refresh error:', e.message);

@@ -4,6 +4,7 @@ import { stripInternalFields, computeFingerprint } from './schema.js';
 import { filterDirectApplyOnly, DIRECT_ATS_SOURCES } from './directApplyFilter.js';
 import { classifyJob } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
+import { runEnrichment } from './enrichJob.js';
 
 // ─── REGISTER SOURCES HERE ───────────────────────────────────────────────────
 // To add a new source: import it and add to SOURCES array.
@@ -305,8 +306,11 @@ async function searchJobs({ query = '', location = '', country = 'us', page = 1,
  * - Rows with passed valid_through → is_active = 0.
  * - Re-appearing rows → is_active = 1 (via upsert or the unchanged-touch path).
  * @param {import('better-sqlite3').Database} db
+ * @param {import('@anthropic-ai/sdk').default | null} [anthropic] optional — when provided,
+ *   a background LLM enrichment pass (services/jobs/enrichJob.js) runs after the sync
+ *   completes. Omitted/falsy simply skips enrichment (e.g. no ANTHROPIC_KEY configured).
  */
-async function cacheJobs(db) {
+async function cacheJobs(db, anthropic = null) {
   try {
     const atsCos = db.prepare("SELECT * FROM company_ats_list WHERE active = 1").all();
     if (!atsCos.length) {
@@ -598,6 +602,12 @@ async function cacheJobs(db) {
       } catch(e) {
         console.warn('[EnrichLogos] Background enrichment:', e.message);
       }
+    });
+
+    // Background job-description enrichment (non-blocking — never delays the board query
+    // or this function's return). Skips cleanly when no Anthropic client is configured.
+    setImmediate(() => {
+      runEnrichment(db, anthropic).catch(e => console.warn('[enrichJob] Background pass failed:', e.message));
     });
 
     console.log(`[cacheJobs] Total: ${totalCached} jobs cached across ${atsSources.length} sources`);

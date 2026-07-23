@@ -1882,4 +1882,19 @@ export const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_scraped_jobs_fingerprint ON scraped_jobs(fingerprint);
       `,
     },
+    {
+      id: "064_job_enrichment",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN content_hash TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN enriched_at  INTEGER;
+        CREATE TABLE IF NOT EXISTS company_technographics (
+          company        TEXT    NOT NULL,
+          skill          TEXT    NOT NULL,
+          weight         REAL    NOT NULL DEFAULT 0,
+          last_seen      INTEGER NOT NULL,
+          posting_count  INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (company, skill)
+        );
+      `,
+    },
   ];
