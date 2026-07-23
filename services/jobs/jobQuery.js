@@ -222,7 +222,12 @@ function computeSkillsFacet(skillsJsonList) {
     let arr;
     try { arr = JSON.parse(raw); } catch { continue; }
     if (!Array.isArray(arr)) continue;
-    for (const skill of arr) {
+    for (const entry of arr) {
+      // Two coexisting shapes: plain strings (schema.js's heuristic normalizeJob output) and
+      // { skill, type } objects (enrichJob.js's typed hard/soft LLM extraction) — a row's
+      // skills_json is one or the other depending on whether it's been through enrichment.
+      const skill = typeof entry === 'string' ? entry
+                  : (entry && typeof entry.skill === 'string' ? entry.skill : null);
       if (!skill) continue;
       counts.set(skill, (counts.get(skill) || 0) + 1);
     }
