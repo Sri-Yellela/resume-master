@@ -40,6 +40,7 @@ function parsePostedOn(text) {
 function normalizeWorkdayJob(job, companyName, baseUrl) {
   return normalizeJob({
     id:          job.bulletFields?.[0] || job.externalPath,
+    req_id:      job.bulletFields?.[0] || job.externalPath,
     title:       job.title,
     company:     companyName,
     location:    job.locationsText || 'Not specified',

@@ -89,6 +89,20 @@ function computeFingerprint({ company, title, location }) {
   return `${c}|${t}|${l}`;
 }
 
+// ── Requisition-ID identity (Task 3.1 hardening) ────────────────────────────
+// The coarse fingerprint above collapses on company|title|location, which is right for
+// matching an ATS req against an aggregator's echo of it, but WRONG for two genuinely
+// different open reqs at the same employer that happen to share a title and city (common
+// at high-volume employers — exactly the ones users care most about). When a source exposes
+// a stable per-requisition identifier (req_id), that identifier disambiguates true siblings
+// from the same posting seen twice. Namespaced with source AND company — a bare req id can
+// collide across unrelated sources/companies (e.g. two different Workday tenants both
+// numbering requisitions "R100" independently).
+function computeReqUid({ source, company, req_id }) {
+  if (!req_id) return null;
+  return `${source}:${normalizeForFingerprint(company)}:${req_id}`;
+}
+
 /**
  * Creates a normalized job object with defaults for missing fields.
  * Call this in every source plugin's normalizer.
@@ -122,6 +136,12 @@ function normalizeJob({
   is_h1b_sponsor,      // boolean|null
   requires_work_auth,  // boolean|null
   is_clearance_required, // boolean|null — explicit from source
+  // ── Requisition identity (Task 3.1) ──────────────────────────────────────
+  req_id,              // string|null — the source's OWN stable per-requisition identifier
+                       // (Greenhouse/Ashby/Recruitee job id, Lever/SmartRecruiters posting id,
+                       // Workday requisition number, Workable shortcode). Omit/leave null for
+                       // sources with no genuine per-req identifier (aggregators) — they fall
+                       // back to the company|title|location fingerprint for dedup instead.
 } = {}) {
   if (!id)      throw new Error('normalizeJob: id is required');
   if (!title)   throw new Error('normalizeJob: title is required');
@@ -171,6 +191,7 @@ function normalizeJob({
     requires_work_auth:    requires_work_auth != null ? (requires_work_auth ? 1 : 0) : null,
     is_clearance_required: is_clearance_required != null ? (is_clearance_required ? 1 : 0)
                          : inferClearanceRequired(cleanTitle),
+    req_id:                req_id != null ? String(req_id) : null,
   };
 }
 
@@ -179,8 +200,8 @@ function normalizeJob({
  * Always call this on every job before res.json().
  */
 function stripInternalFields(job) {
-  const { _raw, _schema_version, ...clientJob } = job;
+  const { _raw, _schema_version, req_id, ...clientJob } = job;
   return clientJob;
 }
 
-export { normalizeJob, stripInternalFields, JOB_SCHEMA_VERSION, computeFingerprint, normalizeForFingerprint };
+export { normalizeJob, stripInternalFields, JOB_SCHEMA_VERSION, computeFingerprint, normalizeForFingerprint, computeReqUid };

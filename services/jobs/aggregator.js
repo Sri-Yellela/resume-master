@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { validatePlugin } from './sources/base.js';
-import { stripInternalFields, computeFingerprint } from './schema.js';
+import { stripInternalFields, computeFingerprint, computeReqUid } from './schema.js';
 import { filterDirectApplyOnly, DIRECT_ATS_SOURCES } from './directApplyFilter.js';
 import { classifyJob } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
@@ -135,10 +135,13 @@ function getFingerprintStmts(db) {
   let stmts = fingerprintStmtsCache.get(db);
   if (!stmts) {
     stmts = {
-      findCanonical: db.prepare(`
+      // All active rows sharing the coarse fingerprint, NOT limited to one — a high-volume
+      // employer can genuinely have several distinct open reqs with the same title+location,
+      // and selectMatch() below needs to see all of them to tell "a sibling" from "my twin".
+      findCandidates: db.prepare(`
         SELECT * FROM scraped_jobs
         WHERE fingerprint = ? AND job_id != ? AND is_active = 1
-        ORDER BY updated_at DESC LIMIT 1
+        ORDER BY updated_at DESC
       `),
       findOwnSourcesSeen: db.prepare(`SELECT sources_seen FROM scraped_jobs WHERE job_id = ?`),
       demote: db.prepare(`UPDATE scraped_jobs SET is_active = 0 WHERE job_id = ?`),
@@ -157,7 +160,8 @@ function getFingerprintStmts(db) {
           requires_work_auth      = @requires_work_auth,
           is_clearance_required   = @is_clearance_required,
           posted_at               = @posted_at,
-          sources_seen            = @sources_seen
+          sources_seen            = @sources_seen,
+          req_uid                 = @req_uid
         WHERE job_id = @job_id
       `),
     };
@@ -166,35 +170,64 @@ function getFingerprintStmts(db) {
   return stmts;
 }
 
+// Picks which (if any) of the rows sharing a fingerprint is "the same job" as the incoming
+// one, per Task 3.1's two-tier rule:
+//   - Incoming has a req_uid: an exact req_uid match is definitely the same job. Absent that,
+//     a candidate with NO req_uid (a hash-only aggregator echo) is treated as the same job too
+//     — that's the ATS<->aggregator merge case. If every candidate has a DIFFERENT non-null
+//     req_uid, none of them match: these are genuinely distinct sibling reqs, not duplicates.
+//   - Incoming has no req_uid (aggregator/unknown source): prefer folding into a candidate
+//     that DOES have a req_uid (the ATS canonical) over a hash-only one, since that's the
+//     more precisely-identified row; falls back to Task 3's original "any fingerprint match"
+//     behavior when no candidate has a req_uid either.
+// Known limitation: if an aggregator echo arrives BEFORE its own ATS twin, and a genuinely
+// different sibling req (same title/company/location) exists, that later sibling could match
+// the orphaned hash-only row instead of creating its own — aggregators carry no req id, so
+// this ambiguity can't be fully resolved from their data alone. Distinct siblings still never
+// silently disappear once each has arrived from a source that DOES carry a req_uid.
+function selectMatch(candidates, reqUid) {
+  if (!candidates.length) return null;
+  if (reqUid) {
+    const exact = candidates.find(c => c.req_uid === reqUid);
+    if (exact) return exact;
+    const hashOnly = candidates.find(c => !c.req_uid);
+    return hashOnly || null;
+  }
+  return candidates.find(c => c.req_uid) || candidates[0];
+}
+
 /**
  * Cross-source dedup check — call before every write to scraped_jobs so a role arriving
  * from an aggregator (adzuna/serpapi) never coexists on the board alongside the same role's
- * direct-ATS copy. Never hard-deletes: a demoted duplicate keeps its row (is_active=0) so any
- * job_applications/resumes tied to its job_id stay intact; a folded (lower-priority) duplicate
- * never gets a row of its own at all.
+ * direct-ATS copy, WHILE keeping genuinely distinct sibling requisitions (same title/company/
+ * location, different req) as separate rows (Task 3.1). Never hard-deletes: a demoted
+ * duplicate keeps its row (is_active=0) so any job_applications/resumes tied to its job_id
+ * stay intact; a folded (lower-priority) duplicate never gets a row of its own at all.
  *
  * Returns:
- *   { action: 'insert_canonical', job, sourcesSeen, fingerprint }
+ *   { action: 'insert_canonical', job, sourcesSeen, fingerprint, reqUid }
  *     → caller should upsert `job` (already union-merged with any demoted duplicate's fields)
- *       as its own row, storing `fingerprint` and `sourcesSeen`. Any previously-canonical
- *       lower-priority row for this fingerprint has already been demoted by this call.
- *   { action: 'fold', intoJobId, fingerprint }
+ *       as its own row, storing `fingerprint`, `sourcesSeen`, and `reqUid`. Any previously-
+ *       canonical lower-priority row this job actually matches has already been demoted.
+ *   { action: 'fold', intoJobId, fingerprint, reqUid }
  *     → caller must NOT write a row for this job; its data has already been folded into the
- *       existing higher-(or-equal-)priority canonical row.
+ *       existing higher-(or-equal-)priority canonical row (whose req_uid is `reqUid`).
  */
 function reconcileFingerprint(db, job) {
-  const stmts      = getFingerprintStmts(db);
+  const stmts       = getFingerprintStmts(db);
   const fingerprint = computeFingerprint(job);
+  const reqUid      = computeReqUid(job);
   const jobId       = job.id || job.url || '';
-  const existing    = stmts.findCanonical.get(fingerprint, jobId);
+
+  const candidates = stmts.findCandidates.all(fingerprint, jobId);
+  const existing   = selectMatch(candidates, reqUid);
 
   if (!existing) {
-    // No other active row shares this fingerprint. Preserve whatever sources_seen this job's
-    // OWN row already had (e.g. from an earlier merge whose other contributor was since
-    // demoted) rather than resetting it to just this one source.
+    // Either nothing shares this fingerprint, or (reqUid set) every same-fingerprint row is a
+    // confirmed-distinct sibling req — either way this job gets its own canonical row.
     const own = stmts.findOwnSourcesSeen.get(jobId);
     const sourcesSeen = mergeSourcesSeen(own?.sources_seen, job.source);
-    return { action: 'insert_canonical', job, sourcesSeen, fingerprint };
+    return { action: 'insert_canonical', job, sourcesSeen, fingerprint, reqUid };
   }
 
   const incomingWins = sourcePriority(job.source) > sourcePriority(existing.source);
@@ -203,15 +236,17 @@ function reconcileFingerprint(db, job) {
     const sourcesSeen = mergeSourcesSeen(existing.sources_seen, existing.source, job.source);
     const merged      = unionMergeFields(job, existing);
     stmts.demote.run(existing.job_id);
-    return { action: 'insert_canonical', job: merged, sourcesSeen, fingerprint };
+    const finalReqUid = reqUid || existing.req_uid || null;
+    return { action: 'insert_canonical', job: merged, sourcesSeen, fingerprint, reqUid: finalReqUid };
   }
 
   // Incoming is a same-or-lower-priority duplicate of an already-canonical role — fold its
   // useful fields into the canonical row instead of creating a second board entry.
   const sourcesSeen     = mergeSourcesSeen(existing.sources_seen, existing.source, job.source);
   const mergedExisting  = unionMergeFields(existing, job);
-  stmts.foldIntoExisting.run({ ...mergedExisting, sources_seen: sourcesSeen, job_id: existing.job_id });
-  return { action: 'fold', intoJobId: existing.job_id, fingerprint };
+  const finalReqUid     = existing.req_uid || reqUid || null;
+  stmts.foldIntoExisting.run({ ...mergedExisting, sources_seen: sourcesSeen, req_uid: finalReqUid, job_id: existing.job_id });
+  return { action: 'fold', intoJobId: existing.job_id, fingerprint, reqUid: finalReqUid };
 }
 
 /**
@@ -351,7 +386,7 @@ async function cacheJobs(db, anthropic = null) {
          normalized_title, summary, experience_level, workplace_type, valid_through,
          salary_min_usd, salary_max_usd, salary_period, skills_json,
          is_h1b_sponsor, requires_work_auth, is_clearance_required,
-         discovered_at, updated_at, is_active, fingerprint, sources_seen)
+         discovered_at, updated_at, is_active, fingerprint, sources_seen, req_uid)
       VALUES
         (@job_id, @search_query, @_hash, @title, @company, @location, @url, @source, @source_label,
          @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description,
@@ -359,7 +394,7 @@ async function cacheJobs(db, anthropic = null) {
          @normalized_title, @summary, @experience_level, @workplace_type, @valid_through,
          @salary_min_usd, @salary_max_usd, @salary_period, @skills_json,
          @is_h1b_sponsor, @requires_work_auth, @is_clearance_required,
-         @discovered_at, @updated_at, 1, @fingerprint, @sources_seen)
+         @discovered_at, @updated_at, 1, @fingerprint, @sources_seen, @req_uid)
     `);
 
     const roleMapStmt = db.prepare(`
@@ -380,12 +415,12 @@ async function cacheJobs(db, anthropic = null) {
     // Cheap "seen, unchanged" touch — refreshes updated_at (so the stale-prune watermark
     // logic doesn't mark it absent) and reactivates it if a prior crawl had pruned it,
     // without re-running classification or rewriting every column. Also (re)writes the
-    // fingerprint/sources_seen every crawl, so rows created before migration 063 (or before
-    // a cross-source duplicate showed up) self-heal into the dedup system over time instead
-    // of sitting with a permanently-null fingerprint.
+    // fingerprint/sources_seen/req_uid every crawl, so rows created before migration 063/065
+    // (or before a cross-source duplicate showed up) self-heal into the dedup system over
+    // time instead of sitting on the coarse key forever.
     const touchSeenStmt = db.prepare(`
       UPDATE scraped_jobs SET updated_at = ?, scraped_at = ?, is_active = 1,
-        fingerprint = ?, sources_seen = ?
+        fingerprint = ?, sources_seen = ?, req_uid = ?
       WHERE job_id = ?
     `);
     const demoteStmt = db.prepare(`UPDATE scraped_jobs SET is_active = 0 WHERE job_id = ?`);
@@ -476,7 +511,7 @@ async function cacheJobs(db, anthropic = null) {
               demoteStmt.run(jobId);
               merged++;
             } else {
-              touchSeenStmt.run(now, now, dedup.fingerprint, dedup.sourcesSeen, jobId);
+              touchSeenStmt.run(now, now, dedup.fingerprint, dedup.sourcesSeen, dedup.reqUid, jobId);
               unchanged++;
             }
             continue;
@@ -551,6 +586,7 @@ async function cacheJobs(db, anthropic = null) {
             updated_at:                now,
             fingerprint:               dedup.fingerprint,
             sources_seen:              dedup.sourcesSeen,
+            req_uid:                   dedup.reqUid,
           });
 
           // Canonical verdict → job_role_map (supersedes old classifyForIngest path)

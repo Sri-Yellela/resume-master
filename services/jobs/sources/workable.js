@@ -20,6 +20,7 @@ function normalizeWorkableJob(job, companyName) {
   const location = [job.city, job.state, job.country].filter(Boolean).join(', ') || 'Not specified';
   return normalizeJob({
     id:              job.shortcode,
+    req_id:          job.shortcode,
     title:           job.title,
     company:         companyName,
     location:        job.telecommuting ? 'Remote' : location,

@@ -2246,6 +2246,13 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         );
       `,
     },
+    {
+      id: "065_req_uid_fingerprint_hardening",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN req_uid TEXT;
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_req_uid ON scraped_jobs(req_uid);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -2704,8 +2711,8 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
      is_frequent_repost, _hash, scraped_at, source_platform,
      salary_min, salary_max, salary_currency, applicant_count, company_icon_url,
      employment_type, domain_profile_id, collar, classification_confidence,
-     fingerprint, sources_seen)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     fingerprint, sources_seen, req_uid)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   const rejectJobStmt  = db.prepare(`
@@ -2790,6 +2797,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         collarVerdict.confidence || 0,
         dedup.fingerprint,
         dedup.sourcesSeen,
+        dedup.reqUid,
       );
       if (result.changes > 0) inserted++;
       else if (domainProfileId) {
@@ -5171,12 +5179,12 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
               (job_id, _hash, title, company, location, url, source, source_label,
                via, bucket_role, bucket_seniority, bucket_domain,
                company_icon_url, direct_apply, posted_at, scraped_at,
-               fingerprint, sources_seen)
+               fingerprint, sources_seen, req_uid)
             VALUES
               (@job_id, @_hash, @title, @company, @location, @url, @source, @source_label,
                @via, @bucket_role, @bucket_seniority, @bucket_domain,
                @company_icon_url, @direct_apply, @posted_at, strftime('%s','now'),
-               @fingerprint, @sources_seen)
+               @fingerprint, @sources_seen, @req_uid)
           `);
           const insertMany = db.transaction((jobs) => {
             for (const j of jobs) {
@@ -5214,6 +5222,7 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
                 posted_at:        canonical.posted_at || null,
                 fingerprint:      dedup.fingerprint,
                 sources_seen:     dedup.sourcesSeen,
+                req_uid:          dedup.reqUid,
               });
             }
           });

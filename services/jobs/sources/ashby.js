@@ -48,6 +48,7 @@ function normalizeAshbyJob(job, companyName) {
 
   return normalizeJob({
     id:             job.id,
+    req_id:         job.id,
     title:          job.title,
     company:        companyName,
     location:       job.location || (job.isRemote ? 'Remote' : 'Not specified'),
