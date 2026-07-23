@@ -15,7 +15,10 @@ const BLOCKED_URL_PATTERNS = [
 // used for cross-source dedup priority in aggregator.js (a company's own ATS listing
 // always outranks an aggregator's copy of the same role). Add Tier-A ATS integrations
 // here as they're onboarded; nothing else needs to change.
-const DIRECT_ATS_SOURCES = new Set(['greenhouse', 'lever', 'ashby']);
+const DIRECT_ATS_SOURCES = new Set([
+  'greenhouse', 'lever', 'ashby',
+  'workday', 'smartrecruiters', 'workable', 'recruitee',
+]);
 
 function isDirectApply(job) {
   if (DIRECT_ATS_SOURCES.has(job.source)) return true;

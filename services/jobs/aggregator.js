@@ -15,6 +15,10 @@ import serpapiPlugin   from './sources/serpapi.js';
 import greenhousePlugin from './sources/greenhouse.js';
 import leverPlugin     from './sources/lever.js';
 import ashbyPlugin     from './sources/ashby.js';
+import workdayPlugin   from './sources/workday.js';
+import smartrecruitersPlugin from './sources/smartrecruiters.js';
+import workablePlugin  from './sources/workable.js';
+import recruiteePlugin from './sources/recruitee.js';
 // import theMuse   from './sources/themusejobs.js';  // add when ready
 // import usaJobs   from './sources/usajobs.js';      // add when ready
 // import indeed    from './sources/indeed.js';        // add when approved
@@ -25,6 +29,10 @@ const SOURCES = [
   greenhousePlugin,
   leverPlugin,
   ashbyPlugin,
+  workdayPlugin,
+  smartrecruitersPlugin,
+  workablePlugin,
+  recruiteePlugin,
 ];
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -33,6 +41,10 @@ export const SOURCE_LABELS = {
   greenhouse:         'Greenhouse',
   lever:              'Lever',
   ashby:              'Ashby',
+  workday:            'Workday',
+  smartrecruiters:    'SmartRecruiters',
+  workable:           'Workable',
+  recruitee:          'Recruitee',
   serpapi:            'Google Jobs',
   linkedin_extension: 'LinkedIn (Saved)',
 };
@@ -319,9 +331,13 @@ async function cacheJobs(db, anthropic = null) {
     }
 
     const companyMap = {
-      greenhouse: atsCos.filter(r => r.ats_type === 'greenhouse'),
-      lever:      atsCos.filter(r => r.ats_type === 'lever'),
-      ashby:      atsCos.filter(r => r.ats_type === 'ashby'),
+      greenhouse:      atsCos.filter(r => r.ats_type === 'greenhouse'),
+      lever:           atsCos.filter(r => r.ats_type === 'lever'),
+      ashby:           atsCos.filter(r => r.ats_type === 'ashby'),
+      workday:         atsCos.filter(r => r.ats_type === 'workday'),
+      smartrecruiters: atsCos.filter(r => r.ats_type === 'smartrecruiters'),
+      workable:        atsCos.filter(r => r.ats_type === 'workable'),
+      recruitee:       atsCos.filter(r => r.ats_type === 'recruitee'),
     };
 
     const atsSources = SOURCES.filter(s => s.isConfigured() && ATS_SOURCE_NAMES.has(s.name));
