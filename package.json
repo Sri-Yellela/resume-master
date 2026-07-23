@@ -12,7 +12,7 @@
     "prebuild": "node -e \"if(process.platform==='win32'){require('child_process').spawnSync('taskkill',['/F','/IM','node.exe','/T'],{stdio:'ignore',shell:true});} console.log('[build] npm prebuild: starting root build pipeline')\"",
     "build": "node -e \"console.log('[build] root build: using existing root install, building client')\" && npm --prefix client ci && npm --prefix client run build",
     "setup": "npm install && npm run build",
-    "migrate": "node scripts/migrate.js",
+    "migrate": "node scripts/migration.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/backup.js restore"
   },
@@ -21,7 +21,7 @@
     "@sparticuz/chromium": "^143.0.4",
     "apify-client": "^2.22.3",
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^11.5.0",
+    "better-sqlite3": "^12.11.1",
     "connect-sqlite3": "^0.9.13",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",

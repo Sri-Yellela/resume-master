@@ -17,17 +17,23 @@ function titleMatchesQuery(title, words) {
 }
 
 function normalizeLeverPosting(posting, companyName) {
+  const sr = posting.salaryRange || {};
   return normalizeJob({
-    id:           posting.id,
-    title:        posting.text,
-    company:      companyName,
-    location:     posting.categories?.location || posting.workplaceType || 'Remote',
-    url:          posting.hostedUrl || posting.applyUrl,
-    source:       'lever',
-    description:  posting.descriptionPlain?.slice(0, 3000) || null,
-    posted_at:    posting.createdAt ? new Date(posting.createdAt).toISOString() : null,
-    remote:       posting.workplaceType === 'remote',
-    _raw:         posting,
+    id:             posting.id,
+    title:          posting.text,
+    company:        companyName,
+    location:       posting.categories?.location || posting.workplaceType || 'Remote',
+    url:            posting.hostedUrl || posting.applyUrl,
+    source:         'lever',
+    description:    posting.descriptionPlain?.slice(0, 3000) || null,
+    posted_at:      posting.createdAt ? new Date(posting.createdAt).toISOString() : null,
+    remote:         posting.workplaceType === 'remote',
+    _raw:           posting,
+    workplace_type: posting.workplaceType || null,
+    salary_min:     sr.min  != null ? Number(sr.min)  : null,
+    salary_max:     sr.max  != null ? Number(sr.max)  : null,
+    salary_currency: sr.currency || null,
+    salary_period:  sr.interval || null,
   });
 }
 
