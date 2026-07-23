@@ -24,6 +24,7 @@ function titleMatchesQuery(title, words) {
 function normalizeGreenhouseJob(job, companyName) {
   return normalizeJob({
     id:           String(job.id),
+    req_id:       String(job.id),
     title:        job.title,
     company:      companyName,
     location:     job.location?.name || 'Remote',

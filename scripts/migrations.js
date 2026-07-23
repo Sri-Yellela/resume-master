@@ -1897,4 +1897,11 @@ export const MIGRATIONS = [
         );
       `,
     },
+    {
+      id: "065_req_uid_fingerprint_hardening",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN req_uid TEXT;
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_req_uid ON scraped_jobs(req_uid);
+      `,
+    },
   ];

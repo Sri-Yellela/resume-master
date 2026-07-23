@@ -38,6 +38,7 @@ function normalizeSmartRecruitersJob(job, companyName) {
 
   return normalizeJob({
     id:              job.id,
+    req_id:          job.id,
     title:           job.name,
     company:         companyName,
     location,

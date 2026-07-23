@@ -20,6 +20,7 @@ function normalizeLeverPosting(posting, companyName) {
   const sr = posting.salaryRange || {};
   return normalizeJob({
     id:             posting.id,
+    req_id:         posting.id,
     title:          posting.text,
     company:        companyName,
     location:       posting.categories?.location || posting.workplaceType || 'Remote',
