@@ -2188,6 +2188,37 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE user_profile ADD COLUMN custom_answers TEXT NOT NULL DEFAULT '{}';
       `,
     },
+    {
+      id: "061_scraped_jobs_enrichment",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN normalized_title      TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN summary               TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN experience_level      TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN workplace_type        TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN valid_through         INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN salary_min_usd        INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN salary_max_usd        INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN salary_period         TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN skills_json           TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN is_h1b_sponsor        INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN requires_work_auth    INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN is_clearance_required INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN discovered_at         INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN updated_at            INTEGER;
+      `,
+    },
+    {
+      id: "062_incremental_sync",
+      sql: `
+        CREATE TABLE IF NOT EXISTS sync_state (
+          source         TEXT    PRIMARY KEY,
+          cursor         TEXT,
+          last_watermark INTEGER,
+          updated_at     INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        ALTER TABLE scraped_jobs ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -2243,7 +2274,7 @@ function runCacheCleanup() {
       // Also clean orphaned job_role_map entries
       db.prepare("DELETE FROM job_role_map WHERE job_id NOT IN (SELECT job_id FROM scraped_jobs)").run();
     }
-    const remaining = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
+    const remaining = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE is_active = 1").get()?.n || 0;
     if (remaining === 0) {
       console.log("[Cache] Empty after cleanup — re-warming from ATS...");
       cacheJobs(db).then(n => console.log(`[Cache] Re-warm complete: ${n} jobs`))
@@ -2256,7 +2287,7 @@ function runCacheCleanup() {
 
 // Warm job cache from ATS sources (non-blocking — runs after server starts)
 {
-  const scraped = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
+  const scraped = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE is_active = 1").get()?.n || 0;
   if (scraped === 0) {
     console.log("[boot] scraped_jobs empty — warming ATS cache...");
     cacheJobs(db).then(n => {
@@ -4759,7 +4790,8 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
     FROM scraped_jobs sj
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
-    WHERE (uj.disliked IS NULL OR uj.disliked = 0)
+    WHERE sj.is_active = 1
+      AND (uj.disliked IS NULL OR uj.disliked = 0)
       AND (uj.applied  IS NULL OR uj.applied  = 0)
       AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
             AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
@@ -4886,7 +4918,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     const minYoeSql  = minYoeVal !== null ? `AND (sj.min_years_exp IS NULL OR sj.min_years_exp >= ?)` : '';
     const minYoeArgs = minYoeVal !== null ? [minYoeVal] : [];
 
-    const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs").get()?.n || 0;
+    const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE is_active = 1").get()?.n || 0;
     if (cacheCount > 0) {
       const orderBy = sort === 'atsScore'      ? 'sj.ats_score DESC, sj.scraped_at DESC'
                     : sort === 'applicantCount' ? 'sj.applicant_count ASC, sj.scraped_at DESC'
@@ -4900,7 +4932,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
           ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
       `;
       const whereClause = `
-        WHERE 1=1
+        WHERE sj.is_active = 1
           ${keyFilter}
           ${locFilter}
           AND ${titleFilter.sql}
@@ -4987,12 +5019,12 @@ app.get("/api/jobs/generic", async (req, res) => {
              salary_min, salary_max, salary_currency, compensation,
              company_icon_url, via
       FROM scraped_jobs
-      WHERE direct_apply = 1
+      WHERE direct_apply = 1 AND is_active = 1
       ORDER BY scraped_at DESC
       LIMIT ? OFFSET ?
     `).all(ps, offset);
 
-    const total = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE direct_apply = 1").get()?.n || 0;
+    const total = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE direct_apply = 1 AND is_active = 1").get()?.n || 0;
     const filteredRows = rows.filter(r => isResumeRelevant(r.title));
 
     res.json({ success: true, jobs: filteredRows.map(mapJobRow), total, page, pageSize: ps });
@@ -5214,7 +5246,8 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     FROM scraped_jobs sj
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
     LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
-    WHERE LOWER(sj.search_query) = ?
+    WHERE sj.is_active = 1
+      AND LOWER(sj.search_query) = ?
       AND ${pollProfileTitleFilter.sql}
       AND (? IS NULL OR sj.min_years_exp IS NULL OR sj.min_years_exp <= ?)
       AND sj.scraped_at >= ?
@@ -5475,7 +5508,8 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
     JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
     JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
     LEFT JOIN resumes r ON r.user_id = ? AND r.job_id = sj.job_id
-    WHERE uj.resume_generated = 1
+    WHERE sj.is_active = 1
+      AND uj.resume_generated = 1
       AND r.html IS NOT NULL
       AND (uj.applied IS NULL OR uj.applied = 0)
       AND (uj.disliked IS NULL OR uj.disliked = 0)
