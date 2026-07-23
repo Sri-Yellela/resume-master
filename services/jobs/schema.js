@@ -58,6 +58,37 @@ function inferClearanceRequired(title) {
   return /\b(security\s+clearance|clearance\s+required|active\s+clearance|top.?secret|ts\/sci)\b/i.test(title) ? 1 : null;
 }
 
+// ── Cross-source fingerprint ────────────────────────────────────────────────
+// Identity key used to collapse the same role posted through multiple sources
+// (e.g. a company's own Greenhouse board AND an Adzuna/SerpApi listing of it)
+// into one canonical board row. Deliberately built from the RAW title, not
+// `normalized_title` — that column is just a lowercased passthrough today, and
+// real title canonicalization (stripping level suffixes, punctuation variants,
+// etc.) is a later enrichment product. Coupling dedup to it now would silently
+// break identity matching whenever that enrichment ships.
+
+function normalizeForFingerprint(str) {
+  return String(str || '')
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '') // strip diacritics
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')   // punctuation -> space
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// A location field can list more than one office ("New York, NY / Remote");
+// the fingerprint keys on the first (primary) one only.
+function primaryLocationSegment(location) {
+  return String(location || '').split(/\s*(?:\/|;|\||\bor\b)\s*/i)[0];
+}
+
+function computeFingerprint({ company, title, location }) {
+  const c = normalizeForFingerprint(company);
+  const t = normalizeForFingerprint(title);
+  const l = normalizeForFingerprint(primaryLocationSegment(location));
+  return `${c}|${t}|${l}`;
+}
+
 /**
  * Creates a normalized job object with defaults for missing fields.
  * Call this in every source plugin's normalizer.
@@ -152,4 +183,4 @@ function stripInternalFields(job) {
   return clientJob;
 }
 
-export { normalizeJob, stripInternalFields, JOB_SCHEMA_VERSION };
+export { normalizeJob, stripInternalFields, JOB_SCHEMA_VERSION, computeFingerprint, normalizeForFingerprint };

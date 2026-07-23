@@ -71,7 +71,7 @@ import {
   getAutomationReadiness,
   publicIntegrationRow,
 } from "./services/integrationReadiness.js";
-import { searchJobs, cacheJobs } from "./services/jobs/aggregator.js";
+import { searchJobs, cacheJobs, reconcileFingerprint } from "./services/jobs/aggregator.js";
 import { classifyJob as unifiedClassifyJob } from "./services/jobs/classifyJob.js";
 import { filterAndRankForProfile } from "./services/jobs/profileMatcher.js";
 import { isResumeRelevant } from "./services/jobs/relevanceFilter.js";
@@ -2219,6 +2219,14 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE scraped_jobs ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
       `,
     },
+    {
+      id: "063_cross_source_dedup",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN fingerprint   TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN sources_seen  TEXT;
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_fingerprint ON scraped_jobs(fingerprint);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -2674,8 +2682,9 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
      ghost_score, years_experience, min_years_exp, max_years_exp, exp_raw,
      is_frequent_repost, _hash, scraped_at, source_platform,
      salary_min, salary_max, salary_currency, applicant_count, company_icon_url,
-     employment_type, domain_profile_id, collar, classification_confidence)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     employment_type, domain_profile_id, collar, classification_confidence,
+     fingerprint, sources_seen)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   const rejectJobStmt  = db.prepare(`
@@ -2710,6 +2719,22 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
       }
       // ──────────────────────────────────────────────────────────────────────
 
+      // Cross-source dedup: collapse this posting into an existing higher-(or-equal-)
+      // priority canonical row (e.g. a direct-ATS listing of the same role) if one exists.
+      const dedup = reconcileFingerprint(db, {
+        id: jobId, url: item.applyUrl || item.url || jobId,
+        title: item.title, company: item.company, location: item.location || 'United States',
+        source: 'LinkedIn',
+        description: item.description || null,
+        company_icon_url: item.companyLogoUrl || null,
+        workplace_type: wt || null,
+        posted_at: normalizePostedAt(item.postedAt, nowUnix),
+      });
+      if (dedup.action === 'fold') {
+        return; // superseded by an existing canonical row for this role — no separate row written
+      }
+      const canonical = dedup.job;
+
       const result = insertJob.run(
         jobId,
         query.toLowerCase(),
@@ -2721,8 +2746,8 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         'LinkedIn',
         item.url        || null,
         item.applyUrl   || null,
-        normalizePostedAt(item.postedAt, nowUnix),
-        item.description || null,
+        canonical.posted_at,
+        canonical.description || null,
         item.descriptionHtml || null,
         ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }),
         yoe.min,          // years_experience (compat col â€” use min)
@@ -2737,11 +2762,13 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         item.salaryMax      || null,
         item.salaryCurrency || null,
         item.applicantCount || null,
-        item.companyLogoUrl || null,
+        canonical.company_icon_url || null,
         empType,
         domainProfileId,
         'white',
         collarVerdict.confidence || 0,
+        dedup.fingerprint,
+        dedup.sourcesSeen,
       );
       if (result.changes > 0) inserted++;
       else if (domainProfileId) {
@@ -5086,16 +5113,32 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
             INSERT OR IGNORE INTO scraped_jobs
               (job_id, _hash, title, company, location, url, source, source_label,
                via, bucket_role, bucket_seniority, bucket_domain,
-               company_icon_url, direct_apply, posted_at, scraped_at)
+               company_icon_url, direct_apply, posted_at, scraped_at,
+               fingerprint, sources_seen)
             VALUES
               (@job_id, @_hash, @title, @company, @location, @url, @source, @source_label,
                @via, @bucket_role, @bucket_seniority, @bucket_domain,
-               @company_icon_url, @direct_apply, @posted_at, strftime('%s','now'))
+               @company_icon_url, @direct_apply, @posted_at, strftime('%s','now'),
+               @fingerprint, @sources_seen)
           `);
           const insertMany = db.transaction((jobs) => {
             for (const j of jobs) {
               const id = j.id || j.url || '';
               if (!id) continue;
+
+              // Cross-source dedup: collapse into an existing higher-(or-equal-)priority
+              // canonical row (e.g. this same role's direct-ATS listing) if one exists.
+              const dedup = reconcileFingerprint(db, {
+                id, url: j.url || '', title: j.title || '', company: j.company || '',
+                location: j.location || '', source: j.source || 'serpapi',
+                description:      j.description || null,
+                company_icon_url: j.companyIconUrl || j.company_icon_url || j.thumbnail || null,
+                workplace_type:   j.workplaceType || j.workplace_type || null,
+                posted_at:        j.postedAt || j.posted_at || null,
+              });
+              if (dedup.action === 'fold') continue; // no separate row for this duplicate
+              const canonical = dedup.job;
+
               insert.run({
                 job_id:           id,
                 _hash:            id,
@@ -5109,9 +5152,11 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
                 bucket_role:      j.bucketRole  || j.bucket_role  || 'other',
                 bucket_seniority: j.bucketSeniority || j.bucket_seniority || null,
                 bucket_domain:    j.bucketDomain || j.bucket_domain || null,
-                company_icon_url: j.companyIconUrl || j.company_icon_url || j.thumbnail || null,
+                company_icon_url: canonical.company_icon_url || null,
                 direct_apply:     (j.directApply ?? j.direct_apply) ? 1 : 0,
-                posted_at:        j.postedAt || j.posted_at || null,
+                posted_at:        canonical.posted_at || null,
+                fingerprint:      dedup.fingerprint,
+                sources_seen:     dedup.sourcesSeen,
               });
             }
           });
