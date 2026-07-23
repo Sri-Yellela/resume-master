@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { validatePlugin } from './sources/base.js';
-import { stripInternalFields } from './schema.js';
-import { filterDirectApplyOnly } from './directApplyFilter.js';
+import { stripInternalFields, computeFingerprint } from './schema.js';
+import { filterDirectApplyOnly, DIRECT_ATS_SOURCES } from './directApplyFilter.js';
 import { classifyJob } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
 
@@ -47,16 +47,33 @@ if (inactiveSources.length) {
 }
 
 // ATS sources that cacheJobs syncs; non-ATS sources (adzuna, serpapi) use live search only.
-const ATS_SOURCE_NAMES = new Set(['greenhouse', 'lever', 'ashby']);
+// Canonical direct-ATS set lives in directApplyFilter.js — it's also the top dedup tier below.
+const ATS_SOURCE_NAMES = DIRECT_ATS_SOURCES;
+
+// Cross-source dedup priority tiers (highest wins as canonical):
+//   Tier 3 — direct ATS (company's own board): greenhouse/lever/ashby + future Tier-A additions.
+//   Tier 2 — managed provider (direct-apply but not a Tier-A ATS integration) — the default for
+//            any source not explicitly listed, e.g. linkedin_extension.
+//   Tier 1 — aggregator (gatekept middleman listing): adzuna, serpapi.
+const AGGREGATOR_SOURCES = new Set(['adzuna', 'serpapi']);
+
+function sourcePriority(source) {
+  if (DIRECT_ATS_SOURCES.has(source)) return 3;
+  if (AGGREGATOR_SOURCES.has(source)) return 1;
+  return 2;
+}
 
 // A job not seen in this many consecutive successful crawls of its source is marked is_active=0.
 // Implemented via watermark comparison: row.updated_at < prev_watermark means absent from both
 // the previous AND current crawl (2 consecutive misses).
 const PRUNE_AFTER_MISSED_CRAWLS = 2;
 
-// Content fingerprint used to skip re-upserting postings that haven't changed since the
-// last crawl. Unchanged rows get a cheap timestamp "touch" instead of the full upsert —
-// this is what makes repeat crawls dramatically cheaper than the first backfill.
+// Content hash used to skip re-upserting postings that haven't changed since the last crawl
+// of their OWN source. Unrelated to the cross-source `fingerprint` column/computeFingerprint()
+// below — this one is per-row change detection ("did source X's copy of job Y change"), that
+// one is cross-source identity ("is source X's job the same ROLE as source Z's job"). Unchanged
+// rows get a cheap timestamp "touch" instead of the full upsert — this is what makes repeat
+// crawls dramatically cheaper than the first backfill.
 function fingerprintJob(job) {
   const parts = [
     job.title || '', job.location || '', job.description || '', job.posted_at || '',
@@ -65,6 +82,123 @@ function fingerprintJob(job) {
     job.direct_apply === false ? 0 : 1,
   ].join('|');
   return crypto.createHash('sha1').update(parts).digest('hex');
+}
+
+// ── Cross-source dedup (collapse the same role from multiple sources) ──────────────────
+// Fields a lower-priority duplicate may carry that the winning canonical row should adopt
+// if the canonical doesn't already have them (never overwrites a real value with null).
+const MERGEABLE_FIELDS = [
+  'description', 'company_icon_url', 'workplace_type', 'experience_level',
+  'valid_through', 'salary_min_usd', 'salary_max_usd', 'salary_period', 'skills_json',
+  'is_h1b_sponsor', 'requires_work_auth', 'is_clearance_required', 'posted_at',
+];
+
+function isBlank(v) {
+  return v === null || v === undefined || v === '';
+}
+
+// Returns a copy of `target` with any blank field filled in from `donor`.
+function unionMergeFields(target, donor) {
+  const merged = { ...target };
+  for (const f of MERGEABLE_FIELDS) {
+    if (isBlank(merged[f]) && !isBlank(donor[f])) merged[f] = donor[f];
+  }
+  return merged;
+}
+
+function mergeSourcesSeen(existingSourcesSeenJson, ...sources) {
+  const set = new Set();
+  if (existingSourcesSeenJson) {
+    try { JSON.parse(existingSourcesSeenJson).forEach(s => { if (s) set.add(s); }); } catch { /* ignore malformed */ }
+  }
+  sources.forEach(s => { if (s) set.add(s); });
+  return JSON.stringify([...set]);
+}
+
+// One prepared-statement bundle per db connection (this app has exactly one long-lived
+// connection, but a WeakMap keeps this safe/reusable rather than assuming that).
+const fingerprintStmtsCache = new WeakMap();
+function getFingerprintStmts(db) {
+  let stmts = fingerprintStmtsCache.get(db);
+  if (!stmts) {
+    stmts = {
+      findCanonical: db.prepare(`
+        SELECT * FROM scraped_jobs
+        WHERE fingerprint = ? AND job_id != ? AND is_active = 1
+        ORDER BY updated_at DESC LIMIT 1
+      `),
+      findOwnSourcesSeen: db.prepare(`SELECT sources_seen FROM scraped_jobs WHERE job_id = ?`),
+      demote: db.prepare(`UPDATE scraped_jobs SET is_active = 0 WHERE job_id = ?`),
+      foldIntoExisting: db.prepare(`
+        UPDATE scraped_jobs SET
+          description            = @description,
+          company_icon_url       = @company_icon_url,
+          workplace_type          = @workplace_type,
+          experience_level        = @experience_level,
+          valid_through           = @valid_through,
+          salary_min_usd          = @salary_min_usd,
+          salary_max_usd          = @salary_max_usd,
+          salary_period           = @salary_period,
+          skills_json             = @skills_json,
+          is_h1b_sponsor          = @is_h1b_sponsor,
+          requires_work_auth      = @requires_work_auth,
+          is_clearance_required   = @is_clearance_required,
+          posted_at               = @posted_at,
+          sources_seen            = @sources_seen
+        WHERE job_id = @job_id
+      `),
+    };
+    fingerprintStmtsCache.set(db, stmts);
+  }
+  return stmts;
+}
+
+/**
+ * Cross-source dedup check — call before every write to scraped_jobs so a role arriving
+ * from an aggregator (adzuna/serpapi) never coexists on the board alongside the same role's
+ * direct-ATS copy. Never hard-deletes: a demoted duplicate keeps its row (is_active=0) so any
+ * job_applications/resumes tied to its job_id stay intact; a folded (lower-priority) duplicate
+ * never gets a row of its own at all.
+ *
+ * Returns:
+ *   { action: 'insert_canonical', job, sourcesSeen, fingerprint }
+ *     → caller should upsert `job` (already union-merged with any demoted duplicate's fields)
+ *       as its own row, storing `fingerprint` and `sourcesSeen`. Any previously-canonical
+ *       lower-priority row for this fingerprint has already been demoted by this call.
+ *   { action: 'fold', intoJobId, fingerprint }
+ *     → caller must NOT write a row for this job; its data has already been folded into the
+ *       existing higher-(or-equal-)priority canonical row.
+ */
+function reconcileFingerprint(db, job) {
+  const stmts      = getFingerprintStmts(db);
+  const fingerprint = computeFingerprint(job);
+  const jobId       = job.id || job.url || '';
+  const existing    = stmts.findCanonical.get(fingerprint, jobId);
+
+  if (!existing) {
+    // No other active row shares this fingerprint. Preserve whatever sources_seen this job's
+    // OWN row already had (e.g. from an earlier merge whose other contributor was since
+    // demoted) rather than resetting it to just this one source.
+    const own = stmts.findOwnSourcesSeen.get(jobId);
+    const sourcesSeen = mergeSourcesSeen(own?.sources_seen, job.source);
+    return { action: 'insert_canonical', job, sourcesSeen, fingerprint };
+  }
+
+  const incomingWins = sourcePriority(job.source) > sourcePriority(existing.source);
+
+  if (incomingWins) {
+    const sourcesSeen = mergeSourcesSeen(existing.sources_seen, existing.source, job.source);
+    const merged      = unionMergeFields(job, existing);
+    stmts.demote.run(existing.job_id);
+    return { action: 'insert_canonical', job: merged, sourcesSeen, fingerprint };
+  }
+
+  // Incoming is a same-or-lower-priority duplicate of an already-canonical role — fold its
+  // useful fields into the canonical row instead of creating a second board entry.
+  const sourcesSeen     = mergeSourcesSeen(existing.sources_seen, existing.source, job.source);
+  const mergedExisting  = unionMergeFields(existing, job);
+  stmts.foldIntoExisting.run({ ...mergedExisting, sources_seen: sourcesSeen, job_id: existing.job_id });
+  return { action: 'fold', intoJobId: existing.job_id, fingerprint };
 }
 
 /**
@@ -197,7 +331,7 @@ async function cacheJobs(db) {
          normalized_title, summary, experience_level, workplace_type, valid_through,
          salary_min_usd, salary_max_usd, salary_period, skills_json,
          is_h1b_sponsor, requires_work_auth, is_clearance_required,
-         discovered_at, updated_at, is_active)
+         discovered_at, updated_at, is_active, fingerprint, sources_seen)
       VALUES
         (@job_id, @search_query, @_hash, @title, @company, @location, @url, @source, @source_label,
          @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description,
@@ -205,7 +339,7 @@ async function cacheJobs(db) {
          @normalized_title, @summary, @experience_level, @workplace_type, @valid_through,
          @salary_min_usd, @salary_max_usd, @salary_period, @skills_json,
          @is_h1b_sponsor, @requires_work_auth, @is_clearance_required,
-         @discovered_at, @updated_at, 1)
+         @discovered_at, @updated_at, 1, @fingerprint, @sources_seen)
     `);
 
     const roleMapStmt = db.prepare(`
@@ -225,11 +359,16 @@ async function cacheJobs(db) {
 
     // Cheap "seen, unchanged" touch — refreshes updated_at (so the stale-prune watermark
     // logic doesn't mark it absent) and reactivates it if a prior crawl had pruned it,
-    // without re-running classification or rewriting every column.
+    // without re-running classification or rewriting every column. Also (re)writes the
+    // fingerprint/sources_seen every crawl, so rows created before migration 063 (or before
+    // a cross-source duplicate showed up) self-heal into the dedup system over time instead
+    // of sitting with a permanently-null fingerprint.
     const touchSeenStmt = db.prepare(`
-      UPDATE scraped_jobs SET updated_at = ?, scraped_at = ?, is_active = 1
+      UPDATE scraped_jobs SET updated_at = ?, scraped_at = ?, is_active = 1,
+        fingerprint = ?, sources_seen = ?
       WHERE job_id = ?
     `);
+    const demoteStmt = db.prepare(`UPDATE scraped_jobs SET is_active = 0 WHERE job_id = ?`);
 
     const getExistingHashes = db.prepare(`SELECT job_id, _hash FROM scraped_jobs WHERE source = ?`);
 
@@ -298,17 +437,28 @@ async function cacheJobs(db) {
       );
 
       // ── Upsert in a transaction ───────────────────────────────────────────
-      const { cached, unchanged, ejected, dropped } = db.transaction(() => {
-        let cached = 0, unchanged = 0, ejected = 0, dropped = 0;
+      const { cached, unchanged, ejected, dropped, merged } = db.transaction(() => {
+        let cached = 0, unchanged = 0, ejected = 0, dropped = 0, merged = 0;
 
         for (const job of fetchedJobs) {
           const jobId = job.id || job.url || '';
           if (!jobId) continue;
 
-          const fingerprint = fingerprintJob(job);
-          if (existingHashes.get(jobId) === fingerprint) {
-            touchSeenStmt.run(now, now, jobId);
-            unchanged++;
+          const contentHash = fingerprintJob(job);
+          if (existingHashes.get(jobId) === contentHash) {
+            // Still run cross-source reconciliation even on the cheap path: a duplicate from
+            // another source may have appeared (or disappeared) since this row was last touched.
+            const jobForDedup = { ...job, company_icon_url: job.thumbnail || job.companyIconUrl || null };
+            const dedup = reconcileFingerprint(db, jobForDedup);
+            if (dedup.action === 'fold') {
+              // This previously-canonical row turns out to be a duplicate of a higher-(or-equal-)
+              // priority row that appeared since — its fields were just folded into that row.
+              demoteStmt.run(jobId);
+              merged++;
+            } else {
+              touchSeenStmt.run(now, now, dedup.fingerprint, dedup.sourcesSeen, jobId);
+              unchanged++;
+            }
             continue;
           }
 
@@ -334,41 +484,53 @@ async function cacheJobs(db) {
             continue;
           }
 
+          // Cross-source dedup: collapse this posting into an existing higher-(or-equal-)
+          // priority canonical row if the same role already has one from another source.
+          const jobForDedup = { ...job, company_icon_url: job.thumbnail || job.companyIconUrl || null };
+          const dedup = reconcileFingerprint(db, jobForDedup);
+          if (dedup.action === 'fold') {
+            merged++;
+            continue;
+          }
+          const canonical = dedup.job;
+
           upsertStmt.run({
             job_id:                    jobId,
-            search_query:              job.source || 'ats',
-            _hash:                     fingerprint,
-            title:                     job.title || '',
-            company:                   job.company || '',
-            location:                  job.location || '',
-            url:                       job.url || '',
-            source:                    job.source || '',
-            source_label:              job.source_label || '',
-            posted_at:                 job.posted_at || null,
+            search_query:              canonical.source || 'ats',
+            _hash:                     contentHash,
+            title:                     canonical.title || '',
+            company:                   canonical.company || '',
+            location:                  canonical.location || '',
+            url:                       canonical.url || '',
+            source:                    canonical.source || '',
+            source_label:              canonical.source_label || '',
+            posted_at:                 canonical.posted_at || null,
             scraped_at:                now,
             bucket_role:               verdict.roleKey,
             bucket_seniority:          verdict.seniority || null,
             bucket_domain:             verdict.domain || null,
-            direct_apply:              job.direct_apply === false ? 0 : 1,
-            description:               job.description || null,
-            company_icon_url:          job.thumbnail || job.companyIconUrl || null,
-            via:                       job.via || null,
+            direct_apply:              canonical.direct_apply === false ? 0 : 1,
+            description:               canonical.description || null,
+            company_icon_url:          canonical.company_icon_url || null,
+            via:                       canonical.via || null,
             collar:                    'white',
             classification_confidence: verdict.confidence || 0,
-            normalized_title:          job.normalized_title || null,
-            summary:                   job.summary         || null,
-            experience_level:          job.experience_level || null,
-            workplace_type:            job.workplace_type  || null,
-            valid_through:             job.valid_through   != null ? job.valid_through : null,
-            salary_min_usd:            job.salary_min_usd  != null ? job.salary_min_usd  : null,
-            salary_max_usd:            job.salary_max_usd  != null ? job.salary_max_usd  : null,
-            salary_period:             job.salary_period   || null,
-            skills_json:               job.skills_json     || null,
-            is_h1b_sponsor:            job.is_h1b_sponsor  != null ? job.is_h1b_sponsor  : null,
-            requires_work_auth:        job.requires_work_auth != null ? job.requires_work_auth : null,
-            is_clearance_required:     job.is_clearance_required != null ? job.is_clearance_required : null,
+            normalized_title:          canonical.normalized_title || null,
+            summary:                   canonical.summary         || null,
+            experience_level:          canonical.experience_level || null,
+            workplace_type:            canonical.workplace_type  || null,
+            valid_through:             canonical.valid_through   != null ? canonical.valid_through : null,
+            salary_min_usd:            canonical.salary_min_usd  != null ? canonical.salary_min_usd  : null,
+            salary_max_usd:            canonical.salary_max_usd  != null ? canonical.salary_max_usd  : null,
+            salary_period:             canonical.salary_period   || null,
+            skills_json:               canonical.skills_json     || null,
+            is_h1b_sponsor:            canonical.is_h1b_sponsor  != null ? canonical.is_h1b_sponsor  : null,
+            requires_work_auth:        canonical.requires_work_auth != null ? canonical.requires_work_auth : null,
+            is_clearance_required:     canonical.is_clearance_required != null ? canonical.is_clearance_required : null,
             discovered_at:             now,
             updated_at:                now,
+            fingerprint:               dedup.fingerprint,
+            sources_seen:              dedup.sourcesSeen,
           });
 
           // Canonical verdict → job_role_map (supersedes old classifyForIngest path)
@@ -383,7 +545,7 @@ async function cacheJobs(db) {
           cached++;
         }
 
-        return { cached, unchanged, ejected, dropped };
+        return { cached, unchanged, ejected, dropped, merged };
       })();
 
       // ── Expiry pruning (outside the upsert transaction) ───────────────────
@@ -405,8 +567,9 @@ async function cacheJobs(db) {
       const pruned = byDate.changes + byStale.changes;
       if (ejected > 0) console.log(`[cacheJobs:${source.name}] Ejected ${ejected} blue-collar jobs`);
       if (dropped > 0) console.log(`[cacheJobs:${source.name}] Dropped ${dropped} unclassifiable jobs`);
+      if (merged  > 0) console.log(`[cacheJobs:${source.name}] Merged ${merged} cross-source duplicates into existing canonical rows`);
       if (pruned  > 0) console.log(`[cacheJobs:${source.name}] Pruned ${pruned} jobs inactive (${byDate.changes} expired, ${byStale.changes} stale)`);
-      console.log(`[cacheJobs:${source.name}] Sync complete — ${fetchedJobs.length} fetched, ${cached} new/changed, ${unchanged} unchanged (touch-only), ${pruned} pruned (prevWatermark=${prevWatermark})`);
+      console.log(`[cacheJobs:${source.name}] Sync complete — ${fetchedJobs.length} fetched, ${cached} new/changed, ${unchanged} unchanged (touch-only), ${merged} merged, ${pruned} pruned (prevWatermark=${prevWatermark})`);
       totalCached += cached;
     }
 
@@ -456,4 +619,4 @@ function getSourceStatus() {
   }));
 }
 
-export { searchJobs, cacheJobs, getSourceStatus };
+export { searchJobs, cacheJobs, getSourceStatus, reconcileFingerprint };

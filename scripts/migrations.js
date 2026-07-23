@@ -1874,4 +1874,12 @@ export const MIGRATIONS = [
         ALTER TABLE scraped_jobs ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
       `,
     },
+    {
+      id: "063_cross_source_dedup",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN fingerprint   TEXT;
+        ALTER TABLE scraped_jobs ADD COLUMN sources_seen  TEXT;
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_fingerprint ON scraped_jobs(fingerprint);
+      `,
+    },
   ];

@@ -11,11 +11,14 @@ const BLOCKED_URL_PATTERNS = [
   /simplyhired\.com\//i,
 ];
 
-// Sources that are always trusted to be direct-apply
-const ALWAYS_ALLOW_SOURCES = new Set(['greenhouse', 'lever', 'ashby']);
+// Sources that are always trusted to be direct-apply — the same "direct ATS" tier
+// used for cross-source dedup priority in aggregator.js (a company's own ATS listing
+// always outranks an aggregator's copy of the same role). Add Tier-A ATS integrations
+// here as they're onboarded; nothing else needs to change.
+const DIRECT_ATS_SOURCES = new Set(['greenhouse', 'lever', 'ashby']);
 
 function isDirectApply(job) {
-  if (ALWAYS_ALLOW_SOURCES.has(job.source)) return true;
+  if (DIRECT_ATS_SOURCES.has(job.source)) return true;
   if (!job.url) return false;
   return !BLOCKED_URL_PATTERNS.some(p => p.test(job.url));
 }
@@ -24,4 +27,4 @@ function filterDirectApplyOnly(jobs) {
   return jobs.filter(isDirectApply);
 }
 
-export { isDirectApply, filterDirectApplyOnly };
+export { isDirectApply, filterDirectApplyOnly, DIRECT_ATS_SOURCES };
