@@ -75,6 +75,10 @@ import { searchJobs, cacheJobs, reconcileFingerprint } from "./services/jobs/agg
 import { classifyJob as unifiedClassifyJob } from "./services/jobs/classifyJob.js";
 import { filterAndRankForProfile } from "./services/jobs/profileMatcher.js";
 import { isResumeRelevant } from "./services/jobs/relevanceFilter.js";
+import {
+  buildJobFilters, buildSelectColumns, resolveFacetDimensions, computeSkillsFacet,
+  FACET_DIMENSIONS,
+} from "./services/jobs/jobQuery.js";
 
 // ── mapJobRow: normalise DB/aggregator rows to camelCase for the client ────────
 function mapJobRow(j) {
@@ -4873,9 +4877,13 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       localSearch    = '',
     } = req.query;
 
-    const rawQuery = (role || q || localSearch || '').slice(0, 200).trim();
+    // NOTE: bare `q` is not consumed here — no existing caller sends it (checked: the
+    // frontend only ever sends role/localSearch for this), so it's reserved below for the
+    // new rich query vocabulary (OR terms / "-"-exclude / "quoted"-exact-title) instead of
+    // the legacy simple-substring behavior, without changing any real existing call.
+    const rawQuery = (role || localSearch || '').slice(0, 200).trim();
     const pg       = Math.max(1, parseInt(page, 10) || 1);
-    const ps       = Math.min(50, Math.max(1, parseInt(pageSize, 10) || 10));
+    const ps       = Math.min(50, Math.max(1, parseInt(req.query.page_size || pageSize, 10) || 10));
 
     // Phase 6: board is profile-scoped via job_role_map join — profile required
     const sessionActiveProfile = getOrRepairActiveProfile(req.user.id);
@@ -4945,6 +4953,13 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     const minYoeSql  = minYoeVal !== null ? `AND (sj.min_years_exp IS NULL OR sj.min_years_exp >= ?)` : '';
     const minYoeArgs = minYoeVal !== null ? [minYoeVal] : [];
 
+    // Rich filter vocabulary (all optional/default-off — see services/jobs/jobQuery.js).
+    // Every param it reads defaults to absent, so richFilters.sql/.params are '' / [] and
+    // this branch is byte-identical to before whenever none of these are passed.
+    const richFilters = buildJobFilters({ q, ...req.query });
+    const selectCols  = buildSelectColumns(req.query.include_fields);
+    const facetDims   = resolveFacetDimensions(req.query.include_facets);
+
     const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE is_active = 1").get()?.n || 0;
     if (cacheCount > 0) {
       const orderBy = sort === 'atsScore'      ? 'sj.ats_score DESC, sj.scraped_at DESC'
@@ -4972,6 +4987,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
           ${ageSql}
           ${yoeSql}
           ${minYoeSql}
+          ${richFilters.sql}
           AND (uj.disliked IS NULL OR uj.disliked = 0)
       `;
       const baseArgs = [
@@ -4979,14 +4995,15 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         ...keyArgs, ...locArgs, ...titleFilter.params,
         ...wtArgs, ...etArgs, ...catArgs, ...srcArgs,
         ...maxAppArgs, ...ageArgs, ...yoeArgs, ...minYoeArgs,
+        ...richFilters.params,
       ];
 
-      const rows  = db.prepare(`SELECT sj.*, uj.visited, uj.applied, uj.starred, uj.disliked ${joinClause} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...baseArgs, ps, offset);
+      const rows  = db.prepare(`SELECT ${selectCols}, uj.visited, uj.applied, uj.starred, uj.disliked ${joinClause} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...baseArgs, ps, offset);
       const total = db.prepare(`SELECT COUNT(*) as n ${joinClause} ${whereClause}`).get(...baseArgs)?.n || 0;
 
       console.log(JSON.stringify({ msg: '[jobs]', profile: sessionActiveProfile.profile_name, sort, total, returned: rows.length }));
 
-      return res.json({
+      const responseBody = {
         success:    true,
         jobs:       rows.map(j => ({ ...mapJobRow(j), scrapedAt: j.scraped_at })),
         total,
@@ -4995,7 +5012,30 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         totalPages: Math.ceil(total / ps),
         sources:    ['scraped_jobs'],
         fromCache:  true,
-      });
+      };
+
+      // include_facets (optional, default-off): facet counts over the SAME filtered result
+      // set, using the identical joinClause/whereClause/baseArgs as the main query.
+      if (facetDims.length) {
+        const facets = {};
+        for (const dim of facetDims) {
+          if (dim === 'skills') continue; // computed separately below (JSON column, not a plain GROUP BY)
+          const { column } = FACET_DIMENSIONS[dim];
+          const facetRows = db.prepare(`
+            SELECT ${column} as value, COUNT(*) as count
+            ${joinClause} ${whereClause}
+            GROUP BY ${column}
+          `).all(...baseArgs);
+          facets[dim] = facetRows.filter(r => r.value != null).map(r => ({ value: r.value, count: r.count }));
+        }
+        if (facetDims.includes('skills')) {
+          const skillsRows = db.prepare(`SELECT sj.skills_json as skills_json ${joinClause} ${whereClause}`).all(...baseArgs);
+          facets.skills = computeSkillsFacet(skillsRows.map(r => r.skills_json));
+        }
+        responseBody.facets = facets;
+      }
+
+      return res.json(responseBody);
     }
 
     // --- Fallback: live search via aggregator (empty cache) ---
