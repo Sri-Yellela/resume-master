@@ -1904,4 +1904,43 @@ export const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_scraped_jobs_req_uid ON scraped_jobs(req_uid);
       `,
     },
+    {
+      id: "066_company_org_units",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN org_unit_raw TEXT;
+        CREATE TABLE IF NOT EXISTS company_org_units (
+          company               TEXT    NOT NULL,
+          org_unit              TEXT    NOT NULL,
+          domain                TEXT,
+          stacks_json           TEXT,
+          seniority_json        TEXT,
+          confidence            REAL    NOT NULL DEFAULT 0,
+          corroboration_count   INTEGER NOT NULL DEFAULT 0,
+          status                TEXT    NOT NULL DEFAULT 'proposed',
+          first_seen            INTEGER NOT NULL,
+          last_seen             INTEGER NOT NULL,
+          source_postings_json  TEXT,
+          PRIMARY KEY (company, org_unit)
+        );
+        CREATE INDEX IF NOT EXISTS idx_company_org_units_status ON company_org_units(company, status);
+      `,
+    },
+    {
+      id: "067_company_hiring_signals",
+      sql: `
+        CREATE TABLE IF NOT EXISTS company_hiring_signals (
+          company               TEXT    NOT NULL,
+          window_start          INTEGER NOT NULL,
+          window_end            INTEGER NOT NULL,
+          open_count            INTEGER NOT NULL DEFAULT 0,
+          new_count             INTEGER NOT NULL DEFAULT 0,
+          expired_count         INTEGER NOT NULL DEFAULT 0,
+          domain_breakdown_json TEXT,
+          growth_score          REAL,
+          updated_at            INTEGER NOT NULL,
+          PRIMARY KEY (company, window_end)
+        );
+        CREATE INDEX IF NOT EXISTS idx_company_hiring_signals_company ON company_hiring_signals(company);
+      `,
+    },
   ];
