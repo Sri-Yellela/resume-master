@@ -81,6 +81,7 @@ import {
   FACET_DIMENSIONS,
 } from "./services/jobs/jobQuery.js";
 import { mapJobRow } from "./services/jobs/mapJobRow.js";
+import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 
 console.log("[boot] server module loaded");
 
@@ -4960,7 +4961,23 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     // Rich filter vocabulary (all optional/default-off — see services/jobs/jobQuery.js).
     // Every param it reads defaults to absent, so richFilters.sql/.params are '' / [] and
     // this branch is byte-identical to before whenever none of these are passed.
-    const richFilters = buildJobFilters({ q, ...req.query });
+    //
+    // Profile→Board Bridge: derives DEFAULTS for a handful of these dimensions (q, skills,
+    // experience level, sponsorship-friendliness) from the active profile's stored signals —
+    // reusing `signals` already loaded above for the YoE constraint, no extra DB call. An
+    // explicit query param for the same dimension always wins (checked per-key below);
+    // ?curate=off skips derivation entirely, reproducing pre-bridge behavior exactly.
+    const baseFilterParams = { q, ...req.query };
+    const derivedFilters = req.query.curate === 'off'
+      ? {}
+      : deriveProfileFilters(sessionActiveProfile, signals);
+    const filterParams = { ...baseFilterParams };
+    for (const key of Object.keys(derivedFilters)) {
+      const explicitVal = baseFilterParams[key];
+      const isExplicit  = explicitVal !== undefined && explicitVal !== null && explicitVal !== '';
+      if (!isExplicit) filterParams[key] = derivedFilters[key];
+    }
+    const richFilters = buildJobFilters(filterParams);
     const selectCols  = buildSelectColumns(req.query.include_fields);
     const facetDims   = resolveFacetDimensions(req.query.include_facets);
 

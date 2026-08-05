@@ -183,6 +183,17 @@ function buildJobFilters(params = {}) {
     args.push(`%"${s}"%`);
   });
 
+  // Visa/sponsorship soft-filter (Profile→Board Bridge): excludes ONLY an explicit
+  // disqualifying structured signal — never on absence of one. is_h1b_sponsor/requires_work_auth
+  // are populated gradually by enrichJob.js's background LLM pass, so most rows are null at any
+  // given time; a sponsorship-needing user must still see those, not have them all hidden.
+  // Same "confidence-weighted, never hard-fail" principle as server.js's
+  // evaluateProfileFactEligibility() (a complementary text-regex check used at scrape/poll time).
+  if (params.sponsorship_friendly) {
+    clauses.push(`(sj.requires_work_auth IS NULL OR sj.requires_work_auth != 1)`);
+    clauses.push(`(sj.is_h1b_sponsor IS NULL OR sj.is_h1b_sponsor != 0)`);
+  }
+
   const companiesInclude = toArray(params.companies_include);
   if (companiesInclude.length) {
     clauses.push(`sj.company IN (${companiesInclude.map(() => '?').join(',')})`);
