@@ -26,6 +26,7 @@ import { createAdminRouter } from "./routes/admin.js";
 import { createAdminDbRouter } from "./routes/adminDb.js";
 import { createDomainProfilesRouter } from "./routes/domainProfiles.js";
 import { createImportedJobsRouter } from "./routes/importedJobs.js";
+import { createImportJobRouter } from "./routes/importJob.js";
 import { trackApiCall, trackScrape } from "./services/usageTracker.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
@@ -71,7 +72,7 @@ import {
   getAutomationReadiness,
   publicIntegrationRow,
 } from "./services/integrationReadiness.js";
-import { searchJobs, cacheJobs, reconcileFingerprint } from "./services/jobs/aggregator.js";
+import { searchJobs, cacheJobs, cacheJoboFeed, reconcileFingerprint } from "./services/jobs/aggregator.js";
 import { classifyJob as unifiedClassifyJob } from "./services/jobs/classifyJob.js";
 import { filterAndRankForProfile } from "./services/jobs/profileMatcher.js";
 import { isResumeRelevant } from "./services/jobs/relevanceFilter.js";
@@ -79,38 +80,7 @@ import {
   buildJobFilters, buildSelectColumns, resolveFacetDimensions, computeSkillsFacet,
   FACET_DIMENSIONS,
 } from "./services/jobs/jobQuery.js";
-
-// ── mapJobRow: normalise DB/aggregator rows to camelCase for the client ────────
-function mapJobRow(j) {
-  return {
-    id:              j.job_id || j.id,
-    title:           j.title,
-    company:         j.company,
-    location:        j.location,
-    description:     j.description,
-    url:             j.url,
-    applyUrl:        j.apply_url || j.applyUrl || j.url,
-    salaryMin:       j.salary_min  ?? j.salaryMin  ?? null,
-    salaryMax:       j.salary_max  ?? j.salaryMax  ?? null,
-    salaryCurrency:  j.salary_currency  || j.salaryCurrency  || null,
-    postedAt:        j.posted_at  || j.postedAt  || null,
-    contractType:    j.contract_type || j.contractType || null,
-    remote:          Boolean(j.remote),
-    source:          j.source,
-    sourceLabel:     j.source_label || j.sourceLabel || null,
-    sourcePlatform:  j.source || j.source_label || j.sourcePlatform || 'direct',
-    via:             j.via || null,
-    bucketRole:      j.bucket_role      || j.bucketRole      || null,
-    bucketSeniority: j.bucket_seniority || j.bucketSeniority || null,
-    bucketDomain:    j.bucket_domain    || j.bucketDomain    || null,
-    directApply:     Boolean(j.direct_apply ?? j.directApply),
-    companyIconUrl:  j.company_icon_url || j.companyIconUrl  || j.thumbnail || null,
-    matchScore:      j._matchScore || j.match_score || null,
-    starred:         Boolean(j.starred),
-    visited:         Boolean(j.visited),
-    disliked:        Boolean(j.disliked),
-  };
-}
+import { mapJobRow } from "./services/jobs/mapJobRow.js";
 
 console.log("[boot] server module loaded");
 
@@ -3045,6 +3015,14 @@ cron.schedule("0 4 * * *", async () => {
   } catch(e) {
     console.error('[Cron] ATS cache refresh error:', e.message);
   }
+  // Jobo feed sync — cron-only (never on boot/restart) so it never burns wallet credits just
+  // because the server restarted. Runs after the ATS refresh, sequentially, in the same tick.
+  try {
+    const joboCount = await cacheJoboFeed(db, ANTHROPIC_KEY ? anthropic : null);
+    console.log('[Cron] Jobo feed sync complete —', joboCount, 'jobs cached');
+  } catch(e) {
+    console.error('[Cron] Jobo feed sync error:', e.message);
+  }
 }, { timezone: 'America/New_York' });
 console.log('[Cron] Daily ATS cache refresh scheduled: 04:00 ET');
 
@@ -4527,6 +4505,7 @@ app.get("/api/auth/active-profile", requireAuth, (req, res) => {
 // /api/domain-profiles/metadata[/:domain]  â€” registry (no auth)
 // /api/domain-profiles/generate-chips      â€” AI chip generation
 app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic, emitToUser));
+app.use("/api/import", requireAuth, createImportJobRouter(db, anthropic));
 app.use("/api/imported-jobs", requireAuth, createImportedJobsRouter(db));
 
 // ─── CHROME EXTENSION — Save job from LinkedIn ───────────────────────────────

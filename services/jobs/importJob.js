@@ -1,0 +1,424 @@
+/**
+ * Bring-your-own-job import: a user hands the app a URL, or raw text/HTML, and it lands in the
+ * SAME global scraped_jobs pool everything else feeds — same dedup (reconcileFingerprint), same
+ * enrichment queue, same board. See routes/importJob.js for the HTTP surface.
+ *
+ * Three extraction paths, tried in this order for a given input:
+ *   1. Known-ATS URL reuse — the URL matches a pattern for one of the 7 already-integrated ATS
+ *      sources; refetch that company's full listing via the source's own already-working
+ *      fetchCompanyJobs() and find the matching posting. Preferred when available: it's the
+ *      SAME clean, structured data a real crawl would get, not an LLM's best guess off rendered
+ *      HTML. Deliberately does NOT try to derive every ATS's URL shape from scratch where that
+     * would require guessing (see detectKnownAtsMatch's comments on Workday/Workable below) —
+ *      guessing a request shape wrong is exactly what went wrong with the provider-eval Jobo
+ *      adapter earlier in this project; an honest "can't parse this one, fall through" beats a
+ *      wrong guess.
+ *   2. Client-provided text/html, or (if neither given and the URL isn't login-walled) a
+ *      server-side fetch of the URL — either way, one Haiku call extracts a normalizeJob()-
+ *      shaped posting from raw text.
+ *   3. LinkedIn (or another login-walled host) with no fallback text/html at all → no fetch is
+ *      attempted; the caller gets a structured "capture it client-side instead" response.
+ *
+ * IMPORTANT: a known-ATS-matched import keeps `source` as the REAL ats type (e.g. 'greenhouse'),
+ * not 'import' — this is deliberate, not a shortcut. computeReqUid() (schema.js) namespaces its
+ * requisition id by `source`; if this import used 'import' as that namespace, a LATER real
+ * crawl of the same company (which computes its req_uid with source='greenhouse') would never
+ * match this row by req_uid, and Task 3.1's selectMatch() treats two different non-null req_uids
+ * as genuinely distinct sibling reqs — i.e. the import and the real crawl would permanently
+ * duplicate as two board rows instead of reconciling into one. Only the generic/text path (no
+ * real ATS identity, no req_id) is tagged source:'import'.
+ */
+
+import axios from 'axios';
+import crypto from 'crypto';
+import { lookup as dnsLookup } from 'dns/promises';
+import { normalizeJob } from './schema.js';
+import { stripResumeHtml } from '../resumeFormatter.js';
+import { classifyJob } from './classifyJob.js';
+import { reconcileFingerprint, upsertCanonicalJob, fingerprintJob, SOURCE_LABELS } from './aggregator.js';
+import { runEnrichment } from './enrichJob.js';
+import { mapJobRow } from './mapJobRow.js';
+
+import { fetchCompanyJobs as fetchGreenhouseJobs }      from './sources/greenhouse.js';
+import { fetchCompanyJobs as fetchLeverJobs }           from './sources/lever.js';
+import { fetchCompanyJobs as fetchAshbyJobs }           from './sources/ashby.js';
+import { fetchCompanyJobs as fetchSmartRecruitersJobs } from './sources/smartrecruiters.js';
+import { fetchCompanyJobs as fetchWorkableJobs }        from './sources/workable.js';
+import { fetchCompanyJobs as fetchRecruiteeJobs }       from './sources/recruitee.js';
+import { fetchCompanyJobs as fetchWorkdayJobs }         from './sources/workday.js';
+
+class ImportInputError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ImportInputError';
+  }
+}
+
+const IMPORT_MODEL_ID = 'claude-haiku-4-5-20251001';
+const LOGIN_WALLED_HOSTS = new Set(['linkedin.com', 'www.linkedin.com']);
+
+const ATS_FETCHERS = {
+  greenhouse:      fetchGreenhouseJobs,
+  lever:           fetchLeverJobs,
+  ashby:           fetchAshbyJobs,
+  smartrecruiters: fetchSmartRecruitersJobs,
+  workable:        fetchWorkableJobs,
+  recruitee:       fetchRecruiteeJobs,
+  workday:         fetchWorkdayJobs,
+};
+
+// ── URL detection (pure — no db/network) ───────────────────────────────────────────────────
+// Each matcher only fires on ITS OWN host and only returns a match when the slug/id are
+// actually present in the URL path — an unparseable URL under a known host returns null
+// (falls through to the generic path) rather than guessing.
+const ATS_URL_MATCHERS = [
+  {
+    type: 'greenhouse',
+    hostTest: h => /(^|\.)greenhouse\.io$/i.test(h),
+    parse: (pathname) => {
+      const m = pathname.match(/^\/([^/]+)\/jobs\/(\d+)/);
+      return m ? { slug: m[1], externalId: m[2] } : null;
+    },
+  },
+  {
+    type: 'lever',
+    hostTest: h => h.toLowerCase() === 'jobs.lever.co',
+    parse: (pathname) => {
+      const m = pathname.match(/^\/([^/]+)\/([0-9a-f-]{8,})/i);
+      return m ? { slug: m[1], externalId: m[2] } : null;
+    },
+  },
+  {
+    type: 'ashby',
+    hostTest: h => h.toLowerCase() === 'jobs.ashbyhq.com',
+    parse: (pathname) => {
+      const m = pathname.match(/^\/([^/]+)\/([0-9a-f-]{8,})/i);
+      return m ? { slug: m[1], externalId: m[2] } : null;
+    },
+  },
+  {
+    type: 'smartrecruiters',
+    hostTest: h => h.toLowerCase() === 'jobs.smartrecruiters.com',
+    parse: (pathname) => {
+      const m = pathname.match(/^\/([^/]+)\/(\d+)-/);
+      return m ? { slug: m[1], externalId: m[2] } : null;
+    },
+  },
+  {
+    // Only the apply.workable.com/{slug}/j/{shortcode} form carries the account slug this
+    // source needs. The jobs.workable.com/view/{shortcode} form does not include it anywhere
+    // in the URL — that form intentionally falls through to the generic path below rather than
+    // guessing a slug that isn't there.
+    type: 'workable',
+    hostTest: h => h.toLowerCase() === 'apply.workable.com',
+    parse: (pathname) => {
+      const m = pathname.match(/^\/([^/]+)\/j\/([a-z0-9]+)/i);
+      return m ? { slug: m[1], externalId: m[2] } : null;
+    },
+  },
+  {
+    type: 'recruitee',
+    hostTest: h => /\.recruitee\.com$/i.test(h),
+    // The slug is the subdomain; Recruitee's public offer URLs don't carry the numeric id
+    // normalizeRecruiteeJob() uses, only a title slug — matching happens by URL equality
+    // against the fetched list's own `url` field (see findMatchingPosting), not by id.
+    parse: (_pathname, hostname) => {
+      const slug = hostname.split('.')[0];
+      return slug ? { slug, externalId: null } : null;
+    },
+  },
+];
+
+// Workday's tenant + wd# live in the hostname, but the `site` segment workday.js's slug
+// convention needs (wdNumber|tenant|site) is not reliably recoverable from an arbitrary pasted
+// URL (locale prefixes, varying path depth) — so a Workday match ALWAYS requires an existing
+// company_ats_list row to supply the already-verified `site`; no guessing.
+const WORKDAY_HOST_RE = /^([a-z0-9-]+)\.wd(\d+)\.myworkdayjobs\.com$/i;
+
+function detectKnownAtsMatch(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { return null; }
+  const hostname = parsed.hostname.toLowerCase();
+
+  for (const matcher of ATS_URL_MATCHERS) {
+    if (matcher.hostTest(hostname)) {
+      const result = matcher.parse(parsed.pathname, hostname);
+      return result ? { type: matcher.type, ...result } : null;
+    }
+  }
+
+  const wdMatch = hostname.match(WORKDAY_HOST_RE);
+  if (wdMatch) {
+    return { type: 'workday', tenant: wdMatch[1].toLowerCase(), wdNumber: wdMatch[2], externalId: null };
+  }
+
+  return null;
+}
+
+function isLoginWalled(rawUrl) {
+  try {
+    const { hostname } = new URL(rawUrl);
+    return LOGIN_WALLED_HOSTS.has(hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+// ── SSRF guard (generic-fetch path only — known-ATS paths only ever hit our own hardcoded
+// vendor API base URLs with a regex-validated slug, never an attacker-controlled host) ────────
+const PRIVATE_IPV4_RANGES = [
+  /^127\./, /^10\./, /^192\.168\./, /^169\.254\./, /^0\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+];
+
+function isPrivateOrLoopbackIp(ip) {
+  if (!ip) return true;
+  if (ip.includes(':')) {
+    const lower = ip.toLowerCase();
+    return lower === '::1' || lower.startsWith('fc') || lower.startsWith('fd') || lower.startsWith('fe80');
+  }
+  return PRIVATE_IPV4_RANGES.some(r => r.test(ip));
+}
+
+// Resolves the hostname BEFORE fetching (not after) so a DNS-rebinding attempt to an internal
+// address is caught, not just a literal http://127.0.0.1 in the input.
+async function assertFetchable(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { throw new ImportInputError('Invalid URL'); }
+  if (!/^https?:$/.test(parsed.protocol)) {
+    throw new ImportInputError('Only http(s) URLs can be imported');
+  }
+  let address;
+  try {
+    ({ address } = await dnsLookup(parsed.hostname));
+  } catch {
+    throw new ImportInputError(`Could not resolve host: ${parsed.hostname}`);
+  }
+  if (isPrivateOrLoopbackIp(address)) {
+    throw new ImportInputError('This URL resolves to a private/internal address and cannot be imported');
+  }
+  return parsed;
+}
+
+function titleCaseSlug(slug) {
+  const words = String(slug || '').split(/[-_]+/).filter(Boolean);
+  if (!words.length) return 'Unknown Company';
+  return words.map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
+function resolveCompanyName(db, atsType, slug) {
+  const row = db.prepare(
+    'SELECT company FROM company_ats_list WHERE ats_type = ? AND ats_slug = ?'
+  ).get(atsType, slug);
+  return row?.company || titleCaseSlug(slug);
+}
+
+// Workday's ats_slug is the composite "wdNumber|tenant|site" workday.js already knows how to
+// use — find the row whose tenant+wd# match what we parsed from the URL and reuse its site.
+function resolveWorkdaySlug(db, tenant, wdNumber) {
+  const rows = db.prepare("SELECT company, ats_slug FROM company_ats_list WHERE ats_type = 'workday'").all();
+  for (const row of rows) {
+    const [rowWdNumber, rowTenant] = String(row.ats_slug || '').split('|');
+    if (rowTenant?.toLowerCase() === tenant && rowWdNumber === wdNumber) {
+      return { atsSlug: row.ats_slug, companyName: row.company };
+    }
+  }
+  return null;
+}
+
+function normalizeUrlForMatch(u) {
+  try {
+    const parsed = new URL(u);
+    return (parsed.hostname + parsed.pathname).toLowerCase().replace(/\/+$/, '');
+  } catch {
+    return String(u || '').toLowerCase().replace(/\/+$/, '');
+  }
+}
+
+// jobs here are already-normalized (fetchCompanyJobs returns normalizeJob()-shaped objects) —
+// match by URL equality first (works for every source, since normalizeJob always sets a real
+// url), falling back to the parsed req_id when the URL match misses.
+function findMatchingPosting(jobs, { url, externalId }) {
+  const targetUrl = url ? normalizeUrlForMatch(url) : null;
+  if (targetUrl) {
+    const byUrl = jobs.find(j => normalizeUrlForMatch(j.url) === targetUrl);
+    if (byUrl) return byUrl;
+  }
+  if (externalId) {
+    const byId = jobs.find(j => j.req_id === String(externalId));
+    if (byId) return byId;
+  }
+  return null;
+}
+
+async function fetchKnownAtsJob(db, match, url) {
+  let atsSlug, companyName;
+
+  if (match.type === 'workday') {
+    const resolved = resolveWorkdaySlug(db, match.tenant, match.wdNumber);
+    if (!resolved) return null; // can't derive `site` — caller falls back to generic
+    atsSlug = resolved.atsSlug;
+    companyName = resolved.companyName;
+  } else {
+    atsSlug = match.slug;
+    companyName = resolveCompanyName(db, match.type, match.slug);
+  }
+
+  const fetcher = ATS_FETCHERS[match.type];
+  const jobs = await fetcher(atsSlug, companyName, []); // [] = no title filter, list everything
+  return findMatchingPosting(jobs, { url, externalId: match.externalId });
+}
+
+async function fetchGenericPosting(url) {
+  await assertFetchable(url);
+  const response = await axios.get(url, {
+    timeout: 10000,
+    maxContentLength: 3 * 1024 * 1024, // 3MB cap
+    maxRedirects: 5,
+    responseType: 'text',
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResumeMasterImportBot/1.0)' },
+  });
+  return stripResumeHtml(String(response.data || ''));
+}
+
+function buildExtractionPrompt(text, url) {
+  return `Extract a single job posting's structured fields from the text below. Only state what
+the text actually says — if a field isn't present, use null. Never invent or infer a value that
+isn't actually written.
+
+${url ? `Source URL: ${url}\n` : ''}Posting text:
+${text.slice(0, 6000)}
+
+Reply ONLY with valid JSON matching this exact schema. No markdown fences, no explanation:
+{
+  "title": "<job title, or null if not determinable>",
+  "company": "<employer name, or null if not determinable>",
+  "location": "<city/state/country, or 'Remote', or null>",
+  "description": "<the job description text, cleaned up, or null>",
+  "salaryMin": <number or null>,
+  "salaryMax": <number or null>,
+  "salaryCurrency": "<ISO 4217 e.g. USD, or null>",
+  "remote": <true, false, or null>,
+  "postedAt": "<ISO8601 date if explicitly stated, or null>"
+}`;
+}
+
+async function extractJobFromContent(anthropic, { url, text }) {
+  if (!anthropic) throw new ImportInputError('Job extraction requires an AI client, which is not configured on this server');
+  if (!text || !text.trim()) throw new ImportInputError('No text to extract a job from');
+
+  const msg = await anthropic.messages.create({
+    model: IMPORT_MODEL_ID,
+    max_tokens: 800,
+    messages: [{ role: 'user', content: buildExtractionPrompt(text, url) }],
+  });
+  const raw = msg.content.map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new ImportInputError('Could not parse a job from this content'); }
+
+  if (!parsed.title || !parsed.company) {
+    throw new ImportInputError('Could not extract a job title/company from this content');
+  }
+
+  return normalizeJob({
+    id:              crypto.randomUUID(),
+    req_id:          null, // no genuine per-posting identifier available — fingerprint-only dedup
+    title:           parsed.title,
+    company:         parsed.company,
+    location:        parsed.location || null,
+    url:             url || `import:${crypto.randomUUID()}`,
+    source:          'import',
+    description:     parsed.description || text.slice(0, 3000) || null,
+    salary_min:      typeof parsed.salaryMin === 'number' ? parsed.salaryMin : null,
+    salary_max:      typeof parsed.salaryMax === 'number' ? parsed.salaryMax : null,
+    salary_currency: parsed.salaryCurrency || null,
+    remote:          typeof parsed.remote === 'boolean' ? parsed.remote : null,
+    posted_at:       parsed.postedAt || null,
+  });
+}
+
+/**
+ * @param {{url?: string, text?: string, html?: string}} input
+ * @param {{db: import('better-sqlite3').Database, anthropic: import('@anthropic-ai/sdk').default|null}} ctx
+ */
+async function importJob({ url, text, html } = {}, { db, anthropic }) {
+  if (!url && !text && !html) {
+    throw new ImportInputError('Provide at least one of url, text, or html');
+  }
+
+  const providedText = text || (html ? stripResumeHtml(html) : null);
+
+  // Login-walled with nothing else to work with → ask the client to capture it instead.
+  // If text/html WAS also provided (the extension's own capture, or a manual paste alongside
+  // the link), that's exactly the fallback this message describes — use it, don't refuse.
+  if (url && isLoginWalled(url) && !providedText) {
+    return {
+      needsClientCapture: true,
+      reason: 'login_walled',
+      message: 'Open this job and capture it with the Resume Master extension, or paste the job text.',
+    };
+  }
+
+  let normalizedJob = null;
+
+  if (url && !isLoginWalled(url)) {
+    const match = detectKnownAtsMatch(url);
+    if (match) {
+      try {
+        normalizedJob = await fetchKnownAtsJob(db, match, url);
+      } catch (err) {
+        console.warn(`[importJob] Known-ATS reuse failed for ${match.type}: ${err.message}`);
+      }
+    }
+  }
+
+  if (!normalizedJob && providedText) {
+    normalizedJob = await extractJobFromContent(anthropic, { url: url || null, text: providedText });
+  } else if (!normalizedJob && url && !isLoginWalled(url)) {
+    const fetchedText = await fetchGenericPosting(url);
+    normalizedJob = await extractJobFromContent(anthropic, { url, text: fetchedText });
+  }
+
+  if (!normalizedJob) {
+    throw new ImportInputError('Could not extract a job from the given input');
+  }
+
+  // Informational tagging only — never gates. Every OTHER write path (cacheJobs, cacheJoboFeed)
+  // ejects blue-collar / drops unclassifiable postings; an explicit user import must never
+  // silently vanish (approved decision), so classifyJob() here only feeds bucket_role/collar.
+  const verdict = classifyJob(
+    normalizedJob.title || '', normalizedJob.description || '', normalizedJob.company || ''
+  );
+
+  const jobForDedup = { ...normalizedJob, company_icon_url: normalizedJob.thumbnail || null };
+  const dedup = reconcileFingerprint(db, jobForDedup);
+
+  let finalJobId;
+  if (dedup.action === 'insert_canonical') {
+    const canonical = dedup.job;
+    const now = Math.floor(Date.now() / 1000);
+    upsertCanonicalJob(db, {
+      jobId: normalizedJob.id,
+      canonical, verdict, dedup, now,
+      contentHash: fingerprintJob(canonical),
+      searchQuery: 'import',
+      sourceLabel: SOURCE_LABELS[canonical.source] || SOURCE_LABELS.import,
+      matchedBy: canonical.source === 'import' ? 'import_extract' : 'import_ats_reuse',
+    });
+    finalJobId = normalizedJob.id;
+  } else {
+    finalJobId = dedup.intoJobId; // folded into an existing (equal-or-higher priority) row
+  }
+
+  setImmediate(() => {
+    runEnrichment(db, anthropic).catch(e => console.warn('[importJob] Background enrichment failed:', e.message));
+  });
+
+  const row = db.prepare('SELECT * FROM scraped_jobs WHERE job_id = ?').get(finalJobId);
+  return { job: mapJobRow(row) };
+}
+
+export {
+  importJob, ImportInputError, detectKnownAtsMatch, isLoginWalled,
+  isPrivateOrLoopbackIp, findMatchingPosting,
+};
