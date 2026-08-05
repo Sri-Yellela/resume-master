@@ -1,9 +1,9 @@
 ﻿{
   "manifest_version": 3,
   "name": "Resume Master",
-  "version": "1.1.0",
-  "description": "Send job descriptions to Resume Master for ATS scoring. Quick access to your resume builder.",
-  "permissions": ["activeTab", "scripting"],
+  "version": "1.2.0",
+  "description": "Capture the job you're viewing into Resume Master, score it against your resume, or send it for ATS scoring.",
+  "permissions": ["activeTab", "scripting", "storage"],
   "privacy_policy_url": "https://resumemaster.one/privacy",
   "host_permissions": [
     "https://resumemaster.one/*",
@@ -26,6 +26,16 @@
       "128": "icons/icon128.png"
     }
   },
+  "options_page": "options.html",
+  "commands": {
+    "capture-job": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "Capture the current job into Resume Master"
+    }
+  },
   "content_scripts": [
     {
       "matches": [
@@ -36,15 +46,7 @@
         "https://boards.greenhouse.io/*/*",
         "https://*.workable.com/j/*"
       ],
-      "js": ["config.js", "linkedin-content.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://www.linkedin.com/my-items/saved-jobs*",
-        "https://www.linkedin.com/my-items/*"
-      ],
-      "js": ["saved-jobs-content.js"],
+      "js": ["config.js", "shortcutUtils.js", "linkedin-content.js"],
       "run_at": "document_idle"
     }
   ],
