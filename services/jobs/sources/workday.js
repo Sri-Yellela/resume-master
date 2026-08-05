@@ -122,3 +122,7 @@ const workdayPlugin = {
 };
 
 export default workdayPlugin;
+// Named exports for services/jobs/importJob.js's single-URL reuse of this source's already-
+// working fetch+normalize (see importJob.js's fetchKnownAtsJob, which resolves the tenant/wd#/
+// site slug via company_ats_list before calling this) — no change to the above.
+export { fetchCompanyJobs, normalizeWorkdayJob, parseSlug };

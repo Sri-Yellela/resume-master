@@ -19,6 +19,9 @@ import workdayPlugin   from './sources/workday.js';
 import smartrecruitersPlugin from './sources/smartrecruiters.js';
 import workablePlugin  from './sources/workable.js';
 import recruiteePlugin from './sources/recruitee.js';
+// Jobo is a feed-sync source, not a per-query search plugin — it is intentionally NOT added
+// to SOURCES below. cacheJoboFeed() (bottom of this file) imports it directly.
+import joboSource from './sources/jobo.js';
 // import theMuse   from './sources/themusejobs.js';  // add when ready
 // import usaJobs   from './sources/usajobs.js';      // add when ready
 // import indeed    from './sources/indeed.js';        // add when approved
@@ -45,6 +48,8 @@ export const SOURCE_LABELS = {
   smartrecruiters:    'SmartRecruiters',
   workable:           'Workable',
   recruitee:          'Recruitee',
+  jobo:               'Jobo',
+  import:             'Imported',
   serpapi:            'Google Jobs',
   linkedin_extension: 'LinkedIn (Saved)',
 };
@@ -168,6 +173,134 @@ function getFingerprintStmts(db) {
     fingerprintStmtsCache.set(db, stmts);
   }
   return stmts;
+}
+
+// Per-job upsert/classify statements shared by cacheJobs() (per-company ATS loop) and
+// cacheJoboFeed() (global feed sync) — same WeakMap-per-connection pattern as
+// getFingerprintStmts above, so both callers reuse one prepared set instead of each preparing
+// their own copy of the same SQL.
+const cacheStmtsCache = new WeakMap();
+function getCacheStmts(db) {
+  let stmts = cacheStmtsCache.get(db);
+  if (!stmts) {
+    stmts = {
+      upsertStmt: db.prepare(`
+        INSERT OR REPLACE INTO scraped_jobs
+          (job_id, search_query, _hash, title, company, location, url, source, source_label,
+           posted_at, scraped_at, bucket_role, bucket_seniority, bucket_domain, direct_apply, description,
+           company_icon_url, via, collar, classification_confidence,
+           normalized_title, summary, experience_level, workplace_type, valid_through,
+           salary_min_usd, salary_max_usd, salary_period, skills_json,
+           is_h1b_sponsor, requires_work_auth, is_clearance_required,
+           discovered_at, updated_at, is_active, fingerprint, sources_seen, req_uid)
+        VALUES
+          (@job_id, @search_query, @_hash, @title, @company, @location, @url, @source, @source_label,
+           @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description,
+           @company_icon_url, @via, @collar, @classification_confidence,
+           @normalized_title, @summary, @experience_level, @workplace_type, @valid_through,
+           @salary_min_usd, @salary_max_usd, @salary_period, @skills_json,
+           @is_h1b_sponsor, @requires_work_auth, @is_clearance_required,
+           @discovered_at, @updated_at, 1, @fingerprint, @sources_seen, @req_uid)
+      `),
+      roleMapStmt: db.prepare(`
+        INSERT OR REPLACE INTO job_role_map
+          (job_id, role_key, role_family, domain, confidence, matched_by)
+        VALUES
+          (@job_id, @role_key, @role_family, @domain, @confidence, @matched_by)
+      `),
+      rejectStmt: db.prepare(`
+        INSERT OR REPLACE INTO rejected_jobs (job_id, title, company, source, reason, rejected_at)
+        VALUES (@job_id, @title, @company, @source, @reason, @rejected_at)
+      `),
+      deleteJobStmt:  db.prepare(`DELETE FROM scraped_jobs  WHERE job_id = ?`),
+      deleteRoleStmt: db.prepare(`DELETE FROM job_role_map  WHERE job_id = ?`),
+      // Cheap "seen, unchanged" touch — see cacheJobs' comment on touchSeenStmt below for why
+      // this re-writes fingerprint/sources_seen/req_uid on every crawl even for unchanged rows.
+      touchSeenStmt: db.prepare(`
+        UPDATE scraped_jobs SET updated_at = ?, scraped_at = ?, is_active = 1,
+          fingerprint = ?, sources_seen = ?, req_uid = ?
+        WHERE job_id = ?
+      `),
+      demoteStmt: db.prepare(`UPDATE scraped_jobs SET is_active = 0 WHERE job_id = ?`),
+      getExistingHashes: db.prepare(`SELECT job_id, _hash FROM scraped_jobs WHERE source = ?`),
+    };
+    cacheStmtsCache.set(db, stmts);
+  }
+  return stmts;
+}
+
+// Shared by cacheJobs(), cacheJoboFeed(), and services/jobs/importJob.js — writes one
+// canonical scraped_jobs row + its job_role_map entry. This is ONLY the write; the *gating*
+// decision (whether a null verdict.roleKey or blue-collar verdict should skip the write
+// entirely) stays with each caller, since that's exactly the behavior that differs: crawled
+// sources (cacheJobs/cacheJoboFeed) already filter those out before ever calling this, while
+// an explicit user import (importJob.js) never gates — it can legitimately reach here with
+// verdict.roleKey === null or verdict.collar === 'blue', which is why bucket_role/collar below
+// reflect the verdict as-is instead of assuming "always classified, always white" like the
+// original inline callers could.
+function upsertCanonicalJob(db, {
+  jobId, canonical, verdict, contentHash, searchQuery, sourceLabel, matchedBy, dedup, now,
+}) {
+  const { upsertStmt, roleMapStmt } = getCacheStmts(db);
+
+  upsertStmt.run({
+    job_id:                    jobId,
+    search_query:              searchQuery,
+    _hash:                     contentHash,
+    title:                     canonical.title || '',
+    company:                   canonical.company || '',
+    location:                  canonical.location || '',
+    url:                       canonical.url || '',
+    source:                    canonical.source || '',
+    source_label:              canonical.source_label || sourceLabel || '',
+    posted_at:                 canonical.posted_at || null,
+    scraped_at:                now,
+    bucket_role:               verdict.roleKey ?? null,
+    bucket_seniority:          verdict.seniority || null,
+    bucket_domain:             verdict.domain || null,
+    direct_apply:              canonical.direct_apply === false ? 0 : 1,
+    description:               canonical.description || null,
+    company_icon_url:          canonical.company_icon_url || null,
+    via:                       canonical.via || null,
+    // Always 'white': cacheJobs/cacheJoboFeed already ejected blue-collar verdicts before
+    // ever reaching here, and importJob.js's "never gate" decision means a blue-collar-
+    // classified import should still render like any other board row, not get hidden behind
+    // a collar filter elsewhere — bucket_role/classification_confidence already carry the
+    // real verdict for anyone who needs it.
+    collar:                    'white',
+    classification_confidence: verdict.confidence || 0,
+    normalized_title:          canonical.normalized_title || null,
+    summary:                   canonical.summary         || null,
+    experience_level:          canonical.experience_level || null,
+    workplace_type:            canonical.workplace_type  || null,
+    valid_through:             canonical.valid_through   != null ? canonical.valid_through : null,
+    salary_min_usd:            canonical.salary_min_usd  != null ? canonical.salary_min_usd  : null,
+    salary_max_usd:            canonical.salary_max_usd  != null ? canonical.salary_max_usd  : null,
+    salary_period:             canonical.salary_period   || null,
+    skills_json:               canonical.skills_json     || null,
+    is_h1b_sponsor:            canonical.is_h1b_sponsor  != null ? canonical.is_h1b_sponsor  : null,
+    requires_work_auth:        canonical.requires_work_auth != null ? canonical.requires_work_auth : null,
+    is_clearance_required:     canonical.is_clearance_required != null ? canonical.is_clearance_required : null,
+    discovered_at:             now,
+    updated_at:                now,
+    fingerprint:               dedup.fingerprint,
+    sources_seen:              dedup.sourcesSeen,
+    req_uid:                   dedup.reqUid,
+  });
+
+  // job_role_map.role_key is NOT NULL — an unclassified import (verdict.roleKey === null,
+  // never possible for the crawled-source callers since they already filtered those out
+  // before reaching here) simply gets no role_map row, same as it getting no role tagging.
+  if (verdict.roleKey != null) {
+    roleMapStmt.run({
+      job_id:      jobId,
+      role_key:    verdict.roleKey,
+      role_family: verdict.roleKey,
+      domain:      verdict.domain || null,
+      confidence:  verdict.confidence || 0,
+      matched_by:  matchedBy,
+    });
+  }
 }
 
 // Picks which (if any) of the rows sharing a fingerprint is "the same job" as the incoming
@@ -377,55 +510,18 @@ async function cacheJobs(db, anthropic = null) {
 
     const atsSources = SOURCES.filter(s => s.isConfigured() && ATS_SOURCE_NAMES.has(s.name));
 
-    // ── Prepared statements (reused across all source loops) ─────────────────
-    const upsertStmt = db.prepare(`
-      INSERT OR REPLACE INTO scraped_jobs
-        (job_id, search_query, _hash, title, company, location, url, source, source_label,
-         posted_at, scraped_at, bucket_role, bucket_seniority, bucket_domain, direct_apply, description,
-         company_icon_url, via, collar, classification_confidence,
-         normalized_title, summary, experience_level, workplace_type, valid_through,
-         salary_min_usd, salary_max_usd, salary_period, skills_json,
-         is_h1b_sponsor, requires_work_auth, is_clearance_required,
-         discovered_at, updated_at, is_active, fingerprint, sources_seen, req_uid)
-      VALUES
-        (@job_id, @search_query, @_hash, @title, @company, @location, @url, @source, @source_label,
-         @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description,
-         @company_icon_url, @via, @collar, @classification_confidence,
-         @normalized_title, @summary, @experience_level, @workplace_type, @valid_through,
-         @salary_min_usd, @salary_max_usd, @salary_period, @skills_json,
-         @is_h1b_sponsor, @requires_work_auth, @is_clearance_required,
-         @discovered_at, @updated_at, 1, @fingerprint, @sources_seen, @req_uid)
-    `);
-
-    const roleMapStmt = db.prepare(`
-      INSERT OR REPLACE INTO job_role_map
-        (job_id, role_key, role_family, domain, confidence, matched_by)
-      VALUES
-        (@job_id, @role_key, @role_family, @domain, @confidence, @matched_by)
-    `);
-
-    const rejectStmt = db.prepare(`
-      INSERT OR REPLACE INTO rejected_jobs (job_id, title, company, source, reason, rejected_at)
-      VALUES (@job_id, @title, @company, @source, @reason, @rejected_at)
-    `);
-
-    const deleteJobStmt  = db.prepare(`DELETE FROM scraped_jobs  WHERE job_id = ?`);
-    const deleteRoleStmt = db.prepare(`DELETE FROM job_role_map  WHERE job_id = ?`);
-
-    // Cheap "seen, unchanged" touch — refreshes updated_at (so the stale-prune watermark
-    // logic doesn't mark it absent) and reactivates it if a prior crawl had pruned it,
-    // without re-running classification or rewriting every column. Also (re)writes the
+    // ── Prepared statements (reused across all source loops, and shared with cacheJoboFeed
+    // via getCacheStmts' WeakMap cache — see its definition and comment above) ─────────────
+    // touchSeenStmt: cheap "seen, unchanged" touch — refreshes updated_at (so the stale-prune
+    // watermark logic doesn't mark it absent) and reactivates it if a prior crawl had pruned
+    // it, without re-running classification or rewriting every column. Also (re)writes the
     // fingerprint/sources_seen/req_uid every crawl, so rows created before migration 063/065
     // (or before a cross-source duplicate showed up) self-heal into the dedup system over
     // time instead of sitting on the coarse key forever.
-    const touchSeenStmt = db.prepare(`
-      UPDATE scraped_jobs SET updated_at = ?, scraped_at = ?, is_active = 1,
-        fingerprint = ?, sources_seen = ?, req_uid = ?
-      WHERE job_id = ?
-    `);
-    const demoteStmt = db.prepare(`UPDATE scraped_jobs SET is_active = 0 WHERE job_id = ?`);
-
-    const getExistingHashes = db.prepare(`SELECT job_id, _hash FROM scraped_jobs WHERE source = ?`);
+    const {
+      rejectStmt, deleteJobStmt, deleteRoleStmt,
+      touchSeenStmt, demoteStmt, getExistingHashes,
+    } = getCacheStmts(db);
 
     // Mark rows inactive when their listing date has passed
     const markExpiredByDate = db.prepare(`
@@ -549,54 +645,11 @@ async function cacheJobs(db, anthropic = null) {
           }
           const canonical = dedup.job;
 
-          upsertStmt.run({
-            job_id:                    jobId,
-            search_query:              canonical.source || 'ats',
-            _hash:                     contentHash,
-            title:                     canonical.title || '',
-            company:                   canonical.company || '',
-            location:                  canonical.location || '',
-            url:                       canonical.url || '',
-            source:                    canonical.source || '',
-            source_label:              canonical.source_label || '',
-            posted_at:                 canonical.posted_at || null,
-            scraped_at:                now,
-            bucket_role:               verdict.roleKey,
-            bucket_seniority:          verdict.seniority || null,
-            bucket_domain:             verdict.domain || null,
-            direct_apply:              canonical.direct_apply === false ? 0 : 1,
-            description:               canonical.description || null,
-            company_icon_url:          canonical.company_icon_url || null,
-            via:                       canonical.via || null,
-            collar:                    'white',
-            classification_confidence: verdict.confidence || 0,
-            normalized_title:          canonical.normalized_title || null,
-            summary:                   canonical.summary         || null,
-            experience_level:          canonical.experience_level || null,
-            workplace_type:            canonical.workplace_type  || null,
-            valid_through:             canonical.valid_through   != null ? canonical.valid_through : null,
-            salary_min_usd:            canonical.salary_min_usd  != null ? canonical.salary_min_usd  : null,
-            salary_max_usd:            canonical.salary_max_usd  != null ? canonical.salary_max_usd  : null,
-            salary_period:             canonical.salary_period   || null,
-            skills_json:               canonical.skills_json     || null,
-            is_h1b_sponsor:            canonical.is_h1b_sponsor  != null ? canonical.is_h1b_sponsor  : null,
-            requires_work_auth:        canonical.requires_work_auth != null ? canonical.requires_work_auth : null,
-            is_clearance_required:     canonical.is_clearance_required != null ? canonical.is_clearance_required : null,
-            discovered_at:             now,
-            updated_at:                now,
-            fingerprint:               dedup.fingerprint,
-            sources_seen:              dedup.sourcesSeen,
-            req_uid:                   dedup.reqUid,
-          });
-
-          // Canonical verdict → job_role_map (supersedes old classifyForIngest path)
-          roleMapStmt.run({
-            job_id:      jobId,
-            role_key:    verdict.roleKey,
-            role_family: verdict.roleKey,
-            domain:      verdict.domain || null,
-            confidence:  verdict.confidence || 0,
-            matched_by:  'ats_cache',
+          upsertCanonicalJob(db, {
+            jobId, canonical, verdict, contentHash, dedup, now,
+            searchQuery: canonical.source || 'ats',
+            sourceLabel: '',
+            matchedBy:   'ats_cache',
           });
           cached++;
         }
@@ -670,15 +723,256 @@ async function cacheJobs(db, anthropic = null) {
   }
 }
 
-/**
- * Returns readiness status of all registered sources.
- * Used by integrationReadiness.js and admin panel.
- */
-function getSourceStatus() {
-  return SOURCES.map(source => ({
-    name:       source.name,
-    configured: source.isConfigured(),
-  }));
+const JOBO_SOURCE_NAME             = 'jobo';
+const JOBO_BOUNDED_BACKFILL_BATCH  = 10;   // free quickstart size — the credit-safe default
+const JOBO_FULL_BACKFILL_BATCH     = 1000;
+const JOBO_INCREMENTAL_BATCH       = 1000;
+const JOBO_EXPIRED_BATCH           = 10000;
+const JOBO_MAX_BACKFILL_PAGES      = 500;  // generous cap — see workday.js for the same idea
+const JOBO_MAX_INCREMENTAL_PAGES   = 100;
+
+function isoFromEpoch(sec) {
+  return new Date(sec * 1000).toISOString();
 }
 
-export { searchJobs, cacheJobs, getSourceStatus, reconcileFingerprint };
+// Pure decision logic for cacheJoboFeed's backfill branch — extracted so the cost-guard
+// behavior (bounded default vs opt-in full stable_scan, and resuming an in-progress full
+// backfill regardless of the CURRENT env value) is unit-testable without a real db/network.
+// An in-progress full backfill (cursor already saved) always resumes as 'full', even if
+// JOBO_FULL_BACKFILL isn't set on this particular run — finishing what was already started
+// and paid for beats silently reverting to a bounded page.
+function decideJoboBackfillMode({ cursor, fullBackfillEnv }) {
+  if (cursor) return { mode: 'full', resumeCursor: cursor };
+  if (fullBackfillEnv === '1') return { mode: 'full', resumeCursor: null };
+  return { mode: 'bounded' };
+}
+
+/**
+ * Syncs Jobo's whole-catalogue feed into scraped_jobs. Unlike cacheJobs()'s per-company ATS
+ * loop, Jobo has no company scoping — it's driven entirely by sync_state('jobo'):
+ *   - last_watermark IS NULL → backfill not done yet. Bounded by default (one
+ *     JOBO_BOUNDED_BACKFILL_BATCH page, no paging) — set JOBO_FULL_BACKFILL=1 to run the
+ *     unbounded stable_scan instead (consumes Jobo wallet credits; a warning is logged before
+ *     it starts). Either way, once backfill finishes, last_watermark is set and Jobo stays in
+ *     incremental mode permanently — JOBO_FULL_BACKFILL only matters on this first run. `cursor`
+ *     persists an in-progress FULL backfill's next_cursor after every page so a crash resumes
+ *     instead of restarting; a crashed BOUNDED backfill just retries the same single page.
+ *   - last_watermark set → incremental mode: page updated_after from that watermark, then page
+ *     /api/jobs/expired from the SAME (pre-run) watermark and is_active=0 the matched local
+ *     rows. The next watermark is captured as `now` BEFORE any network call and is only
+ *     persisted after BOTH steps succeed — same "advance only on full success" rule Task 2's
+ *     ATS sync uses. A failed page anywhere logs and returns without advancing anything, so the
+ *     next run retries the same window (idempotent — re-upserting an unchanged row is a no-op
+ *     via the same content-hash touch path cacheJobs uses).
+ * Every job goes through the SAME normalize → classify → reconcileFingerprint → upsert path as
+ * the ATS sources (via getCacheStmts(db), shared with cacheJobs above), so cross-source dedup,
+ * req_uid identity, and blue-collar ejection all apply identically. sourcePriority() in this
+ * file already defaults an unlisted source name (jobo isn't in DIRECT_ATS_SOURCES or
+ * AGGREGATOR_SOURCES) to tier 2 — below direct ATS, above aggregators — with no code change.
+ * @param {import('better-sqlite3').Database} db
+ * @param {import('@anthropic-ai/sdk').default | null} [anthropic] optional — same background
+ *   enrichment hook cacheJobs() uses; enrichJob.js's own in-progress guard makes it safe to
+ *   fire from both in the same cron tick.
+ */
+async function cacheJoboFeed(db, anthropic = null) {
+  if (!joboSource.isConfigured()) {
+    console.log('[cacheJoboFeed] JOBO_API_KEY not set — skipping');
+    return 0;
+  }
+
+  const {
+    rejectStmt, deleteJobStmt, deleteRoleStmt,
+    touchSeenStmt, demoteStmt, getExistingHashes,
+  } = getCacheStmts(db);
+
+  const getSyncState = db.prepare('SELECT cursor, last_watermark FROM sync_state WHERE source = ?');
+  const upsertSyncState = db.prepare(`
+    INSERT INTO sync_state (source, cursor, last_watermark, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(source) DO UPDATE SET
+      cursor         = excluded.cursor,
+      last_watermark = excluded.last_watermark,
+      updated_at     = excluded.updated_at
+  `);
+  // source='jobo' guard: only a row still canonically owned by Jobo can be expired here — a
+  // Jobo duplicate that lost the dedup fold to an ATS/import row never had a row of its own,
+  // so there's nothing for this statement to touch for it (Task-8 requirement 3).
+  const expireJoboRow = db.prepare(`
+    UPDATE scraped_jobs SET is_active = 0
+    WHERE job_id = ? AND source = 'jobo' AND is_active = 1
+  `);
+
+  const now   = Math.floor(Date.now() / 1000);
+  const state = getSyncState.get(JOBO_SOURCE_NAME);
+  const existingHashes = new Map(getExistingHashes.all(JOBO_SOURCE_NAME).map(r => [r.job_id, r._hash]));
+
+  let cached = 0, unchanged = 0, ejected = 0, dropped = 0, merged = 0, failed = 0;
+
+  // Classify + dedup + upsert one raw Jobo job — mirrors cacheJobs' per-job inner-loop body.
+  function processJob(rawJob) {
+    let job;
+    try {
+      job = joboSource.normalizeJoboJob(rawJob);
+    } catch (err) {
+      console.warn(`[cacheJoboFeed] Skipping malformed job: ${err.message}`);
+      failed++;
+      return;
+    }
+    const jobId       = job.id;
+    const contentHash = fingerprintJob(job);
+
+    if (existingHashes.get(jobId) === contentHash) {
+      const jobForDedup = { ...job, company_icon_url: job.thumbnail || null };
+      const dedup = reconcileFingerprint(db, jobForDedup);
+      if (dedup.action === 'fold') {
+        demoteStmt.run(jobId);
+        merged++;
+      } else {
+        touchSeenStmt.run(now, now, dedup.fingerprint, dedup.sourcesSeen, dedup.reqUid, jobId);
+        unchanged++;
+      }
+      return;
+    }
+
+    const verdict = classifyJob(job.title || '', job.description || '', job.company || '');
+
+    if (verdict.collar === 'blue') {
+      deleteJobStmt.run(jobId);
+      deleteRoleStmt.run(jobId);
+      rejectStmt.run({
+        job_id: jobId, title: job.title || '', company: job.company || '',
+        source: 'jobo', reason: 'blue_collar', rejected_at: now,
+      });
+      ejected++;
+      return;
+    }
+    if (verdict.roleKey === null) {
+      dropped++;
+      return;
+    }
+
+    const jobForDedup = { ...job, company_icon_url: job.thumbnail || null };
+    const dedup = reconcileFingerprint(db, jobForDedup);
+    if (dedup.action === 'fold') {
+      merged++;
+      return;
+    }
+    const canonical = dedup.job;
+
+    upsertCanonicalJob(db, {
+      jobId, canonical, verdict, contentHash, dedup, now,
+      searchQuery: 'jobo',
+      sourceLabel: SOURCE_LABELS.jobo,
+      matchedBy:   'jobo_feed',
+    });
+    cached++;
+  }
+
+  const runPage = (jobs) => db.transaction(() => jobs.forEach(processJob))();
+
+  try {
+    if (state?.last_watermark == null) {
+      // ── Backfill ────────────────────────────────────────────────────────────
+      const decision = decideJoboBackfillMode({
+        cursor: state?.cursor || null,
+        fullBackfillEnv: process.env.JOBO_FULL_BACKFILL,
+      });
+
+      if (decision.mode === 'bounded') {
+        console.log(`[cacheJoboFeed] Bounded backfill (batch_size=${JOBO_BOUNDED_BACKFILL_BATCH}) — set JOBO_FULL_BACKFILL=1 for the full stable_scan backfill (consumes Jobo credits).`);
+        const page = await joboSource.fetchFeedPage({ batch_size: JOBO_BOUNDED_BACKFILL_BATCH, stable_scan: true });
+        runPage(page.jobs);
+        upsertSyncState.run(JOBO_SOURCE_NAME, null, now, now);
+        console.log(`[cacheJoboFeed] Bounded backfill complete — fetched ${page.jobs.length}, cached ${cached}, merged ${merged}, ejected ${ejected}, dropped ${dropped}, failed ${failed}`);
+      } else {
+        let cursor = decision.resumeCursor;
+        console.warn(cursor
+          ? '[cacheJoboFeed] Resuming in-progress full backfill from saved cursor.'
+          : '[cacheJoboFeed] JOBO_FULL_BACKFILL=1 — running the UNBOUNDED stable_scan backfill. This will consume Jobo wallet credits.');
+        let hasMore = true, pageCount = 0;
+        while (hasMore) {
+          if (++pageCount > JOBO_MAX_BACKFILL_PAGES) {
+            console.warn(`[cacheJoboFeed] Hit backfill page cap (${JOBO_MAX_BACKFILL_PAGES}) — stopping early; cursor is saved, next run resumes.`);
+            break;
+          }
+          const body = cursor ? { cursor } : { batch_size: JOBO_FULL_BACKFILL_BATCH, stable_scan: true };
+          const page = await joboSource.fetchFeedPage(body);
+          runPage(page.jobs);
+          cursor  = page.nextCursor;
+          hasMore = page.hasMore && !!cursor;
+          // Persist progress after every page so a crash (or hitting the page cap) resumes
+          // from here next run instead of restarting the whole backfill.
+          upsertSyncState.run(JOBO_SOURCE_NAME, hasMore ? cursor : null, hasMore ? null : now, now);
+          console.log(`[cacheJoboFeed] Full backfill page ${pageCount}: fetched ${page.jobs.length}, running totals — cached ${cached}, merged ${merged}, ejected ${ejected}, dropped ${dropped}`);
+        }
+        console.log(`[cacheJoboFeed] Full backfill ${hasMore ? 'paused (page cap)' : 'complete'} after ${pageCount} page(s)`);
+      }
+      return cached;
+    }
+
+    // ── Incremental ─────────────────────────────────────────────────────────
+    const watermark = state.last_watermark; // pre-run watermark; `now` above is the next one
+    let cursor = null, hasMore = true, pageCount = 0;
+    while (hasMore) {
+      if (++pageCount > JOBO_MAX_INCREMENTAL_PAGES) {
+        throw new Error(`Hit incremental page cap (${JOBO_MAX_INCREMENTAL_PAGES}) without has_more=false — aborting without advancing watermark`);
+      }
+      const body = cursor
+        ? { cursor }
+        : { batch_size: JOBO_INCREMENTAL_BATCH, updated_after: isoFromEpoch(watermark) };
+      const page = await joboSource.fetchFeedPage(body);
+      runPage(page.jobs);
+      cursor  = page.nextCursor;
+      hasMore = page.hasMore && !!cursor;
+    }
+
+    // ── Expiry — same pre-run watermark, never hard-deletes ─────────────────
+    let expiredCursor = null, expiredHasMore = true, expiredCount = 0, expiredPages = 0;
+    while (expiredHasMore) {
+      if (++expiredPages > JOBO_MAX_INCREMENTAL_PAGES) {
+        throw new Error(`Hit expired-feed page cap (${JOBO_MAX_INCREMENTAL_PAGES}) without has_more=false — aborting without advancing watermark`);
+      }
+      const page = await joboSource.fetchExpiredPage({
+        expiredSince: isoFromEpoch(watermark), batchSize: JOBO_EXPIRED_BATCH, cursor: expiredCursor,
+      });
+      db.transaction(() => {
+        for (const externalId of page.jobIds) {
+          const info = expireJoboRow.run(`jobo::${String(externalId)}`);
+          if (info.changes) expiredCount++;
+        }
+      })();
+      expiredCursor  = page.nextCursor;
+      expiredHasMore = page.hasMore && !!expiredCursor;
+    }
+
+    // Both steps succeeded — advance the watermark now, not before.
+    upsertSyncState.run(JOBO_SOURCE_NAME, null, now, now);
+    console.log(`[cacheJoboFeed] Incremental sync complete — cached ${cached}, unchanged ${unchanged}, merged ${merged}, ejected ${ejected}, dropped ${dropped}, expired ${expiredCount}`);
+
+    setImmediate(() => {
+      runEnrichment(db, anthropic).catch(e => console.warn('[cacheJoboFeed] Background enrichment failed:', e.message));
+    });
+
+    return cached;
+  } catch (err) {
+    console.error('[cacheJoboFeed] Failed — watermark NOT advanced:', err.message);
+    return cached;
+  }
+}
+
+/**
+ * Returns readiness status of all registered sources.
+ * Used by integrationReadiness.js and admin panel. Jobo is appended separately since it isn't
+ * a member of SOURCES (it's a feed sync, not a query-time search plugin — see cacheJoboFeed).
+ */
+function getSourceStatus() {
+  return [
+    ...SOURCES.map(source => ({ name: source.name, configured: source.isConfigured() })),
+    { name: 'jobo', configured: joboSource.isConfigured() },
+  ];
+}
+
+export {
+  searchJobs, cacheJobs, cacheJoboFeed, getSourceStatus, reconcileFingerprint,
+  decideJoboBackfillMode, upsertCanonicalJob, fingerprintJob,
+};

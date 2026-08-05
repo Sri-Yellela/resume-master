@@ -80,3 +80,6 @@ const greenhousePlugin = {
 };
 
 export default greenhousePlugin;
+// Named exports for services/jobs/importJob.js's single-URL reuse of this source's already-
+// working fetch+normalize (see importJob.js's fetchKnownAtsJob) — no change to the above.
+export { fetchCompanyJobs, normalizeGreenhouseJob };

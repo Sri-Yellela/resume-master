@@ -69,8 +69,11 @@ const PROVIDER_META = {
   jobo: {
     label: 'Jobo',
     estimatedMonthlyCostUsd: null,
-    consumerRedistributionAllowed: false,
-    licenseNotes: 'Unverified — confirm Jobo ToS permits displaying results directly to our end users (not just internal sourcing/lead-gen use) before enabling.',
+    // Confirmed 2026-08-05: owner has verified Jobo's ToS permits displaying results directly
+    // to our end users, not just internal sourcing/lead-gen use — enabling for the live
+    // pipeline (services/jobs/sources/jobo.js, Task 8).
+    consumerRedistributionAllowed: true,
+    licenseNotes: 'Owner-confirmed 2026-08-05: Jobo ToS permits displaying results directly to end users.',
   },
 };
 
