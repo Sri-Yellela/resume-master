@@ -47,6 +47,57 @@ function CompanyIcon({ company, iconUrl, size = 44 }) {
   );
 }
 
+// ── FE-1 chips (visa badge, NEW pill, skill chips) — matches JobCard.jsx's styling ──
+function VisaBadge({ isH1bSponsor, requiresWorkAuth }) {
+  if (isH1bSponsor === 1 || isH1bSponsor === true) {
+    return (
+      <span style={{ background:"#dcfce7", color:"#166534", padding:"2px 8px",
+                     borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+        Sponsors H-1B
+      </span>
+    );
+  }
+  if (requiresWorkAuth === 1 || requiresWorkAuth === true) {
+    return (
+      <span style={{ background:"var(--color-surface-offset)", color:"var(--color-text-muted)",
+                     padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+        US work auth req.
+      </span>
+    );
+  }
+  return null;
+}
+
+function isNewJob(discoveredAt) {
+  if (!discoveredAt) return false;
+  const ms = Number(discoveredAt) * 1000;
+  return Number.isFinite(ms) && Date.now() - ms < 24 * 3600 * 1000;
+}
+
+function NewPill() {
+  return (
+    <span style={{ fontSize:9, fontWeight:800, color:"#16a34a", background:"#dcfce733",
+                   padding:"1px 6px", borderRadius:999, whiteSpace:"nowrap", letterSpacing:"0.03em" }}>
+      NEW
+    </span>
+  );
+}
+
+function SkillChips({ skills, max = 5 }) {
+  if (!skills?.length) return null;
+  return (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:5, marginBottom:12 }}>
+      {skills.slice(0, max).map((s, i) => (
+        <span key={i} style={{ fontSize:10, color:"var(--color-text-muted)",
+                                background:"var(--color-surface-offset)", padding:"2px 7px",
+                                borderRadius:4, border:"1px solid var(--border-glass)" }}>
+          {s}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function ActionBtn({ onClick, title, children, accent = "#0284c7", active, disabled = false }) {
   const [hov, setHov] = useState(false);
   return (
@@ -180,6 +231,8 @@ export default function JobDetailPanel() {
                   return (
                     <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:5, marginTop:5 }}>
                       <WorkBadge t={job.workType}/>
+                      {isNewJob(job.discoveredAt) && <NewPill/>}
+                      <VisaBadge isH1bSponsor={job.isH1bSponsor} requiresWorkAuth={job.requiresWorkAuth}/>
                       {job.location && <span style={{ fontSize:10, color:"var(--color-text-faint)" }}>{job.location}</span>}
                       {yoeStr && <span style={{ fontSize:10, color:"var(--color-text-faint)" }}>{yoeStr} exp</span>}
                       {salaryStr && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>}
@@ -334,6 +387,7 @@ export default function JobDetailPanel() {
                   👥 {selectedJob.applicantCount > 200 ? "200+" : selectedJob.applicantCount} applicants
                 </div>
               )}
+              <SkillChips skills={selectedJob.skills}/>
               {selectedJob.description ? (
                 <HighlightedDescription
                   text={selectedJob.description}

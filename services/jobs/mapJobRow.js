@@ -2,6 +2,20 @@
 // results) into the single camelCase shape every job-board client consumes. Extracted out of
 // server.js so routes/importJob.js can return the exact same shape the board already uses,
 // without duplicating the mapping.
+function parseSkillsList(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (!raw) return null;
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return null;
+    // skills_json holds two coexisting shapes (see jobQuery.js's computeSkillsFacet): plain
+    // strings, or { skill, type } objects from enrichJob.js's typed hard/soft extraction.
+    return arr
+      .map(entry => (typeof entry === 'string' ? entry : entry?.skill))
+      .filter(s => typeof s === 'string' && s.trim());
+  } catch { return null; }
+}
+
 function mapJobRow(j) {
   return {
     id:              j.job_id || j.id,
@@ -30,6 +44,18 @@ function mapJobRow(j) {
     starred:         Boolean(j.starred),
     visited:         Boolean(j.visited),
     disliked:        Boolean(j.disliked),
+    // FE-1: Task 1/5 enrichment fields — additive, nullable-safe. null means "no signal yet"
+    // (not-yet-enriched or the posting never stated it) and must render as absent on the
+    // client, never as a false negative (e.g. isH1bSponsor: null is NOT "does not sponsor").
+    isH1bSponsor:        j.is_h1b_sponsor        ?? null,
+    requiresWorkAuth:    j.requires_work_auth    ?? null,
+    isClearanceRequired: j.is_clearance_required ?? null,
+    experienceLevel:     j.experience_level      ?? null,
+    workplaceType:       j.workplace_type        ?? null,
+    skills:              parseSkillsList(j.skills_json ?? j.skills) ?? [],
+    discoveredAt:        j.discovered_at         ?? null,
+    summary:             j.summary               ?? null,
+    validThrough:        j.valid_through         ?? null,
   };
 }
 

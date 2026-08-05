@@ -85,6 +85,7 @@ import {
 } from "./services/jobs/jobQuery.js";
 import { mapJobRow } from "./services/jobs/mapJobRow.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
+import { validateResumeClaims } from "./services/kb/failsafe.js";
 
 console.log("[boot] server module loaded");
 
@@ -6353,6 +6354,13 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   `).get(req.user.id, String(jobId), tool);
   const cachedArtifact = existingVersion || (existing?.apply_mode === mode ? existing : null);
 
+  // Company KB failsafe gate (Task 9.6) — additive only: flags/suggests, never rewrites the
+  // resume, never blocks generation. Never let a validator bug break a real generate response.
+  const kbFindingsFor = (html) => {
+    try { return validateResumeClaims(db, html); }
+    catch (e) { console.warn('[kb-failsafe] validation failed:', e.message); return []; }
+  };
+
   // Limit check only applies to new generation (not cache hits)
   if (!cachedArtifact || forceRegen) {
     const limitCheck = checkLimit(db, req.user.id, "resume_generate");
@@ -6388,6 +6396,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
         tool,
         toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate",
         version: cachedArtifact.version || existingVersion?.version || null,
+        kbFindings: kbFindingsFor(cachedArtifact.html),
       });
     }
     try {
@@ -6419,6 +6428,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
         tool,
         toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate",
         version: cachedArtifact.version || existingVersion?.version || null,
+        kbFindings: kbFindingsFor(cachedArtifact.html),
       });
     } catch {
       return res.json({
@@ -6430,6 +6440,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
         tool,
         toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate",
         version: cachedArtifact.version || existingVersion?.version || null,
+        kbFindings: kbFindingsFor(cachedArtifact.html),
       });
     }
   }
@@ -6442,7 +6453,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
 
   try {
     const result = await coreGenerateResume({ userId: req.user.id, jobId: String(jobId), job, tool, resumeText, employers });
-    res.json({ html: result.html, atsScore: result.atsScore, atsReport: result.atsReport, cached:false, version: result.version, tool, toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate" });
+    res.json({ html: result.html, atsScore: result.atsScore, atsReport: result.atsReport, cached:false, version: result.version, tool, toolLabel: tool === "a_plus_resume" ? "A+ Resume" : "Generate", kbFindings: kbFindingsFor(result.html) });
   } catch(e) { res.status(500).json({ error:e.message }); }
   finally { generationInFlight.delete(inFlightKey); }
 });

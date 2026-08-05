@@ -125,6 +125,9 @@ function buildArtifact(job, data, tool) {
     toolLabel: data.toolLabel || TOOL_LABELS[t],
     version: data.version || null,
     status: "success",
+    // Company KB failsafe gate (Task 9.6) — additive; [] when the backend has nothing to say
+    // (the common case), so SandboxPanel renders nothing extra for most generations.
+    kbFindings: data.kbFindings || [],
   };
 }
 
