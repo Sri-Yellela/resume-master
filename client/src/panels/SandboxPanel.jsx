@@ -28,6 +28,11 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const [saveMsg,     setSaveMsg]     = useState("");
   const [selectedTool, setSelectedTool] = useState(entry?.activeTool || entry?.tool || "generate");
   const [pageCount, setPageCount] = useState(1);
+  // Company KB failsafe gate (Task 9.6) — local-only accept/reject/acknowledge state per
+  // finding index. Purely a display decision; no persistence endpoint in this task (accepting
+  // a suggest_fix does not rewrite the resume text — that's a natural follow-up, not silently
+  // added here).
+  const [findingDecisions, setFindingDecisions] = useState({});
   const variants = entry?.variants || null;
   const variantKeys = variants ? Object.keys(variants) : [];
   const activeEntry = variants?.[selectedTool] || entry;
@@ -47,6 +52,7 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     setDirty(false);
     setExportError("");
     setPageCount(1);
+    setFindingDecisions({});
     currentHtmlRef.current = entry?.html || "";
     frameRefs.current = [];
     frameCleanupRef.current = [];
@@ -305,6 +311,58 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
             <button onClick={onClose}
               style={{ ...btnStyle(), color:"#ef4444", borderColor:"#1f0a0a" }}>✕</button>
           </div>
+
+          {/* Company KB failsafe review strip (Task 9.6) — renders nothing when there are no
+              findings, which is the common case, so most generations look exactly as before. */}
+          {activeEntry?.kbFindings?.length > 0 && (
+            <div style={{
+              background:"var(--color-surface)", borderBottom:`1px solid ${"var(--color-border)"}`,
+              padding:"8px 14px", display:"flex", flexDirection:"column", gap:6, flexShrink:0,
+            }}>
+              <div style={{ fontSize:11, fontWeight:700, color:"var(--color-text-muted)" }}>
+                ⚑ {activeEntry.kbFindings.length} KB finding{activeEntry.kbFindings.length > 1 ? "s" : ""} to review
+              </div>
+              {activeEntry.kbFindings.map((f, i) => {
+                const decision = findingDecisions[i];
+                const isFlag = f.type === "flag";
+                return (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:8, fontSize:11 }}>
+                    <span style={{
+                      padding:"2px 6px", borderRadius:4, fontWeight:700, fontSize:9, flexShrink:0,
+                      background: isFlag ? "#fee2e2" : "#fef9c3",
+                      color: isFlag ? "#991b1b" : "#854d0e",
+                    }}>
+                      {isFlag ? "FLAG" : "SUGGESTION"}
+                    </span>
+                    <span style={{ color:"var(--color-text-muted)", flex:1 }}>
+                      {f.message}
+                      {f.evidence?.length > 0 && (
+                        <span style={{ color:"var(--color-text-faint)" }}> — {f.evidence.join("; ")}</span>
+                      )}
+                    </span>
+                    {!decision && !isFlag && (
+                      <>
+                        <button style={btnStyle()} onClick={() => setFindingDecisions(p => ({ ...p, [i]: "accepted" }))}>
+                          Accept
+                        </button>
+                        <button style={btnStyle()} onClick={() => setFindingDecisions(p => ({ ...p, [i]: "rejected" }))}>
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    {!decision && isFlag && (
+                      <button style={btnStyle()} onClick={() => setFindingDecisions(p => ({ ...p, [i]: "acknowledged" }))}>
+                        Acknowledge
+                      </button>
+                    )}
+                    {decision && (
+                      <span style={{ fontSize:10, color:"var(--color-text-faint)", flexShrink:0 }}>✓ {decision}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {!activeEntry ? (
             <div style={{ flex:1, display:"flex", flexDirection:"column",

@@ -84,6 +84,60 @@ function WorkBadge({ t, theme }) {
   );
 }
 
+// ── Visa/sponsorship badge (FE-1) ────────────────────────────────
+// null must render nothing — null means "no signal," never "does not sponsor."
+function VisaBadge({ isH1bSponsor, requiresWorkAuth }) {
+  if (isH1bSponsor === 1 || isH1bSponsor === true) {
+    return (
+      <span style={{ background:"#dcfce7", color:"#166534", padding:"2px 8px",
+                     borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+        Sponsors H-1B
+      </span>
+    );
+  }
+  if (requiresWorkAuth === 1 || requiresWorkAuth === true) {
+    return (
+      <span style={{ background:"var(--color-surface-offset)", color:"var(--color-text-muted)",
+                     padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+        US work auth req.
+      </span>
+    );
+  }
+  return null;
+}
+
+// ── NEW pill (FE-1) — discoveredAt is unix seconds ───────────────
+function isNewJob(discoveredAt) {
+  if (!discoveredAt) return false;
+  const ms = Number(discoveredAt) * 1000;
+  return Number.isFinite(ms) && Date.now() - ms < 24 * 3600 * 1000;
+}
+
+function NewPill() {
+  return (
+    <span style={{ fontSize:9, fontWeight:800, color:"#16a34a", background:"#dcfce733",
+                   padding:"1px 6px", borderRadius:999, whiteSpace:"nowrap", letterSpacing:"0.03em" }}>
+      NEW
+    </span>
+  );
+}
+
+// ── Skill chips (FE-1) — expanded/detail surfaces only ───────────
+function SkillChips({ skills, max = 5 }) {
+  if (!skills?.length) return null;
+  return (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+      {skills.slice(0, max).map((s, i) => (
+        <span key={i} style={{ fontSize:10, color:"var(--color-text-muted)",
+                                background:"var(--color-surface-offset)", padding:"2px 7px",
+                                borderRadius:4, border:"1px solid var(--border-glass)" }}>
+          {s}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ── ATS badge ───────────────────────────────────────────────────
 function ATSBadge({ score, onClick }) {
   if (score == null) return null;
@@ -480,6 +534,8 @@ export default function JobCard({
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
               <WorkBadge t={job.workType} theme={theme}/>
+              {isNewJob(job.discoveredAt) && <NewPill/>}
+              <VisaBadge isH1bSponsor={job.isH1bSponsor} requiresWorkAuth={job.requiresWorkAuth}/>
               <span style={{ display:"flex", alignItems:"center", gap:4 }}>
                 <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>
               </span>
@@ -619,6 +675,9 @@ export default function JobCard({
           {job.description && (
             <DescriptionText text={job.description} theme={theme} truncate={false}/>
           )}
+
+          {/* Skill chips (FE-1) — expanded surface only, never on the collapsed card */}
+          <SkillChips skills={job.skills}/>
 
           {/* Extra meta row */}
           <div style={{ display:"flex", flexWrap:"wrap", gap:8, alignItems:"center", paddingTop:4 }}>
