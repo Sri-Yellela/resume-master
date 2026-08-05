@@ -14,10 +14,6 @@ function isLinkedInJobPage(url = '') {
   return /linkedin\.com\/jobs\/view\//.test(url);
 }
 
-function isSavedJobsPage(url = '') {
-  return /linkedin\.com\/my-items/.test(url);
-}
-
 function isJobPage(url = '') {
   return (
     isLinkedInJobPage(url) ||
@@ -48,6 +44,20 @@ function showJobPreview(jobData) {
 
 let currentJobData = null;
 
+// A hotkey capture (BYO-2) happens on the page in view, not the popup — there's nothing to
+// show "live" in a popup that wasn't open at that moment. This shows the last result, if any,
+// as a secondary/bonus status line whenever the popup happens to be opened afterward.
+async function showLastCapture() {
+  try {
+    const { lastCapture } = await chrome.storage.local.get('lastCapture');
+    const el = document.getElementById('last-capture');
+    if (!el || !lastCapture) return;
+    el.textContent = (lastCapture.success ? '✓ Captured: ' : '✗ ') + (lastCapture.message || '');
+    el.className = 'result-text ' + (lastCapture.success ? 'success' : 'error');
+    el.style.display = 'block';
+  } catch (_) { /* storage unavailable */ }
+}
+
 async function probeAuth() {
   try {
     const res = await fetch(`${RESUME_MASTER_URL}/api/auth/me`, { credentials: 'include' });
@@ -68,14 +78,10 @@ async function init() {
     return;
   }
 
+  await showLastCapture();
+
   const tab = await getCurrentTab();
   if (!tab?.url) return;
-
-  // Show Import Saved Jobs section only on the saved jobs page
-  const savedSection = document.getElementById('saved-jobs-section');
-  if (savedSection) {
-    savedSection.style.display = isSavedJobsPage(tab.url) ? 'block' : 'none';
-  }
 
   if (isLinkedInJobPage(tab.url) && tab.id) {
     // Query the content script for structured job data
@@ -125,8 +131,6 @@ async function init() {
     } catch (_) {
       setStatus('Job listing detected');
     }
-  } else if (isSavedJobsPage(tab.url)) {
-    setStatus('LinkedIn saved jobs page');
   } else if (/linkedin\.com\/in\//.test(tab.url)) {
     setStatus('LinkedIn profile page');
   }
@@ -195,83 +199,10 @@ document.getElementById('btn-ats').addEventListener('click', async () => {
   }
 });
 
-// ─── Import Saved Jobs handler ─────────────────────────────────────────────
+// ─── Settings (capture shortcut) ───────────────────────────────────────────
 
-document.getElementById('btn-import-saved')?.addEventListener('click', async () => {
-  const btn      = document.getElementById('btn-import-saved');
-  const progress = document.getElementById('import-progress');
-  const fill     = document.getElementById('import-progress-fill');
-  const text     = document.getElementById('import-progress-text');
-  const result   = document.getElementById('import-result');
-
-  btn.disabled     = true;
-  btn.textContent  = 'Scanning saved jobs…';
-  progress.style.display = 'block';
-  result.style.display   = 'none';
-  fill.style.width = '5%';
-  text.textContent = 'Scrolling to load all saved jobs…';
-
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-    const scrapeRes = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_SAVED_JOBS' });
-    if (!scrapeRes.success) throw new Error(scrapeRes.error);
-
-    const jobs = scrapeRes.jobs;
-    fill.style.width = '40%';
-    text.textContent = `Found ${jobs.length} saved jobs. Importing…`;
-
-    if (jobs.length === 0) {
-      throw new Error("No saved jobs found. Make sure you're on linkedin.com/my-items/saved-jobs");
-    }
-
-    const BATCH = 20;
-    let imported = 0;
-    let skipped  = 0;
-
-    for (let i = 0; i < jobs.length; i += BATCH) {
-      const batch = jobs.slice(i, i + BATCH);
-      const pct = 40 + Math.round((i / jobs.length) * 55);
-      fill.style.width = pct + '%';
-      text.textContent = `Importing ${Math.min(i + BATCH, jobs.length)} of ${jobs.length}…`;
-
-      try {
-        const res = await fetch(`${RESUME_MASTER_URL}/api/extension/save-jobs-bulk`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jobs: batch }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          imported += data.imported || 0;
-          skipped  += data.skipped  || 0;
-        } else if (res.status === 401) {
-          throw new Error('Sign in to Resume Master first');
-        }
-      } catch (batchErr) {
-        if (batchErr.message.includes('Sign in')) throw batchErr;
-        console.warn('[RM] Batch failed:', batchErr.message);
-      }
-    }
-
-    fill.style.width = '100%';
-    text.textContent = 'Done!';
-    result.className = 'result-text success';
-    result.textContent = `✓ Imported ${imported} jobs` +
-      (skipped > 0 ? ` (${skipped} already saved)` : '');
-    result.style.display = 'block';
-
-  } catch (e) {
-    result.className = 'result-text error';
-    result.textContent = '✗ ' + (e.message || 'Import failed');
-    result.style.display = 'block';
-    if (text) text.textContent = '';
-  } finally {
-    btn.disabled    = false;
-    btn.textContent = 'Import Saved Jobs from LinkedIn';
-    setTimeout(() => { progress.style.display = 'none'; }, 4000);
-  }
+document.getElementById('btn-settings')?.addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
 });
 
 init();

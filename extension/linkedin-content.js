@@ -279,6 +279,143 @@
     }
   }
 
+  // ─── Single-job capture → /api/import/job (BYO-2) ──────────────────────────
+  // Reuses extractLinkedInJobData() as-is on LinkedIn (proven, untouched); everywhere else
+  // uses this generic extractor, mirroring popup.js's existing non-LinkedIn title-parsing
+  // heuristic and the already site-agnostic extractJobText() (JSON-LD first, then the
+  // per-site EXTRACTORS map above) for description.
+
+  function extractGenericJobData() {
+    const ld = extractJsonLdJobPosting();
+    const ldOrg = ld?.hiringOrganization;
+    const ldLoc = ld?.jobLocation;
+    const ldLocCity = Array.isArray(ldLoc) ? ldLoc[0]?.address?.addressLocality : ldLoc?.address?.addressLocality;
+
+    let title = ld?.title?.trim() || '';
+    let company = (typeof ldOrg === 'string' ? ldOrg : ldOrg?.name)?.trim() || '';
+
+    if (!title) {
+      // Same "Title at Company - Site" heuristic popup.js already uses for these sites.
+      const cleanTitle = document.title
+        .replace(/\s*[-–—|]\s*(Indeed|Glassdoor|Workable|Greenhouse|Lever|Jobs).*$/i, '')
+        .trim();
+      const parts = cleanTitle.split(/\s+(?:at|@)\s+/i);
+      title = parts[0]?.trim() || cleanTitle;
+      if (!company) company = parts[1]?.trim() || '';
+    }
+
+    return {
+      title,
+      company,
+      location:    ldLocCity?.trim() || '',
+      workType:    '',
+      description: extractJobText(),
+      jobUrl:      window.location.href,
+      externalJobId: null,
+      applyUrl:    window.location.href,
+      salary:      null,
+      postedDate:  null,
+      companyLogo: null,
+    };
+  }
+
+  function buildCaptureText(data) {
+    return [
+      data.title       && `Title: ${data.title}`,
+      data.company     && `Company: ${data.company}`,
+      data.location    && `Location: ${data.location}`,
+      data.workType    && `Work Type: ${data.workType}`,
+      data.salary      && `Salary: ${data.salary}`,
+      '',
+      data.description || '',
+    ].filter(v => v !== '' && v !== false).join('\n');
+  }
+
+  function showCaptureToast(message, success) {
+    let toast = document.getElementById('rm-capture-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'rm-capture-toast';
+      Object.assign(toast.style, {
+        position: 'fixed', bottom: '76px', right: '24px',
+        zIndex: '2147483647', color: '#fff',
+        borderRadius: '10px', padding: '10px 16px', fontSize: '13px', fontWeight: '600',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        transition: 'opacity 0.2s ease', opacity: '0',
+      });
+      document.body.appendChild(toast);
+    }
+    toast.style.background = success ? '#437A22' : '#a12c2c';
+    toast.textContent = message;
+    toast.style.opacity = '1';
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 4000);
+  }
+
+  async function captureAndImport() {
+    const isLinkedIn = window.location.hostname.includes('linkedin.com');
+    const data = isLinkedIn ? extractLinkedInJobData() : extractGenericJobData();
+
+    if (!data.title) {
+      showCaptureToast('No job found on this page', false);
+      return;
+    }
+
+    const payload = { url: data.jobUrl || window.location.href, text: buildCaptureText(data) };
+    let resultRecord;
+
+    try {
+      const res = await fetch(`${RESUME_MASTER_URL}/api/import/job`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.status === 401) {
+        showCaptureToast('Sign in to Resume Master first', false);
+        resultRecord = { success: false, message: 'Sign in to Resume Master first', at: Date.now() };
+      } else {
+        const json = await res.json();
+        if (json.needsClientCapture) {
+          showCaptureToast(json.message || 'Could not import this job automatically', false);
+          resultRecord = { success: false, message: json.message, at: Date.now() };
+        } else if (!res.ok) {
+          showCaptureToast(json.error || 'Import failed — try again', false);
+          resultRecord = { success: false, message: json.error, at: Date.now() };
+        } else {
+          const title = json.job?.title || data.title;
+          const company = json.job?.company || data.company;
+          showCaptureToast(`Captured "${title}"${company ? ' @ ' + company : ''}`, true);
+          resultRecord = { success: true, message: `${title}${company ? ' @ ' + company : ''}`, at: Date.now() };
+        }
+      }
+    } catch (e) {
+      showCaptureToast('Network error — try again', false);
+      resultRecord = { success: false, message: e.message, at: Date.now() };
+    }
+
+    try { chrome.storage.local.set({ lastCapture: resultRecord }); } catch (_) { /* storage unavailable */ }
+  }
+
+  // Custom-shortcut override (see shortcutUtils.js). This is page-scoped JS, NOT a real
+  // chrome.commands rebinding — Chrome doesn't let extension code reassign that. The default
+  // Ctrl+Shift+K is handled entirely by background.js's chrome.commands listener instead; this
+  // listener only ever fires for a combo the user explicitly customized in the options page,
+  // so the default never double-fires.
+  document.addEventListener('keydown', async (event) => {
+    if (isModifierOnlyKeyEvent(event)) return;
+    let stored;
+    try { ({ captureShortcut: stored } = await chrome.storage.sync.get('captureShortcut')); }
+    catch (_) { return; }
+    if (!stored) return; // no custom override set — default is handled by chrome.commands
+    if (combosMatch(eventToCombo(event), stored)) {
+      event.preventDefault();
+      captureAndImport();
+    }
+  });
+
   // ─── Floating ATS Score button ──────────────────────────────────────────────
 
   const btn = document.createElement('button');
@@ -325,6 +462,10 @@
     }
     if (message.type === 'SAVE_JOB') {
       saveJob().then(sendResponse);
+      return true; // async
+    }
+    if (message.type === 'CAPTURE_AND_IMPORT') {
+      captureAndImport().then(() => sendResponse({ ok: true }));
       return true; // async
     }
     return false;

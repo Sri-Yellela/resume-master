@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Resume Master — Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 420px; padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #F7F6F2; color: #28251D;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+    .subtitle { font-size: 12px; color: #7A7974; margin-bottom: 18px; line-height: 1.5; }
+    label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+    #shortcut-input {
+      width: 100%; padding: 10px 12px; font-size: 14px; font-weight: 600;
+      border: 1px solid #D4D1CA; border-radius: 8px; background: #fff; color: #28251D;
+      text-align: center; cursor: pointer; outline: none;
+    }
+    #shortcut-input:focus { border-color: #01696F; box-shadow: 0 0 0 2px rgba(1,105,111,0.15); }
+    #shortcut-input.shake { animation: shake 0.4s ease; border-color: #a12c2c; }
+    @keyframes shake {
+      10%, 90% { transform: translateX(-1px); }
+      20%, 80% { transform: translateX(2px); }
+      30%, 50%, 70% { transform: translateX(-4px); }
+      40%, 60% { transform: translateX(4px); }
+    }
+    .hint { font-size: 11px; color: #7A7974; margin-top: 6px; min-height: 14px; }
+    .hint.error { color: #a12c2c; }
+    .btn-row { display: flex; gap: 8px; margin-top: 16px; }
+    .btn {
+      flex: 1 1 auto; padding: 9px 14px; border-radius: 10px; border: none;
+      font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit;
+    }
+    .btn-primary { background: #01696F; color: #fff; }
+    .btn-primary:hover { background: #0C4E54; }
+    .btn-primary:disabled { background: #a9c8ca; cursor: default; }
+    .btn-secondary { background: #F3F0EC; color: #28251D; border: 1px solid #D4D1CA; }
+    .btn-secondary:hover { background: #E6E4DF; }
+    .status { font-size: 12px; color: #437A22; margin-top: 10px; min-height: 16px; }
+    .divider { border: none; border-top: 1px solid #DCD9D5; margin: 18px 0; }
+    .note { font-size: 11px; color: #7A7974; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>Resume Master — Capture Shortcut</h1>
+  <p class="subtitle">
+    Press a key combination to capture the job on the page you're viewing into your
+    Resume Master job pool. The default is Ctrl+Shift+K (⌘+Shift+K on Mac).
+  </p>
+
+  <label for="shortcut-input">Capture shortcut</label>
+  <input id="shortcut-input" type="text" readonly value="Ctrl+Shift+K (default)" tabindex="0">
+  <p class="hint" id="hint"></p>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" id="btn-save" disabled>Save</button>
+    <button class="btn btn-secondary" id="btn-reset">Reset to default</button>
+  </div>
+  <p class="status" id="status"></p>
+
+  <hr class="divider">
+  <p class="note">
+    This custom shortcut only works while a supported job page has focus (LinkedIn, Indeed,
+    Glassdoor, Lever, Greenhouse, Workable). It cannot override browser or OS shortcuts —
+    reserved combinations (Ctrl/Cmd+C, Ctrl/Cmd+T, devtools shortcuts, etc.) are rejected.
+    The default Ctrl+Shift+K binding is managed by Chrome itself and can also be changed at
+    chrome://extensions/shortcuts.
+  </p>
+
+  <script src="shortcutUtils.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
