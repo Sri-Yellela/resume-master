@@ -27,6 +27,9 @@ import { createAdminDbRouter } from "./routes/adminDb.js";
 import { createDomainProfilesRouter } from "./routes/domainProfiles.js";
 import { createImportedJobsRouter } from "./routes/importedJobs.js";
 import { createImportJobRouter } from "./routes/importJob.js";
+import { createCompanyKbRouter } from "./routes/companyKb.js";
+import { runOrgLayerRollup } from "./services/kb/orgLayer.js";
+import { runHiringSignalsRollup } from "./services/jobs/hiringSignals.js";
 import { trackApiCall, trackScrape } from "./services/usageTracker.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
@@ -2224,6 +2227,45 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         CREATE INDEX IF NOT EXISTS idx_scraped_jobs_req_uid ON scraped_jobs(req_uid);
       `,
     },
+    {
+      id: "066_company_org_units",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN org_unit_raw TEXT;
+        CREATE TABLE IF NOT EXISTS company_org_units (
+          company               TEXT    NOT NULL,
+          org_unit              TEXT    NOT NULL,
+          domain                TEXT,
+          stacks_json           TEXT,
+          seniority_json        TEXT,
+          confidence            REAL    NOT NULL DEFAULT 0,
+          corroboration_count   INTEGER NOT NULL DEFAULT 0,
+          status                TEXT    NOT NULL DEFAULT 'proposed',
+          first_seen            INTEGER NOT NULL,
+          last_seen             INTEGER NOT NULL,
+          source_postings_json  TEXT,
+          PRIMARY KEY (company, org_unit)
+        );
+        CREATE INDEX IF NOT EXISTS idx_company_org_units_status ON company_org_units(company, status);
+      `,
+    },
+    {
+      id: "067_company_hiring_signals",
+      sql: `
+        CREATE TABLE IF NOT EXISTS company_hiring_signals (
+          company               TEXT    NOT NULL,
+          window_start          INTEGER NOT NULL,
+          window_end            INTEGER NOT NULL,
+          open_count            INTEGER NOT NULL DEFAULT 0,
+          new_count             INTEGER NOT NULL DEFAULT 0,
+          expired_count         INTEGER NOT NULL DEFAULT 0,
+          domain_breakdown_json TEXT,
+          growth_score          REAL,
+          updated_at            INTEGER NOT NULL,
+          PRIMARY KEY (company, window_end)
+        );
+        CREATE INDEX IF NOT EXISTS idx_company_hiring_signals_company ON company_hiring_signals(company);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -3023,6 +3065,22 @@ cron.schedule("0 4 * * *", async () => {
     console.log('[Cron] Jobo feed sync complete —', joboCount, 'jobs cached');
   } catch(e) {
     console.error('[Cron] Jobo feed sync error:', e.message);
+  }
+  // Company KB rollups (Tasks 9.5/9.7) — reuse this same cron tick, no new scheduler. Both are
+  // read-only aggregations over scraped_jobs/its enrichment columns; org_unit_raw fills in via
+  // runEnrichment's own background pass (fired above, inside cacheJobs/cacheJoboFeed), which can
+  // lag behind same-tick crawls — the org rollup just sees whatever's enriched as of now and
+  // picks up newly-enriched rows on the next day's run (an existing characteristic of the
+  // enrichment pipeline, not something new).
+  try {
+    runOrgLayerRollup(db);
+  } catch(e) {
+    console.error('[Cron] Org layer rollup error:', e.message);
+  }
+  try {
+    runHiringSignalsRollup(db);
+  } catch(e) {
+    console.error('[Cron] Hiring signals rollup error:', e.message);
   }
 }, { timezone: 'America/New_York' });
 console.log('[Cron] Daily ATS cache refresh scheduled: 04:00 ET');
@@ -4507,6 +4565,7 @@ app.get("/api/auth/active-profile", requireAuth, (req, res) => {
 // /api/domain-profiles/generate-chips      â€” AI chip generation
 app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic, emitToUser));
 app.use("/api/import", requireAuth, createImportJobRouter(db, anthropic));
+app.use("/api/company-kb", requireAuth, createCompanyKbRouter(db, requireAdmin));
 app.use("/api/imported-jobs", requireAuth, createImportedJobsRouter(db));
 
 // ─── CHROME EXTENSION — Save job from LinkedIn ───────────────────────────────

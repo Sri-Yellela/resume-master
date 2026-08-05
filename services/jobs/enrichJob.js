@@ -63,7 +63,8 @@ Reply ONLY with valid JSON matching this exact schema. No markdown fences, no ex
   "salaryPeriod": "<one of: annual | hourly | monthly | null>",
   "isH1bSponsor": <true, false, or null — null unless the posting explicitly states its sponsorship policy>,
   "requiresWorkAuth": <true, false, or null — null unless explicitly stated>,
-  "isClearanceRequired": <true, false, or null — null unless explicitly stated>
+  "isClearanceRequired": <true, false, or null — null unless explicitly stated>,
+  "orgUnit": "<the specific sub-team/org this role belongs to, e.g. 'Payments Platform' or 'Fraud ML', ONLY if the title or description explicitly names one — null if it just says the company name or a generic department like 'Engineering'>"
 }`;
 }
 
@@ -109,6 +110,11 @@ async function extractSignals(anthropic, job, { onUsage } = {}) {
     is_h1b_sponsor:        coerceBool(parsed.isH1bSponsor),
     requires_work_auth:    coerceBool(parsed.requiresWorkAuth),
     is_clearance_required: coerceBool(parsed.isClearanceRequired),
+    // Company KB org layer (Task 9.5) — raw per-posting signal only; services/kb/orgLayer.js
+    // does the cross-posting clustering/confidence/promotion. Mined from the SAME posting
+    // text as everything else here (never from a resume/profile), matching this file's own
+    // "never learn from user claims" boundary.
+    org_unit:              typeof parsed.orgUnit === 'string' ? (parsed.orgUnit.trim().slice(0, 120) || null) : null,
     skills,
   };
 }
@@ -189,7 +195,7 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
         salary_min_usd = @salary_min_usd, salary_max_usd = @salary_max_usd,
         salary_period = @salary_period, skills_json = @skills_json,
         is_h1b_sponsor = @is_h1b_sponsor, requires_work_auth = @requires_work_auth,
-        is_clearance_required = @is_clearance_required,
+        is_clearance_required = @is_clearance_required, org_unit_raw = @org_unit_raw,
         content_hash = @content_hash, enriched_at = @enriched_at
       WHERE job_id = @job_id
     `);
@@ -220,6 +226,7 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
           is_h1b_sponsor:        signals.is_h1b_sponsor,
           requires_work_auth:    signals.requires_work_auth,
           is_clearance_required: signals.is_clearance_required,
+          org_unit_raw:          signals.org_unit,
           content_hash:          computeContentHash(row.title, row.description),
           enriched_at:           now,
         });
