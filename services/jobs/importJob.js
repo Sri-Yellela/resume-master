@@ -57,6 +57,11 @@ class ImportInputError extends Error {
 const IMPORT_MODEL_ID = 'claude-haiku-4-5-20251001';
 const LOGIN_WALLED_HOSTS = new Set(['linkedin.com', 'www.linkedin.com']);
 
+// "global-if-fresh": re-importing the exact same URL within this window reuses the existing
+// row as-is instead of re-fetching/re-extracting — reconcileFingerprint already collapses
+// re-imports to one row, but without this it still re-does a fetch (or an LLM call) every time.
+const REIMPORT_FRESHNESS_SECONDS = 24 * 60 * 60;
+
 const ATS_FETCHERS = {
   greenhouse:      fetchGreenhouseJobs,
   lever:           fetchLeverJobs,
@@ -344,6 +349,16 @@ async function extractJobFromContent(anthropic, { url, text }) {
 async function importJob({ url, text, html } = {}, { db, anthropic }) {
   if (!url && !text && !html) {
     throw new ImportInputError('Provide at least one of url, text, or html');
+  }
+
+  if (url) {
+    const existing = db.prepare(
+      'SELECT * FROM scraped_jobs WHERE url = ? ORDER BY updated_at DESC LIMIT 1'
+    ).get(url);
+    const ageSeconds = existing ? Math.floor(Date.now() / 1000) - (existing.updated_at || 0) : Infinity;
+    if (existing && ageSeconds < REIMPORT_FRESHNESS_SECONDS) {
+      return { job: mapJobRow(existing) };
+    }
   }
 
   const providedText = text || (html ? stripResumeHtml(html) : null);
