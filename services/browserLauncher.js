@@ -47,15 +47,21 @@ const WINDOWS_SYSTEM_PATHS = [
  * Returns { path, source } or null when nothing is found.
  */
 export async function resolveBrowserExecutable() {
-  // 1. Operator override — highest priority, no filesystem check required
+  // 1. Operator override — highest priority, but still existence-checked: a stale/typo'd env
+  // var (e.g. pointing at a binary name the container's package manager doesn't actually use)
+  // should fall through to the system-path/bundled search below instead of silently returning
+  // a path that will fail at launch time with no fallback.
   const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.BROWSER_EXECUTABLE_PATH;
   if (envPath) {
-    return {
-      path: envPath,
-      source: process.env.PUPPETEER_EXECUTABLE_PATH
-        ? "env:PUPPETEER_EXECUTABLE_PATH"
-        : "env:BROWSER_EXECUTABLE_PATH",
-    };
+    const source = process.env.PUPPETEER_EXECUTABLE_PATH
+      ? "env:PUPPETEER_EXECUTABLE_PATH"
+      : "env:BROWSER_EXECUTABLE_PATH";
+    try {
+      if (fs.existsSync(envPath)) return { path: envPath, source };
+      console.warn(`[browserLauncher] ${source}=${envPath} does not exist on disk — falling back to system paths`);
+    } catch {
+      console.warn(`[browserLauncher] ${source}=${envPath} could not be checked — falling back to system paths`);
+    }
   }
 
   const isWindows = process.platform === "win32";
