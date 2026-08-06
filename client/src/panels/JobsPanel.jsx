@@ -76,6 +76,10 @@ function buildProfileScrapeRequest(query) {
 }
 
 // â"€â"€ Helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// FE-2: mirrors server.js's own AGE_MAP for the /api/jobs handler's ageFilter — used to derive
+// posted_after client-side from the SAME named interval, without a second UI control.
+const AGE_DAYS_MAP = { "1d": 1, "2d": 2, "3d": 3, "1w": 7, "1m": 30 };
+
 function ago(ts) {
   if (!ts) return "-";
   const d = Date.now() - new Date(ts).getTime();
@@ -318,6 +322,25 @@ const EMP_TYPE_OPTIONS = [
   { value:"part-time",  label:"Part-time" },
 ];
 
+// FE-2: jobQuery.js's work_models dimension (sj.workplace_type — the Task-5 ENRICHMENT column,
+// different from the legacy single-select Work Type above which filters sj.work_type).
+const WORK_MODEL_OPTIONS = [
+  { value:"remote", label:"Remote" },
+  { value:"hybrid", label:"Hybrid" },
+  { value:"onsite", label:"Onsite" },
+];
+
+// FE-2: jobQuery.js's experience_levels dimension (sj.experience_level — the profile-bridge's
+// derived default; an explicit selection here overrides it, per server.js's per-key merge).
+const EXPERIENCE_LEVEL_OPTIONS = [
+  { value:"intern",    label:"Intern" },
+  { value:"entry",     label:"Entry" },
+  { value:"mid",       label:"Mid" },
+  { value:"senior",    label:"Senior" },
+  { value:"lead",      label:"Lead" },
+  { value:"executive", label:"Executive" },
+];
+
 function defaultFilterSnapshot() {
   return {
     roleFilter: "",
@@ -331,6 +354,13 @@ function defaultFilterSnapshot() {
     maxApplicants: "",
     visitedFilter: "",
     ageFilter: "",
+    // FE-2: Task-4 filter vocabulary + the profile-bridge visa preference override.
+    salaryMin: "",
+    salaryMax: "",
+    workModels: [],
+    experienceLevels: [],
+    skillsInclude: [],
+    sponsorFriendly: false,
   };
 }
 
@@ -349,10 +379,28 @@ function FiltersPanel({
   maxApplicants, setMaxApplicants,
   visitedFilter, setVisitedFilter,
   ageFilter, setAgeFilter,
+  salaryMin, setSalaryMin,
+  salaryMax, setSalaryMax,
+  workModels, setWorkModels,
+  experienceLevels, setExperienceLevels,
+  skillsInclude, setSkillsInclude,
+  sponsorFriendly, setSponsorFriendly,
+  facetCounts,
   onReset,
 }) {
   const { theme } = useTheme();
+  const [skillDraft, setSkillDraft] = useState("");
   if (!open) return null;
+
+  // FE-2: opt-in facet counts (services/jobs/jobQuery.js's FACET_DIMENSIONS) — only present
+  // when the panel has fetched them; a control renders with no count suffix until then.
+  const countFor = (dimension, value) => {
+    const rows = facetCounts?.[dimension];
+    if (!rows) return null;
+    const hit = rows.find(r => String(r.value).toLowerCase() === String(value).toLowerCase());
+    return hit ? hit.count : null;
+  };
+  const withCount = (label, count) => (count != null ? `${label} (${count})` : label);
   const selStyle = {
     width:"100%", height:36, padding:"0 10px",
     border:`1px solid ${theme.border}`, borderRadius:4,
@@ -431,10 +479,67 @@ function FiltersPanel({
                     color: active ? theme.accentText : theme.textMuted,
                     transition:"all 0.15s",
                   }}>
-                  {opt.label}
+                  {withCount(opt.label, countFor("employment_type", opt.value))}
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Workplace Type (enriched)</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {WORK_MODEL_OPTIONS.map(opt => {
+              const active = workModels.includes(opt.value);
+              return (
+                <button key={opt.value}
+                  type="button"
+                  onClick={() => setWorkModels(active
+                    ? workModels.filter(v => v !== opt.value)
+                    : [...workModels, opt.value])}
+                  style={{
+                    padding:"5px 12px", borderRadius:999, fontSize:11, fontWeight:600,
+                    cursor:"pointer", border:`1px solid ${active ? theme.accent : theme.border}`,
+                    background: active ? theme.accentMuted : "transparent",
+                    color: active ? theme.accentText : theme.textMuted,
+                    transition:"all 0.15s",
+                  }}>
+                  {withCount(opt.label, countFor("work_model", opt.value))}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
+            Matches enrichment-tagged postings only — broader than "Work Type" above, but
+            coverage may lag for very recently-crawled jobs.
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Experience Level</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {EXPERIENCE_LEVEL_OPTIONS.map(opt => {
+              const active = experienceLevels.includes(opt.value);
+              return (
+                <button key={opt.value}
+                  type="button"
+                  onClick={() => setExperienceLevels(active
+                    ? experienceLevels.filter(v => v !== opt.value)
+                    : [...experienceLevels, opt.value])}
+                  style={{
+                    padding:"5px 12px", borderRadius:999, fontSize:11, fontWeight:600,
+                    cursor:"pointer", border:`1px solid ${active ? theme.accent : theme.border}`,
+                    background: active ? theme.accentMuted : "transparent",
+                    color: active ? theme.accentText : theme.textMuted,
+                    transition:"all 0.15s",
+                  }}>
+                  {withCount(opt.label, countFor("experience_level", opt.value))}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
+            Selecting any level here overrides your profile's derived default for this search.
           </div>
         </div>
 
@@ -503,18 +608,77 @@ function FiltersPanel({
           </div>
         </div>
 
-        {/* Coming soon: Salary range filter */}
-        <div style={{ padding:"10px 12px", background:theme.surfaceHigh, borderRadius:4,
-                      border:`1px dashed ${theme.border}`, opacity:0.7 }}>
-          <div style={{ ...labelStyle, marginBottom:6 }}>Salary Range
-            <span style={{ marginLeft:6, fontSize:9, padding:"1px 6px", borderRadius:999,
-                           background:"#f3f4f6", color:"#9ca3af", border:"1px dashed #d1d5db",
-                           fontWeight:700, letterSpacing:"0.04em" }}>soon</span>
-          </div>
+        <div>
+          <div style={labelStyle}>Salary Range (USD)</div>
           <div style={{ display:"flex", gap:6 }}>
-            <input disabled placeholder="$60k" style={{...selStyle, flex:1, opacity:0.5, cursor:"not-allowed"}}/>
-            <input disabled placeholder="$200k" style={{...selStyle, flex:1, opacity:0.5, cursor:"not-allowed"}}/>
+            <input type="number" min={0} placeholder="$60000"
+              value={salaryMin} onChange={e=>setSalaryMin(e.target.value)}
+              style={{...selStyle, flex:1}}/>
+            <input type="number" min={0} placeholder="$200000"
+              value={salaryMax} onChange={e=>setSalaryMax(e.target.value)}
+              style={{...selStyle, flex:1}}/>
           </div>
+          <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
+            Matches jobs whose posted range overlaps this window — postings with no
+            salary data are excluded once either bound is set.
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Skills (must include)</div>
+          <div style={{ display:"flex", gap:6 }}>
+            <input value={skillDraft} onChange={e=>setSkillDraft(e.target.value)}
+              onKeyDown={e => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                const v = skillDraft.trim();
+                if (v && !skillsInclude.some(s => s.toLowerCase() === v.toLowerCase())) {
+                  setSkillsInclude([...skillsInclude, v]);
+                }
+                setSkillDraft("");
+              }}
+              placeholder="e.g. React, SQL"
+              style={{...selStyle, flex:1}}/>
+            <LucyBtn onClick={() => {
+              const v = skillDraft.trim();
+              if (v && !skillsInclude.some(s => s.toLowerCase() === v.toLowerCase())) {
+                setSkillsInclude([...skillsInclude, v]);
+              }
+              setSkillDraft("");
+            }}>Add</LucyBtn>
+          </div>
+          {skillsInclude.length > 0 && (
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
+              {skillsInclude.map(skill => (
+                <button key={skill} type="button" onClick={() => setSkillsInclude(skillsInclude.filter(s => s !== skill))}
+                  style={{
+                    padding:"4px 10px", borderRadius:999, fontSize:11, fontWeight:600,
+                    cursor:"pointer", border:`1px solid ${theme.accent}`,
+                    background:theme.accentMuted, color:theme.accentText,
+                  }}>
+                  {skill} ×
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <button type="button" onClick={() => setSponsorFriendly(!sponsorFriendly)}
+            style={{
+              display:"flex", alignItems:"center", gap:8, width:"100%",
+              padding:"8px 10px", borderRadius:4, cursor:"pointer",
+              border:`1px solid ${sponsorFriendly ? theme.accent : theme.border}`,
+              background: sponsorFriendly ? theme.accentMuted : "transparent",
+              color: sponsorFriendly ? theme.accentText : theme.text,
+            }}>
+            <span style={{
+              width:16, height:16, borderRadius:3, flexShrink:0,
+              border:`1px solid ${sponsorFriendly ? theme.accent : theme.border}`,
+              background: sponsorFriendly ? theme.accent : "transparent",
+            }}/>
+            <span style={{ fontSize:12, fontWeight:600 }}>Sponsor-friendly only</span>
+          </button>
         </div>
 
         <div style={{ display:"flex", gap:8, paddingTop:8 }}>
@@ -1070,6 +1234,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [maxApplicants, setMaxApplicants] = useState("");
   const [visitedFilter, setVisitedFilter] = useState("");
   const [ageFilter,     setAgeFilter]     = useState("");
+  // FE-2: Task-4 filter vocabulary + the profile-bridge visa preference override.
+  const [salaryMin,      setSalaryMin]      = useState("");
+  const [salaryMax,      setSalaryMax]      = useState("");
+  const [workModels,     setWorkModels]     = useState([]);
+  const [experienceLevels,setExperienceLevels]= useState([]);
+  const [skillsInclude,  setSkillsInclude]  = useState([]);
+  const [sponsorFriendly,setSponsorFriendly]= useState(false);
+  const [facetCounts,    setFacetCounts]    = useState(null);
   const [pendingFilters, setPendingFilters] = useState(defaultFilterSnapshot);
 
   const activeProfileKeyRef = useRef(activeProfileKey);
@@ -1096,19 +1268,24 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     maxApplicants,
     visitedFilter,
     ageFilter,
+    salaryMin,
+    salaryMax,
+    workModels,
+    experienceLevels,
+    skillsInclude,
+    sponsorFriendly,
   }), [
     roleFilter, locationFilter, workType, employmentTypePrefs,
     catFilter, srcFilter, minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter,
+    salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
   ]);
 
   const stageFilter = useCallback((key, value) => {
     setPendingFilters(prev => ({ ...prev, [key]: value }));
   }, []);
 
-  const openFilterPanel = useCallback(() => {
-    setPendingFilters(activeFilterSnapshot());
-    setFiltersOpen(true);
-  }, [activeFilterSnapshot]);
+  // openFilterPanel is defined after buildParams below (it needs to call fetchFacets, which
+  // needs buildParams — both declared further down in this component).
 
   const applyPendingFilters = useCallback(() => {
     const next = { ...defaultFilterSnapshot(), ...pendingFilters };
@@ -1127,6 +1304,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setMaxApplicants(next.maxApplicants || "");
     setVisitedFilter(next.visitedFilter || "");
     setAgeFilter(next.ageFilter || "");
+    setSalaryMin(next.salaryMin || "");
+    setSalaryMax(next.salaryMax || "");
+    setWorkModels(Array.isArray(next.workModels) ? next.workModels : []);
+    setExperienceLevels(Array.isArray(next.experienceLevels) ? next.experienceLevels : []);
+    setSkillsInclude(Array.isArray(next.skillsInclude) ? next.skillsInclude : []);
+    setSponsorFriendly(!!next.sponsorFriendly);
     setFiltersOpen(false);
   }, [pendingFilters]);
 
@@ -1420,9 +1603,50 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     if (ageFilter)            p.set("ageFilter",     ageFilter);
     if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
     if (localSearch.trim())   p.set("localSearch",   localSearch.trim().toLowerCase());
+    // FE-2: Task-4 filter vocabulary (services/jobs/jobQuery.js) — additive, legacy params
+    // above are untouched and remain the override channel.
+    if (salaryMin !== "")        p.set("salary_min_usd", salaryMin);
+    if (salaryMax !== "")        p.set("salary_max_usd", salaryMax);
+    if (workModels.length)       p.set("work_models",    workModels.join(","));
+    if (experienceLevels.length) p.set("experience_levels", experienceLevels.join(","));
+    if (skillsInclude.length)    p.set("skills_include", skillsInclude.join(","));
+    // Sponsor-friendly: ON emits the param the profile-bridge/jobQuery already honor as a
+    // soft, null-preserving filter; OFF emits nothing at all (falls back to whatever the
+    // active profile already derives by default — see services/jobs/profileFilterBridge.js).
+    if (sponsorFriendly)         p.set("sponsorship_friendly", "1");
+    // posted_after: derived from the SAME named-interval the legacy ageFilter already uses —
+    // no new UI control, matching the server's own AGE_MAP (server.js's /api/jobs handler).
+    // Redundant with ageFilter's own inline clause (same date, same source of truth) — both
+    // apply harmlessly; this just also feeds the Task-4 richFilters path.
+    if (ageFilter && AGE_DAYS_MAP[ageFilter]) {
+      const postedAfter = Math.floor(Date.now() / 1000) - AGE_DAYS_MAP[ageFilter] * 86400;
+      p.set("posted_after", String(postedAfter));
+    }
     return p.toString();
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
-      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, localSearch]);
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, localSearch,
+      salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly]);
+
+  // FE-2: opt-in facet counts for the panel currently being edited — requested against the
+  // CURRENTLY-COMMITTED filters (buildParams(1)), not the still-being-staged pendingFilters, so
+  // counts describe "how many jobs match today's board" rather than moving under the user's
+  // cursor. The default board fetchJobs() call never requests this — response shape for the
+  // common case is unchanged, per the task's explicit regression requirement.
+  const fetchFacets = useCallback(async () => {
+    try {
+      const qs = buildParams(1);
+      const data = await api(`/api/jobs?${qs}&include_facets=work_model,experience_level,employment_type,sources`);
+      setFacetCounts(data?.facets || null);
+    } catch {
+      setFacetCounts(null);
+    }
+  }, [buildParams]);
+
+  const openFilterPanel = useCallback(() => {
+    setPendingFilters(activeFilterSnapshot());
+    setFiltersOpen(true);
+    fetchFacets();
+  }, [activeFilterSnapshot, fetchFacets]);
 
   const fetchImportedSummary = useCallback(async () => {
     try {
@@ -2430,6 +2654,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             maxApplicants={pendingFilters.maxApplicants} setMaxApplicants={value => stageFilter("maxApplicants", value)}
             visitedFilter={pendingFilters.visitedFilter} setVisitedFilter={value => stageFilter("visitedFilter", value)}
             ageFilter={pendingFilters.ageFilter}     setAgeFilter={value => stageFilter("ageFilter", value)}
+            salaryMin={pendingFilters.salaryMin}     setSalaryMin={value => stageFilter("salaryMin", value)}
+            salaryMax={pendingFilters.salaryMax}     setSalaryMax={value => stageFilter("salaryMax", value)}
+            workModels={pendingFilters.workModels}   setWorkModels={value => stageFilter("workModels", value)}
+            experienceLevels={pendingFilters.experienceLevels} setExperienceLevels={value => stageFilter("experienceLevels", value)}
+            skillsInclude={pendingFilters.skillsInclude} setSkillsInclude={value => stageFilter("skillsInclude", value)}
+            sponsorFriendly={pendingFilters.sponsorFriendly} setSponsorFriendly={value => stageFilter("sponsorFriendly", value)}
+            facetCounts={facetCounts}
             onReset={resetPendingFilters}
           />
         )}
