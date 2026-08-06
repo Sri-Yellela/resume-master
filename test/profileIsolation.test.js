@@ -1,4 +1,4 @@
-// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
@@ -411,8 +411,9 @@ test("phase6: profileMatcher no longer exports resolveUserRoles or contains SKIL
   assert.match(src, /filterAndRankForProfile/, "filterAndRankForProfile must still exist");
 });
 
-test("phase6: classifier.js (Taxonomy A) has classify() removed", () => {
-  const src = fs.readFileSync("services/jobs/classifier.js", "utf8");
-  assert.doesNotMatch(src, /^export \{ classify \}/m, "classify() must no longer be exported");
-  assert.doesNotMatch(src, /^function classify\(/m, "classify() function must be removed");
+test("phase6: classifier.js (Taxonomy A) is fully deleted, not just emptied", () => {
+  assert.equal(fs.existsSync("services/jobs/classifier.js"), false,
+    "services/jobs/classifier.js must not exist â€” classify() was already removed from it; " +
+    "this asserts the now-inert file itself was deleted too, per its own " +
+    "'safe to delete after confirming no remaining importers' comment");
 });
