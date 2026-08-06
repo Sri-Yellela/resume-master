@@ -1943,4 +1943,10 @@ export const MIGRATIONS = [
         CREATE INDEX IF NOT EXISTS idx_company_hiring_signals_company ON company_hiring_signals(company);
       `,
     },
+    {
+      id: "068_profile_tracked_search",
+      sql: `
+        ALTER TABLE domain_profiles ADD COLUMN tracked_search_json TEXT;
+      `,
+    },
   ];

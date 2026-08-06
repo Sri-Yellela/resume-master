@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // routes/domainProfiles.js — Domain profile CRUD + chip generation
 import { Router }        from "express";
 import Anthropic         from "@anthropic-ai/sdk";
@@ -81,6 +81,7 @@ function parseProfileRow(row) {
     selected_keywords: JSON.parse(row.selected_keywords || "[]"),
     selected_verbs: JSON.parse(row.selected_verbs || "[]"),
     selected_tools: JSON.parse(row.selected_tools || "[]"),
+    tracked_search: row.tracked_search_json ? JSON.parse(row.tracked_search_json) : null,
   };
 }
 
@@ -463,6 +464,39 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
     res.json({
       history: listProfileEnhancementHistory(db, { userId: req.user.id, profileId: profile.id }),
     });
+  });
+
+  // ── GET /api/domain-profiles/:id/tracked-search ───────────────
+  // FE-3: the saved filter param set (buildParams() querystring) attached to this profile.
+  router.get("/:id/tracked-search", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    res.json({
+      trackedSearch: profile.tracked_search_json ? JSON.parse(profile.tracked_search_json) : null,
+    });
+  });
+
+  // ── PUT /api/domain-profiles/:id/tracked-search ───────────────
+  // Save (or clear, when params is null/omitted) this profile's tracked search. Additive —
+  // touches only tracked_search_json, leaving every other profile field untouched.
+  router.put("/:id/tracked-search", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+
+    const params = typeof req.body?.params === "string" ? req.body.params.trim() : "";
+    if (!params) {
+      db.prepare("UPDATE domain_profiles SET tracked_search_json=NULL, updated_at=unixepoch() WHERE id=? AND user_id=?")
+        .run(req.params.id, req.user.id);
+      return res.json({ trackedSearch: null });
+    }
+
+    const name = typeof req.body?.name === "string" ? req.body.name.trim().slice(0, 60) : "";
+    const trackedSearch = { params, name: name || null, savedAt: Math.floor(Date.now() / 1000) };
+    db.prepare("UPDATE domain_profiles SET tracked_search_json=?, updated_at=unixepoch() WHERE id=? AND user_id=?")
+      .run(JSON.stringify(trackedSearch), req.params.id, req.user.id);
+    res.json({ trackedSearch });
   });
 
   // ── GET /api/domain-metadata/:domain ─────────────────────────

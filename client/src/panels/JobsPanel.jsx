@@ -1907,7 +1907,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     fetchJobs(page);
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey,
-      profileSwitchKey, activeProfileKey]); // eslint-disable-line react-hooks/exhaustive-deps
+      profileSwitchKey, activeProfileKey,
+      // FE-2's Task-4 params (salaryMin/Max, workModels, experienceLevels, skillsInclude,
+      // sponsorFriendly) feed the SAME buildParams()/fetchJobs() call as the legacy filters
+      // above — they were missing from this list, so changing ONLY one of them (leaving every
+      // legacy filter untouched) would build the right querystring but never actually refetch.
+      salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setSearchPhase("idle");
@@ -2020,6 +2026,67 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setActiveProfileId?.(profileId);
     setProfileSwitchKey(k => k + 1);
   }, [setActiveProfileId]);
+
+  // FE-3: persist the CURRENTLY-COMMITTED filter set (buildParams(1), same querystring
+  // fetchJobs already sent) as this profile's tracked search — not pendingFilters, so "save"
+  // always captures exactly what's on screen right now.
+  const saveTrackedSearch = useCallback(async () => {
+    if (!activeDomainProfile?.id) return;
+    try {
+      const data = await api(`/api/domain-profiles/${activeDomainProfile.id}/tracked-search`, {
+        method: "PUT",
+        body: JSON.stringify({ params: buildParams(1) }),
+      });
+      setDomainProfiles(prev => prev.map(p =>
+        p.id === activeDomainProfile.id ? { ...p, tracked_search: data.trackedSearch } : p
+      ));
+    } catch(e) {
+      setScrapeError(e.message || "Could not save search.");
+    }
+  }, [activeDomainProfile, buildParams]);
+
+  const clearTrackedSearch = useCallback(async () => {
+    if (!activeDomainProfile?.id) return;
+    try {
+      await api(`/api/domain-profiles/${activeDomainProfile.id}/tracked-search`, {
+        method: "PUT",
+        body: JSON.stringify({ params: null }),
+      });
+      setDomainProfiles(prev => prev.map(p =>
+        p.id === activeDomainProfile.id ? { ...p, tracked_search: null } : p
+      ));
+    } catch(e) {
+      setScrapeError(e.message || "Could not clear saved search.");
+    }
+  }, [activeDomainProfile]);
+
+  // Loads a tracked search's saved querystring back into filter state. The refetch effect
+  // (dependent on all of these) then fires fetchJobs on its own — no direct fetchJobs call here.
+  const applyTrackedSearch = useCallback(() => {
+    const saved = activeDomainProfile?.tracked_search;
+    if (!saved?.params) return;
+    const p = new URLSearchParams(saved.params);
+    setRoleFilter(p.get("role") || "");
+    setLocationFilter(p.get("location") || "");
+    setWorkType(p.get("workType") || "");
+    setEmploymentTypePrefs(p.get("employmentType") ? p.get("employmentType").split(",") : ["full-time"]);
+    setCatFilter(p.get("category") || "");
+    setSrcFilter(p.get("source") || "");
+    setMinYoe(p.get("minYoe") || "");
+    setMaxYoe(p.get("maxYoe") || "");
+    setMaxApplicants(p.get("maxApplicants") || "");
+    setVisitedFilter(p.get("visited") || "");
+    setAgeFilter(p.get("ageFilter") || "");
+    setLocalSearch(p.get("localSearch") || "");
+    if (p.get("sort")) setSortBy(p.get("sort"));
+    setSalaryMin(p.get("salary_min_usd") || "");
+    setSalaryMax(p.get("salary_max_usd") || "");
+    setWorkModels(p.get("work_models") ? p.get("work_models").split(",") : []);
+    setExperienceLevels(p.get("experience_levels") ? p.get("experience_levels").split(",") : []);
+    setSkillsInclude(p.get("skills_include") ? p.get("skills_include").split(",") : []);
+    setSponsorFriendly(p.get("sponsorship_friendly") === "1");
+    setCurrentPage(1);
+  }, [activeDomainProfile]);
 
   const askSearchIntent = useCallback((prompt) => new Promise(resolve => {
     searchIntentResolveRef.current = resolve;
@@ -2711,6 +2778,73 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           }}>
           Filters
         </button>
+
+        {/* FE-3: "New in 24h" — reuses ageFilter (buildParams already derives posted_after
+            from it; server.js's legacy ageSql AND jobQuery.js's richFilters both key off the
+            same value), so this is a pure UI toggle with no new query path. */}
+        <button
+          onClick={() => setAgeFilter(ageFilter === "1d" ? "" : "1d")}
+          title="Show only jobs posted in the last 24 hours"
+          style={{
+            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
+            background: ageFilter === "1d" ? theme.accent : theme.surface,
+            border: `2px solid ${theme.borderStrong}`,
+            borderRadius:2, padding:"6px 16px",
+            fontFamily:"'Barlow Condensed',sans-serif",
+            fontWeight:800, fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
+            cursor:"pointer", color: ageFilter === "1d" ? "#0f0f0f" : theme.text,
+            transition:"background 0.15s",
+          }}>
+          New in 24h
+        </button>
+
+        {/* FE-3: tracked search — save the profile's current committed filter set, or
+            apply/clear whatever's already saved for the active profile. */}
+        <button
+          onClick={saveTrackedSearch}
+          disabled={!activeDomainProfile}
+          title="Save this filter set to the active profile"
+          style={{
+            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
+            background: theme.surface,
+            border: `1px solid ${theme.border}`,
+            borderRadius:2, padding:"6px 14px",
+            fontFamily:"'DM Sans',system-ui",
+            fontWeight:700, fontSize:12,
+            cursor: activeDomainProfile ? "pointer" : "not-allowed",
+            color: activeDomainProfile ? theme.text : theme.textDim,
+            opacity: activeDomainProfile ? 1 : 0.5,
+          }}>
+          Save Search
+        </button>
+        {activeDomainProfile?.tracked_search && (
+          <div style={{ display:"inline-flex", alignItems:"center", gap:4, flexShrink:0 }}>
+            <button
+              onClick={applyTrackedSearch}
+              title={activeDomainProfile.tracked_search.name || "Apply saved search"}
+              style={{
+                display:"inline-flex", alignItems:"center", gap:6,
+                background: theme.accentMuted || theme.surface,
+                border: `1px solid ${theme.accent}`,
+                borderRadius: 999, padding:"5px 12px",
+                fontFamily:"'DM Sans',system-ui",
+                fontWeight:700, fontSize:11,
+                cursor:"pointer", color: theme.accentText || theme.text,
+              }}>
+              {activeDomainProfile.tracked_search.name || "Saved Search"}
+            </button>
+            <button
+              onClick={clearTrackedSearch}
+              title="Remove saved search"
+              style={{
+                width:22, height:22, borderRadius:"50%", border:`1px solid ${theme.border}`,
+                background:"transparent", color:theme.textMuted, cursor:"pointer",
+                fontSize:12, lineHeight:1, flexShrink:0,
+              }}>
+              x
+            </button>
+          </div>
+        )}
 
         {/* Sort */}
         <select value={sortBy} onChange={e => setSortBy(e.target.value)}
