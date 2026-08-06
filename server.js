@@ -86,6 +86,7 @@ import {
 import { mapJobRow } from "./services/jobs/mapJobRow.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { validateResumeClaims } from "./services/kb/failsafe.js";
+import { getCompanyProfile } from "./services/kb/companyProfile.js";
 
 console.log("[boot] server module loaded");
 
@@ -4574,6 +4575,13 @@ app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anth
 app.use("/api/import", requireAuth, createImportJobRouter(db, anthropic));
 app.use("/api/company-kb", requireAuth, createCompanyKbRouter(db, requireAdmin));
 app.use("/api/imported-jobs", requireAuth, createImportedJobsRouter(db));
+
+// FE-4 company view — aggregates technographics (Task 5) + org units (9.5) + hiring signals
+// (9.7) into one read-only payload. Same auth tier as /api/company-kb (session only, no admin
+// gate — these are all evidence-labeled reads, not ground truth).
+app.get("/api/company/:company", requireAuth, (req, res) => {
+  res.json(getCompanyProfile(db, req.params.company));
+});
 
 // ─── CHROME EXTENSION — Save job from LinkedIn ───────────────────────────────
 // Allows chrome-extension:// origins (credentialed fetch with session cookie)

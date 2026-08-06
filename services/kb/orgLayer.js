@@ -193,7 +193,24 @@ function confirmOrgUnit(db, company, orgUnit) {
   return info.changes > 0;
 }
 
+// Shared row->camelCase mapper — used by routes/companyKb.js's own org-units read and by
+// services/kb/companyProfile.js's aggregated company view, so both read surfaces agree on shape.
+function mapOrgUnitRow(row) {
+  return {
+    orgUnit:            row.org_unit,
+    domain:             row.domain,
+    stacks:             JSON.parse(row.stacks_json || '[]'),
+    seniority:          JSON.parse(row.seniority_json || '{}'),
+    confidence:         row.confidence,
+    corroborationCount: row.corroboration_count,
+    status:             row.status,
+    firstSeen:          row.first_seen,
+    lastSeen:           row.last_seen,
+    sourcePostings:     JSON.parse(row.source_postings_json || '[]'),
+  };
+}
+
 export {
-  runOrgLayerRollup, confirmOrgUnit, normalizeOrgUnitKey, computeConfidence,
+  runOrgLayerRollup, confirmOrgUnit, normalizeOrgUnitKey, computeConfidence, mapOrgUnitRow,
   PROMOTE_MIN_CORROBORATION, PROMOTE_MIN_CONFIDENCE, N_FULL_CONFIDENCE,
 };

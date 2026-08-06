@@ -6,6 +6,7 @@ import { api } from "../lib/api.js";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { useTheme } from "../styles/theme.jsx";
 import CoverLetterModal from "./CoverLetterModal.jsx";
+import CompanyViewModal from "./CompanyViewModal.jsx";
 
 function ago(postedAt, scrapedAt) {
   let ms = postedAt ? new Date(postedAt).getTime() : NaN;
@@ -140,10 +141,12 @@ export default function JobDetailPanel() {
   const [applyResult, setApplyResult] = useState(null);
   const [semiActive, setSemiActive] = useState(false);
   const [showCoverLetter, setShowCoverLetter] = useState(false);
+  const [showCompanyView, setShowCompanyView] = useState(false);
 
   // Reset apply state when job changes
   useEffect(() => {
     setApplyLoading(false); setApplyResult(null); setSemiActive(false); setShowCoverLetter(false);
+    setShowCompanyView(false);
   }, [selectedJob?.jobId]);
 
   const handleAutoApply = useCallback(async (mode = "semi") => {
@@ -202,7 +205,8 @@ export default function JobDetailPanel() {
             }}>
               <CompanyIcon company={selectedJob.company} iconUrl={selectedJob.companyIconUrl}/>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontWeight:700, fontSize:14, color:"var(--color-text)",
+                <div onClick={() => setShowCompanyView(true)} title={`View ${selectedJob.company}'s KB profile`}
+                  style={{ fontWeight:700, fontSize:14, color:"var(--color-text)", cursor:"pointer",
                               overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                   {selectedJob.company}
                 </div>
@@ -326,6 +330,11 @@ export default function JobDetailPanel() {
                 </div>
               );
             })()}
+
+            {/* Company view (FE-4) */}
+            {showCompanyView && (
+              <CompanyViewModal company={selectedJob.company} onClose={() => setShowCompanyView(false)} />
+            )}
 
             {/* Cover Letter modal */}
             {showCoverLetter && (

@@ -1,21 +1,6 @@
 import { Router } from "express";
-import { confirmOrgUnit } from "../services/kb/orgLayer.js";
+import { confirmOrgUnit, mapOrgUnitRow } from "../services/kb/orgLayer.js";
 import { getHiringSignals } from "../services/jobs/hiringSignals.js";
-
-function mapOrgUnitRow(row) {
-  return {
-    orgUnit:            row.org_unit,
-    domain:             row.domain,
-    stacks:             JSON.parse(row.stacks_json || '[]'),
-    seniority:          JSON.parse(row.seniority_json || '{}'),
-    confidence:         row.confidence,
-    corroborationCount: row.corroboration_count,
-    status:             row.status,
-    firstSeen:          row.first_seen,
-    lastSeen:           row.last_seen,
-    sourcePostings:     JSON.parse(row.source_postings_json || '[]'),
-  };
-}
 
 // Read surface for the two Company KB layers (Task 9.5 org units, Task 9.7 hiring signals).
 // No UI in either task — API only, FE later. `requireAdmin` is passed in from server.js's

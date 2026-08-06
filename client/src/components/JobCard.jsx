@@ -2,6 +2,7 @@
 // client/src/components/JobCard.jsx — shared expandable job card
 import { useState, useEffect } from "react";
 import { useTheme } from "../styles/theme.jsx";
+import CompanyViewModal from "./CompanyViewModal.jsx";
 
 // ── Helpers ─────────────────────────────────────────────────────
 // Compute elapsed time since posting.
@@ -279,6 +280,7 @@ export default function JobCard({
 
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [showCompanyView, setShowCompanyView] = useState(false);
 
   // Local star/dislike state — used when onStar/onDislike callbacks are not provided
   // (e.g. when rendered from LandingPage without a parent managing state)
@@ -513,7 +515,9 @@ export default function JobCard({
           {/* Center info */}
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:3 }}>
-              <span style={{ fontWeight:700, fontSize:14, color:"var(--color-text)",
+              <span onClick={e => { e.stopPropagation(); setShowCompanyView(true); }}
+                title={`View ${job.company}'s KB profile`}
+                style={{ fontWeight:700, fontSize:14, color:"var(--color-text)", cursor:"pointer",
                               overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                 {job.company}
               </span>
@@ -758,6 +762,9 @@ export default function JobCard({
             </div>
           )}
         </div>
+      )}
+      {showCompanyView && (
+        <CompanyViewModal company={job.company} onClose={() => setShowCompanyView(false)} />
       )}
     </div>
   );
