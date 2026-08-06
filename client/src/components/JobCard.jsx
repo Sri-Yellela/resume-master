@@ -1,6 +1,7 @@
 ﻿// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/JobCard.jsx — shared expandable job card
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTheme } from "../styles/theme.jsx";
 import CompanyViewModal from "./CompanyViewModal.jsx";
 
@@ -167,17 +168,6 @@ function DescriptionText({ text, theme, truncate = true, maxChars = 1200 }) {
   );
 }
 
-// ── Coming-soon pill ────────────────────────────────────────────
-function ComingSoon({ label }) {
-  return (
-    <span style={{ fontSize:9, padding:"1px 6px", borderRadius:999, fontWeight:700,
-                   background:"#f3f4f6", color:"#9ca3af", border:"1px dashed #d1d5db",
-                   whiteSpace:"nowrap", letterSpacing:"0.04em" }}>
-      {label} · soon
-    </span>
-  );
-}
-
 // ── Icon button ─────────────────────────────────────────────────
 function IconBtn({
   bg,
@@ -277,6 +267,7 @@ export default function JobCard({
 }) {
   const { theme: ctxTheme } = useTheme();
   const theme = themeProp ?? ctxTheme;
+  const navigate = useNavigate();
 
   const [hov,      setHov]      = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -747,6 +738,9 @@ export default function JobCard({
             </div>
           )}
 
+          {/* FE-6: was a "Recruiter (coming soon)" stub implying auto-contact/LinkedIn
+              reach-out — replaced with a real link into the Recruiter KB-reference +
+              consistency-check surface (companies/roles only, no outreach or scraping). */}
           {!isLoggedOut && (
             <div style={{
               borderTop: "1px dashed var(--border-glass)",
@@ -757,8 +751,15 @@ export default function JobCard({
                               textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Recruiter
               </span>
-              <ComingSoon label="auto-contact"/>
-              <ComingSoon label="LinkedIn reach-out"/>
+              <button
+                onClick={e => { e.stopPropagation(); navigate(`/app/recruiter?company=${encodeURIComponent(job.company)}`); }}
+                title={`Open ${job.company}'s KB reference in Recruiter view`}
+                style={{ fontSize:10, padding:"1px 8px", borderRadius:999, fontWeight:700,
+                         background:"var(--color-surface-offset)", color:"var(--color-primary-text)",
+                         border:"1px solid var(--color-primary)", cursor:"pointer",
+                         whiteSpace:"nowrap", letterSpacing:"0.04em" }}>
+                View company KB →
+              </button>
             </div>
           )}
         </div>

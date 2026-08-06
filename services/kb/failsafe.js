@@ -190,7 +190,32 @@ function validateResumeClaims(db, html) {
   return findings;
 }
 
+/**
+ * Recruiter surface (FE-6): does a CANDIDATE'S pasted resume cohere with a specific company's
+ * KB? Reuses validateResumeClaims as-is — same extraction, same comparison, same
+ * flag-vs-suggest_fix routing — just scoped to one company and framed as advisory (never a
+ * verdict on the person; the KB is public company structure, not a background check).
+ * Stateless: takes resumeText as a plain argument and returns a plain result — nothing is
+ * persisted, no table is written, the text lives only for the duration of this call.
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} company
+ * @param {string} resumeText
+ */
+function checkCandidateConsistency(db, company, resumeText) {
+  const findings = validateResumeClaims(db, resumeText).filter(f => f.company === company);
+
+  let mentionsCompany = false;
+  try {
+    const structure = buildStructuredResume(resumeText);
+    const entries = structure.sections?.find(s => s.title === 'EXPERIENCE')?.entries || [];
+    mentionsCompany = entries.some(e => (e.company || '').trim().toLowerCase() === company.toLowerCase());
+  } catch { /* malformed input — treat as no mention, findings (already []) still returned */ }
+
+  const status = !mentionsCompany ? 'no_claim' : findings.length ? 'flagged' : 'consistent';
+  return { company, status, findings };
+}
+
 export {
-  validateResumeClaims, extractTeamClaim, extractStackClaim,
+  validateResumeClaims, checkCandidateConsistency, extractTeamClaim, extractStackClaim,
   jaccardOverlap, levenshteinSimilarity, similarity,
 };

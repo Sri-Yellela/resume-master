@@ -85,7 +85,7 @@ import {
 } from "./services/jobs/jobQuery.js";
 import { mapJobRow } from "./services/jobs/mapJobRow.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
-import { validateResumeClaims } from "./services/kb/failsafe.js";
+import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
 
 console.log("[boot] server module loaded");
@@ -4581,6 +4581,18 @@ app.use("/api/imported-jobs", requireAuth, createImportedJobsRouter(db));
 // gate — these are all evidence-labeled reads, not ground truth).
 app.get("/api/company/:company", requireAuth, (req, res) => {
   res.json(getCompanyProfile(db, req.params.company));
+});
+
+// FE-6 recruiter surface — candidate-claim consistency check. Reuses the 9.6 failsafe
+// validator; advisory only (consistent / flagged / no_claim + evidence), never a verdict on
+// the person. Stateless: resumeText is read from the request body and never persisted —
+// no INSERT anywhere in this path.
+app.post("/api/company/:company/consistency-check", requireAuth, (req, res) => {
+  const { resumeText } = req.body || {};
+  if (!resumeText || typeof resumeText !== "string") {
+    return res.status(400).json({ error: "resumeText is required" });
+  }
+  res.json(checkCandidateConsistency(db, req.params.company, resumeText));
 });
 
 // ─── CHROME EXTENSION — Save job from LinkedIn ───────────────────────────────
