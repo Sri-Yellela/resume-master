@@ -5069,9 +5069,25 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
 
     const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE is_active = 1").get()?.n || 0;
     if (cacheCount > 0) {
-      const orderBy = sort === 'atsScore'      ? 'sj.ats_score DESC, sj.scraped_at DESC'
-                    : sort === 'applicantCount' ? 'sj.applicant_count ASC, sj.scraped_at DESC'
-                    :                            'sj.scraped_at DESC';
+      // "compHigh"/"compLow" ("Pay high to low"/"Pay low to high") are existing options in
+      // JobsPanel's sort <select> (client already sends sort=compHigh/compLow via
+      // buildParams) that this ternary never had a case for — they silently fell through to
+      // the recency default, so picking "Pay high to low" did nothing. This is that fix, not
+      // a new feature. Sorts by the same salary_min/salary_max columns the client displays
+      // (mapJobRow's salaryMin/salaryMax) rather than the enrichment-only
+      // salary_min_usd/salary_max_usd — sorting by a field the UI doesn't show would look
+      // broken whenever they disagree, and the *_usd columns depend on enrichment having run
+      // (Task 5's LLM pass), which isn't guaranteed for every row. Caveat carried over from
+      // the source columns themselves: unnormalized currency, so a listing quoted in a weaker
+      // currency can rank above a stronger one at the same face value — a real cross-currency
+      // fix belongs on salary_min_usd/salary_max_usd once enrichment coverage is reliable
+      // enough to sort by, not invented here. NULL salaries always sort last in both
+      // directions rather than being treated as zero.
+      const orderBy = sort === 'atsScore'       ? 'sj.ats_score DESC, sj.scraped_at DESC'
+                    : sort === 'applicantCount'  ? 'sj.applicant_count ASC, sj.scraped_at DESC'
+                    : sort === 'compHigh'        ? '(sj.salary_max IS NULL) ASC, sj.salary_max DESC, sj.scraped_at DESC'
+                    : sort === 'compLow'         ? '(sj.salary_min IS NULL) ASC, sj.salary_min ASC, sj.scraped_at DESC'
+                    :                             'sj.scraped_at DESC';
       const offset  = (pg - 1) * ps;
 
       const joinClause = `
