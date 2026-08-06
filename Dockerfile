@@ -4,6 +4,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget ca-certificates gnupg \
+    python3 make g++ \
     chromium \
     libnspr4 \
     libnss3 \
