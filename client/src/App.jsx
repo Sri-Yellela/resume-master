@@ -18,6 +18,7 @@ import { JobProfilesPanel }      from "./panels/JobProfilesPanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
 import { PlansPanel }            from "./panels/PlansPanel.jsx";
 import { IntegrationsPanel }     from "./panels/IntegrationsPanel.jsx";
+import { RecruiterPanel }        from "./panels/RecruiterPanel.jsx";
 import { JobsConsole }            from "./consoles/PlanConsoles.jsx";
 import JobDetailPanel            from "./components/JobDetailPanel.jsx";
 import UnifiedSearchBar          from "./components/UnifiedSearchBar.jsx";
@@ -96,6 +97,7 @@ function AppDashboard({ authUser, setAuthUser }) {
     { id: "console",      label: "Jobs" },
     { id: "job-profiles", label: "Job Profiles" },
     { id: "database",     label: "Database" },
+    { id: "recruiter",    label: "Recruiter" },
   ];
 
   const handleLogout = useCallback(async () => {
@@ -110,7 +112,7 @@ function AppDashboard({ authUser, setAuthUser }) {
       navigate(consolePath);
       return;
     }
-    if (["database","plans","profile","job-profiles","integrations"].includes(tab)) {
+    if (["database","plans","profile","job-profiles","integrations","recruiter"].includes(tab)) {
       navigate(`/app/${tab}`);
     }
   }, [activeTab, consolePath, navigate]);
@@ -133,7 +135,7 @@ function AppDashboard({ authUser, setAuthUser }) {
       navigate(consolePath, { replace:true });
       return;
     }
-    if (routeKey !== CONSOLE_ROUTE && !["database","plans","profile","job-profiles","integrations"].includes(routeKey)) {
+    if (routeKey !== CONSOLE_ROUTE && !["database","plans","profile","job-profiles","integrations","recruiter"].includes(routeKey)) {
       navigate(consolePath, { replace:true });
     }
   }, [routeKey, consolePath, navigate]);
@@ -216,6 +218,7 @@ function AppDashboard({ authUser, setAuthUser }) {
             {activeTab === "plans"        && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
             {activeTab === "profile"      && <ProfilePanel user={authUser} onOpenJobProfiles={() => handlePanelChange("job-profiles")}/>}
             {activeTab === "job-profiles" && <JobProfilesPanel/>}
+            {activeTab === "recruiter"    && <RecruiterPanel/>}
           </main>
 
           <JobDetailPanel/>
