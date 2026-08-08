@@ -105,6 +105,14 @@ npm run dev
 
 ## Deployment — Railway (recommended, simplest)
 
+> **Builder: Docker.** Confirmed via Railway dashboard (Settings → Build → Builder) on
+> 2026-08-08. The repo also carried a `nixpacks.toml` from an earlier, unrelated experiment
+> (never installed the `chromium` package itself, only runtime libraries, and set no
+> `PUPPETEER_EXECUTABLE_PATH`) — it was deleted since Railway isn't using it and it wasn't
+> referenced anywhere else in the repo. If Nixpacks is ever reintroduced as the builder,
+> `nixpacks.toml` needs a `chromium` (or `chromium-browser`) apt package added, not just the
+> runtime libraries — see `Dockerfile` for the full dependency list that actually works.
+
 ### 1. Push to GitHub
 
 ```bash
