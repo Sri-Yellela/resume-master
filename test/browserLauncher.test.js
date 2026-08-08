@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -85,6 +85,22 @@ test("probeBrowserAvailability distinguishes all failure modes", () => {
   assert.match(launcher, /browser_binary_not_found/);
   assert.match(launcher, /browser_runtime_missing_dependency/);
   assert.match(launcher, /browser_launch_failed/);
+});
+
+test("launchBrowser uses resolveBrowserExecutable's validated path, not a raw env re-read", () => {
+  // Regression guard: launchBrowser previously did
+  //   executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || resolution.path
+  // which discards resolveBrowserExecutable's existsSync-validated fallback whenever the env
+  // var is SET but points at a path that doesn't exist — probeBrowserAvailability (which
+  // correctly uses resolution.path only) would report healthy via the fallback while real
+  // launches kept failing on the stale env path.
+  const fnStart = launcher.indexOf("export async function launchBrowser");
+  assert.ok(fnStart > 0, "launchBrowser function must exist");
+  const fnEnd = launcher.indexOf("\nexport async function launchBrowserPage");
+  const fn    = launcher.slice(fnStart, fnEnd > fnStart ? fnEnd : fnStart + 3000);
+  assert.match(fn, /executablePath:\s*resolution\.path/, "launchBrowser must pass resolution.path to puppeteer.launch");
+  assert.doesNotMatch(fn, /executablePath:\s*process\.env\.PUPPETEER_EXECUTABLE_PATH/,
+    "launchBrowser must not re-read the raw env var, bypassing resolution's existsSync check");
 });
 
 // ── Integration with apply automation ────────────────────────────────────────

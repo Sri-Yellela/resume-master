@@ -243,7 +243,7 @@ export async function launchBrowser({ headless = "new", mode = "auto", viewport 
   try {
     return await puppeteer.launch({
       args,
-      executablePath:  process.env.PUPPETEER_EXECUTABLE_PATH || resolution.path,
+      executablePath:  resolution.path,
       defaultViewport: defaultVp,
       headless,
     });
