@@ -8,7 +8,6 @@ const automation = fs.readFileSync("services/applyAutomation.js",   "utf8");
 const server     = fs.readFileSync("server.js",                      "utf8");
 const account    = fs.readFileSync("routes/account.js",              "utf8");
 const applyRoute = fs.readFileSync("routes/apply.js",                "utf8");
-const nixpacks   = fs.readFileSync("nixpacks.toml",                  "utf8");
 
 // ── Resolution strategy ───────────────────────────────────────────────────────
 
@@ -160,17 +159,33 @@ test("manual apply route returns HTTP 503 for browser failures instead of 500", 
 });
 
 // ── Deployment config ─────────────────────────────────────────────────────────
+// Railway's actual builder for this service is Docker (confirmed via dashboard);
+// nixpacks.toml was a leftover from an unrelated earlier experiment (never installed the
+// chromium package itself, only runtime libraries) and has been deleted. These checks moved
+// from nixpacks.toml to the Dockerfile, which is what actually builds the deployed image.
 
-test("nixpacks.toml includes libnspr4 — the library that caused the crash", () => {
-  assert.match(nixpacks, /libnspr4/, "libnspr4 must be present — caused 'cannot open shared object file'");
+const dockerfile = fs.readFileSync("Dockerfile", "utf8");
+
+test("nixpacks.toml has been removed (Docker is the confirmed Railway builder)", () => {
+  assert.equal(fs.existsSync("nixpacks.toml"), false,
+    "nixpacks.toml must not exist — it never installed the chromium package itself " +
+    "(only runtime libraries) and Docker is the real builder for this service");
 });
 
-test("nixpacks.toml includes other commonly missing Chromium dependencies", () => {
-  assert.match(nixpacks, /libdbus-1-3/);
-  assert.match(nixpacks, /libexpat1/);
-  assert.match(nixpacks, /libfontconfig1/);
-  assert.match(nixpacks, /libxi6/);
-  assert.match(nixpacks, /libxcursor1/);
-  assert.match(nixpacks, /libxtst6/);
-  assert.match(nixpacks, /libx11-xcb1/);
+test("Dockerfile installs chromium and libnspr4 — the library that caused the crash", () => {
+  assert.match(dockerfile, /\bchromium\b/, "chromium package itself must be installed");
+  assert.match(dockerfile, /libnspr4/, "libnspr4 must be present — caused 'cannot open shared object file'");
+});
+
+test("Dockerfile installs other commonly missing Chromium dependencies", () => {
+  assert.match(dockerfile, /libdbus-1-3/);
+  assert.match(dockerfile, /libexpat1/);
+  assert.match(dockerfile, /libfontconfig1/);
+  assert.match(dockerfile, /libxi6/);
+  assert.match(dockerfile, /libxtst6/);
+  assert.match(dockerfile, /libx11-xcb1/);
+});
+
+test("Dockerfile sets PUPPETEER_EXECUTABLE_PATH matching the chromium package's install path", () => {
+  assert.match(dockerfile, /PUPPETEER_EXECUTABLE_PATH=\/usr\/bin\/chromium\b/);
 });
