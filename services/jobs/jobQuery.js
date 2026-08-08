@@ -172,9 +172,18 @@ function buildJobFilters(params = {}) {
     args.push(discoveredAfter);
   }
 
+  // Soft-null, matching sponsorship_friendly below: skills_json is populated gradually by
+  // enrichJob.js's background LLM pass, so most/all rows can be null at any given time (in
+  // production, 0 of 178 active engineering-role rows had it set when this was diagnosed —
+  // enrichment lagging entirely, not a rare edge case). Without the `skills_json IS NULL`
+  // escape, this was a HARD requirement with no fallback: any profile with skills in its
+  // simple_apply_profile (the common case) got this filter derived by default via
+  // profileFilterBridge.js, silently zeroing the entire board for that user. A row must never
+  // be hidden purely because we haven't enriched it yet — only excluded on an explicit
+  // mismatch once it has been.
   const skillsInclude = toArray(params.skills_include);
   if (skillsInclude.length) {
-    clauses.push(`(${skillsInclude.map(() => 'sj.skills_json LIKE ?').join(' OR ')})`);
+    clauses.push(`(sj.skills_json IS NULL OR (${skillsInclude.map(() => 'sj.skills_json LIKE ?').join(' OR ')}))`);
     skillsInclude.forEach(s => args.push(`%"${s}"%`));
   }
   const skillsExclude = toArray(params.skills_exclude);
