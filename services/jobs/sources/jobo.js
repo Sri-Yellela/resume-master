@@ -73,6 +73,30 @@ function pick(job, ...keys) {
   return null;
 }
 
+// Jobo's real response nests company under an object ({ id, name, website, ... }) rather than
+// a plain string — confirmed via scripts/joboSyncSmokeTest.js against a live response, where
+// this previously round-tripped as the literal string "[object Object]" (schema.js's
+// normalizeJob does `String(company)`, which is correct for every OTHER source's plain-string
+// company — jobo.js is the one source shaped differently upstream).
+function pickCompanyName(job) {
+  const c = pick(job, 'company', 'company_name', 'employer');
+  if (c && typeof c === 'object') return c.name || null;
+  return c;
+}
+
+// Same story for location: Jobo returns a `locations` ARRAY of objects ({ location, city,
+// region, country, ... }), not a flat `location`/`city` string — pick(job, 'location', 'city')
+// always missed it and fell through to normalizeJob's 'Location not specified' default even
+// when a real location was present in the response.
+function pickLocation(job) {
+  const locs = Array.isArray(job.locations) ? job.locations : null;
+  if (locs && locs.length) {
+    const l = locs[0];
+    return l.location || [l.city, l.region, l.country].filter(Boolean).join(', ') || null;
+  }
+  return pick(job, 'location', 'city');
+}
+
 function normalizeJoboJob(job) {
   const id = pick(job, 'id', 'job_id', 'external_id');
   const remoteFlag = pick(job, 'is_remote', 'remote');
@@ -82,8 +106,8 @@ function normalizeJoboJob(job) {
     id,
     req_id:      id != null ? String(id) : null,
     title:       pick(job, 'title', 'job_title'),
-    company:     pick(job, 'company', 'company_name', 'employer'),
-    location:    pick(job, 'location', 'city'),
+    company:     pickCompanyName(job),
+    location:    pickLocation(job),
     url:         pick(job, 'url', 'application_url', 'apply_url', 'listing_url'),
     source:      'jobo',
     description: pick(job, 'description', 'description_text'),
@@ -101,7 +125,7 @@ function normalizeJoboJob(job) {
     })(),
     skills: Array.isArray(job.skills) ? job.skills : (Array.isArray(job.tags) ? job.tags : null),
     is_h1b_sponsor:        pick(job, 'h1b_sponsor', 'is_h1b_sponsor'),
-    requires_work_auth:    pick(job, 'requires_work_auth'),
+    requires_work_auth:    pick(job, 'is_work_auth_required', 'requires_work_auth'),
     is_clearance_required: pick(job, 'is_clearance_required'),
     _raw: job,
   });
