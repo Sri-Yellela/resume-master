@@ -43,6 +43,39 @@ test("normalizeJoboJob throws when a required field is missing under every guess
   assert.throws(() => normalizeJoboJob(raw), /required/);
 });
 
+// Regression: confirmed against a live /api/jobs/feed response via scripts/joboSyncSmokeTest.js
+// — Jobo's real shape nests company under an object and location under a `locations` array,
+// not the flat strings the original pick(...) guesses assumed. Before this fix, company
+// round-tripped as the literal string "[object Object]" (schema.js's normalizeJob does
+// String(company)) and location fell through to normalizeJob's 'Location not specified'
+// default despite a real location being present in the response.
+test("normalizeJoboJob extracts company.name and locations[0] from Jobo's real (nested) shape", () => {
+  const raw = {
+    id: "req-real-shape",
+    title: "Staff Engineer",
+    company: { id: "co-1", name: "Real Company Inc", website: "https://real.example" },
+    locations: [{ location: "Austin HQ", city: "Austin", region: "Texas", country: "United States" }],
+    apply_url: "https://jobs.real.example/req-real-shape/application",
+    is_work_auth_required: true,
+  };
+  const job = normalizeJoboJob(raw);
+  assert.equal(job.company, "Real Company Inc", "must extract company.name, not String(company object)");
+  assert.equal(job.location, "Austin HQ", "must extract locations[0].location, not fall through to the default");
+  assert.equal(job.requires_work_auth, 1, "must read is_work_auth_required (Jobo's real key), not a guessed-wrong requires_work_auth");
+});
+
+test("normalizeJoboJob falls back to locations[0]'s city/region/country when no `location` label is given", () => {
+  const raw = {
+    id: "req-no-label",
+    title: "Staff Engineer",
+    company: { name: "Real Company Inc" },
+    locations: [{ city: "Austin", region: "Texas", country: "United States" }],
+    apply_url: "https://jobs.real.example/req-no-label/application",
+  };
+  const job = normalizeJoboJob(raw);
+  assert.equal(job.location, "Austin, Texas, United States");
+});
+
 test("decideJoboBackfillMode defaults to bounded with no saved cursor and no full-backfill env", () => {
   assert.deepEqual(
     decideJoboBackfillMode({ cursor: null, fullBackfillEnv: undefined }),
