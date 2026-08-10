@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { normalizeJob } from '../schema.js';
+import { htmlToText, JOB_DESCRIPTION_MAX_LENGTH } from '../htmlToText.js';
 
 const BASE_URL = 'https://boards-api.greenhouse.io/v1/boards';
 
@@ -30,16 +31,22 @@ function normalizeGreenhouseJob(job, companyName) {
     location:     job.location?.name || 'Remote',
     url:          job.absolute_url,
     source:       'greenhouse',
-    description:  null,
+    // `content` only exists when the board was fetched with ?content=true (see fetchCompanyJobs),
+    // and arrives as entity-encoded HTML — htmlToText handles both the decode and the strip.
+    description:  htmlToText(job.content, { maxLength: JOB_DESCRIPTION_MAX_LENGTH }),
     posted_at:    job.updated_at || null,
     _attribution: ATTRIBUTION,
     _raw:         job,
   });
 }
 
+// content=true is required: without it the board endpoint omits the `content` field entirely,
+// so every row lands with a NULL description and enrichJob.js then reads an empty posting and
+// extracts nothing. It returns descriptions for the whole board in the SAME request, so this
+// costs no extra round-trips — only a larger response body.
 async function fetchCompanyJobs(slug, companyName, words) {
-  const url = `${BASE_URL}/${encodeURIComponent(slug)}/jobs`;
-  const response = await axios.get(url, { timeout: 8000 });
+  const url = `${BASE_URL}/${encodeURIComponent(slug)}/jobs?content=true`;
+  const response = await axios.get(url, { timeout: 15000 });
   const raw = response.data?.jobs || [];
   return raw
     .filter(j => titleMatchesQuery(j.title || '', words))

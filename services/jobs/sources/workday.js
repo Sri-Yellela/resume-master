@@ -46,6 +46,10 @@ function normalizeWorkdayJob(job, companyName, baseUrl) {
     location:    job.locationsText || 'Not specified',
     url:         job.externalPath ? `${baseUrl}${job.externalPath}` : baseUrl,
     source:      'workday',
+    // NOT a deliberate omission: Workday's CXS search response carries no job description, which
+    // needs a per-posting detail fetch (an N+1 against the API). Left unfixed while this source
+    // contributes no board rows — enrichJob.js skips description-less rows, so these land
+    // unenriched rather than silently blanked. See docs/PIPELINE_DIAGNOSIS.md.
     description: null,
     posted_at:   parsePostedOn(job.postedOn),
     contract_type: job.timeType || null,

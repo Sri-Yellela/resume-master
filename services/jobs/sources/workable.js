@@ -26,6 +26,10 @@ function normalizeWorkableJob(job, companyName) {
     location:        job.telecommuting ? 'Remote' : location,
     url:             job.application_url || job.url,
     source:          'workable',
+    // NOT a deliberate omission: Workable's list endpoint has no description field, so getting
+    // one needs a per-posting detail fetch (an N+1 against the API). Left unfixed while this
+    // source contributes no board rows — enrichJob.js skips description-less rows, so these
+    // land unenriched rather than silently blanked. See docs/PIPELINE_DIAGNOSIS.md.
     description:     null,
     posted_at:       job.published_on || job.created_at || null,
     remote:          !!job.telecommuting,

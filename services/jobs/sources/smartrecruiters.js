@@ -44,6 +44,10 @@ function normalizeSmartRecruitersJob(job, companyName) {
     location,
     url,
     source:          'smartrecruiters',
+    // NOT a deliberate omission: the postings list endpoint omits jobAd content, which needs a
+    // per-posting detail fetch (an N+1 against the API). Left unfixed while this source
+    // contributes no board rows — enrichJob.js skips description-less rows, so these land
+    // unenriched rather than silently blanked. See docs/PIPELINE_DIAGNOSIS.md.
     description:     null,
     posted_at:       job.releasedDate || null,
     remote:          !!loc.remote,
