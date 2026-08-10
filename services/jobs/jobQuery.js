@@ -126,9 +126,14 @@ function buildJobFilters(params = {}) {
     args.push(...sources);
   }
 
+  // Soft-null, same class as experience_levels below: workplace_type is enrichJob.js-
+  // populated, so an unenriched row is NULL and a hard IN would drop it. Not bridge-derived
+  // (only set when the user explicitly picks Remote/Hybrid/Onsite), so this can't zero the
+  // whole board by default — but with enrichment lagging it would return 0 results and read
+  // as "no remote jobs exist," which is worse than showing not-yet-classified rows.
   const workModels = toArray(params.work_models);
   if (workModels.length) {
-    clauses.push(`sj.workplace_type IN (${workModels.map(() => '?').join(',')})`);
+    clauses.push(`(sj.workplace_type IS NULL OR sj.workplace_type IN (${workModels.map(() => '?').join(',')}))`);
     args.push(...workModels);
   }
 
@@ -138,9 +143,16 @@ function buildJobFilters(params = {}) {
     args.push(...employmentTypes);
   }
 
+  // Soft-null, same class as skills_include above: experience_level is written by
+  // enrichJob.js's background LLM pass, so an unenriched row has it NULL and
+  // `NULL IN (...)` is NULL -> excluded. This filter is applied BY DEFAULT via
+  // profileFilterBridge (any profile with yearsExperience set), so without this guard a
+  // lagging enrichment queue silently zeroes the board for the common case — the exact
+  // production failure skills_include caused. Widening the bucket one level up (see the
+  // bridge) does NOT help here: widening only moves the IN-list, and NULL matches no list.
   const experienceLevels = toArray(params.experience_levels);
   if (experienceLevels.length) {
-    clauses.push(`sj.experience_level IN (${experienceLevels.map(() => '?').join(',')})`);
+    clauses.push(`(sj.experience_level IS NULL OR sj.experience_level IN (${experienceLevels.map(() => '?').join(',')}))`);
     args.push(...experienceLevels);
   }
 

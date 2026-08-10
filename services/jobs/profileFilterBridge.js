@@ -33,11 +33,13 @@ function bucketYearsExperience(years) {
   return hit ? hit.level : null;
 }
 
-// jobQuery.js's experience_levels filter is a plain hard IN-clause (unmodified — see the
-// Profile→Board Bridge task's design notes on why only the visa filter is required to be
-// null-safe). Widening to the mapped bucket + the next one up softens, without eliminating,
-// how often a borderline/under-enriched row is hidden purely by a DEFAULT the user never
-// explicitly asked for.
+// jobQuery.js's experience_levels filter is now null-safe (sj.experience_level IS NULL OR
+// IN (...)), because enrichment lag is the NORMAL state, not an edge case: a production
+// board went to zero when 0 of 178 active rows had been enriched. The earlier note here
+// claimed only the visa filter needed null-safety — that was wrong, and it applies to every
+// filter over an enrichJob.js-populated column. Widening below is a RELEVANCE nicety (a
+// borderline candidate should see one level up), NOT null protection; it never was, since
+// NULL matches no IN-list however wide.
 function widenOneLevelUp(level) {
   const idx = LEVEL_ORDER.indexOf(level);
   if (idx === -1) return [level];
