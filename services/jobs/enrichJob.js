@@ -11,6 +11,14 @@
  * success — a crash mid-batch just leaves those rows candidates again next run, it never
  * re-charges a row that already completed. Reuses the classifier.js Anthropic-client
  * pattern (client passed in, not constructed here) and its Haiku model.
+ *
+ * ADDITIVE ONLY. Every column is written via COALESCE(@new, existing), because ingestion has
+ * already populated several of these from the source feed and the prompt deliberately tells the
+ * model to answer null when a posting is silent. Combining those two facts with a plain
+ * assignment meant a normal, correct extraction erased good ingestion data — and because the
+ * success path also stamps content_hash, the row left the candidate set for good. Two guards
+ * now bound that: COALESCE (a null can never overwrite) and hasAnySignal (an all-null
+ * extraction is treated as a failure, so the row is not stamped and stays a candidate).
  */
 
 import crypto from 'crypto';
@@ -119,6 +127,21 @@ async function extractSignals(anthropic, job, { onUsage } = {}) {
   };
 }
 
+// An extraction where the model returned null for literally everything carries no information.
+// It is indistinguishable from a parse that went wrong or a posting whose text never made it
+// into the DB, and treating it as success is what poisoned rows before: the UPDATE stamped
+// content_hash/enriched_at, permanently removing the row from the candidate set (the hash only
+// changes if the title/description does) while contributing nothing. Treat it as a failure so
+// the row stays a candidate and gets another chance once its text is present.
+function hasAnySignal(signals) {
+  return Boolean(
+    signals.summary || signals.normalized_title || signals.experience_level ||
+    signals.workplace_type || signals.salary_min_usd != null || signals.salary_max_usd != null ||
+    signals.salary_period || signals.is_h1b_sponsor != null || signals.requires_work_auth != null ||
+    signals.is_clearance_required != null || signals.org_unit || signals.skills.length
+  );
+}
+
 // Exponential decay: weight halves every DECAY_HALFLIFE_DAYS since it was last reinforced.
 function decayedWeight(existingWeight, lastSeenEpoch, nowEpoch) {
   const elapsedDays = Math.max(0, (nowEpoch - lastSeenEpoch) / 86400);
@@ -161,11 +184,11 @@ let enrichmentInProgress = false;
 async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = {}) {
   if (!anthropic) {
     console.log('[enrichJob] No Anthropic client available — skipping enrichment pass');
-    return { enriched: 0, failed: 0, skipped: 0 };
+    return { enriched: 0, failed: 0, empty: 0, skipped: 0 };
   }
   if (enrichmentInProgress) {
     console.log('[enrichJob] Enrichment already running — skipping overlapping invocation');
-    return { enriched: 0, failed: 0, skipped: 0 };
+    return { enriched: 0, failed: 0, empty: 0, skipped: 0 };
   }
   enrichmentInProgress = true;
 
@@ -173,10 +196,15 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
     // Cheap SQL pre-filter (updated_at > enriched_at is a superset of "actually changed" —
     // it also catches rows just re-touched with identical content) before the exact
     // content_hash comparison below, so we don't hash every active row every run.
+    // Rows with no description are excluded here rather than skipped inside the loop: there is
+    // nothing to extract from an empty posting, so calling the model just burns tokens to get
+    // an all-null answer back. Filtering in SQL also stops those rows from consuming batch
+    // slots every run and starving rows that DO have text.
     const rows = db.prepare(`
       SELECT job_id, title, company, description, content_hash
       FROM scraped_jobs
       WHERE is_active = 1
+        AND description IS NOT NULL AND TRIM(description) != ''
         AND (enriched_at IS NULL OR content_hash IS NULL OR updated_at > enriched_at)
       ORDER BY discovered_at DESC
     `).all();
@@ -184,23 +212,35 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
     const candidates = rows.filter(r => computeContentHash(r.title, r.description) !== r.content_hash);
     if (!candidates.length) {
       console.log('[enrichJob] No rows need enrichment');
-      return { enriched: 0, failed: 0, skipped: 0 };
+      return { enriched: 0, failed: 0, empty: 0, skipped: 0 };
     }
 
     const batch = candidates.slice(0, batchSize);
+    // COALESCE(@x, x) throughout: enrichment may only ADD information, never remove it.
+    // Ingestion already populates normalized_title/experience_level/workplace_type/salary from
+    // the source feed, and a plain `col = @col` overwrote those with NULL whenever the model
+    // stayed silent on a field — which the prompt explicitly instructs it to do. The board then
+    // lost data by running its own enrichment. A wrong value can still be corrected on a later
+    // pass (a non-null extraction always wins); only nulls are now non-destructive.
     const updateStmt = db.prepare(`
       UPDATE scraped_jobs SET
-        summary = @summary, normalized_title = @normalized_title,
-        experience_level = @experience_level, workplace_type = @workplace_type,
-        salary_min_usd = @salary_min_usd, salary_max_usd = @salary_max_usd,
-        salary_period = @salary_period, skills_json = @skills_json,
-        is_h1b_sponsor = @is_h1b_sponsor, requires_work_auth = @requires_work_auth,
-        is_clearance_required = @is_clearance_required, org_unit_raw = @org_unit_raw,
+        summary = COALESCE(@summary, summary),
+        normalized_title = COALESCE(@normalized_title, normalized_title),
+        experience_level = COALESCE(@experience_level, experience_level),
+        workplace_type = COALESCE(@workplace_type, workplace_type),
+        salary_min_usd = COALESCE(@salary_min_usd, salary_min_usd),
+        salary_max_usd = COALESCE(@salary_max_usd, salary_max_usd),
+        salary_period = COALESCE(@salary_period, salary_period),
+        skills_json = COALESCE(@skills_json, skills_json),
+        is_h1b_sponsor = COALESCE(@is_h1b_sponsor, is_h1b_sponsor),
+        requires_work_auth = COALESCE(@requires_work_auth, requires_work_auth),
+        is_clearance_required = COALESCE(@is_clearance_required, is_clearance_required),
+        org_unit_raw = COALESCE(@org_unit_raw, org_unit_raw),
         content_hash = @content_hash, enriched_at = @enriched_at
       WHERE job_id = @job_id
     `);
 
-    let enriched = 0, failed = 0;
+    let enriched = 0, failed = 0, empty = 0;
     let totalInputTokens = 0, totalOutputTokens = 0;
 
     for (const row of batch) {
@@ -211,6 +251,13 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
             totalOutputTokens += usage?.output_tokens || 0;
           },
         });
+
+        if (!hasAnySignal(signals)) {
+          empty++;
+          console.warn(`[enrichJob] ${row.job_id}: model returned no signal at all — not marking enriched`);
+          if (ENRICH_DELAY_MS > 0) await new Promise(r => setTimeout(r, ENRICH_DELAY_MS));
+          continue;
+        }
 
         const now = Math.floor(Date.now() / 1000);
         updateStmt.run({
@@ -245,15 +292,20 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
     const estCostUsd = (totalInputTokens / 1_000_000) * EST_INPUT_COST_PER_M
                       + (totalOutputTokens / 1_000_000) * EST_OUTPUT_COST_PER_M;
     console.log(
-      `[enrichJob] Enriched ${enriched}/${batch.length} (${failed} failed), ` +
+      `[enrichJob] Enriched ${enriched}/${batch.length} (${failed} failed, ${empty} no-signal), ` +
       `${candidates.length - batch.length} remaining candidates, ` +
       `${totalInputTokens} in / ${totalOutputTokens} out tokens, ~$${estCostUsd.toFixed(4)} est.`
     );
+    // A pass that extracted nothing from ANY row is a pipeline fault, not a quiet no-op —
+    // most likely descriptions missing upstream. Say so rather than logging a clean-looking 0.
+    if (empty && !enriched) {
+      console.warn(`[enrichJob] WARNING: all ${empty} rows this pass yielded no signal — check that descriptions are being stored`);
+    }
 
-    return { enriched, failed, skipped: candidates.length - batch.length, totalInputTokens, totalOutputTokens };
+    return { enriched, failed, empty, skipped: candidates.length - batch.length, totalInputTokens, totalOutputTokens };
   } finally {
     enrichmentInProgress = false;
   }
 }
 
-export { runEnrichment, computeContentHash, decayedWeight, DECAY_HALFLIFE_DAYS, ENRICH_BATCH_SIZE };
+export { runEnrichment, computeContentHash, decayedWeight, hasAnySignal, DECAY_HALFLIFE_DAYS, ENRICH_BATCH_SIZE };
