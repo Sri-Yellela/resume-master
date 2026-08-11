@@ -1369,7 +1369,13 @@ function QuerySimulatorTab({ theme }) {
             <StatCard label="Jobs in Pool" value={fmt(data.totalJobsInPool)} theme={theme}/>
             <StatCard label="Would Show" value={fmt(data.jobsPassingAllFilters)}
               accent="#16a34a" theme={theme}/>
-            <StatCard label="Session Sync Adds" value={fmt(data.sessionSyncWouldAdd)}
+            {/* "Session Sync Adds" removed with the endpoint's 7-day cutoff — session sync was
+                the pre-pivot per-user pool top-up and no longer exists. Replaced with the
+                profile-derived filter set, which is what actually narrows the board now and is
+                the first thing to check when a user reports a missing job. */}
+            <StatCard label="Derived Filters"
+              value={fmt(Object.keys(data.derivedFilters || {}).length)}
+              sub="from profile signals"
               accent="#7c3aed" theme={theme}/>
             <StatCard label="Filtered Out"
               value={fmt(data.totalJobsInPool - data.jobsPassingAllFilters)}
