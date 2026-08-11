@@ -774,10 +774,24 @@ function decideJoboBackfillMode({ cursor, fullBackfillEnv }) {
  *   enrichment hook cacheJobs() uses; enrichJob.js's own in-progress guard makes it safe to
  *   fire from both in the same cron tick.
  */
+// Shape returned by cacheJoboFeed. `status` exists so a caller can tell "the provider never ran"
+// from "the provider ran and legitimately had nothing to add" — those were indistinguishable
+// when this returned a bare `cached` count, which is how a completely unconfigured provider read
+// as a healthy empty sync for its entire lifetime.
+function joboResult(status, fields = {}) {
+  return {
+    status, mode: null, error: null,
+    fetched: 0, cached: 0, unchanged: 0, merged: 0, ejected: 0, dropped: 0, failed: 0, expired: 0,
+    ...fields,
+  };
+}
+
 async function cacheJoboFeed(db, anthropic = null) {
   if (!joboSource.isConfigured()) {
-    console.log('[cacheJoboFeed] JOBO_API_KEY not set — skipping');
-    return 0;
+    // warn, not log: this is a misconfiguration that silently disables an entire provider, not a
+    // routine skip. Nothing downstream can detect it — no rows appear, no error is raised.
+    console.warn('[cacheJoboFeed] MISCONFIGURED: JOBO_API_KEY is not set — the Jobo provider did NOT run. This is not an empty sync; no jobs were fetched at all.');
+    return joboResult('skipped_unconfigured');
   }
 
   const {
@@ -806,7 +820,7 @@ async function cacheJoboFeed(db, anthropic = null) {
   const state = getSyncState.get(JOBO_SOURCE_NAME);
   const existingHashes = new Map(getExistingHashes.all(JOBO_SOURCE_NAME).map(r => [r.job_id, r._hash]));
 
-  let cached = 0, unchanged = 0, ejected = 0, dropped = 0, merged = 0, failed = 0;
+  let cached = 0, unchanged = 0, ejected = 0, dropped = 0, merged = 0, failed = 0, fetched = 0;
 
   // Classify + dedup + upsert one raw Jobo job — mirrors cacheJobs' per-job inner-loop body.
   function processJob(rawJob) {
@@ -868,7 +882,19 @@ async function cacheJoboFeed(db, anthropic = null) {
     cached++;
   }
 
-  const runPage = (jobs) => db.transaction(() => jobs.forEach(processJob))();
+  const runPage = (jobs) => {
+    fetched += jobs.length;
+    db.transaction(() => jobs.forEach(processJob))();
+  };
+
+  // Fired on every successful path, not just the incremental one — the bounded backfill is the
+  // FIRST run a fresh deployment makes, so skipping enrichment there left the initial batch of
+  // rows unenriched until the next day's tick for no reason.
+  const scheduleEnrichment = () => {
+    setImmediate(() => {
+      runEnrichment(db, anthropic).catch(e => console.warn('[cacheJoboFeed] Background enrichment failed:', e.message));
+    });
+  };
 
   try {
     if (state?.last_watermark == null) {
@@ -907,7 +933,11 @@ async function cacheJoboFeed(db, anthropic = null) {
         }
         console.log(`[cacheJoboFeed] Full backfill ${hasMore ? 'paused (page cap)' : 'complete'} after ${pageCount} page(s)`);
       }
-      return cached;
+      scheduleEnrichment();
+      return joboResult('ok', {
+        mode: decision.mode === 'bounded' ? 'bounded_backfill' : 'full_backfill',
+        fetched, cached, unchanged, merged, ejected, dropped, failed,
+      });
     }
 
     // ── Incremental ─────────────────────────────────────────────────────────
@@ -949,14 +979,18 @@ async function cacheJoboFeed(db, anthropic = null) {
     upsertSyncState.run(JOBO_SOURCE_NAME, null, now, now);
     console.log(`[cacheJoboFeed] Incremental sync complete — cached ${cached}, unchanged ${unchanged}, merged ${merged}, ejected ${ejected}, dropped ${dropped}, expired ${expiredCount}`);
 
-    setImmediate(() => {
-      runEnrichment(db, anthropic).catch(e => console.warn('[cacheJoboFeed] Background enrichment failed:', e.message));
-    });
+    scheduleEnrichment();
 
-    return cached;
+    return joboResult('ok', {
+      mode: 'incremental',
+      fetched, cached, unchanged, merged, ejected, dropped, failed, expired: expiredCount,
+    });
   } catch (err) {
     console.error('[cacheJoboFeed] Failed — watermark NOT advanced:', err.message);
-    return cached;
+    return joboResult('failed', {
+      error: err.message,
+      fetched, cached, unchanged, merged, ejected, dropped, failed,
+    });
   }
 }
 

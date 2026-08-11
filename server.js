@@ -3069,8 +3069,31 @@ cron.schedule("0 4 * * *", async () => {
   // Jobo feed sync — cron-only (never on boot/restart) so it never burns wallet credits just
   // because the server restarted. Runs after the ATS refresh, sequentially, in the same tick.
   try {
-    const joboCount = await cacheJoboFeed(db, ANTHROPIC_KEY ? anthropic : null);
-    console.log('[Cron] Jobo feed sync complete —', joboCount, 'jobs cached');
+    const jobo = await cacheJoboFeed(db, ANTHROPIC_KEY ? anthropic : null);
+    // A provider that never ran must never again read as a healthy empty sync. The old line
+    // logged "complete — 0 jobs cached" for an unconfigured key, a hard failure, and a genuine
+    // no-op alike, which is why Jobo's absence went undetected.
+    if (jobo.status === 'skipped_unconfigured') {
+      console.error('[Cron] Jobo feed sync SKIPPED — JOBO_API_KEY is not set. The provider did NOT run; this is NOT a zero-result sync.');
+    } else if (jobo.status === 'failed') {
+      console.error(`[Cron] Jobo feed sync FAILED (${jobo.error}) — watermark not advanced; ${jobo.cached} cached before the error`);
+    } else {
+      console.log(
+        `[Cron] Jobo feed sync complete (${jobo.mode}) — fetched ${jobo.fetched}, cached ${jobo.cached}, ` +
+        `unchanged ${jobo.unchanged}, merged ${jobo.merged}, ejected ${jobo.ejected}, dropped ${jobo.dropped}, ` +
+        `failed ${jobo.failed}, expired ${jobo.expired}`
+      );
+      // The specific blind spot that hid Jobo's real behaviour: rows CAN be fetched and then all
+      // folded into ATS duplicates or dropped by the classifier, writing nothing. That is a very
+      // different state from "the feed had nothing for us", and both used to print as 0.
+      if (jobo.fetched && !jobo.cached) {
+        console.warn(
+          `[Cron] Jobo returned ${jobo.fetched} jobs but cached NONE — all were merged into existing ` +
+          `rows (${jobo.merged}), dropped as unclassifiable (${jobo.dropped}), ejected as blue-collar ` +
+          `(${jobo.ejected}) or malformed (${jobo.failed}). No source='jobo' rows will exist.`
+        );
+      }
+    }
   } catch(e) {
     console.error('[Cron] Jobo feed sync error:', e.message);
   }
