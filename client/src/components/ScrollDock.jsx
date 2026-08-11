@@ -172,7 +172,12 @@ function MarketingToolsDock({ variant }) {
     height: 56,
     padding: "0 32px",
     justifyContent: "space-between",
-    background: `${theme.surface}f2`,
+    // theme.menuSurface, not `${theme.surface}f2`. theme.surface is the STRING "var(--bg-card)",
+    // so appending a hex alpha produced "var(--bg-card)f2" — invalid CSS, which browsers drop
+    // entirely, leaving this fixed top dock with no background at all over scrolling content.
+    // menuSurface (var(--bg-menu), hsl(... / 0.98)) is the near-opaque floating-surface token
+    // this was reaching for.
+    background: theme.menuSurface || theme.surface,
     backdropFilter: "blur(12px)",
     WebkitBackdropFilter: "blur(12px)",
     borderBottom: `1px solid ${theme.accent}1a`,
@@ -191,7 +196,10 @@ function MarketingToolsDock({ variant }) {
     padding: "0 10px",
     justifyContent: "center",
     gap: 2,
-    background: `${theme.surface}80`,
+    // Same invalid-CSS bug as the top dock above. This pill sits over page content and relies on
+    // its blur, so it keeps a lighter surface than the top bar — but expressed as a real color
+    // rather than an un-appendable var() reference.
+    background: theme.menuSurface || theme.surface,
     backdropFilter: "blur(20px)",
     WebkitBackdropFilter: "blur(20px)",
     border: `1px solid ${theme.border}`,
