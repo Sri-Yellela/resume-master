@@ -1,8 +1,21 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // routes/adminDb.js — DB Inspector API routes for admin diagnostics
 import { Router } from "express";
 import fs from "fs";
 import { classifyTitle } from "../services/jobClassifier.js";
+import { getSourceStatus } from "../services/jobs/aggregator.js";
+
+// A source that hasn't written in this long is treated as stale. Ashby stopped writing on
+// 2026-08-07 and nobody noticed for three days because nothing anywhere asserted freshness.
+const STALE_AFTER_HOURS = 48;
+
+// Columns enrichJob.js is responsible for filling. Coverage across these IS the enrichment
+// health signal: the outage was diagnosed by noticing skills_json was 0% and summary 0%, which
+// no admin surface displayed at the time.
+const ENRICHMENT_COLUMNS = [
+  "description", "summary", "normalized_title", "experience_level", "workplace_type",
+  "skills_json", "salary_max_usd", "is_h1b_sponsor", "requires_work_auth",
+];
 
 export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
   const router = Router();
@@ -45,37 +58,181 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
     return tableNames().includes(table);
   }
 
+  // ── Route 0: Pipeline Health ──────────────────────────────────
+  // Read-only aggregation answering "did the pipeline actually WORK?" rather than "what is in
+  // the table?". The old scrape-monitor answered the latter, which is why it showed 684 rows
+  // "existing and looking fine" while three independent failures ran undetected. Every panel
+  // here maps to a failure from docs/PIPELINE_DIAGNOSIS.md that was invisible at the time.
+  // No writes, no LLM calls.
+  router.get("/pipeline-health", requireAdmin, (req, res) => {
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const staleBefore = now - STALE_AFTER_HOURS * 3600;
+      const hasRunLog = assertReadableTable("pipeline_runs");
+
+      // Per-source row facts. COALESCE because discovered_at is NULL for some sources (adzuna)
+      // — itself a known defect (3.5), so fall back rather than reporting them as never-seen.
+      const rowStats = db.prepare(`
+        SELECT source,
+               COUNT(*)                                            AS total,
+               SUM(is_active = 1)                                  AS active,
+               MAX(COALESCE(discovered_at, scraped_at, updated_at)) AS last_row_at,
+               SUM(CASE WHEN description IS NULL OR TRIM(description) = '' THEN 1 ELSE 0 END) AS no_description,
+               SUM(enriched_at IS NOT NULL)                        AS enriched
+        FROM scraped_jobs
+        GROUP BY source
+      `).all();
+      const rowsBySource = new Map(rowStats.map(r => [r.source, r]));
+
+      const companyCounts = new Map(
+        (assertReadableTable("company_ats_list")
+          ? db.prepare(`SELECT ats_type, COUNT(*) n FROM company_ats_list GROUP BY ats_type`).all()
+          : []
+        ).map(r => [r.ats_type, r.n])
+      );
+
+      // Latest run per source, and the latest SUCCESSFUL one — deliberately separate. A source
+      // failing repeatedly still has a recent "last run"; only last_success proves it worked.
+      const lastRuns = new Map();
+      const lastOk = new Map();
+      if (hasRunLog) {
+        for (const r of db.prepare(`
+          SELECT source, status, started_at, finished_at, fetched, written, merged, dropped,
+                 ejected, failed, expired, error_text, details_json
+          FROM pipeline_runs
+          WHERE run_kind = 'source_sync' AND source IS NOT NULL
+          ORDER BY started_at DESC
+        `).all()) {
+          if (!lastRuns.has(r.source)) lastRuns.set(r.source, r);
+          if (r.status === "ok" && !lastOk.has(r.source)) lastOk.set(r.source, r);
+        }
+      }
+
+      const sources = getSourceStatus().map(({ name, configured }) => {
+        const rows = rowsBySource.get(name) || null;
+        const lastRun = lastRuns.get(name) || null;
+        const lastSuccess = lastOk.get(name) || null;
+        const lastActivityAt = lastSuccess?.started_at ?? rows?.last_row_at ?? null;
+
+        // Ordered by severity — the first matching condition wins, so a misconfiguration is
+        // never masked by a downstream symptom.
+        let health;
+        if (!configured)                       health = "not_configured";
+        else if (!rows && !lastRun)            health = "never_ran";
+        else if (lastRun?.status === "failed") health = "failed";
+        else if (lastRun?.status === "skipped_unconfigured") health = "not_configured";
+        else if (lastRun?.status === "no_results")           health = "no_results";
+        else if (lastActivityAt && lastActivityAt < staleBefore) health = "stale";
+        else if (!rows?.active)                health = "no_rows";
+        else                                   health = "ok";
+
+        return {
+          name,
+          configured,
+          companies:       companyCounts.get(name) ?? null,
+          total:           rows?.total ?? 0,
+          active:          rows?.active ?? 0,
+          noDescription:   rows?.no_description ?? 0,
+          enriched:        rows?.enriched ?? 0,
+          lastRowAt:       rows?.last_row_at ?? null,
+          lastActivityAt,
+          staleHours:      lastActivityAt ? Math.floor((now - lastActivityAt) / 3600) : null,
+          health,
+          lastRun:         lastRun && {
+            status: lastRun.status, at: lastRun.started_at,
+            fetched: lastRun.fetched, written: lastRun.written, merged: lastRun.merged,
+            dropped: lastRun.dropped, ejected: lastRun.ejected, failed: lastRun.failed,
+            error: lastRun.error_text,
+          },
+          lastSuccessAt:   lastSuccess?.started_at ?? null,
+        };
+      });
+
+      // Enrichment coverage: % non-null per column over ACTIVE rows. 0% must be alarming, which
+      // is the whole point — skills_json sat at 0/684 while the admin panel looked healthy.
+      const activeTotal = db.prepare(`SELECT COUNT(*) n FROM scraped_jobs WHERE is_active = 1`).get().n;
+      const coverageRow = activeTotal
+        ? db.prepare(`
+            SELECT ${ENRICHMENT_COLUMNS.map(c => `SUM(${c} IS NOT NULL AND TRIM(COALESCE(${c},'')) != '') AS "${c}"`).join(", ")}
+            FROM scraped_jobs WHERE is_active = 1
+          `).get()
+        : {};
+      const coverage = ENRICHMENT_COLUMNS.map(column => {
+        const nonNull = coverageRow?.[column] ?? 0;
+        return {
+          column, nonNull, total: activeTotal,
+          pct: activeTotal ? Math.round((nonNull / activeTotal) * 1000) / 10 : 0,
+        };
+      });
+
+      const enrichmentRuns = hasRunLog
+        ? db.prepare(`
+            SELECT status, started_at, fetched, written, failed, skipped, error_text, details_json
+            FROM pipeline_runs WHERE run_kind = 'enrichment'
+            ORDER BY started_at DESC LIMIT 10
+          `).all().map(r => ({ ...r, details: r.details_json ? JSON.parse(r.details_json) : null }))
+        : [];
+
+      // Dedup: a sources_seen array with more than one entry means at least one duplicate was
+      // folded into this canonical row. Counted via the comma rather than JSON1 so this cannot
+      // fail on a build without the extension.
+      const dedup = db.prepare(`
+        SELECT SUM(CASE WHEN sources_seen IS NOT NULL AND sources_seen LIKE '%,%' THEN 1 ELSE 0 END) AS multi_source,
+               COUNT(*) AS total
+        FROM scraped_jobs WHERE is_active = 1
+      `).get();
+
+      res.json({
+        generatedAt: now,
+        staleAfterHours: STALE_AFTER_HOURS,
+        hasRunLog,
+        sources,
+        enrichment: {
+          activeTotal,
+          coverage,
+          recentRuns: enrichmentRuns,
+          noDescription: db.prepare(`
+            SELECT COUNT(*) n FROM scraped_jobs
+            WHERE is_active = 1 AND (description IS NULL OR TRIM(description) = '')
+          `).get().n,
+        },
+        dedup: { multiSource: dedup.multi_source || 0, total: dedup.total || 0 },
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ── Route 1: Scrape Monitor ───────────────────────────────────
   router.get("/scrape-monitor", requireAdmin, (req, res) => {
     try {
       const limit = Math.min(200, parseInt(req.query.limit || "50"));
-      const userId = req.query.userId ? parseInt(req.query.userId) : null;
+      // Filter by SOURCE, not by user: post-pivot the board is one shared store-then-filter
+      // corpus, so "which provider produced this row" is the question worth slicing on.
+      const source = req.query.source ? String(req.query.source) : null;
 
+      // Re-pointed from the pre-pivot column set (domain_profile_id / search_query / ats_score,
+      // all artifacts of the per-user scraping architecture) to the columns that actually decide
+      // whether a row is usable on the store-then-filter board. `has_description` and
+      // `enriched_at` are the two that matter most: a row can look perfectly fine in a raw table
+      // view while being unenrichable, which is precisely how the outage stayed invisible.
       let sql = `
         SELECT
-          sj.job_id, sj.title, sj.company, sj.search_query,
-          sj.employment_type, sj.work_type, sj.location,
-          sj.posted_at, sj.scraped_at, sj.ghost_score, sj.ats_score,
-          sj.domain_profile_id, sj.source_platform, sj.applicant_count,
-          sj.min_years_exp, sj.max_years_exp,
-          sj.description, sj.description_html,
-          dp.profile_name, dp.role_family,
-          dp.user_id as profile_owner_user_id,
-          u.username as profile_owner_username,
-          CASE
-            WHEN dp.target_titles IS NULL THEN 'no_profile'
-            ELSE 'check_client_side'
-          END as title_relevance_status
+          sj.job_id, sj.title, sj.company, sj.location, sj.source, sj.source_label,
+          sj.posted_at, sj.discovered_at, sj.scraped_at, sj.updated_at, sj.is_active,
+          sj.normalized_title, sj.experience_level, sj.workplace_type,
+          sj.salary_min_usd, sj.salary_max_usd, sj.skills_json, sj.summary,
+          sj.enriched_at, sj.content_hash, sj.sources_seen, sj.req_uid,
+          sj.is_h1b_sponsor, sj.requires_work_auth,
+          LENGTH(COALESCE(sj.description, '')) AS description_len,
+          (sj.description IS NOT NULL AND TRIM(sj.description) != '') AS has_description,
+          sj.description
         FROM scraped_jobs sj
-        LEFT JOIN domain_profiles dp ON dp.id = sj.domain_profile_id
-        LEFT JOIN users u ON u.id = dp.user_id
       `;
       const params = [];
-      if (userId) {
-        sql += ` WHERE dp.user_id = ?`;
-        params.push(userId);
+      if (source) {
+        sql += ` WHERE sj.source = ?`;
+        params.push(source);
       }
-      sql += ` ORDER BY sj.scraped_at DESC LIMIT ?`;
+      sql += ` ORDER BY COALESCE(sj.discovered_at, sj.scraped_at, sj.updated_at) DESC LIMIT ?`;
       params.push(limit);
 
       const DESC_LIMIT = 10000;
@@ -85,46 +242,17 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
           out.description = out.description.slice(0, DESC_LIMIT);
           out.description_truncated = true;
         }
-        if (out.description_html && out.description_html.length > DESC_LIMIT) {
-          out.description_html = out.description_html.slice(0, DESC_LIMIT);
-          out.description_truncated = true;
-        }
         return out;
       });
 
-      const totalCount = db.prepare("SELECT COUNT(*) as c FROM scraped_jobs").get().c;
-      const nullProfileCount = db.prepare(
-        "SELECT COUNT(*) as c FROM scraped_jobs WHERE domain_profile_id IS NULL"
-      ).get().c;
-      const perProfile = db.prepare(`
-        SELECT sj.domain_profile_id, dp.profile_name, dp.user_id,
-          u.username, COUNT(sj.job_id) as job_count
-        FROM scraped_jobs sj
-        LEFT JOIN domain_profiles dp ON dp.id = sj.domain_profile_id
-        LEFT JOIN users u ON u.id = dp.user_id
-        GROUP BY sj.domain_profile_id
-        ORDER BY job_count DESC
-      `).all();
-      const lastScrape = db.prepare("SELECT MAX(scraped_at) as t FROM scraped_jobs").get().t;
-      const empTypes = db.prepare(`
-        SELECT employment_type, COUNT(*) as count FROM scraped_jobs
-        GROUP BY employment_type ORDER BY count DESC
-      `).all();
-      const avgAts = db.prepare(
-        "SELECT AVG(ats_score) as avg FROM scraped_jobs WHERE ats_score IS NOT NULL"
-      ).get().avg;
-
+      // Aggregate stats moved to /pipeline-health — the old ones here (withProfile /
+      // nullProfile / avgAtsScore) measured the pre-pivot per-user scraping model and were
+      // reporting healthy numbers throughout the outage. This route is now just the row list.
       res.json({
         jobs,
-        stats: {
-          total: totalCount,
-          withProfile: totalCount - nullProfileCount,
-          nullProfile: nullProfileCount,
-          avgAtsScore: avgAts ? Math.round(avgAts) : null,
-          lastScrapeAt: lastScrape,
-          employmentTypes: empTypes,
-          perProfile,
-        },
+        sources: db.prepare(
+          `SELECT source, COUNT(*) AS n FROM scraped_jobs WHERE is_active = 1 GROUP BY source ORDER BY n DESC`
+        ).all(),
       });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

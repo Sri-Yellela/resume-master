@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/pages/admin/DBInspector.jsx — Admin DB diagnostic tool
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api, authHeaders } from "../../lib/api.js";
@@ -6,7 +6,7 @@ import { useTheme } from "../../styles/theme.jsx";
 
 const ACCENT = "#F5E642";
 const TABS = [
-  { id: "scrape",   label: "Scrape Monitor" },
+  { id: "scrape",   label: "Pipeline Health" },
   { id: "schema",   label: "Schema Explorer" },
   { id: "tables",   label: "Table Browser" },
   { id: "pool",     label: "User Pool" },
@@ -234,46 +234,101 @@ function SchemaMapView({ theme }) {
   );
 }
 
-// ── Tab 1: Scrape Monitor ────────────────────────────────────
+// ── Tab 1: Pipeline Health ───────────────────────────────────
+// Repurposed from the old Scrape Monitor, which reported the pre-pivot per-user scraping model
+// (domain-profile tagging, ATS scores, search queries). Those numbers stayed healthy-looking
+// throughout the production outage — the panel showed 684 rows "existing and looking fine"
+// while three independent failures ran undetected. This version answers whether the pipeline
+// actually WORKED: per-source freshness, unconfigured providers, and enrichment coverage.
+
+// Health severity ordering is decided server-side; this is only the presentation.
+const HEALTH_STYLE = {
+  ok:              { color:"#16a34a", label:"OK" },
+  stale:           { color:"#d97706", label:"STALE" },
+  no_results:      { color:"#d97706", label:"NO RESULTS" },
+  no_rows:         { color:"#d97706", label:"NO ROWS" },
+  never_ran:       { color:"#d97706", label:"NEVER RAN" },
+  failed:          { color:"#dc2626", label:"FAILED" },
+  // Deliberately red, not grey: an unconfigured provider reading as a benign "off" is exactly
+  // how Jobo went unnoticed for its entire lifetime.
+  not_configured:  { color:"#dc2626", label:"NOT CONFIGURED" },
+};
+
+// 0% must be visually alarming — skills_json sat at 0/684 while nothing surfaced it.
+function coverageColor(pct, theme) {
+  if (pct === 0)  return "#dc2626";
+  if (pct < 25)   return "#d97706";
+  if (pct >= 75)  return "#16a34a";
+  return theme.text;
+}
+
+function CoverageBar({ item, theme }) {
+  const c = coverageColor(item.pct, theme);
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"150px 1fr 90px", gap:10, alignItems:"center", fontSize:11 }}>
+      <div style={{ color:theme.textMuted, fontFamily:"monospace" }}>{item.column}</div>
+      <div style={{ height:8, background:theme.bg, borderRadius:999, overflow:"hidden", border:`1px solid ${theme.border}` }}>
+        <div style={{ width:`${Math.max(item.pct, item.pct > 0 ? 1.5 : 0)}%`, height:"100%", background:c, transition:"width 0.2s" }}/>
+      </div>
+      <div style={{ color:c, fontWeight:700, textAlign:"right" }}>
+        {item.pct}% <span style={{ color:theme.textDim, fontWeight:400 }}>{fmt(item.nonNull)}</span>
+      </div>
+    </div>
+  );
+}
+
 function ScrapeMonitorTab({ theme }) {
+  const [health, setHealth] = useState(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(null);
-  const [filterUser, setFilterUser] = useState("");
-  const [copied, setCopied] = useState(null); // 'text' | 'html' | null
+  const [filterSource, setFilterSource] = useState("");
+  const [copied, setCopied] = useState(null); // 'text' | null
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
       const params = new URLSearchParams({ limit: 50 });
-      if (filterUser) params.set("userId", filterUser);
-      const d = await api(`/api/admin/db/scrape-monitor?${params}`);
-      setData(d);
+      if (filterSource) params.set("source", filterSource);
+      const [h, d] = await Promise.all([
+        api(`/api/admin/db/pipeline-health`),
+        api(`/api/admin/db/scrape-monitor?${params}`),
+      ]);
+      setHealth(h); setData(d);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
-  }, [filterUser]);
+  }, [filterSource]);
 
   useEffect(() => { load(); }, [load]);
 
   const statusLabel = (job) => {
-    if (!job.domain_profile_id) return { label:"⚠ No Tag", color:"#d97706" };
-    return { label:"✓ Tagged", color:"#16a34a" };
+    // The single most important per-row fact post-pivot: a row with no description can never be
+    // enriched, so it will never gain skills, summary, salary or visa signals.
+    if (!job.has_description) return { label:"NO DESC", color:"#dc2626" };
+    if (!job.enriched_at)     return { label:"UNENRICHED", color:"#d97706" };
+    return { label:"ENRICHED", color:"#16a34a" };
   };
 
-  const s = data?.stats;
+  const problemSources = (health?.sources || []).filter(s => s.health !== "ok");
+  const worstCoverage  = (health?.enrichment?.coverage || []).filter(c => c.pct === 0).length;
+
   return (
     <div>
       <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:16, flexWrap:"wrap" }}>
-        <span style={{ fontWeight:800, fontSize:14 }}>Last 50 Scraped Jobs</span>
+        <span style={{ fontWeight:800, fontSize:14 }}>Pipeline Health</span>
         <div style={{ flex:1 }}/>
-        <input
-          placeholder="Filter by user ID…"
-          value={filterUser}
-          onChange={e => setFilterUser(e.target.value)}
+        <select
+          value={filterSource}
+          onChange={e => setFilterSource(e.target.value)}
           style={{ background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
-                   borderRadius:6, padding:"5px 10px", color:theme.text, fontSize:11, width:160 }}
-        />
+                   borderRadius:6, padding:"5px 10px", color:theme.text, fontSize:11 }}
+        >
+          <option value="">All sources</option>
+          {(data?.sources || []).map(s => (
+            <option key={s.source} value={s.source}>{s.source} ({s.n})</option>
+          ))}
+        </select>
         <button onClick={load}
           style={{ background:ACCENT, color:"#0f0f0f", border:"none", borderRadius:6,
                    padding:"5px 14px", fontWeight:700, fontSize:11, cursor:"pointer" }}>
@@ -281,12 +336,108 @@ function ScrapeMonitorTab({ theme }) {
         </button>
       </div>
 
-      {s && (
+      {health && (
         <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
-          <StatCard label="Total Scraped" value={fmt(s.total)} theme={theme}/>
-          <StatCard label="With Profile" value={fmt(s.withProfile)} accent="#16a34a" theme={theme}/>
-          <StatCard label="No Profile Tag" value={fmt(s.nullProfile)} accent={s.nullProfile > 0 ? "#d97706" : theme.text} theme={theme}/>
-          <StatCard label="Avg ATS Score" value={s.avgAtsScore != null ? s.avgAtsScore+"%" : "—"} theme={theme}/>
+          <StatCard label="Active Rows" value={fmt(health.enrichment.activeTotal)} theme={theme}/>
+          <StatCard
+            label="Sources Healthy"
+            value={`${health.sources.length - problemSources.length}/${health.sources.length}`}
+            accent={problemSources.length ? "#d97706" : "#16a34a"}
+            sub={problemSources.length ? problemSources.map(s => s.name).join(", ") : "all reporting"}
+            theme={theme}/>
+          <StatCard
+            label="Missing Description"
+            value={fmt(health.enrichment.noDescription)}
+            accent={health.enrichment.noDescription > 0 ? "#dc2626" : "#16a34a"}
+            sub={health.enrichment.activeTotal
+              ? `${Math.round((health.enrichment.noDescription / health.enrichment.activeTotal) * 100)}% can never enrich`
+              : null}
+            theme={theme}/>
+          <StatCard
+            label="Empty Signals"
+            value={`${worstCoverage}/${health.enrichment.coverage.length}`}
+            accent={worstCoverage ? "#dc2626" : "#16a34a"}
+            sub="enrichment columns at 0%"
+            theme={theme}/>
+          <StatCard label="Deduped" value={fmt(health.dedup.multiSource)} sub="rows folded from 2+ sources" theme={theme}/>
+        </div>
+      )}
+
+      {/* Per-source truth: last success, staleness, and whether it wrote anything. */}
+      {health?.sources?.length > 0 && (
+        <div style={{ border:`1px solid ${theme.border}`, borderRadius:10, overflow:"hidden", marginBottom:16 }}>
+          <div style={{
+            display:"grid", gridTemplateColumns:"1.3fr 110px 70px 70px 80px 1fr 100px",
+            padding:"8px 14px", background:theme.surfaceHigh,
+            fontSize:10, fontWeight:700, textTransform:"uppercase",
+            letterSpacing:"0.06em", color:theme.textMuted,
+          }}>
+            <div>Source</div><div>Health</div><div>Active</div><div>No Desc</div>
+            <div>Last OK</div><div>Last Run</div><div>Companies</div>
+          </div>
+          {health.sources.map((s, i) => {
+            const hs = HEALTH_STYLE[s.health] || { color:theme.textMuted, label:s.health };
+            return (
+              <div key={s.name} style={{
+                display:"grid", gridTemplateColumns:"1.3fr 110px 70px 70px 80px 1fr 100px",
+                padding:"9px 14px", fontSize:12, alignItems:"center",
+                borderTop:`1px solid ${theme.border}`,
+                background: i%2===0 ? "transparent" : theme.surface+"80",
+              }}>
+                <div style={{ fontWeight:600 }}>{s.name}</div>
+                <div><Pill color={hs.color}>{hs.label}</Pill></div>
+                <div style={{ color:theme.textMuted }}>{fmt(s.active)}</div>
+                <div style={{ color: s.noDescription > 0 ? "#dc2626" : theme.textMuted }}>
+                  {s.active ? fmt(s.noDescription) : "—"}
+                </div>
+                <div style={{ color: s.health === "stale" ? "#d97706" : theme.textMuted, fontSize:11 }}>
+                  {ago(s.lastSuccessAt || s.lastActivityAt)}
+                </div>
+                <div style={{ color:theme.textMuted, fontSize:11 }}>
+                  {s.lastRun
+                    ? <span>{s.lastRun.status} · {fmt(s.lastRun.written)} written
+                        {s.lastRun.error && <span style={{ color:"#dc2626" }}> · {truncate(s.lastRun.error, 60)}</span>}
+                      </span>
+                    : <span style={{ color:theme.textDim, fontStyle:"italic" }}>no run recorded yet</span>}
+                </div>
+                <div style={{ color:theme.textMuted, fontSize:11 }}>{s.companies != null ? fmt(s.companies) : "—"}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Enrichment coverage — the panel that would have made the outage obvious. */}
+      {health?.enrichment?.coverage?.length > 0 && (
+        <div style={{ border:`1px solid ${theme.border}`, borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
+          <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.07em",
+                        color:theme.textMuted, marginBottom:12 }}>
+            Enrichment Coverage — % of {fmt(health.enrichment.activeTotal)} active rows with a value
+          </div>
+          <div style={{ display:"grid", gap:7 }}>
+            {health.enrichment.coverage.map(c => <CoverageBar key={c.column} item={c} theme={theme}/>)}
+          </div>
+          {health.enrichment.recentRuns.length > 0 && (
+            <div style={{ marginTop:14, paddingTop:12, borderTop:`1px solid ${theme.border}`, fontSize:11, color:theme.textMuted }}>
+              <span style={{ fontWeight:700 }}>Last enrichment run: </span>
+              {(() => {
+                const r = health.enrichment.recentRuns[0];
+                return (
+                  <span>
+                    {ago(r.started_at)} · {r.status} · {fmt(r.written)} enriched, {fmt(r.failed)} failed,
+                    {" "}{fmt(r.details?.noSignal ?? 0)} no-signal, {fmt(r.skipped)} skipped (no description)
+                    {r.details?.remainingCandidates ? ` · ${fmt(r.details.remainingCandidates)} still queued` : ""}
+                    {r.error_text && <span style={{ color:"#dc2626" }}> · {truncate(r.error_text, 80)}</span>}
+                  </span>
+                );
+              })()}
+            </div>
+          )}
+          {!health.hasRunLog && (
+            <div style={{ marginTop:12, fontSize:11, color:"#d97706" }}>
+              pipeline_runs table not present — run migrations to record per-run outcomes.
+            </div>
+          )}
         </div>
       )}
 
@@ -298,13 +449,13 @@ function ScrapeMonitorTab({ theme }) {
           {/* Header */}
           <div style={{
             display:"grid",
-            gridTemplateColumns:"2fr 1.5fr 1.5fr 1.5fr 60px 60px 70px",
+            gridTemplateColumns:"2fr 1.5fr 1fr 70px 70px 60px 90px",
             padding:"8px 14px", background:theme.surfaceHigh,
             fontSize:10, fontWeight:700, textTransform:"uppercase",
             letterSpacing:"0.06em", color:theme.textMuted,
           }}>
-            <div>Title</div><div>Company</div><div>Domain Profile</div>
-            <div>Search Query</div><div>ATS</div><div>Age</div><div>Status</div>
+            <div>Title</div><div>Company</div><div>Source</div>
+            <div>Desc</div><div>Skills</div><div>Age</div><div>Status</div>
           </div>
 
           {data.jobs.map((job, i) => {
@@ -316,7 +467,7 @@ function ScrapeMonitorTab({ theme }) {
                   onClick={() => setExpanded(isExp ? null : job.job_id)}
                   style={{
                     display:"grid",
-                    gridTemplateColumns:"2fr 1.5fr 1.5fr 1.5fr 60px 60px 70px",
+                    gridTemplateColumns:"2fr 1.5fr 1fr 70px 70px 60px 90px",
                     padding:"9px 14px", cursor:"pointer",
                     background: isExp ? theme.surfaceHigh : i%2===0 ? "transparent" : theme.surface+"80",
                     borderTop:`1px solid ${theme.border}`,
@@ -328,18 +479,16 @@ function ScrapeMonitorTab({ theme }) {
                 >
                   <div style={{ fontWeight:600 }}>{truncate(job.title, 35)}</div>
                   <div style={{ color:theme.textMuted }}>{truncate(job.company, 25)}</div>
-                  <div style={{ color:theme.textMuted, fontSize:11 }}>
-                    {job.profile_name ? (
-                      <span>{truncate(job.profile_name,22)}<br/>
-                        <span style={{fontSize:10,color:theme.textDim}}>@{job.profile_owner_username}</span>
-                      </span>
-                    ) : <span style={{color:"#d97706"}}>—</span>}
+                  <div style={{ color:theme.textMuted, fontSize:11 }}>{job.source || "—"}</div>
+                  {/* Description length, not a boolean: a 40-char "description" is technically
+                      present but useless to enrichment, and only the number shows that. */}
+                  <div style={{ color: job.has_description ? theme.textMuted : "#dc2626", fontSize:11 }}>
+                    {job.has_description ? fmt(job.description_len) : "none"}
                   </div>
-                  <div style={{ color:theme.textMuted, fontSize:11 }}>{truncate(job.search_query,28)}</div>
-                  <div style={{ color: job.ats_score != null ? (job.ats_score>=70?"#16a34a":job.ats_score>=50?"#d97706":"#dc2626") : theme.textMuted }}>
-                    {job.ats_score != null ? job.ats_score+"%" : "—"}
+                  <div style={{ color: job.skills_json ? theme.textMuted : theme.textDim, fontSize:11 }}>
+                    {job.skills_json ? (() => { try { return JSON.parse(job.skills_json).length; } catch { return "?"; } })() : "—"}
                   </div>
-                  <div style={{ color:theme.textMuted, fontSize:11 }}>{ago(job.scraped_at)}</div>
+                  <div style={{ color:theme.textMuted, fontSize:11 }}>{ago(job.discovered_at || job.scraped_at)}</div>
                   <div><Pill color={st.color}>{st.label}</Pill></div>
                 </div>
 
@@ -348,11 +497,11 @@ function ScrapeMonitorTab({ theme }) {
                                 borderTop:`1px solid ${theme.border}` }}>
                     <KeyValueGrid
                       data={(() => {
-                        const { description, description_html, description_truncated, ...rest } = job;
+                        const { description, description_truncated, ...rest } = job;
                         return rest;
                       })()}
                       theme={theme}
-                      highlight={["domain_profile_id","ats_score"]}
+                      highlight={["source","has_description","description_len","enriched_at","content_hash"]}
                     />
 
                     {/* Description section */}
@@ -387,22 +536,6 @@ function ScrapeMonitorTab({ theme }) {
                               cursor:"pointer",
                             }}>
                             {copied === "text" ? "✓ Copied" : "Copy Text"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(job.description_html || "");
-                              setCopied("html");
-                              setTimeout(() => setCopied(null), 2000);
-                            }}
-                            style={{
-                              fontSize:11, padding:"3px 10px", borderRadius:6,
-                              border:`1px solid ${theme.border}`,
-                              background: copied === "html" ? "#4ade8022" : theme.surface,
-                              color: copied === "html" ? "#4ade80" : theme.textMuted,
-                              cursor:"pointer",
-                            }}>
-                            {copied === "html" ? "✓ Copied" : "Copy HTML"}
                           </button>
                         </div>
                       </div>

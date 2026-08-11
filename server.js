@@ -2274,6 +2274,33 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE domain_profiles ADD COLUMN tracked_search_json TEXT;
       `,
     },
+    {
+      id: "069_pipeline_runs",
+      sql: `
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          run_kind     TEXT    NOT NULL,
+          source       TEXT,
+          status       TEXT    NOT NULL,
+          started_at   INTEGER NOT NULL,
+          finished_at  INTEGER,
+          duration_ms  INTEGER,
+          fetched      INTEGER NOT NULL DEFAULT 0,
+          written      INTEGER NOT NULL DEFAULT 0,
+          unchanged    INTEGER NOT NULL DEFAULT 0,
+          merged       INTEGER NOT NULL DEFAULT 0,
+          dropped      INTEGER NOT NULL DEFAULT 0,
+          ejected      INTEGER NOT NULL DEFAULT 0,
+          failed       INTEGER NOT NULL DEFAULT 0,
+          skipped      INTEGER NOT NULL DEFAULT 0,
+          expired      INTEGER NOT NULL DEFAULT 0,
+          error_text   TEXT,
+          details_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_pipeline_runs_kind_source ON pipeline_runs(run_kind, source, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at DESC);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

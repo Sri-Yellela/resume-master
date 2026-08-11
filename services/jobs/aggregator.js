@@ -5,6 +5,7 @@ import { filterDirectApplyOnly, DIRECT_ATS_SOURCES } from './directApplyFilter.j
 import { classifyJob } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
 import { runEnrichment } from './enrichJob.js';
+import { recordPipelineRun } from './pipelineRunLog.js';
 
 // ─── REGISTER SOURCES HERE ───────────────────────────────────────────────────
 // To add a new source: import it and add to SOURCES array.
@@ -550,9 +551,16 @@ async function cacheJobs(db, anthropic = null) {
     let totalCached = 0;
 
     for (const source of atsSources) {
+      // Recorded per SOURCE, not per crawl: a single source going quiet while the others keep
+      // succeeding is exactly the failure that hid ashby's 2026-08-07 stall for three days.
+      const runStartedAt = Math.floor(Date.now() / 1000);
       const companies = companyMap[source.name] || [];
       if (companies.length === 0) {
         console.log(`[cacheJobs:${source.name}] No companies configured — skipping`);
+        recordPipelineRun(db, {
+          runKind: 'source_sync', source: source.name, status: 'skipped_unconfigured',
+          startedAt: runStartedAt, errorText: 'No companies configured for this source',
+        });
         continue;
       }
 
@@ -568,6 +576,11 @@ async function cacheJobs(db, anthropic = null) {
         fetchedJobs = result.jobs;
       } catch (err) {
         console.error(`[cacheJobs:${source.name}] Fetch failed — watermark NOT advanced: ${err.message}`);
+        recordPipelineRun(db, {
+          runKind: 'source_sync', source: source.name, status: 'failed',
+          startedAt: runStartedAt, errorText: err.message,
+          details: { companies: companies.length },
+        });
         continue;
       }
 
@@ -576,6 +589,13 @@ async function cacheJobs(db, anthropic = null) {
       // transient network issues.
       if (!fetchedJobs.length) {
         console.log(`[cacheJobs:${source.name}] No jobs returned — skipping prune`);
+        // 'no_results' rather than 'ok': the plugin swallows per-company errors, so an empty
+        // response is indistinguishable here from every company failing. Recorded as its own
+        // status so the monitor can flag it instead of reading it as a healthy zero.
+        recordPipelineRun(db, {
+          runKind: 'source_sync', source: source.name, status: 'no_results',
+          startedAt: runStartedAt, details: { companies: companies.length },
+        });
         continue;
       }
 
@@ -679,6 +699,12 @@ async function cacheJobs(db, anthropic = null) {
       if (merged  > 0) console.log(`[cacheJobs:${source.name}] Merged ${merged} cross-source duplicates into existing canonical rows`);
       if (pruned  > 0) console.log(`[cacheJobs:${source.name}] Pruned ${pruned} jobs inactive (${byDate.changes} expired, ${byStale.changes} stale)`);
       console.log(`[cacheJobs:${source.name}] Sync complete — ${fetchedJobs.length} fetched, ${cached} new/changed, ${unchanged} unchanged (touch-only), ${merged} merged, ${pruned} pruned (prevWatermark=${prevWatermark})`);
+      recordPipelineRun(db, {
+        runKind: 'source_sync', source: source.name, status: 'ok',
+        startedAt: runStartedAt,
+        fetched: fetchedJobs.length, written: cached, unchanged, merged, dropped, ejected,
+        details: { companies: companies.length, pruned, prunedExpired: byDate.changes, prunedStale: byStale.changes },
+      });
       totalCached += cached;
     }
 
@@ -828,11 +854,27 @@ function joboResult(status, fields = {}) {
 }
 
 async function cacheJoboFeed(db, anthropic = null) {
+  const runStartedAt = Math.floor(Date.now() / 1000);
+  // Records whatever cacheJoboFeed returns, so every exit path — including the unconfigured
+  // skip and the swallowed HTTP 402 — lands in pipeline_runs rather than only in a log line.
+  const record = (result) => {
+    recordPipelineRun(db, {
+      runKind: 'source_sync', source: JOBO_SOURCE_NAME, status: result.status,
+      startedAt: runStartedAt,
+      fetched: result.fetched, written: result.cached, unchanged: result.unchanged,
+      merged: result.merged, dropped: result.dropped, ejected: result.ejected,
+      failed: result.failed, expired: result.expired,
+      errorText: result.error,
+      details: result.mode ? { mode: result.mode } : null,
+    });
+    return result;
+  };
+
   if (!joboSource.isConfigured()) {
     // warn, not log: this is a misconfiguration that silently disables an entire provider, not a
     // routine skip. Nothing downstream can detect it — no rows appear, no error is raised.
     console.warn('[cacheJoboFeed] MISCONFIGURED: JOBO_API_KEY is not set — the Jobo provider did NOT run. This is not an empty sync; no jobs were fetched at all.');
-    return joboResult('skipped_unconfigured');
+    return record(joboResult('skipped_unconfigured'));
   }
 
   const {
@@ -981,10 +1023,10 @@ async function cacheJoboFeed(db, anthropic = null) {
         console.log(`[cacheJoboFeed] Full backfill ${hasMore ? 'paused (page cap)' : 'complete'} after ${pageCount} page(s)`);
       }
       scheduleEnrichment();
-      return joboResult('ok', {
+      return record(joboResult('ok', {
         mode: decision.mode === 'bounded' ? 'bounded_backfill' : 'full_backfill',
         fetched, cached, unchanged, merged, ejected, dropped, failed,
-      });
+      }));
     }
 
     // ── Incremental ─────────────────────────────────────────────────────────
@@ -1044,16 +1086,16 @@ async function cacheJoboFeed(db, anthropic = null) {
 
     scheduleEnrichment();
 
-    return joboResult('ok', {
+    return record(joboResult('ok', {
       mode: 'incremental',
       fetched, cached, unchanged, merged, ejected, dropped, failed, expired: expiredCount,
-    });
+    }));
   } catch (err) {
     console.error('[cacheJoboFeed] Failed — watermark NOT advanced:', err.message);
-    return joboResult('failed', {
+    return record(joboResult('failed', {
       error: err.message,
       fetched, cached, unchanged, merged, ejected, dropped, failed,
-    });
+    }));
   }
 }
 
