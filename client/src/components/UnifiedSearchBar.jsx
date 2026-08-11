@@ -42,6 +42,7 @@ export default function UnifiedSearchBar({
   tabs,
   activeTab,
   onTabChange,
+  actions,   // optional ReactNode rendered right-aligned in the tabs row (see below)
 }) {
   const [q,       setQ]       = useState('');
   const [loc,     setLoc]     = useState('');
@@ -108,12 +109,17 @@ export default function UnifiedSearchBar({
     <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero') + (variant === 'inline' ? ' usb--inline' : '')}
          role="search" aria-label="Job search">
 
-      {tabs && tabs.length > 0 && (
+      {/* `actions` is an optional trailing slot in this row. It lives INSIDE .usb rather than
+          being wrapped around the component by the caller because .usb is position:sticky with
+          auto margins — wrapping it would change the containing block and break the docking
+          transition. Rendered only when supplied, so the marketing landing page (which passes
+          neither tabs nor actions) is unaffected. */}
+      {((tabs && tabs.length > 0) || actions) && (
         <div style={{
-          display: "flex", gap: 4, padding: "8px 12px 0",
+          display: "flex", gap: 4, padding: "8px 12px 0", alignItems: "center",
           borderBottom: "1px solid var(--border-glass)",
         }}>
-          {tabs.map(t => (
+          {(tabs || []).map(t => (
             <button key={t.id} onClick={() => onTabChange?.(t.id)}
               style={{
                 padding: "8px 14px",
@@ -125,6 +131,12 @@ export default function UnifiedSearchBar({
                 textTransform: "uppercase", letterSpacing: "0.08em",
               }}>{t.label}</button>
           ))}
+          {actions && (
+            <>
+              <div style={{ flex: 1 }} />
+              <div style={{ display: "flex", alignItems: "center", paddingBottom: 4 }}>{actions}</div>
+            </>
+          )}
         </div>
       )}
 
