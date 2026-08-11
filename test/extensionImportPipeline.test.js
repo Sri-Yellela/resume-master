@@ -11,32 +11,27 @@ const serverSrc = fs.readFileSync("server.js", "utf8");
 
 // ── Source-code assertions: write-side contract ───────────────────────────────
 
-test("save-jobs-bulk endpoint normalizes source_key to linkedin_extension", () => {
-  // The bulk endpoint must write 'linkedin_extension', not 'linkedin_saved',
-  // so that the read route (which filters WHERE source_key='linkedin_extension') can return them.
-  const bulkBlock = serverSrc.slice(
-    serverSrc.indexOf("/api/extension/save-jobs-bulk"),
-    serverSrc.indexOf("/api/domain-metadata"),
-  );
-  assert.match(bulkBlock, /sourceKey:\s*["']linkedin_extension["']/, "bulk must write sourceKey='linkedin_extension'");
-  assert.doesNotMatch(bulkBlock, /sourceKey:\s*["']linkedin_saved["']/, "bulk must NOT write linkedin_saved");
+// The two save-jobs-bulk assertions that stood here are gone with the endpoint (cleanup 5.4).
+// Its only client was the extension's saved-jobs-content.js, removed in v1.2.0 with the
+// LinkedIn bulk-scraping capability BYO-2 retired; the endpoint had outlived its caller and
+// still accepted bulk writes. This guard replaces them: the endpoint must stay gone, so a
+// future paste cannot quietly reinstate a bulk write path for a capability the extension no
+// longer has and the store listing states it does not perform.
+test("the orphaned save-jobs-bulk endpoint stays removed", () => {
+  assert.doesNotMatch(serverSrc, /app\.(post|options)\(\s*["']\/api\/extension\/save-jobs-bulk["']/,
+    "save-jobs-bulk must not be re-registered — its client no longer exists");
 });
 
-test("save-job single endpoint also writes source_key=linkedin_extension", () => {
+test("save-job single endpoint still writes source_key=linkedin_extension", () => {
+  // Still LIVE: extension/linkedin-content.js posts here, and it is what populates the Starred
+  // LinkedIn section. Anchored on the next route rather than on the removed bulk endpoint,
+  // which is what this test used to slice against.
   const singleBlock = serverSrc.slice(
-    serverSrc.indexOf("/api/extension/save-job"),
-    serverSrc.indexOf("/api/extension/save-jobs-bulk"),
-  );
-  assert.match(singleBlock, /"linkedin_extension"/, "single save must hardcode linkedin_extension");
-});
-
-test("save-jobs-bulk bumpSeen uses linkedin_extension not linkedin_saved", () => {
-  const bulkBlock = serverSrc.slice(
-    serverSrc.indexOf("/api/extension/save-jobs-bulk"),
+    serverSrc.indexOf('app.post("/api/extension/save-job"'),
     serverSrc.indexOf("/api/domain-metadata"),
   );
-  // bumpSeen.run(userId, <sourceKey>, dedupeKey) — second arg must be linkedin_extension
-  assert.match(bulkBlock, /bumpSeen\.run\(userId,\s*["']linkedin_extension["']/, "bumpSeen must use linkedin_extension");
+  assert.ok(singleBlock.length > 0, "the single save-job route must still exist");
+  assert.match(singleBlock, /"linkedin_extension"/, "single save must hardcode linkedin_extension");
 });
 
 // ── Integration test: seeded rows read back via GET /api/imported-jobs/linkedin ──

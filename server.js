@@ -4733,79 +4733,11 @@ app.post("/api/extension/save-job",
 );
 
 // Bulk save from extension (LinkedIn saved jobs import)
-app.options("/api/extension/save-jobs-bulk", cors({ origin: corsOriginExtension, credentials: true }));
-app.post("/api/extension/save-jobs-bulk",
-  cors({ origin: corsOriginExtension, credentials: true }),
-  requireAuth,
-  (req, res) => {
-    const { jobs } = req.body || {};
-    if (!Array.isArray(jobs) || jobs.length === 0)
-      return res.status(400).json({ error: "jobs array required" });
-    if (jobs.length > 50)
-      return res.status(400).json({ error: "Max 50 jobs per batch" });
-
-    const insert = db.prepare(`
-      INSERT OR IGNORE INTO imported_jobs
-        (user_id, source_key, source_label, source_platform, external_job_id, dedupe_key,
-         title, company, location, work_type, description, job_url, apply_url,
-         company_icon_url, posted_at)
-      VALUES
-        (@userId, @sourceKey, @sourceLabel, @sourcePlatform, @externalJobId, @dedupeKey,
-         @title, @company, @location, @workType, @description, @jobUrl, @applyUrl,
-         @companyIconUrl, @postedAt)
-    `);
-
-    const bumpSeen = db.prepare(
-      "UPDATE imported_jobs SET import_count=import_count+1, last_seen_at=unixepoch() WHERE user_id=? AND source_key=? AND dedupe_key=?"
-    );
-
-    const insertMany = db.transaction((jobList, userId) => {
-      let imported = 0;
-      let skipped  = 0;
-      for (const j of jobList) {
-        const jobUrl = (j.jobUrl || j.job_url || "").slice(0, 2000);
-        const externalJobId = j.externalJobId || j.external_job_id || null;
-        const dedupeKey = externalJobId
-          ? `linkedin_ext_saved_${externalJobId}`
-          : `linkedin_ext_saved_${Buffer.from((jobUrl || (j.title || "") + (j.company || "")).slice(0, 200)).toString("base64").slice(0, 64)}`;
-
-        const info = insert.run({
-          userId,
-          sourceKey:      "linkedin_extension",
-          sourceLabel:    "LinkedIn (Extension)",
-          sourcePlatform: "linkedin",
-          externalJobId,
-          dedupeKey,
-          title:          (j.title    || "").slice(0, 500),
-          company:        (j.company  || "").slice(0, 500),
-          location:       (j.location || "").slice(0, 300),
-          workType:       (j.workType || j.work_type || "").slice(0, 100),
-          description:    (j.description || "").slice(0, 20000),
-          jobUrl,
-          applyUrl:       (j.applyUrl || j.apply_url || jobUrl).slice(0, 2000),
-          companyIconUrl: j.companyLogo || j.company_logo || j.company_icon_url || null,
-          postedAt:       j.postedDate || j.posted_date || j.posted_at || null,
-        });
-
-        if (info.changes > 0) {
-          imported++;
-        } else {
-          bumpSeen.run(userId, "linkedin_extension", dedupeKey);
-          skipped++;
-        }
-      }
-      return { imported, skipped };
-    });
-
-    try {
-      const counts = insertMany(jobs, req.user.id);
-      return res.json({ success: true, imported: counts.imported, skipped: counts.skipped, total: jobs.length });
-    } catch (e) {
-      console.error("[Extension] Bulk save error:", e.message);
-      return res.status(500).json({ error: "Database error" });
-    }
-  }
-);
+// /api/extension/save-jobs-bulk REMOVED (cleanup 5.4). Its only client was the extension's
+// saved-jobs-content.js, deleted in v1.2.0 along with the LinkedIn bulk-scraping capability
+// BYO-2 retired. The endpoint outlived its caller and still accepted bulk writes into
+// imported_jobs. The SINGLE-job /api/extension/save-job above stays live — it is called by
+// extension/linkedin-content.js and is what populates the Starred LinkedIn section.
 
 // Metadata is also public â€” mount without requireAuth at a sub-path so
 // the chip registry is accessible from the wizard before login
