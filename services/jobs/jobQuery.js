@@ -178,9 +178,19 @@ function buildJobFilters(params = {}) {
     clauses.push(`sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) >= ?`);
     args.push(postedAfter);
   }
+  // COALESCE onto scraped_at rather than hard-excluding NULL. Note this is NOT the soft-null
+  // pattern used for the enrichment-backed filters below — a recency filter genuinely must not
+  // admit rows of unknown age. It doesn't have to: scraped_at is written on every upsert, so a
+  // row missing discovered_at still has a real "when we first saw it" timestamp, which is a
+  // strictly better answer than dropping the row.
+  //
+  // This matters because rows CAN exist without discovered_at. Production carries 10 adzuna rows
+  // with it NULL — orphans from the pre-pivot architecture, since no current write path produces
+  // adzuna (cacheJobs crawls only DIRECT_ATS_SOURCES, cacheJoboFeed only jobo, searchJobs never
+  // writes). They were invisible to every date filter and to the NEW<24h pill, permanently.
   const discoveredAfter = toInt(params.discovered_after);
   if (discoveredAfter != null) {
-    clauses.push(`sj.discovered_at IS NOT NULL AND sj.discovered_at >= ?`);
+    clauses.push(`COALESCE(sj.discovered_at, sj.scraped_at) >= ?`);
     args.push(discoveredAfter);
   }
 

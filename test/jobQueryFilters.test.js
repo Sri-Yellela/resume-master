@@ -80,3 +80,41 @@ test("work_models is soft-null: an unenriched workplace_type is never excluded",
   const ids = rows.map(r => r.job_id).sort();
   assert.deepEqual(ids, ["remote", "unenriched"], "filtering to remote must not read as 'no remote jobs exist' while enrichment lags");
 });
+
+// Diagnosis item 3.5. Production carries 10 adzuna rows with discovered_at NULL — orphans from
+// the pre-pivot architecture, since no current write path produces adzuna at all (cacheJobs
+// crawls only DIRECT_ATS_SOURCES, cacheJoboFeed only jobo, searchJobs never writes, and
+// discovered_at is set by upsertCanonicalJob which they never went through). The recency filter
+// hard-excluded NULL, so those rows were invisible to every date filter and the NEW<24h pill,
+// permanently and silently.
+test("discovered_after falls back to scraped_at when discovered_at is missing", () => {
+  const db = new Database(":memory:");
+  const now = Math.floor(Date.now() / 1000);
+  db.exec(`
+    CREATE TABLE scraped_jobs (job_id TEXT PRIMARY KEY, discovered_at INTEGER, scraped_at INTEGER);
+    INSERT INTO scraped_jobs VALUES ('orphan_recent', NULL, ${now - 3600});
+    INSERT INTO scraped_jobs VALUES ('orphan_old',    NULL, ${now - 60 * 86400});
+    INSERT INTO scraped_jobs VALUES ('normal_recent', ${now - 7200}, ${now - 7200});
+  `);
+  const { sql, params } = buildJobFilters({ discovered_after: now - 86400 });
+  const ids = db.prepare(`SELECT job_id FROM scraped_jobs sj WHERE 1=1 ${sql}`).all(...params)
+    .map(r => r.job_id).sort();
+  assert.deepEqual(ids, ["normal_recent", "orphan_recent"],
+    "a row with no discovered_at should be judged on scraped_at, not dropped");
+});
+
+test("discovered_after still excludes genuinely old rows — this is not a soft-null filter", () => {
+  // Unlike the enrichment-backed filters, a recency filter must NOT admit rows of unknown age.
+  // The COALESCE works because scraped_at is written on every upsert, so there is always a real
+  // timestamp to judge against rather than a null to wave through.
+  const db = new Database(":memory:");
+  const now = Math.floor(Date.now() / 1000);
+  db.exec(`
+    CREATE TABLE scraped_jobs (job_id TEXT PRIMARY KEY, discovered_at INTEGER, scraped_at INTEGER);
+    INSERT INTO scraped_jobs VALUES ('no_dates_at_all', NULL, NULL);
+    INSERT INTO scraped_jobs VALUES ('old', NULL, ${now - 60 * 86400});
+  `);
+  const { sql, params } = buildJobFilters({ discovered_after: now - 86400 });
+  const rows = db.prepare(`SELECT job_id FROM scraped_jobs sj WHERE 1=1 ${sql}`).all(...params);
+  assert.deepEqual(rows, [], "unknown-age and genuinely-old rows must both stay excluded");
+});
