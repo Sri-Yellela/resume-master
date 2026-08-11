@@ -213,6 +213,9 @@ function getCacheStmts(db) {
         INSERT OR REPLACE INTO rejected_jobs (job_id, title, company, source, reason, rejected_at)
         VALUES (@job_id, @title, @company, @source, @reason, @rejected_at)
       `),
+      // Read before re-upserting so a re-crawl can preserve the ORIGINAL first-seen timestamp;
+      // INSERT OR REPLACE would otherwise reset it. See upsertCanonicalJob.
+      getDiscoveredAt: db.prepare(`SELECT discovered_at FROM scraped_jobs WHERE job_id = ?`),
       deleteJobStmt:  db.prepare(`DELETE FROM scraped_jobs  WHERE job_id = ?`),
       deleteRoleStmt: db.prepare(`DELETE FROM job_role_map  WHERE job_id = ?`),
       // Cheap "seen, unchanged" touch — see cacheJobs' comment on touchSeenStmt below for why
@@ -242,7 +245,18 @@ function getCacheStmts(db) {
 function upsertCanonicalJob(db, {
   jobId, canonical, verdict, contentHash, searchQuery, sourceLabel, matchedBy, dedup, now,
 }) {
-  const { upsertStmt, roleMapStmt } = getCacheStmts(db);
+  const { upsertStmt, roleMapStmt, getDiscoveredAt } = getCacheStmts(db);
+
+  // discovered_at must mean "first time we saw this job", full stop. Because the write below is
+  // INSERT OR REPLACE, a re-crawl of a posting whose text CHANGED was resetting it to now —
+  // so the column silently meant "first seen" for stable rows and "last edited" for edited ones.
+  // Two things broke on that: the NEW<24h pill re-flagged long-known jobs whenever an employer
+  // tweaked a description, and a source's freshness (MAX(discovered_at)) tracked how often its
+  // postings churn rather than whether it is still being crawled — which is exactly how a small,
+  // stable board like ashby (21 postings) can look stalled next to greenhouse (617 across 8
+  // companies) while both are being crawled normally. The unchanged-row path (touchSeenStmt)
+  // already preserved it correctly; only this path did not.
+  const priorDiscoveredAt = getDiscoveredAt.get(jobId)?.discovered_at ?? null;
 
   upsertStmt.run({
     job_id:                    jobId,
@@ -282,7 +296,7 @@ function upsertCanonicalJob(db, {
     is_h1b_sponsor:            canonical.is_h1b_sponsor  != null ? canonical.is_h1b_sponsor  : null,
     requires_work_auth:        canonical.requires_work_auth != null ? canonical.requires_work_auth : null,
     is_clearance_required:     canonical.is_clearance_required != null ? canonical.is_clearance_required : null,
-    discovered_at:             now,
+    discovered_at:             priorDiscoveredAt ?? now,
     updated_at:                now,
     fingerprint:               dedup.fingerprint,
     sources_seen:              dedup.sourcesSeen,
