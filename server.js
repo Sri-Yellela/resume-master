@@ -2301,6 +2301,50 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at DESC);
       `,
     },
+    {
+      // Four of the seeded ATS rows in 056 were wrong. Every company below was re-probed
+      // against the live provider APIs before changing anything — no slug is guessed.
+      //
+      //   Notion    greenhouse/notionhq -> ashby/notion       (gh 404s; ashby returns 128)
+      //   OpenAI    greenhouse/openai   -> ashby/openai       (gh 404s; ashby returns 732)
+      //   Vercel    ashby/vercel        -> greenhouse/vercel  (ashby board is EMPTY, gh has 83)
+      //   Rippling  greenhouse/rippling -> DEACTIVATED        (404 on greenhouse, ashby AND
+      //                                                        lever; no board found)
+      //
+      // Identities confirmed from board content, not just a 200: OpenAI's departments include
+      // Research/Safety Systems/Applied AI, and Vercel's postings resolve to
+      // job-boards.greenhouse.io/vercel.
+      //
+      // Vercel is the subtlest of the four: ashby/vercel returns HTTP 200 with zero jobs, so it
+      // never raised an error and never even logged the per-company warning a 404 produces — it
+      // just silently contributed nothing to the board.
+      //
+      // Rippling is deactivated rather than deleted or guessed. active=0 is honoured by
+      // cacheJobs (`WHERE active = 1`), so it stops costing a failed request every crawl while
+      // the row survives as a record to reactivate once someone finds the real board. Guessing
+      // a slug is exactly the failure this codebase already learned from twice.
+      //
+      // Corrected forward rather than by editing 056, which has already run everywhere. Each
+      // guard is narrow enough to be idempotent and to not clobber a hand-fixed row.
+      id: "070_fix_dead_ats_slugs",
+      sql: `
+        UPDATE company_ats_list
+           SET ats_type = 'ashby', ats_slug = 'openai'
+         WHERE company = 'OpenAI' AND ats_type = 'greenhouse';
+
+        UPDATE company_ats_list
+           SET ats_type = 'ashby', ats_slug = 'notion'
+         WHERE company = 'Notion' AND ats_type = 'greenhouse';
+
+        UPDATE company_ats_list
+           SET ats_type = 'greenhouse', ats_slug = 'vercel'
+         WHERE company = 'Vercel' AND ats_type = 'ashby';
+
+        UPDATE company_ats_list
+           SET active = 0
+         WHERE company = 'Rippling' AND ats_type = 'greenhouse' AND ats_slug = 'rippling';
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
