@@ -26,9 +26,14 @@ import {
 import { validateAdapter } from './adapters/base.js';
 
 import theirstackAdapter from './adapters/theirstack.js';
-import joboAdapter from './adapters/jobo.js';
 
-const PROVIDERS = [theirstackAdapter, joboAdapter];
+// The Jobo eval adapter was deleted in cleanup 5.2. It targeted a guessed endpoint that turned
+// out to be wrong (its own header said so), and Jobo is no longer a candidate under evaluation —
+// it is an integrated source whose REAL request shape and field mapping are now known and
+// corrected in services/jobs/sources/jobo.js. Keeping a second, wrong-endpoint client would have
+// produced garbage numbers for the one provider we already have live measurements for, and its
+// freshness verdict is recorded in docs/PIPELINE_DIAGNOSIS.md §7 instead.
+const PROVIDERS = [theirstackAdapter];
 PROVIDERS.forEach(validateAdapter);
 
 // How many "pulls" of this size would happen in a real month, for the cost-per-net-new-job

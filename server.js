@@ -30,12 +30,18 @@ import { createImportJobRouter } from "./routes/importJob.js";
 import { createCompanyKbRouter } from "./routes/companyKb.js";
 import { runOrgLayerRollup } from "./services/kb/orgLayer.js";
 import { runHiringSignalsRollup } from "./services/jobs/hiringSignals.js";
-import { trackApiCall, trackScrape } from "./services/usageTracker.js";
+// trackScrape dropped from this import in cleanup 5.8 — it was imported here and never called.
+import { trackApiCall } from "./services/usageTracker.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
-import { normaliseRole, buildApifyQueries, buildApifyQueriesFromProfile, buildProfileSearchTerms, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
+// buildApifyQueriesFromProfile and buildProfileSearchTerms dropped from this import in cleanup
+// 5.1: both were imported here and never called. The functions themselves are KEPT — unlike
+// 5.7's module they still have real callers, in scripts/tracePipeline.js, scripts/rawTrace.js and
+// scripts/conditionTests.js (all three verified to still run) plus their own unit tests. Dead in
+// the production path, live in tooling; only the server's unused reference goes.
+import { normaliseRole, buildApifyQueries, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
 import { getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRoleFamilyDomainForKey } from "./services/jobClassifier.js";
 import { inferWorkType, jobHash, normaliseItem, isFullTimeNorm, isEmploymentTypeWanted, parseYearsExperience, ghostJobScoreNorm, isReposted } from "./services/jobNormalization.js";
 import { profileTitleSql } from "./services/profileTitleFilter.js";
@@ -77,7 +83,9 @@ import {
 } from "./services/integrationReadiness.js";
 import { searchJobs, cacheJobs, cacheJoboFeed, reconcileFingerprint } from "./services/jobs/aggregator.js";
 import { classifyJob as unifiedClassifyJob } from "./services/jobs/classifyJob.js";
-import { filterAndRankForProfile } from "./services/jobs/profileMatcher.js";
+// profileMatcher.js deleted in cleanup 5.7. filterAndRankForProfile was imported here and never
+// called — the board has been ranked in SQL (ORDER BY in the /api/jobs query) since the pivot,
+// so scoreJob's in-memory weighting had no call site. Flagged as dead in bb24241; removed now.
 import { isResumeRelevant } from "./services/jobs/relevanceFilter.js";
 import {
   buildJobFilters, buildSelectColumns, resolveFacetDimensions, computeSkillsFacet,
@@ -409,12 +417,8 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           notes TEXT,
           UNIQUE(user_id, job_id)
         );
-        CREATE TABLE IF NOT EXISTS refresh_log (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          query TEXT NOT NULL,
-          refreshed_at INTEGER NOT NULL DEFAULT (unixepoch())
-        );
+        -- refresh_log removed from the bootstrap schema in cleanup 5.9: zero writers, zero
+        -- readers, zero rows. Migration 071 drops it from databases that already have it.
       `,
     },
     {
@@ -2343,6 +2347,21 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         UPDATE company_ats_list
            SET active = 0
          WHERE company = 'Rippling' AND ats_type = 'greenhouse' AND ats_slug = 'rippling';
+      `,
+    },
+    {
+      // Cleanup 5.9. refresh_log had zero writers, zero readers and zero rows — grep-verified
+      // across the repo, its only mention anywhere was its own CREATE TABLE in the bootstrap
+      // schema, which this release also removes. Dropping it here clears it from databases that
+      // already created it. Safe: no data is lost because none was ever written.
+      //
+      // NOT dropped, deliberately: scrape_events. Its writer (usageTracker.trackScrape) is gone
+      // in the same release, but routes/admin.js still READS it in four analytics queries, so
+      // dropping it would break the admin dashboard. Those panels now report a permanent zero,
+      // which is accurate rather than broken. See docs/PIPELINE_DIAGNOSIS.md §5.12.
+      id: "071_drop_refresh_log",
+      sql: `
+        DROP TABLE IF EXISTS refresh_log;
       `,
     },
   ];

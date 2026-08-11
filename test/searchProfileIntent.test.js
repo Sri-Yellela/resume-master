@@ -1,17 +1,24 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-test("search pipeline remains active-profile driven on the server", () => {
+// Was "search pipeline remains active-profile driven on the server". Every one of its six
+// assertions described the removed Apify scrape route — buildApifyQueriesFromProfile(activeProfile),
+// scrapeJobs(query, token, scrapeParams, ...), roleTitleSql("sj.title", roleKey). The route is
+// gone: /api/scrape now answers HTTP 410 "External scraping has been removed. Job search now
+// uses /api/jobs." So this could never pass again, and it was one of the failures keeping the
+// baseline pinned to a pre-pivot architecture (see docs/PIPELINE_DIAGNOSIS.md §5.11).
+// Replaced by the inverse guard: scraping must STAY retired.
+test("external scraping stays retired", () => {
   const server = fs.readFileSync("server.js", "utf8");
 
-  assert.match(server, /const query = normaliseRole\(rawQuery\)/);
-  assert.match(server, /buildApifyQueriesFromProfile\(activeProfile\)/);
-  assert.match(server, /\.\.\.\(profileJobTitles \? \{ jobTitles: profileJobTitles \} : \{\}\)/);
-  assert.match(server, /scrapeJobs\(query, token, scrapeParams, activeProfile\?\.id \?\? null\)/);
-  assert.match(server, /jrm\.role_key = \?/);
-  assert.match(server, /roleTitleSql\("sj\.title", roleKey\)/);
+  assert.match(server, /app\.post\("\/api\/scrape",[\s\S]{0,200}?410/,
+    "/api/scrape must remain a 410 tombstone rather than being reimplemented");
+  assert.doesNotMatch(server, /app\.post\("\/api\/jobs\/scrape"/,
+    "the per-user scrape route must not return");
+  // The board is served from the stored pool via buildJobFilters, not an outbound crawl.
+  assert.match(server, /buildJobFilters\(filterParams\)/,
+    "/api/jobs must still compose its filters through buildJobFilters");
 });
 
 test("frontend detects strong cross-profile search intent before scrape", () => {
@@ -37,7 +44,10 @@ test("confirmed profile-intent switch runs search after activation and declined 
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
 
   assert.match(jobsPanel, /await activateProfileForSearch\(intent\.existingProfile\.id\)/);
-  assert.match(jobsPanel, /handleSearch\(pendingQuery, \{ skipProfileIntent: true \}\)/);
+  // handleSearch was renamed handleSetRole. This assertion was stale, NOT scraping-era — the
+  // confirmed-switch-then-search behaviour it guards is live, so the name is corrected rather
+  // than the test retired.
+  assert.match(jobsPanel, /handleSetRole\(pendingQuery, \{ skipProfileIntent: true \}\)/);
   assert.match(jobsPanel, /Search canceled/);
   assert.match(jobsPanel, /profileWizardIntent\?\.domainKey/);
   assert.match(wizard, /initialDomainKey = null/);

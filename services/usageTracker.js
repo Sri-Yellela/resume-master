@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // services/usageTracker.js
 // PURPOSE: Record all metered events to usage_events, cache_events, and scrape_events.
 // DEPENDENCIES: db instance from server.js passed as first argument.
@@ -116,25 +116,11 @@ export function trackApiCall(db, {
   }
 }
 
-export function trackScrape(db, {
-  userId, searchQuery, rawCount, filteredCount,
-  insertedCount, duplicateCount, ghostCount,
-  irrelevantCount, durationMs,
-  success = true, errorText = null,
-}) {
-  try {
-    db.prepare(`INSERT INTO scrape_events (
-      user_id, search_query, raw_count, filtered_count,
-      inserted_count, duplicate_count, ghost_count,
-      irrelevant_count, duration_ms, success, error_text
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(
-      userId, searchQuery, rawCount || 0, filteredCount || 0,
-      insertedCount || 0, duplicateCount || 0, ghostCount || 0,
-      irrelevantCount || 0, durationMs || null,
-      success ? 1 : 0, errorText || null
-    );
-  } catch (e) {
-    console.warn("[usageTracker] trackScrape error:", e.message);
-  }
-}
+// trackScrape() removed in cleanup 5.8 — it was the ONLY writer to scrape_events and had zero
+// callers, so the table has sat at 0 rows since the pivot retired external scraping.
+//
+// The scrape_events TABLE is deliberately kept: routes/admin.js still reads it in four analytics
+// queries. Those panels therefore report a permanent zero, which is accurate (no scraping
+// happens) but worth knowing before someone reads it as a data bug — recorded as §5.12 in
+// docs/PIPELINE_DIAGNOSIS.md. Dropping the table would break those queries, so it is a separate
+// decision from removing the dead writer.
