@@ -28,6 +28,26 @@ function authHeaders() {
   return { 'X-Api-Key': API_KEY, 'Content-Type': 'application/json' };
 }
 
+// Axios's default message is just "Request failed with status code 402", which discards the
+// response body — and for this API the body is the only place the actual reason appears. A 402
+// (wallet/quota) and a 401 (bad key) are operationally very different but read identically
+// without it, and the caller only ever logs err.message. Named separately so the status is
+// greppable in logs, and annotated for the two cases an operator must act on differently.
+function enrichJoboError(err, what) {
+  const status = err.response?.status;
+  if (!status) return err;
+  const body = err.response.data;
+  const detail = typeof body === 'string' ? body.slice(0, 300) : JSON.stringify(body || {}).slice(0, 300);
+  let hint = '';
+  if (status === 402) hint = ' — PAYMENT REQUIRED: the Jobo wallet/quota is exhausted or this request exceeds the plan. Rows will NOT sync until this is resolved; check the Jobo dashboard balance.';
+  else if (status === 401 || status === 403) hint = ' — AUTH REJECTED: JOBO_API_KEY is set but not accepted (revoked, rotated, or wrong environment).';
+  else if (status === 429) hint = ' — RATE LIMITED.';
+  const wrapped = new Error(`Jobo ${what} failed: HTTP ${status}${hint} Response: ${detail}`);
+  wrapped.status = status;
+  wrapped.cause = err;
+  return wrapped;
+}
+
 /**
  * POST /api/jobs/feed — one page. `body` is caller-supplied and varies by mode:
  *   backfill first page:   { batch_size, stable_scan: true }
@@ -36,7 +56,12 @@ function authHeaders() {
  * This function doesn't know which mode it's in — aggregator.js's cacheJoboFeed decides.
  */
 async function fetchFeedPage(body) {
-  const response = await axios.post(FEED_URL, body, { headers: authHeaders(), timeout: 15000 });
+  let response;
+  try {
+    response = await axios.post(FEED_URL, body, { headers: authHeaders(), timeout: 15000 });
+  } catch (err) {
+    throw enrichJoboError(err, 'feed fetch');
+  }
   const data = response.data || {};
   return {
     jobs:       Array.isArray(data.jobs) ? data.jobs : [],
@@ -52,7 +77,12 @@ async function fetchFeedPage(body) {
 async function fetchExpiredPage({ expiredSince, batchSize = 10000, cursor } = {}) {
   const params = { expired_since: expiredSince, batch_size: batchSize };
   if (cursor) params.cursor = cursor;
-  const response = await axios.get(EXPIRED_URL, { headers: authHeaders(), params, timeout: 15000 });
+  let response;
+  try {
+    response = await axios.get(EXPIRED_URL, { headers: authHeaders(), params, timeout: 15000 });
+  } catch (err) {
+    throw enrichJoboError(err, 'expired fetch');
+  }
   const data = response.data || {};
   return {
     jobIds:     Array.isArray(data.job_ids) ? data.job_ids : [],

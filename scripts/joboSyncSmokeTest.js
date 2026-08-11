@@ -69,8 +69,13 @@ async function runRealSync() {
     return;
   }
 
-  const count = await cacheJoboFeed(db, null);
-  console.log(`[smoke] cacheJoboFeed() returned cached=${count}`);
+  const result = await cacheJoboFeed(db, null);
+  console.log('[smoke] cacheJoboFeed() returned:', result);
+  if (result.status !== 'ok') {
+    console.error(`[smoke] Sync did not complete cleanly (status=${result.status}${result.error ? `: ${result.error}` : ''}).`);
+  } else if (result.fetched && !result.cached) {
+    console.warn(`[smoke] Fetched ${result.fetched} jobs but cached none — merged ${result.merged}, dropped ${result.dropped}, ejected ${result.ejected}, failed ${result.failed}.`);
+  }
 
   const rows = db.prepare(
     "SELECT job_id, title, company, source, is_active, fingerprint, sources_seen, req_uid FROM scraped_jobs WHERE source = 'jobo' ORDER BY discovered_at DESC LIMIT 20"
