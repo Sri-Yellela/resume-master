@@ -22,7 +22,8 @@ function makeDb() {
       discovered_at INTEGER, scraped_at INTEGER, updated_at INTEGER, is_active INTEGER DEFAULT 1,
       description TEXT, summary TEXT, normalized_title TEXT, experience_level TEXT,
       workplace_type TEXT, skills_json TEXT, salary_min_usd INTEGER, salary_max_usd INTEGER,
-      is_h1b_sponsor INTEGER, requires_work_auth INTEGER,
+      salary_period TEXT, is_h1b_sponsor INTEGER, requires_work_auth INTEGER,
+      is_clearance_required INTEGER, org_unit_raw TEXT,
       enriched_at INTEGER, content_hash TEXT, sources_seen TEXT, req_uid TEXT
     );
     CREATE TABLE pipeline_runs (
@@ -223,4 +224,39 @@ test("dedup folding is visible", async () => {
   const { body } = await getHealth(db);
   assert.equal(body.dedup.multiSource, 1, "only the row seen from 2+ sources counts as folded");
   assert.equal(body.dedup.total, 2);
+});
+
+test("user-triggered enrichment passes are excluded from the run log", async () => {
+  // importJob.js fires enrichment on every single-URL import. pipeline_runs answers "is the
+  // SCHEDULED pipeline healthy?", so incidental user-triggered passes must not interleave with
+  // the cron history and push real runs out of the recent-runs view.
+  const { runEnrichment } = await import("../services/jobs/enrichJob.js");
+  const db = makeDb();
+  db.exec(`CREATE TABLE company_technographics (
+    company TEXT, skill TEXT, weight REAL, last_seen INTEGER, posting_count INTEGER,
+    PRIMARY KEY (company, skill)
+  );`);
+  db.prepare(`INSERT INTO scraped_jobs (job_id,title,company,source,discovered_at,is_active,description)
+              VALUES ('a','Eng','Acme','import',1,1,'Real description text.')`).run();
+
+  const stub = { messages: { create: async () => ({
+    content: [{ text: JSON.stringify({
+      summary: "A role.", normalizedTitle: null, experienceLevel: null, workplaceType: null,
+      skillsHard: [], skillsSoft: [], salaryMinUsd: null, salaryMaxUsd: null, salaryPeriod: null,
+      isH1bSponsor: null, requiresWorkAuth: null, isClearanceRequired: null, orgUnit: null,
+    }) }],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  }) } };
+
+  await runEnrichment(db, stub, { recordRun: false });
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM pipeline_runs").get().n, 0,
+    "an opted-out pass must leave no run record");
+  assert.ok(db.prepare("SELECT summary FROM scraped_jobs WHERE job_id='a'").get().summary,
+    "the enrichment work itself must still happen");
+
+  // The scheduled path still records.
+  db.prepare("UPDATE scraped_jobs SET content_hash=NULL, enriched_at=NULL, summary=NULL WHERE job_id='a'").run();
+  await runEnrichment(db, stub);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM pipeline_runs").get().n, 1,
+    "the default (cron) path must still record");
 });

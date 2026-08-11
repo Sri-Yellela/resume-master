@@ -182,13 +182,18 @@ let enrichmentInProgress = false;
  * @param {import('better-sqlite3').Database} db
  * @param {import('@anthropic-ai/sdk').default | null} anthropic
  */
-async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = {}) {
+async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, recordRun = true } = {}) {
   const runStartedAt = Math.floor(Date.now() / 1000);
+  // User-triggered passes (a single-URL import) opt out: pipeline_runs is meant to answer "is
+  // the SCHEDULED pipeline healthy?", and one row per import would interleave dozens of
+  // incidental passes with the cron history, pushing the real runs out of the recent-runs view.
+  // The work still happens and still counts toward coverage — only the run record is skipped.
+  const record = (fields) => { if (recordRun) recordPipelineRun(db, fields); };
   if (!anthropic) {
     // Same class as Jobo's unconfigured skip: with no client this pass does nothing at all, and
     // "did nothing" must be distinguishable from "ran and found nothing to do".
     console.warn('[enrichJob] MISCONFIGURED: no Anthropic client available — enrichment did NOT run');
-    recordPipelineRun(db, {
+    record({
       runKind: 'enrichment', status: 'skipped_unconfigured', startedAt: runStartedAt,
       errorText: 'No Anthropic client available (ANTHROPIC_KEY unset?)',
     });
@@ -228,7 +233,7 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
     const candidates = rows.filter(r => computeContentHash(r.title, r.description) !== r.content_hash);
     if (!candidates.length) {
       console.log(`[enrichJob] No rows need enrichment (${noDescription} active rows have no description and can never be enriched)`);
-      recordPipelineRun(db, {
+      record({
         runKind: 'enrichment', status: 'ok', startedAt: runStartedAt,
         skipped: noDescription, details: { reason: 'no_candidates' },
       });
@@ -322,7 +327,7 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
       console.warn(`[enrichJob] WARNING: all ${empty} rows this pass yielded no signal — check that descriptions are being stored`);
     }
 
-    recordPipelineRun(db, {
+    record({
       runKind: 'enrichment', status: 'ok', startedAt: runStartedAt,
       fetched: batch.length, written: enriched, failed, skipped: noDescription,
       details: {

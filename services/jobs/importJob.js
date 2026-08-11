@@ -426,7 +426,12 @@ async function importJob({ url, text, html } = {}, { db, anthropic }) {
   }
 
   setImmediate(() => {
-    runEnrichment(db, anthropic).catch(e => console.warn('[importJob] Background enrichment failed:', e.message));
+    // recordRun:false — this pass is triggered by a user importing one URL, not by the cron.
+    // Logging it would interleave dozens of incidental passes with the scheduled pipeline's
+    // history and push the real runs out of the monitor's recent-runs view. The enrichment
+    // itself still happens and still shows up in coverage.
+    runEnrichment(db, anthropic, { recordRun: false })
+      .catch(e => console.warn('[importJob] Background enrichment failed:', e.message));
   });
 
   const row = db.prepare('SELECT * FROM scraped_jobs WHERE job_id = ?').get(finalJobId);
