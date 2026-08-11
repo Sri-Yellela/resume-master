@@ -47,7 +47,7 @@ Greenhouse is 95% of the active board. The provider the platform pivoted onto co
 
 ## 2. CONFIRMED failures
 
-### 2.1 Jobo has never executed — `JOBO_API_KEY` unset in Railway
+### 2.1 Jobo has never executed — ~~`JOBO_API_KEY` unset in Railway~~ **WRONG DIAGNOSIS; see 2.1a**
 `aggregator.js:777` — `cacheJoboFeed()` opens with:
 ```js
 if (!joboSource.isConfigured()) {
@@ -66,6 +66,45 @@ line should distinguish "skipped (unconfigured)" from "synced 0."
 
 **Related:** `scripts/providerEval/adapters/jobo.js` targets a different, wrong-guess endpoint
 (noted in `jobo.js`'s own header). Dead code — cleanup candidate.
+
+### 2.1a The real cause: HTTP 402, swallowed as "sync complete — 0 jobs cached"
+
+The owner confirmed `JOBO_API_KEY` has been set in Railway all along and never rotated, and a
+live bounded probe returns HTTP 200 with 10 jobs. **The key is valid.** §2.1 above inferred
+"never ran" from the absence of `source='jobo'` rows — an inference, not an observation, and the
+wrong one.
+
+What the feed actually returns:
+
+```json
+{"error":"Insufficient credits",
+ "detail":"This request needs 3000 credits ($3). Your wallet balance is 1890 credits ($1.89).",
+ "credits_required":3000,"credits_balance":1890,"cost_per_request_usd":3}
+```
+
+Pricing is ~3 credits per job returned, so `JOBO_INCREMENTAL_BATCH = 1000` made every incremental
+page cost $3 — more than the wallet holds. `cacheJoboFeed` caught the throw, correctly refused to
+advance the watermark, returned its bare `cached` count of 0, and `server.js` printed
+*"Jobo feed sync complete — 0 jobs cached."* A hard payment failure rendered as a healthy empty
+sync. Same pattern as everything else in this document, which is why the original inference
+looked plausible.
+
+Fixed: structured return (`skipped_unconfigured` / `ok` / `failed`), the cron logging all three
+differently plus a warn for "fetched N, cached none", axios errors carrying status + body +
+an operator hint (402 wallet vs 401/403 key vs 429 rate limit), and `JOBO_INCREMENTAL_BATCH`
+env-overridable with a free-tier default of 10.
+
+Two further bugs found while fixing it, both of which would have made that default useless:
+`batch_size` was omitted from **cursor** pages (so continuation pages silently reverted to the
+API default of 1000 = $3 each — capping the batch only ever made page 1 cheap), and a small batch
+means many more requests, which rate-limits itself (HTTP 429 after ~30 pages in seconds; now
+paced 2s between pages). Both verified against the live API.
+
+Five more field mappings were reading keys that do not exist in Jobo's response — `workplace_type`
+(read nonexistent `is_remote`/`is_hybrid`), salary (read flat `salary_*` instead of the nested
+`compensation` object), `posted_at` (fell through to `created_at`), `experience_level` (raw
+"Mid Level" rejected by the schema enum), and skills (read nonexistent `job.skills`). Measured on
+10 live jobs, before → after: workplace_type 0→8, experience_level 0→10, skills_json 0→9.
 
 ### 2.2 Enrichment overwrites good data with NULL, then marks the row done
 `enrichJob.js:191` — the UPDATE writes every column unconditionally from `signals`, including
@@ -170,8 +209,8 @@ re-run against production. Items resolved by *code path or live API probe* hold 
 | 3.1 | Are descriptions stored? Prime suspect for all-NULL enrichment. | **RESOLVED — no.** Confirmed root cause; see §2.4. Local: greenhouse 617/617 and ashby 21/21 empty, `avg_len` 0; jobo 0/5 empty, `avg_len` 4108. Confirmed independently by live API probe + code path, so this is not snapshot-dependent. |
 | 3.2 | Is the LLM even being called? | **Effectively resolved by §2.4.** It *was* called (the 120 rows have `enriched_at`, and tokens were spent) — it was just handed an empty description. Post-fix the pass now warns loudly when a whole batch yields no signal. |
 | 3.3 | Is `company_technographics` empty? | **RESOLVED — yes, 0 rows** *(local)*. Downstream of §2.4: skills can only come from a description. Expect it to populate once the adapter fix deploys and enrichment re-runs. FE-4 STACK / FE-6 render empty until then. |
-| 3.4 | Why did ashby stop on Aug 7? | **OPEN.** Note §2.4 changes the fetch URL and raises the timeout to 15s; re-check after deploy before digging, since a slow/oversized response is now a plausible prior cause. Check `[cacheJobs]` logs for an ashby error. |
-| 3.5 | Why is adzuna's `discovered_at` NULL? | **OPEN.** Breaks the NEW<24h pill and `jobQuery.js:171` recency filter — adzuna rows are dropped by any date filter. Not reproducible locally (this snapshot has no adzuna rows). |
+| 3.4 | Why did ashby stop on Aug 7? | **RESOLVED — it probably never stopped.** The two write paths disagreed on what `discovered_at` means: the unchanged-row touch preserved it, but `INSERT OR REPLACE` reset it to `now` on any content change. So a source's apparent freshness tracked how often its postings *churn*, not whether it was still being crawled — and ashby (21 stable postings across Linear/Vercel) reads as stalled next to greenhouse (617 across 8 companies) while both crawl nightly. Fixed: `upsertCanonicalJob` now preserves the prior first-seen. Which explanation held in production is settled by the monitor on the next tick (it records per-source status + rows written, and last-success separately from last-run). |
+| 3.5 | Why is adzuna's `discovered_at` NULL? | **RESOLVED — not an adzuna bug; nothing writes adzuna any more.** `cacheJobs` crawls only `DIRECT_ATS_SOURCES`, `cacheJoboFeed` only jobo, `searchJobs` has zero write statements. `discovered_at` is set by `upsertCanonicalJob`, which those 10 rows never went through — they are pre-pivot orphans nothing will refresh. The live consequence is fixed: the recency filter now uses `COALESCE(discovered_at, scraped_at)` instead of hard-excluding NULL, so they are no longer invisible to every date filter and the NEW<24h pill. |
 | 3.6 | Are visa flags all NULL? | **RESOLVED — yes, 0 non-null for both** *(local)*. Downstream of §2.4, same as 3.3: the flags are description-derived. The OPT/H1B badge cannot render until enrichment has real text. |
 | 3.8 | **NEW** — 2 of 10 greenhouse slugs in `company_ats_list` are dead. | `notionhq` and `openai` both return **404** on the board endpoint (verified on the old *and* new URL, so this is pre-existing and unrelated to §2.4). `greenhouse.js`'s per-company `.catch(...) => []` logs a warning and moves on, so the board just quietly carries 8 companies instead of 10. Find the current slugs or drop the rows. Same silent-failure class as §4. |
 | 3.7 | Test baseline: 44 or 45? | **RESOLVED — 44, always. The "45" never existed.** See below. |
@@ -279,12 +318,46 @@ correctly-behaving pass that still extracted nothing, because there was no text 
    Expect `no_desc → 0` for greenhouse/ashby, and `enriched`/`has_summary`/`has_skills` climbing
    25 rows per pass (`ENRICH_BATCH_SIZE`). If `no_desc` is still high, stop — the adapter fix
    didn't take and everything downstream is moot.
-6. Set `JOBO_API_KEY`; make the skip loud. Verify rows land tagged `source:'jobo'`. (Independent
-   of 1–5 — deliberately moved after them, since they restore 95% of the board and this adds a
-   new source on top.)
-7. Resolve remaining §3 OPEN items (3.4, 3.5) — both are cheap post-deploy log/query checks.
-8. Repurpose the monitor into pipeline-truth observability. Per §4, the single highest-value
-   addition is a **per-source non-null coverage table** — it makes §2.4's whole failure class
-   visible on the first crawl instead of never.
+6. ~~Set `JOBO_API_KEY`; make the skip loud~~ **DONE, and the diagnosis in §2.1 was WRONG.** The
+   key was set and valid all along; the feed returns **HTTP 402 Insufficient credits** and the
+   error was being swallowed into a "0 jobs cached" log line. The skip is now loud, the return is
+   structured (`skipped_unconfigured` / `ok` / `failed`), and the incremental batch is
+   env-overridable with a free-tier default. **Jobo cannot sync until the wallet is topped up** —
+   and per the freshness sample below, that is not obviously worth doing.
+7. ~~Resolve §3 OPEN items~~ **DONE** — 3.4 and 3.5 both resolved above; 3.8 (two dead greenhouse
+   slugs) remains, and is a data fix in `company_ats_list`, not code.
+8. ~~Repurpose the monitor~~ **DONE** (migration 069 + `/api/admin/db/pipeline-health`). It
+   reports per-source freshness/staleness, unconfigured-vs-never-ran-vs-failed, enrichment
+   coverage % per column, and dedup folds. Pointed at the local snapshot it immediately showed
+   greenhouse STALE 120h with 617/617 missing descriptions and coverage at 0.8%/0.5%/0%.
 9. Only then: the scraping-era cleanup pass, and the UI workstream (board/search-bar separation,
    modal transitions, PDF editability) — separate tracks, separate commits.
+
+---
+
+## 7. Jobo freshness — measured, and the reason not to top up
+
+From the 1000-job incremental sample actually pulled (cost ~3000 credits), with `posted_at`
+corrected to Jobo's real `date_posted` field rather than `created_at`:
+
+| Age by true posting date | Count |
+|---|---|
+| ≤ 1 day | **0** |
+| 2–7 days | **0** |
+| 8–30 days | **0** |
+| 31–90 days | 367 |
+| > 90 days | 331 |
+
+Newest posting across 1000 jobs: **2026-05-13**, ~89 days old. Most were posted 1–28 April. The
+`updated_at` values are recent (late July), which is what made them *look* current — Jobo
+re-touches old records. The ATS-direct sources write same-day postings for free.
+
+Caveat: this is the `updated_after` incremental slice, not a random draw across the 4,004,867-job
+corpus, and `stable_scan` ordering might surface different jobs. But 1000 consecutive jobs with
+zero under 30 days old is a strong signal.
+
+**This was invisible before** because the adapter stored `created_at` (when Jobo ingested a job)
+as `posted_at`, systematically understating age. Jobo's one real advantage is that it returns
+`qualifications.must_have.skills` as `{name, type}` — the exact hard/soft split `enrichJob.js`
+pays Haiku to produce — so Jobo rows can skip enrichment entirely. That only matters for jobs
+worth showing, and 3-month-old postings are mostly dead links.
