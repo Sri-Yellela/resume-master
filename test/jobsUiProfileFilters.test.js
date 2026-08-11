@@ -22,15 +22,38 @@ test("filter panel uses an opaque modal surface", () => {
   assert.match(jobsPanel, /boxShadow:theme\.shadowXl/);
 });
 
-test("LinkedIn import CTA is only rendered from the Starred LinkedIn section", () => {
+// Replaces "LinkedIn import CTA is only rendered from the Starred LinkedIn section", which
+// pinned a CTA string that no longer existed even before cleanup 5.3 — it had been failing for
+// that reason. The bulk saved-jobs import is now removed outright: its bridge functions were
+// stubs returning false/no-op since BYO-2, so the CTA could only ever open an install modal that
+// no install could satisfy, and v1.2.0 deleted the extension-side script entirely.
+test("the dead LinkedIn bulk-import flow stays removed", () => {
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
-  const starredSectionStart = jobsPanel.indexOf("function StarredLinkedInSection");
-  const mainToolbar = jobsPanel.slice(0, starredSectionStart);
+  // Strip comments so the explanatory notes left behind don't satisfy these assertions.
+  const code = jobsPanel
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 
-  assert.ok(starredSectionStart > 0);
-  assert.doesNotMatch(mainToolbar, /Import LinkedIn Saved Jobs/);
-  assert.match(jobsPanel.slice(starredSectionStart), /Import LinkedIn Saved Jobs/);
+  for (const symbol of [
+    "startLinkedInImport", "openLinkedInExtensionPopup", "closeLinkedInImportTab",
+    "sendExtensionRequest", "isLinkedInExtensionInstalled", "getLinkedInExtensionInstallUrl",
+    "LinkedInInstallDialog", "linkedinInstallModalOpen", "linkedinExtensionNotice",
+  ]) {
+    assert.doesNotMatch(code, new RegExp(symbol),
+      `${symbol} belongs to the removed bulk-import flow and must not return`);
+  }
+});
+
+test("the Starred LinkedIn section still renders captured jobs", () => {
+  // The DISPLAY is live and must survive the cleanup — it is fed by the single-job capture path
+  // (/api/extension/save-job), which extension/linkedin-content.js still calls.
+  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+  assert.ok(jobsPanel.indexOf("function StarredLinkedInSection") > 0,
+    "the section component must still exist");
   assert.match(jobsPanel, /showImportedLinkedInSection=\{boardTab === "saved"\}/);
+  assert.match(jobsPanel, /api\("\/api\/imported-jobs\/linkedin"\)/,
+    "it must still read back captured LinkedIn jobs");
 });
 
 test("job profiles have a dedicated app section and menu entry", () => {

@@ -18,10 +18,11 @@ import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { toast } from "../hooks/use-toast.js";
 import ROLE_ALIAS_MAP from "../../../data/ROLE_ALIAS_MAP.json";
 
-// Stubs for removed extension bridge — hooks no longer exist
-const getLinkedInExtensionInstallUrl = () => null;
-const isLinkedInExtensionInstalled   = () => false;
-const sendExtensionRequest           = async () => {};
+// The three extension-bridge stubs that stood here (getLinkedInExtensionInstallUrl,
+// isLinkedInExtensionInstalled, sendExtensionRequest) are gone with cleanup 5.3. They returned
+// null / false / an empty promise, which meant every caller was unreachable or a no-op while
+// still presenting working-looking UI. The extension integration that remains is the SINGLE-job
+// capture, which talks to the server over HTTP and needs no in-page bridge at all.
 
 // Normalizes the new /api/jobs aggregator field names to the shape
 // the rest of JobsPanel and JobCard expect (legacy camelCase fields).
@@ -1150,12 +1151,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [pendingJobs, setPendingJobs] = useState([]);
   const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
   const [linkedinImportSummary, setLinkedinImportSummary] = useState({ total: 0, lastImportedAt: null });
-  const [linkedinInstallModalOpen, setLinkedinInstallModalOpen] = useState(false);
-  const [linkedinImporting, setLinkedinImporting] = useState(false);
-  const [linkedinExtensionNotice, setLinkedinExtensionNotice] = useState(null);
-  // Extension removed — stub so remaining extension-gated UI stays dormant
-  const extensionState = { status: "IDLE" };
-  const refreshExtensionState = () => {};
+  // linkedinInstallModalOpen / linkedinImporting / linkedinExtensionNotice removed in cleanup
+  // 5.3 along with the bulk-import flow that was their only writer.
+  // extensionState / refreshExtensionState stubs removed in cleanup 5.3 — the last readers of
+  // both went with the bulk-import flow.
 
   const activeDomainProfile = useMemo(() => (
     domainProfiles.find(p => p.id === activeProfileId)
@@ -1670,55 +1669,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     }
   }, []);
 
-  const openLinkedInExtensionPopup = useCallback(async () => {
-    try {
-      await sendExtensionRequest({ type: "OPEN_POPUP" });
-    } catch (e) {
-      setUploadError(e.message || "Could not open the LinkedIn extension.");
-    }
-  }, []);
-
-  const closeLinkedInImportTab = useCallback(async (tabId) => {
-    try {
-      await sendExtensionRequest({ type: "CLOSE_LINKEDIN_TAB", tabId });
-    } catch {}
-  }, []);
-
-  const startLinkedInImport = useCallback(async () => {
-    if (!activeDomainProfile) {
-      setUploadError("Create and activate a job profile before importing from LinkedIn.");
-      return;
-    }
-    if (!isLinkedInExtensionInstalled()) {
-      setLinkedinInstallModalOpen(true);
-      return;
-    }
-    const status = await refreshExtensionState().catch((error) => {
-      throw new Error(error.message || "Could not reach the LinkedIn extension.");
-    });
-    if (status.status === "NOT_AUTHED") {
-      setLinkedinExtensionNotice({
-        message: "Reconnect Extension to Resume Master before importing from LinkedIn.",
-        actionLabel: "Fix Connection",
-      });
-      return;
-    }
-    setLinkedinExtensionNotice(null);
-    setLinkedinImporting(true);
-    setUploadError("");
-    try {
-      await sendExtensionRequest({
-        type: "START_LINKEDIN_IMPORT",
-        payload: {
-          targetRole: activeDomainProfile.profile_name || "",
-          location: activeDomainProfile.location || "",
-        },
-      });
-    } catch (e) {
-      setLinkedinImporting(false);
-      setUploadError(e.message || "Could not start LinkedIn import.");
-    }
-  }, [activeDomainProfile, refreshExtensionState]);
+  // openLinkedInExtensionPopup / closeLinkedInImportTab / startLinkedInImport removed in cleanup
+  // 5.3. They drove the LinkedIn bulk saved-jobs import, and every one of them called
+  // sendExtensionRequest — a stub returning an empty promise since BYO-2. startLinkedInImport
+  // additionally gated on isLinkedInExtensionInstalled(), a stub hardcoded to false, so the
+  // function could never get past its own guard: it always opened the install modal, for an
+  // extension capability that v1.2.0 deleted outright. Nothing here could succeed.
 
   // -- Fetch pending jobs ----------------------------------------
   const fetchPending = useCallback(async () => {
@@ -1855,39 +1811,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     fetchImportedSummary();
   }, [user, fetchImportedSummary]);
 
-  useEffect(() => {
-    if (extensionState.status === "DONE" && linkedinImporting) {
-      closeLinkedInImportTab(extensionState.linkedInTabId);
-      fetchImportedSummary();
-      fetchImportedLinkedInJobs();
-      fetchJobsRef.current?.(1);
-      toast({ title: "LinkedIn import complete", description: `Imported ${extensionState.importedCount || 0} jobs from LinkedIn.` });
-      setLinkedinImporting(false);
-      setLinkedinExtensionNotice(null);
-    }
-    if (extensionState.status === "ERROR" && linkedinImporting) {
-      closeLinkedInImportTab(extensionState.linkedInTabId);
-      toast({ title: "LinkedIn import failed", description: extensionState.error || "Could not import LinkedIn jobs." });
-      setLinkedinImporting(false);
-    }
-  }, [closeLinkedInImportTab, extensionState, fetchImportedLinkedInJobs, fetchImportedSummary, linkedinImporting]);
+  // Bulk-import completion effect removed in cleanup 5.3. `extensionState` is a hardcoded
+  // { status: "IDLE" } literal, so neither branch could ever run — it watched for DONE/ERROR
+  // states that nothing has published since the bridge became a stub.
 
-  useEffect(() => {
-    const onExtensionEvent = (event) => {
-      const payload = event.detail?.payload;
-      if (!payload?.type) return;
-      if (payload.type === "LINKEDIN_LOGIN_REQUIRED") {
-        setLinkedinImporting(false);
-        setLinkedinExtensionNotice({
-          message: "Please log into LinkedIn in the tab that just opened, then click Import again.",
-          actionLabel: "",
-        });
-        toast({ title: "LinkedIn login required", description: "Finish logging into LinkedIn in the opened tab, then click Import again." });
-      }
-    };
-    window.addEventListener("rm-extension:event", onExtensionEvent);
-    return () => window.removeEventListener("rm-extension:event", onExtensionEvent);
-  }, []);
+  // "rm-extension:event" listener removed in cleanup 5.3. It handled LINKEDIN_LOGIN_REQUIRED,
+  // which only the bulk-import flow ever published, and its handler wrote the two pieces of
+  // state removed above. Nothing dispatches this event any more — the bridge that did is a stub.
 
   useEffect(() => {
     if (["linkedin", "linkedin_saved"].includes(boardTab)) setBoardTab("saved");
@@ -2695,15 +2625,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         />
       )}
 
-      <LinkedInInstallDialog
-        theme={theme}
-        open={linkedinInstallModalOpen}
-        onClose={() => setLinkedinInstallModalOpen(false)}
-        onImportNow={async () => {
-          setLinkedinInstallModalOpen(false);
-          await startLinkedInImport();
-        }}
-      />
+      {/* LinkedInInstallDialog removed in cleanup 5.3 — it was only ever opened by
+          startLinkedInImport's always-true "extension not installed" guard, and its Import Now
+          action called straight back into that same function. A user could reach it, install
+          nothing that would help, and loop. */}
 
       <AnimatePresence>
         {filtersOpen && (
@@ -2944,20 +2869,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           </div>
         )}
 
-        {linkedinExtensionNotice?.message && (
-          <div style={{ flexBasis:"100%", padding:"6px 0", fontSize:11, color:theme.text }}>
-            {linkedinExtensionNotice.message}
-            {linkedinExtensionNotice.actionLabel ? (
-              <button
-                onClick={openLinkedInExtensionPopup}
-                style={{ marginLeft:8, border:"none", borderRadius:999, padding:"4px 10px", cursor:"pointer",
-                  background:theme.accent, color:"#0f0f0f", fontWeight:800, fontSize:11 }}>
-                {linkedinExtensionNotice.actionLabel}
-              </button>
-            ) : null}
-            <button onClick={() => setLinkedinExtensionNotice(null)} style={{ marginLeft:6, background:"none", border:"none", cursor:"pointer", fontSize:11, color:theme.textMuted }}>Dismiss</button>
-          </div>
-        )}
+        {/* linkedinExtensionNotice banner removed in cleanup 5.3 — it was only ever set by
+            startLinkedInImport's NOT_AUTHED branch, which was unreachable past the always-false
+            install guard, and its action button called the no-op extension bridge. */}
 
         {(applyQueue.length > 0 || applyQueueMsg || applyRuns.length > 0 || applyReviewJobs.length > 0) && (
           <div style={{ flexBasis:"100%", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
@@ -3359,8 +3273,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 showImportedLinkedInSection={boardTab === "saved"}
                 importedLinkedInJobs={importedLinkedInJobs}
                 linkedinImportSummary={linkedinImportSummary}
-                linkedinImporting={linkedinImporting}
-                onImportLinkedIn={startLinkedInImport}
                 onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
                 cardTier={1}
               />
@@ -3453,8 +3365,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               showImportedLinkedInSection={boardTab === "saved"}
               importedLinkedInJobs={importedLinkedInJobs}
               linkedinImportSummary={linkedinImportSummary}
-              linkedinImporting={linkedinImporting}
-              onImportLinkedIn={startLinkedInImport}
               onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
               cardTier={effectiveTier}
               containerRef={jobsPanelElementRef}
@@ -3579,8 +3489,6 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       showImportedLinkedInSection = false,
                       importedLinkedInJobs = [],
                       linkedinImportSummary = { total: 0, lastImportedAt: null },
-                      linkedinImporting = false,
-                      onImportLinkedIn,
                       onRefreshImportedLinkedIn,
                       cardTier = 1, containerRef }) {
   const [pageInput, setPageInput] = useState("");
@@ -3630,8 +3538,6 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
             <StarredLinkedInSection
               jobs={importedLinkedInJobs}
               theme={theme}
-              onImport={onImportLinkedIn}
-              linkedinImporting={linkedinImporting}
               onRefresh={onRefreshImportedLinkedIn}
               importCount={linkedinImportSummary.total}
               lastImportedAt={linkedinImportSummary.lastImportedAt}
@@ -3777,12 +3683,16 @@ function buildVisiblePageItems(currentPage, totalPages) {
   return items;
 }
 
+// Displays LinkedIn jobs already captured via the extension. The `onImport`/`linkedinImporting`
+// props and their two "Import from LinkedIn" buttons were removed in cleanup 5.3: they drove the
+// bulk saved-jobs scrape, whose bridge functions have been stubs returning false since BYO-2 and
+// whose extension-side content script was deleted in v1.2.0. Clicking either only ever opened an
+// "install the extension" modal that no install could satisfy. The LIST below stays — it is fed
+// by the single-job capture path (/api/extension/save-job), which is live.
 function StarredLinkedInSection({
   jobs,
   theme,
   onRefresh,
-  onImport,
-  linkedinImporting,
   importCount,
   lastImportedAt,
   onVisit,
@@ -3809,27 +3719,25 @@ function StarredLinkedInSection({
           </span>
         )}
         <div style={{ flex:1 }}/>
-        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onImport} disabled={linkedinImporting}>
-          {linkedinImporting ? "Importing..." : "Import from LinkedIn"}
-        </button>
         <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
       </div>
       <div style={{ padding:"12px 14px", borderBottom:`1px solid ${theme.border}`,
                     background:theme.surfaceHigh }}>
         <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6 }}>
-          Import visible LinkedIn job listings with the browser extension. Resume Master keeps the existing imported-job dedupe path and refreshes the job board automatically after import.
+          Open a LinkedIn job and capture it with the Resume Master extension — press{" "}
+          <strong>Ctrl+Shift+K</strong> (⌘+Shift+K on Mac) or use <strong>Save Job</strong> in the
+          extension popup. Captured jobs are deduped against the board and appear here.
         </div>
       </div>
       {jobs.length === 0 ? (
         <div style={{ display:"flex", flexDirection:"column",
                       alignItems:"center", justifyContent:"center", gap:12, padding:24 }}>
-          <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No imported LinkedIn jobs yet</div>
+          <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No captured LinkedIn jobs yet</div>
           <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:420, lineHeight:1.8 }}>
-            Click <strong>Import from LinkedIn</strong>. Resume Master opens LinkedIn jobs for your active profile, the extension imports the visible listings, and the board refreshes automatically.
+            Open a job on LinkedIn and press <strong>Ctrl+Shift+K</strong> (⌘+Shift+K on Mac), or
+            click <strong>Save Job</strong> in the Resume Master extension popup. You can also
+            paste a job link straight into the board with <strong>+ Import</strong>.
           </div>
-          <button className="rm-btn rm-btn-secondary rm-btn-sm" onClick={onImport} disabled={linkedinImporting}>
-            {linkedinImporting ? "Importing..." : "Import from LinkedIn"}
-          </button>
         </div>
       ) : (
         <div style={{ paddingTop:8, paddingBottom:12 }}>
@@ -3936,89 +3844,10 @@ function SearchIntentDialog({ theme, prompt, onConfirm, onCancel }) {
   );
 }
 
-function LinkedInInstallDialog({ theme, open, onClose, onImportNow }) {
-  if (!open) return null;
-  const [step, setStep] = useState("install");
-  const [timedOut, setTimedOut] = useState(false);
-
-  useEffect(() => {
-    if (!open || step !== "install") return;
-    setTimedOut(false);
-    const poll = setInterval(() => {
-      if (isLinkedInExtensionInstalled()) {
-        clearInterval(poll);
-        setStep("ready");
-      }
-    }, 1000);
-    const timeout = setTimeout(() => setTimedOut(true), 60000);
-    return () => {
-      clearInterval(poll);
-      clearTimeout(timeout);
-    };
-  }, [open, step]);
-
-  useEffect(() => {
-    if (!open) setStep("install");
-  }, [open]);
-
-  return (
-    <div style={{ position:"fixed", inset:0, zIndex:760, background:"rgba(0,0,0,0.48)",
-                  display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
-      <div role="dialog" aria-modal="true" style={{ width:"min(92vw, 560px)",
-        background:theme.modalSurface || theme.surface, border:`1px solid ${theme.border}`,
-        borderRadius:8, boxShadow:"0 24px 72px rgba(0,0,0,0.32)", padding:22, display:"flex",
-        flexDirection:"column", gap:14 }}>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                      fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase",
-                      color:theme.text }}>
-          {step === "ready" ? "Extension Installed!" : "Install the Resume Master Extension"}
-        </div>
-        <div style={{ fontSize:13, lineHeight:1.6, color:theme.textMuted }}>
-          {step === "ready"
-            ? "You're ready to import jobs from LinkedIn."
-            : "The browser extension lets you import jobs from LinkedIn in one click."}
-        </div>
-        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-          {step !== "ready" && (
-            <button onClick={() => window.open(getLinkedInExtensionInstallUrl(), "_blank", "noreferrer")}
-            style={{ border:"none", borderRadius:6, padding:"8px 12px",
-                     background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
-              Install Extension
-            </button>
-          )}
-          {step === "ready" && (
-            <button onClick={onImportNow}
-            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
-                     background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontWeight:800 }}>
-              Import Now
-            </button>
-          )}
-          <button onClick={onClose}
-            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 12px",
-                     background:theme.surface, color:theme.text, cursor:"pointer", fontWeight:700 }}>
-            {step === "ready" ? "Close" : "Cancel"}
-          </button>
-        </div>
-        {step !== "ready" && (
-          <div style={{ background:theme.surfaceHigh, border:`1px solid ${theme.border}`, borderRadius:8, padding:12 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-              <div style={{ width:16, height:16, borderRadius:"50%", border:`2px solid ${theme.border}`, borderTopColor:theme.accent,
-                animation:"spin 0.8s linear infinite" }} />
-              <div style={{ fontSize:12, color:theme.text }}>
-                Waiting for installation...
-              </div>
-            </div>
-            {timedOut && (
-              <div style={{ fontSize:11, color:theme.textMuted, marginTop:8 }}>
-                Didn't work? Try refreshing the page.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+// LinkedInInstallDialog removed in cleanup 5.3. Its only render site was gated behind
+// startLinkedInImport's always-true "extension not installed" branch, and its Import Now
+// button called back into that same function — an install prompt for a capability v1.2.0
+// deleted from the extension, which no install could ever satisfy.
 
 // â"€â"€ History list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
