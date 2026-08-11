@@ -53,11 +53,17 @@ const MOJIBAKE_REPLACEMENTS = [
   [new RegExp("\\u00e2\\u20ac\\u00a6", "g"), "..."],
   [new RegExp("\\u00e2\\u2020\\u2019", "g"), "->"],
   [new RegExp("\\u00e2\\u2020\\u0090", "g"), "<-"],
-  [new RegExp("\\u00e2\\u0153\\u201c", "g"), "âœ“"],
+  // These three replacements were THEMSELVES mojibake, so cleanUiText() was swapping one
+  // corruption for another rather than repairing it. Each regex is the cp1252 misreading of a
+  // UTF-8 byte sequence; decoding those bytes gives the character the replacement should be:
+  //   âœ“ = E2 9C 93 -> "✓"
+  //   â˜… = E2 98 85 -> "★"
+  //   Â·       = C2 B7    -> "·"
+  [new RegExp("\\u00e2\\u0153\\u201c", "g"), "✓"],
   [new RegExp("\\u00e2\\u0153\\u2014", "g"), "x"],
   [new RegExp("\\u00e2\\u0153\\u2022", "g"), "x"],
-  [new RegExp("\\u00e2\\u02dc\\u2026", "g"), "â˜…"],
-  [new RegExp("\\u00c2\\u00b7", "g"), "Â·"],
+  [new RegExp("\\u00e2\\u02dc\\u2026", "g"), "★"],
+  [new RegExp("\\u00c2\\u00b7", "g"), "·"],
   [new RegExp("\\u00c3\\u2014", "g"), "x"],
   [new RegExp("\\u00c3\\u00a2\\u00e2\\u201a\\u00ac\\u00e2\\u20ac\\u009d", "g"), "-"],
 ];
@@ -131,11 +137,11 @@ export const dislikeJob = (jobId) =>
   api(`/api/jobs/${jobId}/disliked`, { method:"PATCH" });
 
 
-// Chromium File System Access API â€” shows Save As dialog, returns chosen filename.
+// Chromium File System Access API — shows Save As dialog, returns chosen filename.
 // Falls back to standard download on unsupported browsers.
 export function printResume(html, filename) {
   const win = window.open("", "_blank");
-  if (!win) { alert("Pop-up blocked â€” please allow pop-ups for this site and try again."); return; }
+  if (!win) { alert("Pop-up blocked — please allow pop-ups for this site and try again."); return; }
   win.document.write(html);
   win.document.close();
   win.focus();

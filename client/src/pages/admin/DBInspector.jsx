@@ -5,6 +5,11 @@ import { api, authHeaders } from "../../lib/api.js";
 import { useTheme } from "../../styles/theme.jsx";
 
 const ACCENT = "#F5E642";
+// Row-striping tint. Must be a literal color, not `theme.surface + "80"`: theme.surface is the
+// STRING "var(--bg-card)", so appending a hex alpha yields "var(--bg-card)80" — invalid CSS that
+// browsers drop, meaning the stripe silently never rendered. (I reintroduced that same bug in the
+// pipeline-health table by copying the surrounding idiom before spotting it.)
+const ROW_STRIPE = "rgba(255,255,255,0.03)";
 const TABS = [
   { id: "scrape",   label: "Pipeline Health" },
   { id: "schema",   label: "Schema Explorer" },
@@ -382,7 +387,7 @@ function ScrapeMonitorTab({ theme }) {
                 display:"grid", gridTemplateColumns:"1.3fr 110px 70px 70px 80px 1fr 100px",
                 padding:"9px 14px", fontSize:12, alignItems:"center",
                 borderTop:`1px solid ${theme.border}`,
-                background: i%2===0 ? "transparent" : theme.surface+"80",
+                background: i%2===0 ? "transparent" : ROW_STRIPE,
               }}>
                 <div style={{ fontWeight:600 }}>{s.name}</div>
                 <div><Pill color={hs.color}>{hs.label}</Pill></div>
@@ -469,13 +474,13 @@ function ScrapeMonitorTab({ theme }) {
                     display:"grid",
                     gridTemplateColumns:"2fr 1.5fr 1fr 70px 70px 60px 90px",
                     padding:"9px 14px", cursor:"pointer",
-                    background: isExp ? theme.surfaceHigh : i%2===0 ? "transparent" : theme.surface+"80",
+                    background: isExp ? theme.surfaceHigh : i%2===0 ? "transparent" : ROW_STRIPE,
                     borderTop:`1px solid ${theme.border}`,
                     transition:"background 0.1s",
                     fontSize:12,
                   }}
                   onMouseEnter={e => e.currentTarget.style.background = theme.surfaceHigh}
-                  onMouseLeave={e => e.currentTarget.style.background = isExp ? theme.surfaceHigh : i%2===0 ? "transparent" : theme.surface+"80"}
+                  onMouseLeave={e => e.currentTarget.style.background = isExp ? theme.surfaceHigh : i%2===0 ? "transparent" : ROW_STRIPE}
                 >
                   <div style={{ fontWeight:600 }}>{truncate(job.title, 35)}</div>
                   <div style={{ color:theme.textMuted }}>{truncate(job.company, 25)}</div>
