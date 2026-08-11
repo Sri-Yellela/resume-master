@@ -726,13 +726,54 @@ async function cacheJobs(db, anthropic = null) {
 const JOBO_SOURCE_NAME             = 'jobo';
 const JOBO_BOUNDED_BACKFILL_BATCH  = 10;   // free quickstart size — the credit-safe default
 const JOBO_FULL_BACKFILL_BATCH     = 1000;
-const JOBO_INCREMENTAL_BATCH       = 1000;
 const JOBO_EXPIRED_BATCH           = 10000;
+
+// Jobo bills ~3 credits ($0.003) per job RETURNED, so batch size is literally the per-request
+// price: a 1000-job page costs 3000 credits ($3). This used to be a hardcoded 1000, which meant
+// an unconfigured deployment on a free-tier wallet issued a $3 request it could not pay for,
+// got HTTP 402, and — because the error was swallowed into a "0 jobs cached" log line — looked
+// like a healthy empty sync forever. The default is now the free quickstart size (matching
+// JOBO_BOUNDED_BACKFILL_BATCH) so an unconfigured deployment cannot silently spend money;
+// a funded wallet raises it via the JOBO_INCREMENTAL_BATCH env var.
+const JOBO_INCREMENTAL_BATCH_DEFAULT = 10;
+const JOBO_INCREMENTAL_BATCH_MAX     = 1000;  // the API's own per-page ceiling
+const JOBO_CREDITS_PER_JOB           = 3;     // observed from a live 402: 1000 jobs -> 3000 credits
+
+// A small batch trades credit cost for REQUEST COUNT, and Jobo enforces a per-minute JobFeed
+// request limit — a live run at batch_size=10 paged 30 times in seconds and died on HTTP 429.
+// That is worse than it sounds: the throw leaves the watermark unadvanced, so the next run
+// re-fetches the same pages and re-spends the same credits without ever making progress.
+// Pacing the loop keeps the small-batch default viable instead of rate-limiting itself.
+const JOBO_PAGE_DELAY_MS = 2000;
 const JOBO_MAX_BACKFILL_PAGES      = 500;  // generous cap — see workday.js for the same idea
 const JOBO_MAX_INCREMENTAL_PAGES   = 100;
 
 function isoFromEpoch(sec) {
   return new Date(sec * 1000).toISOString();
+}
+
+/**
+ * Resolves the incremental page size from its env override. Pure and exported for the same
+ * reason decideJoboBackfillMode is: the cost-guard behaviour should be unit-testable without a
+ * real network or env mutation. A malformed or out-of-range value falls back LOUDLY rather than
+ * silently — a typo'd batch size is a spend decision, so it must never be applied quietly.
+ * @param {string|undefined} raw the raw JOBO_INCREMENTAL_BATCH env value
+ * @returns {number} a usable batch size in [1, JOBO_INCREMENTAL_BATCH_MAX]
+ */
+function resolveJoboIncrementalBatch(raw) {
+  const provided = raw != null && String(raw).trim() !== '';
+  if (!provided) return JOBO_INCREMENTAL_BATCH_DEFAULT;
+
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) {
+    console.warn(`[cacheJoboFeed] Ignoring invalid JOBO_INCREMENTAL_BATCH="${raw}" — falling back to the free-tier default ${JOBO_INCREMENTAL_BATCH_DEFAULT}.`);
+    return JOBO_INCREMENTAL_BATCH_DEFAULT;
+  }
+  if (n > JOBO_INCREMENTAL_BATCH_MAX) {
+    console.warn(`[cacheJoboFeed] JOBO_INCREMENTAL_BATCH=${n} exceeds the API maximum ${JOBO_INCREMENTAL_BATCH_MAX} — clamping.`);
+    return JOBO_INCREMENTAL_BATCH_MAX;
+  }
+  return n;
 }
 
 // Pure decision logic for cacheJoboFeed's backfill branch — extracted so the cost-guard
@@ -921,7 +962,11 @@ async function cacheJoboFeed(db, anthropic = null) {
             console.warn(`[cacheJoboFeed] Hit backfill page cap (${JOBO_MAX_BACKFILL_PAGES}) — stopping early; cursor is saved, next run resumes.`);
             break;
           }
-          const body = cursor ? { cursor } : { batch_size: JOBO_FULL_BACKFILL_BATCH, stable_scan: true };
+          // batch_size repeated on cursor pages for the same reason as the incremental loop
+          // below — an omitted batch_size silently reverts the page to the API default.
+          const body = cursor
+            ? { cursor, batch_size: JOBO_FULL_BACKFILL_BATCH }
+            : { batch_size: JOBO_FULL_BACKFILL_BATCH, stable_scan: true };
           const page = await joboSource.fetchFeedPage(body);
           runPage(page.jobs);
           cursor  = page.nextCursor;
@@ -930,6 +975,8 @@ async function cacheJoboFeed(db, anthropic = null) {
           // from here next run instead of restarting the whole backfill.
           upsertSyncState.run(JOBO_SOURCE_NAME, hasMore ? cursor : null, hasMore ? null : now, now);
           console.log(`[cacheJoboFeed] Full backfill page ${pageCount}: fetched ${page.jobs.length}, running totals — cached ${cached}, merged ${merged}, ejected ${ejected}, dropped ${dropped}`);
+          // Same per-minute request limit applies here; this loop can run up to 500 pages.
+          if (hasMore && JOBO_PAGE_DELAY_MS > 0) await new Promise(r => setTimeout(r, JOBO_PAGE_DELAY_MS));
         }
         console.log(`[cacheJoboFeed] Full backfill ${hasMore ? 'paused (page cap)' : 'complete'} after ${pageCount} page(s)`);
       }
@@ -942,18 +989,34 @@ async function cacheJoboFeed(db, anthropic = null) {
 
     // ── Incremental ─────────────────────────────────────────────────────────
     const watermark = state.last_watermark; // pre-run watermark; `now` above is the next one
+    // Read at call time, not module load, so changing the env var takes effect on the next cron
+    // tick without depending on when this module happened to be imported relative to dotenv.
+    const incrementalBatch = resolveJoboIncrementalBatch(process.env.JOBO_INCREMENTAL_BATCH);
+    console.log(
+      `[cacheJoboFeed] Incremental sync starting — batch_size=${incrementalBatch} ` +
+      `(~${incrementalBatch * JOBO_CREDITS_PER_JOB} credits/page, max ${JOBO_MAX_INCREMENTAL_PAGES} pages ` +
+      `= ~$${((incrementalBatch * JOBO_CREDITS_PER_JOB * JOBO_MAX_INCREMENTAL_PAGES) / 1000).toFixed(2)} worst case). ` +
+      `Set JOBO_INCREMENTAL_BATCH to raise it on a funded wallet.`
+    );
     let cursor = null, hasMore = true, pageCount = 0;
     while (hasMore) {
       if (++pageCount > JOBO_MAX_INCREMENTAL_PAGES) {
         throw new Error(`Hit incremental page cap (${JOBO_MAX_INCREMENTAL_PAGES}) without has_more=false — aborting without advancing watermark`);
       }
+      // batch_size MUST be repeated on cursor pages. Jobo honours it there (verified live), but
+      // omitting it — as this did — makes the continuation fall back to the API default of 1000
+      // jobs, i.e. 3000 credits ($3) per page. Capping the batch therefore only ever made page 1
+      // cheap while every page after it silently reverted to full price.
       const body = cursor
-        ? { cursor }
-        : { batch_size: JOBO_INCREMENTAL_BATCH, updated_after: isoFromEpoch(watermark) };
+        ? { cursor, batch_size: incrementalBatch }
+        : { batch_size: incrementalBatch, updated_after: isoFromEpoch(watermark) };
       const page = await joboSource.fetchFeedPage(body);
       runPage(page.jobs);
       cursor  = page.nextCursor;
       hasMore = page.hasMore && !!cursor;
+      // Pace only BETWEEN pages — never after the last one, so a single-page sync (the common
+      // incremental case) pays no delay at all.
+      if (hasMore && JOBO_PAGE_DELAY_MS > 0) await new Promise(r => setTimeout(r, JOBO_PAGE_DELAY_MS));
     }
 
     // ── Expiry — same pre-run watermark, never hard-deletes ─────────────────
@@ -1008,5 +1071,6 @@ function getSourceStatus() {
 
 export {
   searchJobs, cacheJobs, cacheJoboFeed, getSourceStatus, reconcileFingerprint,
-  decideJoboBackfillMode, upsertCanonicalJob, fingerprintJob,
+  decideJoboBackfillMode, resolveJoboIncrementalBatch, upsertCanonicalJob, fingerprintJob,
+  JOBO_INCREMENTAL_BATCH_DEFAULT, JOBO_INCREMENTAL_BATCH_MAX,
 };

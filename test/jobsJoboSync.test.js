@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeJoboJob } from "../services/jobs/sources/jobo.js";
-import { decideJoboBackfillMode } from "../services/jobs/aggregator.js";
+import {
+  decideJoboBackfillMode, resolveJoboIncrementalBatch,
+  JOBO_INCREMENTAL_BATCH_DEFAULT, JOBO_INCREMENTAL_BATCH_MAX,
+} from "../services/jobs/aggregator.js";
 
 test("normalizeJoboJob maps common field names into normalizeJob's shape", () => {
   const raw = {
@@ -202,4 +205,42 @@ test("normalizeJoboJob de-duplicates a skill listed in both must_have and nice_t
 test("normalizeJoboJob leaves skills null when qualifications carry none", () => {
   const job = realShapeJob({ qualifications: { must_have: { education: [], certifications: [] } } });
   assert.equal(normalizeJoboJob(job).skills_json, null, "no skills must stay null, not an empty array");
+});
+
+// ── Incremental batch size / cost guard ───────────────────────────────────────
+// batch_size IS the per-request price: Jobo bills ~3 credits ($0.003) per job returned, so the
+// previously hardcoded 1000 meant every incremental page cost $3. On a free-tier wallet that
+// request returns HTTP 402, and the error was swallowed into a "0 jobs cached" log line — the
+// provider looked healthy while never syncing a single row. The default must therefore be
+// free-tier safe, and an override must never be applied silently.
+test("resolveJoboIncrementalBatch defaults to the free-tier size when unset", () => {
+  assert.equal(resolveJoboIncrementalBatch(undefined), JOBO_INCREMENTAL_BATCH_DEFAULT);
+  assert.equal(resolveJoboIncrementalBatch(""), JOBO_INCREMENTAL_BATCH_DEFAULT);
+  assert.equal(resolveJoboIncrementalBatch("   "), JOBO_INCREMENTAL_BATCH_DEFAULT);
+  assert.equal(JOBO_INCREMENTAL_BATCH_DEFAULT, 10, "the default must stay the free quickstart size");
+});
+
+test("resolveJoboIncrementalBatch honours a valid override", () => {
+  assert.equal(resolveJoboIncrementalBatch("250"), 250);
+  assert.equal(resolveJoboIncrementalBatch("1"), 1);
+  assert.equal(resolveJoboIncrementalBatch(String(JOBO_INCREMENTAL_BATCH_MAX)), JOBO_INCREMENTAL_BATCH_MAX);
+});
+
+test("resolveJoboIncrementalBatch clamps above the API maximum instead of sending an invalid page", () => {
+  assert.equal(resolveJoboIncrementalBatch("5000"), JOBO_INCREMENTAL_BATCH_MAX);
+  // Scientific notation parses to a real integer (1e4 === 10000) and is therefore clamped
+  // rather than rejected. Safe by construction: clamping can only ever lower the spend.
+  assert.equal(resolveJoboIncrementalBatch("1e4"), JOBO_INCREMENTAL_BATCH_MAX);
+});
+
+test("resolveJoboIncrementalBatch falls back to the safe default on a malformed value", () => {
+  // A typo'd batch size is a SPEND decision, so it must never quietly become something else.
+  // "500abc" and "12.5" matter most: a bare parseInt would silently accept them as 500 and 12,
+  // applying a batch size the operator never wrote.
+  for (const bad of ["abc", "0", "-5", "12.5", "500abc", "NaN", "1000; DROP"]) {
+    assert.equal(
+      resolveJoboIncrementalBatch(bad), JOBO_INCREMENTAL_BATCH_DEFAULT,
+      `"${bad}" must fall back to the default, not be coerced into a spend`
+    );
+  }
 });
