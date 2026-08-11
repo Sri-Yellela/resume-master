@@ -22,6 +22,7 @@
  */
 
 import crypto from 'crypto';
+import { recordPipelineRun } from './pipelineRunLog.js';
 
 const MODEL_ID = 'claude-haiku-4-5-20251001';
 
@@ -182,8 +183,15 @@ let enrichmentInProgress = false;
  * @param {import('@anthropic-ai/sdk').default | null} anthropic
  */
 async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = {}) {
+  const runStartedAt = Math.floor(Date.now() / 1000);
   if (!anthropic) {
-    console.log('[enrichJob] No Anthropic client available — skipping enrichment pass');
+    // Same class as Jobo's unconfigured skip: with no client this pass does nothing at all, and
+    // "did nothing" must be distinguishable from "ran and found nothing to do".
+    console.warn('[enrichJob] MISCONFIGURED: no Anthropic client available — enrichment did NOT run');
+    recordPipelineRun(db, {
+      runKind: 'enrichment', status: 'skipped_unconfigured', startedAt: runStartedAt,
+      errorText: 'No Anthropic client available (ANTHROPIC_KEY unset?)',
+    });
     return { enriched: 0, failed: 0, empty: 0, skipped: 0 };
   }
   if (enrichmentInProgress) {
@@ -209,10 +217,22 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
       ORDER BY discovered_at DESC
     `).all();
 
+    // Counted, not just excluded: "how many rows can't be enriched because they have no text"
+    // is the single number that would have surfaced the missing-description bug on day one, so
+    // the monitor needs it explicitly rather than inferring it from a coverage gap.
+    const noDescription = db.prepare(`
+      SELECT COUNT(*) n FROM scraped_jobs
+      WHERE is_active = 1 AND (description IS NULL OR TRIM(description) = '')
+    `).get().n;
+
     const candidates = rows.filter(r => computeContentHash(r.title, r.description) !== r.content_hash);
     if (!candidates.length) {
-      console.log('[enrichJob] No rows need enrichment');
-      return { enriched: 0, failed: 0, empty: 0, skipped: 0 };
+      console.log(`[enrichJob] No rows need enrichment (${noDescription} active rows have no description and can never be enriched)`);
+      recordPipelineRun(db, {
+        runKind: 'enrichment', status: 'ok', startedAt: runStartedAt,
+        skipped: noDescription, details: { reason: 'no_candidates' },
+      });
+      return { enriched: 0, failed: 0, empty: 0, skipped: 0, noDescription };
     }
 
     const batch = candidates.slice(0, batchSize);
@@ -302,7 +322,18 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE } = 
       console.warn(`[enrichJob] WARNING: all ${empty} rows this pass yielded no signal — check that descriptions are being stored`);
     }
 
-    return { enriched, failed, empty, skipped: candidates.length - batch.length, totalInputTokens, totalOutputTokens };
+    recordPipelineRun(db, {
+      runKind: 'enrichment', status: 'ok', startedAt: runStartedAt,
+      fetched: batch.length, written: enriched, failed, skipped: noDescription,
+      details: {
+        noSignal: empty,
+        remainingCandidates: candidates.length - batch.length,
+        inputTokens: totalInputTokens, outputTokens: totalOutputTokens,
+        estCostUsd: Number(estCostUsd.toFixed(4)),
+      },
+    });
+
+    return { enriched, failed, empty, skipped: candidates.length - batch.length, noDescription, totalInputTokens, totalOutputTokens };
   } finally {
     enrichmentInProgress = false;
   }
