@@ -17,7 +17,7 @@ import { useTheme } from "../styles/theme.jsx";
 const MODES = { URL: "url", TEXT: "text" };
 
 export default function ImportJobModal({ onClose, onImported }) {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const [mode, setMode]           = useState(MODES.URL);
   const [url, setUrl]             = useState("");
   const [text, setText]           = useState("");
@@ -65,11 +65,17 @@ export default function ImportJobModal({ onClose, onImported }) {
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9000,
     display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
   };
+  // OPAQUE, not theme.surface. theme.surface resolves to var(--bg-card), which is a translucent
+  // glass token — over the jobs board the panel behind it (search bar, "0 jobs", the empty-state
+  // card) reads straight through the modal body and the form becomes unreadable. This is the
+  // same fix and the same fallback pair the filter panel already uses in JobsPanel.jsx, which
+  // test/jobsUiProfileFilters.test.js pins as the project's modal-surface convention.
   const modal = {
-    background: theme.surface, border: `1px solid ${theme.border}`,
+    background: theme.modalSurface || (isDark ? "#111827" : "#ffffff"),
+    border: `1px solid ${theme.border}`,
     borderRadius: 12, width: "100%", maxWidth: 480, maxHeight: "85vh",
     display: "flex", flexDirection: "column", overflow: "hidden",
-    boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+    boxShadow: theme.shadowXl || "0 24px 80px rgba(0,0,0,0.35)",
   };
   const hdr = {
     display: "flex", alignItems: "center", justifyContent: "space-between",

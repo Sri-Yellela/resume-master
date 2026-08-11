@@ -22,6 +22,8 @@ import { RecruiterPanel }        from "./panels/RecruiterPanel.jsx";
 import { JobsConsole }            from "./consoles/PlanConsoles.jsx";
 import JobDetailPanel            from "./components/JobDetailPanel.jsx";
 import UnifiedSearchBar          from "./components/UnifiedSearchBar.jsx";
+import ImportJobModal            from "./components/ImportJobModal.jsx";
+import { Plus }                  from "lucide-react";
 import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
@@ -88,6 +90,7 @@ function AppDashboard({ authUser, setAuthUser }) {
   const navigate = useNavigate();
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
   const [uiMode, setUiMode] = useState("hero");
+  const [importOpen, setImportOpen] = useState(false);
   const DOCK_THRESHOLD = 80;
   const consolePath = `/app/${CONSOLE_ROUTE}`;
   const routeKey = location.pathname.replace(/^\/app\/?/, "") || "";
@@ -118,6 +121,13 @@ function AppDashboard({ authUser, setAuthUser }) {
   }, [activeTab, consolePath, navigate]);
 
   const handleProfileActivate = useCallback(() => {
+    setJobBoardRefreshKey(k => k + 1);
+  }, []);
+
+  // An import stars the row for this user (services/jobs/importJob.js), so it belongs on their
+  // board immediately — remount the console the same way activating a profile does, rather than
+  // leaving the user to refresh before their own import shows up.
+  const handleJobImported = useCallback(() => {
     setJobBoardRefreshKey(k => k + 1);
   }, []);
 
@@ -206,6 +216,26 @@ function AppDashboard({ authUser, setAuthUser }) {
             onTabChange={handlePanelChange}
             onSearch={() => {}}
             onLocalFilter={() => {}}
+            // Jobs tab only: importing a job is a board action, so it would be meaningless
+            // sitting above Job Profiles, Database or Recruiter.
+            actions={activeTab === "console" ? (
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                title="Import a job from a link or pasted text"
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "6px 12px", borderRadius: 999,
+                  background: "transparent",
+                  border: "1px solid var(--color-primary)",
+                  color: "var(--color-text)",
+                  fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  textTransform: "uppercase", letterSpacing: "0.08em",
+                  whiteSpace: "nowrap",
+                }}>
+                <Plus size={13} /> Import
+              </button>
+            ) : null}
           />
 
           <main style={{ flex:1, paddingTop: 24 }}>
@@ -222,6 +252,13 @@ function AppDashboard({ authUser, setAuthUser }) {
           </main>
 
           <JobDetailPanel/>
+
+          {importOpen && (
+            <ImportJobModal
+              onClose={() => setImportOpen(false)}
+              onImported={handleJobImported}
+            />
+          )}
         </div>
       </AppScrollProvider>
     </JobBoardProvider>
