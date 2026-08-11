@@ -1,4 +1,4 @@
-﻿// Keep in sync with config.js (service workers cannot share plain-script globals).
+// Keep in sync with config.js (service workers cannot share plain-script globals).
 // DEV SWITCH: comment line A, uncomment line B.
 const RESUME_MASTER_URL = 'https://resumemaster.one'; // A: production
 // const RESUME_MASTER_URL = 'http://localhost:3000'; // B: local dev
