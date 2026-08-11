@@ -276,21 +276,72 @@ been visible at a glance.
 
 ---
 
-## 5. Cleanup register (scraping-era, pending the classification pass)
+## 5. Cleanup register — CLASSIFIED (no deletions performed)
 
-Not yet verified — do not delete without grep-proving zero callers.
+Classification pass complete. Every verdict below is backed by a caller grep across `.js`/`.jsx`
+excluding `node_modules` and `dist`. **Nothing has been deleted** — this pass was scoped to
+classification, and several items turn out to need a decision rather than a delete.
 
-- `searchQueryBuilder.js` → `buildApifyQueriesFromProfile` (flagged do-not-wire)
-- `scripts/providerEval/adapters/jobo.js` (wrong endpoint, superseded)
-- LinkedIn batch-import UI in `JobsPanel.jsx` (`START_LINKEDIN_IMPORT`) + the dead bridge stubs
-  `isLinkedInExtensionInstalled`/`sendExtensionRequest` — promises a capability BYO-2 removed
-- `/simulate-jobs/:userId` admin endpoint (hardcodes the removed `sevenDaysAgo` cutoff)
-- Scrape monitor admin surfaces → **repurpose, don't delete** (see §4)
+The important finding: *most of this register is not merely unused, it is actively misleading.*
+Two items are user-visible dead ends, one is an orphaned write endpoint, and two are dead code
+held alive by tests that assert it must still exist.
+
+| # | Item | Callers (proven) | Verdict |
+|---|---|---|---|
+| 5.1 | `searchQueryBuilder.js` → `buildApifyQueriesFromProfile`, `buildProfileSearchTerms` | `server.js:38` **imports both, calls neither**. `buildProfileSearchTerms`: zero callers anywhere. `buildApifyQueriesFromProfile`: called only by `buildProfileSearchTerms` (itself dead), 3 diagnostic scripts, and tests. | **DEAD, BUT PINNED BY TESTS** — see 5.9. Deleting requires removing the assertions too. |
+| 5.2 | `scripts/providerEval/adapters/jobo.js` | 1 importer: `scripts/providerEval/run.js:29`. | **DEAD (self-contained tool).** Targets the wrong-guess endpoint; superseded by `services/jobs/sources/jobo.js`, whose real field mapping is now known (§2.1a). Running providerEval today would produce garbage for Jobo. |
+| 5.3 | LinkedIn batch-import UI in `JobsPanel.jsx` | `isLinkedInExtensionInstalled` and `sendExtensionRequest` are **stubs defined at `JobsPanel.jsx:23-24`** returning `false` and `async () => {}`. Called at :1675, :1683, :1692, :1710, :3948. | **REACHABLE BUT PERMANENTLY BROKEN.** The guard at :1692 can never pass, so the flow always opens the "install the extension" modal — for a capability BYO-2 removed and which v1.2.0 deleted from the extension entirely. A user can click this today and get an install prompt that can never satisfy it. |
+| 5.4 | `/api/extension/save-jobs-bulk` (`server.js:4737`) | **Test-only.** Its sole client was `saved-jobs-content.js`, removed from the extension in v1.2.0. | **ORPHANED WRITE ENDPOINT.** Still accepts bulk LinkedIn job writes with nothing calling it. Note this outlived its client — the reverse of the usual drift. |
+| 5.5 | `/api/extension/save-job` (single, `server.js:4695`) | **LIVE** — `extension/linkedin-content.js:267`. | **KEEP.** Also keeps `imported_jobs` live (`server.js:4716` is its only real writer). |
+| 5.6 | `/simulate-jobs/:userId` (`routes/adminDb.js:671`) | **LIVE** — `DBInspector.jsx:1322` (Query Simulator tab). | **LIVE BUT LYING.** Hardcodes the removed `sevenDaysAgo` cutoff, so it simulates a filter the board no longer applies. Worse than dead: an admin debugging tool that reports the wrong thing. Fix or remove — do not leave. |
+| 5.7 | `profileMatcher.js` → `scoreJob`, `filterAndRankForProfile` | `server.js:80` **imports, never calls**. | **DEAD, BUT PINNED BY TESTS** (`profileIsolation.test.js:410-411` assert both "must still exist"). Already flagged in bb24241. |
+| 5.8 | `usageTracker.trackScrape` → `scrape_events` table | **Zero callers.** Table has 0 rows. | **DEAD.** Note `trackApiCall` (10 callers) is LIVE and is the real writer of `cache_events` — do not delete `usageTracker.js` wholesale. |
+| 5.9 | `refresh_log` table | **0 writers, 0 rows.** | **DEAD.** |
+| 5.10 | Scrape monitor admin surfaces | — | **DONE — repurposed, not deleted** (5d14c99). See §4. |
 
 **Keep — load-bearing despite scraping-era origin:** the 7 ATS-direct sources (canonically rank
 *above* Jobo), `aggregator.js`, `schema.js`, `reconcileFingerprint`/`computeReqUid`,
-`enrichJob.js`, `sync_state`. These serve store-then-filter. adzuna/serpapi are a cost decision,
-not a cleanup one.
+`enrichJob.js`, `sync_state`. These serve store-then-filter.
+
+**adzuna / serpapi:** no longer a cost decision — settled by 3.5. *No write path produces them
+at all.* `cacheJobs` crawls only `DIRECT_ATS_SOURCES`, `cacheJoboFeed` only jobo, and
+`searchJobs` contains zero write statements. The 10 production adzuna rows are orphans nothing
+will refresh. The plugins remain wired into `searchJobs` (live search) only.
+
+### 5.11 The 44-failure baseline is partly this register in test form
+
+Grouping the 44 pre-existing failures by file changes how they should be read — they are not
+uniform noise:
+
+```
+10  jobsPipelineHardening      "scrape route guards…", "scrape quota exhaustion…",
+                               "local-only scrape unavailable…"   → asserts the REMOVED per-user scrape flow
+ 7  menuSurfaceStyle           opaque surfaces, avatar menu, profile selector → UI redesign drift
+ 5  authProviderIntegrations   OAuth/LinkedIn provider wiring
+ 3  searchSignalsQueue         asserts server.js still calls buildApifyQueriesFromProfile (5.1)
+ 2  searchProfileIntent        same
+ 3  profileAtsUiFixes          incl. "saved jobs section renders imported LinkedIn jobs" (5.3)
+ 3  jobsUiProfileFilters       incl. "LinkedIn import CTA…" (5.3) and the modal-surface convention
+ 2  jobsUiFollowups   2  profileLifecycleSearchGating   2  integrationsArchitecture
+ 1× resumeFormatter, resumeArtifacts, localAtsScorer, consoleArchitecture, authRouteBootstrap
+```
+
+At least **5 failures directly assert that removed scraping code is still wired**, and several
+more assert removed LinkedIn-import UI. That is why the baseline never moves: they are pinned to
+a pre-pivot architecture. **This also means deleting 5.1 or 5.7 will *change* the baseline** —
+those tests will go from failing-for-the-wrong-reason to absent. Any cleanup commit must state
+the new baseline explicitly rather than claiming "unchanged".
+
+*(Cluster attribution above is from sampling each file's failing test names and its
+`readFileSync` targets, not an exhaustive per-assertion audit.)*
+
+### Recommended order, if the deletions are approved
+
+1. **5.6 first** — it is the only item actively giving an admin wrong answers.
+2. **5.3 + 5.4 together** — client dead end and orphaned endpoint are one capability; splitting
+   them leaves half a removed feature.
+3. **5.1 and 5.7 with their pinning tests** — expect the failure baseline to drop.
+4. **5.2, 5.8, 5.9** — trivially safe, zero callers.
 
 ---
 
