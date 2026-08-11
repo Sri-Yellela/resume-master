@@ -343,10 +343,45 @@ async function extractJobFromContent(anthropic, { url, text }) {
 }
 
 /**
- * @param {{url?: string, text?: string, html?: string}} input
- * @param {{db: import('better-sqlite3').Database, anthropic: import('@anthropic-ai/sdk').default|null}} ctx
+ * Attaches an imported job to the person who imported it.
+ *
+ * Without this an import vanished from its owner's point of view: the row lands in the GLOBAL
+ * scraped_jobs pool, so whether the importer ever saw it again depended on their profile filters
+ * happening to match the classification — while every OTHER user with a matching profile got it
+ * on their board. Starring it makes the import behave the way a user expects ("I added this job,
+ * so it's in my saved jobs"), and it is the same mechanism the star button already writes, so it
+ * needs no new surface to be visible.
+ *
+ * Uses scraped_jobs.job_id as the user_jobs key, matching what the board actually reads back
+ * (server.js's per-row interaction lookup). Note the legacy /api/job-interaction endpoint keys
+ * the SAME column by url instead — a pre-existing inconsistency, deliberately not "fixed" here
+ * because changing it would silently orphan existing rows.
+ *
+ * Never throws: failing to star must not fail the import itself.
  */
-async function importJob({ url, text, html } = {}, { db, anthropic }) {
+function attachImportToUser(db, userId, jobId) {
+  if (!userId || !jobId) return;
+  try {
+    const activeProfile = db.prepare(
+      'SELECT id FROM domain_profiles WHERE user_id = ? AND is_active = 1 LIMIT 1'
+    ).get(userId);
+    db.prepare(`
+      INSERT INTO user_jobs (user_id, job_id, domain_profile_id, starred, updated_at)
+      VALUES (?, ?, ?, 1, unixepoch())
+      ON CONFLICT(user_id, job_id) DO UPDATE SET
+        starred    = 1,
+        updated_at = unixepoch()
+    `).run(userId, jobId, activeProfile?.id || null);
+  } catch (err) {
+    console.warn(`[importJob] Could not attach import to user ${userId}:`, err.message);
+  }
+}
+
+/**
+ * @param {{url?: string, text?: string, html?: string}} input
+ * @param {{db: import('better-sqlite3').Database, anthropic: import('@anthropic-ai/sdk').default|null, userId?: number|null}} ctx
+ */
+async function importJob({ url, text, html } = {}, { db, anthropic, userId = null }) {
   if (!url && !text && !html) {
     throw new ImportInputError('Provide at least one of url, text, or html');
   }
@@ -357,6 +392,10 @@ async function importJob({ url, text, html } = {}, { db, anthropic }) {
     ).get(url);
     const ageSeconds = existing ? Math.floor(Date.now() / 1000) - (existing.updated_at || 0) : Infinity;
     if (existing && ageSeconds < REIMPORT_FRESHNESS_SECONDS) {
+      // Still attach on the fast path. The freshness short-circuit exists to avoid re-fetching,
+      // but a SECOND user importing the same URL within the window is a real import for them —
+      // skipping this would silently return someone else's row without adding it to their board.
+      attachImportToUser(db, userId, existing.job_id);
       return { job: mapJobRow(existing) };
     }
   }
@@ -424,6 +463,10 @@ async function importJob({ url, text, html } = {}, { db, anthropic }) {
   } else {
     finalJobId = dedup.intoJobId; // folded into an existing (equal-or-higher priority) row
   }
+
+  // Deliberately after the fold branch: when an import collapses into an existing canonical row
+  // the user still imported it, so the row they get back is the one that must be starred.
+  attachImportToUser(db, userId, finalJobId);
 
   setImmediate(() => {
     // recordRun:false — this pass is triggered by a user importing one URL, not by the cron.

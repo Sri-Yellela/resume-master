@@ -12,7 +12,11 @@ export function createImportJobRouter(db, anthropic) {
   router.post("/job", async (req, res) => {
     const { url, text, html } = req.body || {};
     try {
-      const result = await importJob({ url, text, html }, { db, anthropic });
+      // userId attaches the import to the person who made it (starred in user_jobs). Without it
+      // the row landed in the global pool unowned: the importer had no guarantee of ever seeing
+      // it again, while every other user with a matching profile did. requireAuth is applied at
+      // the mount in server.js, so req.user is always present here.
+      const result = await importJob({ url, text, html }, { db, anthropic, userId: req.user?.id || null });
       res.json(result);
     } catch (err) {
       if (err instanceof ImportInputError) {
