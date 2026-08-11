@@ -127,10 +127,54 @@ function pickLocation(job) {
   return pick(job, 'location', 'city');
 }
 
+// Jobo reports "Entry Level" / "Mid Level" / "Senior" / "Lead"; schema.js's
+// normalizeExperienceLevel only accepts its own lowercase enum and otherwise falls back to
+// guessing from the title. Mapping here means an explicitly-stated level is used as stated
+// instead of being silently re-derived from title text.
+const JOBO_EXPERIENCE_LEVELS = {
+  intern: 'intern', internship: 'intern',
+  entry: 'entry', 'entry level': 'entry', junior: 'entry', associate: 'entry',
+  mid: 'mid', 'mid level': 'mid', 'mid-level': 'mid', intermediate: 'mid',
+  senior: 'senior', principal: 'senior', staff: 'senior',
+  lead: 'lead', manager: 'lead', director: 'lead',
+  executive: 'executive', 'c-level': 'executive',
+};
+
+function mapJoboExperienceLevel(raw) {
+  if (typeof raw !== 'string') return null;
+  return JOBO_EXPERIENCE_LEVELS[raw.trim().toLowerCase()] || null;
+}
+
+// Jobo returns structured qualifications rather than a flat skills array:
+//   qualifications: { must_have: { skills: [{ name, type }], ... }, nice_to_have: { ... } }
+// The { name, type } entries are already the hard/soft split enrichJob.js pays an LLM to
+// produce, so mapping them here populates skills_json for free. Emitted as { skill, type } to
+// match enrichJob.js's shape, which is what mapJobRow.js's parseSkillsList reads.
+function pickSkills(job) {
+  const groups = [job.qualifications?.must_have, job.qualifications?.nice_to_have];
+  const seen = new Set();
+  const out = [];
+  for (const group of groups) {
+    for (const entry of (Array.isArray(group?.skills) ? group.skills : [])) {
+      const name = typeof entry === 'string' ? entry : entry?.name;
+      if (typeof name !== 'string' || !name.trim()) continue;
+      const key = name.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ skill: name.trim(), type: entry?.type === 'soft' ? 'soft' : 'hard' });
+    }
+  }
+  if (out.length) return out;
+  return Array.isArray(job.skills) ? job.skills : (Array.isArray(job.tags) ? job.tags : null);
+}
+
 function normalizeJoboJob(job) {
   const id = pick(job, 'id', 'job_id', 'external_id');
   const remoteFlag = pick(job, 'is_remote', 'remote');
   const hybridFlag = pick(job, 'is_hybrid', 'hybrid');
+  // Compensation is a nested { min, max, currency, period } object. The flat salary_* keys this
+  // used to read do not exist in the response, so salary was always null.
+  const comp = job.compensation && typeof job.compensation === 'object' ? job.compensation : {};
 
   return normalizeJob({
     id,
@@ -141,19 +185,28 @@ function normalizeJoboJob(job) {
     url:         pick(job, 'url', 'application_url', 'apply_url', 'listing_url'),
     source:      'jobo',
     description: pick(job, 'description', 'description_text'),
-    salary_min:      pick(job, 'salary_min'),
-    salary_max:      pick(job, 'salary_max'),
-    salary_currency: pick(job, 'salary_currency', 'currency'),
-    posted_at:       pick(job, 'posted_at', 'published_at', 'created_at'),
+    salary_min:      comp.min      ?? pick(job, 'salary_min'),
+    salary_max:      comp.max      ?? pick(job, 'salary_max'),
+    salary_currency: comp.currency ?? pick(job, 'salary_currency', 'currency'),
+    salary_period:   comp.period   ?? pick(job, 'salary_period'),
+    // date_posted is when the EMPLOYER posted the role; created_at is merely when Jobo ingested
+    // it into their own index. Reading created_at (as this did, since neither posted_at nor
+    // published_at exists) overstates freshness by however long Jobo took to pick the job up --
+    // on a live sample, created_at was 2026-04-29 for roles actually posted 2026-04-01..04-28.
+    posted_at:       pick(job, 'date_posted', 'posted_at', 'published_at', 'created_at'),
     contract_type:   pick(job, 'employment_type', 'contract_type'),
     remote:          remoteFlag != null ? Boolean(remoteFlag) : null,
-    workplace_type:  remoteFlag === true ? 'remote' : (hybridFlag === true ? 'hybrid' : null),
-    experience_level: pick(job, 'experience_level', 'seniority'),
+    // workplace_type is a top-level string ("On-site" / "Hybrid" / "Remote"). The is_remote /
+    // is_hybrid booleans this used to read do not exist, so this was always null.
+    // schema.js's normalizeWorkplaceType already canonicalises "On-site" -> "onsite".
+    workplace_type:  pick(job, 'workplace_type')
+                     ?? (remoteFlag === true ? 'remote' : (hybridFlag === true ? 'hybrid' : null)),
+    experience_level: mapJoboExperienceLevel(pick(job, 'experience_level', 'seniority')),
     valid_through: (() => {
       const exp = pick(job, 'expires_at', 'valid_through');
       return exp ? Math.floor(new Date(exp).getTime() / 1000) : null;
     })(),
-    skills: Array.isArray(job.skills) ? job.skills : (Array.isArray(job.tags) ? job.tags : null),
+    skills: pickSkills(job),
     is_h1b_sponsor:        pick(job, 'h1b_sponsor', 'is_h1b_sponsor'),
     requires_work_auth:    pick(job, 'is_work_auth_required', 'requires_work_auth'),
     is_clearance_required: pick(job, 'is_clearance_required'),
