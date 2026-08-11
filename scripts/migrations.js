@@ -2020,4 +2020,19 @@ export const MIGRATIONS = [
          WHERE company = 'Rippling' AND ats_type = 'greenhouse' AND ats_slug = 'rippling';
       `,
     },
+    {
+      // Cleanup 5.9. refresh_log had zero writers, zero readers and zero rows — grep-verified
+      // across the repo, its only mention anywhere was its own CREATE TABLE in the bootstrap
+      // schema, which this release also removes. Dropping it here clears it from databases that
+      // already created it. Safe: no data is lost because none was ever written.
+      //
+      // NOT dropped, deliberately: scrape_events. Its writer (usageTracker.trackScrape) is gone
+      // in the same release, but routes/admin.js still READS it in four analytics queries, so
+      // dropping it would break the admin dashboard. Those panels now report a permanent zero,
+      // which is accurate rather than broken. See docs/PIPELINE_DIAGNOSIS.md §5.12.
+      id: "071_drop_refresh_log",
+      sql: `
+        DROP TABLE IF EXISTS refresh_log;
+      `,
+    },
   ];

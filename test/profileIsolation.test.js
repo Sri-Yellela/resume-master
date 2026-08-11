@@ -402,13 +402,19 @@ test("phase6: /api/jobs/poll no longer applies roleTitleSql (job_role_map join i
   assert.doesNotMatch(block, /roleTitleSql\("sj\.title"/, "roleTitleSql must be removed from poll (redundant re-derivation)");
 });
 
-test("phase6: profileMatcher no longer exports resolveUserRoles or contains SKILL_TO_ROLE", () => {
-  const src = fs.readFileSync("services/jobs/profileMatcher.js", "utf8");
-  assert.doesNotMatch(src, /SKILL_TO_ROLE/, "SKILL_TO_ROLE map must be removed (Taxonomy A retirement)");
-  assert.doesNotMatch(src, /resolveUserRoles/, "resolveUserRoles must be removed");
-  assert.doesNotMatch(src, /role_match/, "role_match weight must be removed from scoreJob");
-  assert.match(src, /scoreJob/, "scoreJob must still exist for ranking");
-  assert.match(src, /filterAndRankForProfile/, "filterAndRankForProfile must still exist");
+// Was "phase6: profileMatcher no longer exports resolveUserRoles or contains SKILL_TO_ROLE",
+// which asserted scoreJob and filterAndRankForProfile "must still exist" — pinning the module
+// alive after its last caller had gone. server.js imported filterAndRankForProfile and never
+// called it (flagged in bb24241); the board has been ranked in SQL since the pivot. Flipped to a
+// non-existence guard, matching the classifier.js precedent immediately below.
+test("cleanup 5.7: profileMatcher.js is fully deleted, not just unused", () => {
+  assert.equal(fs.existsSync("services/jobs/profileMatcher.js"), false,
+    "services/jobs/profileMatcher.js must not exist — its only import was never called");
+  const server = fs.readFileSync("server.js", "utf8");
+  assert.doesNotMatch(server, /from\s+["']\.\/services\/jobs\/profileMatcher\.js["']/,
+    "server.js must not import the deleted module");
+  assert.doesNotMatch(server, /filterAndRankForProfile\s*\(/,
+    "nothing may call filterAndRankForProfile");
 });
 
 test("phase6: classifier.js (Taxonomy A) is fully deleted, not just emptied", () => {

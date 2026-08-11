@@ -335,6 +335,35 @@ the new baseline explicitly rather than claiming "unchanged".
 *(Cluster attribution above is from sampling each file's failing test names and its
 `readFileSync` targets, not an exhaustive per-assertion audit.)*
 
+### 5.12 Executed — and what executing it corrected
+
+All four batches are done. Three classifications were **wrong** and were narrowed on evidence
+rather than carried out as written:
+
+| Item | Classified as | What executing it showed |
+|---|---|---|
+| 5.1 | "DEAD, delete with its tests" | **Dead in production, LIVE in tooling.** `buildApifyQueriesFromProfile` and `buildProfileSearchTerms` still have real callers in `scripts/tracePipeline.js`, `rawTrace.js` and `conditionTests.js` — all three verified to still run (exit 0) — plus passing unit tests. My earlier caller grep excluded `scripts/`, which is how I missed it. Only the unused `server.js` import was removed; the functions stay. |
+| 5.9 | "`refresh_log` dead — delete" | Correct, and done (migration 071). |
+| 5.8 | "`scrape_events` dead" | **The WRITER is dead; the TABLE has live readers.** `routes/admin.js` queries it in four analytics panels. `trackScrape` removed; table kept. Those panels now report a permanent zero — accurate, since no scraping happens, but it will read like a data bug to anyone who doesn't know. |
+
+Two tests were also *not* what the register implied:
+
+- `searchProfileIntent`'s "confirmed profile-intent switch…" was **not** scraping-era. It failed
+  only because `handleSearch` was renamed `handleSetRole`; the behaviour it guards is live. Fixed
+  the assertion instead of retiring the test — deleting it would have dropped a real guard.
+- `jobsUiProfileFilters`'s LinkedIn CTA test pinned a string that had **already** stopped existing
+  before this cleanup, which is why it was failing.
+
+**New candidates found while executing, not yet acted on:** `scrapeJobs` (server.js:2637) is still
+reachable from a cron path and is passed into the admin router; `searchThreadId` / `logSearchThread`
+survive but every remaining call site passes `scrapeParams.threadId`, i.e. all of them are inside
+the retired crawl; `activeScrapes`, `scrapeStateKey` and `mapPostedLimit` likewise. Removing
+`scrapeJobs` is its own scoped change because of those two live entry points.
+
+**Baseline movement, as predicted:** 44 → 43 (5.3/5.4) → **38** (5.1/5.7). Nine failures cleared,
+all of them assertions pinned to the pre-pivot architecture. `/api/scrape` returning HTTP 410
+*"External scraping has been removed"* is what settled that those could never be repaired.
+
 ### Recommended order, if the deletions are approved
 
 1. **5.6 first** — it is the only item actively giving an admin wrong answers.

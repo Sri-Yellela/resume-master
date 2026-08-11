@@ -1,34 +1,27 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const server = fs.readFileSync("server.js", "utf8");
 
-test("manual scrape builds outbound params from active profile plus stored user signals", () => {
-  const routeStart = server.indexOf('app.post("/api/scrape"');
-  assert.ok(routeStart > 0, "scrape route should exist");
-  const scrapeRoute = server.slice(routeStart, server.indexOf("app.post(\"/api/jobs/:id/keywords\"", routeStart));
-
-  assert.match(scrapeRoute, /buildApifyQueriesFromProfile\(activeProfile\)/);
-  assert.match(scrapeRoute, /loadOrCreateSimpleApplyProfile\(db, \{/);
-  assert.match(scrapeRoute, /profileId: activeProfile\.id/);
-  assert.match(scrapeRoute, /roleTitles: activeProfileTitles/);
-  assert.match(scrapeRoute, /simpleProfile\?\.searchTerms/);
-  assert.match(scrapeRoute, /buildProfileSearchTerms\(activeProfile, terms\)/);
-  assert.match(scrapeRoute, /maxItems: activeProfile\.domain === "engineering_embedded_firmware" \? 75 : undefined/);
-  assert.match(scrapeRoute, /employmentTypes/);
-  assert.match(scrapeRoute, /workplaceTypes/);
-  assert.match(scrapeRoute, /postedLimit/);
-  assert.match(scrapeRoute, /location/);
-});
-
-test("active scrape tracking is profile-scoped and duplicate outbound work is deduped", () => {
-  assert.match(server, /function scrapeStateKey\(userId, profileId, query\)/);
-  assert.match(server, /scrapeStateKey\(userId, activeProfile\.id, qRaw\)/);
-  assert.match(server, /scrapeStateKey\(scrapeUserId, activeProfile\.id, query\)/);
-  assert.match(server, /const inFlightScrape = activeScrapes\.get\(scrapeKey\)/);
-  assert.match(server, /deduped:true/);
+// Two tests stood here — "manual scrape builds outbound params from active profile plus stored
+// user signals" and "active scrape tracking is profile-scoped and duplicate outbound work is
+// deduped". Both described the retired external-scraping path:
+//
+//   - the first sliced the /api/scrape route and asserted Apify request params
+//     (buildApifyQueriesFromProfile, maxItems, postedLimit, employmentTypes). That route is now
+//     a 410 tombstone, so the slice was empty and the very first assertion could not pass.
+//   - the second asserted a dedup mechanism that has been partly dismantled: scrapeStateKey
+//     still exists, but `inFlightScrape` and `deduped:true` are both gone from server.js.
+//
+// Neither can be repaired without reinstating external scraping, which /api/scrape explicitly
+// declares removed. They were part of the failure baseline that never moved
+// (docs/PIPELINE_DIAGNOSIS.md §5.11). Replaced with the inverse guard.
+test("outbound Apify scraping stays retired", () => {
+  assert.match(server, /app\.post\("\/api\/scrape",[\s\S]{0,200}?410/,
+    "/api/scrape must remain a 410 tombstone");
+  assert.doesNotMatch(server, /scrapeParams\.threadId, "apify_payload"[\s\S]{0,80}?await scrapeJobs/,
+    "no live path may build an Apify payload and then crawl");
 });
 
 test("ATS scoring reuses stored signal basis through the queue", () => {
@@ -43,12 +36,15 @@ test("ATS scoring reuses stored signal basis through the queue", () => {
   assert.match(server, /buildRuntimeAtsBasis\(\{\s*resumeText: newContent,\s*signalProfile,\s*domainProfile: profile/);
 });
 
-test("structured search thread logging includes outbound payload and filter summary", () => {
-  assert.match(server, /function searchThreadId\(\)/);
-  assert.match(server, /function logSearchThread\(threadId, event, details = \{\}\)/);
-  assert.match(server, /logSearchThread\(threadId, "request"/);
-  assert.match(server, /logSearchThread\(scrapeParams\.threadId, "apify_payload"/);
-  assert.match(server, /logSearchThread\(scrapeParams\.threadId, "scrape_filter_summary"/);
-  assert.match(server, /logSearchThread\(threadId, "db_first"/);
-  assert.match(server, /logSearchThread\(threadId, "background_complete"/);
-});
+// "structured search thread logging includes outbound payload and filter summary" was removed
+// rather than narrowed. Tracing its assertions showed the whole apparatus is scrape-only: the
+// "db_first" and "background_complete" events are gone, and EVERY remaining logSearchThread call
+// site (apify_payload, scrape_filter_summary, ats_enrichment, scrape_complete) passes
+// scrapeParams.threadId — i.e. lives inside the retired crawl. There is no longer any
+// logSearchThread(threadId, "request") on a live path. Keeping a test here would pin dead code
+// alive, which is exactly what 5.1 and 5.7 were doing.
+//
+// searchThreadId / logSearchThread / scrapeJobs / activeScrapes / scrapeStateKey / mapPostedLimit
+// are therefore a NEW cleanup candidate, recorded as §5.12 in docs/PIPELINE_DIAGNOSIS.md rather
+// than deleted here — server.js's scrapeJobs is still reachable from a cron path and from the
+// admin router, so removing it is its own scoped change, not a test-file edit.
