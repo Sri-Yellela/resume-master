@@ -4,6 +4,10 @@ import { Router } from "express";
 import fs from "fs";
 import { classifyTitle } from "../services/jobClassifier.js";
 import { getSourceStatus } from "../services/jobs/aggregator.js";
+import { buildJobFilters } from "../services/jobs/jobQuery.js";
+import { deriveProfileFilters } from "../services/jobs/profileFilterBridge.js";
+import { profileTitleSql } from "../services/profileTitleFilter.js";
+import { loadSimpleApplyProfile } from "../services/simpleApplyProfile.js";
 
 // A source that hasn't written in this long is treated as stale. Ashby stopped writing on
 // 2026-08-07 and nobody noticed for three days because nothing anywhere asserted freshness.
@@ -668,6 +672,15 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
   });
 
   // ── Route 5: Query Simulator ──────────────────────────────────
+  // Answers "why does user X not see job Y?" by running the REAL board query for that user.
+  //
+  // It used to hand-roll its own SQL: a 7-day posted_at/scraped_at cutoff the board stopped
+  // applying at the pivot, plus applied/resume_generated exclusions, and it never touched
+  // buildJobFilters at all. So the one tool an admin reaches for to explain a missing job was
+  // describing a query the board no longer runs — worse than a dead endpoint, because it answers
+  // confidently and wrongly. It now COMPOSES THE SAME FUNCTIONS /api/jobs uses
+  // (roleKeyForProfile + profileTitleSql + deriveProfileFilters + buildJobFilters), so it cannot
+  // drift from the board again without the board itself changing.
   router.get("/simulate-jobs/:userId", requireAdmin, (req, res) => {
     const userId = parseInt(req.params.userId);
     try {
@@ -678,136 +691,103 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       if (!activeProfile) {
         return res.json({
           activeProfile: null,
-          sessionSyncWouldAdd: 0,
           totalJobsInPool: 0,
           jobsPassingAllFilters: 0,
           sampleResults: [],
           sampleFiltered: [],
           filterReasonCounts: {},
-          conditions: ["No active profile — would return empty immediately"],
+          conditions: ["No active profile — the board returns empty immediately"],
+          derivedFilters: {},
           rawSql: "",
         });
       }
 
-      const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
-      const roleKey = roleKeyForProfile(activeProfile);
+      const roleKey     = roleKeyForProfile(activeProfile);
+      const titleFilter = profileTitleSql("sj.title", activeProfile);
+      const signals     = loadSimpleApplyProfile(db, { userId, profileId: activeProfile.id });
+      // The same bridge the board applies by default; ?curate=off mirrors its escape hatch.
+      const derived     = req.query.curate === "off" ? {} : deriveProfileFilters(activeProfile, signals);
+      const rich        = buildJobFilters(derived);
 
-      const sessionSyncWouldAdd = db.prepare(`
-        SELECT COUNT(*) as c FROM scraped_jobs sj
-        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-        AND (
-          (sj.posted_at IS NOT NULL AND sj.posted_at != ''
-            AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
-          OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?)
-        )
-        AND sj.job_id NOT IN (
-          SELECT job_id FROM user_jobs WHERE user_id = ? AND disliked = 1
-        )
-        AND sj.job_id NOT IN (SELECT job_id FROM user_jobs WHERE user_id = ?)
-      `).get(roleKey, sevenDaysAgo, sevenDaysAgo, userId, userId).c;
+      // profileTitleSql returns { sql, params } with a BARE predicate (it is "1 = 1" when the
+      // profile has no target titles), so it needs its own AND — and its params must be spliced
+      // in SQL order, between the join placeholders and buildJobFilters' params.
+      const base =
+        "FROM scraped_jobs sj " +
+        "JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ? " +
+        "LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? " +
+        "WHERE sj.is_active = 1 AND " + titleFilter.sql + " " + rich.sql + " " +
+        "AND (uj.disliked IS NULL OR uj.disliked = 0)";
+      const args = [roleKey, userId, ...titleFilter.params, ...rich.params];
 
-      const totalJobsInPool = db.prepare(`
-        SELECT COUNT(*) as c FROM scraped_jobs sj
-        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-      `).get(roleKey).c;
+      const totalJobsInPool = db.prepare(
+        "SELECT COUNT(*) c FROM scraped_jobs sj " +
+        "JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ? " +
+        "WHERE sj.is_active = 1"
+      ).get(roleKey).c;
 
-      const passingCount = db.prepare(`
-        SELECT COUNT(*) as c FROM scraped_jobs sj
-        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-        LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
-        WHERE 1 = 1
-        AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
-              AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
-             OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
-        AND (uj.disliked IS NULL OR uj.disliked = 0)
-        AND (uj.applied IS NULL OR uj.applied = 0)
-        AND (uj.resume_generated IS NULL OR uj.resume_generated = 0)
-      `).get(roleKey, userId, sevenDaysAgo, sevenDaysAgo).c;
+      const jobsPassingAllFilters = db.prepare("SELECT COUNT(*) c " + base).get(...args).c;
 
-      const sampleResults = db.prepare(`
-        SELECT sj.title, sj.company, sj.search_query, jrm.role_key,
-          sj.posted_at, sj.scraped_at, sj.ats_score
-        FROM scraped_jobs sj
-        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
-        LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
-        WHERE 1 = 1
-        AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
-              AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ?)
-             OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ?))
-        AND (uj.disliked IS NULL OR uj.disliked = 0)
-        AND (uj.applied IS NULL OR uj.applied = 0)
-        AND (uj.resume_generated IS NULL OR uj.resume_generated = 0)
-        ORDER BY sj.scraped_at DESC LIMIT 20
-      `).all(roleKey, userId, sevenDaysAgo, sevenDaysAgo);
+      const sampleResults = db.prepare(
+        "SELECT sj.job_id, sj.title, sj.company, sj.source, jrm.role_key, sj.posted_at, " +
+        "sj.discovered_at, sj.enriched_at, " +
+        "(sj.description IS NOT NULL AND TRIM(sj.description) != '') AS has_description " +
+        base + " ORDER BY COALESCE(sj.discovered_at, sj.scraped_at) DESC LIMIT 20"
+      ).all(...args);
 
-      // Get all user_jobs to classify filtered-out ones
-      const allUserJobs = db.prepare(`
-        SELECT sj.job_id, sj.title, sj.company, sj.search_query,
-          jrm.role_key,
-          uj.domain_profile_id, uj.disliked, uj.applied, uj.resume_generated,
-          sj.posted_at, sj.scraped_at
-        FROM scraped_jobs sj
-        JOIN job_role_map jrm ON jrm.job_id = sj.job_id
-        LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ?
-        WHERE jrm.role_key = ?
-        LIMIT 1000
-      `).all(userId, roleKey);
+      // Attribute each exclusion to a SPECIFIC clause. A count alone tells an admin a job is
+      // missing but not which filter removed it, which is the entire question being asked.
+      const poolRows = db.prepare(
+        "SELECT sj.job_id, sj.title, sj.company, sj.source, uj.disliked FROM scraped_jobs sj " +
+        "JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ? " +
+        "LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ? " +
+        "WHERE sj.is_active = 1 LIMIT 2000"
+      ).all(roleKey, userId);
+
+      const passing = new Set(db.prepare("SELECT sj.job_id " + base).all(...args).map(r => r.job_id));
+      const passingTitle = new Set(db.prepare(
+        "SELECT sj.job_id FROM scraped_jobs sj " +
+        "JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ? " +
+        "WHERE sj.is_active = 1 AND " + titleFilter.sql
+      ).all(roleKey, ...titleFilter.params).map(r => r.job_id));
 
       const sampleFiltered = [];
       const filterReasonCounts = {};
-
-      for (const job of allUserJobs) {
-        let reason = null;
-        if (job.applied) reason = "applied";
-        else if (job.disliked) reason = "disliked";
-        else if (job.resume_generated) reason = "resume_generated";
-        else {
-          const postedTs = job.posted_at && job.posted_at !== ""
-            ? Math.floor(new Date(job.posted_at).getTime() / 1000) : null;
-          const isTooOld = postedTs
-            ? postedTs <= sevenDaysAgo
-            : job.scraped_at <= sevenDaysAgo;
-          if (isTooOld) reason = "too_old";
-        }
-        if (reason) {
-          filterReasonCounts[reason] = (filterReasonCounts[reason] || 0) + 1;
-          if (sampleFiltered.length < 20) sampleFiltered.push({ ...job, filterReason: reason });
-        }
+      for (const job of poolRows) {
+        if (passing.has(job.job_id)) continue;
+        const reason = job.disliked ? "disliked"
+          : !passingTitle.has(job.job_id) ? "profile_title_filter"
+          : "profile_derived_filters";
+        filterReasonCounts[reason] = (filterReasonCounts[reason] || 0) + 1;
+        if (sampleFiltered.length < 20) sampleFiltered.push({ ...job, filterReason: reason });
       }
 
       const conditions = [
-        `jrm.role_key = ${roleKey}  — active profile: "${activeProfile.profile_name}"`,
-        `posted_at or scraped_at > ${new Date(sevenDaysAgo * 1000).toISOString().slice(0, 10)}  (7 days)`,
-        `uj.disliked = 0`,
-        `uj.applied = 0`,
-        `uj.resume_generated = 0`,
+        "sj.is_active = 1",
+        `jrm.role_key = '${roleKey}'  — active profile: "${activeProfile.profile_name}"`,
+        titleFilter.sql === "1 = 1"
+          ? "profileTitleSql: 1 = 1 (profile has no target_titles — no title narrowing)"
+          : `profileTitleSql: ${titleFilter.sql}`,
+        Object.keys(derived).length
+          ? `deriveProfileFilters -> ${JSON.stringify(derived)}`
+          : "deriveProfileFilters -> {} (no stored signals, or ?curate=off)",
+        "uj.disliked = 0",
+        "NOTE: no date cutoff — the board has not applied one since the pivot.",
       ];
 
-      const rawSql = `SELECT sj.*, jrm.role_key, uj.disliked, uj.applied, uj.resume_generated
-FROM scraped_jobs sj
-JOIN job_role_map jrm ON jrm.job_id = sj.job_id
-LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id AND uj.user_id = ${userId}
-WHERE jrm.role_key = '${roleKey}'
-  AND ((sj.posted_at IS NOT NULL AND sj.posted_at != ''
-        AND CAST(strftime('%s', sj.posted_at) AS INTEGER) > ${sevenDaysAgo})
-       OR ((sj.posted_at IS NULL OR sj.posted_at = '') AND sj.scraped_at > ${sevenDaysAgo}))
-  AND (uj.disliked IS NULL OR uj.disliked = 0)
-  AND (uj.applied IS NULL OR uj.applied = 0)
-  AND (uj.resume_generated IS NULL OR uj.resume_generated = 0)
-ORDER BY sj.scraped_at DESC;`;
-
-      res.json({
+      return res.json({
         activeProfile,
-        sessionSyncWouldAdd,
         totalJobsInPool,
-        jobsPassingAllFilters: passingCount,
+        jobsPassingAllFilters,
         sampleResults,
         sampleFiltered,
         filterReasonCounts,
         conditions,
-        rawSql,
+        derivedFilters: derived,
+        rawSql: "SELECT sj.* " + base + " ORDER BY COALESCE(sj.discovered_at, sj.scraped_at) DESC;",
+        rawSqlParams: args,
       });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { return res.status(500).json({ error: e.message }); }
   });
 
   // ── Utility: Clean user pool ──────────────────────────────────
