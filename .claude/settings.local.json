@@ -67,7 +67,13 @@
       "Bash(npm init *)",
       "Bash(tasklist //FI \"IMAGENAME eq node.exe\")",
       "Bash(netstat -ano)",
-      "PowerShell(claude doctor *)"
+      "PowerShell(claude doctor *)",
+      "Bash(curl -sS -c data/a5-fixture/cookies.txt -X POST http://127.0.0.1:3001/*)",
+      "Bash(curl -sS -b data/a5-fixture/cookies.txt -X POST http://127.0.0.1:3001/*)",
+      "Bash(curl -sS -b data/a5-fixture/cookies.txt http://127.0.0.1:3001/*)",
+      "Bash(curl -sS -c data/a5-fixture/cookies.txt -X POST http://localhost:3001/*)",
+      "Bash(curl -sS -b data/a5-fixture/cookies.txt -X POST http://localhost:3001/*)",
+      "Bash(curl -sS -b data/a5-fixture/cookies.txt http://localhost:3001/*)"
     ]
   }
 }
