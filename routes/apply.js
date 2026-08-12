@@ -29,7 +29,8 @@ function publicApplication(row) {
 export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply) {
   // ── Manual tracking endpoints ────────────────────────────────────────────────
 
-  app.post("/api/apply", requireAuth, (req, res) => {
+  app.post("/api/apply", requireAuth, (req, res) =>
+    withIdempotency("/api/apply", req, res, (out) => {
     const {
       jobId,
       jobUrl,
@@ -42,7 +43,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     } = req.body || {};
 
     if (!jobId && !jobUrl) {
-      return res.status(400).json({ error: "jobId or jobUrl required" });
+      return out.status(400).json({ error: "jobId or jobUrl required" });
     }
 
     const resolvedJobId = String(jobId || `manual_${Date.now()}`);
@@ -90,8 +91,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
     const row = db.prepare("SELECT * FROM job_applications WHERE user_id=? AND job_id=?")
       .get(req.user.id, resolvedJobId);
-    res.json({ ok: true, application: publicApplication(row) });
-  });
+    out.json({ ok: true, application: publicApplication(row) });
+  }));
 
   app.get("/api/apply/status/:jobId", requireAuth, (req, res) => {
     const row = db.prepare("SELECT * FROM job_applications WHERE user_id=? AND job_id=?")
@@ -114,9 +115,109 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
   // ── Queue infrastructure ─────────────────────────────────────────────────────
 
-  const APPLY_WORKER_LIMIT = 2;
+  // ── Submit guards (TASK A3) ──────────────────────────────────────────────────
+  // This pipeline submits real applications under a real candidate's name and a submission cannot
+  // be recalled, so every limit here is configurable and every rejection is explicit.
+  const envInt = (name, dflt) => {
+    const n = Number(process.env[name]);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : dflt;
+  };
+  const APPLY_WORKER_LIMIT   = envInt("APPLY_WORKER_LIMIT", 2);
+  const APPLY_DAILY_CAP      = envInt("APPLY_DAILY_CAP", 25);
+  const APPLY_MAX_ACTIVE_RUNS = envInt("APPLY_MAX_ACTIVE_RUNS_PER_USER", 1);
   const ATS_AUTO_APPLY_THRESHOLD = 65;
   let activeWorkers = 0;
+
+  const getSetting = (key) => {
+    try { return db.prepare("SELECT value FROM app_settings WHERE key=?").get(key)?.value ?? null; }
+    catch { return null; }   // table absent on an un-migrated DB: fall through to env
+  };
+  const truthy = (v) => ["1", "true", "yes", "on"].includes(String(v ?? "").trim().toLowerCase());
+
+  /**
+   * KILL SWITCH (requirement 4). Blocks all full-auto submission; semi mode keeps working.
+   * The DB row wins so it can be flipped with no restart and no deploy; the env var is the
+   * boot-level default. Read at request time — never cached — which is the whole point.
+   */
+  function fullAutoDisabled() {
+    const row = getSetting("apply_full_auto_disabled");
+    if (row !== null) return truthy(row);
+    return truthy(process.env.APPLY_FULL_AUTO_DISABLED);
+  }
+
+  /** Applications actually submitted for this user in the trailing 24h. */
+  function submittedLast24h(userId) {
+    try {
+      return db.prepare(`
+        SELECT COUNT(*) AS n FROM apply_run_jobs
+        WHERE user_id=? AND status='submitted' AND COALESCE(finished_at, 0) >= unixepoch() - 86400
+      `).get(userId).n;
+    } catch { return 0; }
+  }
+
+  function activeRunCount(userId) {
+    try {
+      return db.prepare(`
+        SELECT COUNT(*) AS n FROM apply_runs WHERE user_id=? AND status IN ('queued','running')
+      `).get(userId).n;
+    } catch { return 0; }
+  }
+
+  // ── Idempotency (requirement 1) ──────────────────────────────────────────────
+  // A retry storm must not become duplicate applications to the same employer: duplicates are
+  // worse than none. Keyed per user, NOT per endpoint — a key reused against a different endpoint
+  // is surfaced as a 409 rather than silently answered with the wrong body.
+  function priorResponse(userId, key, endpoint) {
+    if (!key) return null;
+    try {
+      const row = db.prepare(
+        "SELECT endpoint, status_code, response_json FROM apply_idempotency WHERE user_id=? AND idem_key=?"
+      ).get(userId, key);
+      if (!row) return null;
+      if (row.endpoint !== endpoint) return { conflict: row.endpoint };
+      return { statusCode: row.status_code, body: JSON.parse(row.response_json) };
+    } catch { return null; }
+  }
+
+  function recordResponse(userId, key, endpoint, statusCode, body) {
+    if (!key) return;
+    try {
+      db.prepare(`
+        INSERT OR IGNORE INTO apply_idempotency (user_id, idem_key, endpoint, status_code, response_json)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(userId, key, endpoint, statusCode, JSON.stringify(body));
+    } catch (e) {
+      console.warn("[applyRoutes] idempotency record failed:", e.message);
+    }
+  }
+
+  /**
+   * Wraps a synchronous POST handler with replay protection. Handlers stay synchronous up to the
+   * point they respond, so no interleaving is possible between the lookup and the record.
+   */
+  function withIdempotency(endpoint, req, res, handler) {
+    const key = String(req.get("Idempotency-Key") || "").trim().slice(0, 200);
+    const prior = priorResponse(req.user.id, key, endpoint);
+    if (prior?.conflict) {
+      return res.status(409).json({
+        error: "Idempotency-Key was already used for a different endpoint",
+        usedFor: prior.conflict,
+      });
+    }
+    if (prior) return res.status(prior.statusCode).json({ ...prior.body, idempotentReplay: true });
+
+    let sent = null;
+    const capture = {
+      status(code) { this._code = code; return this; },
+      json(body) { sent = { code: this._code || 200, body }; return this; },
+    };
+    handler(capture);
+    if (!sent) return;
+    // Only a success is replayable. Replaying a 4xx would pin a transient rejection (a cap that
+    // has since reset) as this key's permanent answer.
+    if (sent.code >= 200 && sent.code < 300) recordResponse(req.user.id, key, endpoint, sent.code, sent.body);
+    return res.status(sent.code).json(sent.body);
+  }
 
   const BROWSER_FAILURE_CODES = [
     "browser_runtime_missing_dependency",
@@ -141,6 +242,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const mode = run.mode || "auto";
     let resumeTmpPath = null;
     let coverLetterTmpPath = null;
+    // Which resume artifact was actually sent. The temp PDF is deleted in `finally`, so the
+    // reconstructable reference is the resumes row it was rendered from (requirement 3).
+    let usedArtifactId = null;
+    let usedAtsScore   = null;
 
     const setJobStatus = (status, reasonCode = null, reasonDetail = null) => {
       db.prepare(`
@@ -160,6 +265,27 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       if (!jobUrl) { setJobStatus("failed", "no_job_url", "Job has no apply URL"); return; }
 
       // v1 provider scope: only greenhouse/lever/ashby get full-auto; others fall to held_review.
+      // Re-checked per job, not just at admission: a run can cross the daily cap mid-flight, and
+      // the kill switch can be flipped while a run is in progress. Both HOLD the job with a
+      // reasonCode — visible in /api/apply/review — rather than dropping it silently.
+      if (mode === "auto" && fullAutoDisabled()) {
+        logEvent(runId, runJobId, userId, jobId, "full_auto_disabled",
+          "Full-auto submission is disabled; holding for manual review");
+        setJobStatus("held_review", "full_auto_disabled", "Automatic submission is currently disabled");
+        db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+        return;
+      }
+      if (mode === "auto") {
+        const usedToday = submittedLast24h(userId);
+        if (usedToday >= APPLY_DAILY_CAP) {
+          logEvent(runId, runJobId, userId, jobId, "daily_cap_reached",
+            `Daily cap reached: ${usedToday} of ${APPLY_DAILY_CAP} in the last 24h`, { submittedLast24h: usedToday, limit: APPLY_DAILY_CAP });
+          setJobStatus("held_review", "daily_cap_reached", `Daily application cap (${APPLY_DAILY_CAP}) reached`);
+          db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+          return;
+        }
+      }
+
       const V1_AUTO_PROVIDERS = new Set(["greenhouse", "lever", "ashby"]);
       if (mode === "auto") {
         const detectedProvider = detectPlatformFromUrl(jobUrl);
@@ -187,6 +313,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
       if (artifact?.html) {
         // CASE A: existing artifact — ATS gate, then PDF convert and apply
+        usedArtifactId = artifact.id ?? null;
+        usedAtsScore   = artifact.ats_score ?? null;
         const atsScore = artifact.ats_score ?? null;
         if (mode === "auto" && atsScore !== null && atsScore < ATS_AUTO_APPLY_THRESHOLD) {
           logEvent(runId, runJobId, userId, jobId, "ats_review", `ATS score ${atsScore} below threshold`, { atsScore });
@@ -279,6 +407,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
             return null;
           }
           logEvent(runId, runJobId, userId, jobId, "generation_ready", "Resume generated", { atsScore: gen.atsScore });
+          usedArtifactId = gen.resumeId ?? null;
+          usedAtsScore   = gen.atsScore ?? null;
           const atsScore = gen.atsScore ?? 0;
           logEvent(runId, runJobId, userId, jobId, "ats_review", `ATS score: ${atsScore}`, { atsScore });
           if (atsScore < ATS_AUTO_APPLY_THRESHOLD) {
@@ -326,13 +456,39 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         : atsHeld || result.status === "awaiting_user" ? "held_review"
         : result.status === "error" ? "failed"
         : "held_review";
+      // result.reasonCode now takes precedence so `submit_unverified` — a submit button was
+      // clicked and nothing happened — is not flattened into the much milder "no_submit_button".
       const reasonCode = atsHeld ? "ats_below_threshold"
         : result.status === "awaiting_user" ? "manual_review"
-        : result.status === "filled_not_submitted" ? "no_submit_button"
-        : result.reasonCode || null;
+        : result.reasonCode
+          || (result.status === "filled_not_submitted" ? "no_submit_button" : null);
 
       const fallbackUrl = isBrowserFailure(reasonCode) ? jobUrl : null;
       setJobStatus(finalStatus, reasonCode, result.reasonDetail || (fallbackUrl ? `fallbackUrl:${fallbackUrl}` : null));
+
+      // AUDIT TRAIL (requirement 3). Everything needed to reconstruct exactly what was sent to an
+      // employer and why, on the run-job row itself rather than only in the event log: the resolved
+      // answers with provenance/confidence from A2, which resume artifact was used and its ATS
+      // score, the screenshot, and whether the submission was actually VERIFIED (see submit_verified
+      // — A1 finding N1 showed 'submitted' was previously claimed on a click alone).
+      try {
+        db.prepare(`
+          UPDATE apply_run_jobs
+          SET answers_json=?, resume_artifact_id=?, resume_ats_score=?,
+              screenshot_path=?, submit_verified=?, submit_evidence=?
+          WHERE id=?
+        `).run(
+          Array.isArray(result.answers) && result.answers.length ? JSON.stringify(result.answers) : null,
+          usedArtifactId,
+          usedAtsScore,
+          result.screenshotPath || null,
+          result.submitVerified === true ? 1 : result.submitVerified === false ? 0 : null,
+          result.submitEvidence || null,
+          runJobId,
+        );
+      } catch (e) {
+        console.warn("[applyRoutes] audit persist failed:", e.message);
+      }
       logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform, fallbackUrl });
 
       // Answer provenance (TASK A2). Persisted so that what was sent to an employer, and which
@@ -427,12 +583,13 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
   // ── Queue endpoints ──────────────────────────────────────────────────────────
 
-  app.post("/api/apply/runs", requireAuth, (req, res) => {
+  app.post("/api/apply/runs", requireAuth, (req, res) =>
+    withIdempotency("/api/apply/runs", req, res, (out) => {
     const { jobIds = [], mode = "auto", tool, toolType } = req.body || {};
     if (!Array.isArray(jobIds) || jobIds.length === 0)
-      return res.status(400).json({ error: "jobIds array required" });
+      return out.status(400).json({ error: "jobIds array required" });
     if (jobIds.length > 25)
-      return res.status(400).json({ error: "Max 25 jobs per run" });
+      return out.status(400).json({ error: "Max 25 jobs per run" });
 
     // ── Three payload-contract mismatches with the client, fixed together ──────────────────────
     //
@@ -455,11 +612,33 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // pinned by applyPipeline.test.js).
     const planTier = normalisePlanTier(req.user?.planTier);
     if (resolvedTool === "a_plus_resume" && !canUseAPlusResume(planTier)) {
-      return res.status(403).json({
+      return out.status(403).json({
         error: "upgrade_required",
         message: "A+ Resume requires the PRO plan.",
         requiredTier: "PRO",
         planTier,
+      });
+    }
+
+    // KILL SWITCH (requirement 4). Full-auto is refused outright; semi still runs, because semi
+    // puts a human in front of every submit and is the mode A5 gates the first live application on.
+    if (resolvedMode === "auto" && fullAutoDisabled()) {
+      return out.status(503).json({
+        error: "full_auto_disabled",
+        message: "Automatic submission is currently disabled. Manual review mode is still available.",
+        retryWithMode: "manual",
+      });
+    }
+
+    // CONCURRENCY (requirement 2). A user may not stack runs: overlapping runs make the daily cap
+    // racy and multiply browser load.
+    const active = activeRunCount(req.user.id);
+    if (active >= APPLY_MAX_ACTIVE_RUNS) {
+      return out.status(429).json({
+        error: "run_already_active",
+        message: `You already have ${active} run in progress. Wait for it to finish before starting another.`,
+        activeRuns: active,
+        limit: APPLY_MAX_ACTIVE_RUNS,
       });
     }
 
@@ -472,7 +651,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // scopes linkedin to profile_import, so none of those block a run.
     const missingPrerequisites = getMissingApplyPrerequisites(getAutomationReadiness(db, req.user.id));
     if (missingPrerequisites.length) {
-      return res.status(409).json({
+      return out.status(409).json({
         error: "Apply prerequisites are not set up yet",
         missingPrerequisites,
       });
@@ -486,7 +665,22 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
     const filtered = jobIds.map(String).filter(id => !duplicateSet.has(id));
     if (filtered.length === 0)
-      return res.status(400).json({ error: "All selected jobs are already applied or in progress" });
+      return out.status(400).json({ error: "All selected jobs are already applied or in progress" });
+
+    // DAILY CAP (requirement 2). Checked here so the caller gets a clear error rather than a run
+    // that quietly holds most of its jobs. processRunJob re-checks before each submit, because a
+    // long run can cross the cap after it was admitted.
+    const used = submittedLast24h(req.user.id);
+    if (resolvedMode === "auto" && used + filtered.length > APPLY_DAILY_CAP) {
+      return out.status(429).json({
+        error: "daily_cap_exceeded",
+        message: `Daily application cap reached: ${used} of ${APPLY_DAILY_CAP} used in the last 24h, ${filtered.length} requested.`,
+        submittedLast24h: used,
+        requested: filtered.length,
+        limit: APPLY_DAILY_CAP,
+        remaining: Math.max(0, APPLY_DAILY_CAP - used),
+      });
+    }
 
     const runResult = db.prepare(`
       INSERT INTO apply_runs (user_id, mode, tool_type, status, total_jobs)
@@ -507,15 +701,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     //    route never sent — so every run reported "0 jobs started". `queued` is the accepted ids,
     //    which is also what distinguishes them from the ones dropped as duplicates above.
     //    `toolType` is echoed so the client can tell when A+ was requested but downgraded.
-    res.status(202).json({
+    out.status(202).json({
       ok: true,
       runId,
       mode: run.mode,
       toolType: run.tool_type,
       queued: filtered,
       totalJobs: filtered.length,
+      dailyCap: { limit: APPLY_DAILY_CAP, submittedLast24h: used, remaining: Math.max(0, APPLY_DAILY_CAP - used - filtered.length) },
     });
-  });
+  }));
 
   app.get("/api/apply/runs", requireAuth, (req, res) => {
     const runs = db.prepare(`

@@ -1184,13 +1184,18 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     }
 
     let status, pageTitle;
+    let submitVerified = null, submitEvidence = null, submitReasonCode = null;
     if (isFullAuto) {
       // Completeness gate: re-discover all frames; hold if any required non-file field is still empty.
       const postFillFields = (await Promise.all(
         frameList(page).map(f => discoverFields(f, detected).catch(() => []))
       )).flat();
+      // A1 finding N2: required FILE inputs used to be exempt here, so a form with no resume
+      // attached passed the gate while the browser refused to submit it — the run then reported
+      // filled_not_submitted with no reasonCode, having never reached the later steps. A file
+      // input's value is readable ('' when empty), so it is checked like any other control.
       const missingRequired = postFillFields
-        .filter(f => f.is_required && f.type !== 'file' && (f.current_value === '' || f.current_value == null))
+        .filter(f => f.is_required && (f.current_value === '' || f.current_value == null))
         .map(f => f.label || f.field_id || '(unknown)');
       if (missingRequired.length > 0) {
         const pageTitle2 = await page.title().catch(() => '');
@@ -1243,23 +1248,58 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
       inProgress.set(String(jobId), { status: "submitting", browser });
       const SUBMIT_RE = /^(submit|apply|apply now|submit application|send application)/i;
-      let submitted = false;
+      let clicked = false;
+      const urlBefore = page.url();
       for (const btn of await page.$$("button,input[type='submit']")) {
         try {
-          const txt = (await btn.evaluate(el => el.textContent || "")).trim();
+          const txt = (await btn.evaluate(el => el.textContent || el.value || "")).trim();
           const visible = await btn.evaluate(el => {
             const r = el.getBoundingClientRect();
             return r.width > 0 && r.height > 0;
           });
           if (SUBMIT_RE.test(txt) && visible) {
-            await btn.click(); await new Promise(r => setTimeout(r, 2000)); submitted = true; break;
+            await btn.click();
+            // Give a navigation the chance to happen instead of assuming it did.
+            await Promise.race([
+              page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
+              new Promise(r => setTimeout(r, 2000)),
+            ]);
+            clicked = true;
+            break;
           }
         } catch {}
       }
-      if (submitted || flowState === 'submitted') {
+
+      // A1 finding N1: `submitted` was previously set by the CLICK ALONE, with nothing checking
+      // that anything was actually sent. A form blocked by HTML5 validation produced
+      // status:'submitted' with zero submissions recorded on the receiving end — a silent
+      // non-application, and self-concealing, because the duplicate guard then treats the job as
+      // done and never retries it. Require post-click evidence.
+      const urlAfter = page.url();
+      const postFlow = clicked ? await classifyFlowState(page, originalDomain) : flowState;
+      const evidence = [];
+      if (postFlow === "submitted") evidence.push("confirmation_page");
+      if (urlAfter !== urlBefore) evidence.push("url_changed");
+
+      if (flowState === "submitted") {
+        // Already on a confirmation page before we clicked anything.
         status = "submitted";
+        submitVerified = true;
+        submitEvidence = "confirmation_page_pre_click";
+      } else if (clicked && evidence.length > 0) {
+        status = "submitted";
+        submitVerified = true;
+        submitEvidence = evidence.join(",");
+      } else if (clicked) {
+        // The dangerous case: a submit-shaped button was clicked and nothing changed.
+        status = "filled_not_submitted";
+        submitVerified = false;
+        submitEvidence = "clicked_no_evidence";
+        submitReasonCode = "submit_unverified";
       } else {
         status = "filled_not_submitted";
+        submitVerified = false;
+        submitEvidence = "no_submit_button";
       }
       pageTitle = await page.title().catch(() => "");
     } else {
@@ -1278,6 +1318,9 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       platform: detected,
       fieldsFilled: totalFilled,
       answers: resolvedAnswers,
+      submitVerified,
+      submitEvidence,
+      ...(submitReasonCode ? { reasonCode: submitReasonCode } : {}),
       pageTitle,
       screenshotBase64: ss.base64,
       screenshotPath:   ss.path,
