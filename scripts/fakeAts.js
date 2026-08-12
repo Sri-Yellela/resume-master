@@ -25,6 +25,17 @@
  *   GET  /_submissions         JSON of everything submitted so far (for assertions)
  *   POST /_reset               clear recorded submissions
  *
+ * FILE UPLOADS ARE REAL. Every form carrying a file input declares
+ * enctype="multipart/form-data" and the recorder parses it. Each submission records:
+ *   fields     text parts only, name -> value (same shape urlencoded produced)
+ *   files      name -> { filename, contentType, size }, or NULL when the input was
+ *              present but no file was chosen — that is the distinction between
+ *              "resume uploaded" and "resume field skipped", and it is the whole point
+ *   partCount  parts in THIS post. A multi-step flow can report 0 here and still list uploads in
+ *              `files` — greenhouse takes the resume at step 1 and posts step 2 urlencoded, so
+ *              assert on `files`, never on partCount, to decide whether a resume arrived.
+ * A file field appears in `files`, never in `fields`, so the two can never be confused.
+ *
  * NO EXTERNAL DEPENDENCIES — node:http only.
  */
 
@@ -113,7 +124,7 @@ const field = (label, input, required = false) => {
 function greenhouseStep1() {
   return page('Senior Engineer — Application', `
   <h1>Senior Engineer</h1><p>Step 1 of 2 — About you</p>
-  <form method="POST" action="/greenhouse/step2">
+  <form method="POST" action="/greenhouse/step2" enctype="multipart/form-data">
     ${field('First Name', `<input id="first_name" name="job_application[first_name]" required>`, true)}
     ${field('Last Name',  `<input id="last_name"  name="job_application[last_name]"  required>`, true)}
     ${field('Email',      `<input id="email" type="email" name="job_application[email]" required>`, true)}
@@ -131,13 +142,19 @@ function greenhouseStep1() {
   </form>`);
 }
 
-function greenhouseStep2(carry) {
+// Greenhouse uploads the resume at step 1, which POSTs to /greenhouse/step2 and is not itself a
+// recorded submission — so without carrying it, the one form that exercises a two-step upload would
+// leave no evidence the resume ever arrived. Step-1 uploads travel forward as a hidden `_step1_files`
+// summary, so the final /_submit/greenhouse record is self-contained. (This step has no file input
+// of its own, so it stays urlencoded — real ATS flows mix the two, and it keeps that path covered.)
+function greenhouseStep2(carry, files = {}) {
   const hidden = Object.entries(carry)
     .map(([k, v]) => `<input type="hidden" name="${k}" value="${escapeHtml(String(v))}">`).join('');
+  const uploads = `<input type="hidden" name="_step1_files" value="${escapeHtml(JSON.stringify(files))}">`;
   return page('Senior Engineer — Step 2', `
   <h1>Senior Engineer</h1><p>Step 2 of 2 — Eligibility</p>
   <form method="POST" action="/_submit/greenhouse">
-    ${hidden}
+    ${hidden}${uploads}
     <fieldset><legend>TRAP: sponsorship_inversion</legend>
       ${field('Do you now or in the future require sponsorship for work authorization?',
         `<select name="job_application[requires_sponsorship]" aria-required="true">
@@ -172,7 +189,7 @@ function greenhouseStep2(carry) {
 function leverForm() {
   return page('Backend Engineer — Apply', `
   <h1>Backend Engineer</h1>
-  <form method="POST" action="/_submit/lever">
+  <form method="POST" action="/_submit/lever" enctype="multipart/form-data">
     ${field('Full name', `<input name="name" required>`, true)}
     ${field('Email',     `<input name="email" type="email" required>`, true)}
     ${field('Current company', `<input name="org">`)}
@@ -199,7 +216,7 @@ function leverForm() {
 function ashbyForm() {
   return page('Platform Engineer — Application', `
   <h1>Platform Engineer</h1>
-  <form method="POST" action="/_submit/ashby">
+  <form method="POST" action="/_submit/ashby" enctype="multipart/form-data">
     ${field('Name',  `<input name="_systemfield_name" required>`, true)}
     ${field('Email', `<input name="_systemfield_email" type="email" required>`, true)}
     ${field('Resume', `<input type="file" name="_systemfield_resume" required>`, true)}
@@ -250,7 +267,7 @@ function workdayDecoy() {
 
 function workdayInner() {
   return page('Workday — Application', `
-  <form method="POST" action="/_submit/workday">
+  <form method="POST" action="/_submit/workday" enctype="multipart/form-data">
     ${field('First Name', `<input name="firstName" required>`, true)}
     ${field('Last Name',  `<input name="lastName" required>`, true)}
     ${field('Email',      `<input name="email" type="email" required>`, true)}
@@ -280,18 +297,79 @@ function indexPage() {
     <li><a href="/lever">/lever</a> — 1-step (lowercase yes/no, "Review and Submit" button)</li>
     <li><a href="/ashby">/ashby</a> — 1-step (required typeahead, non-ISO date)</li>
   </ul>
-  <p><a href="/_submissions">/_submissions</a> — recorded submissions (JSON)</p>
+  <p><a href="/_submissions">/_submissions</a> — recorded submissions (JSON). Each record carries
+  <code>fields</code> (text parts), <code>files</code> (uploads — <code>null</code> where the input
+  was present but empty) and <code>partCount</code>. Every form with a file input posts as
+  <code>multipart/form-data</code>, so an upload is observable rather than assumed.</p>
   <h2>Traps</h2>
   <pre style="white-space:pre-wrap;font-size:12px">${escapeHtml(JSON.stringify(TRAPS, null, 2))}</pre>`);
 }
 
 // ── Server ───────────────────────────────────────────────────────────────────
+// Buffers, not a string: a multipart body carries raw PDF bytes, and `raw += chunk` would decode
+// them as UTF-8 and corrupt every part boundary offset. The cap is 20MB rather than the old 2MB
+// because file content now actually crosses the wire.
 function readBody(req) {
   return new Promise(resolve => {
-    let raw = '';
-    req.on('data', c => { raw += c; if (raw.length > 2e6) req.destroy(); });
-    req.on('end', () => resolve(raw));
+    const chunks = [];
+    let len = 0;
+    req.on('data', c => { chunks.push(c); len += c.length; if (len > 2e7) req.destroy(); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
   });
+}
+
+const CRLF2 = Buffer.from('\r\n\r\n');
+
+/**
+ * Minimal multipart/form-data parser — enough to record what a browser actually sent.
+ *
+ * File bodies are measured and discarded, never stored: the harness needs to prove the resume
+ * arrived, not keep a copy of the candidate's resume in memory.
+ */
+function parseMultipart(buf, boundary) {
+  const fields = Object.create(null);
+  const files = Object.create(null);
+  const delim = Buffer.from(`--${boundary}`);
+  const parts = [];
+
+  let pos = buf.indexOf(delim);
+  if (pos < 0) return { fields, files, partCount: 0 };
+  pos += delim.length;
+  while (pos < buf.length) {
+    if (buf[pos] === 0x2d && buf[pos + 1] === 0x2d) break;          // closing "--"
+    if (buf[pos] === 0x0d && buf[pos + 1] === 0x0a) pos += 2;       // CRLF after the boundary
+    const next = buf.indexOf(delim, pos);
+    if (next < 0) break;
+    let end = next;
+    if (buf[end - 2] === 0x0d && buf[end - 1] === 0x0a) end -= 2;   // trailing CRLF belongs to the delimiter
+    parts.push(buf.subarray(pos, end));
+    pos = next + delim.length;
+  }
+
+  for (const part of parts) {
+    const sep = part.indexOf(CRLF2);
+    if (sep < 0) continue;
+    const headers = part.subarray(0, sep).toString('utf8');
+    const body = part.subarray(sep + CRLF2.length);
+    const name = headers.match(/\bname="([^"]*)"/i)?.[1];
+    if (name == null) continue;
+    const filename = headers.match(/\bfilename="([^"]*)"/i)?.[1];
+
+    if (filename == null) {
+      const val = body.toString('utf8');
+      // Mirror querystring.parse: a repeated key collects into an array.
+      fields[name] = name in fields ? [].concat(fields[name], val) : val;
+      continue;
+    }
+    // A file input with nothing chosen still sends a part, with filename="" and an empty body.
+    // Recording null rather than omitting it is what separates "the resolver skipped this field"
+    // from "the resolver filled it and the upload failed" — indistinguishable under urlencoded.
+    files[name] = filename === ''
+      ? null
+      : { filename, contentType: headers.match(/content-type:\s*([^\r\n]+)/i)?.[1]?.trim()
+            || 'application/octet-stream', size: body.length };
+  }
+  return { fields, files, partCount: parts.length };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -316,10 +394,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST') {
     const raw = await readBody(req);
-    // NOTE: multipart (file uploads) is not parsed — file fields are recorded as present-only.
-    const fields = req.headers['content-type']?.includes('multipart/form-data')
-      ? { _multipart: true, _rawLength: raw.length }
-      : parseQuery(raw);
+    const ctype = req.headers['content-type'] || '';
+    const boundary = ctype.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    const { fields, files, partCount } = ctype.includes('multipart/form-data') && boundary
+      ? parseMultipart(raw, (boundary[1] || boundary[2]).trim())
+      : { fields: parseQuery(raw.toString('utf8')), files: {}, partCount: 0 };
 
     if (path === '/_reset') {
       submissions.length = 0;
@@ -327,15 +406,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (path === '/greenhouse/step2') {
-      return send(200, greenhouseStep2(fields));
+      return send(200, greenhouseStep2(fields, files));
     }
 
     if (path.startsWith('/_submit/')) {
       const provider = path.split('/')[2];
-      const record = { provider, at: new Date().toISOString(), fields };
+      // Uploads from an earlier step of a multi-step flow, carried in as a hidden field.
+      const carried = fields._step1_files ? JSON.parse(fields._step1_files) : null;
+      if (carried) { delete fields._step1_files; Object.assign(files, carried); }
+      const record = { provider, at: new Date().toISOString(), fields, files, partCount };
       submissions.push(record);
       console.log(`[fakeAts] SUBMITTED via ${provider}:`);
       console.log(JSON.stringify(fields, null, 2));
+      console.log(`[fakeAts] files (${partCount} parts):`, JSON.stringify(files, null, 2));
       return send(200, page('Application received', `
         <h1>Thank you for your application</h1>
         <p>Your application has been submitted successfully. We'll be in touch.</p>
@@ -352,4 +435,5 @@ server.listen(PORT, () => {
   console.log(`[fakeAts] listening on http://localhost:${PORT}`);
   console.log('[fakeAts] forms: /greenhouse  /lever  /ashby');
   console.log('[fakeAts] assert against GET /_submissions — never on status alone.');
+  console.log('[fakeAts] uploads are real multipart; check record.files, not record.fields.');
 });
