@@ -72,9 +72,10 @@ function writeProfileUiCache(profileId, snapshot) {
 
 // Upstream scrape requests are profile-driven on the server.
 // Board UI filters stay local to /api/jobs and must not shape /api/scrape.
-function buildProfileScrapeRequest(query) {
-  return { query };
-}
+// The request builder that used to carry that rule is gone (§5.12): /api/scrape has returned
+// HTTP 410 since external scraping was removed, and this client never posts to it, so the builder
+// had no call site left. The rule is kept here as a constraint on anyone re-adding an outbound
+// path — the server derives it from the profile; board filters stay out of it.
 
 // â"€â"€ Helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 // FE-2: mirrors server.js's own AGE_MAP for the /api/jobs handler's ageFilter — used to derive
