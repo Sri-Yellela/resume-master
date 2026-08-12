@@ -185,14 +185,35 @@ test("file upload and typeahead fill are frame-aware", () => {
     "typeahead must be filled in the frame that owns the control, not the main document");
 });
 
-test("submission across frames is deliberately NOT enabled", () => {
-  // Left main-frame-only on purpose: making the submit scan frame-aware would change behaviour on
-  // greenhouse, which embeds its form in an iframe on some boards, and that is a live full-auto
-  // provider. It belongs with the provider-allowlist decision, gated on A5.
-  const i = automationSrc.indexOf("const SUBMIT_RE =");
-  const block = automationSrc.slice(i, i + 600);
-  assert.match(block, /await page\.\$\$\("button,input\[type='submit'\]"\)/,
-    "the submit scan is still main-frame-only; changing it is a gated decision");
+test("the submit scan is frame-aware but scoped to frames we actually filled", () => {
+  // ENABLED (was deliberately withheld). Main-frame-only scanning made submission arbitrary on
+  // greenhouse, which embeds its form in an iframe on some boards and not others: identical
+  // applications either went out or silently stopped at no_submit_button depending on the embed.
+  //
+  // The scope restriction is the safety property. Iterating EVERY frame would let a submit-shaped
+  // button in an untouched third-party frame (an ad, a captcha, an analytics widget) be clicked;
+  // main-frame-only used to prevent that by accident, so it is now prevented on purpose.
+  assert.match(automationSrc, /const submitCandidates = \[page\.mainFrame\(\), \.\.\.touchedFrames\]/,
+    "candidates must be the main frame plus frames that received an approved answer");
+  assert.match(automationSrc, /if \(approved\.length\) touched\.add\(frame\);/,
+    "a frame only becomes a candidate once we have filled something in it");
+  assert.doesNotMatch(automationSrc, /for \(const ctx of frameList\(page\)\) \{\s*if \(clicked\)/,
+    "the submit scan must not walk every frame indiscriminately");
+});
+
+test("submission evidence is gathered where the submission happened", () => {
+  // An iframe-hosted form leaves the main document's URL and body untouched, so main-frame-only
+  // checks would report clicked_no_evidence for a submission that genuinely succeeded — N1's
+  // guarantee inverted into a false negative, which is how a real submission gets retried.
+  assert.match(automationSrc, /classifyFlowState\(clickedFrame, null\)/,
+    "the submitting frame must be classified too");
+  assert.match(automationSrc, /frame_confirmation_page/);
+  assert.match(automationSrc, /frame_url_changed/);
+  // And the claim stays evidence-based: no evidence still means not submitted.
+  assert.match(automationSrc, /submitEvidence = "clicked_no_evidence"/);
+  assert.match(automationSrc, /submitReasonCode = "submit_unverified"/);
+  // Which frame submitted is recorded, so a cross-frame claim is checkable after the fact.
+  assert.match(automationSrc, /\|frame/);
 });
 
 // ── Scope: the v1 allowlist is unchanged ─────────────────────────────────────
