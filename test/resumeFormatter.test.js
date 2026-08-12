@@ -1,4 +1,4 @@
-// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -141,7 +141,12 @@ test("formatter emits HTML contract classes and tuned typography", () => {
   assert.match(html, /class="section-title"/);
   assert.match(html, /class="entry"/);
   assert.match(html, /class="bullets"/);
-  assert.match(html, /class="skills-table"/);
+  // The skills section stopped being a <table class="skills-table"> in 8412c9a, whose diff says
+  // so outright: "CHANGE 7: skills section now renders as a bullet list instead of a table".
+  // A deliberate design change that this assertion was never updated for. Asserting the contract
+  // that exists â€” a labelled bullet, which is also the ATS-friendlier shape (tables extract
+  // poorly), consistent with this file's own "selectable-text oriented" test below.
+  assert.match(html, /<ul class="bullets">\s*<li><strong>Languages<\/strong>/);
   assert.match(html, /letter-spacing: 0\.08em/);
   assert.match(html, /letter-spacing: 0\.01em/);
   assert.doesNotMatch(html, /letter-spacing: 0\.22em/);
