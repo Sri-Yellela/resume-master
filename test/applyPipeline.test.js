@@ -22,11 +22,17 @@ test("apply pipeline has DB-backed runs, jobs, and structured logs", () => {
 
 test("apply queue routes expose async run, detail, and review endpoints", () => {
   assert.match(applyRoute, /app\.post\("\/api\/apply\/runs"/);
-  assert.match(applyRoute, /res\.status\(202\)\.json/);
+  // A3 wrapped both POST handlers in withIdempotency, which hands them a capture object (`out`)
+  // instead of the raw `res` so the response can be recorded for replay. The 202 contract is
+  // unchanged; only the object it is written to is.
+  assert.match(applyRoute, /out\.status\(202\)\.json/);
   assert.match(applyRoute, /app\.get\("\/api\/apply\/runs"/);
   assert.match(applyRoute, /app\.get\("\/api\/apply\/runs\/:runId"/);
   assert.match(applyRoute, /app\.get\("\/api\/apply\/review"/);
-  assert.match(applyRoute, /const APPLY_WORKER_LIMIT = 2/);
+  // A3 made the limit configurable (requirement 2) instead of hardcoded. The default is still 2,
+  // so the shipped behaviour is unchanged when the env var is unset — but it is now overridable
+  // without a code change, which is the point.
+  assert.match(applyRoute, /const APPLY_WORKER_LIMIT\s+= envInt\("APPLY_WORKER_LIMIT", 2\)/);
 });
 
 test("apply queue duplicate list uses the defined variable consistently", () => {
@@ -211,8 +217,15 @@ test("completeness gate holds full-auto submit when required fields are still em
   // Gate must re-discover fields after fill using discoverFields across all frames
   assert.match(automation, /postFillFields/, "must re-discover fields post-fill");
   assert.match(automation, /missingRequired/, "must collect unfilled required fields");
-  // Gate must fire only in full-auto mode and only for non-file required fields
-  assert.match(automation, /f\.is_required.*f\.type !== 'file'|is_required.*type !== 'file'/, "must skip file fields in completeness check");
+  // REVERSED IN A3. This asserted that the gate SKIPS required file fields — it was pinning A1
+  // finding N2 in place. Exempting them let a form with no resume attached pass the gate while the
+  // browser refused to submit it, so the run reported filled_not_submitted having never reached the
+  // later steps. A file input's value is readable (''  when empty), so it is now checked like any
+  // other required control. The gate must NOT special-case file fields.
+  assert.doesNotMatch(automation, /f\.type !== 'file'/,
+    "required file fields must no longer be exempt from the completeness gate");
+  assert.match(automation, /f\.is_required && \(f\.current_value === ''/,
+    "the gate must test every required field's current_value, files included");
   // Gate must return held_review / incomplete_form when required fields are unfilled
   assert.match(automation, /reasonCode:\s*'incomplete_form'/, "must return incomplete_form reason code");
   assert.match(automation, /status:\s*'held_review'/, "must return held_review status on incompleteness");

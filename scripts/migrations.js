@@ -2035,4 +2035,29 @@ export const MIGRATIONS = [
         DROP TABLE IF EXISTS refresh_log;
       `,
     },
+    {
+      id: "072_apply_submit_guards",
+      sql: `
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key        TEXT PRIMARY KEY,
+          value      TEXT,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE TABLE IF NOT EXISTS apply_idempotency (
+          user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          idem_key      TEXT    NOT NULL,
+          endpoint      TEXT    NOT NULL,
+          status_code   INTEGER NOT NULL DEFAULT 200,
+          response_json TEXT    NOT NULL,
+          created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+          PRIMARY KEY (user_id, idem_key)
+        );
+        ALTER TABLE apply_run_jobs ADD COLUMN answers_json TEXT;
+        ALTER TABLE apply_run_jobs ADD COLUMN resume_artifact_id INTEGER;
+        ALTER TABLE apply_run_jobs ADD COLUMN resume_ats_score INTEGER;
+        ALTER TABLE apply_run_jobs ADD COLUMN screenshot_path TEXT;
+        ALTER TABLE apply_run_jobs ADD COLUMN submit_verified INTEGER;
+        ALTER TABLE apply_run_jobs ADD COLUMN submit_evidence TEXT;
+      `,
+    },
   ];

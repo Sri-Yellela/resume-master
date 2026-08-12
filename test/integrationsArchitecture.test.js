@@ -78,7 +78,8 @@ test("starting an apply run is gated server-side on the centralized prerequisite
 
   // The response shape is the contract the client already implements — assert the field name,
   // since renaming it would silently degrade the message back to a generic failure.
-  assert.match(runsBlock, /res\.status\(409\)\.json\(\{[\s\S]*?missingPrerequisites,/);
+  // `out` rather than `res` since A3's withIdempotency wrapper: the field name is what matters.
+  assert.match(runsBlock, /out\.status\(409\)\.json\(\{[\s\S]*?missingPrerequisites,/);
   assert.match(jobsPanel, /e\.payload\?\.missingPrerequisites/,
     "client must keep reading the field the server sends");
 });
