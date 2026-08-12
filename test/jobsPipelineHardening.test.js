@@ -174,8 +174,14 @@ test("manual search reads the stored board and never triggers an outbound scrape
   assert.doesNotMatch(jobsPanel, /api\("\/api\/scrape"/,
     "the client must not call the retired scrape endpoint");
   assert.match(jobsPanel, /const handleSetRole/, "search entry point must still exist");
-  // buildProfileScrapeRequest is still DEFINED in JobsPanel (JobsPanel.jsx:75) but nothing calls
-  // it now that the scrape request is gone — another §5.12 leftover, not asserted absent here.
+  // The scrape-request builder that lingered here with zero callers is now removed (§5.12), so
+  // this is asserted rather than merely noted. Comments are stripped first: the removal's own
+  // explanatory note in JobsPanel names the outbound path it forbids.
+  const jobsPanelCode = jobsPanel
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(jobsPanelCode, /buildProfileScrapeRequest/,
+    "the scrape-request builder must not return — there is no outbound path to build for");
 });
 
 test("board filters stay local and are not sent as scrape parameters", () => {

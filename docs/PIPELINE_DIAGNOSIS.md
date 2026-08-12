@@ -366,6 +366,18 @@ called only from `scrapeJobs` and the cron re-scrape path; and `buildProfileScra
 `/api/scrape`. The client-side one is independently removable — it has no live entry point at all,
 unlike the server cluster.
 
+**`buildProfileScrapeRequest` — DONE.** Removed; `/api/scrape` returns HTTP 410 (server.js:5622)
+and the client has no outbound path to build a request for. The comment above it survives
+deliberately: `jobsPipelineHardening` pins the *"Board UI filters stay local to /api/jobs and must
+not shape /api/scrape"* line as a live invariant, so the rule is kept as a constraint on anyone
+re-adding an outbound path even though its builder is gone. That test's note about the orphan is
+now an absence assertion instead of a comment.
+
+**Still open, and deliberately not bundled:** the server-side cluster (`scrapeJobs`,
+`isExternalScrapeQuotaError`, `searchThreadId`/`logSearchThread`, `activeScrapes`, `scrapeStateKey`,
+`mapPostedLimit`). `scrapeJobs` retains two live entry points — a cron path and the admin router —
+so removing it is its own scoped change, not a continuation of this pass.
+
 **Baseline movement, as predicted:** 44 → 43 (5.3/5.4) → **38** (5.1/5.7). Nine failures cleared,
 all of them assertions pinned to the pre-pivot architecture. `/api/scrape` returning HTTP 410
 *"External scraping has been removed"* is what settled that those could never be repaired.
@@ -442,9 +454,14 @@ either surface. Behaviour is unchanged by the removal: while a job is in the `a_
 state, `st` is still truthy, so the `disabled={!!st}` guards on both surfaces keep disabling their
 buttons exactly as before. `generateLoading` stays in both files; it has a button to drive.
 
-**`aPlusLoading` is dead in JobCard.** `JobCard.jsx:328` computes
-`const aPlusLoading = st === "a_plus_resume"` and nothing uses it — the A+ action is no longer a
-card button (it survives in `JobDetailPanel`). Small dead-code item, same family as §5.12.
+Both surfaces are now guarded against the flag returning (`profileAtsUiFixes`). The detail-panel
+half had no guard at first — it was found only because an unrelated test pinned the JobCard line —
+so leaving it unguarded would have let the orphan back in on the one surface nothing watched.
+
+*Correction to this entry as originally filed:* it claimed the A+ action "survives in
+`JobDetailPanel`". It does not. Neither surface has a dedicated A+ button, which is the reason both
+flags sat unread; the tool is selected implicitly by `apply_mode`/plan tier. `JobCard.jsx`'s own
+comment repeated that wrong claim and has been corrected too.
 
 ### Recommended order, if the deletions are approved
 

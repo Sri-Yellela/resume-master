@@ -24,6 +24,18 @@ test("job card hover preview uses shared active-aware icon helpers for save and 
   assert.doesNotMatch(jobCardCode, /aPlusLoading/,
     "an unused second loading flag must not return — !!st already covers that state");
   assert.match(jobCardCode, /disabled=\{!!st\}/, "the generic in-flight guard must stay");
+
+  // JobDetailPanel's action bar carried an IDENTICAL orphan, removed in the same change. It was
+  // found only because an unrelated test happened to pin the JobCard line — nothing guarded this
+  // surface, so guard it here rather than leave the pair half-covered. Neither surface has a
+  // dedicated A+ button; both rely on the same generic in-flight guard.
+  const detailPanelCode = fs.readFileSync("client/src/components/JobDetailPanel.jsx", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(detailPanelCode, /aPlusLoading/,
+    "the detail panel's action bar must not regrow the unused flag either");
+  assert.match(detailPanelCode, /disabled=\{!!st\}/,
+    "the detail panel's generic in-flight guard must stay");
 });
 
 test("jobs UI opens ATS panel from stored base ATS reports without requiring regeneration", () => {
