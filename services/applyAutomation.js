@@ -1097,7 +1097,7 @@ export function frameList(page) {
 }
 
 async function discoverAndFill(page, frames, provider, autofillData, labelMap, opts = {}) {
-  const { policy = defaultAnswerPolicy, mode = 'full', step = 0 } = opts;
+  const { policy = defaultAnswerPolicy, mode = 'full', step = 0, touched = new Set() } = opts;
   let filled = 0;
   const collected = [];
   const rejected = [];
@@ -1145,6 +1145,11 @@ async function discoverAndFill(page, frames, provider, autofillData, labelMap, o
       }
 
       const approved = decision.approved;
+      // Remember that this frame owns part of the application. The submit scan is restricted to
+      // these: a submit-shaped button inside an untouched third-party iframe (an ad, a captcha, an
+      // analytics widget) must never be clicked, and main-frame-only scanning used to prevent that
+      // by accident.
+      if (approved.length) touched.add(frame);
       const simpleAnswers = approved.filter(a => a.type !== 'typeahead');
       if (simpleAnswers.length) filled += await frame.evaluate(`(${APPLY_FN_SRC})(${JSON.stringify(simpleAnswers)})`).catch(() => 0);
       // The FRAME, not the page: a typeahead inside an iframe was previously looked up in the main
@@ -1357,11 +1362,13 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // not just the last page. (A dead `fillAllFrames` closure sat here — defined, never called.)
     const resolvedAnswers = [];
     const rejectedAnswers = [];
+    // Frames that received at least one approved answer, i.e. that own part of this application.
+    const touchedFrames = new Set();
     let escalation = null;
     let stepIndex = 0;
     const runDiscovery = async () => {
       const r = await discoverAndFill(page, frameList(page), detected, autofillData, labelMap,
-        { policy: answerPolicy, mode: isFullAuto ? 'full' : 'semi', step: stepIndex++ });
+        { policy: answerPolicy, mode: isFullAuto ? 'full' : 'semi', step: stepIndex++, touched: touchedFrames });
       totalFilled += r.filled;
       resolvedAnswers.push(...r.answers);
       if (r.rejected?.length) rejectedAnswers.push(...r.rejected);
@@ -1563,25 +1570,52 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       inProgress.set(String(jobId), { status: "submitting", browser });
       const SUBMIT_RE = /^(submit|apply|apply now|submit application|send application)/i;
       let clicked = false;
+      let clickedFrame = null;
       const urlBefore = page.url();
-      for (const btn of await page.$$("button,input[type='submit']")) {
-        try {
-          const txt = (await btn.evaluate(el => el.textContent || el.value || "")).trim();
-          const visible = await btn.evaluate(el => {
-            const r = el.getBoundingClientRect();
-            return r.width > 0 && r.height > 0;
-          });
-          if (SUBMIT_RE.test(txt) && visible) {
-            await btn.click();
-            // Give a navigation the chance to happen instead of assuming it did.
-            await Promise.race([
-              page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
-              new Promise(r => setTimeout(r, 2000)),
-            ]);
-            clicked = true;
-            break;
-          }
-        } catch {}
+
+      // CROSS-FRAME SUBMIT. Previously main-frame-only, so a form hosted in an iframe was filled
+      // completely, passed every gate, and then stopped at `no_submit_button`. That made submission
+      // arbitrary on greenhouse, which embeds its form in an iframe on some boards and not others:
+      // identical applications either went out or silently did not, depending on the embed.
+      //
+      // Scope is deliberately narrow — the main frame plus frames we actually filled — so a
+      // submit-shaped button in an untouched third-party frame is never clicked.
+      const submitCandidates = [page.mainFrame(), ...touchedFrames].filter(
+        (f, i, arr) => f && arr.indexOf(f) === i
+      );
+      const framesBefore = new Map();
+      for (const f of submitCandidates) {
+        try { framesBefore.set(f, f.url()); } catch {}
+      }
+
+      for (const ctx of submitCandidates) {
+        if (clicked) break;
+        let buttons = [];
+        try { buttons = await ctx.$$("button,input[type='submit']"); } catch { continue; }
+        for (const btn of buttons) {
+          try {
+            const txt = (await btn.evaluate(el => el.textContent || el.value || "")).trim();
+            const visible = await btn.evaluate(el => {
+              const r = el.getBoundingClientRect();
+              return r.width > 0 && r.height > 0;
+            });
+            if (SUBMIT_RE.test(txt) && visible) {
+              await btn.click();
+              // Give a navigation the chance to happen instead of assuming it did. An iframe-hosted
+              // form usually navigates the FRAME, not the page, so both are awaited.
+              await Promise.race([
+                page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
+                ctx === page.mainFrame()
+                  ? new Promise(() => {})
+                  : ctx.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
+                new Promise(r => setTimeout(r, 2000)),
+              ]);
+              clicked = true;
+              clickedFrame = ctx;
+              break;
+            }
+          } catch {}
+        }
       }
 
       // A1 finding N1: `submitted` was previously set by the CLICK ALONE, with nothing checking
@@ -1589,11 +1623,28 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       // status:'submitted' with zero submissions recorded on the receiving end — a silent
       // non-application, and self-concealing, because the duplicate guard then treats the job as
       // done and never retries it. Require post-click evidence.
+      //
+      // The evidence has to be gathered where the submission happened: an iframe-hosted form leaves
+      // the main document's URL and body untouched, so main-frame-only checks would report
+      // `clicked_no_evidence` for a submission that genuinely succeeded — N1's guarantee inverted
+      // into a false negative.
       const urlAfter = page.url();
-      const postFlow = clicked ? await classifyFlowState(page, originalDomain) : flowState;
       const evidence = [];
-      if (postFlow === "submitted") evidence.push("confirmation_page");
-      if (urlAfter !== urlBefore) evidence.push("url_changed");
+      let postFlow = flowState;
+      if (clicked) {
+        const inClickedFrame = clickedFrame && clickedFrame !== page.mainFrame()
+          ? await classifyFlowState(clickedFrame, null).catch(() => null)
+          : null;
+        postFlow = await classifyFlowState(page, originalDomain);
+        if (postFlow === "submitted") evidence.push("confirmation_page");
+        else if (inClickedFrame === "submitted") { evidence.push("frame_confirmation_page"); postFlow = "submitted"; }
+        for (const [f, before] of framesBefore) {
+          try {
+            if (f.url() !== before) { evidence.push(f === page.mainFrame() ? "url_changed" : "frame_url_changed"); }
+          } catch {}
+        }
+      }
+      if (urlAfter !== urlBefore && !evidence.includes("url_changed")) evidence.push("url_changed");
 
       if (flowState === "submitted") {
         // Already on a confirmation page before we clicked anything.
@@ -1603,7 +1654,10 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       } else if (clicked && evidence.length > 0) {
         status = "submitted";
         submitVerified = true;
-        submitEvidence = evidence.join(",");
+        // Which frame submitted is part of the audit: it is the difference between a main-document
+        // submission and an embedded one, and it is what makes a cross-frame claim checkable.
+        submitEvidence = [...new Set(evidence)].join(",") +
+          (clickedFrame && clickedFrame !== page.mainFrame() ? "|frame" : "");
       } else if (clicked) {
         // The dangerous case: a submit-shaped button was clicked and nothing changed.
         status = "filled_not_submitted";

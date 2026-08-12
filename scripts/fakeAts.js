@@ -231,7 +231,21 @@ function workdayShell() {
   return page('Workday — Apply', `
   <h1>Staff Engineer</h1>
   <p>Application hosted in an iframe, as workday/icims/taleo do.</p>
+  <!-- DECOY, deliberately FIRST in the DOM so a naive walk over every frame reaches it before the
+       real form. It has a visible "Submit" button and no field we would ever fill, standing in for
+       the third-party frames a real posting carries (ads, captcha, analytics). Clicking it must be
+       impossible: the submit scan only considers frames that received an approved answer. If it is
+       ever posted, /_submissions records provider "decoy" and the test fails. -->
+  <iframe src="/workday/decoy" title="Sponsored" style="width:100%;height:80px;border:1px dashed #f00"></iframe>
   <iframe src="/workday/inner" title="Application" style="width:100%;height:900px;border:1px solid #ccc"></iframe>`);
+}
+
+function workdayDecoy() {
+  return page('Sponsored', `
+  <form method="POST" action="/_submit/decoy">
+    <p style="font-size:12px;color:#900">Third-party widget — nothing here belongs to the application.</p>
+    <button type="submit">Submit</button>
+  </form>`);
 }
 
 function workdayInner() {
@@ -294,6 +308,7 @@ const server = http.createServer(async (req, res) => {
     if (path === '/ashby')      return send(200, ashbyForm());
     if (path === '/workday')       return send(200, workdayShell());
     if (path === '/workday/inner') return send(200, workdayInner());
+    if (path === '/workday/decoy') return send(200, workdayDecoy());
     if (path === '/_submissions')
       return send(200, JSON.stringify({ count: submissions.length, submissions }, null, 2),
                   'application/json; charset=utf-8');
