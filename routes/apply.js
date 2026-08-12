@@ -335,6 +335,30 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       setJobStatus(finalStatus, reasonCode, result.reasonDetail || (fallbackUrl ? `fallbackUrl:${fallbackUrl}` : null));
       logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform, fallbackUrl });
 
+      // Answer provenance (TASK A2). Persisted so that what was sent to an employer, and which
+      // rule produced each value, can be reconstructed after the fact. details_json is used
+      // deliberately: it needs no migration, leaving id 069 for A3's dedicated audit columns.
+      // The field VALUE is recorded — auditing "was this answer correct" is impossible without it.
+      if (Array.isArray(result.answers) && result.answers.length) {
+        logEvent(runId, runJobId, userId, jobId, "answers_resolved",
+          `Resolved ${result.answers.filter(a => !a.skipped).length} answers`, {
+            answers: result.answers.map(a => ({
+              field: a.label || a.name || a.field_id,
+              type: a.type,
+              value: a.skipped ? null : a.value,
+              provenance: a.provenance,
+              confidence: a.confidence,
+              matched_on: a.matched_on,
+              ...(a.skipped ? { skipped: true, refusals: a.refusals } : {}),
+            })),
+          });
+      }
+      if (Array.isArray(result.lowConfidence) && result.lowConfidence.length) {
+        logEvent(runId, runJobId, userId, jobId, "low_confidence_hold",
+          `Held: ${result.lowConfidence.length} answer(s) below the auto-submit confidence floor`,
+          { lowConfidence: result.lowConfidence });
+      }
+
       if (submitted) {
         logEvent(runId, runJobId, userId, jobId, "submitted", "Application submitted successfully");
         db.prepare(`UPDATE apply_runs SET submitted_count=submitted_count+1 WHERE id=?`).run(runId);

@@ -208,6 +208,16 @@ function ashbyForm() {
     ${field('Available from (MM/DD/YYYY)',
       `<input name="start_date" placeholder="MM/DD/YYYY" required>`, true)}
     ${field('Website', `<input name="_systemfield_website" type="url">`)}
+
+    <fieldset><legend>TRAP: lowercase_yes</legend>
+      <p style="font-size:13px;color:#666">A1 found the harness had no checkbox or toggle anywhere,
+      so buildAnswers' <code>value === 'Yes'</code> coercion (which only runs for
+      checkbox/toggle) was never exercised. This is that field. A stored <code>'yes'</code> must
+      arrive checked; anything unrecognised must stay unchecked.</p>
+      ${field('I am authorized to work without sponsorship',
+        `<input type="checkbox" name="authorized_no_sponsorship" required>`, true)}
+    </fieldset>
+
     <button type="submit">Submit</button>
   </form>`);
 }
