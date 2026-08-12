@@ -1,11 +1,16 @@
 import os from "os";
 import path from "path";
-import { writeFileSync, unlinkSync } from "fs";
+import { fileURLToPath } from "url";
+import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { autoApply } from "../services/applyAutomation.js";
 import { probeBrowserAvailability } from "../services/browserLauncher.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
 import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
 import { canUseAPlusResume, normalisePlanTier } from "../services/entitlements.js";
+
+// Must match services/applyAutomation.js SCREENSHOT_DIR — screenshot_path rows are absolute paths
+// written by takeScreenshot(), and this is the only directory they are ever allowed to resolve into.
+const SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "screenshots");
 
 function publicApplication(row) {
   if (!row) return null;
@@ -827,6 +832,122 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // Additive: openQuestions is parsed alongside the existing row shape, so a caller that ignores
     // it is unaffected. This is the read half of the validation-correction loop.
     res.json({ jobs: jobs.map(withOpenQuestions) });
+  });
+
+  // ── Review artifacts (read-only) ─────────────────────────────────────────────
+  // A3 already persists everything needed to reconstruct what was sent to an employer — the resume
+  // artifact id, the resolved answers with A2's provenance/confidence, the screenshot, and the submit
+  // evidence. None of it was reachable over HTTP, so an application could not actually be reviewed,
+  // before or after submission. These three endpoints serve that record. They are strictly read-only:
+  // nothing here changes whether, when, or what gets submitted.
+  //
+  // Keyed on apply_run_jobs.id (the run job), not scraped_jobs.job_id — the audit columns live on the
+  // run job, and the same posting can be attempted more than once.
+
+  const ownedRunJob = (runJobId, userId) => {
+    const id = Number(runJobId);
+    if (!Number.isInteger(id) || id <= 0) return null;
+    return db.prepare(`
+      SELECT rj.*, r.mode, sj.title, sj.company AS sj_company
+      FROM apply_run_jobs rj
+      JOIN apply_runs r ON r.id = rj.run_id
+      LEFT JOIN scraped_jobs sj ON sj.job_id = rj.job_id
+      WHERE rj.id=? AND rj.user_id=?
+    `).get(id, userId) || null;
+  };
+
+  /** The full record of one application attempt: what was answered, with what confidence, and why. */
+  app.get("/api/apply/run-jobs/:runJobId/review", requireAuth, (req, res) => {
+    const rj = ownedRunJob(req.params.runJobId, req.user.id);
+    if (!rj) return res.status(404).json({ error: "not_found" });
+    res.json({
+      runJobId:  rj.id,
+      runId:     rj.run_id,
+      jobId:     rj.job_id,
+      title:     rj.title,
+      company:   rj.sj_company,
+      mode:      rj.mode,
+      status:    rj.status,
+      reasonCode:   rj.reason_code,
+      reasonDetail: rj.reason_detail,
+      // Every answer with the rule that produced it. A 'label_fuzzy' answer is a guess; an
+      // 'handler_exact'/'field_map_exact'/'custom_answer' one is not. That distinction is the
+      // point of showing this at all.
+      answers:       parseJson(rj.answers_json, []),
+      openQuestions: parseJson(rj.open_questions_json, []),
+      resume: {
+        artifactId: rj.resume_artifact_id ?? null,
+        atsScore:   rj.resume_ats_score ?? null,
+        available:  rj.resume_artifact_id != null,
+      },
+      submission: {
+        verified: rj.submit_verified === 1,
+        evidence: rj.submit_evidence ?? null,
+      },
+      screenshotAvailable: !!rj.screenshot_path,
+    });
+  });
+
+  /**
+   * The resume for this attempt, as a PDF.
+   *
+   * IMPORTANT: this is RE-RENDERED from the stored `resumes.html`, not the archived upload — the temp
+   * PDF is deleted in processRunJob's `finally`. It is a faithful reconstruction of the same source,
+   * which is what the audit trail was designed around, but it is not guaranteed byte-identical to the
+   * file the employer received: a different Chromium build or missing font would render differently.
+   * Treat it as "the resume this application was built from", not as a forensic copy.
+   */
+  app.get("/api/apply/run-jobs/:runJobId/resume", requireAuth, async (req, res) => {
+    const rj = ownedRunJob(req.params.runJobId, req.user.id);
+    if (!rj) return res.status(404).json({ error: "not_found" });
+    if (rj.resume_artifact_id == null) {
+      return res.status(404).json({
+        error: "no_resume_artifact",
+        message: "No resume artifact was recorded for this application.",
+      });
+    }
+    // Re-check ownership on the artifact itself rather than trusting the foreign key.
+    const artifact = db.prepare("SELECT html FROM resumes WHERE id=? AND user_id=?")
+      .get(rj.resume_artifact_id, req.user.id);
+    if (!artifact?.html) {
+      return res.status(404).json({
+        error: "resume_artifact_missing",
+        message: "The resume this application used is no longer stored.",
+      });
+    }
+    try {
+      const pdf = await htmlToPdf(artifact.html);
+      const safe = String(rj.job_id).replace(/[^a-z0-9._-]+/gi, "_");
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition",
+        `${req.query.download ? "attachment" : "inline"}; filename="resume-${safe}.pdf"`);
+      return res.send(pdf);
+    } catch (err) {
+      // PDF rendering needs a browser; on a host without one this is the same failure the apply
+      // path hits, and it should read as unavailable rather than as a missing resume.
+      return res.status(503).json({
+        error: "pdf_render_failed",
+        message: err?.message || "Could not render the resume to PDF.",
+      });
+    }
+  });
+
+  /** The screenshot taken at the end of the attempt — the visual proof of what the form looked like. */
+  app.get("/api/apply/run-jobs/:runJobId/screenshot", requireAuth, (req, res) => {
+    const rj = ownedRunJob(req.params.runJobId, req.user.id);
+    if (!rj) return res.status(404).json({ error: "not_found" });
+    if (!rj.screenshot_path) return res.status(404).json({ error: "no_screenshot" });
+    // The value is written by our own takeScreenshot(), but serving a DB string as a filesystem path
+    // is precisely the shape that becomes an arbitrary-file read if anything upstream ever changes.
+    // Confine it to the screenshot directory and refuse anything else.
+    const resolved = path.resolve(rj.screenshot_path);
+    if (resolved !== path.resolve(SCREENSHOT_DIR) &&
+        !resolved.startsWith(path.resolve(SCREENSHOT_DIR) + path.sep)) {
+      return res.status(403).json({ error: "screenshot_outside_store" });
+    }
+    if (!existsSync(resolved)) return res.status(404).json({ error: "screenshot_missing" });
+    res.setHeader("Content-Type", "image/png");
+    return res.sendFile(resolved);
   });
 
   // ── Validation-correction loop ───────────────────────────────────────────────
