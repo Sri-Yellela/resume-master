@@ -97,20 +97,27 @@ A dead `fillAllFrames` closure was removed — defined, never called.
   `role="switch"`, and for a non-input element `APPLY_FN_SRC` sets `.checked`, which does nothing —
   a required switch would hold forever. Worth its own fix before any provider that uses one.
 
-## Trade-off that needs a decision
+## Trade-off that needed a decision — RESOLVED, `label_exact` shipped
 
-**Full-auto now holds whenever any field resolves only by fuzzy label match.** Observed on Lever:
-the run holds because `current_company` matched "Current company" — a benign, in fact *exact*, label
-match scored `label_fuzzy` at 0.3.
+**As first shipped, full-auto held whenever any field resolved only by fuzzy label match.** Observed
+on Lever: the run held because `current_company` matched "Current company" — a benign, in fact
+*exact*, label match scored `label_fuzzy` at 0.3. That was requirement 5 implemented literally, and
+the right conservative posture, but on real forms it would hold a large share of runs.
 
-This is requirement 5 implemented literally, and it is the right conservative posture before A5. But
-on real forms it will hold a large share of runs, because harmless fuzzy matches are common.
+**Signed off and implemented:** a sixth provenance value, `label_exact`, for a normalised-exact
+label/key match, at **0.85**. Chosen over 0.9 deliberately — it clears `AUTO_SUBMIT_MIN_CONFIDENCE`
+(0.8) so ordinary forms no longer hold, but stays below `CLEAR_FIRST_MIN_CONFIDENCE` (0.9), so a
+label match may fill a blank field and still never overwrite a value the ATS parsed from the resume.
+A label string is weaker evidence than the attribute/handler signal `field_map_exact` rests on.
 
-Recommendation: add a `label_exact` tier (normalised label == key phrase) at ~0.9, keeping
-`label_fuzzy` for genuine token-subset guesses. That preserves the safety property — guesses still
-hold — while not holding on exact label matches. **Not implemented**, because requirement 1 fixes the
-provenance enum to five values and adding a sixth is a spec change, not an implementation detail.
-The Deferred "validation-correction loop" is the other half of this: today a hold is a dead end.
+`label_fuzzy` keeps 0.3 for genuine token-subset guesses ("Your city of residence" ← `city`), so the
+safety property is unchanged: guesses still hold. No guard is relaxed — eligibility-class,
+third-party-subject and inversion refusals all run *before* provenance is assigned, verified by test.
+
+Measured effect on the trap matrix: Lever moved from `held_review / low_confidence_answers` to
+`filled_not_submitted`, with every greenhouse trap still holding and Ashby still submitting correct
+values. The Deferred "validation-correction loop" remains the other half of this: a hold is still a
+dead end.
 
 ## Regression review
 
