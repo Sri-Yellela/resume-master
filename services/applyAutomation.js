@@ -690,31 +690,18 @@ export function buildAnswers(fields, profilePayload) {
       }
     }
 
-    // 3. Fuzzy label match against field_map keys — the weakest path, and the one A1 proved
-    //    submits false attestations. Now: whole-token only (not raw substring), refused outright
-    //    for eligibility-class and third-party-subject fields, and refused when the label inverts
-    //    the key's sense. Whatever survives is marked label_fuzzy and cannot auto-submit.
-    if (value === null && label) {
-      for (const [k, v] of Object.entries(field_map)) {
-        if (!v) continue;
-        if (!matchesWholeToken(label, k)) continue;
-        const reason = refuseReason({ ...guardCtx, key: k });
-        if (reason) { refusals.push(`${k}:${reason}`); continue; }
-        if (invertsKey(label, k)) { refusals.push(`${k}:inverted_label`); continue; }
-        value = v;
-        // Exact label match is trustworthy enough to submit; a token-subset match stays a guess and
-        // holds the run. Both pass through every guard above either way — the eligibility and
-        // third-party refusals are not relaxed for an exact label.
-        provenance = isExactLabelMatch(label, k) ? PROVENANCE.LABEL_EXACT : PROVENANCE.LABEL_FUZZY;
-        matched_on = k;
-        break;
-      }
-    }
-
-    // 4. custom_answers — the user's own answer to a question. The reverse direction
-    //    (`ql.includes(lbl)`) is DROPPED: a short label matched almost any longer stored question.
-    //    An eligibility field may be answered here only on a normalised-EXACT question match,
-    //    which is not a guess — the user answered that exact question.
+    // 3. custom_answers — the user's own answer to this question.
+    //
+    //    ORDERED AHEAD OF THE FUZZY STEP, and that ordering is load-bearing for the
+    //    validation-correction loop. When a field holds as low-confidence, the loop asks the user
+    //    and stores their reply here; if the fuzzy step ran first it would keep winning with its
+    //    0.3 guess, the stored answer would never be reached, and the loop could never converge —
+    //    the same question would be asked forever. An explicit answer to this exact question is
+    //    strictly better evidence than a token-subset match against a profile key.
+    //
+    //    The reverse direction (`ql.includes(lbl)`) is DROPPED: a short label matched almost any
+    //    longer stored question. An eligibility field may be answered here only on a
+    //    normalised-EXACT question match, which is not a guess — the user answered that question.
     if (value === null && label) {
       const lbl = normaliseText(label);
       for (const [q, a] of Object.entries(custom_answers)) {
@@ -730,6 +717,26 @@ export function buildAnswers(fields, profilePayload) {
         value = String(a);
         provenance = PROVENANCE.CUSTOM_ANSWER;
         matched_on = q;
+        break;
+      }
+    }
+
+    // 4. Fuzzy label match against field_map keys — the weakest path, and the one A1 proved
+    //    submits false attestations. Whole-token only (not raw substring), refused outright for
+    //    eligibility-class and third-party-subject fields, and refused when the label inverts the
+    //    key's sense. An exact label match is trustworthy enough to submit; a token-subset match
+    //    stays a guess, cannot auto-submit, and becomes a question the loop can ask.
+    if (value === null && label) {
+      for (const [k, v] of Object.entries(field_map)) {
+        if (!v) continue;
+        if (!matchesWholeToken(label, k)) continue;
+        const reason = refuseReason({ ...guardCtx, key: k });
+        if (reason) { refusals.push(`${k}:${reason}`); continue; }
+        if (invertsKey(label, k)) { refusals.push(`${k}:inverted_label`); continue; }
+        value = v;
+        // Guards above are not relaxed for an exact label — only the confidence differs.
+        provenance = isExactLabelMatch(label, k) ? PROVENANCE.LABEL_EXACT : PROVENANCE.LABEL_FUZZY;
+        matched_on = k;
         break;
       }
     }
@@ -804,6 +811,69 @@ export function formatDateForHint(value, hintText) {
   if (!iso) return String(value);
   const [, y, mo, d] = iso;
   return m[1] ? `${mo}/${d}/${y}` : `${d}/${mo}/${y}`;
+}
+
+/**
+ * Turn a hold into an answerable question set — the validation-correction loop.
+ *
+ * `missingRequired` on its own ends a run: it is a list of label strings with no type, no options
+ * and no indication of why. That is a dead end. This returns everything needed to ASK, so the
+ * answers can come back through `custom_answers`, which is the one resolution path that is exact by
+ * construction (see buildAnswers step 4) and therefore safe even for eligibility fields.
+ *
+ * Two kinds of question:
+ *   unanswered      — required and still empty; nothing resolved it
+ *   low_confidence  — resolved, but only by a guess, so it must be confirmed rather than submitted
+ *
+ * `eligibility` is surfaced deliberately: those answers are attestations to an employer, and the UI
+ * should say so rather than presenting them as ordinary form fields.
+ */
+export function buildOpenQuestions({ missingFields = [], lowConfidence = [] } = {}) {
+  const seen = new Set();
+  const questions = [];
+
+  const push = (q) => {
+    const key = normaliseText(q.question);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    questions.push(q);
+  };
+
+  for (const f of missingFields) {
+    const question = f.label || f.name || f.field_id || '';
+    if (!question) continue;
+    push({
+      question,
+      field: f.name || f.field_id || null,
+      type: f.type || 'text',
+      options: Array.isArray(f.options) ? f.options.filter(o => o && o.value !== '') : [],
+      required: !!f.is_required,
+      eligibility: eligibilityClassOf(`${f.label || ''} ${f.name || ''}`),
+      reason: 'unanswered',
+      // What the resolver tried and refused, when it tried anything — this is why the field is
+      // empty, and it is the difference between "we have no answer" and "we refused to guess".
+      refusals: Array.isArray(f.refusals) ? f.refusals : undefined,
+    });
+  }
+
+  for (const a of lowConfidence) {
+    const question = a.field || a.label || a.name || '';
+    if (!question) continue;
+    push({
+      question,
+      field: a.name || a.field_id || null,
+      type: a.type || 'text',
+      options: [],
+      required: false,
+      eligibility: eligibilityClassOf(question),
+      reason: 'low_confidence',
+      proposed: a.value ?? null,
+      provenance: a.provenance ?? null,
+      confidence: a.confidence ?? null,
+    });
+  }
+
+  return questions;
 }
 
 /** Answers that may not be auto-submitted in mode:'full' (requirement 5). */
@@ -1217,10 +1287,20 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       // attached passed the gate while the browser refused to submit it — the run then reported
       // filled_not_submitted with no reasonCode, having never reached the later steps. A file
       // input's value is readable ('' when empty), so it is checked like any other control.
-      const missingRequired = postFillFields
-        .filter(f => f.is_required && (f.current_value === '' || f.current_value == null))
-        .map(f => f.label || f.field_id || '(unknown)');
+      const missingFields = postFillFields
+        .filter(f => f.is_required && (f.current_value === '' || f.current_value == null));
+      const missingRequired = missingFields.map(f => f.label || f.field_id || '(unknown)');
       if (missingRequired.length > 0) {
+        // Attach what the resolver refused for each field, so a question can explain itself
+        // ("we did not guess your sponsorship answer") rather than just being blank.
+        const refusalsByField = new Map();
+        for (const a of resolvedAnswers) {
+          if (a.skipped && a.refusals?.length) refusalsByField.set(a.field_id ?? a.name, a.refusals);
+        }
+        for (const f of missingFields) {
+          const r = refusalsByField.get(f.field_id) ?? refusalsByField.get(f.name);
+          if (r) f.refusals = r;
+        }
         const pageTitle2 = await page.title().catch(() => '');
         const ss2 = await takeScreenshot(page, jobId);
         inProgress.set(String(jobId), { status: 'held_review', browser: null });
@@ -1231,6 +1311,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
           flowState:        'form_ready',
           fieldsFilled:     totalFilled,
           missingRequired,
+          openQuestions:    buildOpenQuestions({ missingFields }),
           answers:          resolvedAnswers,
           platform:         detected,
           pageTitle:        pageTitle2,
@@ -1245,6 +1326,10 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       // applied where the stakes are higher.
       const lowConfidence = lowConfidenceAnswers(resolvedAnswers);
       if (lowConfidence.length > 0) {
+        const lowConfidenceQuestions = lowConfidence.map(a => ({
+          field: a.label || a.name || a.field_id, name: a.name, field_id: a.field_id,
+          type: a.type, value: a.value, provenance: a.provenance, confidence: a.confidence,
+        }));
         const pageTitle3 = await page.title().catch(() => '');
         const ss3 = await takeScreenshot(page, jobId);
         inProgress.set(String(jobId), { status: 'held_review', browser: null });
@@ -1261,6 +1346,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
             confidence: a.confidence,
             matched_on: a.matched_on,
           })),
+          openQuestions:    buildOpenQuestions({ lowConfidence: lowConfidenceQuestions }),
           answers:          resolvedAnswers,
           platform:         detected,
           pageTitle:        pageTitle3,

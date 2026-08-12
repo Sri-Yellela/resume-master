@@ -475,7 +475,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         db.prepare(`
           UPDATE apply_run_jobs
           SET answers_json=?, resume_artifact_id=?, resume_ats_score=?,
-              screenshot_path=?, submit_verified=?, submit_evidence=?
+              screenshot_path=?, submit_verified=?, submit_evidence=?, open_questions_json=?
           WHERE id=?
         `).run(
           Array.isArray(result.answers) && result.answers.length ? JSON.stringify(result.answers) : null,
@@ -484,8 +484,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           result.screenshotPath || null,
           result.submitVerified === true ? 1 : result.submitVerified === false ? 0 : null,
           result.submitEvidence || null,
+          // Validation-correction loop: the questions that would turn this hold into a completion.
+          Array.isArray(result.openQuestions) && result.openQuestions.length
+            ? JSON.stringify(result.openQuestions) : null,
           runJobId,
         );
+        if (Array.isArray(result.openQuestions) && result.openQuestions.length) {
+          logEvent(runId, runJobId, userId, jobId, "open_questions",
+            `${result.openQuestions.length} question(s) would unblock this application`,
+            { openQuestions: result.openQuestions });
+        }
       } catch (e) {
         console.warn("[applyRoutes] audit persist failed:", e.message);
       }
@@ -583,13 +591,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
   // ── Queue endpoints ──────────────────────────────────────────────────────────
 
-  app.post("/api/apply/runs", requireAuth, (req, res) =>
-    withIdempotency("/api/apply/runs", req, res, (out) => {
-    const { jobIds = [], mode = "auto", tool, toolType } = req.body || {};
-    if (!Array.isArray(jobIds) || jobIds.length === 0)
-      return out.status(400).json({ error: "jobIds array required" });
-    if (jobIds.length > 25)
-      return out.status(400).json({ error: "Max 25 jobs per run" });
+  /**
+   * Create and dispatch a run. Extracted so the validation-correction retry goes through EXACTLY
+   * the same admission control as a fresh run: the kill switch, concurrency limit, prerequisite
+   * gate, duplicate filter and daily cap are implemented once and cannot drift apart.
+   * Returns { status, body } — body carries `error` on refusal.
+   */
+  function startRun(userId, planTier, jobIds, { mode = "auto", tool = "generate" } = {}) {
+    const respond = (status, body) => ({ status, body });
 
     // ── Three payload-contract mismatches with the client, fixed together ──────────────────────
     //
@@ -603,16 +612,15 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // 2. TOOL. The client sends `tool` — its convention at every other resume endpoint — while
     //    this route read only `toolType`, so the A+ selection never arrived and every run recorded
     //    tool_type='generate'. Accept both; `tool` wins. Anything unrecognised means generate.
-    const resolvedTool = (tool ?? toolType) === "a_plus_resume" ? "a_plus_resume" : "generate";
+    const resolvedTool = tool === "a_plus_resume" ? "a_plus_resume" : "generate";
 
     // Honouring the client's tool makes this route entitlement-bearing for the first time: while
     // the field was ignored, a BASIC user could not reach A+ generation by asking for it. Gate it
     // server-side so repairing the plumbing does not open a plan-tier bypass. Same 403 shape as
     // requireToolEntitlement in server.js, which this route cannot reach (positional signature,
     // pinned by applyPipeline.test.js).
-    const planTier = normalisePlanTier(req.user?.planTier);
     if (resolvedTool === "a_plus_resume" && !canUseAPlusResume(planTier)) {
-      return out.status(403).json({
+      return respond(403, {
         error: "upgrade_required",
         message: "A+ Resume requires the PRO plan.",
         requiredTier: "PRO",
@@ -623,7 +631,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // KILL SWITCH (requirement 4). Full-auto is refused outright; semi still runs, because semi
     // puts a human in front of every submit and is the mode A5 gates the first live application on.
     if (resolvedMode === "auto" && fullAutoDisabled()) {
-      return out.status(503).json({
+      return respond(503, {
         error: "full_auto_disabled",
         message: "Automatic submission is currently disabled. Manual review mode is still available.",
         retryWithMode: "manual",
@@ -632,9 +640,9 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
     // CONCURRENCY (requirement 2). A user may not stack runs: overlapping runs make the daily cap
     // racy and multiply browser load.
-    const active = activeRunCount(req.user.id);
+    const active = activeRunCount(userId);
     if (active >= APPLY_MAX_ACTIVE_RUNS) {
-      return out.status(429).json({
+      return respond(429, {
         error: "run_already_active",
         message: `You already have ${active} run in progress. Wait for it to finish before starting another.`,
         activeRuns: active,
@@ -649,9 +657,9 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // `missingPrerequisites` off the error payload and renders "Setup needed in Integrations: …".
     // Deliberately narrow: getAutomationReadiness keeps gmail/google in `apply.optional` and
     // scopes linkedin to profile_import, so none of those block a run.
-    const missingPrerequisites = getMissingApplyPrerequisites(getAutomationReadiness(db, req.user.id));
+    const missingPrerequisites = getMissingApplyPrerequisites(getAutomationReadiness(db, userId));
     if (missingPrerequisites.length) {
-      return out.status(409).json({
+      return respond(409, {
         error: "Apply prerequisites are not set up yet",
         missingPrerequisites,
       });
@@ -660,19 +668,19 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const duplicates = db.prepare(`
       SELECT job_id FROM apply_run_jobs
       WHERE user_id=? AND status IN ('submitted', 'running', 'queued')
-    `).pluck().all(req.user.id);
+    `).pluck().all(userId);
     const duplicateSet = new Set(duplicates);
 
     const filtered = jobIds.map(String).filter(id => !duplicateSet.has(id));
     if (filtered.length === 0)
-      return out.status(400).json({ error: "All selected jobs are already applied or in progress" });
+      return respond(400, { error: "All selected jobs are already applied or in progress" });
 
     // DAILY CAP (requirement 2). Checked here so the caller gets a clear error rather than a run
     // that quietly holds most of its jobs. processRunJob re-checks before each submit, because a
     // long run can cross the cap after it was admitted.
-    const used = submittedLast24h(req.user.id);
+    const used = submittedLast24h(userId);
     if (resolvedMode === "auto" && used + filtered.length > APPLY_DAILY_CAP) {
-      return out.status(429).json({
+      return respond(429, {
         error: "daily_cap_exceeded",
         message: `Daily application cap reached: ${used} of ${APPLY_DAILY_CAP} used in the last 24h, ${filtered.length} requested.`,
         submittedLast24h: used,
@@ -685,14 +693,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const runResult = db.prepare(`
       INSERT INTO apply_runs (user_id, mode, tool_type, status, total_jobs)
       VALUES (?, ?, ?, 'queued', ?)
-    `).run(req.user.id, resolvedMode, resolvedTool, filtered.length);
+    `).run(userId, resolvedMode, resolvedTool, filtered.length);
     const runId = runResult.lastInsertRowid;
 
     const insertJob = db.prepare(`
       INSERT OR IGNORE INTO apply_run_jobs (run_id, user_id, job_id, status)
       VALUES (?, ?, ?, 'queued')
     `);
-    db.transaction(() => { for (const id of filtered) insertJob.run(runId, req.user.id, id); })();
+    db.transaction(() => { for (const id of filtered) insertJob.run(runId, userId, id); })();
 
     const run = db.prepare("SELECT * FROM apply_runs WHERE id=?").get(runId);
     setImmediate(() => processRun(run).catch(e => console.error("[applyRoutes] processRun:", e.message)));
@@ -701,7 +709,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     //    route never sent — so every run reported "0 jobs started". `queued` is the accepted ids,
     //    which is also what distinguishes them from the ones dropped as duplicates above.
     //    `toolType` is echoed so the client can tell when A+ was requested but downgraded.
-    out.status(202).json({
+    return respond(202, {
       ok: true,
       runId,
       mode: run.mode,
@@ -710,7 +718,20 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       totalJobs: filtered.length,
       dailyCap: { limit: APPLY_DAILY_CAP, submittedLast24h: used, remaining: Math.max(0, APPLY_DAILY_CAP - used - filtered.length) },
     });
-  }));
+  }
+
+  app.post("/api/apply/runs", requireAuth, (req, res) =>
+    withIdempotency("/api/apply/runs", req, res, (out) => {
+      const { jobIds = [], mode = "auto", tool, toolType } = req.body || {};
+      if (!Array.isArray(jobIds) || jobIds.length === 0)
+        return out.status(400).json({ error: "jobIds array required" });
+      if (jobIds.length > 25)
+        return out.status(400).json({ error: "Max 25 jobs per run" });
+
+      const r = startRun(req.user.id, normalisePlanTier(req.user?.planTier), jobIds,
+        { mode, tool: tool ?? toolType });
+      return out.status(r.status).json(r.body);
+    }));
 
   app.get("/api/apply/runs", requireAuth, (req, res) => {
     const runs = db.prepare(`
@@ -743,8 +764,124 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       WHERE rj.user_id=? AND rj.status='held_review'
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id);
-    res.json({ jobs });
+    // Additive: openQuestions is parsed alongside the existing row shape, so a caller that ignores
+    // it is unaffected. This is the read half of the validation-correction loop.
+    res.json({ jobs: jobs.map(withOpenQuestions) });
   });
+
+  // ── Validation-correction loop ───────────────────────────────────────────────
+  // A hold used to be a dead end: missingRequired named the fields and the run stopped. The answers
+  // the resolver could not supply are exactly the answers the USER has, so they are collected and
+  // stored as custom_answers — the one resolution path that is exact by construction, and therefore
+  // the only one safe for eligibility questions. Nothing is guessed on retry; it is answered.
+
+  const parseJson = (s, dflt) => { try { return s ? JSON.parse(s) : dflt; } catch { return dflt; } };
+  const withOpenQuestions = (row) => ({ ...row, openQuestions: parseJson(row.open_questions_json, []) });
+
+  /** Every outstanding question across this user's held jobs, deduplicated by question text. */
+  app.get("/api/apply/questions", requireAuth, (req, res) => {
+    const rows = db.prepare(`
+      SELECT rj.job_id, rj.run_id, rj.reason_code, rj.open_questions_json,
+             sj.title, sj.company
+      FROM apply_run_jobs rj
+      LEFT JOIN scraped_jobs sj ON sj.job_id = rj.job_id
+      WHERE rj.user_id=? AND rj.status='held_review' AND rj.open_questions_json IS NOT NULL
+      ORDER BY rj.created_at DESC LIMIT 50
+    `).all(req.user.id);
+
+    const stored = parseJson(
+      db.prepare("SELECT custom_answers FROM user_profile WHERE user_id=?").get(req.user.id)?.custom_answers,
+      {},
+    );
+    const byQuestion = new Map();
+    for (const row of rows) {
+      for (const q of parseJson(row.open_questions_json, [])) {
+        const key = String(q.question || "").trim().toLowerCase();
+        if (!key) continue;
+        if (!byQuestion.has(key)) {
+          byQuestion.set(key, { ...q, answered: Object.prototype.hasOwnProperty.call(stored, q.question), blocking: [] });
+        }
+        byQuestion.get(key).blocking.push({ jobId: row.job_id, runId: row.run_id, title: row.title, company: row.company });
+      }
+    }
+    const questions = [...byQuestion.values()];
+    res.json({
+      questions,
+      // Eligibility answers are attestations to an employer. A caller should present them as such,
+      // and they are the ones the resolver refuses to infer on the user's behalf.
+      eligibilityCount: questions.filter(q => q.eligibility).length,
+      blockedJobs: rows.length,
+    });
+  });
+
+  /**
+   * Save answers, and optionally retry the jobs they unblock.
+   * Answers are merged into user_profile.custom_answers keyed by the EXACT question text captured
+   * from the form, which is what makes them usable for eligibility fields on the next pass.
+   */
+  app.post("/api/apply/answers", requireAuth, (req, res) =>
+    withIdempotency("/api/apply/answers", req, res, (out) => {
+      const { answers = {}, retryJobIds = null, mode = "auto" } = req.body || {};
+      if (!answers || typeof answers !== "object" || Array.isArray(answers))
+        return out.status(400).json({ error: "answers object required" });
+
+      const entries = Object.entries(answers)
+        .map(([q, a]) => [String(q).trim(), a])
+        .filter(([q, a]) => q.length > 0 && a !== null && a !== undefined && String(a).trim() !== "");
+      if (entries.length === 0)
+        return out.status(400).json({ error: "no non-empty answers supplied" });
+
+      db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
+      const existing = parseJson(
+        db.prepare("SELECT custom_answers FROM user_profile WHERE user_id=?").get(req.user.id)?.custom_answers,
+        {},
+      );
+      const merged = { ...existing };
+      for (const [q, a] of entries) merged[q] = String(a);
+      db.prepare("UPDATE user_profile SET custom_answers=? WHERE user_id=?")
+        .run(JSON.stringify(merged), req.user.id);
+
+      // Which held jobs are now fully answered? A job is retryable when every question it was
+      // blocked on has an answer — retrying one that is still missing an answer just burns a run.
+      const held = db.prepare(`
+        SELECT job_id, open_questions_json FROM apply_run_jobs
+        WHERE user_id=? AND status='held_review' AND open_questions_json IS NOT NULL
+      `).all(req.user.id);
+      const unblocked = held
+        .filter(row => {
+          const qs = parseJson(row.open_questions_json, []);
+          return qs.length > 0 && qs.every(q => Object.prototype.hasOwnProperty.call(merged, q.question));
+        })
+        .map(row => row.job_id);
+
+      const body = { ok: true, saved: entries.map(([q]) => q), unblocked };
+
+      if (retryJobIds !== null) {
+        const requested = (Array.isArray(retryJobIds) ? retryJobIds : []).map(String);
+        // Only retry jobs that are actually unblocked; anything else is reported back, not queued.
+        const toRetry = requested.filter(id => unblocked.includes(id));
+        const skipped = requested.filter(id => !unblocked.includes(id));
+        if (toRetry.length === 0) {
+          return out.status(409).json({ ...body, error: "no_retryable_jobs", skipped });
+        }
+        // The held rows are dismissed first: leaving them held_review would keep re-offering
+        // questions that have since been answered.
+        const dismiss = db.prepare(`
+          UPDATE apply_run_jobs SET status='superseded', finished_at=unixepoch()
+          WHERE user_id=? AND job_id=? AND status='held_review'
+        `);
+        db.transaction(() => { for (const id of toRetry) dismiss.run(req.user.id, id); })();
+
+        const retry = startRun(req.user.id, normalisePlanTier(req.user?.planTier), toRetry,
+          { mode, tool: "generate" });
+        // A refusal is surfaced as-is: the answers were still saved, but the retry did not start,
+        // and the caller needs the real reason (cap, kill switch, concurrency).
+        if (retry.status !== 202) return out.status(retry.status).json({ ...body, ...retry.body, skipped });
+        return out.status(202).json({ ...body, skipped, retry: retry.body });
+      }
+
+      out.json(body);
+    }));
 
   app.post("/api/apply/close/:jobId", requireAuth, (req, res) => {
     db.prepare(`
