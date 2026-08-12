@@ -40,9 +40,27 @@ const profilePath = path.join(DIR, "profile.json");
 if (!fs.existsSync(profilePath)) { console.error(`Missing ${profilePath}`); process.exit(1); }
 const profile = JSON.parse(fs.readFileSync(profilePath, "utf8"));
 
-const resumeFile = ["resume.html", "resume.txt", "resume.md", "resume.pdf"]
-  .map(f => path.join(DIR, f)).find(fs.existsSync);
-if (!resumeFile) { console.error(`Missing a resume file in ${DIR} (.txt, .md, .html or .pdf)`); process.exit(1); }
+// The exact names win. Otherwise a resume can keep whatever name it already has
+// ("John Doe Resume.pdf") — but it must SAY resume/cv. Matching on extension alone would let any
+// stray .txt in the directory become the candidate's resume, and the seeder would happily submit it.
+const SUPPORTED = [".html", ".txt", ".md", ".pdf"];
+const ext = f => path.extname(f).toLowerCase();
+const byExtPriority = (a, b) => SUPPORTED.indexOf(ext(a)) - SUPPORTED.indexOf(ext(b)) || a.localeCompare(b);
+
+const present = fs.readdirSync(DIR).filter(f => SUPPORTED.includes(ext(f)));
+const named = present.filter(f => /resume|cv/i.test(path.basename(f, ext(f)))).sort(byExtPriority);
+const exact = ["resume.html", "resume.txt", "resume.md", "resume.pdf"].find(f => present.includes(f));
+const chosen = exact || named[0];
+
+if (!chosen) {
+  console.error(`No resume found in ${path.relative(ROOT, DIR)}/.` +
+    (present.length ? `\n  Ignored (name says nothing about being a resume): ${present.join(", ")}` : "") +
+    `\n  Name it resume.(txt|md|html|pdf), or include "resume" or "cv" in the filename.`);
+  process.exit(1);
+}
+const resumeFile = path.join(DIR, chosen);
+const skipped = present.filter(f => f !== chosen);
+console.log(`Using resume: ${chosen}${skipped.length ? `  (ignored: ${skipped.join(", ")})` : ""}`);
 
 // ── resume -> text + html ────────────────────────────────────────────────────
 const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -78,11 +96,13 @@ function textToHtml(text) {
 
 let resumeText = "";
 let resumeHtml = "";
-if (resumeFile.endsWith(".pdf")) {
+if (ext(chosen) === ".pdf") {
+  // pdf-parse/lib/... directly: the package index runs a debug block that reads a bundled test PDF
+  // and throws when it is absent.
   const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
   resumeText = (await pdfParse(fs.readFileSync(resumeFile))).text.trim();
   resumeHtml = textToHtml(resumeText);
-} else if (resumeFile.endsWith(".html")) {
+} else if (ext(chosen) === ".html") {
   resumeHtml = fs.readFileSync(resumeFile, "utf8");
   resumeText = resumeHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 } else {
