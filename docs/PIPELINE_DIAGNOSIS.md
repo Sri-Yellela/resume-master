@@ -401,23 +401,37 @@ The test previously asserted the wiring existed, so it had been failing silently
 44-failure baseline rather than raising this. It has been narrowed to assert what is verifiably
 true, with this question recorded rather than papered over.
 
-### 5.14 OPEN — two smaller findings from clearing the last failures
+### 5.14 RESOLVED — the dock's viewport centring is intended, not a regression
 
-**The floating dock's zone constraint is inert.** `jobsUiFollowups` asserted the dock is centred on
-the jobs panel's measured rect rather than the viewport. The `"rm:jobs-panel-zone"` CustomEvent
-that carried that rect is gone from both `JobsPanel.jsx` and `TopBar.jsx`, and the two variables
-survive only as names:
+`jobsUiFollowups` asserted the dock is centred on the jobs panel's measured rect rather than the
+viewport, and the code had `constrainedPillWidth = pillWidth` / `dockCenter = vw / 2` — an inert
+pair that read like an unfinished revert. **It was deliberate.** `.cinematic/STATE.md` records it
+as Step 7b of the cinematic redesign ("TopBar flatten + ScrollDock split"):
 
-```js
-const constrainedPillWidth = pillWidth;   // constrains nothing
-const dockCenter           = vw / 2;      // always viewport centre
-```
+> *"rm:jobs-panel-zone event pair removed atomically (TopBar consumer + JobsPanel publisher).
+> Zone-constraint geometry (dockCenter offset, dockMaxWidth, constrainedPillWidth clamp,
+> dockScale) removed; dock now centers at vw/2 with full pillWidth and no scale() transform."*
 
-So the dock is back to the full-viewport centring the test said it should not use. Plausibly a
-deliberate simplification — the redesigned board is centred and near-full-width, so the two may
-now coincide visually — but equally it reads like an unfinished revert. **Needs eyes on the real
-UI, not a code read.** The test asserts only what is verifiably true and no longer claims the
-constraint exists.
+Checked for an actual defect before accepting that, and found none:
+
+- At **vw = 1600** the board's content column (`.usb`) spans 340..1260 — centre **800**. The dock
+  centres at `vw / 2` = **800**. They coincide, so viewport centring and content centring are the
+  same thing on this layout.
+- `JobDetailPanel` is a **fixed right-side drawer** (`right:16, top:80`), not an in-flow panel that
+  narrows the list, and it starts below the 56px top bar — so it cannot collide with the dock
+  either. The divergence case the constraint was built for no longer exists.
+
+Owner decision: leave the behaviour as-is. The misleading `constrainedPillWidth` alias has been
+removed (it is what caused this to be filed as a suspected regression in the first place), and
+the geometry now carries a comment pointing at Step 7b so the next reader gets the history
+instead of re-deriving it.
+
+*Not verified:* the collapsed-pill state at scroll, because a fresh test account has no profile
+and therefore no rows to scroll. The centres coincide regardless of scroll, since both derive
+from `vw`.
+
+**Still open from that pass:** `aPlusLoading` at `JobCard.jsx:328` is computed and never used —
+the A+ action lives in `JobDetailPanel` now. Small dead-code item, same family as §5.12.
 
 **`aPlusLoading` is dead in JobCard.** `JobCard.jsx:328` computes
 `const aPlusLoading = st === "a_plus_resume"` and nothing uses it — the A+ action is no longer a

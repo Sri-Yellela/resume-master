@@ -528,9 +528,20 @@ export default function TopBar({
   // ── Geometry interpolation ──
   const [ar, ag, ab] = hexToRgb(theme.accent);
 
-  const pillWidth           = Math.round(vw - p * (vw - 400));
-  const constrainedPillWidth = pillWidth;
-  const dockCenter           = vw / 2;
+  const pillWidth = Math.round(vw - p * (vw - 400));
+  // The dock spans the full interpolated pill width and is centred on the VIEWPORT.
+  //
+  // It was once constrained to the jobs panel's measured rect, broadcast via an
+  // "rm:jobs-panel-zone" CustomEvent. That publisher/consumer pair and its geometry
+  // (dockMaxWidth, the clamp, dockScale) were removed deliberately in Step 7b of the cinematic
+  // redesign — see .cinematic/STATE.md, "TopBar flatten + ScrollDock split". Viewport centring
+  // is the intended end state, not a regression: the board's content column is itself centred,
+  // so the two coincide (measured at vw=1600: search bar spans 340..1260, centre 800 = vw/2).
+  //
+  // A `constrainedPillWidth = pillWidth` alias survived that removal and read as though a clamp
+  // were still in force, which is misleading enough that it was filed as a suspected regression
+  // before the history was checked. Removed — pillWidth is used directly below.
+  const dockCenter = vw / 2;
   const radius     = Math.round(p * 9999);
   const blur       = Math.round(12 + p * 8);
   const topOffset  = Math.round(p * 10);
@@ -574,7 +585,7 @@ export default function TopBar({
           top: topOffset,
           left: dockCenter,
           transform: "translateX(-50%)",
-          width: constrainedPillWidth,
+          width: pillWidth,
           height: 46,
           borderRadius: radius,
           background: pillBg,
@@ -587,8 +598,8 @@ export default function TopBar({
           justifyContent: "space-between",
           padding: `0 ${padH}px`,
           overflow: "visible",
-          opacity: constrainedPillWidth <= 0 ? 0 : 1,
-          pointerEvents: constrainedPillWidth <= 0 ? "none" : "auto",
+          opacity: pillWidth <= 0 ? 0 : 1,
+          pointerEvents: pillWidth <= 0 ? "none" : "auto",
           zIndex: 1000,
           fontFamily: "'DM Sans',system-ui,sans-serif",
         }}>
@@ -635,8 +646,8 @@ export default function TopBar({
             alignItems: "center",
             padding: "0 14px",
             gap: 6,
-            opacity: constrainedPillWidth <= 0 ? 0 : 1,
-            pointerEvents: constrainedPillWidth <= 0 ? "none" : "auto",
+            opacity: pillWidth <= 0 ? 0 : 1,
+            pointerEvents: pillWidth <= 0 ? "none" : "auto",
             zIndex: 1000,
             fontFamily: "'DM Sans',system-ui,sans-serif",
             animation: "slideDown 200ms ease",
