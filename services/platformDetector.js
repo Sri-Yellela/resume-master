@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // services/platformDetector.js — ATS platform detection + per-platform selectors
 "use strict";
 
@@ -131,6 +131,28 @@ export async function detectPlatformFromPage(page) {
   return "generic";
 }
 
-export const getPlatformLabelMap = (platform) => PLATFORM_LABEL_MAPS[platform] || {};
+/**
+ * A provider's label map EXTENDS the generic one rather than replacing it.
+ *
+ * Audited across all 12 providers: the non-generic maps carry 5–15 entries against generic's 22, and
+ * NONE of them had a plain "Name" — so on ashby (whose only name control is `_systemfield_name`
+ * labelled "Name") and on greenhouse ("Legal Name"), the candidate's name resolved by a fuzzy guess
+ * or not at all, purely because the provider map shadowed generic instead of adding to it. The same
+ * shadowing hid Location, LinkedIn, Work Authorization and Sponsorship on eight providers.
+ *
+ * Provider entries come FIRST so a provider-specific spelling ("Email address" on lever, "Phone
+ * Number" on workday) is tried before the generic one, and a provider value wins on a key collision.
+ * Note the map keys are NEEDLES searched inside a form's label, so a longer provider spelling cannot
+ * match a shorter label — which is why the generic fallback matters rather than being redundant.
+ */
+export const getPlatformLabelMap = (platform) => {
+  const base = PLATFORM_LABEL_MAPS.generic || {};
+  const specific = PLATFORM_LABEL_MAPS[platform];
+  if (!specific || specific === base) return { ...base };
+  return {
+    ...specific,
+    ...Object.fromEntries(Object.entries(base).filter(([label]) => !(label in specific))),
+  };
+};
 export const usesIframe = (platform) =>
   platform === "workday" || platform === "icims" || platform === "taleo";

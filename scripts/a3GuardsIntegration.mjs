@@ -46,7 +46,11 @@ const SCHEMA = `
     job_id TEXT, status TEXT, reason_code TEXT, reason_detail TEXT, started_at INTEGER,
     finished_at INTEGER, created_at INTEGER DEFAULT (unixepoch()),
     answers_json TEXT, resume_artifact_id INTEGER, resume_ats_score INTEGER,
-    screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT, UNIQUE(run_id, job_id));
+    screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT,
+    -- migration 073. Omitting it made the audit UPDATE throw, and because every audit column shares
+    -- one best-effort statement the ENTIRE audit row was silently lost while the run still reported
+    -- success. Same failure mode as an un-migrated deployment.
+    open_questions_json TEXT, UNIQUE(run_id, job_id));
   CREATE TABLE apply_job_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, run_job_id INTEGER,
     user_id INTEGER, job_id TEXT, level TEXT DEFAULT 'info', event TEXT, message TEXT,
     details_json TEXT, created_at INTEGER DEFAULT (unixepoch()));
