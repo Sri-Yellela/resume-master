@@ -110,12 +110,19 @@ further needs real forms.
 
 ## Two incidental findings
 
-**One missing column loses the whole audit trail.** `a3GuardsIntegration.mjs`'s in-memory schema
-predated migration 073, so the audit `UPDATE` — which now also sets `open_questions_json` — threw and
-its `try/catch` silently dropped **every** audit field while the run still reported success. Fixture
-fixed, but the shape is worth knowing: all audit columns share one best-effort statement, so on an
-un-migrated deployment the entire audit row is lost rather than just the new column. It only
-`console.warn`s.
+**One missing column lost the whole audit trail — FIXED in a follow-up commit.**
+`a3GuardsIntegration.mjs`'s in-memory schema predated migration 073, so the audit `UPDATE` — which
+now also sets `open_questions_json` — threw and its `try/catch` silently dropped **every** audit
+field while the run still reported success. All seven columns shared one best-effort statement, so an
+un-migrated deployment lost the entire row rather than one column, and it only `console.warn`ed.
+
+The columns are now resolved against the live schema, so a missing one costs only itself; the gap is
+named once per router with the migration to run; the `open_questions` event moved out of the
+persistence `try` (a failed UPDATE had been swallowing the correction loop's questions too); and the
+facts are additionally written to `apply_job_logs` as an `audit_recorded` event, so no schema state
+can lose them. Proven on the real path by re-running the integration script with
+`open_questions_json` deliberately removed: it warns precisely and still persists
+`submit_verified`, the evidence, the artifact id, the ATS score, the screenshot and all six answers.
 
 **`"Website" → github_url`** — FIXED in a follow-up commit. It was in both the greenhouse and generic
 maps, so a field labelled "Website" received the candidate's GitHub URL. The same conflation existed a

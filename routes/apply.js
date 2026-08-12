@@ -237,6 +237,56 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     }
   }
 
+  // ── Audit persistence ────────────────────────────────────────────────────────
+  // These seven were written by ONE UPDATE inside ONE try/catch, so a single missing column — an
+  // un-migrated deployment, or a stale fixture — threw and silently discarded EVERY audit field
+  // while the run still reported success. The columns are resolved against the live schema instead,
+  // so a missing one costs only itself; it is named once per process; and the facts are written to
+  // apply_job_logs as well, so the record survives even if no column exists at all.
+  const AUDIT_COLUMNS = [
+    "answers_json", "resume_artifact_id", "resume_ats_score",
+    "screenshot_path", "submit_verified", "submit_evidence", "open_questions_json",
+  ];
+  let auditColumnsCache = null;
+
+  function auditColumns() {
+    if (auditColumnsCache) return auditColumnsCache;
+    let present = [];
+    try {
+      const live = new Set(db.prepare("PRAGMA table_info(apply_run_jobs)").all().map(c => c.name));
+      present = AUDIT_COLUMNS.filter(c => live.has(c));
+    } catch (e) {
+      console.warn("[applyRoutes] could not read apply_run_jobs schema:", e.message);
+    }
+    const missing = AUDIT_COLUMNS.filter(c => !present.includes(c));
+    if (missing.length) {
+      console.warn(
+        `[applyRoutes] AUDIT DEGRADED — apply_run_jobs is missing: ${missing.join(", ")}. ` +
+        `Those fields will not be queryable; run migrations (073 adds open_questions_json). ` +
+        `The full payload is still recorded in apply_job_logs as an 'audit_recorded' event.`
+      );
+    }
+    auditColumnsCache = present;
+    return present;
+  }
+
+  /** Write whatever audit columns this schema actually has. Returns what was written and skipped. */
+  function persistAudit(runJobId, values) {
+    const cols = auditColumns();
+    const skipped = AUDIT_COLUMNS.filter(c => !cols.includes(c));
+    if (!cols.length) return { written: [], skipped };
+    try {
+      db.prepare(`UPDATE apply_run_jobs SET ${cols.map(c => `${c}=?`).join(", ")} WHERE id=?`)
+        .run(...cols.map(c => values[c]), runJobId);
+      return { written: cols, skipped };
+    } catch (e) {
+      // Unexpected (the columns were verified present). Still not fatal: the event carries the data.
+      console.warn("[applyRoutes] audit persist failed:", e.message,
+        "— payload retained in apply_job_logs");
+      return { written: [], skipped: AUDIT_COLUMNS, error: e.message };
+    }
+  }
+
   async function processRunJob(runJob, run) {
     const { id: runJobId, run_id: runId, job_id: jobId, user_id: userId } = runJob;
     const mode = run.mode || "auto";
@@ -471,31 +521,41 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // answers with provenance/confidence from A2, which resume artifact was used and its ATS
       // score, the screenshot, and whether the submission was actually VERIFIED (see submit_verified
       // — A1 finding N1 showed 'submitted' was previously claimed on a click alone).
-      try {
-        db.prepare(`
-          UPDATE apply_run_jobs
-          SET answers_json=?, resume_artifact_id=?, resume_ats_score=?,
-              screenshot_path=?, submit_verified=?, submit_evidence=?, open_questions_json=?
-          WHERE id=?
-        `).run(
-          Array.isArray(result.answers) && result.answers.length ? JSON.stringify(result.answers) : null,
-          usedArtifactId,
-          usedAtsScore,
-          result.screenshotPath || null,
-          result.submitVerified === true ? 1 : result.submitVerified === false ? 0 : null,
-          result.submitEvidence || null,
-          // Validation-correction loop: the questions that would turn this hold into a completion.
-          Array.isArray(result.openQuestions) && result.openQuestions.length
-            ? JSON.stringify(result.openQuestions) : null,
-          runJobId,
-        );
-        if (Array.isArray(result.openQuestions) && result.openQuestions.length) {
-          logEvent(runId, runJobId, userId, jobId, "open_questions",
-            `${result.openQuestions.length} question(s) would unblock this application`,
-            { openQuestions: result.openQuestions });
-        }
-      } catch (e) {
-        console.warn("[applyRoutes] audit persist failed:", e.message);
+      const openQuestions = Array.isArray(result.openQuestions) ? result.openQuestions : [];
+      const audit = persistAudit(runJobId, {
+        answers_json: Array.isArray(result.answers) && result.answers.length ? JSON.stringify(result.answers) : null,
+        resume_artifact_id: usedArtifactId,
+        resume_ats_score: usedAtsScore,
+        screenshot_path: result.screenshotPath || null,
+        submit_verified: result.submitVerified === true ? 1 : result.submitVerified === false ? 0 : null,
+        submit_evidence: result.submitEvidence || null,
+        // Validation-correction loop: the questions that would turn this hold into a completion.
+        open_questions_json: openQuestions.length ? JSON.stringify(openQuestions) : null,
+      });
+
+      // The durable record, independent of schema state. The columns are a queryable projection of
+      // this; these particular facts (which artifact, which screenshot, whether the submission was
+      // actually verified) had no event of their own before, so a failed UPDATE lost them outright.
+      logEvent(runId, runJobId, userId, jobId, "audit_recorded",
+        `Audit recorded (${audit.written.length}/${AUDIT_COLUMNS.length} columns)`, {
+          resumeArtifactId: usedArtifactId,
+          resumeAtsScore:   usedAtsScore,
+          screenshotPath:   result.screenshotPath || null,
+          submitVerified:   result.submitVerified ?? null,
+          submitEvidence:   result.submitEvidence || null,
+          answerCount:      Array.isArray(result.answers) ? result.answers.length : 0,
+          openQuestionCount: openQuestions.length,
+          columnsWritten:   audit.written,
+          ...(audit.skipped.length ? { columnsSkipped: audit.skipped } : {}),
+          ...(audit.error ? { persistError: audit.error } : {}),
+        });
+
+      // Outside the persistence path on purpose: this used to sit inside the same try, so a failed
+      // UPDATE also swallowed the questions the correction loop depends on.
+      if (openQuestions.length) {
+        logEvent(runId, runJobId, userId, jobId, "open_questions",
+          `${openQuestions.length} question(s) would unblock this application`,
+          { openQuestions });
       }
       logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform, fallbackUrl });
 
