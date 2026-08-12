@@ -42,21 +42,45 @@ test("integrations page is routed and replaces scattered Apify menu input", () =
   assert.match(integrations, /title="LinkedIn Profile Import"/);
 });
 
-// NARROWED, AND A GAP IS FLAGGED RATHER THAN PAPERED OVER.
+// §5.13 RESOLVED — it was a regression, and the client is what proved it.
 //
-// routes/apply.js no longer imports anything from integrationReadiness.js. Its only readiness
-// endpoint (/api/apply/readiness) probes BROWSER availability, which is a different concern, and
-// getMissingApplyPrerequisites / requiresLinkedInSession now have ZERO callers anywhere in the
-// repo — the centralized apply-prerequisite check was dropped from the server side.
+// This test used to record an undecidable gap: routes/apply.js imported nothing from
+// integrationReadiness.js, and getMissingApplyPrerequisites had zero callers. What settled it was
+// JobsPanel's startApplyRun catch block, which already reads `missingPrerequisites` off the error
+// payload to render "Setup needed in Integrations: …". The client was honouring a contract whose
+// server half had been deleted, so the run endpoint could never send what the UI was waiting for.
+// The gate is restored at POST /api/apply/runs and asserted on both sides below.
 //
-// Whether that is intentional (the flow relies on client gating plus per-step validation) or an
-// accidental regression is NOT determinable from the code, so this test no longer claims either.
-// It asserts what is verifiably true today; the open question is recorded in
-// docs/PIPELINE_DIAGNOSIS.md §5.13 for an owner decision.
+// (`requiresLinkedInSession`, which this note used to name alongside it, does not exist at all —
+// see the correction in docs/PIPELINE_DIAGNOSIS.md §5.13.)
 test("apply surface has a readiness gate and points users at Integrations", () => {
   assert.match(applyRoute, /app\.get\("\/api\/apply\/readiness"/);
   assert.match(applyRoute, /probeBrowserAvailability/);
   assert.match(jobsPanel, /Setup needed in Integrations/);
+});
+
+test("starting an apply run is gated server-side on the centralized prerequisites", () => {
+  assert.match(applyRoute, /import \{ getAutomationReadiness, getMissingApplyPrerequisites \}/,
+    "the run endpoint must use the centralized readiness helpers, not a local re-check");
+
+  // The gate must sit inside POST /api/apply/runs and fire before the run row is inserted —
+  // a prerequisite failure that still queued a run would be worse than no gate.
+  const runsStart = applyRoute.indexOf('app.post("/api/apply/runs"');
+  assert.ok(runsStart > 0, "POST /api/apply/runs must exist");
+  const runsEnd = applyRoute.indexOf('app.get("/api/apply/runs"', runsStart);
+  const runsBlock = applyRoute.slice(runsStart, runsEnd);
+
+  assert.match(runsBlock, /getMissingApplyPrerequisites\(getAutomationReadiness\(db, req\.user\.id\)\)/);
+  const gateAt = runsBlock.indexOf("missingPrerequisites.length");
+  const insertAt = runsBlock.indexOf("INSERT INTO apply_runs");
+  assert.ok(gateAt > 0 && insertAt > 0 && gateAt < insertAt,
+    "the prerequisite check must precede the apply_runs insert");
+
+  // The response shape is the contract the client already implements — assert the field name,
+  // since renaming it would silently degrade the message back to a generic failure.
+  assert.match(runsBlock, /res\.status\(409\)\.json\(\{[\s\S]*?missingPrerequisites,/);
+  assert.match(jobsPanel, /e\.payload\?\.missingPrerequisites/,
+    "client must keep reading the field the server sends");
 });
 
 test("centralized readiness is still consumed by the account/integrations surface", () => {
