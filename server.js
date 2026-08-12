@@ -3442,7 +3442,13 @@ function buildAutofillPayload(profile, mode) {
       address_line2:profile?.address_line2||"", addressLine2:profile?.address_line2||"",
       linkedin:linkedinUrl, linkedinUrl, linkedin_url:linkedinUrl, linkedin_profile:linkedinUrl,
       github:githubUrl, githubUrl, github_url:githubUrl,
-      website:normaliseUrl(profile?.website_url||"")||githubUrl||linkedinUrl||"",
+      // No fallback to github/linkedin. A "Website" field receiving the candidate's GitHub — or
+      // worse, their LinkedIn — is wrong information submitted to an employer, and it made this
+      // field_map entry contradict handler_map's 'website', which was always strict. Since
+      // handler_map is consulted first, the fallback only ever fired when website_url was EMPTY,
+      // i.e. exactly when there was nothing true to say. Blank is the honest answer; the
+      // completeness gate holds the run if the form requires it.
+      website:normaliseUrl(profile?.website_url||""),
       portfolio:normaliseUrl(profile?.portfolio_url||""),
       gender:profile?.gender||"", ethnicity:profile?.ethnicity||"", race:profile?.ethnicity||"",
       veteran_status:profile?.veteran_status||"", veteranStatus:profile?.veteran_status||"",

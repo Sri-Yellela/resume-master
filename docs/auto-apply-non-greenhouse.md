@@ -117,9 +117,11 @@ fixed, but the shape is worth knowing: all audit columns share one best-effort s
 un-migrated deployment the entire audit row is lost rather than just the new column. It only
 `console.warn`s.
 
-**`"Website" → github_url`** in both the greenhouse and generic maps. Pre-existing, looks like a
-copy-paste from the GitHub entry, and it means a website field gets the GitHub URL. Not touched —
-it is a data question about what those profile keys mean, not a bug in the resolution path.
+**`"Website" → github_url`** — FIXED in a follow-up commit. It was in both the greenhouse and generic
+maps, so a field labelled "Website" received the candidate's GitHub URL. The same conflation existed a
+second time in `buildAutofillPayload`, whose `field_map.website` fell back to the GitHub then the
+LinkedIn URL — firing precisely when `website_url` was empty, i.e. when there was nothing true to say.
+Both fixed; blank is the honest answer.
 
 ## What remains for real non-greenhouse coverage
 

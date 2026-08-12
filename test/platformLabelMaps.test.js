@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { PROFILE_KEY_TO_HANDLER, matchesWholeToken } from "../services/applyAutomation.js";
+import { PROFILE_KEY_TO_HANDLER, matchesWholeToken, buildAnswers } from "../services/applyAutomation.js";
 import { getPlatformLabelMap, detectPlatformFromUrl, usesIframe } from "../services/platformDetector.js";
 
 const detectorSrc   = fs.readFileSync("services/platformDetector.js", "utf8");
@@ -115,6 +115,54 @@ test("first/last name still beat the plain Name entry", () => {
     if (first === -1) continue;
     assert.ok(first < plain, `${p}: "First Name" must be checked before "Name" (got ${first} vs ${plain})`);
   }
+});
+
+test("website / github / linkedin labels are not cross-wired", () => {
+  // greenhouse and generic both mapped "Website" -> github_url, so a field labelled "Website"
+  // received the candidate's GitHub URL: wrong information submitted to an employer. These three
+  // are the confusable set, and a mis-mapping between them is invisible at a glance because the
+  // value is a plausible URL either way.
+  const EXPECT = { website: "website_url", github: "github_url", linkedin: "linkedin_url", portfolio: "portfolio_url" };
+  for (const p of PROVIDERS) {
+    for (const [label, key] of Object.entries(getPlatformLabelMap(p))) {
+      for (const [token, correct] of Object.entries(EXPECT)) {
+        if (!new RegExp(`\\b${token}\\b`, "i").test(label)) continue;
+        assert.equal(key, correct,
+          `${p}: label ${JSON.stringify(label)} mentions ${token} but maps to ${key}`);
+      }
+    }
+  }
+});
+
+test("a Website field takes the website, and is left blank rather than given the GitHub URL", () => {
+  const websiteField = [{
+    field_id: "w", name: "w", type: "text", label: "Website", is_required: false,
+    options: [], handler_type: null, handler_source: null, current_value: "",
+  }];
+  // Resolves via the label map -> handler 'website' -> the website value.
+  const [a] = buildAnswers(websiteField, {
+    field_map: { website: "https://ada.dev", github: "https://github.com/ada" },
+  });
+  assert.equal(a.value, "https://ada.dev");
+
+  // With no website on file the field must go unanswered, NOT receive the GitHub URL. server.js's
+  // field_map.website used to fall back to github then linkedin, which fired precisely when there
+  // was nothing true to say.
+  const answers = buildAnswers(websiteField, {
+    field_map: { github: "https://github.com/ada", linkedin: "https://linkedin.com/in/ada" },
+  });
+  assert.equal(answers.filter(x => !x.skipped).length, 0,
+    "an empty website must stay empty rather than borrowing another profile URL");
+});
+
+test("buildAutofillPayload does not substitute github/linkedin for a missing website", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  assert.doesNotMatch(server, /website:\s*normaliseUrl\([^)]*\)\s*\|\|\s*githubUrl/,
+    "field_map.website must not fall back to the GitHub URL");
+  assert.match(server, /website:normaliseUrl\(profile\?\.website_url\|\|""\),/);
+  // handler_map was always strict; the two must agree, since handler_map is consulted first and the
+  // disagreement was only observable when website_url was empty.
+  assert.match(server, /'website':\s*normaliseUrl\(profile\?\.website_url \|\| ''\)/);
 });
 
 test("clearance and visa handlers are reachable, matching what the guards already expect", () => {
