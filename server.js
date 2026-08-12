@@ -3211,37 +3211,16 @@ cron.schedule("0 2 * * *", () => {
   catch(e) { console.error("[backup-cron]", e.message); }
 });
 
-cron.schedule("0 7 * * *", async () => {
-  const last = db.prepare(`
-    SELECT ujs.search_query, ujs.user_id, dp.id as profile_id
-    FROM user_job_searches ujs
-    JOIN domain_profiles dp ON dp.user_id = ujs.user_id AND dp.is_active = 1
-    ORDER BY ujs.last_scraped_at DESC LIMIT 1
-  `).get();
-  if (!last) return;
-  const recent = db.prepare(
-    "SELECT apify_token FROM users WHERE id=?"
-  ).get(last.user_id);
-  if (!recent?.apify_token) {
-    console.log("[cron] Skipping daily re-scrape â€” no user Apify token available");
-    return;
-  }
-  try {
-    await scrapeJobs(last.search_query, recent.apify_token, {
-      workplaceTypes:  ["remote", "hybrid", "office"],
-      employmentTypes: ["full-time"],
-      location:        "United States",
-      postedLimit:     "24h",
-    }, last.profile_id);
-  }
-  catch(e) {
-    if (isExternalScrapeQuotaError(e)) {
-      console.warn("[cron] Daily re-scrape skipped: external scrape quota exhausted");
-    } else {
-      console.error("[cron]", e.message);
-    }
-  }
-});
+// The 07:00 daily re-scrape cron was removed here (§5.12). It picked what to re-crawl from the
+// most recent `user_job_searches` row, and that table has ZERO writers anywhere in the repo —
+// every remaining reference is its CREATE TABLE, two legacy migration backfills, one admin
+// read-only view, and the cron's own SELECT. So `if (!last) return` fired on every single tick
+// and the crawl could never run. Dead by data flow, not merely by absent callers, which is why
+// it survived earlier caller-grep passes.
+//
+// `scrapeJobs` itself is deliberately KEPT: POST /api/admin/db/force-scrape still reaches it and
+// it is still a working HarvestAPI crawl. Removing that is a product decision, not cleanup.
+// See docs/PIPELINE_DIAGNOSIS.md §5.12.
 
 // â”€â”€ Prompt injection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // domainProfile is the active domain_profiles row (or null).

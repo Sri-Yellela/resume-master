@@ -46,5 +46,10 @@ test("ATS scoring reuses stored signal basis through the queue", () => {
 //
 // searchThreadId / logSearchThread / scrapeJobs / activeScrapes / scrapeStateKey / mapPostedLimit
 // are therefore a NEW cleanup candidate, recorded as §5.12 in docs/PIPELINE_DIAGNOSIS.md rather
-// than deleted here — server.js's scrapeJobs is still reachable from a cron path and from the
-// admin router, so removing it is its own scoped change, not a test-file edit.
+// than deleted here.
+//
+// UPDATE: that cluster has since been traced. Of the two entry points named above, the cron path
+// was PROVABLY DEAD — it chose its target from user_job_searches, a table with zero writers — and
+// has been removed. The admin router's POST /api/admin/db/force-scrape is NOT dead: it still
+// invokes a working HarvestAPI crawl, so scrapeJobs and everything it calls stays. The absence
+// guard for the cron lives in jobsPipelineHardening.test.js.
