@@ -10,18 +10,34 @@ const integrations = fs.readFileSync("client/src/panels/IntegrationsPanel.jsx", 
 const docs = fs.readFileSync("documentation.md", "utf8");
 const envExample = fs.readFileSync(".env.example", "utf8");
 
-test("auth entry exposes Google and LinkedIn provider login options", () => {
-  assert.match(auth, /const label = provider === "linkedin" \? "LinkedIn" : "Google"/);
+test("auth entry exposes Google, LinkedIn and GitHub provider login options", () => {
+  // GitHub was added after this test was written, turning the two-way label into a three-way
+  // chain. Asserting each provider is labelled, rather than the exact ternary shape, so adding a
+  // fourth provider extends the list instead of breaking the test.
+  assert.match(auth, /provider === "linkedin" \? "LinkedIn"/);
+  assert.match(auth, /provider === "github" \? "GitHub"/);
+  assert.match(auth, /: "Google"/);
   assert.match(auth, /Continue with \{label\}/);
   assert.match(auth, /api\("\/api\/auth\/oauth\/status"\)/);
-  assert.match(auth, /not configured for this deployment/);
-  assert.match(auth, /\/api\/auth\/oauth\/\$\{provider\}\/start/);
+  // An unconfigured provider is now HIDDEN rather than rendered with a "not configured for this
+  // deployment" note — the button returns null once readiness says it isn't configured. Asserting
+  // that gate, since it is the behaviour that replaced the copy.
+  assert.match(auth, /oauthStatus !== null && !readiness\?\.configured\) return null/);
+  // The button now links to the short /auth/:provider alias rather than building the long
+  // /api/auth/oauth/${provider}/start URL — which is precisely why that alias is registered
+  // server-side (asserted in the route test below, and relied on by the extension popup too).
+  assert.match(auth, /href=\{`\/auth\/\$\{provider\}`\}/);
   assert.doesNotMatch(auth, /Provider ID \(optional\)/);
 });
 
 test("provider auth links identities to main users and integrations", () => {
-  assert.match(server, /app\.get\("\/api\/auth\/oauth\/:provider\/start"/);
-  assert.match(server, /app\.get\("\/api\/auth\/oauth\/:provider\/callback"/);
+  // Both routes now register an ARRAY of paths — the canonical /api/auth/oauth/:provider/* plus a
+  // short /auth/:provider alias. That alias is load-bearing: the browser extension's popup opens
+  // /auth/linkedin directly. Asserting the path is present in the registration rather than the
+  // exact single-string form.
+  assert.match(server, /app\.get\(\[?"\/api\/auth\/oauth\/:provider\/start"/);
+  assert.match(server, /app\.get\(\[?"\/api\/auth\/oauth\/:provider\/callback"/);
+  assert.match(server, /"\/auth\/:provider"/, "the short alias the extension relies on must stay");
   assert.match(server, /exchangeOAuthCode/);
   assert.match(server, /fetchOAuthUserInfo/);
   assert.match(server, /completeProviderAuth/);
@@ -43,8 +59,16 @@ test("OAuth configuration is environment driven", () => {
   assert.match(server, /oauthProviderReadiness/);
   assert.match(server, /app\.get\("\/api\/auth\/oauth\/status"/);
   assert.match(server, /logOAuthReadiness\(\)/);
-  assert.match(envExample, /GOOGLE_OAUTH_REDIRECT_URI=http:\/\/localhost:3001\/api\/auth\/oauth\/google\/callback/);
-  assert.match(envExample, /LINKEDIN_OAUTH_REDIRECT_URI=http:\/\/localhost:3001\/api\/auth\/oauth\/linkedin\/callback/);
+  // .env.example documents the CURRENT variable names (GOOGLE_CALLBACK_URL, …). The
+  // *_OAUTH_REDIRECT_URI form this used to assert is the legacy alias, still accepted by
+  // server.js for backwards compatibility but deliberately not what new deployments are told to
+  // set. Assert both halves of that contract: the example documents the current names, and the
+  // server still honours the legacy ones.
+  assert.match(envExample, /GOOGLE_CALLBACK_URL=/);
+  assert.match(envExample, /LINKEDIN_CALLBACK_URL=/);
+  assert.match(envExample, /GITHUB_CALLBACK_URL=/);
+  assert.match(server, /GOOGLE_CALLBACK_URL \|\| process\.env\.GOOGLE_OAUTH_REDIRECT_URI/);
+  assert.match(server, /LINKEDIN_CALLBACK_URL \|\| process\.env\.LINKEDIN_OAUTH_REDIRECT_URI/);
 });
 
 test("OAuth callback and redirect handling is hardened", () => {
@@ -63,16 +87,25 @@ test("unlinking OAuth integrations clears provider identity columns", () => {
 test("integrations readiness reflects auth-linked LinkedIn identity as connected", () => {
   assert.match(readiness, /identityLinked/);
   assert.match(readiness, /getStoredIntegration\(db, userId, "linkedin"\)/);
-  assert.match(readiness, /connected: !!row \|\| publicLinkedIdentity\.connected/);
+  // getLinkedInStatus was refactored to derive every field from publicIntegrationRow() rather
+  // than OR-ing a raw row against it, so `!!row ||` no longer appears. The behaviour asserted —
+  // an auth-linked identity reads as connected — is unchanged and still covered.
+  assert.match(readiness, /connected: publicLinkedIdentity\.connected/);
 });
 
 test("integrations page uses OAuth reconnect flows for Google and LinkedIn login", () => {
   assert.match(integrations, /\/api\/auth\/oauth\/\$\{provider\}\/start/);
-  assert.match(integrations, /status\.oauth\?\.\[provider\]/);
+  // `status` itself is now optional-chained too (status?.oauth?.[provider]) — a defensive fix for
+  // reading readiness before the status request resolves. Matching either form.
+  assert.match(integrations, /status\??\.oauth\?\.\[provider\]/);
   assert.match(integrations, /OAuth is not configured by the app operator/);
-  assert.match(integrations, /Reconnect Google/);
-  assert.match(integrations, /Connect LinkedIn Login/);
-  assert.match(integrations, /Unlink Login/);
+  // "Reconnect Google" / "Connect LinkedIn Login" / "Unlink Login" are gone. The panel was
+  // reframed from generic OAuth account-linking to a purpose-named "LinkedIn Profile Import"
+  // section, and no Google section is offered here at all — Google remains a sign-in provider on
+  // the auth screen, not an integration to manage. Asserting the copy that exists now.
+  assert.match(integrations, /LinkedIn Profile Import/);
+  assert.match(integrations, /Import from LinkedIn/);
+  assert.match(integrations, /Disconnect/);
 });
 
 test("operator docs explain OAuth provider console setup", () => {
