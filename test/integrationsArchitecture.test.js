@@ -63,23 +63,32 @@ test("starting an apply run is gated server-side on the centralized prerequisite
   assert.match(applyRoute, /import \{ getAutomationReadiness, getMissingApplyPrerequisites \}/,
     "the run endpoint must use the centralized readiness helpers, not a local re-check");
 
-  // The gate must sit inside POST /api/apply/runs and fire before the run row is inserted —
-  // a prerequisite failure that still queued a run would be worse than no gate.
-  const runsStart = applyRoute.indexOf('app.post("/api/apply/runs"');
-  assert.ok(runsStart > 0, "POST /api/apply/runs must exist");
-  const runsEnd = applyRoute.indexOf('app.get("/api/apply/runs"', runsStart);
+  // RE-POINTED: the gate now lives in startRun(), the shared run-admission function, rather than
+  // inline in POST /api/apply/runs. That extraction is what makes the validation-correction retry
+  // go through the SAME admission control as a fresh run — so asserting on the shared function is
+  // now the stronger check: it covers both entry points at once.
+  const runsStart = applyRoute.indexOf("function startRun(");
+  assert.ok(runsStart > 0, "startRun must exist as the single run-admission path");
+  const runsEnd = applyRoute.indexOf('app.post("/api/apply/runs"', runsStart);
   const runsBlock = applyRoute.slice(runsStart, runsEnd);
 
-  assert.match(runsBlock, /getMissingApplyPrerequisites\(getAutomationReadiness\(db, req\.user\.id\)\)/);
+  assert.match(runsBlock, /getMissingApplyPrerequisites\(getAutomationReadiness\(db, userId\)\)/);
   const gateAt = runsBlock.indexOf("missingPrerequisites.length");
   const insertAt = runsBlock.indexOf("INSERT INTO apply_runs");
   assert.ok(gateAt > 0 && insertAt > 0 && gateAt < insertAt,
     "the prerequisite check must precede the apply_runs insert");
 
+  // Every caller of startRun must go through it rather than inserting a run itself.
+  const inserts = applyRoute.match(/INSERT INTO apply_runs/g) || [];
+  assert.equal(inserts.length, 1, "apply_runs must be written in exactly one place");
+  assert.match(applyRoute, /const r = startRun\(req\.user\.id, normalisePlanTier\(req\.user\?\.planTier\), jobIds/,
+    "POST /api/apply/runs must delegate to startRun");
+  assert.match(applyRoute, /const retry = startRun\(req\.user\.id, normalisePlanTier\(req\.user\?\.planTier\), toRetry/,
+    "the correction-loop retry must delegate to startRun too, so no guard is bypassed");
+
   // The response shape is the contract the client already implements — assert the field name,
   // since renaming it would silently degrade the message back to a generic failure.
-  // `out` rather than `res` since A3's withIdempotency wrapper: the field name is what matters.
-  assert.match(runsBlock, /out\.status\(409\)\.json\(\{[\s\S]*?missingPrerequisites,/);
+  assert.match(runsBlock, /respond\(409, \{[\s\S]*?missingPrerequisites,/);
   assert.match(jobsPanel, /e\.payload\?\.missingPrerequisites/,
     "client must keep reading the field the server sends");
 });

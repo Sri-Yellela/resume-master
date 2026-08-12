@@ -2060,4 +2060,10 @@ export const MIGRATIONS = [
         ALTER TABLE apply_run_jobs ADD COLUMN submit_evidence TEXT;
       `,
     },
+    {
+      id: "073_apply_open_questions",
+      sql: `
+        ALTER TABLE apply_run_jobs ADD COLUMN open_questions_json TEXT;
+      `,
+    },
   ];
