@@ -1,6 +1,6 @@
 // TASK A1 driver — drives autoApply against scripts/fakeAts.js ONLY (localhost:4599).
 // Diagnostic: reports what the form ACTUALLY received. Never asserts on status alone.
-import { autoApply } from "./services/applyAutomation.js";
+import { autoApply } from "../services/applyAutomation.js";
 
 const BASE = "http://localhost:4599";
 const RESUME = process.env.A1_RESUME;
@@ -31,6 +31,7 @@ const COMPLETION = {
   "Are you legally authorized to work in the country of employment?": "Yes",
   "How did you hear about us?": "Your engineering blog",
   "Are you authorized to work without sponsorship?": "yes",
+  "I am authorized to work without sponsorship": "yes",
 };
 
 function payload({ workAuth = "Yes", complete = false, dropShortName = false } = {}) {
@@ -47,6 +48,7 @@ const WATCH = [
   "job_application[legal_name]", "job_application[preferred_name]", "job_application[referrer_name]",
   "job_application[hear_about_us]", "job_application[start_date]", "job_application[years_experience]",
   "cards[authorized_to_work]", "name", "start_date", "_systemfield_name", "_systemfield_location",
+  "authorized_no_sponsorship",
 ];
 
 async function run(label, url, pay) {
@@ -57,6 +59,7 @@ async function run(label, url, pay) {
   console.log(`RUN ${label} -> ${url}`);
   console.log(`status=${res.status} reason=${res.reasonCode || "-"} filled=${res.fieldsFilled} submissions=${s.count}`);
   if (res.missingRequired) console.log("missingRequired:", JSON.stringify([...new Set(res.missingRequired)]));
+  if (res.lowConfidence) console.log("lowConfidence:", JSON.stringify(res.lowConfidence));
   if (res.error) console.log("error:", res.error);
   for (const rec of s.submissions) {
     console.log(`-- RECORDED (${rec.provider}) --`);

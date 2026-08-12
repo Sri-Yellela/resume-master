@@ -81,6 +81,167 @@ export const PROFILE_KEY_TO_HANDLER = {
   current_job_title:'current-title', current_company:'current-company',
 };
 
+// Reverse of PROFILE_KEY_TO_HANDLER: handler_type -> profile keys that legitimately answer it.
+// Without this, step 2 only tried field_map[handler_type] and its underscore variant, so the
+// CANONICAL key for a class could not resolve its own field: handler 'sponsorship' never looked
+// for `requires_sponsorship`. Once eligibility fields are restricted to exact mapping, that gap
+// would mean they can never be answered at all — safe, but permanently held.
+export const HANDLER_TO_PROFILE_KEYS = Object.entries(PROFILE_KEY_TO_HANDLER)
+  .reduce((acc, [key, handler]) => { (acc[handler] ||= []).push(key); return acc; }, {});
+
+// -- Answer provenance + confidence (TASK A2) ----------------------------------
+// Every answer records the rule that produced it. The apply path had no equivalent of the KB
+// layer's provenance, so an exact handler hit and a fuzzy substring guess were submitted
+// identically. See docs/auto-apply-a1-trap-matrix.md.
+export const PROVENANCE = {
+  HANDLER_EXACT:   'handler_exact',
+  FIELD_MAP_EXACT: 'field_map_exact',
+  CUSTOM_ANSWER:   'custom_answer',
+  LABEL_FUZZY:     'label_fuzzy',
+  DEFAULT:         'default',
+};
+
+export const CONFIDENCE_BY_PROVENANCE = {
+  handler_exact:   1.0,
+  field_map_exact: 0.9,
+  custom_answer:   0.85,
+  label_fuzzy:     0.3,
+  default:         0.1,
+};
+
+// Below this, an answer may not be auto-submitted in mode:'full' (requirement 5).
+export const AUTO_SUBMIT_MIN_CONFIDENCE = 0.8;
+// Below this, an answer may not wipe a value the ATS already parsed from the resume
+// (requirement 6). Only the two exact paths clear a prefilled field.
+export const CLEAR_FIRST_MIN_CONFIDENCE = 0.9;
+
+// -- Eligibility-class fields ---------------------------------------------------
+// A wrong answer here is a materially false attestation to an employer, so these resolve by exact
+// mapping or not at all — never by fuzzy label matching. Order matters: a label may mention two
+// classes ("require sponsorship for work authorization"), and the FIRST match wins, so the more
+// specific subject is listed first. That single label is the A1 trap: it is a sponsorship
+// question that mentions work authorization.
+export const ELIGIBILITY_PATTERNS = [
+  ['sponsorship', /\bsponsor(?:s|ed|ship)?\b/i],
+  ['criminal',    /\b(?:criminal|felony|convict\w*|background\s+check)\b/i],
+  ['clearance',   /\bclearance\b/i],
+  ['visa',        /\b(?:visa|h-?1-?b|f-?1|opt|cpt|green\s+card|permanent\s+resident)\b/i],
+  ['eeo',         /\b(?:gender|ethnicit\w*|races?|racial|veteran|disabilit\w*|eeo|hispanic|latino|pronouns?)\b/i],
+  ['work_auth',   /\b(?:work\s+authoriz\w*|authoriz\w*\s+to\s+work|right\s+to\s+work|legally\s+authoriz\w*|employment\s+eligib\w*)\b/i],
+];
+
+// Profile keys that are a legitimate answer for each class.
+export const ELIGIBILITY_CANONICAL_KEYS = {
+  sponsorship: ['requires_sponsorship', 'needs_sponsorship', 'sponsorship'],
+  work_auth:   ['work_auth', 'work_authorization', 'authorized_to_work'],
+  clearance:   ['clearance_level', 'has_clearance', 'clearance'],
+  visa:        ['visa_type', 'visa_status', 'visa'],
+  criminal:    ['criminal_history', 'has_criminal_record', 'background_check'],
+  eeo:         ['gender', 'ethnicity', 'race', 'veteran_status', 'disability_status', 'pronouns'],
+};
+
+// handler_types that are a legitimate answer for each class.
+export const ELIGIBILITY_HANDLERS = {
+  sponsorship: ['sponsorship'],
+  work_auth:   ['work-auth'],
+  clearance:   ['clearance'],
+  visa:        ['visa'],
+  criminal:    [],
+  eeo:         ['gender', 'ethnicity', 'veteran', 'disability'],
+};
+
+// Labels naming a DIFFERENT person. "Name of Referrer" is not the candidate's name, and this —
+// not whole-token matching — is what actually stops the A1 name_ambiguity trap: "name" IS a whole
+// token in "Name of Referrer", so token matching alone would still match it.
+export const THIRD_PARTY_SUBJECT_RE =
+  /\b(?:referr?er|referral|referee|reference|emergency\s+contact|next\s+of\s+kin|supervisor|manager'?s?|manager\s+name|spouse|partner'?s|parent|guardian|witness|previous\s+employer\s+contact)\b/i;
+
+// Handlers/keys that identify the candidate, and so must never fill a third-party field.
+export const IDENTITY_HANDLERS = new Set([
+  'first-name', 'last-name', 'full-name', 'email', 'phone', 'linkedin', 'github',
+  'website', 'portfolio', 'address1', 'address2', 'city', 'state', 'zip', 'country', 'location',
+]);
+const IDENTITY_KEY_RE = /\b(?:name|email|phone|mobile|linkedin|github|website|portfolio|address|city|state|zip|location)\b/i;
+
+// Negation/inversion tokens. A key must not fuzzy-match a label that inverts its sense.
+const INVERSION_RE = /\b(?:not|never|without|require[sd]?|requiring|need(?:s|ed)?|unable|cannot|can't|don'?t|do\s+not|lack)\b/i;
+
+const normaliseText = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+const keyToPhrase  = (k) => normaliseText(String(k).replace(/[_-]+/g, ' '));
+
+/** The eligibility class a label/name belongs to, or null. */
+export function eligibilityClassOf(text) {
+  const t = String(text ?? '');
+  if (!t) return null;
+  for (const [cls, re] of ELIGIBILITY_PATTERNS) if (re.test(t)) return cls;
+  return null;
+}
+
+/** Whole-token containment: `name` matches "Legal Name" but not "Username". */
+export function matchesWholeToken(label, key) {
+  const needle = keyToPhrase(key);
+  if (!needle) return false;
+  const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[\\s_-]+');
+  return new RegExp(`(?:^|[^a-z0-9])${esc}(?:[^a-z0-9]|$)`, 'i').test(normaliseText(label));
+}
+
+/** True when the label negates/inverts the key's sense and the key itself carries no negation. */
+export function invertsKey(label, key) {
+  return INVERSION_RE.test(normaliseText(label)) && !INVERSION_RE.test(keyToPhrase(key));
+}
+
+/**
+ * May `key` (a field_map key) or `handler` answer this field? Shared by every resolution path so
+ * the legacy sweep and the discovery handler cannot contradict buildAnswers.
+ * Returns null when allowed, or a string reason when refused.
+ */
+export function refuseReason({ label = '', name = '', key = null, handler = null, allowEligibilityExactAnswer = false }) {
+  const subject = `${label} ${name}`;
+  const cls = eligibilityClassOf(subject);
+  if (cls) {
+    const okKeys = ELIGIBILITY_CANONICAL_KEYS[cls] || [];
+    const okHandlers = ELIGIBILITY_HANDLERS[cls] || [];
+    const keyOk = key != null && okKeys.includes(String(key).toLowerCase());
+    const handlerOk = handler != null && okHandlers.includes(String(handler));
+    if (!keyOk && !handlerOk && !allowEligibilityExactAnswer) return `eligibility_class:${cls}`;
+  }
+  if (THIRD_PARTY_SUBJECT_RE.test(subject)) {
+    const identityKey = key != null && IDENTITY_KEY_RE.test(keyToPhrase(key));
+    const identityHandler = handler != null && IDENTITY_HANDLERS.has(String(handler));
+    if (identityKey || identityHandler) return 'third_party_subject';
+  }
+  return null;
+}
+
+/**
+ * Normalise a yes/no-ish value to a boolean for checkbox/toggle fields.
+ * FAIL-SAFE DIRECTION IS LOAD-BEARING: anything unrecognised is false. Never invent an
+ * affirmative — an affirmative is what attests something to an employer.
+ */
+export function coerceAffirmative(value) {
+  if (value === true) return true;
+  const v = normaliseText(value);
+  return ['yes', 'y', 'true', '1', 'on', 'checked', 'affirmative', 'i do', 'i am', 'agree', 'agreed', 'accept'].includes(v);
+}
+
+/**
+ * Strip handler_types that discovery inferred from the LABEL MAP and that the guards refuse.
+ * Attribute-derived handlers are left alone: `name="requires_sponsorship"` is an exact signal,
+ * whereas the label map's `"Name" -> full_name` is a substring guess that then resolves through
+ * the *exact* field_map path — the A1 name_ambiguity trap (finding N5).
+ */
+export function sanitizeDiscoveredFields(fields) {
+  for (const f of fields || []) {
+    if (f?.handler_source !== 'label' || !f.handler_type) continue;
+    const reason = refuseReason({ label: f.label, name: f.name, handler: f.handler_type });
+    if (reason) {
+      f.handler_rejected = `${f.handler_type}:${reason}`;
+      f.handler_type = null;
+    }
+  }
+  return fields;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCREENSHOT_DIR = path.join(__dirname, "..", "data", "screenshots");
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -91,11 +252,45 @@ const inProgress = new Map();
 // -- Fill script injected into page context ------------------------------------
 // Logic ported directly from extension/content.js and background.js
 const FILL_FN_SRC = `
-function(autofillData, labelMap) {
+function(autofillData, labelMap, guards) {
   if (!autofillData || !autofillData.field_map) return 0;
   const fm  = autofillData.field_map;
   const ddm = autofillData.dropdown_map || {};
+  const g   = guards || { eligibility: [], canonicalKeys: {}, thirdPartyRe: '$^', identityKeyRe: '$^' };
   let filled = 0;
+
+  // This legacy sweep fills elements DIRECTLY, bypassing buildAnswers and therefore bypassing
+  // provenance and the low-confidence hold. A1 proved it independently submits the inverted
+  // sponsorship answer via its own labelMap substring match, so restricting buildAnswers alone
+  // would have fixed nothing. The same guards are applied here.
+  function tokenMatch(hay, needle) {
+    const n = String(needle || '').replace(/[_-]+/g, ' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+    if (!n) return false;
+    const esc = n.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&').replace(/\\s+/g, '[\\\\s_-]+');
+    try {
+      return new RegExp('(?:^|[^a-z0-9])' + esc + '(?:[^a-z0-9]|\$)', 'i')
+        .test(String(hay || '').replace(/\\s+/g, ' ').trim().toLowerCase());
+    } catch { return false; }
+  }
+  // True when \`key\` must not fill a field described by \`text\`.
+  function refused(text, key) {
+    const t = String(text || '');
+    if (!t) return false;
+    for (const pair of g.eligibility) {
+      let re; try { re = new RegExp(pair[1], 'i'); } catch { continue; }
+      if (re.test(t)) {
+        const ok = (g.canonicalKeys[pair[0]] || []).indexOf(String(key).toLowerCase()) !== -1;
+        return !ok;
+      }
+    }
+    try {
+      if (new RegExp(g.thirdPartyRe, 'i').test(t) &&
+          new RegExp(g.identityKeyRe, 'i').test(String(key).replace(/[_-]+/g, ' '))) return true;
+    } catch {}
+    return false;
+  }
+  const describe = (el) =>
+    [el.getAttribute('name') || '', el.id || '', el.placeholder || '', el.getAttribute('aria-label') || ''].join(' ');
 
   function setNativeValue(el, value) {
     try {
@@ -119,6 +314,11 @@ function(autofillData, labelMap) {
     ].join(",");
     document.querySelectorAll(sel).forEach(el => {
       if (["hidden","submit","button","file","image"].includes(el.type)) return;
+      // Do not overwrite a value that is already there. Steps 2 and 3 always checked this; step 1
+      // did not, so it clobbered both ATS-prefilled values (requirement 6) and buildAnswers' own
+      // vetted output — it was overwriting a date formatted to the field's advertised MM/DD/YYYY
+      // with the raw ISO string, because this key happens to equal the control's name.
+      if (el.value) return;
       setNativeValue(el, value); filled++;
     });
   }
@@ -142,8 +342,10 @@ function(autofillData, labelMap) {
   ).forEach(el => {
     if (el.value) return;
     const hint = ((el.placeholder||"") + " " + (el.getAttribute("aria-label")||"")).toLowerCase();
+    const subject = describe(el);
     for (const [key, fieldKey] of Object.entries(HINT_MAP)) {
-      if (hint.includes(key) && fm[fieldKey]) {
+      if (tokenMatch(hint, key) && fm[fieldKey]) {
+        if (refused(subject, fieldKey)) break;
         setNativeValue(el, fm[fieldKey]); filled++; break;
       }
     }
@@ -154,7 +356,7 @@ function(autofillData, labelMap) {
     const text = lbl.textContent.trim();
     let matchedKey = null;
     for (const [k, fk] of Object.entries(labelMap)) {
-      if (text.toLowerCase().includes(k.toLowerCase())) { matchedKey = fk; break; }
+      if (tokenMatch(text, k)) { matchedKey = fk; break; }
     }
     if (!matchedKey || !fm[matchedKey]) return;
     const forId = lbl.getAttribute("for");
@@ -162,6 +364,8 @@ function(autofillData, labelMap) {
       ? (document.getElementById(forId) || document.querySelector('[name="'+forId+'"]'))
       : lbl.querySelector("input,textarea,select");
     if (!el || el.value) return;
+    // The label text is the authoritative description here; include the control's own attributes.
+    if (refused(text + ' ' + describe(el), matchedKey)) return;
     if (el.tagName === "SELECT") {
       for (const opt of el.options) {
         if (opt.text.toLowerCase().includes((fm[matchedKey]||"").toLowerCase())) {
@@ -253,29 +457,44 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
     } catch { return false; }
   }
 
+  // Whole-token containment, mirroring matchesWholeToken() in Node. Stops the label map's "Name"
+  // from claiming "Username"; it does NOT stop it claiming "Name of Referrer" -- "name" is a whole
+  // token there -- which is why the returned source matters and Node re-vets label hits.
+  function tokenMatch(haystack, needle) {
+    const n = String(needle || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!n) return false;
+    const esc = n.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&').replace(/\\s+/g, '[\\\\s_-]+');
+    try {
+      return new RegExp('(?:^|[^a-z0-9])' + esc + '(?:[^a-z0-9]|\$)', 'i')
+        .test(String(haystack || '').replace(/\\s+/g, ' ').trim().toLowerCase());
+    } catch { return false; }
+  }
+
+  // Returns { handler, source }. The source lets Node distinguish an exact attribute signal
+  // (name="requires_sponsorship") from a label-map substring guess ("Name" -> full_name), which
+  // otherwise resolve through the same "exact" field_map path. See sanitizeDiscoveredFields.
   function resolveHandler(el, fieldType, label) {
     const attrNames = ['name','id','autocomplete'];
     const attrVals = attrNames.map(a => (el.getAttribute(a) || '').toLowerCase());
     for (const val of attrVals) {
       if (!val) continue;
       for (const [substr, ht] of Object.entries(handlerByAttr)) {
-        if (val.includes(substr)) return ht;
+        if (val.includes(substr)) return { handler: ht, source: 'attr' };
       }
     }
     // file-specific: check label+name+id for resume/cover
     if (fieldType === 'file') {
       const combined = (label + ' ' + attrVals.join(' ')).toLowerCase();
-      if (combined.includes('resume') || combined.includes('cv')) return 'resume';
-      if (combined.includes('cover') || combined.includes('letter')) return 'cover-letter';
+      if (combined.includes('resume') || combined.includes('cv')) return { handler: 'resume', source: 'file' };
+      if (combined.includes('cover') || combined.includes('letter')) return { handler: 'cover-letter', source: 'file' };
     }
     // label map -> profile key -> handler
-    const labelLower = label.toLowerCase();
     for (const [k, profileKey] of Object.entries(labelMap)) {
-      if (labelLower.includes(k.toLowerCase()) && profileKeyToHandler[profileKey]) {
-        return profileKeyToHandler[profileKey];
+      if (tokenMatch(label, k) && profileKeyToHandler[profileKey]) {
+        return { handler: profileKeyToHandler[profileKey], source: 'label' };
       }
     }
-    return null;
+    return { handler: null, source: null };
   }
 
   const fields = [];
@@ -300,7 +519,9 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
     }
 
     const label = getLabel(el);
-    const handler_type = resolveHandler(el, fieldType, label);
+    const resolved = resolveHandler(el, fieldType, label);
+    const handler_type = resolved.handler;
+    const handler_source = resolved.source;
     const is_required = el.required || el.getAttribute('aria-required') === 'true';
 
     let options = [];
@@ -329,6 +550,7 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
       is_required: !!is_required,
       options,
       handler_type: handler_type || null,
+      handler_source: handler_source || null,
       current_value,
     });
   }
@@ -393,9 +615,11 @@ function(answers) {
 export async function discoverFields(pageOrFrame, provider) {
   try {
     const labelMap = getPlatformLabelMap(provider || 'generic');
-    return await pageOrFrame.evaluate(
+    const fields = await pageOrFrame.evaluate(
       `(${DISCOVER_FN_SRC})(${JSON.stringify(HANDLER_BY_ATTR)}, ${JSON.stringify(PROFILE_KEY_TO_HANDLER)}, ${JSON.stringify(labelMap)})`
     );
+    // Label-map-derived handlers are re-vetted here, in Node, where the policy is testable.
+    return sanitizeDiscoveredFields(fields);
   } catch (e) {
     console.warn("[applyAutomation] discoverFields error:", e.message);
     return [];
@@ -411,71 +635,157 @@ export function buildAnswers(fields, profilePayload) {
   for (const field of fields) {
     if (SKIP_TYPES.has(field.type)) continue;
 
+    const label = field.label || '';
+    const guardCtx = { label, name: field.name || '' };
     let value = null;
+    let provenance = null;
+    let matched_on = null;
+    const refusals = [];
 
-    // 1. handler_map lookup by handler_type
+    // 1. handler_map by handler_type — an exact signal, and the strongest one available.
     if (field.handler_type && handler_map[field.handler_type] !== undefined && handler_map[field.handler_type] !== '') {
       value = handler_map[field.handler_type];
+      provenance = PROVENANCE.HANDLER_EXACT;
+      matched_on = field.handler_type;
     }
 
-    // 2. field_map lookup by handler_type (with dash -> underscore fallback)
+    // 2. field_map by handler_type (with dash -> underscore fallback). Also exact: the handler
+    //    itself was derived from an attribute, or from a label the guards already vetted in
+    //    sanitizeDiscoveredFields.
     if (value === null && field.handler_type) {
-      const fm1 = field_map[field.handler_type];
-      const fm2 = field_map[field.handler_type.replace(/-/g,'_')];
-      if (fm1 !== undefined && fm1 !== '') value = fm1;
-      else if (fm2 !== undefined && fm2 !== '') value = fm2;
+      const candidates = [
+        field.handler_type,
+        field.handler_type.replace(/-/g, '_'),
+        ...(HANDLER_TO_PROFILE_KEYS[field.handler_type] || []),
+      ];
+      const hit = candidates.find(k => field_map[k] !== undefined && field_map[k] !== '');
+      // Vet even this exact path: a handler that survived discovery can still be the wrong class
+      // for the label (the inversion case), and the key must be legitimate for that class.
+      if (hit && !refuseReason({ ...guardCtx, key: hit, handler: field.handler_type })) {
+        value = field_map[hit];
+        provenance = PROVENANCE.FIELD_MAP_EXACT;
+        matched_on = hit;
+      } else if (hit) {
+        refusals.push(`${hit}:${refuseReason({ ...guardCtx, key: hit, handler: field.handler_type })}`);
+      }
     }
 
-    // 3. Fuzzy label match against field_map keys
-    if (value === null && field.label) {
-      const lbl = field.label.toLowerCase();
+    // 3. Fuzzy label match against field_map keys — the weakest path, and the one A1 proved
+    //    submits false attestations. Now: whole-token only (not raw substring), refused outright
+    //    for eligibility-class and third-party-subject fields, and refused when the label inverts
+    //    the key's sense. Whatever survives is marked label_fuzzy and cannot auto-submit.
+    if (value === null && label) {
       for (const [k, v] of Object.entries(field_map)) {
-        if (v && lbl.includes(k.replace(/_/g,' ').toLowerCase())) {
-          value = v; break;
-        }
+        if (!v) continue;
+        if (!matchesWholeToken(label, k)) continue;
+        const reason = refuseReason({ ...guardCtx, key: k });
+        if (reason) { refusals.push(`${k}:${reason}`); continue; }
+        if (invertsKey(label, k)) { refusals.push(`${k}:inverted_label`); continue; }
+        value = v;
+        provenance = PROVENANCE.LABEL_FUZZY;
+        matched_on = k;
+        break;
       }
     }
 
-    // 4. custom_answers fallback
-    if (value === null && field.label) {
-      const lbl = field.label.toLowerCase();
+    // 4. custom_answers — the user's own answer to a question. The reverse direction
+    //    (`ql.includes(lbl)`) is DROPPED: a short label matched almost any longer stored question.
+    //    An eligibility field may be answered here only on a normalised-EXACT question match,
+    //    which is not a guess — the user answered that exact question.
+    if (value === null && label) {
+      const lbl = normaliseText(label);
       for (const [q, a] of Object.entries(custom_answers)) {
-        const ql = q.toLowerCase();
-        if (lbl.includes(ql) || ql.includes(lbl)) { value = String(a); break; }
+        if (a === undefined || a === null || a === '') continue;
+        const ql = normaliseText(q);
+        if (!ql) continue;
+        const exact = ql === lbl;
+        // Forward containment only, and only for questions specific enough to mean something.
+        const forward = ql.length >= 8 && lbl.includes(ql);
+        if (!exact && !forward) continue;
+        const reason = refuseReason({ ...guardCtx, key: q, allowEligibilityExactAnswer: exact });
+        if (reason) { refusals.push(`custom:${reason}`); continue; }
+        value = String(a);
+        provenance = PROVENANCE.CUSTOM_ANSWER;
+        matched_on = q;
+        break;
       }
     }
 
-    if (value === null) continue;
+    if (value === null) {
+      if (refusals.length) {
+        answers.push({
+          field_id: field.field_id, name: field.name, type: field.type,
+          value: null, skipped: true, refusals,
+          provenance: null, confidence: 0, clear_first: false, typeahead_selection: null,
+        });
+      }
+      continue;
+    }
+
+    const confidence = CONFIDENCE_BY_PROVENANCE[provenance] ?? 0;
 
     // Type formatting
     let typeahead_selection = null;
     if (field.type === 'checkbox' || field.type === 'toggle') {
-      const boolVal = value === true || value === 'true' || value === 'Yes' || value === '1' || value === 1;
-      value = boolVal ? 'true' : 'false';
+      // Case-insensitive, common affirmatives accepted. Unrecognised stays false — see
+      // coerceAffirmative: the fail-safe direction is deliberate.
+      value = coerceAffirmative(value) ? 'true' : 'false';
     } else if (field.type === 'typeahead') {
       typeahead_selection = String(value);
       value = String(value);
     } else if (field.type === 'date' && value) {
-      // Ensure YYYY-MM-DD
       const d = new Date(value);
-      if (!isNaN(d.getTime())) {
-        value = d.toISOString().slice(0, 10);
-      }
+      if (!isNaN(d.getTime())) value = d.toISOString().slice(0, 10);
+      else value = String(value);
     } else {
       value = String(value);
+      // A text control can still be a date field; honour a format it explicitly advertises.
+      value = formatDateForHint(value, label);
     }
 
     answers.push({
       field_id: field.field_id,
       name: field.name,
       type: field.type,
+      label,
       value,
       typeahead_selection,
-      clear_first: true,
+      provenance,
+      confidence,
+      matched_on,
+      // Only an exact-path answer may wipe a value the ATS already parsed from the uploaded
+      // resume. A fuzzy or custom answer fills a blank field but never overwrites (requirement 6).
+      clear_first: confidence >= CLEAR_FIRST_MIN_CONFIDENCE,
+      ...(refusals.length ? { refusals } : {}),
     });
   }
 
   return answers;
+}
+
+// An explicit format hint in a label/placeholder, e.g. "Available from (MM/DD/YYYY)". Only an
+// EXPLICIT hint is honoured — DD/MM vs MM/DD is unrecoverable by guessing, and a wrong guess here
+// silently misstates a date to an employer.
+const DATE_HINT_RE = /\b(MM)\s*[\/.-]\s*(DD)\s*[\/.-]\s*(YYYY)\b|\b(DD)\s*[\/.-]\s*(MM)\s*[\/.-]\s*(YYYY)\b/i;
+
+/**
+ * Re-format an ISO-ish date to match a format the field explicitly advertises. A1 trap 6: the
+ * field wants MM/DD/YYYY, but because the control is type="text" (not type="date") the ISO
+ * normalisation did not apply and "2026-09-01" was submitted verbatim.
+ * Returns the original string when there is no hint or the value is not a date.
+ */
+export function formatDateForHint(value, hintText) {
+  const m = DATE_HINT_RE.exec(String(hintText || ''));
+  if (!m) return String(value);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim());
+  if (!iso) return String(value);
+  const [, y, mo, d] = iso;
+  return m[1] ? `${mo}/${d}/${y}` : `${d}/${mo}/${y}`;
+}
+
+/** Answers that may not be auto-submitted in mode:'full' (requirement 5). */
+export function lowConfidenceAnswers(answers) {
+  return (answers || []).filter(a => !a.skipped && a.value !== null && (a.confidence ?? 0) < AUTO_SUBMIT_MIN_CONFIDENCE);
 }
 
 // -- applyTypeaheadAnswer ------------------------------------------------------
@@ -486,6 +796,19 @@ async function applyTypeaheadAnswer(page, answer) {
       : null;
     if (!el) return;
     await el.click();
+    // el.type() APPENDS. A1 recorded "Boston, MABoston, MA" because this ran twice and never
+    // cleared. Honour clear_first here as the other fill paths do, and never append to a value
+    // that is already present: without clear_first permission the existing value is either an
+    // ATS-parsed value or our own from a previous pass, and both must be left alone.
+    const existing = await el.evaluate(e => e.value || '').catch(() => '');
+    if (existing) {
+      if (!answer.clear_first) return;
+      await el.evaluate(e => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        if (setter) setter.call(e, ''); else e.value = '';
+        ['input', 'change'].forEach(ev => e.dispatchEvent(new Event(ev, { bubbles: true })));
+      });
+    }
     await el.type(String(answer.value || ''), { delay: 50 });
     await new Promise(r => setTimeout(r, 800));
     // Try to click a dropdown option matching typeahead_selection
@@ -574,20 +897,33 @@ export async function classifyFlowState(page, originalDomain) {
 }
 
 // -- discoverAndFill -----------------------------------------------------------
+// page.frames() ALREADY includes the main frame, so the previous `[page, ...page.frames()]`
+// processed it twice (A1 finding N3): fieldsFilled reached 198 on a 9-field step, missingRequired
+// came back with every entry duplicated, and the typeahead text was typed twice.
+export function frameList(page) {
+  const frames = page.frames();
+  return frames.includes(page.mainFrame()) ? frames : [page.mainFrame(), ...frames];
+}
+
 async function discoverAndFill(page, frames, provider, autofillData, labelMap) {
-  let n = 0;
+  let filled = 0;
+  const collected = [];
   for (const frame of frames) {
     const fields = await discoverFields(frame, provider);
     if (fields.length) {
       const answers = buildAnswers(fields, autofillData);
-      const simpleAnswers = answers.filter(a => a.type !== 'typeahead');
-      if (simpleAnswers.length) n += await frame.evaluate(`(${APPLY_FN_SRC})(${JSON.stringify(simpleAnswers)})`).catch(() => 0);
-      for (const a of answers.filter(a => a.type === 'typeahead')) await applyTypeaheadAnswer(page, a);
+      collected.push(...answers);
+      // Refusal records carry value:null and must never reach the page — the generic branch of
+      // APPLY_FN_SRC would stringify null into the field.
+      const applicable = answers.filter(a => !a.skipped && a.value !== null);
+      const simpleAnswers = applicable.filter(a => a.type !== 'typeahead');
+      if (simpleAnswers.length) filled += await frame.evaluate(`(${APPLY_FN_SRC})(${JSON.stringify(simpleAnswers)})`).catch(() => 0);
+      for (const a of applicable.filter(a => a.type === 'typeahead')) await applyTypeaheadAnswer(page, a);
     }
     // Legacy fallback sweep for any inputs discovery missed
-    n += await fillContext(frame, autofillData, labelMap);
+    filled += await fillContext(frame, autofillData, labelMap);
   }
-  return n;
+  return { filled, answers: collected };
 }
 
 // -- Helpers -------------------------------------------------------------------
@@ -596,8 +932,16 @@ async function fillContext(pageOrFrame, autofillData, labelMap) {
     // FILL_FN_SRC is an anonymous function expression -- invoke as IIFE with args.
     // Named function expressions (function foo(){}) have their name scoped only
     // inside the body; calling foo() after the expression would ReferenceError.
+    // Guards are serialised as regex SOURCES and rebuilt in-page; the policy itself stays defined
+    // once, in Node, where it is unit-testable.
+    const guards = {
+      eligibility:   ELIGIBILITY_PATTERNS.map(([cls, re]) => [cls, re.source]),
+      canonicalKeys: ELIGIBILITY_CANONICAL_KEYS,
+      thirdPartyRe:  THIRD_PARTY_SUBJECT_RE.source,
+      identityKeyRe: IDENTITY_KEY_RE.source,
+    };
     return await pageOrFrame.evaluate(
-      `(${FILL_FN_SRC})(${JSON.stringify(autofillData)}, ${JSON.stringify(labelMap)})`
+      `(${FILL_FN_SRC})(${JSON.stringify(autofillData)}, ${JSON.stringify(labelMap)}, ${JSON.stringify(guards)})`
     );
   } catch (e) {
     console.warn("[applyAutomation] fillContext error:", e.message);
@@ -755,15 +1099,16 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     inProgress.set(String(jobId), { status: "filling", browser });
 
     let totalFilled = 0;
-    const fillAllFrames = async () => {
-      totalFilled += await fillContext(page, autofillData, labelMap);
-      for (const frame of page.frames()) {
-        if (frame === page.mainFrame()) continue;
-        totalFilled += await fillContext(frame, autofillData, labelMap);
-      }
+    // Answers accumulate across every step so the low-confidence gate below sees the whole run,
+    // not just the last page. (A dead `fillAllFrames` closure sat here — defined, never called.)
+    const resolvedAnswers = [];
+    const runDiscovery = async () => {
+      const r = await discoverAndFill(page, frameList(page), detected, autofillData, labelMap);
+      totalFilled += r.filled;
+      resolvedAnswers.push(...r.answers);
     };
 
-    totalFilled += await discoverAndFill(page, [page, ...page.frames()], detected, autofillData, labelMap);
+    await runDiscovery();
 
     // Resolve effective resume path -- await resumePathPromise if no direct path provided.
     // resumePathPromise is set by the apply worker when generation runs in parallel;
@@ -794,7 +1139,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // Multi-step pagination
     for (let step = 0; step < 8; step++) {
       if (!await clickNext(page)) break;
-      totalFilled += await discoverAndFill(page, [page, ...page.frames()], detected, autofillData, labelMap);
+      await runDiscovery();
       await handleTypedFileUploads(page, effectiveResumePath, effectiveCoverLetterPath);
     }
 
@@ -842,7 +1187,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     if (isFullAuto) {
       // Completeness gate: re-discover all frames; hold if any required non-file field is still empty.
       const postFillFields = (await Promise.all(
-        [page, ...page.frames()].map(f => discoverFields(f, detected).catch(() => []))
+        frameList(page).map(f => discoverFields(f, detected).catch(() => []))
       )).flat();
       const missingRequired = postFillFields
         .filter(f => f.is_required && f.type !== 'file' && (f.current_value === '' || f.current_value == null))
@@ -858,10 +1203,41 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
           flowState:        'form_ready',
           fieldsFilled:     totalFilled,
           missingRequired,
+          answers:          resolvedAnswers,
           platform:         detected,
           pageTitle:        pageTitle2,
           screenshotBase64: ss2.base64,
           screenshotPath:   ss2.path,
+        };
+      }
+
+      // Low-confidence gate (requirement 5): a label_fuzzy answer is a guess, and this pipeline
+      // submits under a real candidate's name. Hold for a human instead of auto-submitting, and
+      // name the answers that caused it. Same flag-don't-fabricate rule as the resume failsafe,
+      // applied where the stakes are higher.
+      const lowConfidence = lowConfidenceAnswers(resolvedAnswers);
+      if (lowConfidence.length > 0) {
+        const pageTitle3 = await page.title().catch(() => '');
+        const ss3 = await takeScreenshot(page, jobId);
+        inProgress.set(String(jobId), { status: 'held_review', browser: null });
+        await browser.close();
+        return {
+          status:           'held_review',
+          reasonCode:       'low_confidence_answers',
+          flowState:        'form_ready',
+          fieldsFilled:     totalFilled,
+          lowConfidence:    lowConfidence.map(a => ({
+            field: a.label || a.name || a.field_id,
+            value: a.value,
+            provenance: a.provenance,
+            confidence: a.confidence,
+            matched_on: a.matched_on,
+          })),
+          answers:          resolvedAnswers,
+          platform:         detected,
+          pageTitle:        pageTitle3,
+          screenshotBase64: ss3.base64,
+          screenshotPath:   ss3.path,
         };
       }
 
@@ -901,6 +1277,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       flowState,
       platform: detected,
       fieldsFilled: totalFilled,
+      answers: resolvedAnswers,
       pageTitle,
       screenshotBase64: ss.base64,
       screenshotPath:   ss.path,
