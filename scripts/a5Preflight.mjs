@@ -21,6 +21,7 @@ const arg = (name) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? arg
 const LIST = argv.includes("--list");
 const USER_ID = Number(arg("user") || 0) || null;
 const JOB_ID = arg("job");
+const ALLOW_FIXTURE = argv.includes("--allow-fixture");
 
 if (!fs.existsSync(DB_PATH)) { console.error(`No database at ${DB_PATH}`); process.exit(1); }
 // Read-only: a preflight must not be able to change the thing it is inspecting.
@@ -89,11 +90,17 @@ if (!user) {
 
   // A5 submits under a REAL candidate's name. A fixture identity reaching a real employer is a junk
   // application against that company, and it is not a test of anything either.
-  const FIXTURE = /\b(test|smoke|fixture|sample|demo|foo|bar|qa)\b/i;
+  const FIXTURE = /\b(test|smoke|fixture|sample|demo|foo|bar|qa|john doe|jane doe)\b/i;
   const FIXTURE_EMAIL = /@(example|test|invalid|localhost)\.|^$/i;
   if (FIXTURE.test(name) || FIXTURE.test(p.email || "") || FIXTURE_EMAIL.test(p.email || "")) {
-    stop("the account looks like a TEST FIXTURE, not a real candidate",
-      `name="${name}" email="${p.email || ""}" — A5 submits under a real name to a real employer`);
+    // --allow-fixture is a CONSCIOUS override, not a bypass: the check still fires and still prints.
+    // What it protects against is an ACCIDENTAL fixture submission, and an explicit flag is not that.
+    (ALLOW_FIXTURE ? warn : stop)(
+      "the account is a FABRICATED identity, not a real candidate",
+      `name="${name}" email="${p.email || ""}"` +
+      (ALLOW_FIXTURE
+        ? " — overridden with --allow-fixture. Anything submitted lands in a real employer's pipeline under this name."
+        : " — A5 submits under a real name to a real employer. Pass --allow-fixture to proceed deliberately."));
   } else {
     ok(`candidate identity looks real`, `${name} <${p.email}>`);
   }
