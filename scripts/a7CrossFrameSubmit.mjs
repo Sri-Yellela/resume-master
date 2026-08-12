@@ -53,11 +53,19 @@ check("the evidence came from the frame, not the main document",
 check("exactly one submission reached the ATS", wdSubs.count === 1, `count=${wdSubs.count}`);
 check("it was the real application form", providers.includes("workday"), JSON.stringify(providers));
 
-const fields = wdSubs.submissions.find(s => s.provider === "workday")?.fields || {};
+const wdRecord = wdSubs.submissions.find(s => s.provider === "workday") || {};
+const fields = wdRecord.fields || {};
 check("the embedded form's fields were filled correctly",
   fields.firstName === "Ada" && fields.lastName === "Lovelace" && fields.workAuthorization === "Yes",
   JSON.stringify(fields));
-check("and the resume reached the frame's file input", !!fields.resumeUpload, fields.resumeUpload || "(none)");
+
+// The form now posts multipart, so the resume is a real upload with a size, not a bare filename
+// echoed back by a urlencoded post. `files.resumeUpload === null` means the input was present and
+// left EMPTY — the failure this assertion previously could not see.
+const upload = (wdRecord.files || {}).resumeUpload;
+check("and the resume reached the frame's file input",
+  !!upload && upload.size > 0,
+  upload ? `${upload.filename} (${upload.size} bytes, ${upload.contentType})` : "(no file chosen)");
 
 // ── 2. an untouched third-party frame is never submitted ─────────────────────
 console.log("\n=== the decoy third-party frame ===");
