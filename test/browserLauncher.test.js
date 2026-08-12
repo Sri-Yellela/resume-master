@@ -102,6 +102,48 @@ test("launchBrowser uses resolveBrowserExecutable's validated path, not a raw en
     "launchBrowser must not re-read the raw env var, bypassing resolution's existsSync check");
 });
 
+test("the readiness probe resolves the same way launchBrowser does — they cannot diverge", () => {
+  // A4 restates the bug as "readiness reports healthy via fallback while real launches fail". That
+  // signature requires the probe and the launch to resolve DIFFERENTLY. The guard above covers
+  // launchBrowser only, so this covers the other half: the probe must also take resolution.path,
+  // and both must derive it from the one resolver. Verified behaviourally, with a stale env var, by
+  // scripts/a4BrowserResolution.mjs.
+  const probeStart = launcher.indexOf("export async function probeBrowserAvailability");
+  assert.ok(probeStart > 0, "probeBrowserAvailability must exist");
+  const probeEnd = launcher.indexOf("\n// ── Main launch API", probeStart);
+  const probeFn  = launcher.slice(probeStart, probeEnd > probeStart ? probeEnd : probeStart + 3000);
+
+  assert.match(probeFn, /await resolveBrowserExecutable\(\)/,
+    "the probe must resolve through resolveBrowserExecutable, not its own logic");
+  assert.match(probeFn, /executablePath:\s*resolution\.path/,
+    "the probe must launch the resolved path");
+  assert.doesNotMatch(probeFn, /executablePath:\s*process\.env\./,
+    "the probe must not re-read a raw env var either");
+
+  const launchStart = launcher.indexOf("export async function launchBrowser");
+  const launchFn = launcher.slice(launchStart, launcher.indexOf("\nexport async function launchBrowserPage"));
+  assert.match(launchFn, /await resolveBrowserExecutable\(\)/,
+    "launchBrowser must resolve through the same function as the probe");
+});
+
+test("a set-but-nonexistent executable path falls back instead of being trusted", () => {
+  // This existsSync guard inside the resolver is what makes the fallback possible at all: without
+  // it, a stale env var (a container package renaming chromium-browser -> chromium, which is the
+  // actual history here) would be returned as-is and every launch would fail with no recovery.
+  const resStart = launcher.indexOf("export async function resolveBrowserExecutable");
+  const resEnd   = launcher.indexOf("\n// ── Launch args", resStart);
+  const resFn    = launcher.slice(resStart, resEnd > resStart ? resEnd : resStart + 3000);
+
+  assert.match(resFn, /const envPath = process\.env\.PUPPETEER_EXECUTABLE_PATH \|\| process\.env\.BROWSER_EXECUTABLE_PATH/);
+  assert.match(resFn, /if \(fs\.existsSync\(envPath\)\) return/,
+    "the env path must be existence-checked before it is returned");
+  assert.match(resFn, /falling back to system paths/,
+    "and the fallback must be logged, so a stale override is diagnosable");
+  // The env branch must not be a bare early return that skips the rest of the search.
+  assert.doesNotMatch(resFn, /if \(envPath\) return \{ path: envPath/,
+    "an unchecked early return would reinstate the bug");
+});
+
 // ── Integration with apply automation ────────────────────────────────────────
 
 test("applyAutomation uses launchBrowser — no direct puppeteer.launch call", () => {
