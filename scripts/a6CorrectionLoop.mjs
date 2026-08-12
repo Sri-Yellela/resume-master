@@ -132,27 +132,26 @@ const check = (label, cond, extra = "") => {
 
 await resetAts();
 
-console.log("=== 1. first run HOLDS (the dead end the loop exists to fix) ===");
+console.log("\n=== 1. first run HOLDS (the dead end the loop exists to fix) ===");
 const first = await post("/api/apply/runs", { jobIds: ["gh1"], mode: "auto" }).then(r => r.json());
 await waitForRuns();
 const held = db.prepare("SELECT * FROM apply_run_jobs WHERE run_id=?").get(first.runId);
-check("job is held_review", held.status === "held_review", `status=${held.status} reason=${held.reason_code}`);
-check("hold reason is incomplete_form", held.reason_code === "incomplete_form");
+check("job is held_review", held.status === "held_review", "status=" + held.status + " reason=" + held.reason_code);
+// Either gate is a legitimate first hold. With step-scoped approval the run escalates BEFORE
+// typing anything when an early step contains a guess in a required field, so a form whose first
+// step has a low-confidence field reports low_confidence_answers rather than reaching the later
+// step that would have reported incomplete_form.
+check("hold reason is a recognised gate",
+  ["incomplete_form", "low_confidence_answers"].includes(held.reason_code), held.reason_code);
 check("no submission reached the ATS", (await atsCount()) === 0);
 check("open questions were persisted", !!held.open_questions_json);
 
 console.log("\n=== 2. the hold is now an answerable question set ===");
-const qs = await get("/api/apply/questions");
-console.log(JSON.stringify(qs.questions.map(q => ({ q: q.question, type: q.type, eligibility: q.eligibility, options: q.options?.map(o => o.value), refusals: q.refusals })), null, 2));
-check("questions are exposed", qs.questions.length >= 3, `${qs.questions.length} questions`);
-check("at least one is flagged as an eligibility attestation", qs.eligibilityCount >= 1, `${qs.eligibilityCount}`);
-check("the blocked job is named", qs.questions.every(q => q.blocking?.some(b => b.jobId === "gh1")));
-const sponsorship = qs.questions.find(q => /sponsorship/i.test(q.question));
-check("the sponsorship question carries its select options", (sponsorship?.options || []).length === 2,
-  JSON.stringify(sponsorship?.options));
-check("and explains that the resolver REFUSED rather than had nothing",
-  (sponsorship?.refusals || []).some(r => /eligibility_class/.test(r)), JSON.stringify(sponsorship?.refusals));
-check("all questions start unanswered", qs.questions.every(q => q.answered === false));
+const firstQs = await get("/api/apply/questions");
+console.log(JSON.stringify(firstQs.questions.map(q => ({ q: q.question, type: q.type, reason: q.reason, eligibility: q.eligibility })), null, 2));
+check("questions are exposed", firstQs.questions.length >= 1, firstQs.questions.length + " questions");
+check("the blocked job is named", firstQs.questions.every(q => q.blocking?.some(b => b.jobId === "gh1")));
+check("all questions start unanswered", firstQs.questions.every(q => q.answered === false));
 
 console.log("\n=== 3. answer, retry, repeat — until nothing is open ===");
 // A real LOOP: a hold can surface a SECOND round of questions, because the incomplete_form gate
@@ -167,10 +166,12 @@ const answerFor = (q) => {
   return q.options?.length ? q.options[0].value : "N/A";
 };
 
+const seen = new Map();
 let round = 0, lastRetryRunId = null;
 for (; round < 4; round++) {
   const open = await get("/api/apply/questions");
   if (open.questions.length === 0) break;
+  for (const q of open.questions) seen.set(q.question, q);
   const answers = Object.fromEntries(open.questions.map(q => [q.question, answerFor(q)]));
   console.log("  round " + (round + 1) + ": answering " + open.questions.length + " — " +
     open.questions.map(q => q.question.slice(0, 44) + " [" + q.reason + "]").join("; "));
@@ -181,6 +182,16 @@ for (; round < 4; round++) {
   await waitForRuns();
 }
 check("the loop converged in a small number of rounds", round >= 1 && round <= 3, round + " round(s)");
+
+// Asserted over the UNION of questions seen, not one round: which round surfaces which question is
+// an ordering detail of the gates, but every one of them must have been asked at some point.
+const all = [...seen.values()];
+check("the eligibility attestations were asked", all.filter(q => q.eligibility).length >= 2,
+  JSON.stringify(all.filter(q => q.eligibility).map(q => q.eligibility)));
+const sp = all.find(q => /require sponsorship/i.test(q.question));
+check("the sponsorship question was asked, with its select options", (sp?.options || []).length === 2, JSON.stringify(sp?.options));
+check("and it explained that the resolver REFUSED rather than had nothing",
+  (sp?.refusals || []).some(r => /eligibility_class/.test(r)), JSON.stringify(sp?.refusals));
 check("answers were persisted to custom_answers",
   Object.keys(JSON.parse(db.prepare("SELECT custom_answers FROM user_profile WHERE user_id=1").get().custom_answers)).length >= 3);
 check("no superseded hold is still offered for review",
@@ -209,9 +220,16 @@ const provenance = JSON.parse(retried?.answers_json || "[]");
 // the answers_resolved log event stores a normalised {field,...} shape. Read the raw keys here.
 const spAnswer = provenance.find(a => /require sponsorship/i.test(a.label || a.name || ""));
 check("audit trail records it as custom_answer, never a guess", spAnswer?.provenance === "custom_answer", JSON.stringify(spAnswer));
-check("nothing in the final submission was a low-confidence guess",
-  !provenance.some(a => a.provenance === "label_fuzzy"),
-  JSON.stringify(provenance.filter(a => a.provenance === "label_fuzzy").map(a => a.field)));
+// A guess must not be SUBMITTED. It may still appear in the audit flagged policy_rejected — that is
+// the step policy recording "left blank on purpose", a different fact from "never saw it".
+const submittedGuesses = provenance.filter(a => a.provenance === "label_fuzzy" && !a.policy_rejected);
+check("nothing SUBMITTED was a low-confidence guess", submittedGuesses.length === 0,
+  JSON.stringify(submittedGuesses.map(a => a.label || a.name)));
+const droppedGuesses = provenance.filter(a => a.policy_rejected);
+check("a guess in an optional field was dropped, not typed, and is recorded as such",
+  droppedGuesses.length >= 1, JSON.stringify(droppedGuesses.map(a => a.label + "=" + a.provenance)));
+check("and that optional field was left blank in the submission",
+  !recorded["job_application[preferred_name]"], JSON.stringify(recorded["job_application[preferred_name]"]));
 
 console.log("\n=== 5. no questions remain ===");
 const after = await get("/api/apply/questions");

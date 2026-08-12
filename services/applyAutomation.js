@@ -778,6 +778,10 @@ export function buildAnswers(fields, profilePayload) {
       name: field.name,
       type: field.type,
       label,
+      // Carried so a policy layer can tell "a guess in a field the form demands" (which must stop
+      // the run) from "a guess in an optional field" (which can simply be left alone).
+      required: !!field.is_required,
+      options: Array.isArray(field.options) ? field.options : [],
       value,
       typeahead_selection,
       provenance,
@@ -811,6 +815,74 @@ export function formatDateForHint(value, hintText) {
   if (!iso) return String(value);
   const [, y, mo, d] = iso;
   return m[1] ? `${mo}/${d}/${y}` : `${d}/${mo}/${y}`;
+}
+
+// -- Step-scoped answer approval -----------------------------------------------
+//
+// Every step of a form emits a resolved answer set, and a policy decides what happens to it BEFORE
+// anything is typed. Previously all policy ran at the END of a run: by the time the low-confidence
+// gate said "this is a guess, hold", the guess had already been typed into steps 1..N of a real
+// employer's form and "Next" had been clicked through them. Deciding per step means a run that is
+// going to be held is held before it writes anything.
+//
+// The seam is injectable (`autoApply(..., { answerPolicy })`), which is the hook a confirmation UI
+// or a hosted provider would plug into: it receives the step's answers and returns what to do.
+//
+//   approve  — fill these answers
+//   reject   — do not fill these, but continue (a guess in an OPTIONAL field: leaving it blank is
+//              more truthful than typing something we do not know)
+//   escalate — stop the run now and hand back to a human, before typing anything on this step
+//
+// A policy receives { step, mode, provider, url, answers, fields } and returns
+// { approved?, rejected?, escalate?, reason? }. Omitted fields default to "approve everything".
+
+export const POLICY_ACTIONS = { APPROVE: 'approve', REJECT: 'reject', ESCALATE: 'escalate' };
+
+/**
+ * The default policy, derived from what A1–A3 established.
+ *
+ * semi mode approves everything: a human is looking at the form, and pre-filling a guess for them
+ * to correct is the entire point of semi. Full-auto has no such reviewer, so a guess is either
+ * stopped (required field — the form cannot proceed without it, so ask with the proposal) or
+ * dropped (optional field — continue, leave it blank rather than fabricate).
+ */
+export function defaultAnswerPolicy({ mode = 'full', answers = [] } = {}) {
+  const fillable = answers.filter(a => !a.skipped && a.value !== null);
+  if (mode !== 'full') return { approved: fillable };
+
+  const guesses = fillable.filter(a => (a.confidence ?? 0) < AUTO_SUBMIT_MIN_CONFIDENCE);
+  if (guesses.length === 0) return { approved: fillable };
+
+  const blocking = guesses.filter(a => a.required);
+  if (blocking.length > 0) {
+    return {
+      approved: [],
+      escalate: true,
+      reason: 'low_confidence_answers',
+      escalated: blocking,
+      // Optional guesses are named too, so the caller can see everything the step was unsure about
+      // rather than only the part that stopped it.
+      rejected: guesses.filter(a => !a.required),
+    };
+  }
+  return {
+    approved: fillable.filter(a => !guesses.includes(a)),
+    rejected: guesses,
+    reason: 'low_confidence_optional',
+  };
+}
+
+/** Normalise whatever a policy returned into a decision this module can act on. */
+export function normalisePolicyDecision(decision, fillable) {
+  if (!decision || typeof decision !== 'object') return { approved: fillable, rejected: [], escalate: false };
+  const approved = Array.isArray(decision.approved) ? decision.approved : fillable;
+  return {
+    approved,
+    rejected: Array.isArray(decision.rejected) ? decision.rejected : [],
+    escalate: decision.escalate === true,
+    reason: decision.reason || null,
+    escalated: Array.isArray(decision.escalated) ? decision.escalated : [],
+  };
 }
 
 /**
@@ -876,9 +948,17 @@ export function buildOpenQuestions({ missingFields = [], lowConfidence = [] } = 
   return questions;
 }
 
-/** Answers that may not be auto-submitted in mode:'full' (requirement 5). */
+/**
+ * Answers that may not be auto-submitted in mode:'full' (requirement 5).
+ *
+ * `policy_rejected` answers are excluded: the step policy declined to type them, so they are not
+ * part of the submission and cannot make it unsafe. Counting them held runs over a guess that had
+ * already been dropped — which meant an optional field the policy correctly left blank kept
+ * re-opening as a question that answering could never close.
+ */
 export function lowConfidenceAnswers(answers) {
-  return (answers || []).filter(a => !a.skipped && a.value !== null && (a.confidence ?? 0) < AUTO_SUBMIT_MIN_CONFIDENCE);
+  return (answers || []).filter(a =>
+    !a.skipped && !a.policy_rejected && a.value !== null && (a.confidence ?? 0) < AUTO_SUBMIT_MIN_CONFIDENCE);
 }
 
 // -- applyTypeaheadAnswer ------------------------------------------------------
@@ -998,25 +1078,67 @@ export function frameList(page) {
   return frames.includes(page.mainFrame()) ? frames : [page.mainFrame(), ...frames];
 }
 
-async function discoverAndFill(page, frames, provider, autofillData, labelMap) {
+async function discoverAndFill(page, frames, provider, autofillData, labelMap, opts = {}) {
+  const { policy = defaultAnswerPolicy, mode = 'full', step = 0 } = opts;
   let filled = 0;
   const collected = [];
+  const rejected = [];
+
   for (const frame of frames) {
     const fields = await discoverFields(frame, provider);
     if (fields.length) {
       const answers = buildAnswers(fields, autofillData);
       collected.push(...answers);
+
       // Refusal records carry value:null and must never reach the page — the generic branch of
       // APPLY_FN_SRC would stringify null into the field.
-      const applicable = answers.filter(a => !a.skipped && a.value !== null);
-      const simpleAnswers = applicable.filter(a => a.type !== 'typeahead');
+      const fillable = answers.filter(a => !a.skipped && a.value !== null);
+
+      // ── The approval seam. Nothing is typed before this returns. ──
+      let decision;
+      try {
+        decision = normalisePolicyDecision(
+          await policy({ step, mode, provider, url: page.url(), answers, fields, fillable }),
+          fillable,
+        );
+      } catch (e) {
+        // A policy that throws must not silently become "approve everything" — that would turn a
+        // broken confirmation hook into an unreviewed submission. Escalate instead.
+        console.warn('[applyAutomation] answer policy threw — escalating:', e.message);
+        decision = { approved: [], rejected: [], escalate: true, reason: 'policy_error', escalated: fillable };
+      }
+
+      // Tag on the answer objects themselves — `collected` holds the same references, so the
+      // end-of-run gate can tell a dropped guess from a submitted one.
+      for (const a of decision.rejected) a.policy_rejected = true;
+      if (decision.rejected.length) rejected.push(...decision.rejected);
+
+      if (decision.escalate) {
+        return {
+          filled,
+          answers: collected,
+          rejected,
+          escalation: {
+            reason: decision.reason || 'policy_escalation',
+            step,
+            answers: decision.escalated.length ? decision.escalated : fillable,
+          },
+        };
+      }
+
+      const approved = decision.approved;
+      const simpleAnswers = approved.filter(a => a.type !== 'typeahead');
       if (simpleAnswers.length) filled += await frame.evaluate(`(${APPLY_FN_SRC})(${JSON.stringify(simpleAnswers)})`).catch(() => 0);
-      for (const a of applicable.filter(a => a.type === 'typeahead')) await applyTypeaheadAnswer(page, a);
+      for (const a of approved.filter(a => a.type === 'typeahead')) await applyTypeaheadAnswer(page, a);
     }
-    // Legacy fallback sweep for any inputs discovery missed
+    // Legacy fallback sweep for any inputs discovery missed.
+    // NOTE: this path is NOT policy-gated — it fills by attribute/label heuristics inside the page
+    // and never produces an answer object to approve. Its A2 guards (eligibility class, third-party
+    // subject, whole-token matching) are what keep it in bounds. Bringing it under the policy would
+    // mean porting it to the buildAnswers path, which is its own change.
     filled += await fillContext(frame, autofillData, labelMap);
   }
-  return { filled, answers: collected };
+  return { filled, answers: collected, rejected, escalation: null };
 }
 
 // -- Helpers -------------------------------------------------------------------
@@ -1148,6 +1270,10 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     coverLetterPathPromise   = null,
     jobId             = `tmp_${Date.now()}`,
     storageStatePath  = null,
+    // Step-scoped approval hook. Receives each step's resolved answer set BEFORE anything is typed
+    // and returns { approved?, rejected?, escalate?, reason? }. This is the seam a confirmation UI
+    // or a hosted provider plugs into; defaultAnswerPolicy is the built-in behaviour.
+    answerPolicy      = defaultAnswerPolicy,
   } = options;
 
   const isFullAuto = mode === "full";
@@ -1195,10 +1321,17 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // Answers accumulate across every step so the low-confidence gate below sees the whole run,
     // not just the last page. (A dead `fillAllFrames` closure sat here — defined, never called.)
     const resolvedAnswers = [];
+    const rejectedAnswers = [];
+    let escalation = null;
+    let stepIndex = 0;
     const runDiscovery = async () => {
-      const r = await discoverAndFill(page, frameList(page), detected, autofillData, labelMap);
+      const r = await discoverAndFill(page, frameList(page), detected, autofillData, labelMap,
+        { policy: answerPolicy, mode: isFullAuto ? 'full' : 'semi', step: stepIndex++ });
       totalFilled += r.filled;
       resolvedAnswers.push(...r.answers);
+      if (r.rejected?.length) rejectedAnswers.push(...r.rejected);
+      if (r.escalation) escalation = r.escalation;
+      return !r.escalation;
     };
 
     await runDiscovery();
@@ -1229,11 +1362,48 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
     await handleTypedFileUploads(page, effectiveResumePath, effectiveCoverLetterPath);
 
-    // Multi-step pagination
-    for (let step = 0; step < 8; step++) {
+    // Multi-step pagination. A step that escalates stops the walk: advancing further would mean
+    // clicking through an employer's form on the strength of an answer we already decided a human
+    // has to see.
+    for (let step = 0; step < 8 && !escalation; step++) {
       if (!await clickNext(page)) break;
-      await runDiscovery();
+      if (!await runDiscovery()) break;
       await handleTypedFileUploads(page, effectiveResumePath, effectiveCoverLetterPath);
+    }
+
+    // Step-scoped escalation. Reported before the ATS and completeness gates because it happened
+    // FIRST, chronologically — during the fill — and because nothing was typed for the offending
+    // step. The shape deliberately matches the end-of-run low-confidence hold, so A3's audit
+    // persistence and the correction loop consume it unchanged.
+    if (isFullAuto && escalation) {
+      const escalatedAsQuestions = escalation.answers.map(a => ({
+        field: a.label || a.name || a.field_id, name: a.name, field_id: a.field_id,
+        type: a.type, value: a.value, provenance: a.provenance, confidence: a.confidence,
+      }));
+      const pageTitleE = await page.title().catch(() => "");
+      const ssE = await takeScreenshot(page, jobId);
+      inProgress.set(String(jobId), { status: "held_review", browser: null });
+      await browser.close();
+      return {
+        status:           "held_review",
+        reasonCode:       escalation.reason,
+        flowState:        "form_ready",
+        fieldsFilled:     totalFilled,
+        lowConfidence:    escalation.answers.map(a => ({
+          field: a.label || a.name || a.field_id,
+          value: a.value, provenance: a.provenance, confidence: a.confidence, matched_on: a.matched_on,
+        })),
+        openQuestions:    buildOpenQuestions({ lowConfidence: escalatedAsQuestions }),
+        answers:          resolvedAnswers,
+        rejectedAnswers:  rejectedAnswers.map(a => ({
+          field: a.label || a.name || a.field_id, provenance: a.provenance, confidence: a.confidence,
+        })),
+        policyEscalation: { step: escalation.step, reason: escalation.reason },
+        platform:         detected,
+        pageTitle:        pageTitleE,
+        screenshotBase64: ssE.base64,
+        screenshotPath:   ssE.path,
+      };
     }
 
     // ATS gate: if a resumePathPromise was provided but resolved to null (generation failed,
@@ -1427,6 +1597,13 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       platform: detected,
       fieldsFilled: totalFilled,
       answers: resolvedAnswers,
+      // Guesses the policy declined to type into optional fields. Recorded rather than dropped
+      // silently: "we left this blank on purpose" is a different fact from "we never saw it".
+      ...(rejectedAnswers.length ? {
+        rejectedAnswers: rejectedAnswers.map(a => ({
+          field: a.label || a.name || a.field_id, provenance: a.provenance, confidence: a.confidence,
+        })),
+      } : {}),
       submitVerified,
       submitEvidence,
       ...(submitReasonCode ? { reasonCode: submitReasonCode } : {}),
