@@ -1,4 +1,4 @@
-// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -88,7 +88,11 @@ test("resume sandbox layout keeps scroll ownership inside the preview pane", () 
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
   const sandbox = fs.readFileSync("client/src/panels/SandboxPanel.jsx", "utf8");
 
-  assert.match(sandbox, /minHeight:0, minWidth:0, background:theme\.bg/);
+  // The background moved from the theme.bg JS token to the var(--color-bg) CSS custom property.
+  // That is incidental to this test, which is about SCROLL OWNERSHIP â€” the minHeight:0/minWidth:0
+  // pair on the flex column is what stops the pane from growing past its parent and handing the
+  // scrollbar to the page. Asserting that pair, not the paint.
+  assert.match(sandbox, /flexDirection:"column", height:"100%", minHeight:0, minWidth:0/);
   assert.match(sandbox, /flex:1,\s*[\s\S]*minHeight:0,\s*[\s\S]*overflowY: "auto"/);
   assert.match(jobsPanel, /PanelGroup orientation="horizontal" style=\{\{ flex: 1, minHeight:0, minWidth:0, overflow: "hidden" \}\}/);
   assert.match(jobsPanel, /style=\{\{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden"/);

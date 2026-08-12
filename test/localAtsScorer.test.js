@@ -1,4 +1,4 @@
-// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -90,7 +90,14 @@ test("ATS missing chips add profile-scoped inactive suggestions without mutating
   assert.match(routes, /router\.post\("\/:id\/suggestions"/);
   assert.match(routes, /addProfileSignalSuggestions/);
   assert.doesNotMatch(routes, /profile_base_resumes[\s\S]{0,120}suggestions/);
-  assert.match(panel, /kind, labels: \[label\]/);
+  // The { kind, labels: [label] } request body moved out of ATSPanel into the shared
+  // client/src/lib/profileSuggestions.js helpers (addSkillToProfile / addVerbToProfile), which
+  // the panel now calls. Asserting the payload where it is actually built, so the contract with
+  // POST /:id/suggestions is still pinned rather than dropped.
+  const suggestionsLib = fs.readFileSync("client/src/lib/profileSuggestions.js", "utf8");
+  assert.match(suggestionsLib, /body: JSON\.stringify\(\{ kind, labels: \[label\] \}\)/);
+  assert.match(panel, /await addVerbToProfile\(clickableProfileId, label\)/);
+  assert.match(panel, /await addSkillToProfile\(clickableProfileId, label\)/);
   assert.match(panel, /addSuggestion\("skill", item\)/);
   assert.match(panel, /addSuggestion\("action_verb", item\)/);
   assert.match(profilePanel, /Inactive ATS-Suggested Action Verbs/);
