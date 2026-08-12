@@ -360,6 +360,12 @@ survive but every remaining call site passes `scrapeParams.threadId`, i.e. all o
 the retired crawl; `activeScrapes`, `scrapeStateKey` and `mapPostedLimit` likewise. Removing
 `scrapeJobs` is its own scoped change because of those two live entry points.
 
+Two more surfaced while fixing the test baseline: `isExternalScrapeQuotaError` (server.js:5590),
+called only from `scrapeJobs` and the cron re-scrape path; and `buildProfileScrapeRequest`
+(JobsPanel.jsx:75), which is defined but has **no callers** now that the client never posts to
+`/api/scrape`. The client-side one is independently removable — it has no live entry point at all,
+unlike the server cluster.
+
 **Baseline movement, as predicted:** 44 → 43 (5.3/5.4) → **38** (5.1/5.7). Nine failures cleared,
 all of them assertions pinned to the pre-pivot architecture. `/api/scrape` returning HTTP 410
 *"External scraping has been removed"* is what settled that those could never be repaired.
