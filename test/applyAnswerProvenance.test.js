@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildAnswers, lowConfidenceAnswers, sanitizeDiscoveredFields,
   coerceAffirmative, eligibilityClassOf, matchesWholeToken, invertsKey,
-  refuseReason, formatDateForHint,
+  refuseReason, formatDateForHint, isExactLabelMatch,
   PROVENANCE, CONFIDENCE_BY_PROVENANCE, AUTO_SUBMIT_MIN_CONFIDENCE, CLEAR_FIRST_MIN_CONFIDENCE,
 } from "../services/applyAutomation.js";
 
@@ -74,16 +74,20 @@ test("every answer carries the rule that produced it, with a confidence", () => 
     field({ field_id: "a", name: "a", label: "First Name", handler_type: "first-name", handler_source: "attr" }),
     field({ field_id: "b", name: "b", label: "Last Name",  handler_type: "last-name",  handler_source: "attr" }),
     field({ field_id: "c", name: "c", label: "Current company" }),
+    field({ field_id: "e", name: "e", label: "Your city of residence" }),
     field({ field_id: "d", name: "d", label: "How did you hear about us? (free text)" }),
   ];
   const answers = buildAnswers(fields, {
     handler_map:    { "first-name": "Ada" },
-    field_map:      { last_name: "Lovelace", current_company: "Analytical Engines Ltd" },
+    field_map:      { last_name: "Lovelace", current_company: "Analytical Engines Ltd", city: "Boston" },
     custom_answers: { "How did you hear about us?": "Your engineering blog" },
   });
 
+  // "Current company" IS current_company normalised -> label_exact. "Your city of residence" merely
+  // contains `city` as a token -> label_fuzzy, still a guess.
   assert.deepEqual(answers.map(a => a.provenance), [
-    PROVENANCE.HANDLER_EXACT, PROVENANCE.FIELD_MAP_EXACT, PROVENANCE.LABEL_FUZZY, PROVENANCE.CUSTOM_ANSWER,
+    PROVENANCE.HANDLER_EXACT, PROVENANCE.FIELD_MAP_EXACT, PROVENANCE.LABEL_EXACT,
+    PROVENANCE.LABEL_FUZZY, PROVENANCE.CUSTOM_ANSWER,
   ]);
   for (const a of answers) {
     assert.equal(a.confidence, CONFIDENCE_BY_PROVENANCE[a.provenance], `${a.label} confidence`);
@@ -96,13 +100,20 @@ test("clear_first is granted only to exact-path answers, so a guess cannot wipe 
   const fields = [
     field({ field_id: "a", name: "a", label: "Email", handler_type: "email", handler_source: "attr" }),
     field({ field_id: "b", name: "b", label: "Current company" }),
+    field({ field_id: "c", name: "c", label: "Your city of residence" }),
   ];
-  const [exact, fuzzy] = buildAnswers(fields, {
-    field_map: { email: "ada@example.com", current_company: "Analytical Engines Ltd" },
+  const [exact, labelExact, fuzzy] = buildAnswers(fields, {
+    field_map: { email: "ada@example.com", current_company: "Analytical Engines Ltd", city: "Boston" },
   });
   assert.equal(exact.clear_first, true);
+  // A label match may FILL a blank field but never overwrite: the ATS's own parse of the uploaded
+  // resume is at least as trustworthy as a label string. This is why label_exact sits at 0.85 and
+  // not 0.9 — it clears the auto-submit floor without earning clear_first.
+  assert.equal(labelExact.provenance, PROVENANCE.LABEL_EXACT);
+  assert.equal(labelExact.clear_first, false, "an exact LABEL match must still not overwrite");
   assert.equal(fuzzy.clear_first, false, "a label_fuzzy answer must not overwrite an existing value");
   assert.ok(fuzzy.confidence < CLEAR_FIRST_MIN_CONFIDENCE);
+  assert.ok(labelExact.confidence < CLEAR_FIRST_MIN_CONFIDENCE);
 });
 
 // ── Fuzzy matching restrictions (requirement 2) ──────────────────────────────
@@ -204,19 +215,57 @@ test("label_fuzzy answers are below the auto-submit floor and are reported", () 
   const fields = [
     field({ field_id: "a", name: "a", label: "Email", handler_type: "email", handler_source: "attr" }),
     field({ field_id: "b", name: "b", label: "Current company" }),
+    field({ field_id: "c", name: "c", label: "Your city of residence" }),
   ];
   const answers = buildAnswers(fields, {
-    field_map: { email: "ada@example.com", current_company: "Analytical Engines Ltd" },
+    field_map: { email: "ada@example.com", current_company: "Analytical Engines Ltd", city: "Boston" },
   });
   const low = lowConfidenceAnswers(answers);
-  assert.equal(low.length, 1);
+  assert.equal(low.length, 1, "only the genuine guess holds the run");
   assert.equal(low[0].provenance, PROVENANCE.LABEL_FUZZY);
+  assert.equal(low[0].label, "Your city of residence");
   assert.ok(CONFIDENCE_BY_PROVENANCE.label_fuzzy < AUTO_SUBMIT_MIN_CONFIDENCE,
     "the whole point: a guess must not clear the auto-submit floor");
   assert.ok(CONFIDENCE_BY_PROVENANCE.custom_answer >= AUTO_SUBMIT_MIN_CONFIDENCE,
     "the user's own answer to a question is not a guess");
+  assert.ok(CONFIDENCE_BY_PROVENANCE.label_exact >= AUTO_SUBMIT_MIN_CONFIDENCE,
+    "an exact label match is not a guess either — this is what stops ordinary forms holding");
   // Refusal records are not answers and must not trigger a hold on their own.
   assert.equal(lowConfidenceAnswers([{ skipped: true, refusals: ["x"], confidence: 0 }]).length, 0);
+});
+
+test("label_exact does not relax any guard", () => {
+  // The worry with a higher-confidence label tier is that it becomes a new route into eligibility
+  // fields. It is not: every guard runs before provenance is assigned.
+  assert.equal(isExactLabelMatch("Current company", "current_company"), true);
+  assert.equal(isExactLabelMatch("  CURRENT   COMPANY ", "current_company"), true, "normalised, not literal");
+  assert.equal(isExactLabelMatch("Current company name", "current_company"), false, "a superset is a guess");
+  assert.equal(isExactLabelMatch("company", "current_company"), false, "a subset is not a match at all");
+
+  // An eligibility field CAN be answered by an exact label match — but only by a canonical key,
+  // which is the same rule as every other path.
+  const sponsorship = [field({
+    field_id: "s", name: "s", type: "select", is_required: true, label: "Requires sponsorship",
+  })];
+  const allowed = buildAnswers(sponsorship, { field_map: { requires_sponsorship: "No" } });
+  assert.equal(allowed[0].value, "No");
+  assert.equal(allowed[0].provenance, PROVENANCE.LABEL_EXACT);
+  assert.ok(allowed[0].confidence >= AUTO_SUBMIT_MIN_CONFIDENCE);
+
+  // The A1 trap label is NOT an exact match for work_authorization, and is refused by class — the
+  // new tier changes nothing about it. (Full cover in the sponsorship-inversion test above.)
+  const trap = [field({
+    field_id: "t", name: "t", type: "select", is_required: true,
+    label: "Do you now or in the future require sponsorship for work authorization?",
+  })];
+  const refused = buildAnswers(trap, { field_map: { work_authorization: "Yes" } });
+  assert.ok(refused[0]?.skipped, "still refused");
+  assert.deepEqual(refused[0].refusals, ["work_authorization:eligibility_class:sponsorship"]);
+
+  // A third-party subject still refuses an identity key regardless of how well the label matches.
+  const referrerName = [field({ field_id: "r2", name: "r2", label: "Referrer name" })];
+  assert.ok(buildAnswers(referrerName, { field_map: { name: "Ada Lovelace" } })[0]?.skipped,
+    "identity keys stay refused on a third-party label");
 });
 
 // ── Date formatting (A1 trap 6) ─────────────────────────────────────────────

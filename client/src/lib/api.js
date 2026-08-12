@@ -83,6 +83,22 @@ function cleanPayload(value) {
   return value;
 }
 
+/**
+ * Pick the most human error text an error body offers.
+ *
+ * `error` is a MACHINE CODE on the newer endpoints ("daily_cap_exceeded", "full_auto_disabled",
+ * "upgrade_required") with the sentence in `message`. Preferring `error` therefore surfaced the raw
+ * code to the user, which reads like a crash rather than an explanation — the apply cap said
+ * "daily_cap_exceeded" instead of "Daily application cap reached: 2 of 3 used in the last 24h".
+ * Older endpoints put the sentence in `error` and send no `message`, so that stays the fallback,
+ * and the generic copy is used only when the body carries neither.
+ */
+function errorMessage(payload, fallback) {
+  const message = typeof payload?.message === "string" ? payload.message.trim() : "";
+  const error   = typeof payload?.error   === "string" ? payload.error.trim()   : "";
+  return message || error || fallback;
+}
+
 export async function api(path, opts = {}) {
   const bodyIsForm = typeof FormData !== "undefined" && opts.body instanceof FormData;
   const headers = authHeaders({
@@ -97,7 +113,7 @@ export async function api(path, opts = {}) {
   if (r.status === 401) {
     const payload = await r.json().catch(() => ({}));
     if (path === "/api/auth/login") {
-      throw Object.assign(new Error(payload.error || "Invalid credentials."), { status: 401, payload });
+      throw Object.assign(new Error(errorMessage(payload, "Invalid credentials.")), { status: 401, payload });
     }
     // Clear the stale auth context so subsequent requests don't keep sending it.
     // After server-side Fix 1 (requireAuth honors authContextToken), a 401 only
@@ -113,16 +129,16 @@ export async function api(path, opts = {}) {
   }
   if (r.status === 429) {
     const payload = await r.json().catch(() => ({}));
-    throw Object.assign(new Error(payload.error || "Too many requests. Try again shortly."), { status: 429, payload });
+    throw Object.assign(new Error(errorMessage(payload, "Too many requests. Try again shortly.")), { status: 429, payload });
   }
   if (r.status >= 500) {
     const payload = await r.json().catch(() => ({}));
-    throw Object.assign(new Error(payload.error || "Service temporarily unavailable. Try again shortly."), { status: r.status, payload });
+    throw Object.assign(new Error(errorMessage(payload, "Service temporarily unavailable. Try again shortly.")), { status: r.status, payload });
   }
   const ct = r.headers.get("content-type") || "";
   if (ct.includes("application/pdf") || ct.includes("spreadsheetml") || ct.includes("octet-stream")) return r;
   const payload = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(payload.error || `Request failed (${r.status})`), { status: r.status, payload });
+  if (!r.ok) throw Object.assign(new Error(errorMessage(payload, `Request failed (${r.status})`)), { status: r.status, payload });
   return cleanPayload(payload);
 }
 

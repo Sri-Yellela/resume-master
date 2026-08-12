@@ -76,14 +76,26 @@ anyone who finds them.
 
 ## Findings for the next task
 
-**The clear errors do not reach the user.** `client/src/lib/api.js` special-cases **429** and **≥500**
-and replaces the body's message with generic copy ("Too many requests. Try again shortly." /
-"Service temporarily unavailable."). So the cap's *"Daily application cap reached: 2 of 3 used"* and
-the kill switch's *"Automatic submission is currently disabled"* are both flattened before
-`JobsPanel.startApplyRun`'s catch sees them — it reads only `e.payload?.missingPrerequisites` or
-`e.message`. Requirement 2's "clear error, never a silent drop" holds **server-side**; the UI shows
-generic text. The fix is one line in that catch (prefer `e.payload?.message || e.payload?.error`),
-but it is user-visible copy, so per the standing conventions it **needs sign-off** and is not done here.
+**The clear errors did not reach the user — FIXED, and the mechanism was worse than described here.**
+
+This entry originally said `api.js` "replaces the body's message with generic copy". That was wrong:
+`payload.error` was already *preferred* at every throw site, and the generic copy was only a fallback.
+The real defect was worse. The guards answer with a machine code in `error` and the sentence in
+`message`:
+
+```json
+{ "error": "daily_cap_exceeded", "message": "Daily application cap reached: 2 of 3 used in the last 24h" }
+```
+
+So the user was shown **`daily_cap_exceeded`** verbatim — a raw code that reads like a crash, not a
+generic-but-human fallback. Same for `full_auto_disabled` and `upgrade_required`.
+
+Fixed globally in `client/src/lib/api.js` with one helper, `errorMessage(payload, fallback)`, used by
+all four throw sites: `message` → `error` → generic. Older endpoints that put the sentence in `error`
+and send no `message` are unaffected, and the generic copy still covers bodies carrying neither. The
+`payload` remains attached, so `JobsPanel`'s `e.payload?.missingPrerequisites` path is untouched — no
+change was needed in any caller. Covered by `test/apiErrorMessages.test.js`, whose absence guard was
+confirmed to fail against the old precedence.
 
 **`PLATFORM_LABEL_MAPS.ashby` has no `"Name"` entry** — only `"First Name"`/`"Last Name"`. Ashby's real
 control is a single `_systemfield_name` labelled "Name", so once the provider is correctly detected

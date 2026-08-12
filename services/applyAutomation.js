@@ -97,6 +97,7 @@ export const PROVENANCE = {
   HANDLER_EXACT:   'handler_exact',
   FIELD_MAP_EXACT: 'field_map_exact',
   CUSTOM_ANSWER:   'custom_answer',
+  LABEL_EXACT:     'label_exact',
   LABEL_FUZZY:     'label_fuzzy',
   DEFAULT:         'default',
 };
@@ -104,6 +105,16 @@ export const PROVENANCE = {
 export const CONFIDENCE_BY_PROVENANCE = {
   handler_exact:   1.0,
   field_map_exact: 0.9,
+  // A label that IS the key once normalised ("Current company" <- current_company) is not a guess;
+  // it is the strongest signal a label can give. Splitting it out from label_fuzzy is what stops
+  // the low-confidence hold from firing on ordinary forms — A2 shipped with every fuzzy match
+  // holding the run, and in practice the commonest trigger was an exact label match scored 0.3.
+  //
+  // 0.85 rather than 0.9 is deliberate: it clears the auto-submit floor but stays BELOW
+  // CLEAR_FIRST_MIN_CONFIDENCE, so a label match may fill a blank field yet never overwrite a value
+  // the ATS parsed from the uploaded resume. A label string is weaker evidence than an attribute or
+  // handler signal, which is what field_map_exact rests on.
+  label_exact:     0.85,
   custom_answer:   0.85,
   label_fuzzy:     0.3,
   default:         0.1,
@@ -175,6 +186,15 @@ export function eligibilityClassOf(text) {
   if (!t) return null;
   for (const [cls, re] of ELIGIBILITY_PATTERNS) if (re.test(t)) return cls;
   return null;
+}
+
+/**
+ * True when the label IS the key, normalised — "Current company" for `current_company`.
+ * Distinct from a token-subset match ("Current company name"), which remains a guess.
+ */
+export function isExactLabelMatch(label, key) {
+  const l = normaliseText(label), k = keyToPhrase(key);
+  return !!l && !!k && l === k;
 }
 
 /** Whole-token containment: `name` matches "Legal Name" but not "Username". */
@@ -682,7 +702,10 @@ export function buildAnswers(fields, profilePayload) {
         if (reason) { refusals.push(`${k}:${reason}`); continue; }
         if (invertsKey(label, k)) { refusals.push(`${k}:inverted_label`); continue; }
         value = v;
-        provenance = PROVENANCE.LABEL_FUZZY;
+        // Exact label match is trustworthy enough to submit; a token-subset match stays a guess and
+        // holds the run. Both pass through every guard above either way — the eligibility and
+        // third-party refusals are not relaxed for an exact label.
+        provenance = isExactLabelMatch(label, k) ? PROVENANCE.LABEL_EXACT : PROVENANCE.LABEL_FUZZY;
         matched_on = k;
         break;
       }
