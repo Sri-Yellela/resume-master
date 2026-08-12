@@ -17,9 +17,18 @@ test("admin route guards never fall through to the regular user app", () => {
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
   const adminBlock = app.slice(app.indexOf('<Route path="/admin/login"'), app.indexOf("{/* User login"));
 
-  assert.match(adminBlock, /authUser\?\.isAdmin/);
-  assert.match(adminBlock, /<Navigate to="\/admin" replace\/>/);
-  assert.match(adminBlock, /<Navigate to="\/admin\/login" replace\/>/);
+  // The admin routes no longer inline an authUser?.isAdmin check — guarding moved into the
+  // <AdminRouteGate> component. Assert the routes are wrapped AND that the gate itself enforces
+  // isAdmin, which is a stronger guarantee than string-matching the check inside the route block:
+  // wrapping without enforcement, or enforcement without wrapping, both now fail.
+  assert.match(adminBlock, /<AdminRouteGate authStatus=\{authStatus\} authUser=\{authUser\}>/);
+  assert.match(app, /function AdminRouteGate[\s\S]{0,400}?!authUser\.isAdmin/);
+  // These redirects also moved out of the route block and into the gate components, for the same
+  // refactor. Assert them where they now live, so the guarantee is still pinned:
+  //   AdminRouteGate    — unauthenticated or non-admin  -> /admin/login
+  //   PublicLoginRoute  — an already-signed-in admin    -> /admin (never falls through to /app)
+  assert.match(app, /function AdminRouteGate[\s\S]{0,400}?<Navigate to="\/admin\/login" replace\/>/);
+  assert.match(app, /function PublicLoginRoute[\s\S]{0,400}?authUser\.isAdmin \? <Navigate to="\/admin" replace\/>/);
   assert.doesNotMatch(adminBlock, /Navigate to="\/app"/);
 });
 

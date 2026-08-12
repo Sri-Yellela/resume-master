@@ -364,6 +364,37 @@ the retired crawl; `activeScrapes`, `scrapeStateKey` and `mapPostedLimit` likewi
 all of them assertions pinned to the pre-pivot architecture. `/api/scrape` returning HTTP 410
 *"External scraping has been removed"* is what settled that those could never be repaired.
 
+### 5.13 OPEN — the apply flow's server-side prerequisite check is gone
+
+Surfaced while fixing the UI-drift failures, and **not** resolved, because the code alone doesn't
+say whether it was deliberate.
+
+`routes/apply.js` no longer imports anything from `services/integrationReadiness.js`. Its only
+readiness endpoint, `GET /api/apply/readiness`, probes **browser** availability
+(`probeBrowserAvailability`) — a different concern entirely. Meanwhile
+`getMissingApplyPrerequisites` and `requiresLinkedInSession` are still exported from
+integrationReadiness.js and have **zero callers anywhere in the repo**.
+
+So an apply run is gated by `requireAuth`, input validation (jobIds required, max 25,
+already-applied filtering) and browser availability — but nothing server-side checks the
+integration prerequisites those two helpers exist to compute. `getAutomationReadiness` itself is
+alive and well, consumed by `routes/account.js` and the integrations surface.
+
+Client-side the gate is partial: JobsPanel still shows *"Setup needed in Integrations"*, but the
+`"open Integrations to add it"` copy and the `integrationsPath` plumbing the old test asserted are
+gone.
+
+Two possibilities, and they need different fixes:
+- **Deliberate** — the flow now relies on client gating plus per-step validation, in which case
+  the two dead helpers should be deleted (they'd be cleanup items alongside §5.12).
+- **Regression** — a user with a missing prerequisite can start a run that fails later and less
+  legibly than it used to, in which case apply.js should consume `getMissingApplyPrerequisites`
+  again.
+
+The test previously asserted the wiring existed, so it had been failing silently as part of the
+44-failure baseline rather than raising this. It has been narrowed to assert what is verifiably
+true, with this question recorded rather than papered over.
+
 ### Recommended order, if the deletions are approved
 
 1. **5.6 first** — it is the only item actively giving an admin wrong answers.
