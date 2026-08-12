@@ -556,6 +556,42 @@ so leaving it unguarded would have let the orphan back in on the one surface not
 flags sat unread; the tool is selected implicitly by `apply_mode`/plan tier. `JobCard.jsx`'s own
 comment repeated that wrong claim and has been corrected too.
 
+### 5.15 FIXED — three payload-contract mismatches on `POST /api/apply/runs`
+
+Found while fixing §5.13, in the same request body. Each side was internally consistent, so nothing
+failed loudly and no static test could see them — only the *pairing* was wrong. Same family as
+§5.13: the client half survived a server-side change.
+
+| # | Client sends | Server read | Effect |
+|---|---|---|---|
+| 1 | `mode: "manual"` | `mode === "semi" ? "semi" : "auto"` | **Ran a full auto-submit.** |
+| 2 | `tool: "a_plus_resume"` | `toolType` only | A+ silently downgraded to generate on every run. |
+| 3 | reads `data.queued.length` | returned no `queued` | Success message always read *"0 jobs started."* |
+
+**(1) was the serious one.** JobsPanel's *"Manual review"* button calls `startApplyRun("manual")`;
+`processRunJob` branches on `"semi"` (its own comment at apply.js:223 reads *"semi (manual review)
+mode"*) and passes `mode === "auto" ? "full" : "semi"` to `autoApply`. Because `"manual"` is not
+`"semi"`, it was stored as `auto` and applications were really submitted for a user who had asked
+to review them first. Blast radius was greenhouse/lever/ashby — other providers fall to
+`held_review` at apply.js:165, which is what kept this from being noticed sooner.
+
+**(2) could not be fixed by plumbing alone.** While the field was ignored, a BASIC user could not
+reach A+ by asking for it; honouring `tool` would have made the route a plan-tier bypass. So the
+fix adds a server-side entitlement check (403 `upgrade_required`, matching
+`requireToolEntitlement`'s shape). `routes/apply.js` imports `canUseAPlusResume`/`normalisePlanTier`
+directly rather than taking an injected helper, because its positional signature is pinned by
+`applyPipeline.test.js`. `req.user.planTier` is populated by `deserializeUser` (server.js:3529), and
+the client derives its own flag from the same `canUseAPlusResume(planTier)`, so the two cannot
+disagree and no legitimate user sees a false 403.
+
+All three are server-side fixes; the client was self-consistent on all three and is unchanged.
+Both spellings are now accepted for mode (`manual`/`semi`) and tool (`tool`/`toolType`).
+
+Covered by `test/applyRunPayloadContract.test.js`, which exercises the endpoint over real HTTP
+against an in-memory DB (the `adminDbInspector` pattern) rather than matching source text — static
+assertions are what missed these. Each assertion was checked to fail against the pre-fix code, not
+merely to pass against the new.
+
 ### Recommended order, if the deletions are approved
 
 1. **5.6 first** — it is the only item actively giving an admin wrong answers.

@@ -5,6 +5,7 @@ import { autoApply } from "../services/applyAutomation.js";
 import { probeBrowserAvailability } from "../services/browserLauncher.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
 import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
+import { canUseAPlusResume, normalisePlanTier } from "../services/entitlements.js";
 
 function publicApplication(row) {
   if (!row) return null;
@@ -403,11 +404,40 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   // ── Queue endpoints ──────────────────────────────────────────────────────────
 
   app.post("/api/apply/runs", requireAuth, (req, res) => {
-    const { jobIds = [], mode = "auto", toolType } = req.body || {};
+    const { jobIds = [], mode = "auto", tool, toolType } = req.body || {};
     if (!Array.isArray(jobIds) || jobIds.length === 0)
       return res.status(400).json({ error: "jobIds array required" });
     if (jobIds.length > 25)
       return res.status(400).json({ error: "Max 25 jobs per run" });
+
+    // ── Three payload-contract mismatches with the client, fixed together ──────────────────────
+    //
+    // 1. MODE. "manual" is the client's word for the review flow (its button calls
+    //    startApplyRun("manual") and its own copy says "manual review"); "semi" is the server's
+    //    word and what processRunJob branches on. They were never mapped, so "manual" fell through
+    //    to "auto" and autoApply ran in "full" mode — a user asking to review first got a real
+    //    auto-submitted application. Accept both spellings for the one behaviour.
+    const resolvedMode = (mode === "semi" || mode === "manual") ? "semi" : "auto";
+
+    // 2. TOOL. The client sends `tool` — its convention at every other resume endpoint — while
+    //    this route read only `toolType`, so the A+ selection never arrived and every run recorded
+    //    tool_type='generate'. Accept both; `tool` wins. Anything unrecognised means generate.
+    const resolvedTool = (tool ?? toolType) === "a_plus_resume" ? "a_plus_resume" : "generate";
+
+    // Honouring the client's tool makes this route entitlement-bearing for the first time: while
+    // the field was ignored, a BASIC user could not reach A+ generation by asking for it. Gate it
+    // server-side so repairing the plumbing does not open a plan-tier bypass. Same 403 shape as
+    // requireToolEntitlement in server.js, which this route cannot reach (positional signature,
+    // pinned by applyPipeline.test.js).
+    const planTier = normalisePlanTier(req.user?.planTier);
+    if (resolvedTool === "a_plus_resume" && !canUseAPlusResume(planTier)) {
+      return res.status(403).json({
+        error: "upgrade_required",
+        message: "A+ Resume requires the PRO plan.",
+        requiredTier: "PRO",
+        planTier,
+      });
+    }
 
     // Restored server-side prerequisite gate (§5.13). A run cannot produce anything without a
     // base resume, an active profile, and the name/email the autofill fills in — so refuse before
@@ -437,7 +467,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const runResult = db.prepare(`
       INSERT INTO apply_runs (user_id, mode, tool_type, status, total_jobs)
       VALUES (?, ?, ?, 'queued', ?)
-    `).run(req.user.id, mode === "semi" ? "semi" : "auto", toolType || "generate", filtered.length);
+    `).run(req.user.id, resolvedMode, resolvedTool, filtered.length);
     const runId = runResult.lastInsertRowid;
 
     const insertJob = db.prepare(`
@@ -449,7 +479,18 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const run = db.prepare("SELECT * FROM apply_runs WHERE id=?").get(runId);
     setImmediate(() => processRun(run).catch(e => console.error("[applyRoutes] processRun:", e.message)));
 
-    res.status(202).json({ ok: true, runId, mode: run.mode, totalJobs: filtered.length });
+    // 3. RESPONSE SHAPE. The client's success message reads `data.queued?.length`, which this
+    //    route never sent — so every run reported "0 jobs started". `queued` is the accepted ids,
+    //    which is also what distinguishes them from the ones dropped as duplicates above.
+    //    `toolType` is echoed so the client can tell when A+ was requested but downgraded.
+    res.status(202).json({
+      ok: true,
+      runId,
+      mode: run.mode,
+      toolType: run.tool_type,
+      queued: filtered,
+      totalJobs: filtered.length,
+    });
   });
 
   app.get("/api/apply/runs", requireAuth, (req, res) => {
