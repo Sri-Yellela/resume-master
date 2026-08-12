@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -9,39 +9,31 @@ const profileTitleFilter = fs.readFileSync("services/profileTitleFilter.js", "ut
 const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 const simpleProfileSvc = fs.readFileSync("services/simpleApplyProfile.js", "utf8");
 
-test("scrape route guards missing active profile before profile-scoped local count", () => {
-  const routeStart = server.indexOf('app.post("/api/scrape"');
-  assert.ok(routeStart > 0, "scrape route should exist");
-  const localCount = server.indexOf("DB-first: count unvisited quality jobs scraped in the last 30 days for this role", routeStart);
-  assert.ok(localCount > routeStart, "DB-first local count should exist");
+// Three tests here described the retired external-scraping flow: the /api/scrape route's
+// profile guard and DB-first local count, its quota-exhaustion classification, and the client
+// states that surfaced both. /api/scrape is now a tombstone returning HTTP 410 "External
+// scraping has been removed. Job search now uses /api/jobs.", so none of them could pass again.
+// Replaced with the guard that matters — the retirement must hold — plus the client-side setup
+// gate, which IS still live and is what now blocks a user with no profile.
+test("external scraping stays retired and the setup gate still blocks a profileless user", () => {
+  assert.match(server, /app\.post\("\/api\/scrape",[\s\S]{0,200}?410/,
+    "/api/scrape must remain a 410 tombstone");
+  // NOTE: isExternalScrapeQuotaError still EXISTS in server.js and is called from scrapeJobs and
+  // the cron re-scrape path — both scrape-path leftovers recorded as §5.12 in
+  // docs/PIPELINE_DIAGNOSIS.md, pending their own scoped removal. Asserting it absent here would
+  // be asserting a cleanup that has not happened yet.
 
-  const preCount = server.slice(routeStart, localCount);
-  assert.match(preCount, /if \(!activeProfile\)/);
-  assert.match(preCount, /needsProfileSetup: true/);
-  assert.match(preCount, /reason: "no_active_profile"/);
-});
-
-test("scrape quota exhaustion is classified and surfaced through poll state", () => {
-  assert.match(server, /function isExternalScrapeQuotaError/);
-  assert.match(server, /monthly usage hard limit exceeded/);
-  assert.match(server, /scrape_quota_exhausted/);
-  assert.match(server, /scrapeUnavailable/);
-  assert.match(server, /Daily re-scrape skipped: external scrape quota exhausted/);
-});
-
-test("frontend handles missing profile and local-only scrape unavailable responses", () => {
-  // fetchJobs (d.*) no longer sets scrapeError for needsProfileSetup — setupBlock gate handles it
+  // The user-facing gate that replaced it is live.
   assert.match(jobsPanel, /setupBlock/);
   assert.match(jobsPanel, /SetupGateNotice/);
-  // scrape start (result.*) and poll (pollData.*) still check needsProfileSetup
-  assert.match(jobsPanel, /result\.needsProfileSetup/);
-  assert.match(jobsPanel, /pollData\.needsProfileSetup/);
-  assert.match(jobsPanel, /pollData\.scrapeUnavailable/);
   assert.match(jobsPanel, /Create a job search profile/);
 });
 
 test("roleTitleSql engineering excludes all firmware/embedded keyword families", () => {
-  assert.match(server, /import \{ getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRoleFamilyDomainForKey, roleTitleSql \} from "\.\/services\/jobClassifier\.js"/);
+  // The server.js import assertion that stood here is gone: /api/jobs no longer applies
+  // roleTitleSql (the job_role_map join is sufficient — see the phase6 tests in
+  // profileIsolation), so server.js stopped importing it. The KEYWORD FAMILIES below are the
+  // valuable part and are still intact in jobClassifier.js, which is what this test guards.
   const engStart = jobClassifier.indexOf('if (roleKey === "engineering") return');
   assert.ok(engStart > 0, "engineering roleTitleSql case must exist");
   // Find the closing of the engineering block by locating the next roleKey check
@@ -130,29 +122,33 @@ test("migration 048 UPDATE step is safe after DELETE — no UNIQUE violation pos
   assert.ok(!updateBlock.includes("INSERT OR IGNORE"), "UPDATE is the right operation here");
 });
 
-test("jobs board uses triple filter — role_key + roleTitleSql + profileTitleSql on every query", () => {
-  // All three filters must appear together in the /api/jobs GET conditions array
+// Was "triple filter — role_key + roleTitleSql + profileTitleSql". It is a DOUBLE filter now:
+// roleTitleSql was deliberately dropped from the query paths because the job_role_map join
+// already constrains the board to the right role family, making the title re-derivation
+// redundant. profileIsolation.test.js asserts that removal as correct, so this file was
+// contradicting a passing test elsewhere in the suite.
+test("jobs board uses the role_key join plus profileTitleSql on every query", () => {
   const routeStart = server.indexOf('app.get("/api/jobs"');
   assert.ok(routeStart > 0, "/api/jobs route must exist");
   const routeEnd   = server.indexOf("\napp.", routeStart + 10);
   const block      = server.slice(routeStart, routeEnd);
 
   assert.match(block, /jrm\.role_key = \?/, "must filter by role_key");
-  assert.match(block, /roleTitleSql\(/, "must apply roleTitleSql");
   assert.match(block, /profileTitleSql\(/, "must apply profileTitleSql");
   assert.match(profileTitleFilter, /export function profileTitleSql\(column, profile\)/, "profile title filter must be extracted");
   // Profile filter must be first guard — no-profile returns empty immediately
   assert.match(block, /if \(!sessionActiveProfile\)/, "must guard on missing active profile");
 });
 
-test("poll board uses same triple filter to prevent wrong-profile jobs leaking", () => {
+test("poll board uses the same filters as the board to prevent wrong-profile jobs leaking", () => {
   const pollStart = server.indexOf('app.get("/api/jobs/poll"');
   assert.ok(pollStart > 0, "/api/jobs/poll route must exist");
   const pollEnd   = server.indexOf("\napp.", pollStart + 10);
   const block     = server.slice(pollStart, pollEnd);
 
   assert.match(block, /jrm\.role_key = \?/, "poll must filter by role_key");
-  assert.match(block, /roleTitleSql\(/, "poll must apply roleTitleSql");
+  // roleTitleSql dropped here for the same reason as the board query above; profileIsolation
+  // has a passing test asserting exactly that ("poll no longer applies roleTitleSql").
   assert.match(block, /pollProfileTitleFilter/, "poll must apply profileTitleSql");
   assert.match(block, /if \(!activeProfile\)/, "poll must guard on missing active profile");
 });
@@ -170,17 +166,16 @@ test("poll completion triggers re-fetch via fetchJobsRef for correct sort order"
   assert.match(pollBlock, /fetchJobsRef\.current\?\.\(1\)/, "poll completion must call fetchJobsRef.current?.(1)");
 });
 
-test("manual search renders local board before profile-driven scrape starts", () => {
-  const searchStart = jobsPanel.indexOf("const handleSearch");
-  assert.ok(searchStart > 0, "handleSearch must exist");
-  const searchEnd = jobsPanel.indexOf("// -- Pull / Check-for-new", searchStart);
-  const block = jobsPanel.slice(searchStart, searchEnd);
-
-  const localFetch = block.indexOf("await fetchJobs(1, false, { overrides: { role: immediateRoleQ } })");
-  const scrapeCall = block.indexOf('api("/api/scrape"');
-  assert.ok(localFetch > 0, "search must explicitly fetch local board rows first");
-  assert.ok(scrapeCall > localFetch, "scrape must start after the local board fetch");
-  assert.match(block, /buildProfileScrapeRequest\(q\)/, "scrape body must be profile-driven only");
+// Was "manual search renders local board before profile-driven scrape starts" — it asserted the
+// ORDERING of a local fetch against a subsequent api("/api/scrape") call. There is no scrape call
+// any more, so the ordering it protected is moot: search now only ever reads the stored board.
+// The surviving invariant is that searching does not attempt an outbound crawl at all.
+test("manual search reads the stored board and never triggers an outbound scrape", () => {
+  assert.doesNotMatch(jobsPanel, /api\("\/api\/scrape"/,
+    "the client must not call the retired scrape endpoint");
+  assert.match(jobsPanel, /const handleSetRole/, "search entry point must still exist");
+  // buildProfileScrapeRequest is still DEFINED in JobsPanel (JobsPanel.jsx:75) but nothing calls
+  // it now that the scrape request is gone — another §5.12 leftover, not asserted absent here.
 });
 
 test("board filters stay local and are not sent as scrape parameters", () => {
@@ -235,8 +230,10 @@ test("/api/jobs does not hard-filter by scrape age — no hidden 7-day cutoff in
   assert.doesNotMatch(block, /sevenDaysAgo/, "/api/jobs must not use sevenDaysAgo in base conditions");
   // The existing optional ageFilter must still exist
   assert.match(block, /ageFilter/, "opt-in age filter must remain available");
-  // Triple filter must still be intact
-  assert.match(block, /roleTitleSql\(/, "roleTitleSql must still be applied");
+  // Profile scoping must still be intact. roleTitleSql was deliberately dropped (the
+  // job_role_map join covers it); the role_key join is asserted here in its place so this test
+  // still proves the board stays profile-scoped without a freshness cutoff.
+  assert.match(block, /jrm\.role_key = \?/, "role_key join must still scope the board");
   assert.match(block, /profileTitleSql\(/, "profileTitleSql must still be applied");
 });
 
@@ -247,18 +244,12 @@ test("/api/jobs response maps scrapedAt so client can render staleness indicator
   assert.match(block, /scrapedAt:\s*j\.scraped_at/, "response must expose scrapedAt for staleness UI");
 });
 
-test("scrape DB-first count uses 30-day window instead of 7-day", () => {
-  // The 7-day window caused the DB-first count to always return 0 if the last scrape
-  // was more than a week ago, forcing an unnecessary background scrape every time.
-  // A 30-day window matches a realistic job-posting lifecycle.
-  const scrapeStart = server.indexOf('app.post("/api/scrape"');
-  const scrapeEnd   = server.indexOf("\napp.", scrapeStart + 10);
-  const block       = server.slice(scrapeStart, scrapeEnd);
-
-  assert.match(block, /thirtyDaysAgo/, "DB-first count must use thirtyDaysAgo");
-  assert.match(block, /30 \* 24 \* 60 \* 60/, "30-day window constant must be present");
-  assert.doesNotMatch(block, /sevenDaysAgo/, "7-day variable must not appear in scrape DB-first path");
-});
+// "scrape DB-first count uses 30-day window instead of 7-day" is gone with the route it measured.
+// The DB-first count existed to decide whether a background crawl was worth starting; with
+// /api/scrape a 410 tombstone there is no crawl to skip, so the window is meaningless. The
+// underlying concern it protected — that a stale-date cutoff must not silently empty the board —
+// is covered by "/api/jobs does not hard-filter by scrape age" above, which asserts against the
+// LIVE board query rather than the retired scrape path.
 
 test("normalizePostedAt converts relative age strings to ISO dates at ingest", () => {
   // Root of O1: LinkedIn returns "2 days ago" which new Date() can't parse.
@@ -316,8 +307,9 @@ test("/api/jobs auto-applies YoE hard constraint from stored signals when no exp
   assert.match(block, /loadSimpleApplyProfile/, "must call loadSimpleApplyProfile");
   assert.match(block, /signals\?\.yearsExperience/, "must check yearsExperience from signals");
   assert.match(block, /yearsExperience \+ 2/, "must use +2 year buffer for stretch goals");
-  // Must only apply when user hasn't set explicit maxYoe
-  assert.match(block, /maxYoe === null/, "hard constraint must only apply when maxYoe is not set");
+  // Must only apply when the user hasn't set an explicit maxYoe. The check was extracted into an
+  // `explicitMaxYoe` variable — same semantics, so the assertion follows the rename.
+  assert.match(block, /explicitMaxYoe !== null/, "hard constraint must only apply when maxYoe is not set");
   // The constraint must exclude jobs requiring more than user's band
   assert.match(block, /sj\.min_years_exp IS NULL OR sj\.min_years_exp <= \?/, "must filter by min_years_exp");
 });
