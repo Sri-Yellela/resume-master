@@ -222,6 +222,37 @@ function ashbyForm() {
   </form>`);
 }
 
+// ── Workday-flavoured IFRAME form ────────────────────────────────────────────
+// The non-greenhouse coverage case. platformDetector.usesIframe() is true for workday, icims and
+// taleo — three of the nine providers outside the v1 full-auto allowlist — yet nothing in this
+// harness had an iframe, so the multi-frame path had never been exercised at all. Everything real
+// lives in the inner document; the outer page only hosts it.
+function workdayShell() {
+  return page('Workday — Apply', `
+  <h1>Staff Engineer</h1>
+  <p>Application hosted in an iframe, as workday/icims/taleo do.</p>
+  <iframe src="/workday/inner" title="Application" style="width:100%;height:900px;border:1px solid #ccc"></iframe>`);
+}
+
+function workdayInner() {
+  return page('Workday — Application', `
+  <form method="POST" action="/_submit/workday">
+    ${field('First Name', `<input name="firstName" required>`, true)}
+    ${field('Last Name',  `<input name="lastName" required>`, true)}
+    ${field('Email',      `<input name="email" type="email" required>`, true)}
+    ${field('Phone Number', `<input name="phoneNumber" type="tel">`)}
+    ${field('Name',       `<input name="candidateName">`)}
+    ${field('Resume', `<input type="file" name="resumeUpload" required>`, true)}
+    ${field('Are you legally authorized to work in the country of employment?',
+      `<select name="workAuthorization" aria-required="true">
+         <option value="">Select...</option>
+         <option value="Yes">Yes</option>
+         <option value="No">No</option>
+       </select>`, true)}
+    <button type="submit">Submit Application</button>
+  </form>`);
+}
+
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -261,6 +292,8 @@ const server = http.createServer(async (req, res) => {
     if (path === '/greenhouse') return send(200, greenhouseStep1());
     if (path === '/lever')      return send(200, leverForm());
     if (path === '/ashby')      return send(200, ashbyForm());
+    if (path === '/workday')       return send(200, workdayShell());
+    if (path === '/workday/inner') return send(200, workdayInner());
     if (path === '/_submissions')
       return send(200, JSON.stringify({ count: submissions.length, submissions }, null, 2),
                   'application/json; charset=utf-8');

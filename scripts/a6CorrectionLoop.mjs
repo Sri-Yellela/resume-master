@@ -186,14 +186,24 @@ check("the loop converged in a small number of rounds", round >= 1 && round <= 3
 // Asserted over the UNION of questions seen, not one round: which round surfaces which question is
 // an ordering detail of the gates, but every one of them must have been asked at some point.
 const all = [...seen.values()];
-check("the eligibility attestations were asked", all.filter(q => q.eligibility).length >= 2,
-  JSON.stringify(all.filter(q => q.eligibility).map(q => q.eligibility)));
+// Asserted as an invariant rather than a count. Which eligibility questions get ASKED shrinks as the
+// label maps improve: with the merged maps, "Are you legally authorized to work…" now resolves from
+// the canonical work_authorization key (the guard permits a canonical key for its own class), so it
+// is answered rather than asked. Sponsorship must ALWAYS be asked — it is not derivable from work
+// authorization, which is the entire A1 trap.
+check("the sponsorship attestation was asked, and flagged as an attestation",
+  all.some(q => /require sponsorship/i.test(q.question) && q.eligibility === "sponsorship"),
+  JSON.stringify(all.map(q => [q.question.slice(0, 40), q.eligibility])));
 const sp = all.find(q => /require sponsorship/i.test(q.question));
 check("the sponsorship question was asked, with its select options", (sp?.options || []).length === 2, JSON.stringify(sp?.options));
 check("and it explained that the resolver REFUSED rather than had nothing",
   (sp?.refusals || []).some(r => /eligibility_class/.test(r)), JSON.stringify(sp?.refusals));
-check("answers were persisted to custom_answers",
-  Object.keys(JSON.parse(db.prepare("SELECT custom_answers FROM user_profile WHERE user_id=1").get().custom_answers)).length >= 3);
+// One answer per question actually asked. How MANY get asked depends on how much the resolver can
+// legitimately resolve on its own, which improves as the label maps do — so this is tied to the
+// questions seen, not to a fixed count.
+const persisted = Object.keys(JSON.parse(db.prepare("SELECT custom_answers FROM user_profile WHERE user_id=1").get().custom_answers));
+check("every question asked was persisted to custom_answers",
+  persisted.length === seen.size && persisted.length > 0, `${persisted.length} saved / ${seen.size} asked`);
 check("no superseded hold is still offered for review",
   db.prepare("SELECT COUNT(*) n FROM apply_run_jobs WHERE job_id='gh1' AND status='held_review'").get().n === 0);
 
@@ -225,11 +235,13 @@ check("audit trail records it as custom_answer, never a guess", spAnswer?.proven
 const submittedGuesses = provenance.filter(a => a.provenance === "label_fuzzy" && !a.policy_rejected);
 check("nothing SUBMITTED was a low-confidence guess", submittedGuesses.length === 0,
   JSON.stringify(submittedGuesses.map(a => a.label || a.name)));
+// The optional-guess drop is asserted directly in test/applyAnswerPolicy.test.js. It is no longer
+// reproducible on THIS fixture: fixing the in-page tokenMatch escape bug means greenhouse's
+// "Preferred Name" now resolves through the label map as field_map_exact instead of being a 0.3
+// guess, so there is nothing left for the policy to drop here. Better resolution, fewer questions —
+// which is the point. Recorded as an observation rather than a requirement.
 const droppedGuesses = provenance.filter(a => a.policy_rejected);
-check("a guess in an optional field was dropped, not typed, and is recorded as such",
-  droppedGuesses.length >= 1, JSON.stringify(droppedGuesses.map(a => a.label + "=" + a.provenance)));
-check("and that optional field was left blank in the submission",
-  !recorded["job_application[preferred_name]"], JSON.stringify(recorded["job_application[preferred_name]"]));
+console.log(`  (optional guesses dropped by the step policy on this fixture: ${droppedGuesses.length})`);
 
 console.log("\n=== 5. no questions remain ===");
 const after = await get("/api/apply/questions");

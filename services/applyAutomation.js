@@ -78,6 +78,18 @@ export const PROFILE_KEY_TO_HANDLER = {
   highest_degree:'degree', field_of_study:'field-of-study',
   university:'school', graduation_year:'grad-year',
   years_of_experience:'years-experience',
+  // `years_experience` is the spelling four PLATFORM_LABEL_MAPS use as their value. Without it here
+  // resolveHandler's label lookup found no handler and silently skipped, so "Years of Experience"
+  // resolved only when the control's ATTRIBUTE happened to be recognisable — the label fallback,
+  // which exists precisely for when it is not, was dead.
+  years_experience:'years-experience',
+  // clearance_level / visa_type were referenced by the label maps and by ELIGIBILITY_HANDLERS
+  // (which already lists 'clearance' and 'visa' as the valid handlers for those classes) but no
+  // profile key produced either handler, so both were unreachable. Wiring them makes the
+  // eligibility guard's canonical-key path work for clearance and visa questions instead of
+  // refusing every key and holding the run.
+  clearance_level:'clearance', has_clearance:'clearance',
+  visa_type:'visa', visa_status:'visa',
   current_job_title:'current-title', current_company:'current-company',
 };
 
@@ -481,7 +493,13 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
   // from claiming "Username"; it does NOT stop it claiming "Name of Referrer" -- "name" is a whole
   // token there -- which is why the returned source matters and Node re-vets label hits.
   function tokenMatch(haystack, needle) {
-    const n = String(needle || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    // NOTE the doubled backslash. This is inside a template literal, so a single backslash is
+    // consumed by the parser: the whitespace class here previously collapsed to the bare letter s,
+    // and this line shipped normalising runs of that LETTER instead of whitespace. "First Name"
+    // became "fir t name" and never matched, so every multi-word label-map key containing an s
+    // silently failed and a shorter key such as "Name" won instead. Guarded by the emitted-source
+    // test in test/platformLabelMaps.test.js.
+    const n = String(needle || '').replace(/[_-]+/g, ' ').replace(/\\s+/g, ' ').trim().toLowerCase();
     if (!n) return false;
     const esc = n.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&').replace(/\\s+/g, '[\\\\s_-]+');
     try {
@@ -1129,7 +1147,10 @@ async function discoverAndFill(page, frames, provider, autofillData, labelMap, o
       const approved = decision.approved;
       const simpleAnswers = approved.filter(a => a.type !== 'typeahead');
       if (simpleAnswers.length) filled += await frame.evaluate(`(${APPLY_FN_SRC})(${JSON.stringify(simpleAnswers)})`).catch(() => 0);
-      for (const a of approved.filter(a => a.type === 'typeahead')) await applyTypeaheadAnswer(page, a);
+      // The FRAME, not the page: a typeahead inside an iframe was previously looked up in the main
+      // document and silently never filled. For a single-document form frame === mainFrame, so this
+      // is a no-op there.
+      for (const a of approved.filter(a => a.type === 'typeahead')) await applyTypeaheadAnswer(frame, a);
     }
     // Legacy fallback sweep for any inputs discovery missed.
     // NOTE: this path is NOT policy-gated — it fills by attribute/label heuristics inside the page
@@ -1182,9 +1203,24 @@ async function uploadToFileInput(input, filePath) {
 
 async function handleTypedFileUploads(page, resumePath, coverLetterPath) {
   if (!resumePath && !coverLetterPath) return;
+  // Frame-aware: workday, icims and taleo host the entire application in an iframe, so a
+  // main-frame-only scan found no file input at all. With A3's completeness gate now checking
+  // required file fields, that meant every run on those providers held on "Resume" — the resume
+  // was never uploaded because nothing looked inside the frame. The uploaded flags are shared
+  // across frames so one resume is not attached twice.
+  let resumeUploaded = false;
+  let coverUploaded  = false;
+  for (const ctx of frameList(page)) {
+    if (resumeUploaded && coverUploaded) break;
+    ({ resumeUploaded, coverUploaded } =
+      await uploadIntoContext(ctx, resumePath, coverLetterPath, resumeUploaded, coverUploaded));
+  }
+}
+
+async function uploadIntoContext(page, resumePath, coverLetterPath, resumeUploaded, coverUploaded) {
   try {
     const inputs = await page.$$("input[type='file']");
-    if (!inputs.length) return;
+    if (!inputs.length) return { resumeUploaded, coverUploaded };
 
     // Classify each file input by examining label + name + id attributes
     const slots = await page.evaluate(() =>
@@ -1199,9 +1235,6 @@ async function handleTypedFileUploads(page, resumePath, coverLetterPath) {
         return { idx, isCover, isResume };
       })
     );
-
-    let resumeUploaded = false;
-    let coverUploaded  = false;
 
     for (const slot of slots) {
       const input = inputs[slot.idx];
@@ -1219,11 +1252,13 @@ async function handleTypedFileUploads(page, resumePath, coverLetterPath) {
     if (!resumeUploaded && resumePath && fs.existsSync(resumePath) && inputs.length > 0) {
       if (!slots[0]?.isCover) {
         await uploadToFileInput(inputs[0], resumePath);
+        resumeUploaded = true;
       }
     }
   } catch (e) {
     console.warn("[applyAutomation] file upload routing:", e.message);
   }
+  return { resumeUploaded, coverUploaded };
 }
 
 const NEXT_RE = /^(next|continue|proceed|save and continue|save & continue|next step)/i;
