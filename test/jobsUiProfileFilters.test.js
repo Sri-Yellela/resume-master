@@ -14,11 +14,17 @@ test("jobs filters are staged and only committed by Apply", () => {
   assert.doesNotMatch(jobsPanel, /role=\{roleFilter\}\s+setRole=\{setRoleFilter\}/);
 });
 
+// The two `isDark ? <light> : <dark>` ternaries this asserted are gone: there is exactly one
+// theme now (themes/cinematic.js) and isDark is hardcoded true, so the light halves were dead
+// branches and were collapsed. The INTENT — the filter drawer must be opaque, not the translucent
+// card surface, or the board reads straight through it — is unchanged and still worth pinning.
 test("filter panel uses an opaque modal surface", () => {
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 
-  assert.match(jobsPanel, /background:isDark \? "rgba\(0,0,0,0\.42\)" : "rgba\(15,23,42,0\.18\)"/);
-  assert.match(jobsPanel, /background:theme\.modalSurface \|\| \(isDark \? "#111827" : "#ffffff"\)/);
+  // A real dim behind the drawer.
+  assert.match(jobsPanel, /background:"rgba\(0,0,0,0\.42\)"/);
+  // The drawer itself uses the dedicated modal token, never theme.surface (var(--bg-card), 0.68).
+  assert.match(jobsPanel, /background:theme\.modalSurface \|\| "#111827"/);
   assert.match(jobsPanel, /boxShadow:theme\.shadowXl/);
 });
 
@@ -63,8 +69,11 @@ test("job profiles have a dedicated app section and menu entry", () => {
   const profile = fs.readFileSync("client/src/panels/ProfilePanel.jsx", "utf8");
 
   assert.match(app, /JobProfilesPanel/);
-  assert.match(app, /id:"job-profiles", label:"Job Profiles"/);
-  assert.match(app, /renderRoute === "job-profiles"/);
+  // Whitespace-tolerant: App.jsx formats this as `{ id: "job-profiles", label: "Job Profiles" }`.
+  assert.match(app, /id:\s*"job-profiles",\s*label:\s*"Job Profiles"/);
+  // `renderRoute` became `activeTab` when App.jsx moved to react-router — the panel is still
+  // gated on the same key, only the variable was renamed.
+  assert.match(app, /activeTab === "job-profiles"/);
   assert.match(topBar, /Manage Job Profiles/);
   assert.match(topBar, /onTabChange\?\.\("job-profiles"\)/);
   assert.match(panel, /export function JobProfilesPanel/);

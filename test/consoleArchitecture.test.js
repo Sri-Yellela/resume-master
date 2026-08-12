@@ -8,7 +8,9 @@ test("app routes users into one shared jobs console", () => {
 
   assert.match(app, /CONSOLE_ROUTE = "jobs"/);
   assert.match(app, /LEGACY_CONSOLE_ROUTES/);
-  assert.match(app, /label:"Jobs"/);
+  // Tolerate the space after the colon — App.jsx's tab list is formatted `label: "Jobs"`, and a
+  // reformat should not read as a missing tab.
+  assert.match(app, /label:\s*"Jobs"/);
   assert.match(app, /<Route path="\/app\/\*"/);
   assert.match(consoles, /function JobsConsole/);
   assert.match(consoles, /consoleKind="jobs"/);
