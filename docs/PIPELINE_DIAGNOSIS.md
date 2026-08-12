@@ -430,8 +430,17 @@ instead of re-deriving it.
 and therefore no rows to scroll. The centres coincide regardless of scroll, since both derive
 from `vw`.
 
-**Still open from that pass:** `aPlusLoading` at `JobCard.jsx:328` is computed and never used —
-the A+ action lives in `JobDetailPanel` now. Small dead-code item, same family as §5.12.
+**`aPlusLoading` — RESOLVED, and there were TWO of them.** It was flagged at `JobCard.jsx:328`,
+computed and never read. Removing it surfaced an identical orphan at `JobDetailPanel.jsx:274` —
+found only because a *second* test (`resumeArtifacts`) pinned the JobCard line and failed, which
+is the suite doing exactly its job.
+
+Neither surface has a dedicated A+ button, which is why both flags went unread. **A+ itself is
+live** — `JobsPanel.jsx` selects `A_PLUS_TOOL` by `apply_mode === "CUSTOM_SAMPLER"` and plan tier
+(`canUseAPlusResume`), and SandboxPanel labels the variant — it simply has no button of its own on
+either surface. Behaviour is unchanged by the removal: while a job is in the `a_plus_resume`
+state, `st` is still truthy, so the `disabled={!!st}` guards on both surfaces keep disabling their
+buttons exactly as before. `generateLoading` stays in both files; it has a button to drive.
 
 **`aPlusLoading` is dead in JobCard.** `JobCard.jsx:328` computes
 `const aPlusLoading = st === "a_plus_resume"` and nothing uses it — the A+ action is no longer a

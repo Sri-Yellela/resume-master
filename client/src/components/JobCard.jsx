@@ -324,8 +324,12 @@ export default function JobCard({
   const frostedOverlay = "linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(200,200,200,0.02) 100%)";
 
   const hasDesc    = !!(job.description || job.descriptionHtml);
+  // Only `generate` needs its own flag here. The A+ Resume action is not a JobCard button — it
+  // lives in JobDetailPanel — so the `aPlusLoading` companion that used to sit here was computed
+  // and never read. Removing it changes nothing: while a job is in the a_plus_resume state, `st`
+  // is still truthy, so the `disabled={!!st}` / `cursor:st ? …` guards below keep disabling this
+  // card's buttons exactly as before.
   const generateLoading = st === "generate";
-  const aPlusLoading = st === "a_plus_resume";
   const hasSalary  = job.salaryMin != null || job.salaryMax != null;
   const salaryStr  = hasSalary
     ? [job.salaryMin, job.salaryMax].filter(Boolean).map(v =>

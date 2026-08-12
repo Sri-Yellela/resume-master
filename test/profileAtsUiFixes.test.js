@@ -13,11 +13,17 @@ test("job card hover preview uses shared active-aware icon helpers for save and 
   assert.match(jobCard, /activeLabel="Remove from saved"/);
   assert.match(jobCard, /activeLabel="Undo pass"/);
   assert.match(jobCard, /active=\{done && !generateLoading\}/);
-  // The A+ action is no longer a JobCard button — only Generate is. `aPlusLoading` survives at
-  // JobCard.jsx:328 as a computed-but-unused local (a small dead-code item, recorded in
-  // docs/PIPELINE_DIAGNOSIS.md §5.14). Asserting the active-aware helper contract on the button
-  // that exists rather than requiring one that does not.
-  assert.match(jobCard, /const aPlusLoading = st === "a_plus_resume"/);
+  // The A+ action is no longer a JobCard button — only Generate is — and the dead `aPlusLoading`
+  // local that lingered alongside it has now been removed too (§5.14). The card must not grow a
+  // second loading flag back without a button to use it; while a job is in the a_plus_resume
+  // state the generic `disabled={!!st}` guard still covers it.
+  // Comments stripped first — the removal's own explanatory note names the deleted identifier.
+  const jobCardCode = jobCard
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(jobCardCode, /aPlusLoading/,
+    "an unused second loading flag must not return — !!st already covers that state");
+  assert.match(jobCardCode, /disabled=\{!!st\}/, "the generic in-flight guard must stay");
 });
 
 test("jobs UI opens ATS panel from stored base ATS reports without requiring regeneration", () => {

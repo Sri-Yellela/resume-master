@@ -15,7 +15,10 @@ test("Generate and A+ artifacts are tracked independently in the sandbox", () =>
   assert.match(sandbox, /variantKeys\.length > 1/);
   assert.match(sandbox, /setSelectedTool\(tool\)/);
   assert.match(jobCard, /const generateLoading = st === "generate"/);
-  assert.match(jobCard, /const aPlusLoading = st === "a_plus_resume"/);
+  // The companion `aPlusLoading` assertion is gone with the dead local it pinned (§5.14). A+ is
+  // not a JobCard button — it lives in JobDetailPanel — so the card never read that flag. The
+  // independent TRACKING this test is actually about is asserted on jobsPanel and sandbox above;
+  // the card only needs its own flag for the button it does own.
   assert.match(detail, /disabled=\{!!st\}/);
 });
 

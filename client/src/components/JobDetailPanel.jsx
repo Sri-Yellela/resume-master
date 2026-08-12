@@ -270,8 +270,12 @@ export default function JobDetailPanel() {
             {/* Action bar */}
             {selectedJobMeta && (() => {
               const { g, done, st, applyMode: am, canUseGenerate: canGen, onGenerate, onViewSandbox, onExport, onStar, onDislike, onQueueApply } = selectedJobMeta;
+              // Same orphan as the one removed from JobCard: this action bar has no dedicated A+
+              // button, so the `aPlusLoading` flag beside this one was computed and never read.
+              // A+ is still a live tool — JobsPanel selects it by apply_mode/plan tier — it just
+              // has no button of its own here, and `disabled={!!st}` below already covers the
+              // in-flight state for whichever tool is running.
               const generateLoading = st === "generate";
-              const aPlusLoading = st === "a_plus_resume";
               return (
                 <div style={{
                   display:"flex", alignItems:"center", gap:6, flexWrap:"wrap",
