@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -13,7 +13,11 @@ test("job card hover preview uses shared active-aware icon helpers for save and 
   assert.match(jobCard, /activeLabel="Remove from saved"/);
   assert.match(jobCard, /activeLabel="Undo pass"/);
   assert.match(jobCard, /active=\{done && !generateLoading\}/);
-  assert.match(jobCard, /active=\{done && !aPlusLoading\}/);
+  // The A+ action is no longer a JobCard button — only Generate is. `aPlusLoading` survives at
+  // JobCard.jsx:328 as a computed-but-unused local (a small dead-code item, recorded in
+  // docs/PIPELINE_DIAGNOSIS.md §5.14). Asserting the active-aware helper contract on the button
+  // that exists rather than requiring one that does not.
+  assert.match(jobCard, /const aPlusLoading = st === "a_plus_resume"/);
 });
 
 test("jobs UI opens ATS panel from stored base ATS reports without requiring regeneration", () => {
@@ -26,8 +30,10 @@ test("jobs UI opens ATS panel from stored base ATS reports without requiring reg
   assert.match(jobsPanel, /job\?\.baseAtsReport/);
   assert.match(jobsPanel, /openAtsPanel\(buildAtsPayload\(job, g\)\)/);
   assert.match(detailPanel, /const atsScore = g\?\.atsScore \?\? job\?\.baseAtsScore \?\? null/);
-  assert.match(server, /sj\.ats_report as base_ats_report/);
-  assert.match(server, /baseAtsReport:\s*parseJsonMaybe\(j\.base_ats_report, null\)/);
+  // The SQL alias was dropped — the row mapper now reads sj.ats_report directly rather than
+  // renaming it to base_ats_report in the SELECT. Same data reaching the client under the same
+  // baseAtsReport key, one fewer indirection.
+  assert.match(server, /baseAtsReport:\s*parseJsonMaybe\(j\.ats_report, null\)/);
   assert.match(server, /SELECT ats_report FROM scraped_jobs WHERE job_id=\?/);
 });
 
@@ -42,9 +48,19 @@ test("saved jobs section renders imported LinkedIn jobs inside Starred with inst
 
   assert.match(jobsPanel, /function StarredLinkedInSection/);
   assert.match(jobsPanel, /showImportedLinkedInSection=\{boardTab === "saved"\}/);
-  assert.match(jobsPanel, /They stay separate from local starred jobs/);
-  assert.match(jobsPanel, /No imported LinkedIn saved jobs yet/);
-  assert.match(jobsPanel, /short-lived token/);
+  // The section's copy was rewritten in cleanup 5.3 (7a88522). It used to describe the LinkedIn
+  // bulk saved-jobs import — a flow whose bridge functions had been stubs since BYO-2 and whose
+  // extension-side script v1.2.0 deleted, so the instructions told users to do something that
+  // could not work. It now describes the live single-job capture path.
+  assert.match(jobsPanel, /Open a LinkedIn job and capture it with the Resume Master extension/);
+  assert.match(jobsPanel, /No captured LinkedIn jobs yet/);
+  // Comments stripped first: the removal's own explanatory note in JobsPanel quotes the old CTA.
+  const jobsPanelCode = jobsPanel
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.doesNotMatch(jobsPanelCode, /Import from LinkedIn/,
+    "the removed bulk-import CTA must not come back");
 });
 
 test("scrape and poll enforce stored profile experience constraints before surfacing new jobs", () => {

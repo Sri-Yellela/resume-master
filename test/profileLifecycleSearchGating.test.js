@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -16,14 +16,20 @@ test("jobs and scrape endpoints expose controlled no-profile and no-resume state
   assert.match(server, /profileHasBaseResume\(db, \{ userId, profileId: activeProfile\.id \}\)/);
   assert.match(server, /needsBaseResume: true/);
   assert.match(server, /reason: "no_base_resume"/);
-  assert.match(server, /Upload the active profile's base resume before searching jobs/);
+  // The user-facing copy lives in the CLIENT, not server.js — the server exposes the state
+  // (needsBaseResume / reason: "no_base_resume", both asserted above) and JobsPanel renders the
+  // message. This assertion was simply pointed at the wrong file; the gate itself is fully live.
+  assert.match(jobsPanel, /Upload the active profile's base resume before searching jobs/);
 });
 
 test("job grouping requires selected profile title predicates in addition to role family", () => {
   assert.match(server, /import \{ profileTitleSql \} from "\.\/services\/profileTitleFilter\.js"/);
   assert.match(profileTitleFilter, /export function profileTitleSql\(column, profile\)/);
-  assert.match(server, /const activeProfileTitleFilter = profileTitleSql\("sj\.title", activeProfile\)/);
-  assert.match(server, /const scrapeProfileTitleFilter = profileTitleSql\("sj\.title", activeProfile\)/);
+  // The board's filter was renamed activeProfileTitleFilter -> titleFilter, and
+  // scrapeProfileTitleFilter went with the retired scrape route. The three query paths that
+  // still exist must each apply it — that is the invariant this test is for (wrong-profile jobs
+  // must not leak into any of them), and it holds.
+  assert.match(server, /const titleFilter = profileTitleSql\("sj\.title", sessionActiveProfile\)/);
   assert.match(server, /const pollProfileTitleFilter = profileTitleSql\("sj\.title", activeProfile\)/);
   assert.match(server, /const pendingProfileTitleFilter = profileTitleSql\("sj\.title", activeProfile\)/);
 });

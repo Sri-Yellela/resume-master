@@ -401,6 +401,28 @@ The test previously asserted the wiring existed, so it had been failing silently
 44-failure baseline rather than raising this. It has been narrowed to assert what is verifiably
 true, with this question recorded rather than papered over.
 
+### 5.14 OPEN — two smaller findings from clearing the last failures
+
+**The floating dock's zone constraint is inert.** `jobsUiFollowups` asserted the dock is centred on
+the jobs panel's measured rect rather than the viewport. The `"rm:jobs-panel-zone"` CustomEvent
+that carried that rect is gone from both `JobsPanel.jsx` and `TopBar.jsx`, and the two variables
+survive only as names:
+
+```js
+const constrainedPillWidth = pillWidth;   // constrains nothing
+const dockCenter           = vw / 2;      // always viewport centre
+```
+
+So the dock is back to the full-viewport centring the test said it should not use. Plausibly a
+deliberate simplification — the redesigned board is centred and near-full-width, so the two may
+now coincide visually — but equally it reads like an unfinished revert. **Needs eyes on the real
+UI, not a code read.** The test asserts only what is verifiably true and no longer claims the
+constraint exists.
+
+**`aPlusLoading` is dead in JobCard.** `JobCard.jsx:328` computes
+`const aPlusLoading = st === "a_plus_resume"` and nothing uses it — the A+ action is no longer a
+card button (it survives in `JobDetailPanel`). Small dead-code item, same family as §5.12.
+
 ### Recommended order, if the deletions are approved
 
 1. **5.6 first** — it is the only item actively giving an admin wrong answers.
