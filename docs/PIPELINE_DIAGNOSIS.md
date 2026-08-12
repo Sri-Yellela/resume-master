@@ -382,7 +382,7 @@ so removing it is its own scoped change, not a continuation of this pass.
 all of them assertions pinned to the pre-pivot architecture. `/api/scrape` returning HTTP 410
 *"External scraping has been removed"* is what settled that those could never be repaired.
 
-### 5.13 OPEN — the apply flow's server-side prerequisite check is gone
+### 5.13 RESOLVED — the apply flow's server-side prerequisite check was gone (regression, restored)
 
 Surfaced while fixing the UI-drift failures, and **not** resolved, because the code alone doesn't
 say whether it was deliberate.
@@ -392,6 +392,24 @@ readiness endpoint, `GET /api/apply/readiness`, probes **browser** availability
 (`probeBrowserAvailability`) — a different concern entirely. Meanwhile
 `getMissingApplyPrerequisites` and `requiresLinkedInSession` are still exported from
 integrationReadiness.js and have **zero callers anywhere in the repo**.
+
+*Two corrections to the above, from re-verifying it:*
+
+- **`requiresLinkedInSession` no longer exists.** It is not exported from integrationReadiness.js
+  at all — the file's exports are `INTEGRATION_PROVIDERS`, `publicIntegrationRow`,
+  `getStoredIntegration`, `getLinkedInStatus`, `getJobSourceReadiness`, `isAdzunaConfigured`,
+  `isIndeedConfigured`, `isLinkedInOAuthConfigured`, `getAutomationReadiness`,
+  `getMissingApplyPrerequisites`. So this is one dead helper, not two.
+- **The prerequisite *computation* is not gone — only its consumption is.** `getMissingApplyPrerequisites`
+  (line 129) is a one-line accessor, `readiness?.apply?.missing || []`, over data
+  `getAutomationReadiness` still computes and still exposes as `apply: { ready, missing, optional }`
+  (lines 118-125). `getAutomationReadiness` is live. So restoring the gate does not require
+  rebuilding a check; the values are already there and already served to the integrations surface.
+
+The gap itself is confirmed: `POST /api/apply/runs` (`routes/apply.js:404-437`) validates
+`jobIds` (non-empty array, max 25), filters already-applied/in-progress jobs, inserts the run and
+calls `processRun` via `setImmediate`. `requireAuth` is the only other gate. Nothing consults
+`apply.ready` before a run is queued.
 
 So an apply run is gated by `requireAuth`, input validation (jobIds required, max 25,
 already-applied filtering) and browser availability — but nothing server-side checks the
@@ -408,6 +426,45 @@ Two possibilities, and they need different fixes:
 - **Regression** — a user with a missing prerequisite can start a run that fails later and less
   legibly than it used to, in which case apply.js should consume `getMissingApplyPrerequisites`
   again.
+
+#### RESOLVED — regression. The client proved it.
+
+It was not determinable from `routes/apply.js` alone, but it *is* determinable from the client.
+`JobsPanel.startApplyRun`'s catch block reads `e.payload?.missingPrerequisites` and renders
+*"Setup needed in Integrations: {list}"*. The client was still honouring a contract whose server
+half had been deleted — the UI was waiting for a field the run endpoint could no longer send. That
+is a half-removed contract, not a design change, so the gate was restored rather than the helper
+deleted.
+
+`POST /api/apply/runs` now returns **409** with `{ error, missingPrerequisites }` when
+`getMissingApplyPrerequisites(getAutomationReadiness(db, userId))` is non-empty, placed after input
+validation and **before** the `apply_runs` insert. 409 was chosen because `client/src/lib/api.js`
+special-cases only 401/429/5xx; every other non-2xx reaches the generic branch that preserves
+`payload` intact, which is what the client's message depends on.
+
+**Verified against the real database rather than assumed**, because the risk of restoring a gate is
+over-blocking runs that currently work:
+
+| user | profile | base resume | outcome |
+|---|---|---|---|
+| 1, 2, 4 | none | none | 409 gated |
+| 3, 5 | ready | missing | 409 gated on `base_resume` only |
+| 10 | ready | available | **202 allowed** |
+
+A fully set-up user passes, so the check is not stale and does not over-block. It is also narrow by
+construction: `getAutomationReadiness` keeps gmail/google in `apply.optional` and scopes linkedin
+to `profile_import`, so no OAuth state can block a run. And the gate's two lookups
+(`domain_profiles WHERE is_active=1`, `getBaseResumeRecord`) are *the same lookups*
+`coreGenerateResume` performs at server.js:6110-6116 — with `generateResumeForApply` passing no
+`resumeText` (server.js:6339), a run with no base resume generates from an empty string. The gate
+blocks exactly the runs that could not have produced a real resume. `apply_runs` had 0 rows, so no
+in-flight run was disrupted.
+
+*One narrow trade-off, recorded rather than hidden:* `generateResumeForApply` short-circuits to a
+cached artifact from the `resumes` table (server.js:6306-6311) before ever needing a base resume.
+A user with no base resume but a cached artifact for **every** queued job would previously have
+completed a run and is now gated. This is judged correct — the client's own copy frames a base
+resume as setup, not an optimization — but it is a real behaviour change for that edge case.
 
 The test previously asserted the wiring existed, so it had been failing silently as part of the
 44-failure baseline rather than raising this. It has been narrowed to assert what is verifiably

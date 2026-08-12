@@ -4,6 +4,7 @@ import { writeFileSync, unlinkSync } from "fs";
 import { autoApply } from "../services/applyAutomation.js";
 import { probeBrowserAvailability } from "../services/browserLauncher.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
+import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
 
 function publicApplication(row) {
   if (!row) return null;
@@ -407,6 +408,21 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       return res.status(400).json({ error: "jobIds array required" });
     if (jobIds.length > 25)
       return res.status(400).json({ error: "Max 25 jobs per run" });
+
+    // Restored server-side prerequisite gate (§5.13). A run cannot produce anything without a
+    // base resume, an active profile, and the name/email the autofill fills in — so refuse before
+    // queueing rather than failing per-job inside processRun. This is the missing half of a
+    // contract the client still honours: JobsPanel's startApplyRun catch reads
+    // `missingPrerequisites` off the error payload and renders "Setup needed in Integrations: …".
+    // Deliberately narrow: getAutomationReadiness keeps gmail/google in `apply.optional` and
+    // scopes linkedin to profile_import, so none of those block a run.
+    const missingPrerequisites = getMissingApplyPrerequisites(getAutomationReadiness(db, req.user.id));
+    if (missingPrerequisites.length) {
+      return res.status(409).json({
+        error: "Apply prerequisites are not set up yet",
+        missingPrerequisites,
+      });
+    }
 
     const duplicates = db.prepare(`
       SELECT job_id FROM apply_run_jobs
