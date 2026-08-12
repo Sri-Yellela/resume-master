@@ -1104,6 +1104,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
   const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
   const [applyReadiness, setApplyReadiness] = useState(null); // null=unknown, {available,reason}
+  // Validation-correction loop. A held run used to be a dead end; these are the questions that would
+  // turn it into a completion, deduplicated across jobs by GET /api/apply/questions.
+  const [applyQuestions, setApplyQuestions] = useState([]);
+  const [applyQuestionMeta, setApplyQuestionMeta] = useState({ eligibilityCount: 0, blockedJobs: 0 });
+  const [questionDrafts, setQuestionDrafts] = useState({});   // question text -> answer
+  const [answersSaving, setAnswersSaving] = useState(false);
+  const [answersMsg, setAnswersMsg] = useState("");
 
   // LIVE POLLING: polls /api/jobs/poll every 4s during active scrape.
   // Stops when scraping:false returned or after 3 consecutive failures.
@@ -2058,7 +2065,85 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     } catch {}
   }, []);
 
-  useEffect(() => { if (user) loadApplyRuns(); }, [user, loadApplyRuns]);
+  const loadApplyQuestions = useCallback(async () => {
+    try {
+      const data = await api("/api/apply/questions");
+      const questions = Array.isArray(data.questions) ? data.questions : [];
+      setApplyQuestions(questions);
+      setApplyQuestionMeta({
+        eligibilityCount: data.eligibilityCount || 0,
+        blockedJobs: data.blockedJobs || 0,
+      });
+      // A low_confidence question is a CONFIRMATION, not a blank: the resolver already has a value it
+      // was not confident enough to submit, so seed the field with it. Accepting it is the answer.
+      setQuestionDrafts(prev => {
+        const next = { ...prev };
+        for (const q of questions) {
+          if (next[q.question] === undefined) next[q.question] = q.proposed ?? "";
+        }
+        return next;
+      });
+    } catch {}
+  }, []);
+
+  /**
+   * Save the drafted answers, optionally retrying whatever they unblock.
+   *
+   * retryJobIds is the union of every job the answered questions block; the SERVER decides which of
+   * those are actually retryable (it only retries a job once every question blocking it is answered)
+   * and reports the rest as `skipped`. Sending the union rather than guessing keeps that authority
+   * in one place.
+   */
+  const submitApplyAnswers = useCallback(async (retry) => {
+    const answers = {};
+    for (const q of applyQuestions) {
+      const v = questionDrafts[q.question];
+      if (v !== undefined && String(v).trim() !== "") answers[q.question] = String(v).trim();
+    }
+    if (Object.keys(answers).length === 0) {
+      setAnswersMsg("Answer at least one question first.");
+      return;
+    }
+    const blocked = [...new Set(
+      applyQuestions
+        .filter(q => answers[q.question] !== undefined)
+        .flatMap(q => (q.blocking || []).map(b => b.jobId))
+    )];
+
+    setAnswersSaving(true);
+    setAnswersMsg("");
+    try {
+      const data = await api("/api/apply/answers", {
+        method: "POST",
+        body: JSON.stringify({
+          answers,
+          ...(retry ? { retryJobIds: blocked, mode: "auto" } : {}),
+        }),
+      });
+      const saved = data.saved?.length || 0;
+      const started = data.retry?.queued?.length || 0;
+      setAnswersMsg(
+        started
+          ? `Saved ${saved} answer${saved === 1 ? "" : "s"} — retrying ${started} application${started === 1 ? "" : "s"}.`
+          : `Saved ${saved} answer${saved === 1 ? "" : "s"}.` +
+            (data.unblocked?.length ? ` ${data.unblocked.length} ready to retry.` : "")
+      );
+      await Promise.all([loadApplyQuestions(), loadApplyRuns()]);
+    } catch (e) {
+      // The answers are saved even when a retry is refused (cap spent, kill switch, run in flight),
+      // so say so rather than implying the input was lost. api.js now surfaces the server's sentence.
+      const stillSaved = e.payload?.saved?.length || 0;
+      setAnswersMsg(
+        (stillSaved ? `Saved ${stillSaved} answer${stillSaved === 1 ? "" : "s"}, but the retry did not start: ` : "") +
+        (e.message || "Could not save answers.")
+      );
+      if (stillSaved) await Promise.all([loadApplyQuestions(), loadApplyRuns()]);
+    } finally {
+      setAnswersSaving(false);
+    }
+  }, [applyQuestions, questionDrafts, loadApplyQuestions, loadApplyRuns]);
+
+  useEffect(() => { if (user) { loadApplyRuns(); loadApplyQuestions(); } }, [user, loadApplyRuns, loadApplyQuestions]);
 
   useEffect(() => {
     if (!user) return;
@@ -2936,6 +3021,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 {applyReviewJobs.length} need review ↗
               </button>
             )}
+            {/* Answering is the actionable thing, so it gets its own CTA rather than hiding behind
+                "need review". Accented because a hold only clears once these are answered. */}
+            {applyQuestions.length > 0 && !applyQueue.length && (
+              <button onClick={() => { setApplyRunDetail(null); setApplyRunDetailOpen(true); }}
+                style={{ border:`1px solid ${theme.accent}`, borderRadius:4, padding:"3px 8px",
+                         background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontSize:11, fontWeight:800 }}>
+                Answer {applyQuestions.length} question{applyQuestions.length === 1 ? "" : "s"} ↗
+              </button>
+            )}
           </div>
         )}
 
@@ -3003,7 +3097,121 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
             {/* Job list */}
             <div style={{ overflowY:"auto", flex:1, padding:"12px 20px", display:"flex", flexDirection:"column", gap:8 }}>
-              {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).length === 0 && (
+
+              {/* ── Validation-correction loop ──────────────────────────────────
+                  A hold used to end the run. These are the fields the resolver refused to fill on
+                  its own; answering them is what turns the hold into a completed application. The
+                  answers are stored as custom_answers, which is the only exact-by-construction
+                  resolution path — so on retry they are used verbatim, never inferred. */}
+              {!applyRunDetail && applyQuestions.length > 0 && (
+                <div style={{ border:`1px solid ${theme.accent}`, borderRadius:6, padding:"12px 14px",
+                              background:theme.surfaceHigh, display:"flex", flexDirection:"column", gap:10 }}>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:13, color:theme.text }}>
+                      Answer {applyQuestions.length} question{applyQuestions.length === 1 ? "" : "s"}
+                      {applyQuestionMeta.blockedJobs > 0 &&
+                        ` to unblock ${applyQuestionMeta.blockedJobs} application${applyQuestionMeta.blockedJobs === 1 ? "" : "s"}`}
+                    </div>
+                    <div style={{ fontSize:11, color:theme.textMuted, marginTop:2 }}>
+                      Nothing here was guessed on your behalf — these are the fields we would not fill without you.
+                      {applyQuestionMeta.eligibilityCount > 0 &&
+                        ` ${applyQuestionMeta.eligibilityCount} of them are attestations to the employer.`}
+                    </div>
+                  </div>
+
+                  {applyQuestions.map(q => {
+                    const isEligibility = !!q.eligibility;
+                    const isConfirm     = q.reason === "low_confidence";
+                    const value         = questionDrafts[q.question] ?? "";
+                    const setValue      = v => setQuestionDrafts(prev => ({ ...prev, [q.question]: v }));
+                    const inputStyle    = { width:"100%", padding:"6px 8px", fontSize:12, borderRadius:4,
+                                            border:`1px solid ${theme.border}`, background:theme.surface,
+                                            color:theme.text, boxSizing:"border-box" };
+                    return (
+                      <div key={q.question} style={{ borderTop:`1px solid ${theme.border}`, paddingTop:10,
+                                                     display:"flex", flexDirection:"column", gap:5 }}>
+                        <div style={{ display:"flex", alignItems:"flex-start", gap:8, flexWrap:"wrap" }}>
+                          <span style={{ fontSize:12, fontWeight:700, color:theme.text, flex:1, minWidth:220 }}>
+                            {q.question}
+                          </span>
+                          {isEligibility && (
+                            <span title="Submitted to the employer as your own statement. Never inferred from your profile."
+                              style={{ fontSize:9, fontWeight:800, padding:"2px 7px", borderRadius:999,
+                                       background:"#dc262622", color:"#dc2626", whiteSpace:"nowrap", flexShrink:0 }}>
+                              ATTESTATION
+                            </span>
+                          )}
+                          {q.answered && (
+                            <span style={{ fontSize:9, fontWeight:700, padding:"2px 7px", borderRadius:999,
+                                           background:"#16a34a22", color:"#16a34a", whiteSpace:"nowrap", flexShrink:0 }}>
+                              SAVED
+                            </span>
+                          )}
+                        </div>
+
+                        {isEligibility && (
+                          <div style={{ fontSize:10, color:"#dc2626" }}>
+                            You are stating this to the employer yourself. We never answer it from your profile.
+                          </div>
+                        )}
+                        {isConfirm && (
+                          <div style={{ fontSize:10, color:theme.textMuted }}>
+                            We had a guess{q.proposed ? ` — "${q.proposed}"` : ""} but were not confident enough to send it.
+                            Confirm or correct it.
+                          </div>
+                        )}
+
+                        {Array.isArray(q.options) && q.options.length > 0 ? (
+                          <select value={value} onChange={e => setValue(e.target.value)} style={inputStyle}>
+                            <option value="">Select…</option>
+                            {q.options.map(o => (
+                              <option key={o.value} value={o.value}>{o.label || o.value}</option>
+                            ))}
+                          </select>
+                        ) : q.type === "checkbox" || q.type === "toggle" ? (
+                          <select value={value} onChange={e => setValue(e.target.value)} style={inputStyle}>
+                            <option value="">Select…</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                          </select>
+                        ) : q.type === "text_area" ? (
+                          <textarea rows={2} value={value} onChange={e => setValue(e.target.value)} style={inputStyle}/>
+                        ) : (
+                          <input value={value} onChange={e => setValue(e.target.value)} style={inputStyle}/>
+                        )}
+
+                        {(q.blocking || []).length > 0 && (
+                          <div style={{ fontSize:10, color:theme.textDim }}>
+                            Blocks: {q.blocking.slice(0, 3).map(b => b.company || b.title || b.jobId).join(", ")}
+                            {q.blocking.length > 3 ? ` +${q.blocking.length - 3} more` : ""}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", paddingTop:4 }}>
+                    <button onClick={() => submitApplyAnswers(true)} disabled={answersSaving}
+                      style={{ border:"none", borderRadius:6, padding:"6px 12px", background:theme.accent,
+                               color:"#0f0f0f", fontWeight:800, fontSize:12,
+                               cursor: answersSaving ? "wait" : "pointer", opacity: answersSaving ? 0.6 : 1 }}>
+                      {answersSaving ? "Saving…" : "Save & retry"}
+                    </button>
+                    <button onClick={() => submitApplyAnswers(false)} disabled={answersSaving}
+                      style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"6px 12px",
+                               background:theme.surface, color:theme.text, fontWeight:700, fontSize:12,
+                               cursor: answersSaving ? "wait" : "pointer", opacity: answersSaving ? 0.6 : 1 }}>
+                      Save only
+                    </button>
+                    {answersMsg && (
+                      <span style={{ fontSize:11, color:theme.accentText }}>{answersMsg}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).length === 0 &&
+               (applyRunDetail || applyQuestions.length === 0) && (
                 <div style={{ padding:"24px 0", textAlign:"center", color:theme.textMuted, fontSize:12 }}>
                   No jobs in this run yet.
                 </div>
