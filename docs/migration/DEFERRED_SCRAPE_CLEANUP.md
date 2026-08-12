@@ -1,5 +1,21 @@
 # Deferred Scrape Reference Cleanup
 
+> **STALE PREMISE — read this first.** Every "next step" below is conditioned on the Adzuna/Indeed
+> aggregator going live. That precondition was cancelled, not delayed: per
+> `docs/PIPELINE_DIAGNOSIS.md` §3.5 **no write path produces adzuna or serpapi rows at all**, and
+> the architecture pivoted to store-then-filter over the 7 direct ATS sources plus Jobo. The
+> adzuna/serpapi plugins remain wired into live search only. So the triggers below will never fire
+> on their own terms and this document should not be read as "waiting".
+>
+> Progress made since, tracked in §5.12 of the diagnosis rather than here:
+> - The daily re-scrape cron is **removed** — it was unreachable, selecting its target from
+>   `user_job_searches`, a table with no writer.
+> - **Force Scrape is still live and still works** (a real HarvestAPI crawl). Its replacement was
+>   deferred pending "Trigger Adzuna Sync", which is not coming; retiring it is now an open product
+>   decision, along with the Apify token field `AuthScreen.jsx` still collects at signup.
+> - Item 3 (test files) is largely done: the scrape-era tests were re-pointed across commits
+>   823b622…e475e55, and the suite is green.
+
 ## What This Tracks
 After the Phase 1–7 LinkedIn/scraping migration, a broad
 grep for "scrape|apify|puppeteer|linkedin.*session|linkedin.*cookie"

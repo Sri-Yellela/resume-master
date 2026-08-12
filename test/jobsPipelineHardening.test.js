@@ -18,10 +18,20 @@ const simpleProfileSvc = fs.readFileSync("services/simpleApplyProfile.js", "utf8
 test("external scraping stays retired and the setup gate still blocks a profileless user", () => {
   assert.match(server, /app\.post\("\/api\/scrape",[\s\S]{0,200}?410/,
     "/api/scrape must remain a 410 tombstone");
-  // NOTE: isExternalScrapeQuotaError still EXISTS in server.js and is called from scrapeJobs and
-  // the cron re-scrape path — both scrape-path leftovers recorded as §5.12 in
-  // docs/PIPELINE_DIAGNOSIS.md, pending their own scoped removal. Asserting it absent here would
-  // be asserting a cleanup that has not happened yet.
+  // The daily re-scrape cron is gone (§5.12). It selected its target from user_job_searches,
+  // which has no writer anywhere in the repo, so it could never fire. Asserted absent because the
+  // reason it was dead is invisible at the call site — it looked like a live scheduled job.
+  assert.doesNotMatch(server, /cron\.schedule\("0 7 \* \* \*"/,
+    "the dead daily re-scrape cron must not come back");
+  // Not asserting that nothing reads user_job_searches at all: a legacy migration backfill
+  // (server.js:911-916) joins it to domain_profiles legitimately, and an admin view reads it.
+  // Reads are fine — the table having no WRITER is what made the cron unreachable.
+
+  // isExternalScrapeQuotaError and scrapeJobs still EXIST and are still live, now via exactly one
+  // entry point: POST /api/admin/db/force-scrape, which is a working HarvestAPI crawl. Removing
+  // that is a product decision, not cleanup, so absence is deliberately NOT asserted for them.
+  assert.match(server, /createAdminDbRouter\(db, \{ dbPath: DB_PATH, scrapeJobs \}\)/,
+    "force-scrape is the one remaining scrapeJobs entry point — keep the wiring explicit");
 
   // The user-facing gate that replaced it is live.
   assert.match(jobsPanel, /setupBlock/);

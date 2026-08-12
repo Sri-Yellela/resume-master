@@ -373,10 +373,46 @@ not shape /api/scrape"* line as a live invariant, so the rule is kept as a const
 re-adding an outbound path even though its builder is gone. That test's note about the orphan is
 now an absence assertion instead of a comment.
 
-**Still open, and deliberately not bundled:** the server-side cluster (`scrapeJobs`,
-`isExternalScrapeQuotaError`, `searchThreadId`/`logSearchThread`, `activeScrapes`, `scrapeStateKey`,
-`mapPostedLimit`). `scrapeJobs` retains two live entry points — a cron path and the admin router —
-so removing it is its own scoped change, not a continuation of this pass.
+**The server-side cluster — TRACED. The two entry points are not equivalent; one was dead.**
+
+`scrapeJobs` was recorded as having two live entry points, a cron path and the admin router.
+Tracing them settled it, and the answer differs per path:
+
+| Entry point | Reachable? | Verdict |
+|---|---|---|
+| `cron.schedule("0 7 * * *")` (server.js:3214) | **No — provably** | **REMOVED.** |
+| `POST /api/admin/db/force-scrape` (adminDb.js:851) | **Yes** | **KEPT** — see below. |
+
+**Why the cron was dead by data flow, not by missing callers.** It chose what to re-crawl from the
+most recent `user_job_searches` row. That table has **zero writers anywhere in the repo** — every
+reference is its `CREATE TABLE` (migration 004), two legacy migration backfills, one admin
+read-only view, and the cron's own `SELECT`. So `if (!last) return` fired on every tick and the
+crawl could never run. This is why it survived earlier caller-grep passes: the call site
+`await scrapeJobs(...)` looks live, and only the writerless table upstream makes it unreachable.
+Confirmed against the DB: `user_job_searches` has 0 rows and the cron's own query returns nothing.
+
+**Why `scrapeJobs` is kept.** `force-scrape` reaches it, and it is not a stub — it calls
+`scrapeHarvestAPI` and performs a real external crawl. So external scraping is retired from the
+*user-facing* flow (`/api/scrape` → 410) while remaining fully functional behind an admin endpoint.
+`isExternalScrapeQuotaError` stays with it; after the cron went, `scrapeJobs` is its only caller.
+
+**Two things this surfaced that are decisions, not cleanup:**
+
+1. **`force-scrape` has no caller of its own** — not even DBInspector. It is an orphaned admin
+   endpoint in the shape of §5.4, except that unlike `save-jobs-bulk` it still *works*. Removing a
+   functioning admin escape hatch is a product call.
+2. **`AuthScreen.jsx` still collects an Apify token at signup** (lines 79, 153, 164, 356, including
+   an `apify_api_` prefix check), and `PATCH /api/integrations/apify-token` still exists — even
+   though the Integrations panel's Apify section was removed with external scraping. This is what
+   keeps `users.apify_token` populatable, and therefore what keeps `force-scrape` usable. No user
+   in the DB currently has one. A signup form asking for a third-party API token that only an
+   unreferenced admin route consumes is worth an explicit decision.
+
+**`docs/migration/DEFERRED_SCRAPE_CLEANUP.md` is stale in its premise.** It defers exactly this
+admin cleanup ("Replace 'Force Scrape' with 'Trigger Adzuna Sync'") until "after Adzuna/Indeed
+aggregator is live". Per §3.5 that precondition never arrived and cannot: no write path produces
+adzuna or serpapi rows at all, and the pivot went to the 7 direct ATS sources plus Jobo instead.
+The deferral is waiting on an event that was cancelled.
 
 **Baseline movement, as predicted:** 44 → 43 (5.3/5.4) → **38** (5.1/5.7). Nine failures cleared,
 all of them assertions pinned to the pre-pivot architecture. `/api/scrape` returning HTTP 410
