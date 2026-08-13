@@ -130,13 +130,22 @@ test("browser unavailable error is classified for graceful fallback", () => {
   assert.doesNotMatch(automation, /puppeteer\.launch/);
 });
 
-test("jobs UI can queue multiple jobs and start auto or manual apply runs", () => {
+test("jobs UI can queue multiple jobs and start an apply run that holds for approval", () => {
   assert.match(detailPanel, /onQueueApply/);
   assert.match(detailPanel, /Queue Auto/);
   assert.match(jobsPanel, /const \[applyQueue, setApplyQueue\]/);
-  assert.match(jobsPanel, /Run Auto Apply/);
   assert.match(jobsPanel, /Autofill for Review/);
   assert.match(jobsPanel, /api\("\/api\/apply\/runs"/);
+  // "Run Auto Apply" is gone on purpose. It posted the identical request to this one —
+  // mode:"auto" with no approvalMode, which the server treats as approval-required — so it never
+  // auto-applied, and a control claiming applications were sent while they sat waiting for
+  // approval is a false statement to the user, not a feature.
+  // Matches the rendered LABEL, not any mention of the name — the comment above the surviving
+  // button explains why the old one went, and that explanation should not fail this assertion.
+  assert.doesNotMatch(jobsPanel, /Run Auto Apply\s*<\/button>/);
+  assert.match(jobsPanel, /startApplyRun\("review"\)/);
+  assert.doesNotMatch(jobsPanel, /startApplyRun\("manual"\)/,
+    "the semi path is retired from this surface: its visible browser cannot exist in production");
 });
 
 test("autoApply accepts resumePathPromise and awaits it before first upload", () => {
