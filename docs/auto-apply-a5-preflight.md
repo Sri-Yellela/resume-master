@@ -69,11 +69,32 @@ made that attempt fail has not been diagnosed here.
 
 ## Two facts that change how A5 should be read
 
-**The greenhouse pool is 110 rows, all Figma.** A5 says "651 of 684 active rows are greenhouse" — that
-figure is stale. The current board is 643 rows: 110 greenhouse (Figma only), 26 ashby, 507 generic.
-So "pick ONE greenhouse job the candidate genuinely wants" has a one-company menu, and of the 33
+**The greenhouse pool is 35 rows, all Figma.** A5 says "651 of 684 active rows are greenhouse" — that
+figure is stale, and so is the 643-row board this doc previously described. `runExpiredJobsCleanup`
+(`server.js:3142`) deletes anything whose `scraped_at` is older than 7 days, and on a server boot it
+removed 637 of the 643 rows. The board was then refilled from real posting URLs through
+`scripts/importJobUrls.mjs`, which drives the app's own `services/jobs/importJob.js`.
+
+So "pick ONE greenhouse job the candidate genuinely wants" has a one-company menu, and of the 35
 engineering-ish titles most are *Manager, Software Engineering* rather than IC roles. Whether anything
 here is a role worth applying to on its own merits is the candidate's call, and it may be *no*.
+
+**The board expires, so a target has a shelf life.** Anything imported stops being a valid A5 target
+7 days after import. `POST /api/admin/db/force-scrape` — the only crawl path — needs a
+`users.apify_token` that no account currently has, so refills go through `importJobUrls.mjs` until
+one is configured. Re-run it before A5 rather than trusting a stale board:
+
+```
+node scripts/importJobUrls.mjs --greenhouse <slug> --match "engineer" --list   # look first
+node scripts/importJobUrls.mjs --greenhouse <slug> --match "engineer"          # import
+node scripts/importJobUrls.mjs <url> [<url> ...]                               # or specific postings
+```
+
+A greenhouse/lever/ashby URL costs no model credits — `importJob` refetches that company's board
+through the source's own `fetchCompanyJobs` and matches the posting, which is the same structured
+data a crawl would produce. Imports run with no Anthropic client, so **`runEnrichment` is skipped**
+and rows carry the ATS's own fields without the derived ones (YoE, extracted skills). That does not
+affect the apply path; it affects board filtering.
 
 **A5 is a production activity, not a local one.** The real candidate's profile and resume live in the
 deployed app; this dev database contains only fixtures. Running A5 locally would first require seeding
@@ -121,7 +142,8 @@ preflight itself uses a `readonly` handle.
    profile and resume seeded into `data/a5-fixture/`.
 2. Replace the placeholder `profile.json` and `John Doe Resume.pdf` with the candidate's real ones,
    so there is an actual payload — this clears the identity check and the resume check together.
-3. Name the posting the candidate genuinely wants, from a 110-row, single-company (Figma) pool.
+3. Name the posting the candidate genuinely wants. The pool is whatever was last imported; import
+   the specific posting if it is not already on the board.
 4. Be at the machine, in semi mode, for the field-by-field review.
 
 Re-run `node scripts/a5Preflight.mjs --user <id> --job <job_id>` until it reports PREFLIGHT CLEAR
