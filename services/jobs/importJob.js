@@ -379,14 +379,21 @@ function attachImportToUser(db, userId, jobId) {
 
 /**
  * @param {{url?: string, text?: string, html?: string}} input
- * @param {{db: import('better-sqlite3').Database, anthropic: import('@anthropic-ai/sdk').default|null, userId?: number|null}} ctx
+ * @param {{db: import('better-sqlite3').Database, anthropic: import('@anthropic-ai/sdk').default|null,
+ *          userId?: number|null, force?: boolean}} ctx
+ *   force skips the freshness short-circuit and re-fetches even a row imported moments ago. For
+ *   BACKFILLS after the extractor changes: when a source starts reading a field it previously
+ *   dropped, every existing row is stale in a way `updated_at` cannot express, and without this
+ *   the re-import silently returns the old row and the fix appears not to work. Not exposed over
+ *   HTTP — routes/importJob.js never passes it, so a client cannot use it to force repeated
+ *   outbound fetches.
  */
-async function importJob({ url, text, html } = {}, { db, anthropic, userId = null }) {
+async function importJob({ url, text, html } = {}, { db, anthropic, userId = null, force = false }) {
   if (!url && !text && !html) {
     throw new ImportInputError('Provide at least one of url, text, or html');
   }
 
-  if (url) {
+  if (url && !force) {
     const existing = db.prepare(
       'SELECT * FROM scraped_jobs WHERE url = ? ORDER BY updated_at DESC LIMIT 1'
     ).get(url);

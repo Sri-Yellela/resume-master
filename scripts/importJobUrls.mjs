@@ -16,8 +16,11 @@
 //   node scripts/importJobUrls.mjs --file urls.txt          # one URL per line, # comments ok
 //   node scripts/importJobUrls.mjs --greenhouse figma --match engineer   # a company's open board
 //   node scripts/importJobUrls.mjs --greenhouse figma --list             # show, import nothing
+//   node scripts/importJobUrls.mjs --greenhouse figma --force            # re-fetch rows <24h old
 //
 // --user <id> stars the imports for that account (default: the single apply-ready one).
+// --force bypasses importJob's 24h reuse window — needed to BACKFILL after the extractor changes,
+// since otherwise the run reuses the rows it was meant to correct and reports success regardless.
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
@@ -35,6 +38,10 @@ const MATCH = arg("match");
 const GREENHOUSE = arg("greenhouse");
 const FILE = arg("file");
 const USER_ID = Number(arg("user") || 0) || null;
+// importJob reuses any row imported in the last 24h instead of re-fetching. That is right for an
+// ordinary re-import and wrong after the extractor changes — the existing rows are stale in a way
+// updated_at cannot express, and without --force the run reports "ok" while changing nothing.
+const FORCE = has("force");
 
 // The preflight's own rule (scripts/a5Preflight.mjs). Reported per row so a URL that can never
 // clear A5 is visible here rather than three steps later.
@@ -89,7 +96,7 @@ const landed = [];
 for (const [i, url] of urls.entries()) {
   process.stdout.write(`[${i + 1}/${urls.length}] ${url.slice(0, 78)} … `);
   try {
-    const { job } = await importJob({ url }, { db, anthropic, userId });
+    const { job } = await importJob({ url }, { db, anthropic, userId, force: FORCE });
     const applyUrl = job.applyUrl || job.url || "";
     landed.push({ jobId: job.jobId || job.id, title: job.title, company: job.company, applyUrl });
     console.log(`ok — ${job.company} / ${job.title}${isGreenhouseApplyUrl(applyUrl) ? "" : "  [not a greenhouse apply page]"}`);
