@@ -3,7 +3,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
-import { api, printResume, dislikeJob, authHeaders } from "../lib/api.js";
+import { api, printResume, dislikeJob, authHeaders, authContextQuery } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
 import JobCard from "../components/JobCard.jsx";
@@ -1111,6 +1111,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [questionDrafts, setQuestionDrafts] = useState({});   // question text -> answer
   const [answersSaving, setAnswersSaving] = useState(false);
   const [answersMsg, setAnswersMsg] = useState("");
+  // Queue-then-approve. An auto run now fills the form, runs every gate and STOPS; these are the
+  // applications waiting on a decision. Approving them submits to a real employer and cannot be
+  // undone, which is why the detail view shows every answer with the rule that produced it.
+  const [applyPending, setApplyPending] = useState([]);
+  const [pendingDetail, setPendingDetail] = useState(null); // { runJobId, answers, resume, ... }
+  const [pendingBusy, setPendingBusy] = useState(false);
+  const [pendingMsg, setPendingMsg] = useState("");
+  const [confirmApproveAll, setConfirmApproveAll] = useState(false);
 
   // LIVE POLLING: polls /api/jobs/poll every 4s during active scrape.
   // Stops when scraping:false returned or after 3 consecutive failures.
@@ -2143,7 +2151,73 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     }
   }, [applyQuestions, questionDrafts, loadApplyQuestions, loadApplyRuns]);
 
-  useEffect(() => { if (user) { loadApplyRuns(); loadApplyQuestions(); } }, [user, loadApplyRuns, loadApplyQuestions]);
+  // ── Queue-then-approve ─────────────────────────────────────────────────────
+  const loadApplyPending = useCallback(async () => {
+    try {
+      const data = await api("/api/apply/pending");
+      setApplyPending(Array.isArray(data.pending) ? data.pending : []);
+    } catch {}
+  }, []);
+
+  /**
+   * The full record of one previewed application: every answer with the rule that produced it.
+   * Loaded on demand rather than with the list — this is what you read before deciding, and the
+   * list is only meant to tell you which ones need attention.
+   */
+  const openPendingDetail = useCallback(async (runJobId) => {
+    if (pendingDetail?.runJobId === runJobId) { setPendingDetail(null); return; }
+    setPendingDetail({ runJobId, loading: true });
+    try {
+      const data = await api(`/api/apply/run-jobs/${runJobId}/review`);
+      setPendingDetail({ ...data, runJobId, loading: false });
+    } catch (e) {
+      setPendingDetail(null);
+      setPendingMsg(e.message || "Could not load that application.");
+    }
+  }, [pendingDetail]);
+
+  /**
+   * Approve (submit) or reject the given applications.
+   * Approving is the one irreversible action on this surface, so the outcome is always reported
+   * from the server's reply rather than assumed — a refused run (cap, kill switch, another run in
+   * flight) leaves the approval in place to retry, and the user needs to be told that, not shown a
+   * success message for something that did not happen.
+   */
+  const decidePending = useCallback(async (runJobIds, approve) => {
+    if (!runJobIds.length) return;
+    setPendingBusy(true);
+    setPendingMsg("");
+    try {
+      const data = await api(`/api/apply/${approve ? "approve" : "reject"}`, {
+        method: "POST",
+        body: JSON.stringify({ runJobIds }),
+      });
+      const n = (approve ? data.approved : data.rejected)?.length || 0;
+      setPendingMsg(approve
+        ? `Submitting ${n} application${n === 1 ? "" : "s"}.`
+        : `Rejected ${n} application${n === 1 ? "" : "s"}. Nothing was sent.`);
+      setPendingDetail(null);
+      setConfirmApproveAll(false);
+      await Promise.all([loadApplyPending(), loadApplyRuns()]);
+    } catch (e) {
+      setPendingMsg(e.message || (approve ? "Could not submit." : "Could not reject."));
+      await loadApplyPending();
+    } finally {
+      setPendingBusy(false);
+    }
+  }, [loadApplyPending, loadApplyRuns]);
+
+  // The resume and screenshot are served as files, so they cannot carry the auth header api() adds.
+  // authContextQuery is the query-param form of the same token, which requireAuth also honours
+  // (server.js: `req.query?.authContext`) — the mechanism useSyncEvents already relies on for SSE.
+  const artifactUrl = useCallback((runJobId, kind) => {
+    const qs = authContextQuery();
+    return `/api/apply/run-jobs/${runJobId}/${kind}${qs ? `?${qs}` : ""}`;
+  }, []);
+
+  useEffect(() => {
+    if (user) { loadApplyRuns(); loadApplyQuestions(); loadApplyPending(); }
+  }, [user, loadApplyRuns, loadApplyQuestions, loadApplyPending]);
 
   useEffect(() => {
     if (!user) return;
@@ -2959,7 +3033,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             startLinkedInImport's NOT_AUTHED branch, which was unreachable past the always-false
             install guard, and its action button called the no-op extension bridge. */}
 
-        {(applyQueue.length > 0 || applyQueueMsg || applyRuns.length > 0 || applyReviewJobs.length > 0) && (
+        {(applyQueue.length > 0 || applyQueueMsg || applyRuns.length > 0 || applyReviewJobs.length > 0
+          || applyPending.length > 0) && (
           <div style={{ flexBasis:"100%", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
                         padding:"8px 10px", border:`1px solid ${theme.border}`,
                         background:theme.surfaceHigh, borderRadius:6 }}>
@@ -3019,6 +3094,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 style={{ border:`1px solid #d97706`, borderRadius:4, padding:"3px 8px",
                          background:"#fef3c7", color:"#92400e", cursor:"pointer", fontSize:11, fontWeight:700 }}>
                 {applyReviewJobs.length} need review ↗
+              </button>
+            )}
+            {/* Awaiting approval is the highest-stakes thing on this bar — these applications are
+                filled and one click from a real employer — so it gets its own CTA and does not hide
+                behind "need review". */}
+            {applyPending.length > 0 && !applyQueue.length && (
+              <button onClick={() => { setApplyRunDetail(null); setApplyRunDetailOpen(true); }}
+                style={{ border:`1px solid #2563eb`, borderRadius:4, padding:"3px 8px",
+                         background:"#dbeafe", color:"#1e3a8a", cursor:"pointer", fontSize:11, fontWeight:800 }}>
+                {applyPending.length} awaiting your approval ↗
               </button>
             )}
             {/* Answering is the actionable thing, so it gets its own CTA rather than hiding behind
@@ -3097,6 +3182,168 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
             {/* Job list */}
             <div style={{ overflowY:"auto", flex:1, padding:"12px 20px", display:"flex", flexDirection:"column", gap:8 }}>
+
+              {/* ── Queue-then-approve ──────────────────────────────────────────
+                  These applications are already filled and have passed every gate. Approving one
+                  submits it to a real employer and it cannot be recalled, so this surface is built
+                  around reading before deciding: the row says how many answers were GUESSED, and
+                  the detail view shows every answer with the rule that produced it, plus the exact
+                  resume that will be attached. */}
+              {!applyRunDetail && applyPending.length > 0 && (
+                <div style={{ border:"1px solid #2563eb", borderRadius:6, padding:"12px 14px",
+                              background:theme.surfaceHigh, display:"flex", flexDirection:"column", gap:10 }}>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:13, color:theme.text }}>
+                      {applyPending.length} application{applyPending.length === 1 ? "" : "s"} waiting on you
+                    </div>
+                    <div style={{ fontSize:11, color:theme.textMuted, marginTop:2 }}>
+                      Filled and checked, but nothing has been sent. Read one before you approve it —
+                      approving submits it to the employer and cannot be undone.
+                    </div>
+                  </div>
+
+                  {applyPending.map(p => {
+                    const open = pendingDetail?.runJobId === p.runJobId;
+                    const btn  = (bg, fg, bd) => ({
+                      border:`1px solid ${bd}`, borderRadius:6, padding:"5px 10px", background:bg,
+                      color:fg, fontWeight:800, fontSize:11.5,
+                      cursor: pendingBusy ? "wait" : "pointer", opacity: pendingBusy ? 0.6 : 1,
+                    });
+                    return (
+                      <div key={p.runJobId} style={{ borderTop:`1px solid ${theme.border}`, paddingTop:10,
+                                                     display:"flex", flexDirection:"column", gap:6 }}>
+                        <div style={{ display:"flex", alignItems:"flex-start", gap:8, flexWrap:"wrap" }}>
+                          <span style={{ fontSize:12, fontWeight:700, color:theme.text, flex:1, minWidth:200 }}>
+                            {p.company || "Unknown company"}
+                            {p.title ? <span style={{ color:theme.textMuted, fontWeight:600 }}> — {p.title}</span> : null}
+                          </span>
+                          {/* A guess is the thing worth a human's attention; an exact mapping is not. */}
+                          {p.guessCount > 0 && (
+                            <span title="Answers matched by a fuzzy label match rather than an exact mapping. Read these."
+                              style={{ fontSize:9, fontWeight:800, padding:"2px 7px", borderRadius:999,
+                                       background:"#d9770622", color:"#d97706", whiteSpace:"nowrap", flexShrink:0 }}>
+                              {p.guessCount} GUESSED
+                            </span>
+                          )}
+                          <span style={{ fontSize:10, color:theme.textDim, whiteSpace:"nowrap" }}>
+                            {p.answerCount} answer{p.answerCount === 1 ? "" : "s"}
+                            {p.resume.atsScore != null ? ` · ATS ${p.resume.atsScore}` : ""}
+                          </span>
+                        </div>
+
+                        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+                          <button onClick={() => openPendingDetail(p.runJobId)}
+                            style={btn(theme.surface, theme.text, theme.border)}>
+                            {open ? "Hide" : "Review"} answers
+                          </button>
+                          {p.resume.available && (
+                            <a href={artifactUrl(p.runJobId, "resume")} target="_blank" rel="noreferrer"
+                              style={{ ...btn(theme.surface, theme.text, theme.border), textDecoration:"none" }}>
+                              Resume PDF ↗
+                            </a>
+                          )}
+                          {p.screenshotAvailable && (
+                            <a href={artifactUrl(p.runJobId, "screenshot")} target="_blank" rel="noreferrer"
+                              style={{ ...btn(theme.surface, theme.text, theme.border), textDecoration:"none" }}>
+                              Filled form ↗
+                            </a>
+                          )}
+                          <span style={{ flex:1 }}/>
+                          <button onClick={() => decidePending([p.runJobId], false)} disabled={pendingBusy}
+                            style={btn(theme.surface, "#dc2626", "#dc262655")}>
+                            Reject
+                          </button>
+                          <button onClick={() => decidePending([p.runJobId], true)} disabled={pendingBusy}
+                            style={btn("#2563eb", "#ffffff", "#2563eb")}>
+                            Approve &amp; send
+                          </button>
+                        </div>
+
+                        {open && (
+                          <div style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"8px 10px",
+                                        background:theme.surface, display:"flex", flexDirection:"column", gap:4 }}>
+                            {pendingDetail.loading ? (
+                              <span style={{ fontSize:11, color:theme.textMuted }}>Loading…</span>
+                            ) : (
+                              <>
+                                <div style={{ fontSize:10, color:theme.textMuted }}>
+                                  This is exactly what will be sent. Anything marked GUESS was matched by label,
+                                  not by an exact mapping.
+                                </div>
+                                {(pendingDetail.answers || [])
+                                  .filter(a => !a.skipped && !a.policy_rejected)
+                                  .map((a, i) => {
+                                    const guess = a.provenance === "label_fuzzy";
+                                    return (
+                                      <div key={i} style={{ display:"flex", gap:8, alignItems:"baseline",
+                                                            flexWrap:"wrap", fontSize:11,
+                                                            borderTop: i ? `1px solid ${theme.border}` : "none",
+                                                            paddingTop: i ? 4 : 0 }}>
+                                        <span style={{ color:theme.textMuted, minWidth:150, flex:"0 1 auto" }}>
+                                          {a.label || a.name || a.field_id}
+                                        </span>
+                                        <span style={{ color:theme.text, fontWeight:700, flex:1, minWidth:120,
+                                                       wordBreak:"break-word" }}>
+                                          {String(a.value ?? "")}
+                                        </span>
+                                        <span style={{ fontSize:9, fontWeight:800, padding:"1px 6px", borderRadius:999,
+                                                       whiteSpace:"nowrap",
+                                                       background: guess ? "#d9770622" : `${theme.border}66`,
+                                                       color: guess ? "#d97706" : theme.textDim }}>
+                                          {guess ? "GUESS" : (a.provenance || "").replace(/_/g, " ") || "—"}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                {(pendingDetail.answers || []).filter(a => !a.skipped && !a.policy_rejected).length === 0 && (
+                                  <span style={{ fontSize:11, color:theme.textMuted }}>No answers recorded.</span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", paddingTop:4 }}>
+                    {/* Bulk approval is the one place a stray click could send several real
+                        applications at once, so it takes two deliberate steps. */}
+                    {applyPending.length > 1 && (
+                      confirmApproveAll ? (
+                        <>
+                          <span style={{ fontSize:11, color:"#dc2626", fontWeight:700 }}>
+                            Send all {applyPending.length} to their employers?
+                          </span>
+                          <button onClick={() => decidePending(applyPending.map(p => p.runJobId), true)}
+                            disabled={pendingBusy}
+                            style={{ border:"none", borderRadius:6, padding:"6px 12px", background:"#dc2626",
+                                     color:"#fff", fontWeight:800, fontSize:12,
+                                     cursor: pendingBusy ? "wait" : "pointer" }}>
+                            Yes, send all
+                          </button>
+                          <button onClick={() => setConfirmApproveAll(false)} disabled={pendingBusy}
+                            style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"6px 12px",
+                                     background:theme.surface, color:theme.text, fontWeight:700, fontSize:12,
+                                     cursor:"pointer" }}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => setConfirmApproveAll(true)} disabled={pendingBusy}
+                          style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"6px 12px",
+                                   background:theme.surface, color:theme.text, fontWeight:700, fontSize:12,
+                                   cursor: pendingBusy ? "wait" : "pointer" }}>
+                          Approve all {applyPending.length}
+                        </button>
+                      )
+                    )}
+                    {pendingMsg && (
+                      <span style={{ fontSize:11, color:theme.accentText }}>{pendingMsg}</span>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* ── Validation-correction loop ──────────────────────────────────
                   A hold used to end the run. These are the fields the resolver refused to fill on
@@ -3211,7 +3458,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               )}
 
               {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).length === 0 &&
-               (applyRunDetail || applyQuestions.length === 0) && (
+               (applyRunDetail || (applyQuestions.length === 0 && applyPending.length === 0)) && (
                 <div style={{ padding:"24px 0", textAlign:"center", color:theme.textMuted, fontSize:12 }}>
                   No jobs in this run yet.
                 </div>

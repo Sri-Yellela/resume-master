@@ -840,10 +840,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const runs = db.prepare(`
       SELECT * FROM apply_runs WHERE user_id=? ORDER BY created_at DESC LIMIT 20
     `).all(req.user.id);
+    // Applications awaiting approval are also held_review, but they have their own surface with
+    // their own decision. Leaving them here listed every one of them twice — once as something to
+    // approve and once as a bare "needs review" row with no action on it.
     const review = db.prepare(`
       SELECT rj.*, r.mode FROM apply_run_jobs rj
       JOIN apply_runs r ON r.id = rj.run_id
       WHERE rj.user_id=? AND rj.status='held_review'
+        AND COALESCE(rj.reason_code, '') != 'awaiting_approval'
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id);
     res.json({ runs, review });
