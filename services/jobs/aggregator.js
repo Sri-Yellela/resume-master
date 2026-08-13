@@ -194,8 +194,29 @@ function getCacheStmts(db) {
   let stmts = cacheStmtsCache.get(db);
   if (!stmts) {
     stmts = {
+      // A real upsert, not INSERT OR REPLACE.
+      //
+      // REPLACE deletes the row and inserts a new one, so every column absent from the list below
+      // reverts to NULL — which silently discarded everything enrichment owns. content_hash and
+      // enriched_at were reset, so the row looked unenriched and was re-sent to the model on the
+      // next pass; skills_json, summary and the eligibility flags were overwritten with the
+      // source's nulls. A forced re-import of an unchanged board therefore re-enriched all 35 rows
+      // and cost real credits to rebuild data it had just thrown away.
+      //
+      // The delete also fired job_role_map's ON DELETE CASCADE on every re-crawl, dropping and
+      // re-inserting a row that never needed to change.
+      //
+      // Precedence in the DO UPDATE below, one rule per group:
+      //   - source columns          take the crawl's value outright; it is the fresher copy
+      //   - salary                  COALESCE(excluded, existing) — a structured range from the ATS
+      //                             beats an extracted one, but a source with no range must not
+      //                             erase a figure enrichment already found
+      //   - enrichment columns      COALESCE(existing, excluded) — keep the model's work; the
+      //                             source's value is a heuristic fallback for the first insert
+      //   - content_hash/enriched_at/org_unit_raw are never written here at all, so enrichment
+      //     keeps its own bookkeeping and re-runs only when the description actually changes
       upsertStmt: db.prepare(`
-        INSERT OR REPLACE INTO scraped_jobs
+        INSERT INTO scraped_jobs
           (job_id, search_query, _hash, title, company, location, url, source, source_label,
            posted_at, scraped_at, bucket_role, bucket_seniority, bucket_domain, direct_apply, description,
            company_icon_url, via, collar, classification_confidence,
@@ -213,6 +234,49 @@ function getCacheStmts(db) {
            @salary_min, @salary_max, @salary_currency,
            @is_h1b_sponsor, @requires_work_auth, @is_clearance_required,
            @discovered_at, @updated_at, 1, @fingerprint, @sources_seen, @req_uid)
+        ON CONFLICT(job_id) DO UPDATE SET
+          search_query              = excluded.search_query,
+          _hash                     = excluded._hash,
+          title                     = excluded.title,
+          company                   = excluded.company,
+          location                  = excluded.location,
+          url                       = excluded.url,
+          source                    = excluded.source,
+          source_label              = excluded.source_label,
+          posted_at                 = excluded.posted_at,
+          scraped_at                = excluded.scraped_at,
+          bucket_role               = excluded.bucket_role,
+          bucket_seniority          = excluded.bucket_seniority,
+          bucket_domain             = excluded.bucket_domain,
+          direct_apply              = excluded.direct_apply,
+          description               = excluded.description,
+          company_icon_url          = excluded.company_icon_url,
+          via                       = excluded.via,
+          collar                    = excluded.collar,
+          classification_confidence = excluded.classification_confidence,
+          valid_through             = excluded.valid_through,
+          discovered_at             = excluded.discovered_at,
+          updated_at                = excluded.updated_at,
+          is_active                 = 1,
+          fingerprint               = excluded.fingerprint,
+          sources_seen              = excluded.sources_seen,
+          req_uid                   = excluded.req_uid,
+          -- structured range wins when the source has one, never nulls out an existing figure
+          salary_min      = COALESCE(excluded.salary_min,      scraped_jobs.salary_min),
+          salary_max      = COALESCE(excluded.salary_max,      scraped_jobs.salary_max),
+          salary_currency = COALESCE(excluded.salary_currency, scraped_jobs.salary_currency),
+          salary_min_usd  = COALESCE(excluded.salary_min_usd,  scraped_jobs.salary_min_usd),
+          salary_max_usd  = COALESCE(excluded.salary_max_usd,  scraped_jobs.salary_max_usd),
+          salary_period   = COALESCE(excluded.salary_period,   scraped_jobs.salary_period),
+          -- enrichment's output outlives a re-crawl; content_hash decides when it is regenerated
+          normalized_title      = COALESCE(scraped_jobs.normalized_title,      excluded.normalized_title),
+          summary               = COALESCE(scraped_jobs.summary,               excluded.summary),
+          experience_level      = COALESCE(scraped_jobs.experience_level,      excluded.experience_level),
+          workplace_type        = COALESCE(scraped_jobs.workplace_type,        excluded.workplace_type),
+          skills_json           = COALESCE(scraped_jobs.skills_json,           excluded.skills_json),
+          is_h1b_sponsor        = COALESCE(scraped_jobs.is_h1b_sponsor,        excluded.is_h1b_sponsor),
+          requires_work_auth    = COALESCE(scraped_jobs.requires_work_auth,    excluded.requires_work_auth),
+          is_clearance_required = COALESCE(scraped_jobs.is_clearance_required, excluded.is_clearance_required)
       `),
       roleMapStmt: db.prepare(`
         INSERT OR REPLACE INTO job_role_map

@@ -18,7 +18,7 @@ import Database from "better-sqlite3";
 import Anthropic from "@anthropic-ai/sdk";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runEnrichment } from "../services/jobs/enrichJob.js";
+import { runEnrichment, computeContentHash } from "../services/jobs/enrichJob.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -31,11 +31,17 @@ const USD_PER_OUTPUT_MTOK = 5.00;
 
 const db = new Database(path.join(ROOT, "data", "resume_master.db"));
 
-const pending = () => db.prepare(`
-  SELECT COUNT(*) n FROM scraped_jobs
+// Mirrors enrichJob's own two-step selection: a cheap SQL pre-filter, then the exact content-hash
+// comparison. Counting only the pre-filter overstates the work — a re-import bumps updated_at
+// without changing a word, so the script would announce 35 candidates and a dollar estimate, then
+// send nothing. An estimate that cries wolf is worse than no estimate.
+const pendingRows = () => db.prepare(`
+  SELECT job_id, title, description, content_hash FROM scraped_jobs
   WHERE is_active = 1 AND description IS NOT NULL AND TRIM(description) != ''
     AND (enriched_at IS NULL OR content_hash IS NULL OR updated_at > enriched_at)
-`).get().n;
+`).all().filter(r => computeContentHash(r.title, r.description) !== r.content_hash);
+
+const pending = () => pendingRows().length;
 
 const coverage = () => db.prepare(`
   SELECT COUNT(*) total,
@@ -55,11 +61,7 @@ if (candidates === 0) { console.log("Nothing to do."); process.exit(0); }
 
 // The estimate is deliberately rough and stated as such: it prices the descriptions we are about to
 // send, at ~4 chars/token, plus the max_tokens ceiling for output. Actual tokens are reported below.
-const chars = db.prepare(`
-  SELECT COALESCE(SUM(LENGTH(description)), 0) c FROM scraped_jobs
-  WHERE is_active = 1 AND description IS NOT NULL AND TRIM(description) != ''
-    AND (enriched_at IS NULL OR content_hash IS NULL OR updated_at > enriched_at)
-`).get().c;
+const chars = pendingRows().reduce((sum, r) => sum + (r.description?.length || 0), 0);
 const estIn = chars / 4;
 const estOut = candidates * 500;   // the cap, so this is a ceiling not a guess
 const estUsd = (estIn / 1e6) * USD_PER_INPUT_MTOK + (estOut / 1e6) * USD_PER_OUTPUT_MTOK;
