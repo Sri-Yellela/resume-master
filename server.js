@@ -5160,11 +5160,31 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       // fix belongs on salary_min_usd/salary_max_usd once enrichment coverage is reliable
       // enough to sort by, not invented here. NULL salaries always sort last in both
       // directions rather than being treated as zero.
-      const orderBy = sort === 'atsScore'       ? 'sj.ats_score DESC, sj.scraped_at DESC'
-                    : sort === 'applicantCount'  ? 'sj.applicant_count ASC, sj.scraped_at DESC'
-                    : sort === 'compHigh'        ? '(sj.salary_max IS NULL) ASC, sj.salary_max DESC, sj.scraped_at DESC'
-                    : sort === 'compLow'         ? '(sj.salary_min IS NULL) ASC, sj.salary_min ASC, sj.scraped_at DESC'
-                    :                             'sj.scraped_at DESC';
+      // Every sort ended in `sj.scraped_at DESC` with nothing after it, and a crawl writes its
+      // whole batch within a second or two — so on a real board scraped_at has a handful of
+      // distinct values across thousands of rows and cannot order them. Two consequences, one
+      // visible and one silent:
+      //
+      //   - The tie group comes back in query-plan order, i.e. roughly insert order, so whichever
+      //     employer the crawler happened to write first owns the top of the board. Observed in
+      //     production: 1,275 rows across 9 companies sharing 2 distinct scraped_at values, 505 of
+      //     them OpenAI — at the default page size of 10 that is up to 50 consecutive pages of one
+      //     employer before any other appears. The other 770 jobs were never missing, just buried.
+      //   - SQLite guarantees no consistent order between separate queries when rows tie, so
+      //     LIMIT/OFFSET paging could return the same row on two pages and skip others entirely.
+      //     Nothing surfaces that as an error; the board just quietly lies.
+      //
+      // posted_at breaks the tie with something meaningful rather than arbitrary — within a crawl
+      // batch the genuinely newest postings lead, which is what "Newest" claims to mean, and it
+      // interleaves employers as a side effect because posting dates vary. NULLs sort last instead
+      // of counting as epoch 0 and hiding real postings beneath undated ones. job_id is the final
+      // key: it is the primary key, so the order is total and paging is reproducible.
+      const RECENCY = 'sj.scraped_at DESC, (sj.posted_at IS NULL) ASC, sj.posted_at DESC, sj.job_id';
+      const orderBy = sort === 'atsScore'       ? `sj.ats_score DESC, ${RECENCY}`
+                    : sort === 'applicantCount'  ? `sj.applicant_count ASC, ${RECENCY}`
+                    : sort === 'compHigh'        ? `(sj.salary_max IS NULL) ASC, sj.salary_max DESC, ${RECENCY}`
+                    : sort === 'compLow'         ? `(sj.salary_min IS NULL) ASC, sj.salary_min ASC, ${RECENCY}`
+                    :                             RECENCY;
       const offset  = (pg - 1) * ps;
 
       const joinClause = `
@@ -5539,7 +5559,9 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
       AND sj.scraped_at >= ?
       AND (uj.disliked  IS NULL OR uj.disliked  = 0)
       AND (uj.applied   IS NULL OR uj.applied   = 0)
-    ORDER BY sj.scraped_at DESC
+    -- Same tie-break as the board (see /api/jobs): a crawl writes its batch within a second or two,
+    -- so scraped_at alone leaves these 50 slots to whichever employer was inserted first.
+    ORDER BY sj.scraped_at DESC, (sj.posted_at IS NULL) ASC, sj.posted_at DESC, sj.job_id
     LIMIT 50
   `).all(roleKey, userId, activeProfile.id, qRaw, ...pollProfileTitleFilter.params, pollMaxYoe, pollMaxYoe, sinceSeconds);
 
