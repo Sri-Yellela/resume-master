@@ -23,8 +23,10 @@
 
 import crypto from 'crypto';
 import { recordPipelineRun } from './pipelineRunLog.js';
+import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
 
-const MODEL_ID = 'claude-haiku-4-5-20251001';
+// Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
+const MODEL_ID = MODEL_HAIKU;
 
 const VALID_EXPERIENCE_LEVELS = new Set(['intern', 'entry', 'mid', 'senior', 'lead', 'executive']);
 const VALID_WORKPLACE_TYPES   = new Set(['remote', 'hybrid', 'onsite']);

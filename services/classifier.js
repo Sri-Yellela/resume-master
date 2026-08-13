@@ -12,14 +12,17 @@
 // What to change here if intent changes:
 //   - To add a new role family or domain: add to the enum strings in
 //     the Haiku prompt below and update domainModuleKey derivation
-//   - To change the Haiku model: update MODEL_ID
+//   - To change the Haiku model: update MODEL_HAIKU in shared/anthropicModels.js
 //   - To change classification output fields: update the schema below
 //     AND update all callers in server.js
 //
-// Depends on: Anthropic SDK (passed as argument), no file dependencies
+// Depends on: Anthropic SDK (passed as argument), shared/anthropicModels.js for the model ID
 // ============================================================
 
-const MODEL_ID = "claude-haiku-4-5-20251001";
+import { MODEL_HAIKU } from "../shared/anthropicModels.js";
+
+// Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
+const MODEL_ID = MODEL_HAIKU;
 
 // TO CHANGE DOMAIN MAPPING: edit the derivation logic in getDomainModuleKey()
 // below AND add/remove a corresponding file in prompts/layer2_domains/

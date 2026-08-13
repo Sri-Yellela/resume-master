@@ -5,33 +5,18 @@
 // TO ADD A NEW EVENT TYPE: add the event_type string to the column comment in
 //   the migration, then call trackApiCall() or trackScrape() from the route.
 
-// Duplicate pricing here so this module is self-contained.
-const ANTHROPIC_PRICING = {
-  "claude-sonnet-4-20250514": {
-    input: 0.000003, output: 0.000015,
-    cache_read: 0.0000003, cache_write: 0.00000375,
-  },
-  "claude-haiku-4-5-20251001": {
-    input: 0.0000008, output: 0.000004,
-    cache_read: 0.00000008, cache_write: 0.000001,
-  },
-};
-
-function calcCost(model, usage = {}) {
-  const p = ANTHROPIC_PRICING[model];
-  if (!p) return 0;
-  return (
-    (usage.input_tokens || 0)              * p.input +
-    (usage.output_tokens || 0)             * p.output +
-    (usage.cache_read_input_tokens || 0)   * p.cache_read +
-    (usage.cache_creation_tokens || 0)     * p.cache_write
-  );
-}
+// Pricing and model IDs live in ONE place — see shared/anthropicModels.js for why this module
+// no longer keeps its own copy (the duplicate drifted and mispriced every Haiku call).
+import {
+  ANTHROPIC_PRICING,
+  calculateCost as calcCost,
+  cacheCreationTokensOf,
+} from "../shared/anthropicModels.js";
 
 function cacheState(usage = {}) {
   const inputTokens = usage?.input_tokens || 0;
   const cacheReadTokens = usage?.cache_read_input_tokens || 0;
-  const cacheCreationTokens = usage?.cache_creation_tokens || 0;
+  const cacheCreationTokens = cacheCreationTokensOf(usage);
   if (cacheReadTokens > 0 && inputTokens > 0) return "partial";
   if (cacheReadTokens > 0) return "warm";
   if (cacheCreationTokens > 0) return "cold_write";
@@ -56,7 +41,7 @@ export function trackApiCall(db, {
   try {
     const cost = calcCost(model, usage || {});
     const cacheReadTokens     = usage?.cache_read_input_tokens || 0;
-    const cacheCreationTokens = usage?.cache_creation_tokens   || 0;
+    const cacheCreationTokens = cacheCreationTokensOf(usage || {});
     const state = cacheState(usage || {});
     const cached = cacheReadTokens > 0 ? 1 : 0;
 
