@@ -22,11 +22,11 @@
 // --force bypasses importJob's 24h reuse window — needed to BACKFILL after the extractor changes,
 // since otherwise the run reuses the rows it was meant to correct and reports success regardless.
 //
-// COSTS A RE-ENRICHMENT. upsertCanonicalJob writes with INSERT OR REPLACE and does not list
-// content_hash or enriched_at, so replacing a row resets both to NULL and every forced row looks
-// unenriched on the next pass — about $0.09 per 35 rows at Haiku 4.5 rates. Measured, not
-// theoretical: a forced re-import of an unchanged board re-enriched all 35 rows. Use --force for
-// backfills, not as a routine refresh.
+// A forced re-import no longer discards enrichment. It used to: upsertCanonicalJob wrote with
+// INSERT OR REPLACE, which reset content_hash and enriched_at to NULL and overwrote skills/summary
+// with the source's nulls, so every forced row looked unenriched and cost about $0.09 per 35 rows
+// to rebuild. The upsert now preserves what enrichment owns and re-runs only when the description
+// actually changes — a forced re-import of an unchanged board sends nothing to the model.
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
