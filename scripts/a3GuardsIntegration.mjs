@@ -38,11 +38,11 @@ const SCHEMA = `
     apply_url TEXT, source TEXT, location TEXT);
   CREATE TABLE resumes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, job_id TEXT,
     apply_mode TEXT, ats_score INTEGER, html TEXT, updated_at INTEGER);
-  CREATE TABLE apply_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mode TEXT,
+  CREATE TABLE apply_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mode TEXT, approval_mode TEXT,
     tool_type TEXT, status TEXT, total_jobs INTEGER, held_count INTEGER DEFAULT 0,
     submitted_count INTEGER DEFAULT 0, failed_count INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (unixepoch()), started_at INTEGER, finished_at INTEGER);
-  CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER,
+  CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER, approved_at INTEGER, approved_from_run_job_id INTEGER,
     job_id TEXT, status TEXT, reason_code TEXT, reason_detail TEXT, started_at INTEGER,
     finished_at INTEGER, created_at INTEGER DEFAULT (unixepoch()),
     answers_json TEXT, resume_artifact_id INTEGER, resume_ats_score INTEGER,
@@ -150,8 +150,8 @@ const check = (label, cond, extra = "") => {
   await resetAts();
   const { db, server, url } = boot();
   const key = "e2e-retry-1";
-  const a = await post(url, "/api/apply/runs", { jobIds: ["ash1"], mode: "auto" }, { "Idempotency-Key": key }).then(r => r.json());
-  const b = await post(url, "/api/apply/runs", { jobIds: ["ash1"], mode: "auto" }, { "Idempotency-Key": key }).then(r => r.json());
+  const a = await post(url, "/api/apply/runs", { jobIds: ["ash1"], mode: "auto", approvalMode: "auto" }, { "Idempotency-Key": key }).then(r => r.json());
+  const b = await post(url, "/api/apply/runs", { jobIds: ["ash1"], mode: "auto", approvalMode: "auto" }, { "Idempotency-Key": key }).then(r => r.json());
   check("replay returns the original runId", a.runId === b.runId, `${a.runId} vs ${b.runId}`);
   check("replay is flagged", b.idempotentReplay === true);
   check("only one run row exists", db.prepare("SELECT COUNT(*) n FROM apply_runs").get().n === 1);
@@ -182,7 +182,7 @@ const check = (label, cond, extra = "") => {
   const { db, server, url } = boot({ jobIds: ["ash1", "ash2"] });
   const r1 = db.prepare("INSERT INTO apply_runs (user_id, mode, tool_type, status, total_jobs) VALUES (1,'auto','generate','completed',1)").run();
   db.prepare("INSERT INTO apply_run_jobs (run_id, user_id, job_id, status, finished_at) VALUES (?,1,'prev','submitted',unixepoch())").run(r1.lastInsertRowid);
-  const res = await post(url, "/api/apply/runs", { jobIds: ["ash1"], mode: "auto" });
+  const res = await post(url, "/api/apply/runs", { jobIds: ["ash1"], mode: "auto", approvalMode: "auto" });
   const body = await res.json();
   check("cap returns 429", res.status === 429, `status=${res.status}`);
   check("cap error is explicit", body.error === "daily_cap_exceeded", JSON.stringify(body));
@@ -198,7 +198,7 @@ const check = (label, cond, extra = "") => {
   await resetAts();
   const { db, server, url } = boot();
   db.prepare("INSERT INTO app_settings (key, value) VALUES ('apply_full_auto_disabled','1')").run();
-  const auto = await post(url, "/api/apply/runs", { jobIds: ["ash1"], mode: "auto" });
+  const auto = await post(url, "/api/apply/runs", { jobIds: ["ash1"], mode: "auto", approvalMode: "auto" });
   check("full-auto is refused with 503", auto.status === 503, `status=${auto.status}`);
   check("no submission reached the ATS", (await atsCount()) === 0);
 

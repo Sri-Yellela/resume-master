@@ -44,11 +44,11 @@ db.exec(`
     apply_url TEXT, source TEXT, location TEXT);
   CREATE TABLE resumes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, job_id TEXT,
     apply_mode TEXT, ats_score INTEGER, html TEXT, updated_at INTEGER);
-  CREATE TABLE apply_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mode TEXT,
+  CREATE TABLE apply_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mode TEXT, approval_mode TEXT,
     tool_type TEXT, status TEXT, total_jobs INTEGER, held_count INTEGER DEFAULT 0,
     submitted_count INTEGER DEFAULT 0, failed_count INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (unixepoch()), started_at INTEGER, finished_at INTEGER);
-  CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER,
+  CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER, approved_at INTEGER, approved_from_run_job_id INTEGER,
     job_id TEXT, status TEXT, reason_code TEXT, reason_detail TEXT, started_at INTEGER,
     finished_at INTEGER, created_at INTEGER DEFAULT (unixepoch()),
     answers_json TEXT, resume_artifact_id INTEGER, resume_ats_score INTEGER,
@@ -133,7 +133,7 @@ const check = (label, cond, extra = "") => {
 await resetAts();
 
 console.log("\n=== 1. first run HOLDS (the dead end the loop exists to fix) ===");
-const first = await post("/api/apply/runs", { jobIds: ["gh1"], mode: "auto" }).then(r => r.json());
+const first = await post("/api/apply/runs", { jobIds: ["gh1"], mode: "auto", approvalMode: "auto" }).then(r => r.json());
 await waitForRuns();
 const held = db.prepare("SELECT * FROM apply_run_jobs WHERE run_id=?").get(first.runId);
 check("job is held_review", held.status === "held_review", "status=" + held.status + " reason=" + held.reason_code);
@@ -175,7 +175,7 @@ for (; round < 4; round++) {
   const answers = Object.fromEntries(open.questions.map(q => [q.question, answerFor(q)]));
   console.log("  round " + (round + 1) + ": answering " + open.questions.length + " — " +
     open.questions.map(q => q.question.slice(0, 44) + " [" + q.reason + "]").join("; "));
-  const res = await post("/api/apply/answers", { answers, retryJobIds: ["gh1"], mode: "auto" });
+  const res = await post("/api/apply/answers", { answers, retryJobIds: ["gh1"], mode: "auto", approvalMode: "auto" });
   const rbody = await res.json();
   if (res.status !== 202) { check("round " + (round + 1) + " retry started", false, JSON.stringify(rbody)); break; }
   lastRetryRunId = rbody.retry?.runId ?? lastRetryRunId;

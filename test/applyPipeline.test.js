@@ -148,7 +148,9 @@ test("autoApply accepts resumePathPromise and awaits it before first upload", ()
   assert.match(automation, /waiting_for_resume/);
   // Must return ats_held (not submit) when resumePathPromise resolves to null in full-auto mode
   assert.match(automation, /status:\s*"ats_held"/);
-  assert.match(automation, /isFullAuto && resumePathPromise && !effectiveResumePath/);
+  // isUnattended, not isFullAuto: mode 'preview' must reach this gate too, or a queued application
+  // would be shown for approval as though its resume were fine when generation had actually failed.
+  assert.match(automation, /isUnattended && resumePathPromise && !effectiveResumePath/);
 });
 
 test("auto apply Case C launches browser in parallel with generation via resumePathPromise", () => {
