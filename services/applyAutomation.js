@@ -251,6 +251,80 @@ export function refuseReason({ label = '', name = '', key = null, handler = null
   return null;
 }
 
+// -- Eligibility boolean polarity ----------------------------------------------
+// A1 finding: the checkbox "I am authorized to work without sponsorship" was answered FALSE
+// (unchecked) from a profile whose `requires_sponsorship` is "No". Those two statements agree —
+// not requiring sponsorship IS being authorized without it — but the resolver passed the stored
+// value straight through coerceAffirmative, so it answered the OPPOSITE of the truth, at 0.9
+// confidence, above the auto-submit floor. It held only because an unchecked required checkbox
+// reads as empty to the completeness gate; that is the field type saving it, not the logic.
+//
+// `invertsKey` does not catch it, for two independent reasons:
+//   1. it is only wired to the FUZZY label path, not the exact field_map path this resolved on;
+//   2. INVERSION_RE matches the label ("without") AND the key phrase ("requires sponsorship"),
+//      so the two cancel and it returns false.
+// Both are addressed by asking a narrower question: which DIRECTION does each side state?
+
+// What `true` means for each canonical sponsorship key.
+const SPONSORSHIP_KEY_SENSE = {
+  requires_sponsorship: 'needs',
+  needs_sponsorship:    'needs',
+  sponsorship:          'needs',
+};
+
+// "…authorized to work WITHOUT sponsorship", "…do NOT require sponsorship", "no sponsorship needed".
+// True here means the candidate does NOT need sponsorship — the opposite sense to the keys above.
+// The negation alternative deliberately anchors on "not/never/don't" IMMEDIATELY before the verb
+// rather than on an auxiliary, so "Do you NOT require sponsorship?" (subject between the two)
+// still reads as a negation.
+const SPONSORSHIP_WITHOUT_RE =
+  /\bwithout\s+(?:requiring\s+|needing\s+)?(?:visa\s+)?sponsorship\b|\b(?:not|never|don'?t|doesn'?t|won'?t)\s+(?:require|requires|requiring|need|needs|needing)\b[^.?]{0,30}\bsponsorship\b|\bno\s+sponsorship\b/i;
+
+// "Do you now or in the future REQUIRE sponsorship…" — same sense as the keys above.
+const SPONSORSHIP_NEEDS_RE =
+  /\b(?:require|requires|requiring|need|needs|needing|seeking|request)\b[^.?]{0,40}\bsponsorship\b/i;
+
+/**
+ * Which direction does this question state, for the sponsorship class?
+ * Returns 'needs' | 'without' | null (undetermined).
+ * Checked "without" FIRST: "authorized to work without requiring sponsorship" satisfies both
+ * patterns, and the negated reading is the correct one.
+ */
+export function sponsorshipQuestionSense(text) {
+  const t = String(text ?? '');
+  if (!t) return null;
+  if (SPONSORSHIP_WITHOUT_RE.test(t)) return 'without';
+  if (SPONSORSHIP_NEEDS_RE.test(t)) return 'needs';
+  return null;
+}
+
+/**
+ * Decide how a stored boolean answers this field.
+ *   'direct'   — the stored sense matches the question; use the value as-is
+ *   'invert'   — opposite senses; the correct answer is the negation
+ *   'unknown'  — cannot be established; the caller MUST refuse rather than guess
+ *
+ * Only sponsorship is handled: it is the class A1 proved fires, it is a materially false
+ * attestation when wrong, and its vocabulary is small enough to enumerate honestly. Any other
+ * eligibility class returns 'unknown' so it refuses instead of being silently passed through.
+ * Non-eligibility checkboxes ("I agree to the terms") are not eligibility-classed at all and
+ * never reach this — they keep the existing pass-through behaviour.
+ */
+export function booleanPolarity({ label = '', name = '', key = null } = {}) {
+  const subject = `${label} ${name}`;
+  const cls = eligibilityClassOf(subject);
+  if (!cls) return 'direct';               // ordinary checkbox — unchanged behaviour
+  if (cls !== 'sponsorship') return 'unknown';
+
+  const keySense = SPONSORSHIP_KEY_SENSE[String(key ?? '').toLowerCase()];
+  if (!keySense) return 'unknown';         // not a key whose meaning we can state
+
+  const qSense = sponsorshipQuestionSense(subject);
+  if (!qSense) return 'unknown';           // question direction unreadable — refuse, never guess
+
+  return qSense === keySense ? 'direct' : 'invert';
+}
+
 /**
  * Normalise a yes/no-ish value to a boolean for checkbox/toggle fields.
  * FAIL-SAFE DIRECTION IS LOAD-BEARING: anything unrecognised is false. Never invent an
@@ -781,9 +855,28 @@ export function buildAnswers(fields, profilePayload) {
     // Type formatting
     let typeahead_selection = null;
     if (field.type === 'checkbox' || field.type === 'toggle') {
+      // An eligibility question can state the OPPOSITE direction to the key that answered it —
+      // "authorized to work without sponsorship" vs `requires_sponsorship`. Passing the stored
+      // value straight through then attests the opposite of the truth. Resolve the direction
+      // before coercing; refuse outright when it cannot be established.
+      const polarity = booleanPolarity({ label, name: field.name || '', key: matched_on });
+      if (polarity === 'unknown') {
+        // Same shape as the other refusals: recorded, never typed, so the completeness gate holds
+        // and the correction loop can ask the user. Guessing here is a false attestation.
+        refusals.push(`${matched_on ?? 'value'}:undetermined_boolean_polarity`);
+        answers.push({
+          field_id: field.field_id, name: field.name, type: field.type, label,
+          required: !!field.is_required,
+          options: Array.isArray(field.options) ? field.options : [],
+          value: null, skipped: true, refusals,
+          provenance: null, confidence: 0, clear_first: false, typeahead_selection: null,
+        });
+        continue;
+      }
       // Case-insensitive, common affirmatives accepted. Unrecognised stays false — see
       // coerceAffirmative: the fail-safe direction is deliberate.
-      value = coerceAffirmative(value) ? 'true' : 'false';
+      const affirmative = coerceAffirmative(value);
+      value = (polarity === 'invert' ? !affirmative : affirmative) ? 'true' : 'false';
     } else if (field.type === 'typeahead') {
       typeahead_selection = String(value);
       value = String(value);
