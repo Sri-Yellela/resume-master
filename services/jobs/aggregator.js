@@ -98,6 +98,11 @@ function fingerprintJob(job) {
     job.title || '', job.location || '', job.description || '', job.posted_at || '',
     job.workplace_type || '', job.valid_through ?? '',
     job.salary_min_usd ?? '', job.salary_max_usd ?? '', job.salary_period || '',
+    // The source-currency trio as well as the USD pair: for a non-USD posting salary_min_usd is
+    // null, so without these a company revising its GBP range would produce an identical hash and
+    // the change would never be picked up. Adding them re-upserts every existing row once on the
+    // next crawl (its stored hash predates these fields), then settles.
+    job.salary_min ?? '', job.salary_max ?? '', job.salary_currency || '',
     job.direct_apply === false ? 0 : 1,
   ].join('|');
   return crypto.createHash('sha1').update(parts).digest('hex');
@@ -109,6 +114,7 @@ function fingerprintJob(job) {
 const MERGEABLE_FIELDS = [
   'description', 'company_icon_url', 'workplace_type', 'experience_level',
   'valid_through', 'salary_min_usd', 'salary_max_usd', 'salary_period', 'skills_json',
+  'salary_min', 'salary_max', 'salary_currency',
   'is_h1b_sponsor', 'requires_work_auth', 'is_clearance_required', 'posted_at',
 ];
 
@@ -161,6 +167,9 @@ function getFingerprintStmts(db) {
           salary_min_usd          = @salary_min_usd,
           salary_max_usd          = @salary_max_usd,
           salary_period           = @salary_period,
+          salary_min              = @salary_min,
+          salary_max              = @salary_max,
+          salary_currency         = @salary_currency,
           skills_json             = @skills_json,
           is_h1b_sponsor          = @is_h1b_sponsor,
           requires_work_auth      = @requires_work_auth,
@@ -192,6 +201,7 @@ function getCacheStmts(db) {
            company_icon_url, via, collar, classification_confidence,
            normalized_title, summary, experience_level, workplace_type, valid_through,
            salary_min_usd, salary_max_usd, salary_period, skills_json,
+           salary_min, salary_max, salary_currency,
            is_h1b_sponsor, requires_work_auth, is_clearance_required,
            discovered_at, updated_at, is_active, fingerprint, sources_seen, req_uid)
         VALUES
@@ -200,6 +210,7 @@ function getCacheStmts(db) {
            @company_icon_url, @via, @collar, @classification_confidence,
            @normalized_title, @summary, @experience_level, @workplace_type, @valid_through,
            @salary_min_usd, @salary_max_usd, @salary_period, @skills_json,
+           @salary_min, @salary_max, @salary_currency,
            @is_h1b_sponsor, @requires_work_auth, @is_clearance_required,
            @discovered_at, @updated_at, 1, @fingerprint, @sources_seen, @req_uid)
       `),
@@ -292,6 +303,14 @@ function upsertCanonicalJob(db, {
     salary_min_usd:            canonical.salary_min_usd  != null ? canonical.salary_min_usd  : null,
     salary_max_usd:            canonical.salary_max_usd  != null ? canonical.salary_max_usd  : null,
     salary_period:             canonical.salary_period   || null,
+    // The range as the employer stated it, alongside the USD-normalised pair. normalizeJob only
+    // derives salary_min_usd/max_usd when the currency IS USD, so for a GBP or EUR posting these
+    // three are the only record of the figure — dropping them on write discarded it entirely.
+    // jobQuery already selects them and mapJobRow already exposes them as salaryMin/salaryMax/
+    // salaryCurrency, so this is the one missing link in an otherwise complete path.
+    salary_min:                canonical.salary_min      != null ? canonical.salary_min      : null,
+    salary_max:                canonical.salary_max      != null ? canonical.salary_max      : null,
+    salary_currency:           canonical.salary_currency || null,
     skills_json:               canonical.skills_json     || null,
     is_h1b_sponsor:            canonical.is_h1b_sponsor  != null ? canonical.is_h1b_sponsor  : null,
     requires_work_auth:        canonical.requires_work_auth != null ? canonical.requires_work_auth : null,

@@ -21,6 +21,12 @@
 // --user <id> stars the imports for that account (default: the single apply-ready one).
 // --force bypasses importJob's 24h reuse window — needed to BACKFILL after the extractor changes,
 // since otherwise the run reuses the rows it was meant to correct and reports success regardless.
+//
+// COSTS A RE-ENRICHMENT. upsertCanonicalJob writes with INSERT OR REPLACE and does not list
+// content_hash or enriched_at, so replacing a row resets both to NULL and every forced row looks
+// unenriched on the next pass — about $0.09 per 35 rows at Haiku 4.5 rates. Measured, not
+// theoretical: a forced re-import of an unchanged board re-enriched all 35 rows. Use --force for
+// backfills, not as a routine refresh.
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
