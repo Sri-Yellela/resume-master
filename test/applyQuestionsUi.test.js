@@ -236,6 +236,8 @@ test("the questions surface uses the modal conventions and its own CTA", () => {
   assert.match(jobsPanel, /Answer \{applyQuestions\.length\} question/);
   // Only on the review view, not when inspecting one run's detail.
   assert.match(jobsPanel, /!applyRunDetail && applyQuestions\.length > 0/);
-  // The empty state must not contradict a visible question list.
-  assert.match(jobsPanel, /\(applyRunDetail \|\| applyQuestions\.length === 0\)/);
+  // The empty state must not contradict a visible question list — nor a visible pending list, which
+  // renders in the same place and would otherwise sit under "No jobs in this run yet."
+  assert.match(jobsPanel,
+    /\(applyRunDetail \|\| \(applyQuestions\.length === 0 && applyPending\.length === 0\)\)/);
 });
