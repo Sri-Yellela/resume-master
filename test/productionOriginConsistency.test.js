@@ -23,11 +23,19 @@ function trackedFiles(extensions) {
   return out.split(/\r?\n/).filter(f => f && extensions.some(e => f.endsWith(e)));
 }
 
+// This file has to contain the hostname in order to search for it, so it must exclude itself.
+// It did not at first, and passed anyway — because it was still UNTRACKED when I ran it, so
+// `git ls-files` never returned it. Committing it turned a green test red, which is the useful
+// lesson: a guard whose result depends on whether it happens to be staged yet is not a guard.
+const SELF = "test/productionOriginConsistency.test.js";
+
 test("no code or config points at the retired Railway hostname", () => {
-  // Deliberately excludes .md: documentation.md names the dead host in a warning explaining that it
-  // is dead, which is the opposite of the problem. Code and config have no such excuse.
-  const files = trackedFiles([".js", ".jsx", ".mjs", ".cjs", ".json", ".toml", ".html", ".yml", ".yaml"]);
+  // Also excludes .md: documentation.md names the dead host in a warning explaining that it IS
+  // dead, which is the opposite of the problem. Code and config have no such excuse.
+  const files = trackedFiles([".js", ".jsx", ".mjs", ".cjs", ".json", ".toml", ".html", ".yml", ".yaml"])
+    .filter(f => f !== SELF);
   assert.ok(files.length > 50, `expected a real file list, got ${files.length}`);
+  assert.ok(!files.includes(SELF), "this file must exclude itself or it reports its own constant");
 
   const offenders = files.filter(f => {
     let text;

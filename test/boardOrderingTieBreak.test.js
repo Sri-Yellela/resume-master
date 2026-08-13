@@ -133,3 +133,98 @@ test("the live-scrape poll uses the same tie-break", () => {
   assert.match(serverSrc,
     /ORDER BY sj\.scraped_at DESC, \(sj\.posted_at IS NULL\) ASC, sj\.posted_at DESC, sj\.job_id\s*\n\s*LIMIT 50/);
 });
+
+// ── every option in the <select> has to do something ─────────────────────────
+
+test("every sort value the client can send has its own case", () => {
+  // "Oldest" (dateAsc) had no case and fell through to the default, so it rendered identically to
+  // "Newest" — a control that visibly does nothing. Read the option values out of the panel rather
+  // than hardcoding them, so adding an <option> without a server case fails here.
+  const panel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+  const selectStart = panel.indexOf('<option value="dateDesc"');
+  const options = [...panel.slice(selectStart, selectStart + 900).matchAll(/<option value="([a-zA-Z]+)"/g)]
+    .map(m => m[1]);
+  assert.ok(options.includes("dateAsc"), "precondition: the panel really offers Oldest");
+
+  const block = serverSrc.slice(serverSrc.indexOf("const RECENCY ="),
+                               serverSrc.indexOf("const offset  = (pg - 1) * ps;"));
+  for (const opt of options) {
+    if (opt === "dateDesc") continue;   // the default arm, correctly unnamed
+    assert.match(block, new RegExp(`sort === '${opt}'`),
+      `the sort <select> offers "${opt}" but the server has no case for it, so it silently does nothing`);
+  }
+});
+
+test("Oldest actually reverses Newest", () => {
+  const db = boardLikeProduction();
+  try {
+    const OLDEST = "sj.scraped_at ASC, (sj.posted_at IS NULL) ASC, sj.posted_at ASC, sj.job_id";
+    const newest = page(db, RECENCY, 1, 5).map(r => r.job_id);
+    const oldest = page(db, OLDEST, 1, 5).map(r => r.job_id);
+    assert.notDeepEqual(oldest, newest, "Oldest must not return the same rows as Newest");
+  } finally { db.close(); }
+});
+
+test("the experience sorts work on a crawled board, where min_years_exp is never populated", () => {
+  // The obvious column for "Exp low to high" is min_years_exp, which the YoE filters use — but the
+  // ATS crawl path never writes it, so sorting on it alone would leave both controls dead on any
+  // crawled board. experience_level is what enrichment fills, from a fixed ordered vocabulary.
+  const db = new Database(":memory:");
+  try {
+    db.exec(`CREATE TABLE scraped_jobs (job_id TEXT PRIMARY KEY, company TEXT, scraped_at INTEGER,
+             posted_at TEXT, min_years_exp INTEGER, experience_level TEXT, is_active INTEGER DEFAULT 1);`);
+    const ins = db.prepare(`INSERT INTO scraped_jobs
+      (job_id,company,scraped_at,posted_at,min_years_exp,experience_level) VALUES (?,?,?,?,?,?)`);
+    // Exactly the crawled shape: no numeric years anywhere, levels present.
+    for (const [id, lvl] of [["a", "lead"], ["b", "intern"], ["c", "senior"], ["d", "mid"]]) {
+      ins.run(id, "Acme", 1786000000, "2026-07-01T00:00:00Z", null, lvl);
+    }
+    const LEVEL_RANK = `CASE sj.experience_level
+      WHEN 'intern' THEN 0 WHEN 'entry' THEN 1 WHEN 'mid' THEN 2
+      WHEN 'senior' THEN 3 WHEN 'lead' THEN 4 WHEN 'executive' THEN 5 END`;
+    const EXP = (dir) =>
+      `(sj.min_years_exp IS NULL) ASC, sj.min_years_exp ${dir}, ` +
+      `((${LEVEL_RANK}) IS NULL) ASC, (${LEVEL_RANK}) ${dir}, ${RECENCY}`;
+
+    assert.deepEqual(page(db, EXP("ASC"), 1, 4).map(r => r.job_id), ["b", "d", "c", "a"],
+      "low to high: intern, mid, senior, lead");
+    assert.deepEqual(page(db, EXP("DESC"), 1, 4).map(r => r.job_id), ["a", "c", "d", "b"],
+      "high to low is the exact reverse");
+  } finally { db.close(); }
+});
+
+test("a precise year count outranks the level bucket where it exists", () => {
+  const db = new Database(":memory:");
+  try {
+    db.exec(`CREATE TABLE scraped_jobs (job_id TEXT PRIMARY KEY, company TEXT, scraped_at INTEGER,
+             posted_at TEXT, min_years_exp INTEGER, experience_level TEXT, is_active INTEGER DEFAULT 1);`);
+    const ins = db.prepare(`INSERT INTO scraped_jobs
+      (job_id,company,scraped_at,posted_at,min_years_exp,experience_level) VALUES (?,?,?,?,?,?)`);
+    ins.run("numbered", "Acme", 1786000000, "2026-07-01T00:00:00Z", 1, "lead");   // says 1 year
+    ins.run("levelled", "Acme", 1786000000, "2026-07-01T00:00:00Z", null, "intern");
+    const LEVEL_RANK = `CASE sj.experience_level WHEN 'intern' THEN 0 WHEN 'entry' THEN 1
+      WHEN 'mid' THEN 2 WHEN 'senior' THEN 3 WHEN 'lead' THEN 4 WHEN 'executive' THEN 5 END`;
+    const EXP = `(sj.min_years_exp IS NULL) ASC, sj.min_years_exp ASC, ` +
+                `((${LEVEL_RANK}) IS NULL) ASC, (${LEVEL_RANK}) ASC, ${RECENCY}`;
+    assert.equal(page(db, EXP, 1, 2)[0].job_id, "numbered",
+      "a stated year count is more precise than a bucket and should lead");
+  } finally { db.close(); }
+});
+
+test("an all-NULL sort column does not scramble the board", () => {
+  // ats_score is populated only for jobs the user has actually scored, so on a fresh board it is
+  // NULL everywhere. NULLs-last keeps that case a stable recency listing instead of arbitrary order.
+  const db = new Database(":memory:");
+  try {
+    db.exec(`CREATE TABLE scraped_jobs (job_id TEXT PRIMARY KEY, company TEXT, scraped_at INTEGER,
+             posted_at TEXT, ats_score INTEGER, is_active INTEGER DEFAULT 1);`);
+    const ins = db.prepare("INSERT INTO scraped_jobs (job_id,company,scraped_at,posted_at,ats_score) VALUES (?,?,?,?,?)");
+    ins.run("a", "Acme", 1786000000, "2026-07-03T00:00:00Z", null);
+    ins.run("b", "Acme", 1786000000, "2026-07-02T00:00:00Z", null);
+    ins.run("c", "Acme", 1786000000, "2026-07-01T00:00:00Z", 90);   // the one scored job
+    const ATS = `(sj.ats_score IS NULL) ASC, sj.ats_score DESC, ${RECENCY}`;
+    const order = page(db, ATS, 1, 5).map(r => r.job_id);
+    assert.equal(order[0], "c", "the scored job must lead, not be lost among the unscored ones");
+    assert.deepEqual(order.slice(1), ["a", "b"], "the rest stay in recency order");
+  } finally { db.close(); }
+});
