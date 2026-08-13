@@ -16,7 +16,8 @@ function db0() {
       description TEXT, company_icon_url TEXT, via TEXT, collar TEXT,
       classification_confidence REAL, normalized_title TEXT, summary TEXT, experience_level TEXT,
       workplace_type TEXT, valid_through INTEGER, salary_min_usd INTEGER, salary_max_usd INTEGER,
-      salary_period TEXT, skills_json TEXT, is_h1b_sponsor INTEGER, requires_work_auth INTEGER,
+      salary_period TEXT, salary_min INTEGER, salary_max INTEGER, salary_currency TEXT,
+      skills_json TEXT, is_h1b_sponsor INTEGER, requires_work_auth INTEGER,
       is_clearance_required INTEGER, discovered_at INTEGER, updated_at INTEGER,
       is_active INTEGER DEFAULT 1, fingerprint TEXT, sources_seen TEXT, req_uid TEXT
     );
