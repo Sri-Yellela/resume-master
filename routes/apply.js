@@ -422,7 +422,18 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         // so the user can review the pre-filled form while generation completes in the background.
         logEvent(runId, runJobId, userId, jobId, "generation_started", "Starting resume generation in background");
         const genPromise = generateResumeForApply(userId, jobId, toolType).then(async (gen) => {
-          if (!gen?.html) return null;
+          if (!gen?.html) {
+            // Was silent: a semi run whose generation failed looked identical to one that
+            // succeeded, because neither recorded anything about the resume.
+            logEvent(runId, runJobId, userId, jobId, "generation_failed",
+              gen?.error || "Resume generation returned no HTML");
+            return null;
+          }
+          // CASE A and CASE C both recorded which artifact they used; this branch never did, so the
+          // review surface reported "no resume generated" for a resume that generateResumeForApply
+          // had in fact written to the `resumes` table. The resume existed — the link to it did not.
+          usedArtifactId = gen.resumeId ?? null;
+          usedAtsScore   = gen.atsScore ?? null;
           logEvent(runId, runJobId, userId, jobId, "generation_ready", "Resume generation completed", { atsScore: gen.atsScore });
           try {
             const pdfBuf = await htmlToPdf(gen.html);
@@ -455,7 +466,34 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         const [,, applySettled] = await Promise.allSettled([genPromise, coverLetterPathPromise, browserPromise]);
         result = applySettled.status === "fulfilled" ? applySettled.value : { status: "awaiting_user", fieldsFilled: 0 };
         db.prepare(`UPDATE apply_run_jobs SET status='held_review', reason_code='manual_review', finished_at=unixepoch() WHERE id=?`).run(runJobId);
-        logEvent(runId, runJobId, userId, jobId, "autofill_done", `Autofilled ${result.fieldsFilled ?? 0} fields`, { platform: result.platform });
+
+        // This branch used to return here, before the audit block below — so a manual-review run
+        // discarded everything it had just produced: the resolved answers WITH their provenance,
+        // the resume artifact id, and the screenshot of the filled form. autoApply returns all
+        // three; nothing read them. That is why the review surface could say "7 fields filled"
+        // and then show nothing about WHICH fields, offer no resume, and offer no way to see what
+        // the form looked like. The evidence was captured and thrown away.
+        const semiAnswers = Array.isArray(result.answers) ? result.answers : [];
+        const semiAudit = persistAudit(runJobId, {
+          answers_json: semiAnswers.length ? JSON.stringify(semiAnswers) : null,
+          resume_artifact_id: usedArtifactId,
+          resume_ats_score: usedAtsScore,
+          screenshot_path: result.screenshotPath || null,
+          // Nothing was submitted — this run exists so a human can decide. Recording 0 rather than
+          // null keeps "reviewed, not sent" distinguishable from "we have no idea".
+          submit_verified: 0,
+          submit_evidence: null,
+          open_questions_json: Array.isArray(result.openQuestions) && result.openQuestions.length
+            ? JSON.stringify(result.openQuestions) : null,
+        });
+        logEvent(runId, runJobId, userId, jobId, "autofill_done",
+          `Autofilled ${result.fieldsFilled ?? 0} fields`, {
+            platform: result.platform,
+            answerCount: semiAnswers.length,
+            resumeArtifactId: usedArtifactId,
+            screenshotPath: result.screenshotPath || null,
+            columnsWritten: semiAudit.written,
+          });
         db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
         return;
 
