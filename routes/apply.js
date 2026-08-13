@@ -836,6 +836,65 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       return out.status(r.status).json(r.body);
     }));
 
+  // ── Run payload shape ────────────────────────────────────────────────────────
+  // These routes returned raw DB rows: snake_case, seconds-epoch timestamps, and no join to
+  // scraped_jobs at all. The client reads camelCase and renders `new Date(...)`, so every review
+  // row showed a status pill and nothing else — no title, no company, no reason, no ATS score —
+  // and the run chips rendered "undefined✓". Both sides were self-consistent and neither matched
+  // the other, the same shape of defect as `tool` vs `toolType`.
+  //
+  // apply_run_jobs stores only job_id, so title/company have to come from scraped_jobs. LEFT JOIN,
+  // not JOIN: a posting can be expired by the 7-day cleanup while the application that targeted it
+  // remains, and losing the row entirely would be worse than showing it without a title.
+  const toMs = (sec) => (sec ? Number(sec) * 1000 : null);
+
+  const publicRun = (r) => ({
+    id: r.id,
+    mode: r.mode,
+    toolType: r.tool_type,
+    approvalMode: r.approval_mode ?? null,
+    status: r.status,
+    totalJobs: r.total_jobs ?? 0,
+    submittedCount: r.submitted_count ?? 0,
+    heldCount: r.held_count ?? 0,
+    failedCount: r.failed_count ?? 0,
+    createdAt: toMs(r.created_at),
+    startedAt: toMs(r.started_at),
+    finishedAt: toMs(r.finished_at),
+  });
+
+  const publicRunJob = (r) => ({
+    id: r.id,
+    runId: r.run_id,
+    jobId: r.job_id,
+    // Null when the posting has since expired — the row still names the job_id, so a run is never
+    // anonymous even after its target is gone.
+    title: r.title ?? null,
+    company: r.company ?? null,
+    applyUrl: r.apply_url || r.url || null,
+    mode: r.mode ?? null,
+    status: r.status,
+    reasonCode: r.reason_code ?? null,
+    reasonDetail: r.reason_detail ?? null,
+    atsScore: r.resume_ats_score ?? null,
+    // What the review surface needs to offer a link rather than leaving the user guessing whether
+    // a resume was ever produced.
+    resumeAvailable: r.resume_artifact_id != null,
+    screenshotAvailable: !!r.screenshot_path,
+    submitVerified: r.submit_verified === 1,
+    submitEvidence: r.submit_evidence ?? null,
+    startedAt: toMs(r.started_at),
+    finishedAt: toMs(r.finished_at),
+    createdAt: toMs(r.created_at),
+  });
+
+  const RUN_JOB_SELECT = `
+    SELECT rj.*, r.mode, sj.title, sj.company, sj.apply_url, sj.url
+    FROM apply_run_jobs rj
+    JOIN apply_runs r ON r.id = rj.run_id
+    LEFT JOIN scraped_jobs sj ON sj.job_id = rj.job_id
+  `;
+
   app.get("/api/apply/runs", requireAuth, (req, res) => {
     const runs = db.prepare(`
       SELECT * FROM apply_runs WHERE user_id=? ORDER BY created_at DESC LIMIT 20
@@ -844,22 +903,42 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // their own decision. Leaving them here listed every one of them twice — once as something to
     // approve and once as a bare "needs review" row with no action on it.
     const review = db.prepare(`
-      SELECT rj.*, r.mode FROM apply_run_jobs rj
-      JOIN apply_runs r ON r.id = rj.run_id
+      ${RUN_JOB_SELECT}
       WHERE rj.user_id=? AND rj.status='held_review'
         AND COALESCE(rj.reason_code, '') != 'awaiting_approval'
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id);
-    res.json({ runs, review });
+    res.json({ runs: runs.map(publicRun), review: review.map(publicRunJob) });
   });
 
   app.get("/api/apply/runs/:runId", requireAuth, (req, res) => {
     const run = db.prepare("SELECT * FROM apply_runs WHERE id=? AND user_id=?")
       .get(Number(req.params.runId), req.user.id);
     if (!run) return res.status(404).json({ error: "Run not found" });
-    const jobs = db.prepare("SELECT * FROM apply_run_jobs WHERE run_id=? ORDER BY id").all(run.id);
-    const logs = db.prepare("SELECT * FROM apply_job_logs WHERE run_id=? ORDER BY created_at").all(run.id);
-    res.json({ run, jobs, logs });
+    const jobs = db.prepare(`${RUN_JOB_SELECT} WHERE rj.run_id=? ORDER BY rj.id`).all(run.id);
+    // Log lines carry job_id but the panel rendered only the message, so "7 fields filled" gave no
+    // indication of WHICH application or site it referred to. Joining the posting lets each line
+    // name its target.
+    const logs = db.prepare(`
+      SELECT l.*, sj.title, sj.company
+      FROM apply_job_logs l
+      LEFT JOIN scraped_jobs sj ON sj.job_id = l.job_id
+      WHERE l.run_id=? ORDER BY l.created_at, l.id
+    `).all(run.id);
+    res.json({
+      run: publicRun(run),
+      jobs: jobs.map(publicRunJob),
+      logs: logs.map(l => ({
+        id: l.id,
+        jobId: l.job_id,
+        title: l.title ?? null,
+        company: l.company ?? null,
+        level: l.level || "info",
+        event: l.event,
+        message: l.message,
+        createdAt: toMs(l.created_at),
+      })),
+    });
   });
 
   app.get("/api/apply/review", requireAuth, (req, res) => {

@@ -156,7 +156,8 @@ test("a pending application is not ALSO listed as a plain 'needs review' row", a
                   VALUES (1, 1, 'gh2', 'held_review', 'incomplete_form')`).run();
     const after = await (await fetch(`${t.baseUrl}/api/apply/runs`)).json();
     assert.equal(after.review.length, 1);
-    assert.equal(after.review[0].reason_code, "incomplete_form");
+    // camelCase since the runs payload was re-shaped to match what the panel actually reads.
+    assert.equal(after.review[0].reasonCode, "incomplete_form");
   } finally { t.close(); }
 });
 

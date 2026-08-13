@@ -2219,6 +2219,23 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     if (user) { loadApplyRuns(); loadApplyQuestions(); loadApplyPending(); }
   }, [user, loadApplyRuns, loadApplyQuestions, loadApplyPending]);
 
+  // A run does its work in the background, and nothing refreshed this panel — so progress and the
+  // final result never appeared until the page was reloaded, which read as "it did nothing".
+  // Polls only while a run is actually in flight, and stops as soon as none are, so an idle board
+  // costs no requests.
+  const runInFlight = applyRuns.some(r => r.status === "queued" || r.status === "running");
+  useEffect(() => {
+    if (!user || !runInFlight) return;
+    const id = setInterval(() => {
+      loadApplyRuns();
+      loadApplyPending();
+      // The open run-detail modal is a snapshot; refresh it too or it freezes mid-run.
+      if (applyRunDetailOpen && applyRunDetail?.run?.id) loadApplyRunDetail(applyRunDetail.run.id);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [user, runInFlight, applyRunDetailOpen, applyRunDetail?.run?.id,
+      loadApplyRuns, loadApplyPending, loadApplyRunDetail]);
+
   useEffect(() => {
     if (!user) return;
     api("/api/apply/readiness").then(d => setApplyReadiness(d)).catch(() => setApplyReadiness({ available: false, reason: "probe_error" }));
@@ -3080,7 +3097,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                          borderRadius:4, padding:"3px 8px", background:theme.surface,
                          color:theme.text, cursor:"pointer", fontSize:11 }}>
                 <span style={{ width:6, height:6, borderRadius:"50%", flexShrink:0, background:
-                  run.status === "complete" ? "#16a34a" :
+                  run.status === "completed" ? "#16a34a" :
                   run.status === "running"  ? theme.accent :
                   run.status === "queued"   ? "#d97706" : "#6b7280" }}/>
                 {run.submittedCount}✓
@@ -3484,9 +3501,19 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                     {/* title / company / status */}
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
                       <div>
-                        <span style={{ fontWeight:700, fontSize:13, color:theme.text }}>{job.title || "—"}</span>
+                        {/* Falls back to the job id: a posting expired by the 7-day cleanup leaves
+                            the application behind, and a row identified by nothing at all is what
+                            made this list unreadable. */}
+                        <span style={{ fontWeight:700, fontSize:13, color:theme.text }}>
+                          {job.title || job.jobId || "—"}
+                        </span>
                         {job.company && (
                           <span style={{ fontSize:12, color:theme.textMuted, marginLeft:8 }}>{job.company}</span>
+                        )}
+                        {!job.title && job.jobId && (
+                          <span style={{ fontSize:10, color:theme.textDim, marginLeft:8 }}>
+                            (posting no longer on the board)
+                          </span>
                         )}
                       </div>
                       <span style={{
@@ -3526,6 +3553,43 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                         {" · "}Attempts: {job.attemptCount || 1}
                       </div>
                     )}
+                    {/* What was actually sent. The audit trail has recorded the resume artifact and
+                        the end-of-attempt screenshot all along; nothing linked them, so there was
+                        no way to tell whether a resume had even been generated. */}
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+                      {job.resumeAvailable ? (
+                        <a href={artifactUrl(job.id, "resume")} target="_blank" rel="noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
+                                   border:`1px solid ${theme.border}`, background:theme.surface,
+                                   color:theme.text, textDecoration:"none", whiteSpace:"nowrap" }}>
+                          Resume PDF ↗
+                        </a>
+                      ) : (
+                        <span title="No resume artifact was recorded for this application."
+                          style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
+                                   background:`${theme.border}55`, color:theme.textDim, whiteSpace:"nowrap" }}>
+                          no resume generated
+                        </span>
+                      )}
+                      {job.screenshotAvailable && (
+                        <a href={artifactUrl(job.id, "screenshot")} target="_blank" rel="noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
+                                   border:`1px solid ${theme.border}`, background:theme.surface,
+                                   color:theme.text, textDecoration:"none", whiteSpace:"nowrap" }}>
+                          Filled form ↗
+                        </a>
+                      )}
+                      {job.status === "submitted" && (
+                        <span title={job.submitEvidence || ""}
+                          style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
+                                   background: job.submitVerified ? "#16a34a22" : "#d9770622",
+                                   color: job.submitVerified ? "#16a34a" : "#d97706", whiteSpace:"nowrap" }}>
+                          {job.submitVerified ? "submission verified" : "unverified submit"}
+                        </span>
+                      )}
+                    </div>
                     {/* apply URL */}
                     {job.applyUrl && (
                       <a href={job.applyUrl} target="_blank" rel="noopener noreferrer"
@@ -3566,6 +3630,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                       }}>
                         [{log.event || log.level}]
                       </span>
+                      {/* Which application this line is about. Without it a run's log is a list of
+                          statements like "7 fields filled" with no way to tell which job or site
+                          produced them. */}
+                      {(log.company || log.title || log.jobId) && (
+                        <span style={{ color:theme.text, marginRight:6 }}>
+                          {log.company || log.title || log.jobId}
+                          {log.company && log.title ? ` — ${log.title}` : ""}
+                          {":"}
+                        </span>
+                      )}
                       {log.message}
                     </div>
                   ))}
