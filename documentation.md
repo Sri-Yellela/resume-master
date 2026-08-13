@@ -564,29 +564,56 @@ Run from `C:\Users\sriye\resume-master\`:
 | Lovable visual revamp (G-W Studio Event Platform template) | Ready to execute — prompt prepared, screenshots needed |
 | framer-motion animations | Post-Lovable |
 | `client/src/styles/theme.js` design tokens | Post-Lovable |
-| Railway deployment | Pending — local dev complete |
-| Chrome extension production URL update | Pending deployment |
+| Railway deployment | Done — live at https://resumemaster.one, auto-deploys on push to `main` |
+| Chrome extension production URL update | Done — pinned to `resumemaster.one` in background.js, config.js and manifest.json |
 | Extension icon PNGs (real design) | Using 1x1 placeholder currently |
 
 ---
 
-## 15. Deployment Checklist (Railway)
+## 15. Deployment (Railway)
 
-When ready to deploy:
+**Already deployed.** The service is live at **https://resumemaster.one**, and Railway is wired to
+this GitHub repo, so **a push to `main` IS the deploy** — there is no CLI step and no CI workflow.
+`railway.toml` supplies the start command and the Chromium env vars.
 
-1. `npm run backup` — snapshot current local DB
-2. `git add . && git commit -m "ready for deploy"`
-3. `git push origin main`
-4. Railway → New Project → Deploy from GitHub → select `resume-master`
-5. Set all environment variables (see Section 11) — add `NODE_ENV=production`
-6. Build command: `npm install && cd client && npm install && npm run build && cd ..`
-7. Start command: `node server.js`
-8. Volumes → Add Volume → Mount path: `/app/data`
-9. Deploy → wait for Active status
-10. Get Railway URL (e.g. `https://resume-master-production.up.railway.app`)
-11. Update Chrome extension popup → change URL to Railway URL
-12. Register accounts, verify all features on live URL
-13. `npm run backup` again post-deploy
+To ship: `git push origin main`, then confirm the new code is actually serving. The client bundle is
+the reliable signal, because a string you just added either appears in it or the deploy has not
+finished:
+
+```sh
+curl -s https://resumemaster.one/api/health                 # {"ok":true,...}
+B=$(curl -s https://resumemaster.one/ | grep -oE '/assets/[^"]+\.js' | head -1)
+curl -s "https://resumemaster.one$B" | grep -c "some string you just added"
+```
+
+> ⚠️ **`https://resume-master-production.up.railway.app` is dead** — Railway's edge returns
+> `{"status":"error","code":404,"message":"Application not found"}`. It was this project's original
+> Railway-generated hostname and is no longer attached to the service. Do not use it anywhere, and
+> do not point the extension at it (see below). `resumemaster.one` is the only working origin.
+
+### First-time setup, for reference
+
+1. `npm run backup` — snapshot the current local DB
+2. `git push origin main`
+3. Railway → New Project → Deploy from GitHub → select `resume-master`
+4. Set all environment variables (see Section 11) — add `NODE_ENV=production`
+5. Build command: `npm install && cd client && npm install && npm run build && cd ..`
+6. Start command: `node server.js`
+7. Volumes → Add Volume → Mount path: `/app/data` — the SQLite DB lives here, so without the
+   volume every deploy starts from an empty database
+8. Deploy → wait for Active status
+9. Point a custom domain at the service. **Use the custom domain everywhere from then on**, not the
+   Railway-generated hostname — that hostname changes if the service is recreated, which is exactly
+   how the one above became a 404.
+10. Register accounts, verify features on the live URL
+11. `npm run backup` again post-deploy
+
+**Do not change the extension's URL as part of deploying.** The extension is pinned to the canonical
+domain in three places — `extension/background.js`, `extension/config.js`, and `manifest.json`
+(`host_permissions` plus `privacy_policy_url`) — and it is already correct. An earlier version of
+this checklist said to repoint it at the Railway URL; following that today would aim a shipped
+Chrome extension at a hostname that 404s, and `host_permissions` would have to be re-reviewed by the
+Chrome Web Store to change it back.
 
 ---
 
