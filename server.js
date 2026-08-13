@@ -33,6 +33,7 @@ import { runHiringSignalsRollup } from "./services/jobs/hiringSignals.js";
 // trackScrape dropped from this import in cleanup 5.8 — it was imported here and never called.
 import { trackApiCall } from "./services/usageTracker.js";
 import { MODEL_SONNET, MODEL_HAIKU } from "./shared/anthropicModels.js";
+import { classifyGenerationError } from "./shared/failureAttribution.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
@@ -6409,7 +6410,23 @@ function generateResumeForApply(userId, jobId, toolType) {
   console.log(`[generateResumeForApply] starting background generation for user=${userId} job=${jobId} tool=${tool}`);
   const p = coreGenerateResume({ userId, jobId: String(jobId), job: jobRow, tool })
     .then(r => ({ html: r.html, atsScore: r.atsScore, resumeId: r.resumeId, fromCache: false }))
-    .catch(e => ({ error: e.message }))
+    // Keep the upstream failure STRUCTURED. This used to be `{ error: e.message }`, which threw
+    // away the HTTP status, the API error type and the request_id — so a 404 on a retired model
+    // and a transient 529 overload were the same opaque string to every caller downstream, and
+    // nothing could tell "retrying is pointless" from "retry in a moment".
+    .catch(e => {
+      const f = classifyGenerationError(e);
+      return {
+        error: f.message,
+        errorCode: f.code,
+        errorStatus: f.status,
+        errorType: f.apiType,
+        errorRequestId: f.requestId,
+        errorPermanent: f.permanent,
+        errorIsDeadModel: f.isDeadModel,
+        errorDetail: f.detail,
+      };
+    })
     .finally(() => pendingGenerationPromises.delete(key));
   pendingGenerationPromises.set(key, p);
   return p;

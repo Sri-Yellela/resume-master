@@ -123,8 +123,14 @@ test("browser unavailable error is classified for graceful fallback", () => {
   assert.match(launcher, /browser_runtime_missing_dependency/);
   assert.match(launcher, /browser_binary_not_found/);
   assert.match(launcher, /browser_launch_failed/);
-  // autoApply error handler still propagates the structured reasonCode
-  assert.match(automation, /reasonCode: e\.reasonCode/);
+  // autoApply error handler still propagates the structured reasonCode — it now does so via
+  // classifyRuntimeError (which returns e.reasonCode untouched when the thrower set one) instead
+  // of an inline `e.reasonCode || "browser_error"`. The old fallback blamed the browser for every
+  // unrecognised error, which is how an Anthropic 404 was reported as "browser error".
+  assert.match(automation, /classifyRuntimeError\(e\)/);
+  assert.match(automation, /reasonCode: attributed\.reasonCode/);
+  assert.doesNotMatch(automation, /:\s*"browser_error"/,
+    "no code path may DEFAULT to browser_error; attribution decides it");
   // autoApply uses launchBrowser (no direct puppeteer.launch)
   assert.match(automation, /launchBrowser/);
   assert.doesNotMatch(automation, /puppeteer\.launch/);
