@@ -6,7 +6,8 @@
 // rows imported that way land with the ATS's own fields and none of the derived ones. This is how
 // you fill those in afterwards, on purpose.
 //
-// Model: services/jobs/enrichJob.js pins claude-haiku-4-5-20251001, one call per posting capped at
+// Model: services/jobs/enrichJob.js uses MODEL_HAIKU from shared/anthropicModels.js (the single
+// source of truth for model IDs), one call per posting capped at
 // max_tokens 500. THIS SPENDS REAL API CREDITS. --dry-run prints the work and the estimate first.
 //
 // Usage:

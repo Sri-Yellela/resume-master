@@ -38,6 +38,7 @@ import { classifyJob } from './classifyJob.js';
 import { reconcileFingerprint, upsertCanonicalJob, fingerprintJob, SOURCE_LABELS } from './aggregator.js';
 import { runEnrichment } from './enrichJob.js';
 import { mapJobRow } from './mapJobRow.js';
+import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
 
 import { fetchCompanyJobs as fetchGreenhouseJobs }      from './sources/greenhouse.js';
 import { fetchCompanyJobs as fetchLeverJobs }           from './sources/lever.js';
@@ -54,7 +55,8 @@ class ImportInputError extends Error {
   }
 }
 
-const IMPORT_MODEL_ID = 'claude-haiku-4-5-20251001';
+// Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
+const IMPORT_MODEL_ID = MODEL_HAIKU;
 const LOGIN_WALLED_HOSTS = new Set(['linkedin.com', 'www.linkedin.com']);
 
 // "global-if-fresh": re-importing the exact same URL within this window reuses the existing

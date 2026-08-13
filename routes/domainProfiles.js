@@ -23,6 +23,7 @@ import {
   syncSelectedSkillSuggestions,
 } from "../services/profileSignalAggregator.js";
 import { mergeUniqueSignalLabels } from "../shared/profileSignals.js";
+import { MODEL_HAIKU } from "../shared/anthropicModels.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -549,7 +550,7 @@ Rules:
 
     try {
       const msg = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
+        model: MODEL_HAIKU,
         max_tokens: 600,
         messages: [{ role: "user", content: prompt }],
       });

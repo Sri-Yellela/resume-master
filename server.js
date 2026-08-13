@@ -32,6 +32,7 @@ import { runOrgLayerRollup } from "./services/kb/orgLayer.js";
 import { runHiringSignalsRollup } from "./services/jobs/hiringSignals.js";
 // trackScrape dropped from this import in cleanup 5.8 — it was imported here and never called.
 import { trackApiCall } from "./services/usageTracker.js";
+import { MODEL_SONNET, MODEL_HAIKU } from "./shared/anthropicModels.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
@@ -2510,39 +2511,14 @@ if (!adminExists) {
     .run(ADMIN_USER, hashPassword(ADMIN_PASSWORD));
 }
 
-// PRICING: Anthropic per-token costs in USD as of 2025.
-// Update these when Anthropic changes pricing.
-// Cache read tokens cost 10% of base input price.
-// Cache write tokens cost 125% of base input price.
-const ANTHROPIC_PRICING = {
-  "claude-sonnet-4-20250514": {
-    input:       0.000003,
-    output:      0.000015,
-    cache_read:  0.0000003,
-    cache_write: 0.00000375,
-  },
-  "claude-haiku-4-5-20251001": {
-    input:       0.0000008,
-    output:      0.000004,
-    cache_read:  0.00000008,
-    cache_write: 0.000001,
-  },
-};
-
-function calculateCost(model, usage) {
-  const p = ANTHROPIC_PRICING[model];
-  if (!p) return 0;
-  return (
-    (usage.input_tokens || 0)              * p.input +
-    (usage.output_tokens || 0)             * p.output +
-    (usage.cache_read_input_tokens || 0)   * p.cache_read +
-    (usage.cache_creation_tokens || 0)     * p.cache_write
-  );
-}
-// TO UPDATE PRICING â€” edit ANTHROPIC_PRICING above.
-// Historical cost calculations use the price at insert time
-// (stored in usage_events.cost_usd) so changing this does not
-// retroactively alter past records.
+// PRICING lives in shared/anthropicModels.js — see that file to update per-token costs.
+// This module used to carry its own ANTHROPIC_PRICING table plus a calculateCost() that had
+// ZERO callers: the live cost path is services/usageTracker.js. Two tables that nothing kept
+// in sync is how the Haiku entry ended up holding Haiku 3.5's prices, so the dead copy is gone
+// rather than duplicated a third time.
+//
+// Historical cost calculations still use the price at insert time (stored in
+// usage_events.cost_usd), so changing pricing does not retroactively alter past records.
 
 // â”€â”€ Multer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const upload = multer({
@@ -2608,7 +2584,7 @@ function decryptCookies(enc, iv, tag) {
 async function classifyJob(title, description = "") {
   try {
     const msg = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: MODEL_HAIKU,
       max_tokens: 30,
       messages: [{ role:"user", content:
         `Classify this job into the single best matching category from the list below.
@@ -5976,8 +5952,15 @@ Return ONLY the improved resume text with no commentary, preamble, or explanatio
 
     const t0 = Date.now();
     const enhanceMsg = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4000,
+      model: MODEL_SONNET,
+      // thinking is explicit: Sonnet 5 runs ADAPTIVE thinking when the field is omitted, and
+      // max_tokens caps thinking + response text together — so an omitted field would silently
+      // spend this budget on reasoning and truncate the resume. This is a deterministic rewrite
+      // task that ran with no thinking on Sonnet 4; keep that behaviour.
+      thinking: { type: "disabled" },
+      // 4000 -> 8000: Sonnet 5's tokenizer emits ~30% more tokens for the same text, so a
+      // resume that fit in 4000 output tokens on Sonnet 4 can now overrun and truncate.
+      max_tokens: 8000,
       system: ENHANCE_SYSTEM,
       messages: [{ role: "user", content: `PROFILE NAME: ${profile.profile_name}
 ROLE FAMILY: ${profile.role_family}
@@ -5992,7 +5975,7 @@ ${originalText}` }],
     const enhancedText = enhanceMsg.content.map(b => b.text || "").join("").trim();
     trackApiCall(db, {
       userId: req.user.id, eventType: "resume_enhance", eventSubtype: "enhance",
-      model: "claude-sonnet-4-20250514", usage: enhanceMsg.usage,
+      model: MODEL_SONNET, usage: enhanceMsg.usage,
       durationMs: Date.now() - t0,
     });
 
@@ -6159,7 +6142,12 @@ app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) 
   try {
     const base64 = req.file.buffer.toString("base64");
     const msg = await anthropic.messages.create({
-      model:"claude-sonnet-4-20250514", max_tokens:4000,
+      model: MODEL_SONNET,
+      // See the enhance call site: explicit thinking:disabled + doubled budget, because Sonnet 5
+      // thinks by default and its tokenizer is denser. A truncated extraction here silently
+      // yields a partial resume, which is why this must not be left implicit.
+      thinking: { type: "disabled" },
+      max_tokens: 8000,
       messages:[{ role:"user", content:[
         { type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64 } },
         { type:"text", text:"Extract all text from this resume PDF preserving section structure. Return plain text only, no commentary." },
@@ -6220,14 +6208,18 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
 
   const genStart = Date.now();
   const resumeMsg = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
+    model: MODEL_SONNET,
+    // See the enhance call site: Sonnet 5 thinks by default and max_tokens covers thinking +
+    // output, so leaving this implicit would eat the HTML budget. Truncated HTML is especially
+    // bad here — downstream code parses this into the submitted resume.
+    thinking: { type: "disabled" },
+    max_tokens: 8192,
     system: systemBlocks,
     messages: [{ role: "user", content: runtimeInputs }],
   });
   trackApiCall(db, {
     userId, eventType: "resume_generate", eventSubtype,
-    model: "claude-sonnet-4-20250514", usage: resumeMsg.usage,
+    model: MODEL_SONNET, usage: resumeMsg.usage,
     durationMs: Date.now() - genStart, jobId: String(jobId), company: job.company,
     domainModule: domainModuleKey,
   });
@@ -6306,14 +6298,14 @@ RULES:
 
       const fmtStart = Date.now();
       const formatMsg = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001",
+        model: MODEL_HAIKU,
         max_tokens: 4096,
         system: [{ type: "text", text: FORMATTING_SYSTEM, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: `Reformat this resume HTML to match the design specification exactly. Preserve all content:\n\n${html}` }],
       });
       trackApiCall(db, {
         userId, eventType: "resume_format", eventSubtype,
-        model: "claude-haiku-4-5-20251001", usage: formatMsg.usage,
+        model: MODEL_HAIKU, usage: formatMsg.usage,
         durationMs: Date.now() - fmtStart,
       });
       const formatted = formatMsg.content.map(b => b.text || "").join("").replace(/```html|```/g, "").trim();
@@ -6469,7 +6461,7 @@ REQUIREMENTS:
 
   try {
     const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: MODEL_HAIKU,
       max_tokens: 800,
       messages: [{ role: "user", content: prompt }],
     });
@@ -7036,7 +7028,7 @@ app.post("/api/standalone/ats", standaloneRateLimit("ats", 1, 3), standaloneUplo
 
     const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):\n${jdText}\n\nRESUME TEXT (check which JD keywords appear here):\n${resumeText}`;
     const msg = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: MODEL_HAIKU,
       max_tokens: 900,
       system: ATS_SYSTEM_PROMPT,
       messages: [{ role: "user", content: atsDynamic }],
@@ -7072,8 +7064,10 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     const { systemBlocks } = assemblePrompt(domainModuleKey, "GENERATE", runtimeInputs);
 
     const resumeMsg = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
+      model: MODEL_SONNET,
+      // See the enhance call site: explicit thinking:disabled + denser-tokenizer headroom.
+      thinking: { type: "disabled" },
+      max_tokens: 8192,
       system: systemBlocks,
       messages: [{ role: "user", content: runtimeInputs }],
     });
@@ -7084,7 +7078,7 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     let atsScore = null;
     try {
       const atsMsg = await anthropic.messages.create({
-        model: "claude-haiku-4-5-20251001", max_tokens: 900,
+        model: MODEL_HAIKU, max_tokens: 900,
         system: ATS_SYSTEM_PROMPT,
         messages: [{ role: "user", content: `JOB DESCRIPTION:\n${jdText}\n\nRESUME TEXT:\n${cachedText}` }],
       });
@@ -7154,7 +7148,7 @@ REQUIREMENTS:
 
   try {
     const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: MODEL_HAIKU,
       max_tokens: 800,
       messages: [{ role: "user", content: prompt }],
     });
