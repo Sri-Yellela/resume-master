@@ -22,6 +22,12 @@
  *   GET  /greenhouse           2-step form (traps: sponsorship inversion, name ambiguity)
  *   GET  /lever                1-step form (traps: lowercase yes/no, "Review and Submit")
  *   GET  /ashby                1-step form (traps: required typeahead, date format)
+ *   GET  /spa                  JS-RENDERED form — fields injected in two chunks after a delay
+ *                              (?delay=ms, default 2500; ?delay=0 renders synchronously).
+ *                              Reproduces the hydration timing every real ATS has and that
+ *                              static HTML cannot: a discovery pass that does not wait for a
+ *                              readiness condition walks an empty DOM here, exactly as it did
+ *                              against a real Ashby posting.
  *   GET  /_submissions         JSON of everything submitted so far (for assertions)
  *   POST /_reset               clear recorded submissions
  *
@@ -239,6 +245,54 @@ function ashbyForm() {
   </form>`);
 }
 
+// ── JS-RENDERED (SPA) form ───────────────────────────────────────────────────
+// The characteristic every live target shares and this harness could not reproduce: Ashby,
+// Greenhouse and Lever all build their form client-side, AFTER the document is parsed. Because
+// every form above was static HTML, a discovery pass that walks the DOM too early found all the
+// fields here and none of them in production — a real Ashby run discovered nothing, filled
+// nothing, and reported "Autofilled 0 fields" as a clean autofill_done in 9 seconds.
+//
+// The delay is deliberately longer than the fixed 1500ms sleep autoApply used to use, so a run
+// that does not WAIT on a readiness condition reliably sees an empty DOM. ?delay= overrides it,
+// and ?delay=0 renders synchronously for a control case.
+//
+// Fields are injected in TWO chunks so the control count climbs rather than jumping straight to
+// its final value: a readiness check that merely waits for "any field" would fire on the first
+// chunk and still miss half the form. Only waiting for the count to STOP CHANGING is correct.
+function spaForm(delayMs) {
+  const d = Number.isFinite(delayMs) ? delayMs : 2500;
+  return page('SPA ATS — Apply', `
+  <h1>Senior Data Engineer</h1>
+  <p>Form is rendered by JavaScript ${d}ms after load, in two chunks — as every real ATS does.</p>
+  <div id="app"><p id="boot">Loading application form…</p></div>
+  <script>
+  (function(){
+    var DELAY = ${d};
+    var chunk1 =
+      '<form id="spaform" method="POST" action="/_submit/spa" enctype="multipart/form-data">' +
+      '<label class="req" for="f_name">Full name</label><input id="f_name" name="name" required>' +
+      '<label class="req" for="f_email">Email</label><input id="f_email" name="email" type="email" required>' +
+      '<label for="f_phone">Phone</label><input id="f_phone" name="phone">' +
+      '<div id="chunk2"></div>' +
+      '<button type="submit">Submit application</button></form>';
+    var chunk2 =
+      '<label class="req" for="f_resume">Resume</label>' +
+      '<input id="f_resume" type="file" name="resume" required>' +
+      '<label for="f_linkedin">LinkedIn</label><input id="f_linkedin" name="linkedin">' +
+      '<label for="f_github">GitHub</label><input id="f_github" name="github">' +
+      '<label for="f_addr">Address</label><input id="f_addr" name="address1">' +
+      '<label class="req" for="f_auth">I am authorized to work without sponsorship</label>' +
+      '<input id="f_auth" type="checkbox" name="authorized_no_sponsorship" required>';
+    setTimeout(function(){
+      var b = document.getElementById('boot'); if (b) b.remove();
+      document.getElementById('app').innerHTML = chunk1;
+      // Second chunk lands a further 400ms later, so the count is briefly non-zero but not final.
+      setTimeout(function(){ document.getElementById('chunk2').innerHTML = chunk2; }, 400);
+    }, DELAY);
+  })();
+  </script>`);
+}
+
 // ── Workday-flavoured IFRAME form ────────────────────────────────────────────
 // The non-greenhouse coverage case. platformDetector.usesIframe() is true for workday, icims and
 // taleo — three of the nine providers outside the v1 full-auto allowlist — yet nothing in this
@@ -295,6 +349,7 @@ function indexPage() {
   <ul>
     <li><a href="/greenhouse">/greenhouse</a> — 2-step (sponsorship inversion, name ambiguity, required unmapped)</li>
     <li><a href="/lever">/lever</a> — 1-step (lowercase yes/no, "Review and Submit" button)</li>
+    <li><a href="/spa">/spa</a> — JS-rendered, fields appear after a delay (SPA hydration)</li>
     <li><a href="/ashby">/ashby</a> — 1-step (required typeahead, non-ISO date)</li>
   </ul>
   <p><a href="/_submissions">/_submissions</a> — recorded submissions (JSON). Each record carries
@@ -384,6 +439,11 @@ const server = http.createServer(async (req, res) => {
     if (path === '/greenhouse') return send(200, greenhouseStep1());
     if (path === '/lever')      return send(200, leverForm());
     if (path === '/ashby')      return send(200, ashbyForm());
+    if (path === '/spa') {
+      // ?delay=<ms> overrides the hydration delay; ?delay=0 renders synchronously.
+      const q = url.searchParams.get('delay');
+      return send(200, spaForm(q === null ? undefined : Number(q)));
+    }
     if (path === '/workday')       return send(200, workdayShell());
     if (path === '/workday/inner') return send(200, workdayInner());
     if (path === '/workday/decoy') return send(200, workdayDecoy());

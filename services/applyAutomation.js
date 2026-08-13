@@ -1141,14 +1141,97 @@ export function frameList(page) {
   return frames.includes(page.mainFrame()) ? frames : [page.mainFrame(), ...frames];
 }
 
+// -- waitForFormReady ----------------------------------------------------------
+// Replaces a fixed `setTimeout(1500)` after domcontentloaded.
+//
+// Every live target renders client-side — Ashby, Greenhouse and Lever all ship a JS bundle that
+// builds the form after the document is parsed. A fixed sleep is wrong in both directions: too
+// short and discovery walks an empty DOM and reports "Autofilled 0 fields" as a clean run (this
+// is what happened on a real Ashby posting — the whole run took 9 seconds); too long and every
+// static page pays for the slowest SPA.
+//
+// The condition is "the form has STOPPED CHANGING and has at least one fillable control", not a
+// provider-specific selector and not networkidle:
+//   - a selector per provider is a maintenance trap and breaks the moment a provider re-skins;
+//   - networkidle never arrives on pages that poll, stream analytics, or hold a socket open —
+//     common on all three targets.
+// Counting real form controls across every frame works for all of them because whatever the
+// framework, what we ultimately have to fill is native <input>/<select>/<textarea> nodes.
+// Requiring the count to be STABLE across consecutive polls is what makes it a readiness
+// condition rather than a race: a hydrating form's count climbs as nodes mount, so an unchanged
+// count means mounting has settled.
+export const FORM_READY_POLL_MS = 150;
+// 5 polls = 750ms of an unchanged count before we call the form ready.
+//
+// This number is load-bearing, and the /spa harness route exists to pin it. A real form does not
+// mount in one shot — it arrives in chunks as bundles resolve and async data lands. With a 300ms
+// window, discovery fired on the FIRST chunk of the /spa form and found 3 of its 8 fields, then
+// filled 3 and held on the rest as "incomplete_form": a subtler version of the same bug, where
+// the run looks like it worked and quietly submits a partial application. The window has to be
+// wider than the realistic gap between chunks, not merely non-zero.
+//
+// 750ms still puts the static routes at ~900ms, under the 1500ms fixed sleep this replaced.
+export const FORM_READY_STABLE_POLLS = 5;
+export const FORM_READY_TIMEOUT_MS = 15000;
+
+// A plain EXPRESSION, not an arrow function. frame.evaluate(string) evaluates the string as an
+// expression, so `() => ...` would evaluate to a function object and the count would come back
+// as undefined — summing that yields NaN, the comparison never matches, and the readiness check
+// silently degrades into a full-timeout sleep on every single run. Matches how APPLY_FN_SRC is
+// invoked elsewhere in this file.
+const COUNT_CONTROLS = `document.querySelectorAll(
+  'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]),select,textarea,[contenteditable=true]'
+).length`;
+
+export async function waitForFormReady(page, {
+  pollMs = FORM_READY_POLL_MS,
+  stablePolls = FORM_READY_STABLE_POLLS,
+  timeoutMs = FORM_READY_TIMEOUT_MS,
+} = {}) {
+  const started = Date.now();
+  let lastCount = -1, stable = 0;
+
+  while (Date.now() - started < timeoutMs) {
+    let count = 0;
+    // Sum across frames: workday/icims/taleo put the whole form in an iframe, so a main-frame-only
+    // count would report 0 forever and burn the full timeout on a page that was ready immediately.
+    for (const frame of frameList(page)) {
+      try {
+        const n = Number(await frame.evaluate(COUNT_CONTROLS));
+        // Coerce defensively: a NaN here would make `count === lastCount` never true and turn
+        // this readiness check into a silent full-timeout sleep.
+        if (Number.isFinite(n)) count += n;
+      } catch { /* frame detached mid-poll */ }
+    }
+
+    if (count > 0 && count === lastCount) {
+      if (++stable >= stablePolls) {
+        return { ready: true, count, waitedMs: Date.now() - started, timedOut: false };
+      }
+    } else {
+      stable = 0;
+    }
+    lastCount = count;
+    await new Promise(r => setTimeout(r, pollMs));
+  }
+
+  // Timed out. Report honestly rather than pretending — the caller decides whether a page with no
+  // controls is a hold. Never claim readiness we did not observe.
+  return { ready: false, count: Math.max(lastCount, 0), waitedMs: Date.now() - started, timedOut: true };
+}
+
 async function discoverAndFill(page, frames, provider, autofillData, labelMap, opts = {}) {
   const { policy = defaultAnswerPolicy, mode = 'full', step = 0, touched = new Set() } = opts;
   let filled = 0;
   const collected = [];
   const rejected = [];
+  // Raw fields seen across every frame, before any policy filtering. Lets the caller tell
+  // "the page had no form at all" from "we declined to answer what was there".
+  let fieldCount = 0;
 
   for (const frame of frames) {
     const fields = await discoverFields(frame, provider);
+    fieldCount += fields.length;
     if (fields.length) {
       const answers = buildAnswers(fields, autofillData);
       collected.push(...answers);
@@ -1179,6 +1262,7 @@ async function discoverAndFill(page, frames, provider, autofillData, labelMap, o
       if (decision.escalate) {
         return {
           filled,
+          fieldCount,
           answers: collected,
           rejected,
           escalation: {
@@ -1209,7 +1293,7 @@ async function discoverAndFill(page, frames, provider, autofillData, labelMap, o
     // mean porting it to the buildAnswers path, which is its own change.
     filled += await fillContext(frame, autofillData, labelMap);
   }
-  return { filled, answers: collected, rejected, escalation: null };
+  return { filled, fieldCount, answers: collected, rejected, escalation: null };
 }
 
 // -- Helpers -------------------------------------------------------------------
@@ -1321,7 +1405,12 @@ async function clickNext(page) {
         return r.width > 0 && r.height > 0;
       });
       if (NEXT_RE.test(txt) && visible) {
-        await btn.click(); await new Promise(r => setTimeout(r, 1500)); return true;
+        await btn.click();
+        // Same defect as the post-navigation sleep, one step later: step 2 of a multi-step form
+        // renders client-side too, so a fixed wait means the next discovery pass can walk a DOM
+        // that is still mounting and under-fill the step. Wait on the same readiness condition.
+        await waitForFormReady(page);
+        return true;
       }
     } catch {}
   }
@@ -1406,7 +1495,10 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     console.log(`[autoApply] navigating to ${jobUrl}`);
 
     await page.goto(jobUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await new Promise(r => setTimeout(r, 1500));
+    // Explicit readiness condition, not a fixed sleep — see waitForFormReady.
+    const readiness = await waitForFormReady(page);
+    console.log(`[autoApply] form readiness: controls=${readiness.count} waited=${readiness.waitedMs}ms` +
+      (readiness.timedOut ? " (TIMED OUT — page never settled with a fillable control)" : ""));
 
     const detected  = platform || detectPlatformFromUrl(jobUrl) || await detectPlatformFromPage(page);
     const labelMap  = getPlatformLabelMap(detected);
@@ -1423,9 +1515,14 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     const touchedFrames = new Set();
     let escalation = null;
     let stepIndex = 0;
+    // Fields seen by the FIRST discovery pass, before any policy filtering. Distinguishes
+    // "the page had no form" from "the page had a form we chose not to answer" — those are
+    // different failures and used to look identical.
+    let firstPassFieldCount = null;
     const runDiscovery = async () => {
       const r = await discoverAndFill(page, frameList(page), detected, autofillData, labelMap,
         { policy: answerPolicy, mode: isUnattended ? 'full' : 'semi', step: stepIndex++, touched: touchedFrames });
+      if (firstPassFieldCount === null) firstPassFieldCount = r.fieldCount ?? null;
       totalFilled += r.filled;
       resolvedAnswers.push(...r.answers);
       if (r.rejected?.length) rejectedAnswers.push(...r.rejected);
@@ -1434,6 +1531,33 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     };
 
     await runDiscovery();
+
+    // "Autofilled 0 fields" was previously indistinguishable from a clean run: the pipeline
+    // reported autofill_done and carried on to the submit path. A page where we discovered NOTHING
+    // is not an application we understand, and it is the third instance of the "logs like success"
+    // defect class in this codebase (after the Jobo unconfigured skip and the enrichment
+    // empty-write stamp). Emit a distinct outcome and HOLD.
+    if (firstPassFieldCount === 0) {
+      const pageTitle = await page.title().catch(() => "");
+      const ss = await takeScreenshot(page, jobId);
+      inProgress.set(String(jobId), { status: "no_fields_discovered", browser: null });
+      await browser.close();
+      return {
+        status:           "no_fields_discovered",
+        reasonCode:       "no_fields_discovered",
+        reasonDetail:     `No fillable field was discovered in any frame. ` +
+                          `Readiness: controls=${readiness.count} waited=${readiness.waitedMs}ms` +
+                          `${readiness.timedOut ? " (timed out — page never settled)" : ""}. ` +
+                          `Frames=${frameList(page).length}.`,
+        fieldsFilled:     0,
+        fieldsDiscovered: 0,
+        readiness,
+        platform:         detected,
+        pageTitle,
+        screenshotBase64: ss.base64,
+        screenshotPath:   ss.path,
+      };
+    }
 
     // Resolve effective resume path -- await resumePathPromise if no direct path provided.
     // resumePathPromise is set by the apply worker when generation runs in parallel;
