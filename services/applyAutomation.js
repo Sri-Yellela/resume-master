@@ -18,6 +18,7 @@ import path  from "path";
 import fs    from "fs";
 import { fileURLToPath } from "url";
 import { launchBrowser } from "./browserLauncher.js";
+import { classifyRuntimeError } from "../shared/failureAttribution.js";
 import {
   detectPlatformFromUrl, detectPlatformFromPage,
   getPlatformLabelMap,
@@ -1814,10 +1815,20 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     let ss = { base64: null, path: null };
     try { if (page) ss = await takeScreenshot(page, jobId); } catch {}
     try { if (browser) await browser.close(); } catch {}
+    // Attribute by CAUSE. This used to default every unrecognised error to "browser_error",
+    // which is how an Anthropic 404 was reported as a browser failure — the browser had
+    // navigated, audited and autofilled successfully. An unattributable error is now
+    // "internal_error": an honest unknown, rather than a confident accusation against a
+    // subsystem that then gets debugged for nothing.
+    const attributed = classifyRuntimeError(e);
     return {
       status: "error",
       error: e.message,
-      reasonCode: e.reasonCode || (String(e.message || "").toLowerCase().includes("timeout") ? "browser_timeout" : "browser_error"),
+      reasonCode: attributed.reasonCode,
+      reasonDetail: attributed.detail,
+      // Null when unknown. A permanent failure must never be retried — a 404 on a model name
+      // fails identically every time.
+      permanent: attributed.permanent,
       screenshotBase64: ss.base64,
       screenshotPath: ss.path,
     };

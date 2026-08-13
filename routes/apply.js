@@ -5,6 +5,7 @@ import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { autoApply } from "../services/applyAutomation.js";
 import { probeBrowserAvailability } from "../services/browserLauncher.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
+import { classifyRuntimeError } from "../shared/failureAttribution.js";
 import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
 import { canUseAPlusResume, normalisePlanTier } from "../services/entitlements.js";
 
@@ -313,6 +314,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // reconstructable reference is the resumes row it was rendered from (requirement 3).
     let usedArtifactId = null;
     let usedAtsScore   = null;
+    // Set when resume generation fails, so the run's terminal reason can name GENERATION rather
+    // than inheriting whatever failed last. Resume generation runs in parallel with the browser,
+    // so without this the browser's outcome silently wins the attribution race.
+    let genFailure = null;
 
     const setJobStatus = (status, reasonCode = null, reasonDetail = null) => {
       db.prepare(`
@@ -425,8 +430,13 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           if (!gen?.html) {
             // Was silent: a semi run whose generation failed looked identical to one that
             // succeeded, because neither recorded anything about the resume.
+            genFailure = {
+              reasonCode: gen?.errorCode || "generation_failed",
+              detail: gen?.errorDetail || gen?.error || "Resume generation returned no HTML",
+              permanent: gen?.errorPermanent ?? null,
+            };
             logEvent(runId, runJobId, userId, jobId, "generation_failed",
-              gen?.error || "Resume generation returned no HTML");
+              gen?.errorDetail || gen?.error || "Resume generation returned no HTML");
             return null;
           }
           // CASE A and CASE C both recorded which artifact they used; this branch never did, so the
@@ -509,7 +519,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
             return null;
           }
           if (gen?.error) {
-            logEvent(runId, runJobId, userId, jobId, "generation_failed", `Generation failed: ${gen.error}`);
+            // Remember WHY there is no resume. Without this, the run ends with only "no resume
+            // path" and the terminal status gets attributed to whatever failed last — which is
+            // how an Anthropic 404 came to be reported as "browser error".
+            genFailure = {
+              reasonCode: gen.errorCode || "generation_failed",
+              detail: gen.errorDetail || `Generation failed: ${gen.error}`,
+              permanent: gen.errorPermanent ?? null,
+            };
+            logEvent(runId, runJobId, userId, jobId, "generation_failed",
+              gen.errorDetail || `Generation failed: ${gen.error}`);
             return null;
           }
           logEvent(runId, runJobId, userId, jobId, "generation_ready", "Resume generated", { atsScore: gen.atsScore });
@@ -562,20 +581,41 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // A preview holds like any other hold — the row carries the full answer set, so the review
       // endpoints serve it and the approve endpoint can release it.
       const previewed = result.status === "preview_ready";
+      // A generation failure is a HOLD, not a crash. The old mapping only reached "held_review"
+      // via the browser's own status, so when generation died and the browser later threw for any
+      // reason, the run was filed as "failed / browser error" — pointing at the one subsystem that
+      // had worked. This does NOT widen the submit gate: only reason_code 'awaiting_approval' rows
+      // are releasable by the approve endpoints, so a generation_failed hold can never be
+      // approved into a submission.
       const finalStatus = submitted ? "submitted"
+        : genFailure ? "held_review"
         : previewed || atsHeld || result.status === "awaiting_user" ? "held_review"
         : result.status === "error" ? "failed"
         : "held_review";
       // result.reasonCode now takes precedence so `submit_unverified` — a submit button was
       // clicked and nothing happened — is not flattened into the much milder "no_submit_button".
-      const reasonCode = atsHeld ? "ats_below_threshold"
+      //
+      // `atsHeld` used to hardcode "ats_below_threshold" here, which OVERWROTE the reason
+      // autoApply had already worked out. The pre-submit gate returns ats_held with
+      // reasonCode "resume_unavailable" whenever there is no resume to upload — so a run whose
+      // generation crashed was reported as "ATS score below threshold", a completely different
+      // diagnosis pointing at the scorer instead of at the generator. The gate's own reason wins.
+      //
+      // A generation failure outranks all of it: when generation is why we are not submitting,
+      // that is the fact worth reporting, not the browser's or the scorer's downstream symptom.
+      const reasonCode = submitted ? null
+        : genFailure ? genFailure.reasonCode
+        : atsHeld ? (result.reasonCode || "ats_below_threshold")
         : previewed ? "awaiting_approval"
         : result.status === "awaiting_user" ? "manual_review"
         : result.reasonCode
           || (result.status === "filled_not_submitted" ? "no_submit_button" : null);
 
+      // Preserve the upstream failure (404 body, error type, request_id) on the row, and say
+      // plainly whether a retry can ever work — "permanent" means the same call fails identically.
+      const reasonDetail = genFailure ? genFailure.detail : result.reasonDetail;
       const fallbackUrl = isBrowserFailure(reasonCode) ? jobUrl : null;
-      setJobStatus(finalStatus, reasonCode, result.reasonDetail || (fallbackUrl ? `fallbackUrl:${fallbackUrl}` : null));
+      setJobStatus(finalStatus, reasonCode, reasonDetail || (fallbackUrl ? `fallbackUrl:${fallbackUrl}` : null));
 
       // AUDIT TRAIL (requirement 3). Everything needed to reconstruct exactly what was sent to an
       // employer and why, on the run-job row itself rather than only in the event log: the resolved
@@ -655,11 +695,21 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
     } catch (e) {
       console.error(`[applyRoutes] processRunJob error job=${jobId}: ${e.message}`);
-      const errReasonCode = e.reasonCode || (isBrowserFailure(e.reasonCode) ? e.reasonCode : "internal_error");
-      const fallbackUrl = isBrowserFailure(e.reasonCode) ? (job?.apply_url || job?.url || null) : null;
-      db.prepare(`UPDATE apply_run_jobs SET status='failed', reason_code=?, reason_detail=?, finished_at=unixepoch() WHERE id=?`)
-        .run(errReasonCode, (e.message?.slice(0, 500) || "Unknown error") + (fallbackUrl ? ` fallbackUrl:${fallbackUrl}` : ""), runJobId);
-      db.prepare(`UPDATE apply_runs SET failed_count=failed_count+1 WHERE id=?`).run(runId);
+      // A generation failure that happened earlier in this job outranks whatever threw here:
+      // it is the reason there was nothing to submit. Otherwise attribute the throw by cause
+      // rather than assuming a subsystem (the old code's second branch was unreachable — it
+      // tested e.reasonCode after already returning it — and always yielded "internal_error").
+      const attributed = classifyRuntimeError(e);
+      const errReasonCode = genFailure ? genFailure.reasonCode : attributed.reasonCode;
+      const errDetail     = genFailure ? genFailure.detail     : attributed.detail;
+      const fallbackUrl = isBrowserFailure(errReasonCode) ? (job?.apply_url || job?.url || null) : null;
+      // Generation failures are held for review, not filed as crashes — same rationale as the
+      // main path, and still unsubmittable (only 'awaiting_approval' rows can be approved).
+      const errStatus = genFailure ? "held_review" : "failed";
+      db.prepare(`UPDATE apply_run_jobs SET status=?, reason_code=?, reason_detail=?, finished_at=unixepoch() WHERE id=?`)
+        .run(errStatus, errReasonCode,
+          (errDetail || e.message?.slice(0, 500) || "Unknown error") + (fallbackUrl ? ` fallbackUrl:${fallbackUrl}` : ""), runJobId);
+      db.prepare(`UPDATE apply_runs SET ${genFailure ? "held_count=held_count+1" : "failed_count=failed_count+1"} WHERE id=?`).run(runId);
       logEvent(runId, runJobId, userId, jobId, "error", e.message?.slice(0, 500) || "Unknown error", { fallbackUrl });
     } finally {
       if (resumeTmpPath) { try { unlinkSync(resumeTmpPath); } catch {} }
