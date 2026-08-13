@@ -2241,15 +2241,36 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     api("/api/apply/readiness").then(d => setApplyReadiness(d)).catch(() => setApplyReadiness({ available: false, reason: "probe_error" }));
   }, [user]);
 
-  const startApplyRun = useCallback(async (mode = "auto") => {
+  /**
+   * @param intent "review" — fill, run every gate, stop before submitting, and park each
+   *                          application for a human decision (the approval flow).
+   *               "auto"   — the same today: mode:"auto" without approvalMode means the server
+   *                          defaults to approval-required. Full-auto is opt-in per run via
+   *                          approvalMode:"auto", which nothing in this UI sends.
+   *
+   * "review" replaces the old mode:"manual" (semi) path. Semi's promise — a visible browser you
+   * review the filled form in and submit from — cannot be kept in production: applyAutomation
+   * launches headless whenever the host is not Windows, so on Railway the form is filled in an
+   * invisible container browser and the link here points at an untouched apply URL. The approval
+   * flow keeps the same promise in a way that works remotely: the server fills and verifies, then
+   * shows every resolved answer with its provenance, the resume PDF and a screenshot of the filled
+   * form, and submits only when you approve.
+   */
+  const startApplyRun = useCallback(async (intent = "auto") => {
     if (!applyQueue.length) return;
+    // Both paths post mode:"auto" and omit approvalMode, so the server's approval-required default
+    // applies. They are deliberately the same request today — see the note above.
+    const mode = intent === "review" ? "auto" : intent;
     try {
       const data = await api("/api/apply/runs", {
         method: "POST",
         body: JSON.stringify({ jobIds: applyQueue.map(job => job.jobId), mode, tool: canUseAPlusResume ? A_PLUS_TOOL : GENERATE_TOOL }),
       });
       setApplyQueue([]);
-      setApplyQueueMsg(`${data.queued?.length || 0} job${data.queued?.length === 1 ? "" : "s"} started in ${mode === "manual" ? "manual review" : "auto apply"} mode.`);
+      const n = data.queued?.length || 0;
+      setApplyQueueMsg(
+        `${n} job${n === 1 ? "" : "s"} queued — nothing is sent until you approve each one.`,
+      );
       loadApplyRuns();
     } catch(e) {
       const missing = e.payload?.missingPrerequisites;
@@ -3067,26 +3088,29 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             ))}
             {applyQueue.length > 0 && (
               <>
-                <button onClick={() => startApplyRun("auto")}
+                {/* One action, because there is one behaviour. "Run Auto Apply" sat here alongside
+                    this and posted the same request — mode:"auto" with no approvalMode, which the
+                    server treats as approval-required — so it did not auto-apply, and a button that
+                    claims applications were sent when they are waiting for you is worse than no
+                    button. Full-auto is still reachable per run via approvalMode:"auto"; nothing in
+                    this UI sends it, deliberately. */}
+                <button onClick={() => startApplyRun("review")}
                   disabled={applyReadiness !== null && !applyReadiness.available}
-                  title={applyReadiness && !applyReadiness.available ? `Auto Apply unavailable: ${applyReadiness.reason}` : undefined}
+                  title={applyReadiness && !applyReadiness.available
+                    ? `Autofill unavailable: ${applyReadiness.reason}`
+                    : "Fills each application and holds it for your approval. Nothing is submitted until you approve it."}
                   style={{ border:"none", borderRadius:6, padding:"6px 10px",
                            background: applyReadiness && !applyReadiness.available ? (theme.surfaceHigh || "#555") : theme.accent,
                            color:"#0f0f0f", fontWeight:800,
                            cursor: applyReadiness && !applyReadiness.available ? "not-allowed" : "pointer",
                            fontSize:12, opacity: applyReadiness && !applyReadiness.available ? 0.5 : 1 }}>
-                  Run Auto Apply
+                  Autofill for Review
                 </button>
                 {applyReadiness && !applyReadiness.available && (
                   <span style={{ fontSize:11, color: theme.textDim || theme.textMuted }}>
                     Browser unavailable: {applyReadiness.reason}
                   </span>
                 )}
-                <button onClick={() => startApplyRun("manual")}
-                  style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"6px 10px",
-                           background:theme.surface, color:theme.text, fontWeight:700, cursor:"pointer", fontSize:12 }}>
-                  Autofill for Review
-                </button>
               </>
             )}
             {applyQueueMsg && <span style={{ fontSize:11, color:theme.accentText }}>{applyQueueMsg}</span>}
