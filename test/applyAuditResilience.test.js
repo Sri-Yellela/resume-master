@@ -26,11 +26,11 @@ function setup({ omit = [] } = {}) {
     .join(", ");
   db.exec(`
     CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, plan_tier TEXT DEFAULT 'PRO');
-    CREATE TABLE apply_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mode TEXT,
+    CREATE TABLE apply_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mode TEXT, approval_mode TEXT,
       tool_type TEXT, status TEXT, total_jobs INTEGER, held_count INTEGER DEFAULT 0,
       submitted_count INTEGER DEFAULT 0, failed_count INTEGER DEFAULT 0,
       created_at INTEGER DEFAULT (unixepoch()), started_at INTEGER, finished_at INTEGER);
-    CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER,
+    CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER, approved_at INTEGER, approved_from_run_job_id INTEGER,
       job_id TEXT, status TEXT, reason_code TEXT, reason_detail TEXT, started_at INTEGER,
       finished_at INTEGER, created_at INTEGER DEFAULT (unixepoch())
       ${auditCols ? ", " + auditCols : ""}, UNIQUE(run_id, job_id));

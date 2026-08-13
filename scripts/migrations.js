@@ -2066,4 +2066,20 @@ export const MIGRATIONS = [
         ALTER TABLE apply_run_jobs ADD COLUMN open_questions_json TEXT;
       `,
     },
+    {
+      // Queue-then-approve. approval_mode is left NULL on existing rows deliberately: those runs
+      // predate the flow and were never approved by anyone, so backfilling them to 'required' would
+      // put a claim in the audit trail that is not true. NULL reads as "predates approval".
+      //   'required' — the run previews only and parks each job for a human decision
+      //   'auto'     — full-auto, submitted without approval (now opt-in)
+      //   'approved' — this run exists BECAUSE a human approved; it submits
+      // approved_from_run_job_id points at the preview row whose answers were approved, which is what
+      // lets the submitting run refuse if the form has changed since.
+      id: "074_apply_approval_flow",
+      sql: `
+        ALTER TABLE apply_runs     ADD COLUMN approval_mode TEXT;
+        ALTER TABLE apply_run_jobs ADD COLUMN approved_at INTEGER;
+        ALTER TABLE apply_run_jobs ADD COLUMN approved_from_run_job_id INTEGER;
+      `,
+    },
   ];

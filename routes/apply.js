@@ -295,6 +295,18 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   async function processRunJob(runJob, run) {
     const { id: runJobId, run_id: runId, job_id: jobId, user_id: userId } = runJob;
     const mode = run.mode || "auto";
+    // Queue-then-approve. NULL approval_mode means the run predates the flow, and those rows
+    // submitted — so NULL keeps submitting rather than silently changing what old runs did.
+    const approvalMode  = run.approval_mode || "auto";
+    const needsApproval = mode === "auto" && approvalMode === "required";
+    // 'preview' is full-auto minus the click; 'semi' opens a visible browser for a live human.
+    const applyMode = mode !== "auto" ? "semi" : needsApproval ? "preview" : "full";
+    // What the human approved, if this run exists because of an approval. autoApply refuses to
+    // submit anything that differs from it.
+    const approvedAnswers = runJob.approved_from_run_job_id
+      ? parseJson(db.prepare("SELECT answers_json FROM apply_run_jobs WHERE id=? AND user_id=?")
+          .get(runJob.approved_from_run_job_id, userId)?.answers_json, null)
+      : null;
     let resumeTmpPath = null;
     let coverLetterTmpPath = null;
     // Which resume artifact was actually sent. The temp PDF is deleted in `finally`, so the
@@ -397,10 +409,11 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         const clPath = await clPromise;
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page in browser");
         result = await autoApply(jobUrl, autofillPayload, {
-          mode: mode === "auto" ? "full" : "semi",
+          mode: applyMode,
           jobId,
           resumePath: resumeTmpPath,
           coverLetterPath: clPath,
+          approvedAnswers,
         });
 
       } else if (mode === "semi") {
@@ -495,10 +508,11 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         }).catch(() => null);
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page in browser");
         const applyPromise = autoApply(jobUrl, autofillPayload, {
-          mode: "full",
+          mode: applyMode,
           jobId,
           resumePathPromise,
           coverLetterPathPromise: coverLetterPathPromiseCaseC,
+          approvedAnswers,
         });
         const [,, applySettled] = await Promise.allSettled([resumePathPromise, coverLetterPathPromiseCaseC, applyPromise]);
         result = applySettled.status === "fulfilled" ? applySettled.value : { status: "error", fieldsFilled: 0 };
@@ -507,13 +521,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // Record final result for CASE A and CASE C (CASE B returns early above)
       const submitted = result.status === "submitted";
       const atsHeld   = result.status === "ats_held";
+      // A preview holds like any other hold — the row carries the full answer set, so the review
+      // endpoints serve it and the approve endpoint can release it.
+      const previewed = result.status === "preview_ready";
       const finalStatus = submitted ? "submitted"
-        : atsHeld || result.status === "awaiting_user" ? "held_review"
+        : previewed || atsHeld || result.status === "awaiting_user" ? "held_review"
         : result.status === "error" ? "failed"
         : "held_review";
       // result.reasonCode now takes precedence so `submit_unverified` — a submit button was
       // clicked and nothing happened — is not flattened into the much milder "no_submit_button".
       const reasonCode = atsHeld ? "ats_below_threshold"
+        : previewed ? "awaiting_approval"
         : result.status === "awaiting_user" ? "manual_review"
         : result.reasonCode
           || (result.status === "filled_not_submitted" ? "no_submit_button" : null);
@@ -662,7 +680,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
    * gate, duplicate filter and daily cap are implemented once and cannot drift apart.
    * Returns { status, body } — body carries `error` on refusal.
    */
-  function startRun(userId, planTier, jobIds, { mode = "auto", tool = "generate" } = {}) {
+  function startRun(userId, planTier, jobIds, { mode = "auto", tool = "generate", approvalMode = null,
+                                                approvedFrom = null } = {}) {
     const respond = (status, body) => ({ status, body });
 
     // ── Three payload-contract mismatches with the client, fixed together ──────────────────────
@@ -678,6 +697,15 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     //    this route read only `toolType`, so the A+ selection never arrived and every run recorded
     //    tool_type='generate'. Accept both; `tool` wins. Anything unrecognised means generate.
     const resolvedTool = tool === "a_plus_resume" ? "a_plus_resume" : "generate";
+
+    // APPROVAL. A full-auto run submits to a real employer with nobody having seen what it filled,
+    // and a submission cannot be recalled — so it is now opt-in. An 'auto' run PREVIEWS by default:
+    // it runs every gate, stops short of the click, and parks each job for a human decision.
+    // 'semi' is exempt because it already puts a human at the browser; approving twice is friction
+    // with no safety gained. 'approved' is set by the approve endpoint on the run it creates.
+    const resolvedApproval = resolvedMode === "semi" ? "auto"
+      : approvalMode === "auto" || approvalMode === "approved" ? approvalMode
+      : "required";
 
     // Honouring the client's tool makes this route entitlement-bearing for the first time: while
     // the field was ignored, a BASIC user could not reach A+ generation by asking for it. Gate it
@@ -756,16 +784,20 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     }
 
     const runResult = db.prepare(`
-      INSERT INTO apply_runs (user_id, mode, tool_type, status, total_jobs)
-      VALUES (?, ?, ?, 'queued', ?)
-    `).run(userId, resolvedMode, resolvedTool, filtered.length);
+      INSERT INTO apply_runs (user_id, mode, tool_type, status, total_jobs, approval_mode)
+      VALUES (?, ?, ?, 'queued', ?, ?)
+    `).run(userId, resolvedMode, resolvedTool, filtered.length, resolvedApproval);
     const runId = runResult.lastInsertRowid;
 
+    // approvedFrom maps job_id -> the preview run-job whose answers were approved. Carrying it on
+    // the row is what lets the submitting run compare against what the human actually saw.
     const insertJob = db.prepare(`
-      INSERT OR IGNORE INTO apply_run_jobs (run_id, user_id, job_id, status)
-      VALUES (?, ?, ?, 'queued')
+      INSERT OR IGNORE INTO apply_run_jobs (run_id, user_id, job_id, status, approved_from_run_job_id)
+      VALUES (?, ?, ?, 'queued', ?)
     `);
-    db.transaction(() => { for (const id of filtered) insertJob.run(runId, userId, id); })();
+    db.transaction(() => {
+      for (const id of filtered) insertJob.run(runId, userId, id, approvedFrom?.[id] ?? null);
+    })();
 
     const run = db.prepare("SELECT * FROM apply_runs WHERE id=?").get(runId);
     setImmediate(() => processRun(run).catch(e => console.error("[applyRoutes] processRun:", e.message)));
@@ -787,14 +819,20 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
   app.post("/api/apply/runs", requireAuth, (req, res) =>
     withIdempotency("/api/apply/runs", req, res, (out) => {
-      const { jobIds = [], mode = "auto", tool, toolType } = req.body || {};
+      // approvalMode:'auto' is how a caller opts OUT of review and back into full-auto. Anything
+      // else — including omitting it — previews and parks for approval.
+      const { jobIds = [], mode = "auto", tool, toolType, approvalMode = null } = req.body || {};
       if (!Array.isArray(jobIds) || jobIds.length === 0)
         return out.status(400).json({ error: "jobIds array required" });
       if (jobIds.length > 25)
         return out.status(400).json({ error: "Max 25 jobs per run" });
+      // 'approved' is set by the approve endpoint on runs it creates; accepting it from a client
+      // would let anyone submit without ever previewing.
+      if (approvalMode === "approved")
+        return out.status(400).json({ error: "approval_mode_reserved" });
 
       const r = startRun(req.user.id, normalisePlanTier(req.user?.planTier), jobIds,
-        { mode, tool: tool ?? toolType });
+        { mode, tool: tool ?? toolType, approvalMode });
       return out.status(r.status).json(r.body);
     }));
 
@@ -950,6 +988,133 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     return res.sendFile(resolved);
   });
 
+  // ── Queue-then-approve ───────────────────────────────────────────────────────
+  // An 'auto' run now previews by default: it fills the form, runs every gate, stops short of the
+  // click and parks. Approving releases a job to a run that submits — and that run refuses if the
+  // form no longer resolves to what was approved, because the reviewer's decision was about a
+  // specific set of answers, not about the job in general.
+
+  const AWAITING = "awaiting_approval";
+
+  /** Jobs parked for a decision, each with the answers that are actually going to be sent. */
+  app.get("/api/apply/pending", requireAuth, (req, res) => {
+    const rows = db.prepare(`
+      SELECT rj.id, rj.run_id, rj.job_id, rj.answers_json, rj.resume_artifact_id, rj.resume_ats_score,
+             rj.screenshot_path, rj.created_at, r.mode, r.tool_type,
+             sj.title, sj.company, sj.apply_url, sj.url
+      FROM apply_run_jobs rj
+      JOIN apply_runs r ON r.id = rj.run_id
+      LEFT JOIN scraped_jobs sj ON sj.job_id = rj.job_id
+      WHERE rj.user_id=? AND rj.status='held_review' AND rj.reason_code=?
+      ORDER BY rj.created_at DESC, rj.id DESC LIMIT 100
+    `).all(req.user.id, AWAITING);
+
+    res.json({
+      pending: rows.map(r => {
+        const answers = parseJson(r.answers_json, []);
+        const filled = answers.filter(a => !a.skipped && !a.policy_rejected);
+        return {
+          runJobId: r.id, runId: r.run_id, jobId: r.job_id,
+          title: r.title, company: r.company,
+          applyUrl: r.apply_url || r.url,
+          createdAt: r.created_at,
+          answerCount: filled.length,
+          // Surfaced at list level so a reviewer can see which applications need attention without
+          // opening each one. An exact mapping is not a guess; a fuzzy one is.
+          guessCount: filled.filter(a => a.provenance === "label_fuzzy").length,
+          resume: { artifactId: r.resume_artifact_id ?? null, atsScore: r.resume_ats_score ?? null,
+                    available: r.resume_artifact_id != null },
+          screenshotAvailable: !!r.screenshot_path,
+        };
+      }),
+    });
+  });
+
+  /** The rows this user actually owns and that are actually awaiting a decision. */
+  const pendingRows = (userId, runJobIds) => {
+    const ids = (Array.isArray(runJobIds) ? runJobIds : [])
+      .map(Number).filter(n => Number.isInteger(n) && n > 0);
+    if (ids.length === 0) return [];
+    const q = ids.map(() => "?").join(",");
+    return db.prepare(`
+      SELECT id, job_id FROM apply_run_jobs
+      WHERE user_id=? AND status='held_review' AND reason_code=? AND id IN (${q})
+    `).all(userId, AWAITING, ...ids);
+  };
+
+  /**
+   * Approve one or more previewed applications and submit them.
+   *
+   * The approved rows are superseded rather than mutated in place, exactly as the correction loop
+   * does, so the preview stays in the audit trail as its own record of what was shown and when it
+   * was approved. The new run carries approval_mode='approved', which is the discriminator that
+   * separates a human-approved submission from a full-auto one — the thing that was missing when
+   * mode was being coerced at INSERT.
+   */
+  app.post("/api/apply/approve", requireAuth, (req, res) =>
+    withIdempotency("/api/apply/approve", req, res, (out) => {
+      const rows = pendingRows(req.user.id, req.body?.runJobIds);
+      const requested = Array.isArray(req.body?.runJobIds) ? req.body.runJobIds.length : 0;
+      if (rows.length === 0) {
+        return out.status(409).json({
+          error: "no_approvable_jobs",
+          message: requested
+            ? "None of those applications are awaiting approval."
+            : "runJobIds required.",
+        });
+      }
+
+      const approvedFrom = {};
+      for (const r of rows) approvedFrom[String(r.job_id)] = r.id;
+
+      db.transaction(() => {
+        const mark = db.prepare(`
+          UPDATE apply_run_jobs SET approved_at=unixepoch(), status='superseded', finished_at=unixepoch()
+          WHERE id=? AND user_id=? AND status='held_review'
+        `);
+        for (const r of rows) mark.run(r.id, req.user.id);
+      })();
+
+      const started = startRun(req.user.id, normalisePlanTier(req.user?.planTier),
+        rows.map(r => String(r.job_id)), { mode: "auto", approvalMode: "approved", approvedFrom });
+
+      if (started.status !== 202) {
+        // The run was refused (cap, kill switch, concurrency). Put the approvals back so the user
+        // can retry — an approval that silently evaporates is worse than one that fails loudly.
+        db.transaction(() => {
+          const undo = db.prepare(`
+            UPDATE apply_run_jobs SET status='held_review', approved_at=NULL, finished_at=NULL
+            WHERE id=? AND user_id=? AND status='superseded'
+          `);
+          for (const r of rows) undo.run(r.id, req.user.id);
+        })();
+        return out.status(started.status).json({ ...started.body, approved: [] });
+      }
+
+      return out.status(202).json({
+        ok: true,
+        approved: rows.map(r => r.id),
+        skipped: Math.max(0, requested - rows.length),
+        run: started.body,
+      });
+    }));
+
+  /** Reject previewed applications. Nothing is submitted and no run is started. */
+  app.post("/api/apply/reject", requireAuth, (req, res) => {
+    const rows = pendingRows(req.user.id, req.body?.runJobIds);
+    if (rows.length === 0) {
+      return res.status(409).json({ error: "no_rejectable_jobs" });
+    }
+    db.transaction(() => {
+      const reject = db.prepare(`
+        UPDATE apply_run_jobs SET status='dismissed', reason_code='rejected', finished_at=unixepoch()
+        WHERE id=? AND user_id=? AND status='held_review'
+      `);
+      for (const r of rows) reject.run(r.id, req.user.id);
+    })();
+    res.json({ ok: true, rejected: rows.map(r => r.id) });
+  });
+
   // ── Validation-correction loop ───────────────────────────────────────────────
   // A hold used to be a dead end: missingRequired named the fields and the run stopped. The answers
   // the resolver could not supply are exactly the answers the USER has, so they are collected and
@@ -1002,7 +1167,12 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
    */
   app.post("/api/apply/answers", requireAuth, (req, res) =>
     withIdempotency("/api/apply/answers", req, res, (out) => {
-      const { answers = {}, retryJobIds = null, mode = "auto" } = req.body || {};
+      // The retry goes through startRun, so it inherits the approval default too: answering the
+      // questions unblocks the job, it does not authorise the submission. Pass approvalMode:'auto'
+      // to answer-and-send in one step.
+      const { answers = {}, retryJobIds = null, mode = "auto", approvalMode = null } = req.body || {};
+      if (approvalMode === "approved")
+        return out.status(400).json({ error: "approval_mode_reserved" });
       if (!answers || typeof answers !== "object" || Array.isArray(answers))
         return out.status(400).json({ error: "answers object required" });
 
@@ -1054,7 +1224,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         db.transaction(() => { for (const id of toRetry) dismiss.run(req.user.id, id); })();
 
         const retry = startRun(req.user.id, normalisePlanTier(req.user?.planTier), toRetry,
-          { mode, tool: "generate" });
+          { mode, tool: "generate", approvalMode });
         // A refusal is surfaced as-is: the answers were still saved, but the retry did not start,
         // and the caller needs the real reason (cap, kill switch, concurrency).
         if (retry.status !== 202) return out.status(retry.status).json({ ...body, ...retry.body, skipped });

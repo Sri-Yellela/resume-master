@@ -40,9 +40,9 @@ function setup() {
       apply_url TEXT, source TEXT, location TEXT);
     CREATE TABLE resumes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, job_id TEXT,
       apply_mode TEXT, ats_score INTEGER, html TEXT, updated_at INTEGER);
-    CREATE TABLE apply_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mode TEXT,
+    CREATE TABLE apply_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mode TEXT, approval_mode TEXT,
       tool_type TEXT, status TEXT, total_jobs INTEGER, created_at INTEGER DEFAULT (unixepoch()));
-    CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER,
+    CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER, approved_at INTEGER, approved_from_run_job_id INTEGER,
       job_id TEXT, status TEXT, reason_code TEXT, reason_detail TEXT, created_at INTEGER DEFAULT (unixepoch()),
       answers_json TEXT, open_questions_json TEXT, resume_artifact_id INTEGER, resume_ats_score INTEGER,
       screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT, UNIQUE(run_id, job_id));

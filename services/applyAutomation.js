@@ -3,8 +3,13 @@
 // Replaces the Chrome extension form-fill logic with a Node.js service.
 //
 // autoApply(jobUrl, autofillData, options) -- main entry point
-//   options.mode: 'full'  = headless, auto-submit after fill
-//               | 'semi'  = visible browser, form pre-filled, user reviews/submits
+//   options.mode: 'full'    = headless, auto-submit after fill
+//               | 'semi'    = visible browser, form pre-filled, user reviews/submits
+//               | 'preview' = headless, fills and runs every gate, NEVER submits, closes the
+//                             browser. For queue-then-approve: resolves a batch for review without
+//                             leaving one visible browser open per job the way semi does.
+//   options.approvedAnswers: the answer set a human approved in a preview pass. The run refuses to
+//                            submit if it now resolves the form differently.
 //   options.platform:        override ATS detection
 //   options.resumePath:      absolute path to PDF resume for upload
 //   options.storageStatePath: saved session state file
@@ -979,6 +984,45 @@ export function lowConfidenceAnswers(answers) {
     !a.skipped && !a.policy_rejected && a.value !== null && (a.confidence ?? 0) < AUTO_SUBMIT_MIN_CONFIDENCE);
 }
 
+/** Stable identity for an answer across two runs of the same form. */
+const answerKey = (a) => String(a.field_id ?? a.name ?? a.label ?? "");
+
+/**
+ * What a human approved, versus what this run is actually about to submit.
+ *
+ * Approval happens against a PREVIEW pass, and the submitting run resolves the form again — so an
+ * employer editing the form in between, or any non-determinism in resolution, would mean submitting
+ * something nobody agreed to. Returns the differences; a non-empty result must never be submitted.
+ *
+ * Deliberately strict in both directions: a changed value is drift, and so is a field being filled
+ * that was not in the approved set. Reviewing five answers does not authorise a sixth.
+ */
+export function driftFromApproved(approved, current) {
+  if (!Array.isArray(approved)) return [];
+  const live = (approved || []).filter(a => a && !a.skipped && !a.policy_rejected);
+  const was = new Map(live.map(a => [answerKey(a), a]));
+  const drift = [];
+  for (const a of (current || [])) {
+    if (a.skipped || a.policy_rejected) continue;
+    const key = answerKey(a);
+    const before = was.get(key);
+    if (!before) {
+      drift.push({ field: a.label || a.name || a.field_id, change: "added",
+                   approved: null, now: a.value });
+    } else if (String(before.value ?? "") !== String(a.value ?? "")) {
+      drift.push({ field: a.label || a.name || a.field_id, change: "changed",
+                   approved: before.value, now: a.value });
+    }
+    was.delete(key);
+  }
+  // Anything approved that this run did not fill: the reviewer saw an answer that is not going.
+  for (const [, before] of was) {
+    drift.push({ field: before.label || before.name || before.field_id, change: "missing",
+                 approved: before.value, now: null });
+  }
+  return drift;
+}
+
 // -- applyTypeaheadAnswer ------------------------------------------------------
 async function applyTypeaheadAnswer(page, answer) {
   try {
@@ -1314,9 +1358,21 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // and returns { approved?, rejected?, escalate?, reason? }. This is the seam a confirmation UI
     // or a hosted provider plugs into; defaultAnswerPolicy is the built-in behaviour.
     answerPolicy      = defaultAnswerPolicy,
+    // Queue-then-approve. The answer set a human approved, from an earlier mode:'preview' pass.
+    // When supplied, the run refuses to submit if what it resolves this time differs — see
+    // driftFromApproved below.
+    approvedAnswers   = null,
   } = options;
 
+  // 'preview' is full-auto in every respect EXCEPT the submit click: same headless browser, same
+  // strict answer policy, same gates, browser closed at the end. It exists so a batch can be
+  // resolved and parked for review without leaving a visible browser open per job — which is what
+  // semi does, and why semi cannot serve a queue.
+  const isPreview  = mode === "preview";
   const isFullAuto = mode === "full";
+  // Everything gated on "no human is watching this happen" — every gate below reads this, not
+  // isFullAuto, so preview reports exactly the outcome a real submit run would reach.
+  const isUnattended = isFullAuto || isPreview;
   let browser, page;
 
   try {
@@ -1325,8 +1381,8 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // launchBrowser resolves the best available binary, applies container-safe args,
     // and throws with a structured reasonCode on failure.
     browser = await launchBrowser({
-      headless:  isFullAuto || !isWindows ? "new" : false,
-      mode:      isFullAuto ? "auto" : "manual",
+      headless:  isUnattended || !isWindows ? "new" : false,
+      mode:      isUnattended ? "auto" : "manual",
       viewport:  isWindows ? { width: 1280, height: 800 } : null,
       isWindows,
     });
@@ -1368,7 +1424,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     let stepIndex = 0;
     const runDiscovery = async () => {
       const r = await discoverAndFill(page, frameList(page), detected, autofillData, labelMap,
-        { policy: answerPolicy, mode: isFullAuto ? 'full' : 'semi', step: stepIndex++, touched: touchedFrames });
+        { policy: answerPolicy, mode: isUnattended ? 'full' : 'semi', step: stepIndex++, touched: touchedFrames });
       totalFilled += r.filled;
       resolvedAnswers.push(...r.answers);
       if (r.rejected?.length) rejectedAnswers.push(...r.rejected);
@@ -1417,7 +1473,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // FIRST, chronologically — during the fill — and because nothing was typed for the offending
     // step. The shape deliberately matches the end-of-run low-confidence hold, so A3's audit
     // persistence and the correction loop consume it unchanged.
-    if (isFullAuto && escalation) {
+    if (isUnattended && escalation) {
       const escalatedAsQuestions = escalation.answers.map(a => ({
         field: a.label || a.name || a.field_id, name: a.name, field_id: a.field_id,
         type: a.type, value: a.value, provenance: a.provenance, confidence: a.confidence,
@@ -1450,7 +1506,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
     // ATS gate: if a resumePathPromise was provided but resolved to null (generation failed,
     // ATS below threshold, or PDF conversion failed) -- do NOT auto-submit.
-    if (isFullAuto && resumePathPromise && !effectiveResumePath) {
+    if (isUnattended && resumePathPromise && !effectiveResumePath) {
       const pageTitle = await page.title().catch(() => "");
       const ss = await takeScreenshot(page, jobId);
       inProgress.set(String(jobId), { status: "ats_held", browser: null });
@@ -1471,7 +1527,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     const flowState = await classifyFlowState(page, originalDomain);
 
     // Terminal states
-    if (isFullAuto && (flowState === 'login_required' || flowState === 'captcha_required' || flowState === 'expired')) {
+    if (isUnattended && (flowState === 'login_required' || flowState === 'captcha_required' || flowState === 'expired')) {
       const pageTitle = await page.title().catch(() => "");
       const ss = await takeScreenshot(page, jobId);
       inProgress.set(String(jobId), { status: flowState, browser: null });
@@ -1490,7 +1546,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
     let status, pageTitle;
     let submitVerified = null, submitEvidence = null, submitReasonCode = null;
-    if (isFullAuto) {
+    if (isUnattended) {
       // Completeness gate: re-discover all frames; hold if any required non-file field is still empty.
       const postFillFields = (await Promise.all(
         frameList(page).map(f => discoverFields(f, detected).catch(() => []))
@@ -1564,6 +1620,57 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
           pageTitle:        pageTitle3,
           screenshotBase64: ss3.base64,
           screenshotPath:   ss3.path,
+        };
+      }
+
+      // DRIFT GATE. The approved answers came from a preview pass against this same form; this run
+      // resolved it again. If the two disagree, the thing about to be submitted is not the thing a
+      // human agreed to, and a submission cannot be recalled — so hold rather than guess which is
+      // right. Runs before the preview stop below so an approved re-run and a fresh preview are
+      // checked by the same code.
+      if (approvedAnswers) {
+        const drift = driftFromApproved(approvedAnswers, resolvedAnswers);
+        if (drift.length > 0) {
+          const pageTitleD = await page.title().catch(() => '');
+          const ssD = await takeScreenshot(page, jobId);
+          inProgress.set(String(jobId), { status: 'held_review', browser: null });
+          await browser.close();
+          return {
+            status:       'held_review',
+            reasonCode:   'answers_changed_since_approval',
+            flowState:    'form_ready',
+            fieldsFilled: totalFilled,
+            drift,
+            answers:      resolvedAnswers,
+            platform:     detected,
+            pageTitle:    pageTitleD,
+            screenshotBase64: ssD.base64,
+            screenshotPath:   ssD.path,
+          };
+        }
+      }
+
+      // PREVIEW STOP. Everything above has run — the ATS gate, terminal flow states, the
+      // completeness gate, the low-confidence gate — so this reports the outcome a real submit run
+      // would reach. The only thing not done is the click.
+      if (isPreview) {
+        const pageTitleP = await page.title().catch(() => '');
+        const ssP = await takeScreenshot(page, jobId);
+        inProgress.set(String(jobId), { status: 'preview_ready', browser: null });
+        await browser.close();
+        return {
+          status:       'preview_ready',
+          reasonCode:   'awaiting_approval',
+          flowState:    'form_ready',
+          fieldsFilled: totalFilled,
+          answers:      resolvedAnswers,
+          rejectedAnswers: rejectedAnswers.map(a => ({
+            field: a.label || a.name || a.field_id, provenance: a.provenance, confidence: a.confidence,
+          })),
+          platform:     detected,
+          pageTitle:    pageTitleP,
+          screenshotBase64: ssP.base64,
+          screenshotPath:   ssP.path,
         };
       }
 
@@ -1677,8 +1784,8 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
     console.log(`[autoApply] done — status=${status} fieldsFilled=${totalFilled}`);
     const ss = await takeScreenshot(page, jobId);
-    inProgress.set(String(jobId), { status, browser: isFullAuto ? null : browser });
-    if (isFullAuto) await browser.close();
+    inProgress.set(String(jobId), { status, browser: isUnattended ? null : browser });
+    if (isUnattended) await browser.close();
 
     return {
       status,
