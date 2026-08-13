@@ -325,6 +325,64 @@ export function booleanPolarity({ label = '', name = '', key = null } = {}) {
   return qSense === keySense ? 'direct' : 'invert';
 }
 
+// -- Option-set constraint -----------------------------------------------------
+// A1 finding #2: the select "Are you legally authorized to work in the country of employment?"
+// (options: Yes / No) received the free-text string "Authorized to work in the US (F-1 STEM OPT)"
+// at 0.9 confidence. It held only because that string matches no option, so the page-side fill
+// was a no-op — but the answer was still RECORDED as answered, with high confidence, and nothing
+// noticed that the field a required eligibility question owns had in fact been left empty.
+//
+// The matcher below mirrors the page-side matching in APPLY_FN_SRC EXACTLY. That equivalence is
+// deliberate and is what makes this safe to add: we refuse precisely when the page-side fill
+// would have been a no-op anyway, so no field that used to be filled stops being filled. The
+// only thing that changes is that an unfillable value is now recorded as unanswered — which the
+// completeness gate can act on — instead of being counted as a confident answer.
+
+/** The option a value would actually select on the page, or null if none would match. */
+export function matchOptionValue(value, options = []) {
+  const v = String(value ?? '').toLowerCase();
+  if (!v) return null;
+  for (const o of options || []) {
+    const ov = String(o?.value ?? '').toLowerCase();
+    const ol = String(o?.label ?? '').toLowerCase();
+    if ((ol && ol.includes(v)) || (ov && ov.includes(v))) return o.value;
+  }
+  return null;
+}
+
+/** True when an option set is a plain yes/no pair (ignoring an empty "Select…" placeholder). */
+export function isYesNoOptionSet(options = []) {
+  const vals = (options || [])
+    .map(o => normaliseText(o?.label || o?.value))
+    .filter(v => v && !/^select/.test(v));
+  return vals.length === 2 && vals.some(v => /^y(es)?$/.test(v)) && vals.some(v => /^no?$/.test(v));
+}
+
+// Work-authorization status text is free-form ("Authorized to work in the US (F-1 STEM OPT)",
+// "US Citizen", "Not authorized"), but the question asking about it is often a Yes/No. Reading a
+// status into a yes/no answer needs an enumerated vocabulary, checked NEGATIVE-FIRST so a denial
+// can never be read as an affirmative by a stray positive word later in the same sentence.
+const WORK_AUTH_NEGATIVE_RE =
+  /\b(?:not|never)\s+(?:legally\s+|currently\s+)?(?:authori[sz]ed|eligible|permitted|allowed)\b|\bunauthori[sz]ed\b|\bno\s+(?:work\s+)?authori[sz]ation\b|\bnot\s+(?:a\s+)?(?:us\s+)?citizen\b/i;
+const WORK_AUTH_AFFIRMATIVE_RE =
+  /\b(?:authori[sz]ed|eligible|permitted|allowed)\s+to\s+work\b|\bwork\s+authori[sz]ation\b|\b(?:u\.?s\.?\s+)?citizen\b|\bpermanent\s+resident\b|\bgreen\s+card\b|\bead\b|\bopt\b|\bcpt\b/i;
+
+/**
+ * Read a free-text work-authorization status as yes/no.
+ * Returns true / false / null (undetermined — the caller MUST refuse rather than guess).
+ */
+// Field types whose value must be one of the options the control offers. `multi_select` is
+// included because a single resolved value still has to name a real option.
+export const OPTION_TYPES = new Set(['select', 'radio', 'multi_select']);
+
+export function workAuthAffirmative(text) {
+  const t = String(text ?? '');
+  if (!t) return null;
+  if (WORK_AUTH_NEGATIVE_RE.test(t)) return false;
+  if (WORK_AUTH_AFFIRMATIVE_RE.test(t)) return true;
+  return null;
+}
+
 /**
  * Normalise a yes/no-ish value to a boolean for checkbox/toggle fields.
  * FAIL-SAFE DIRECTION IS LOAD-BEARING: anything unrecognised is false. Never invent an
@@ -877,6 +935,34 @@ export function buildAnswers(fields, profilePayload) {
       // coerceAffirmative: the fail-safe direction is deliberate.
       const affirmative = coerceAffirmative(value);
       value = (polarity === 'invert' ? !affirmative : affirmative) ? 'true' : 'false';
+    } else if (OPTION_TYPES.has(field.type) && Array.isArray(field.options) && field.options.length) {
+      // Constrain the value to an option this field actually offers.
+      let picked = matchOptionValue(value, field.options);
+
+      // A free-text work-authorization status against a Yes/No question: read the status rather
+      // than posting it verbatim into a field that cannot hold it.
+      if (picked === null && isYesNoOptionSet(field.options) &&
+          eligibilityClassOf(`${label} ${field.name || ''}`) === 'work_auth') {
+        const affirmative = workAuthAffirmative(value);
+        if (affirmative !== null) picked = matchOptionValue(affirmative ? 'yes' : 'no', field.options);
+      }
+
+      if (picked === null) {
+        // Nothing this field offers matches. The page-side fill would have been a no-op, so this
+        // loses no filling that used to happen — it stops the run RECORDING an unfillable value
+        // as a confident answer, and lets the completeness gate hold on a required field.
+        refusals.push(`${matched_on ?? 'value'}:value_not_in_options`);
+        answers.push({
+          field_id: field.field_id, name: field.name, type: field.type, label,
+          required: !!field.is_required,
+          options: field.options,
+          value: null, skipped: true, refusals,
+          provenance: null, confidence: 0, clear_first: false, typeahead_selection: null,
+        });
+        continue;
+      }
+      // Canonical option value, so the page-side match is exact rather than a substring guess.
+      value = String(picked);
     } else if (field.type === 'typeahead') {
       typeahead_selection = String(value);
       value = String(value);
