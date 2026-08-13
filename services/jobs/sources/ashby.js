@@ -1,6 +1,8 @@
 import axios from 'axios';
 import { normalizeJob } from '../schema.js';
-import { htmlToText, JOB_DESCRIPTION_MAX_LENGTH } from '../htmlToText.js';
+import {
+  htmlToText, truncateWithTail, JOB_DESCRIPTION_MAX_LENGTH, JOB_DESCRIPTION_TAIL_LENGTH,
+} from '../htmlToText.js';
 
 const BASE_URL = 'https://api.ashbyhq.com/posting-api/job-board';
 
@@ -64,9 +66,14 @@ function normalizeAshbyJob(job, companyName) {
   // The posting-api board endpoint returns `descriptionPlain` (already plain text) and
   // `descriptionHtml`. There is no `descriptionSections` field — reading it, as this used to,
   // silently yielded null for every row, which is why enrichment had no text to work from.
+  // Truncation keeps a tail slice: compensation, benefits and EEO text sit at the BOTTOM of a
+  // posting, so a prefix-only cut drops exactly the part enrichment is looking for.
   const descriptionText = job.descriptionPlain
-    ? job.descriptionPlain.slice(0, JOB_DESCRIPTION_MAX_LENGTH)
-    : htmlToText(job.descriptionHtml, { maxLength: JOB_DESCRIPTION_MAX_LENGTH });
+    ? truncateWithTail(job.descriptionPlain, JOB_DESCRIPTION_MAX_LENGTH, JOB_DESCRIPTION_TAIL_LENGTH)
+    : htmlToText(job.descriptionHtml, {
+        maxLength: JOB_DESCRIPTION_MAX_LENGTH,
+        tailLength: JOB_DESCRIPTION_TAIL_LENGTH,
+      });
 
   const comp = extractAshbyCompensation(job);
 
