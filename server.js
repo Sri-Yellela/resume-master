@@ -5180,10 +5180,35 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       // of counting as epoch 0 and hiding real postings beneath undated ones. job_id is the final
       // key: it is the primary key, so the order is total and paging is reproducible.
       const RECENCY = 'sj.scraped_at DESC, (sj.posted_at IS NULL) ASC, sj.posted_at DESC, sj.job_id';
-      const orderBy = sort === 'atsScore'       ? `sj.ats_score DESC, ${RECENCY}`
-                    : sort === 'applicantCount'  ? `sj.applicant_count ASC, ${RECENCY}`
+      // "Oldest" is a real option in the sort <select> (value "dateAsc") that had no case here, so
+      // it fell through to the default and rendered identically to "Newest" — the same silent
+      // fall-through that compHigh/compLow suffered before, fixed there and missed here. Undated
+      // postings stay last in BOTH directions: they have no date, so leading the "oldest" list with
+      // them would be an ordering by absence rather than by age.
+      const OLDEST = 'sj.scraped_at ASC, (sj.posted_at IS NULL) ASC, sj.posted_at ASC, sj.job_id';
+      // NULLs last on every keyed sort, matching what the salary sorts already did. Without it a
+      // column that is only partly populated ranks its unscored rows among the scored ones, and a
+      // column that is entirely NULL makes the sort a silent no-op that looks like a broken control.
+      // "Exp low to high" / "Exp high to low" were dead too. The obvious column, min_years_exp, is
+      // the one the YoE FILTERS use — but nothing on the ATS crawl path ever writes it (it comes
+      // from the extension capture), so sorting on it alone would have left both controls doing
+      // nothing on any crawled board. experience_level IS populated, by enrichment, from a fixed
+      // ordered vocabulary — so rank that, and let min_years_exp win wherever the precise number
+      // exists. NULLs last on both keys.
+      const LEVEL_RANK = `CASE sj.experience_level
+        WHEN 'intern' THEN 0 WHEN 'entry' THEN 1 WHEN 'mid' THEN 2
+        WHEN 'senior' THEN 3 WHEN 'lead' THEN 4 WHEN 'executive' THEN 5 END`;
+      const EXP = (dir) =>
+        `(sj.min_years_exp IS NULL) ASC, sj.min_years_exp ${dir}, ` +
+        `((${LEVEL_RANK}) IS NULL) ASC, (${LEVEL_RANK}) ${dir}, ${RECENCY}`;
+
+      const orderBy = sort === 'atsScore'       ? `(sj.ats_score IS NULL) ASC, sj.ats_score DESC, ${RECENCY}`
+                    : sort === 'applicantCount'  ? `(sj.applicant_count IS NULL) ASC, sj.applicant_count ASC, ${RECENCY}`
                     : sort === 'compHigh'        ? `(sj.salary_max IS NULL) ASC, sj.salary_max DESC, ${RECENCY}`
                     : sort === 'compLow'         ? `(sj.salary_min IS NULL) ASC, sj.salary_min ASC, ${RECENCY}`
+                    : sort === 'yoeLow'          ? EXP('ASC')
+                    : sort === 'yoeHigh'         ? EXP('DESC')
+                    : sort === 'dateAsc'         ? OLDEST
                     :                             RECENCY;
       const offset  = (pg - 1) * ps;
 
