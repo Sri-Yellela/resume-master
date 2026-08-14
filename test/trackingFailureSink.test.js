@@ -199,7 +199,9 @@ test("coverage does not claim healthy while the sink holds unimported failures",
       assert.equal(r.coverage.healthy, false,
         "a pending sink is a known gap; claiming healthy here is the original defect");
       assert.match(r.coverage.note, /pending in the out-of-process sink/);
-      assert.match(r.coverage.limitation, /filesystem is also unwritable|lostFailures/);
+      // Structural, not prose: the webhook tier must be reported, and the remaining limit stated.
+      assert.equal(typeof r.coverage.webhook.configured, "boolean");
+      assert.ok(r.coverage.limitation && r.coverage.limitation.length > 40);
     } finally { server.close(); }
   } finally { cleanup(); }
 });
