@@ -247,8 +247,13 @@ test("completeness gate holds full-auto submit when required fields are still em
   assert.match(automation, /reasonCode:\s*'incomplete_form'/, "must return incomplete_form reason code");
   assert.match(automation, /status:\s*'held_review'/, "must return held_review status on incompleteness");
   // Gate must not submit (must return early) before submit button loop
+  // Anchored on the submit SCAN rather than the old ^-anchored SUBMIT_RE literal, which was
+  // removed when "Review and Submit" was fixed (A1 trap 4). The property under test is unchanged:
+  // the gate must return before anything can be clicked.
   const gateIdx = automation.indexOf("missingRequired.length > 0");
-  const submitLoopIdx = automation.indexOf("SUBMIT_RE = /^(submit|apply");
+  const submitLoopIdx = automation.indexOf("classifySubmitLabel(txt)");
+  assert.ok(gateIdx > 0, "completeness gate not found");
+  assert.ok(submitLoopIdx > 0, "submit scan not found");
   assert.ok(gateIdx < submitLoopIdx, "completeness gate must appear before submit button loop");
 });
 

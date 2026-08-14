@@ -375,6 +375,48 @@ const WORK_AUTH_AFFIRMATIVE_RE =
 // included because a single resolved value still has to name a real option.
 export const OPTION_TYPES = new Set(['select', 'radio', 'multi_select']);
 
+// -- Submit-button classification ----------------------------------------------
+// A1 trap 4: SUBMIT_RE was /^(submit|apply|...)/i — anchored at ^, so Lever's "Review and Submit"
+// never matched and a fully filled, fully gated application silently ended as
+// filled_not_submitted. The qualifier before the verb is common ("Review and Submit", "Confirm
+// and Submit"), so the anchor rejects exactly the phrasing real ATSes use.
+//
+// Dropping the anchor alone would be dangerous: bare /submit|apply/ also matches "Submit
+// feedback", "Submit a question" and "Apply filters" — and this regex decides which button gets
+// CLICKED to send a real application under a real person's name. So the rule is:
+//   - reject anything that names a different action, FIRST;
+//   - accept "submit"/"send" wherever they appear (that verb has no other job on an application
+//     form once the non-application actions above are excluded);
+//   - accept "apply" only as the WHOLE label ("Apply", "Apply Now"), because "apply" is a common
+//     verb for non-submitting controls ("Apply filters") in a way "submit" is not.
+
+// Checked first. A submit-shaped verb doing some other job.
+const NOT_SUBMIT_RE =
+  /\b(?:feedback|question|comment|inquiry|enquiry|filter|filters|coupon|promo|search|newsletter|subscribe|referral|refer|later|draft|withdraw|cancel|delete|remove|report)\b/i;
+
+// "Submit", "Submit Application", "Review and Submit", "Send Application", "Finish and Submit".
+const STRONG_SUBMIT_RE = /\b(?:submit|send)\b/i;
+// "Apply" / "Apply Now" as the entire label — never "Apply filters".
+const WEAK_SUBMIT_RE = /^apply(?:\s+now)?[\s.!]*$/i;
+
+/**
+ * Score a button label as the application's submit control.
+ *   2 — strong: names the submit/send action
+ *   1 — weak:   an "Apply"-only label
+ *   0 — not a submit control
+ *
+ * Scored rather than first-match because the scan now accepts a qualifier before the verb, so a
+ * page can offer more than one candidate; the strongest is clicked, not merely the first found.
+ */
+export function classifySubmitLabel(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return 0;
+  if (NOT_SUBMIT_RE.test(t)) return 0;
+  if (STRONG_SUBMIT_RE.test(t)) return 2;
+  if (WEAK_SUBMIT_RE.test(t)) return 1;
+  return 0;
+}
+
 export function workAuthAffirmative(text) {
   const t = String(text ?? '');
   if (!t) return null;
@@ -1979,7 +2021,9 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       }
 
       inProgress.set(String(jobId), { status: "submitting", browser });
-      const SUBMIT_RE = /^(submit|apply|apply now|submit application|send application)/i;
+      // Submit-button matching lives in classifySubmitLabel — see the note there for why the
+      // old /^(submit|apply|…)/ anchor rejected the exact phrasing real ATSes use, and why
+      // simply removing the anchor would have been unsafe.
       let clicked = false;
       let clickedFrame = null;
       const urlBefore = page.url();
@@ -1999,34 +2043,48 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         try { framesBefore.set(f, f.url()); } catch {}
       }
 
+      // Collect every visible candidate across the in-scope frames FIRST, then click the
+      // strongest. First-match-wins was safe only while the pattern was ^-anchored and could
+      // therefore match at most one obvious label; now that a qualifier may precede the verb, a
+      // page can present several candidates and the best one has to win rather than the earliest.
+      const scored = [];
       for (const ctx of submitCandidates) {
-        if (clicked) break;
         let buttons = [];
         try { buttons = await ctx.$$("button,input[type='submit']"); } catch { continue; }
         for (const btn of buttons) {
           try {
             const txt = (await btn.evaluate(el => el.textContent || el.value || "")).trim();
+            const score = classifySubmitLabel(txt);
+            if (!score) continue;
             const visible = await btn.evaluate(el => {
               const r = el.getBoundingClientRect();
               return r.width > 0 && r.height > 0;
             });
-            if (SUBMIT_RE.test(txt) && visible) {
-              await btn.click();
-              // Give a navigation the chance to happen instead of assuming it did. An iframe-hosted
-              // form usually navigates the FRAME, not the page, so both are awaited.
-              await Promise.race([
-                page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
-                ctx === page.mainFrame()
-                  ? new Promise(() => {})
-                  : ctx.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
-                new Promise(r => setTimeout(r, 2000)),
-              ]);
-              clicked = true;
-              clickedFrame = ctx;
-              break;
-            }
+            if (visible) scored.push({ ctx, btn, txt, score });
           } catch {}
         }
+      }
+      // Stable: highest score wins, ties keep discovery order (main frame before touched frames).
+      scored.sort((a, b) => b.score - a.score);
+      if (scored.length) {
+        const best = scored[0];
+        console.log(`[autoApply] submit button: ${JSON.stringify(best.txt)} (score ${best.score}` +
+          `${scored.length > 1 ? `, ${scored.length} candidates` : ""})`);
+        const ctx = best.ctx;
+        try {
+          await best.btn.click();
+          // Give a navigation the chance to happen instead of assuming it did. An iframe-hosted
+          // form usually navigates the FRAME, not the page, so both are awaited.
+          await Promise.race([
+            page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
+            ctx === page.mainFrame()
+              ? new Promise(() => {})
+              : ctx.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => null),
+            new Promise(r => setTimeout(r, 2000)),
+          ]);
+          clicked = true;
+          clickedFrame = ctx;
+        } catch {}
       }
 
       // A1 finding N1: `submitted` was previously set by the CLICK ALONE, with nothing checking
