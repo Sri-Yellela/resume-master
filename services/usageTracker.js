@@ -13,6 +13,7 @@ import {
   cacheCreationTokensOf,
 } from "../shared/anthropicModels.js";
 import { appendFailure } from "./trackingFailureSink.js";
+import { notifyLostFailure } from "./trackingFailureWebhook.js";
 
 function cacheState(usage = {}) {
   const inputTokens = usage?.input_tokens || 0;
@@ -48,6 +49,11 @@ const trackingStats = {
   // and nothing but the log below remains.
   sinkedFailures: 0,
   lostFailures: 0,
+  // Of the LOST ones, how many were pushed off-box via the optional webhook. Inert unless
+  // USAGE_FAILURE_WEBHOOK_URL is set, in which case a lost failure is at least visible somewhere
+  // other than a log line on one host.
+  webhookAttempts: 0,
+  webhookThrottled: 0,
   lastError: null,
   lastErrorAt: null,
   lastPersistError: null,
@@ -66,6 +72,8 @@ export function resetTrackingStats() {
   trackingStats.unpersistedFailures = 0;
   trackingStats.sinkedFailures = 0;
   trackingStats.lostFailures = 0;
+  trackingStats.webhookAttempts = 0;
+  trackingStats.webhookThrottled = 0;
   trackingStats.lastError = null;
   trackingStats.lastErrorAt = null;
   trackingStats.lastPersistError = null;
@@ -180,8 +188,22 @@ export function trackApiCall(db, {
         errorText: String(e?.message ?? e),
         persistError: persistError.message,
       });
-      if (sunk) trackingStats.sinkedFailures++;
-      else      trackingStats.lostFailures++;
+      if (sunk) {
+        trackingStats.sinkedFailures++;
+      } else {
+        // FOURTH tier: neither the database nor the filesystem could hold this. The webhook is the
+        // only way the fact leaves the box. Fire-and-forget and opt-in — see the module header for
+        // why it never awaits, never retries and never floods.
+        trackingStats.lostFailures++;
+        const outcome = notifyLostFailure({
+          model, purpose: purpose ?? eventType, userId,
+          errorText: String(e?.message ?? e),
+          persistError: persistError.message,
+          sinkError: "append to local sink failed",
+        });
+        if (outcome === "attempted") trackingStats.webhookAttempts++;
+        else if (outcome === "throttled") trackingStats.webhookThrottled++;
+      }
     }
 
     console.error("[usageTracker] FAILED TO RECORD USAGE — spend is happening and is not being " +

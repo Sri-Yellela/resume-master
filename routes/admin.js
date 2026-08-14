@@ -3,6 +3,7 @@
 import { Router } from "express";
 import { getTrackingStats } from "../services/usageTracker.js";
 import { pendingCount as sinkPendingCount, sinkPath } from "../services/trackingFailureSink.js";
+import { getWebhookStats } from "../services/trackingFailureWebhook.js";
 
 export function createAdminRouter(db) {
   const router = Router();
@@ -517,6 +518,15 @@ export function createAdminRouter(db) {
         // Of the failures in range, how many were recovered after an outage rather than recorded
         // live. Non-zero means the database was down while model calls were being made.
         recoveredFromSinkInRange: persisted.recoveredFromSink,
+        // Optional fourth tier. Off-box notification for the one case the sink cannot cover.
+        // Best effort by design: fire-and-forget, never retried, so delivery is not confirmed.
+        webhook: {
+          ...getWebhookStats(),
+          note: getWebhookStats().configured
+            ? "Notified only when a failure reaches neither the database nor the local sink. " +
+              "Fire-and-forget: delivery is attempted, not guaranteed."
+            : "Not configured. Set USAGE_FAILURE_WEBHOOK_URL to have a lost failure pushed off-box.",
+        },
         // Out-of-process sink: survives an unreachable database, drained at the next boot.
         sink: {
           available: sink.available,
@@ -539,6 +549,8 @@ export function createAdminRouter(db) {
           unpersisted: t.unpersistedFailures,
           sunkToFile: t.sinkedFailures,
           lost: t.lostFailures,
+          webhookAttempts: t.webhookAttempts,
+          webhookThrottled: t.webhookThrottled,
           lastError: t.lastError,
           lastErrorAt: t.lastErrorAt,
           lastPersistError: t.lastPersistError,
@@ -557,10 +569,15 @@ export function createAdminRouter(db) {
         // database -> out-of-process sink -> log line. Only the last is not machine-readable.
         limitation: t.lostFailures > 0
           ? `${t.lostFailures} failure(s) reached NEITHER the database NOR the sink — the ` +
-            "filesystem was unwritable too, and the error log is the only remaining record."
-          : "A failure is recorded in the database when it is reachable, and in the " +
-            "out-of-process sink when it is not. If the filesystem is also unwritable, only the " +
-            "error log remains — counted as lostFailures.",
+            "filesystem was unwritable too. " +
+            (getWebhookStats().configured
+              ? `${t.webhookAttempts} pushed to the webhook (delivery attempted, not confirmed)` +
+                (t.webhookThrottled ? `, ${t.webhookThrottled} suppressed by the send throttle` : "") +
+                "; the error log remains the only durable record."
+              : "USAGE_FAILURE_WEBHOOK_URL is not set, so the error log is the only record.")
+          : "Recorded in the database when it is reachable, in the out-of-process sink when it is " +
+            "not, and — if USAGE_FAILURE_WEBHOOK_URL is set — pushed off-box when neither works. " +
+            "The webhook is fire-and-forget, so it notifies rather than guarantees.",
       };
 
       // Empty state. "No rows" must read as "nothing was recorded", never as "nothing was spent"

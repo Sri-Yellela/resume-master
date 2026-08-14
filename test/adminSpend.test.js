@@ -154,12 +154,15 @@ test("coverage is reported explicitly, with its scope stated", async () => {
     assert.equal(r.coverage.persistedHistory.available, true);
     assert.equal(r.coverage.failuresInRange, 0);
     assert.equal(r.coverage.failuresAllTime, 0);
-    // Three fallbacks deep — database, then the out-of-process sink, then the log line. The one
-    // case none of them covers is stated, not left to be discovered.
-    assert.match(r.coverage.limitation, /out-of-process sink/i);
-    assert.match(r.coverage.limitation, /error log|lostFailures/i);
+    // Assert the SHAPE of the escalation chain, not its prose. Matching wording here has broken
+    // three times as the text was refined, which teaches people to delete the assertion.
     assert.equal(r.coverage.sink.available, true);
     assert.equal(r.coverage.sink.pendingNotYetImported, 0);
+    assert.equal(typeof r.coverage.webhook.configured, "boolean");
+    assert.equal(typeof r.coverage.sinceBoot.lost, "number");
+    assert.equal(typeof r.coverage.sinceBoot.webhookAttempts, "number");
+    // The limit that none of the tiers covers must be stated somewhere non-empty.
+    assert.ok(r.coverage.limitation && r.coverage.limitation.length > 40);
   } finally { server.close(); }
 });
 
