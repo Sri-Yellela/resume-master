@@ -4,10 +4,20 @@
 // cannot cover — because a coverage number that overstates itself is the original defect.
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import express from "express";
 import Database from "better-sqlite3";
 import { createAdminRouter } from "../routes/admin.js";
 import { trackApiCall, getTrackingStats, resetTrackingStats } from "../services/usageTracker.js";
+
+// A failure the database cannot record falls through to the out-of-process sink, which defaults to
+// data/ next to the production database. Redirect it: a test must not write into the app's data
+// directory, and one that did would make every later assertion about sink contents order-dependent.
+const tmpSink = fs.mkdtempSync(path.join(os.tmpdir(), "sink-persist-"));
+process.env.USAGE_FAILURE_SINK_PATH = path.join(tmpSink, "failures.jsonl");
+test.after(() => { try { fs.rmSync(tmpSink, { recursive: true, force: true }); } catch {} });
 
 const FAILURES_DDL = `
   CREATE TABLE usage_tracking_failures (

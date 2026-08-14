@@ -8,8 +8,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import express from "express";
+import os from "node:os";
+import path from "node:path";
 import Database from "better-sqlite3";
 import { createAdminRouter } from "../routes/admin.js";
+
+// Point the out-of-process sink at a scratch directory: these tests assert that nothing is
+// pending, and an ambient sink file left by any other run would make that assertion about the
+// machine rather than about the code.
+const tmpSink = fs.mkdtempSync(path.join(os.tmpdir(), "sink-spend-"));
+process.env.USAGE_FAILURE_SINK_PATH = path.join(tmpSink, "failures.jsonl");
+test.after(() => { try { fs.rmSync(tmpSink, { recursive: true, force: true }); } catch {} });
 
 function setup() {
   const db = new Database(":memory:");
@@ -145,8 +154,12 @@ test("coverage is reported explicitly, with its scope stated", async () => {
     assert.equal(r.coverage.persistedHistory.available, true);
     assert.equal(r.coverage.failuresInRange, 0);
     assert.equal(r.coverage.failuresAllTime, 0);
-    // The one case persistence cannot cover is stated, not left to be discovered.
-    assert.match(r.coverage.limitation, /unreachable/i);
+    // Three fallbacks deep — database, then the out-of-process sink, then the log line. The one
+    // case none of them covers is stated, not left to be discovered.
+    assert.match(r.coverage.limitation, /out-of-process sink/i);
+    assert.match(r.coverage.limitation, /error log|lostFailures/i);
+    assert.equal(r.coverage.sink.available, true);
+    assert.equal(r.coverage.sink.pendingNotYetImported, 0);
   } finally { server.close(); }
 });
 
