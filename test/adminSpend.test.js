@@ -41,6 +41,11 @@ function setup() {
       cost_saved_usd REAL DEFAULT 0, model TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
+    CREATE TABLE usage_tracking_failures (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      model TEXT, purpose TEXT, user_id INTEGER, error_text TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
     INSERT INTO users (id, username) VALUES (1,'admin'), (0,'system');
   `);
   const app = express();
@@ -132,12 +137,16 @@ test("coverage is reported explicitly, with its scope stated", async () => {
   try {
     addRow(db);
     const r = await fetch(`${baseUrl}/api/admin/analytics/spend`).then(x => x.json());
-    assert.equal(typeof r.coverage.recordedSinceBoot, "number");
-    assert.equal(typeof r.coverage.failedSinceBoot, "number");
+    assert.equal(typeof r.coverage.sinceBoot.recorded, "number");
+    assert.equal(typeof r.coverage.sinceBoot.failed, "number");
     assert.equal(typeof r.coverage.healthy, "boolean");
     assert.ok(r.coverage.note, "coverage must carry a plain-language verdict");
-    // Process-local and reset on restart — stated rather than left to be discovered.
-    assert.match(r.coverage.scope, /in-process|restart/i);
+    // Persisted history is the figure that survives a restart.
+    assert.equal(r.coverage.persistedHistory.available, true);
+    assert.equal(r.coverage.failuresInRange, 0);
+    assert.equal(r.coverage.failuresAllTime, 0);
+    // The one case persistence cannot cover is stated, not left to be discovered.
+    assert.match(r.coverage.limitation, /unreachable/i);
   } finally { server.close(); }
 });
 
