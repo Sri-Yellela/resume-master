@@ -1,6 +1,7 @@
 // SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // routes/admin.js — Usage analytics and limits admin API
 import { Router } from "express";
+import { getTrackingStats } from "../services/usageTracker.js";
 
 export function createAdminRouter(db) {
   const router = Router();
@@ -372,6 +373,136 @@ export function createAdminRouter(db) {
   });
 
   // ── Limits ────────────────────────────────────────────────────
+  // ── Unified LLM spend ────────────────────────────────────────
+  // ONE place to answer "what is this costing, and on what". Extends the analytics that already
+  // live in this router rather than adding a parallel surface — /overview, /timeseries,
+  // /model-calls and /cache all still read the same usage_events table.
+  //
+  // Read-only aggregation. No writes, no model calls.
+  //
+  // Prod runs better-sqlite3 — an embedded file driver on a Railway volume, with no wire
+  // protocol — so there is nothing for a dev process to repoint at. This endpoint IS the
+  // production read path; a local copy of prod data would be a read-only snapshot pulled from the
+  // volume out of band, never a dev->prod connection.
+  router.get("/spend", requireAdmin, (req, res) => {
+    const { from, to } = getRange(req.query);
+    try {
+      const totals = db.prepare(`
+        SELECT
+          COUNT(*)                                   AS calls,
+          COALESCE(SUM(cost_usd), 0)                 AS cost_usd,
+          COALESCE(SUM(input_tokens), 0)             AS input_tokens,
+          COALESCE(SUM(output_tokens), 0)            AS output_tokens,
+          COALESCE(SUM(cache_read_tokens), 0)        AS cache_read_tokens,
+          COALESCE(SUM(cache_creation_tokens), 0)    AS cache_creation_tokens,
+          SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failed_calls
+        FROM usage_events WHERE created_at BETWEEN ? AND ?
+      `).get(from, to);
+      totals.total_tokens = totals.input_tokens + totals.output_tokens
+        + totals.cache_read_tokens + totals.cache_creation_tokens;
+
+      const byModel = db.prepare(`
+        SELECT COALESCE(model, '(no model recorded)') AS model,
+          COUNT(*) AS calls,
+          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+          COALESCE(SUM(output_tokens), 0) AS output_tokens
+        FROM usage_events WHERE created_at BETWEEN ? AND ?
+        GROUP BY model ORDER BY cost_usd DESC
+      `).all(from, to);
+
+      // 'unattributed' is rows written before migration 075 added purpose. They are shown, not
+      // dropped: silently omitting them is how a partial total passes for a complete one.
+      const byPurpose = db.prepare(`
+        SELECT COALESCE(purpose, 'unattributed') AS purpose,
+          COUNT(*) AS calls,
+          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+          COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
+        FROM usage_events WHERE created_at BETWEEN ? AND ?
+        GROUP BY COALESCE(purpose, 'unattributed') ORDER BY cost_usd DESC
+      `).all(from, to);
+
+      const byDay = db.prepare(`
+        SELECT DATE(created_at, 'unixepoch') AS day,
+          COUNT(*) AS calls,
+          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+          COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
+        FROM usage_events WHERE created_at BETWEEN ? AND ?
+        GROUP BY day ORDER BY day
+      `).all(from, to);
+
+      // Cache behaviour read from the call rows themselves, so it cannot disagree with the spend
+      // figures above the way a separate cache_events roll-up can.
+      const cacheAgg = db.prepare(`
+        SELECT
+          COUNT(*) AS calls,
+          SUM(CASE WHEN cache_read_tokens > 0 THEN 1 ELSE 0 END) AS calls_with_cache_read,
+          COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+          COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens
+        FROM usage_events WHERE created_at BETWEEN ? AND ?
+      `).get(from, to);
+      const savedUsd = db.prepare(`
+        SELECT COALESCE(SUM(cost_saved_usd), 0) AS saved
+        FROM cache_events WHERE created_at BETWEEN ? AND ?
+      `).get(from, to).saved;
+      const cache = {
+        calls: cacheAgg.calls,
+        callsWithCacheRead: cacheAgg.calls_with_cache_read,
+        hitRate: cacheAgg.calls ? cacheAgg.calls_with_cache_read / cacheAgg.calls : null,
+        cacheReadTokens: cacheAgg.cache_read_tokens,
+        cacheCreationTokens: cacheAgg.cache_creation_tokens,
+        costSavedUsd: savedUsd,
+      };
+
+      // COVERAGE. The whole reason this endpoint exists: a confident total that quietly omits a
+      // third of the traffic is what made the gap invisible in the first place. `failed` counts
+      // usage inserts that THREW — spend that happened and was not recorded. It is process-local
+      // and resets on restart, which is stated here rather than left to be discovered.
+      const t = getTrackingStats();
+      const coverage = {
+        recordedSinceBoot: t.recorded,
+        failedSinceBoot: t.failed,
+        lastError: t.lastError,
+        lastErrorAt: t.lastErrorAt,
+        healthy: t.failed === 0,
+        note: t.failed === 0
+          ? "Every model call this process made was recorded."
+          : `${t.failed} usage insert(s) FAILED since boot — spend happened that is NOT in these totals.`,
+        scope: "Counted in-process since the last restart; not a historical figure.",
+      };
+
+      // Empty state. "No rows" must read as "nothing was recorded", never as "nothing was spent"
+      // — usage_events had no claude-sonnet-5 rows at all and its newest entry was months old,
+      // and a bare $0.00 would have been read as "this is free".
+      const span = db.prepare(`
+        SELECT MIN(created_at) AS oldest, MAX(created_at) AS newest, COUNT(*) AS total
+        FROM usage_events
+      `).get();
+      const empty = totals.calls === 0;
+
+      res.json({
+        range: { from, to },
+        empty,
+        emptyReason: empty
+          ? (span.total === 0
+              ? "usage_events is empty — no model call has ever been recorded. This is an absence of DATA, not an absence of spend."
+              : "No model calls were recorded in this date range. This is an absence of DATA, not an absence of spend — widen the range or check coverage below.")
+          : null,
+        dataSpan: {
+          oldestEventAt: span.oldest,
+          newestEventAt: span.newest,
+          totalRowsAllTime: span.total,
+        },
+        totals,
+        byModel,
+        byPurpose,
+        byDay,
+        cache,
+        coverage,
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   router.get("/limits/:userId", requireAdmin, (req, res) => {
     const userId = parseInt(req.params.userId);
     const limits = db.prepare("SELECT * FROM user_limits WHERE user_id=?").get(userId);
