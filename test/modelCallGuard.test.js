@@ -75,7 +75,9 @@ test("every callModel invocation passes a purpose", () => {
     if (file === WRAPPER || file.startsWith("test/")) continue;
     const src = fs.readFileSync(file, "utf8");
     // Each call's argument object, up to the model line — purpose is written adjacent to it.
-    for (const m of src.matchAll(/callModel\(\{([\s\S]{0,400}?)\bmodel\s*[:,}]/g)) {
+    // Inspect the whole argument window, not just the text before `model`: key order is a style
+    // choice, and a site writing `{ anthropic, db, model, purpose }` is perfectly correct.
+    for (const m of src.matchAll(/callModel\(\{([\s\S]{0,600})/g)) {
       // Accept property shorthand (`{ purpose }`) as well as `purpose: '…'` — otherwise a
       // perfectly good call site that forwards a `purpose` variable fails this guard.
       if (!/\bpurpose\s*[:,}]/.test(m[1])) {
