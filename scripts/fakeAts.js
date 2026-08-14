@@ -212,7 +212,9 @@ function leverForm() {
 
     ${field('Location', `<input name="location" placeholder="City, State">`)}
     <fieldset><legend>TRAP: submit_label</legend>
-      <p style="font-size:13px;color:#666">Button reads "Review and Submit" — SUBMIT_RE is ^-anchored.</p>
+      <p style="font-size:13px;color:#666">Button reads "Review and Submit" — the qualifier sits
+      BEFORE the verb, which the old ^-anchored SUBMIT_RE could never match. Now handled by
+      classifySubmitLabel; this form must reach an actual submission, not filled_not_submitted.</p>
     </fieldset>
     <button type="submit">Review and Submit</button>
   </form>`);
