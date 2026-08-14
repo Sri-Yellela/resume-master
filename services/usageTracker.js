@@ -30,6 +30,25 @@ function cacheEventTypeForState(state) {
   return "cache_miss";
 }
 
+// Tracking failures used to go to console.warn and nothing else — the same "logs quietly" class
+// as the Jobo unconfigured skip and the enrichment empty-write stamp. A cost table that is empty
+// because every insert threw looked identical to one that is empty because nothing ran. These
+// counters make that distinguishable, and routes/admin.js reports them as coverage.
+const trackingStats = { recorded: 0, failed: 0, lastError: null, lastErrorAt: null };
+
+/** Recorded vs failed usage inserts for this process. Read by the admin cost endpoint. */
+export function getTrackingStats() {
+  return { ...trackingStats };
+}
+
+/** Test seam only. */
+export function resetTrackingStats() {
+  trackingStats.recorded = 0;
+  trackingStats.failed = 0;
+  trackingStats.lastError = null;
+  trackingStats.lastErrorAt = null;
+}
+
 export function trackApiCall(db, {
   userId, eventType, eventSubtype,
   model, usage,
@@ -37,6 +56,7 @@ export function trackApiCall(db, {
   atsScoreBefore, atsScoreAfter,
   success = true, errorText = null,
   domainModule = null,
+  purpose = null,
 }) {
   try {
     const cost = calcCost(model, usage || {});
@@ -49,8 +69,8 @@ export function trackApiCall(db, {
       user_id, event_type, event_subtype, input_tokens,
       output_tokens, cache_read_tokens, cache_creation_tokens,
       cached, model, cost_usd, ats_score_before, ats_score_after,
-      duration_ms, job_id, company, success, error_text
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      duration_ms, job_id, company, success, error_text, purpose
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(
       userId, eventType, eventSubtype || null,
       usage?.input_tokens || 0,
@@ -59,8 +79,9 @@ export function trackApiCall(db, {
       cached, model, cost,
       atsScoreBefore ?? null, atsScoreAfter ?? null,
       durationMs || null, jobId || null, company || null,
-      success ? 1 : 0, errorText || null
+      success ? 1 : 0, errorText || null, purpose || null
     );
+    trackingStats.recorded++;
 
     console.info("[usage] model_call", JSON.stringify({
       userId,
@@ -97,7 +118,13 @@ export function trackApiCall(db, {
       );
     }
   } catch (e) {
-    console.warn("[usageTracker] trackApiCall error:", e.message);
+    // LOUD, and counted. A swallowed insert means spend happened and was never recorded, so
+    // the cost panel would under-report without anything indicating it.
+    trackingStats.failed++;
+    trackingStats.lastError = e.message;
+    trackingStats.lastErrorAt = Math.floor(Date.now() / 1000);
+    console.error("[usageTracker] FAILED TO RECORD USAGE — spend is happening and is not being " +
+      `logged. model=${model} purpose=${purpose ?? eventType}: ${e.message}`);
   }
 }
 

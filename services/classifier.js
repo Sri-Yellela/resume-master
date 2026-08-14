@@ -20,6 +20,7 @@
 // ============================================================
 
 import { MODEL_HAIKU } from "../shared/anthropicModels.js";
+import { callModel, SYSTEM_USER_ID } from "./modelCall.js";
 
 // Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
 const MODEL_ID = MODEL_HAIKU;
@@ -60,12 +61,23 @@ Reply ONLY with valid JSON matching this exact schema. No markdown fences, no ex
   "searchQueries": ["<best job board search string 1>", "<best job board search string 2>"]
 }`;
 
-  const msg = await anthropic.messages.create({
+  // Routes through callModel so usage is recorded on ONE path. The old `options.onUsage`
+  // callback is gone rather than kept alongside it: only two of this function's three callers
+  // ever passed one, so the third was silently untracked — the exact failure mode a single
+  // logged path exists to prevent. Callers now pass { db, userId, ... } instead.
+  const msg = await callModel({
+    anthropic,
+    db: options.db,
+    purpose: "classifier",
+    eventType: "classifier",
+    userId: options.userId ?? SYSTEM_USER_ID,
+    eventSubtype: options.eventSubtype ?? null,
+    jobId: options.jobId ?? null,
+    company: options.company ?? null,
     model: MODEL_ID,
     max_tokens: 400,
     messages: [{ role: "user", content: prompt }],
   });
-  try { options.onUsage?.(msg.usage, MODEL_ID); } catch {}
 
   const raw = msg.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(raw);

@@ -250,10 +250,10 @@ export function createAdminRouter(db) {
     const { from, to } = getRange(req.query);
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize || "50")));
     const offset = Math.max(0, parseInt(req.query.offset || "0"));
-    const modelEventTypes = [
-      "resume_generate", "resume_format", "ats_score", "resume_enhance",
-      "classifier", "apply_automation", "pdf_export",
-    ];
+    // The hardcoded allowlist that used to sit here was itself a coverage hole: any event_type
+    // not named in it was invisible in this panel, so the ten call sites that began recording
+    // usage in U1 would have spent money that still did not show up. `model IS NOT NULL` is the
+    // honest definition of a model call and needs no maintenance as features are added.
     try {
       const rows = db.prepare(`
         SELECT
@@ -285,10 +285,9 @@ export function createAdminRouter(db) {
         LEFT JOIN users u ON u.id = ue.user_id
         WHERE ue.created_at BETWEEN ? AND ?
           AND ue.model IS NOT NULL
-          AND ue.event_type IN (${modelEventTypes.map(() => "?").join(",")})
         ORDER BY ue.created_at DESC, ue.id DESC
         LIMIT ? OFFSET ?
-      `).all(from, to, ...modelEventTypes, pageSize, offset);
+      `).all(from, to, pageSize, offset);
       res.json({ rows, pageSize, offset });
     } catch(e) { res.status(500).json({ error: e.message }); }
   });
@@ -424,8 +423,8 @@ export function createAdminRouter(db) {
     const { from, to } = getRange(req.query);
     try {
       const rows = db.prepare(`
-        SELECT ue.*, u.username
-        FROM usage_events ue JOIN users u ON u.id=ue.user_id
+        SELECT ue.*, COALESCE(u.username, 'system') AS username
+        FROM usage_events ue LEFT JOIN users u ON u.id = ue.user_id
         WHERE ue.created_at BETWEEN ? AND ?
         ORDER BY ue.created_at DESC
       `).all(from, to);

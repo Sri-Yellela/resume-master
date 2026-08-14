@@ -39,6 +39,7 @@ import { reconcileFingerprint, upsertCanonicalJob, fingerprintJob, SOURCE_LABELS
 import { runEnrichment } from './enrichJob.js';
 import { mapJobRow } from './mapJobRow.js';
 import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
+import { callModel, SYSTEM_USER_ID } from '../modelCall.js';
 
 import { fetchCompanyJobs as fetchGreenhouseJobs }      from './sources/greenhouse.js';
 import { fetchCompanyJobs as fetchLeverJobs }           from './sources/lever.js';
@@ -310,11 +311,14 @@ Reply ONLY with valid JSON matching this exact schema. No markdown fences, no ex
 }`;
 }
 
-async function extractJobFromContent(anthropic, { url, text }) {
+async function extractJobFromContent(anthropic, { url, text, db = null }) {
   if (!anthropic) throw new ImportInputError('Job extraction requires an AI client, which is not configured on this server');
   if (!text || !text.trim()) throw new ImportInputError('No text to extract a job from');
 
-  const msg = await anthropic.messages.create({
+  const msg = await callModel({
+    // User-initiated import, but this helper has no user in scope; the system sentinel keeps the
+    // spend visible rather than dropping it.
+    anthropic, db, purpose: "import_job", userId: SYSTEM_USER_ID,
     model: IMPORT_MODEL_ID,
     max_tokens: 800,
     messages: [{ role: 'user', content: buildExtractionPrompt(text, url) }],
@@ -436,10 +440,10 @@ async function importJob({ url, text, html } = {}, { db, anthropic, userId = nul
   }
 
   if (!normalizedJob && providedText) {
-    normalizedJob = await extractJobFromContent(anthropic, { url: url || null, text: providedText });
+    normalizedJob = await extractJobFromContent(anthropic, { url: url || null, text: providedText, db });
   } else if (!normalizedJob && url && !isLoginWalled(url)) {
     const fetchedText = await fetchGenericPosting(url);
-    normalizedJob = await extractJobFromContent(anthropic, { url, text: fetchedText });
+    normalizedJob = await extractJobFromContent(anthropic, { url, text: fetchedText, db });
   }
 
   if (!normalizedJob) {
