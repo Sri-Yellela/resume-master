@@ -1,4 +1,4 @@
-// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING ï¿½ SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -33,6 +33,10 @@ function setupServer() {
       company TEXT,
       success INTEGER NOT NULL DEFAULT 1,
       error_text TEXT,
+      -- migration 075: names the FEATURE a call served, separately from event_type (which
+      -- limitEnforcer keys quotas on). This fixture builds its own schema, so it has to track
+      -- the migration or every insert throws and the panel reads as empty.
+      purpose TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE TABLE cache_events (
@@ -194,10 +198,26 @@ test("admin cache analytics distinguish warm partial writes and cold misses", as
 test("classifier tracking is wired into generation classifier call sites", () => {
   const server = fs.readFileSync("server.js", "utf8");
   const classifier = fs.readFileSync("services/classifier.js", "utf8");
-  assert.match(classifier, /options\.onUsage/);
-  assert.match(server, /eventType:\s*"classifier"/);
+  // classifier.js no longer takes an onUsage callback. Only two of its three callers ever passed
+  // one, so the third was silently untracked â€” it now routes through callModel and the callers
+  // pass { db, userId, eventSubtype } instead. The property under test is unchanged: classifier
+  // spend is attributed, at every call site.
+  assert.match(classifier, /callModel\(\{/);
+  assert.match(classifier, /purpose:\s*"classifier"/);
+  // Strip comments first: classifier.js explains in prose why the callback was removed, and that
+  // explanation must not read as the callback still being there.
+  const classifierCode = classifier.replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(classifierCode, /options\.onUsage/,
+    "the onUsage callback is the two-paths-to-one-table shape that let a caller go untracked");
   assert.match(server, /eventSubtype,/);
   assert.match(server, /eventSubtype:\s*"profile_setup"/);
+  // All three callers must pass a db, or their spend is not recorded at all.
+  const callers = [...server.matchAll(/await classify\(anthropic,[\s\S]{0,260}?\}\);/g)];
+  assert.equal(callers.length, 3, `expected 3 classify() callers, found ${callers.length}`);
+  for (const c of callers) {
+    assert.match(c[0], /\bdb\b/,
+      `a classify() caller passes no db, so its spend goes unrecorded: ${c[0].slice(0, 80)}`);
+  }
 });
 
 test("admin usage panel includes model-call token ledger", () => {

@@ -24,6 +24,7 @@
 import crypto from 'crypto';
 import { recordPipelineRun } from './pipelineRunLog.js';
 import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
+import { callModel, SYSTEM_USER_ID } from '../modelCall.js';
 
 // Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
 const MODEL_ID = MODEL_HAIKU;
@@ -91,14 +92,20 @@ function coerceNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null;
 }
 
-async function extractSignals(anthropic, job, { onUsage } = {}) {
+async function extractSignals(anthropic, job, { onUsage, db = null } = {}) {
   const prompt = buildPrompt(job.title, job.company, job.description);
-  const msg = await anthropic.messages.create({
+  const msg = await callModel({
+    // One call PER JOB across hundreds of rows — the single largest untracked spender.
+    // Background pass, so there is no user: attributed to the system sentinel.
+    anthropic, db, purpose: "enrich_job", userId: SYSTEM_USER_ID, jobId: job?.job_id ?? null,
     model: MODEL_ID,
     max_tokens: 500,
     messages: [{ role: 'user', content: prompt }],
   });
-  try { onUsage?.(msg.usage, MODEL_ID); } catch { /* usage tracking is best-effort */ }
+  // Kept: this callback is the caller's LOCAL batch-token summation for its run summary, not
+  // database tracking — that now happens inside callModel. Removing it would blank the
+  // per-batch token totals in the enrichment log.
+  try { onUsage?.(msg.usage, MODEL_ID); } catch { /* local summation is best-effort */ }
 
   const raw = msg.content.map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
   const parsed = JSON.parse(raw);
@@ -273,6 +280,7 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
     for (const row of batch) {
       try {
         const signals = await extractSignals(anthropic, row, {
+          db,
           onUsage: (usage) => {
             totalInputTokens  += usage?.input_tokens  || 0;
             totalOutputTokens += usage?.output_tokens || 0;

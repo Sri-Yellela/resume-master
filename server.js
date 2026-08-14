@@ -31,7 +31,10 @@ import { createCompanyKbRouter } from "./routes/companyKb.js";
 import { runOrgLayerRollup } from "./services/kb/orgLayer.js";
 import { runHiringSignalsRollup } from "./services/jobs/hiringSignals.js";
 // trackScrape dropped from this import in cleanup 5.8 — it was imported here and never called.
-import { trackApiCall } from "./services/usageTracker.js";
+// Every model call goes through callModel, which records usage on one path — see
+// services/modelCall.js. trackApiCall is no longer imported here: server.js called it
+// directly at 4 of 14 call sites, which is how the other 10 went unrecorded.
+import { callModel, SYSTEM_USER_ID } from "./services/modelCall.js";
 import { MODEL_SONNET, MODEL_HAIKU } from "./shared/anthropicModels.js";
 import { classifyGenerationError } from "./shared/failureAttribution.js";
 import { checkLimit } from "./services/limitEnforcer.js";
@@ -2413,6 +2416,35 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE apply_run_jobs ADD COLUMN approved_from_run_job_id INTEGER;
       `,
     },
+    {
+      // Cost observability. `purpose` names the FEATURE a model call served, separately from
+      // event_type — which stays exactly as it is because services/limitEnforcer.js enforces
+      // per-user quotas with `WHERE event_type = ?`, so repurposing that column would silently
+      // change what counts against a limit.
+      //
+      // Additive and nullable on purpose: every row written before this migration was recorded by
+      // a call site that had no notion of purpose, and inventing one for them would put a claim in
+      // the cost history that nothing verified. NULL reads as "recorded before purpose existed" —
+      // routes/admin.js groups it as 'unattributed' rather than dropping it.
+      //
+      // The 'system' user (id 0) is what background work — enrichment, import extraction, job
+      // classification, the unauthenticated standalone endpoints — is attributed to.
+      // usage_events.user_id is NOT NULL REFERENCES users(id), and better-sqlite3 turns
+      // foreign_keys ON by default, so a bare sentinel id with no row is REJECTED: verified by a
+      // real run, where every background insert failed with "FOREIGN KEY constraint failed" and
+      // the largest untracked spender stayed untracked.
+      // id 0 can never collide with a real account (users.id is AUTOINCREMENT, so it starts at 1)
+      // and the password hash is a literal that no hash function can produce, so it is not a
+      // login. INSERT OR IGNORE keeps this migration safe to re-run.
+      id: "075_usage_events_purpose",
+      sql: `
+        ALTER TABLE usage_events ADD COLUMN purpose TEXT;
+        CREATE INDEX IF NOT EXISTS idx_usage_events_purpose
+          ON usage_events(purpose, created_at);
+        INSERT OR IGNORE INTO users (id, username, password_hash, is_admin)
+          VALUES (0, 'system', '!unusable', 0);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -2584,7 +2616,8 @@ function decryptCookies(enc, iv, tag) {
 
 async function classifyJob(title, description = "") {
   try {
-    const msg = await anthropic.messages.create({
+    const msg = await callModel({
+      anthropic, db, purpose: "classify_job", userId: SYSTEM_USER_ID,
       model: MODEL_HAIKU,
       max_tokens: 30,
       messages: [{ role:"user", content:
@@ -5952,7 +5985,9 @@ Do NOT keyword-dump. Omit low-value or duplicative additions.
 Return ONLY the improved resume text with no commentary, preamble, or explanation.`;
 
     const t0 = Date.now();
-    const enhanceMsg = await anthropic.messages.create({
+    const enhanceMsg = await callModel({
+      anthropic, db, purpose: "resume_enhance", userId: req.user.id,
+      eventType: "resume_enhance", eventSubtype: "enhance",
       model: MODEL_SONNET,
       // thinking is explicit: Sonnet 5 runs ADAPTIVE thinking when the field is omitted, and
       // max_tokens caps thinking + response text together — so an omitted field would silently
@@ -5974,12 +6009,6 @@ RESUME TO ENHANCE:
 ${originalText}` }],
     });
     const enhancedText = enhanceMsg.content.map(b => b.text || "").join("").trim();
-    trackApiCall(db, {
-      userId: req.user.id, eventType: "resume_enhance", eventSubtype: "enhance",
-      model: MODEL_SONNET, usage: enhanceMsg.usage,
-      durationMs: Date.now() - t0,
-    });
-
     const templateJd = "Software Engineer, Product Manager, Data Scientist, Data Engineer, Machine Learning Engineer";
     const scoreSignalProfile = loadOrCreateSimpleApplyProfile(db, {
       userId: req.user.id,
@@ -6142,7 +6171,8 @@ app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) 
   if (!ANTHROPIC_KEY) return res.status(500).json({ error:"ANTHROPIC_KEY not configured on server. Set it in your .env file." });
   try {
     const base64 = req.file.buffer.toString("base64");
-    const msg = await anthropic.messages.create({
+    const msg = await callModel({
+      anthropic, db, purpose: "parse_pdf", userId: req.user.id,
       model: MODEL_SONNET,
       // See the enhance call site: explicit thinking:disabled + doubled budget, because Sonnet 5
       // thinks by default and its tokenizer is denser. A truncated extraction here silently
@@ -6190,12 +6220,8 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
     console.log(`[generate] domain from profile: ${activeDomainProfile.profile_name} â†’ ${domainModuleKey}`);
   } else {
     try {
-      const classifierStart = Date.now();
       const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "", {
-        onUsage: (usage, model) => trackApiCall(db, {
-          userId, eventType: "classifier", eventSubtype, model, usage,
-          durationMs: Date.now() - classifierStart, jobId: String(jobId), company: job.company,
-        }),
+        db, userId, eventSubtype, jobId: String(jobId), company: job.company,
       });
       const qualKey = resolveFromClassifier(classifierResult, profile?.qualification_key);
       domainModuleKey = getDomainModuleKey(qualKey, classifierResult.roleFamily, classifierResult.domain);
@@ -6208,7 +6234,10 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
   const { systemBlocks } = assemblePrompt(domainModuleKey, promptMode, runtimeInputs);
 
   const genStart = Date.now();
-  const resumeMsg = await anthropic.messages.create({
+  const resumeMsg = await callModel({
+    anthropic, db, purpose: "resume_generate", userId,
+    eventType: "resume_generate", eventSubtype,
+    jobId: String(jobId), company: job.company, domainModule: domainModuleKey,
     model: MODEL_SONNET,
     // See the enhance call site: Sonnet 5 thinks by default and max_tokens covers thinking +
     // output, so leaving this implicit would eat the HTML budget. Truncated HTML is especially
@@ -6217,12 +6246,6 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
     max_tokens: 8192,
     system: systemBlocks,
     messages: [{ role: "user", content: runtimeInputs }],
-  });
-  trackApiCall(db, {
-    userId, eventType: "resume_generate", eventSubtype,
-    model: MODEL_SONNET, usage: resumeMsg.usage,
-    durationMs: Date.now() - genStart, jobId: String(jobId), company: job.company,
-    domainModule: domainModuleKey,
   });
   const html = resumeMsg.content.map(b => b.text || "").join("").replace(/```html|```/g, "").trim();
 
@@ -6298,16 +6321,14 @@ RULES:
 - Output only the complete HTML file, nothing else`;
 
       const fmtStart = Date.now();
-      const formatMsg = await anthropic.messages.create({
+      const formatMsg = await callModel({
+        anthropic, db, purpose: "resume_format", userId,
+        eventType: "resume_format", eventSubtype,
+        jobId: String(jobId), company: job.company, domainModule: domainModuleKey,
         model: MODEL_HAIKU,
         max_tokens: 4096,
         system: [{ type: "text", text: FORMATTING_SYSTEM, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: `Reformat this resume HTML to match the design specification exactly. Preserve all content:\n\n${html}` }],
-      });
-      trackApiCall(db, {
-        userId, eventType: "resume_format", eventSubtype,
-        model: MODEL_HAIKU, usage: formatMsg.usage,
-        durationMs: Date.now() - fmtStart,
       });
       const formatted = formatMsg.content.map(b => b.text || "").join("").replace(/```html|```/g, "").trim();
       if (formatted) formattedHtml = normalizeResumeHtml(formatted);
@@ -6477,7 +6498,8 @@ REQUIREMENTS:
 - Plain text output only — no markdown, no bullet points`;
 
   try {
-    const message = await anthropic.messages.create({
+    const message = await callModel({
+      anthropic, db, purpose: "cover_letter_apply", userId, jobId: String(jobId),
       model: MODEL_HAIKU,
       max_tokens: 800,
       messages: [{ role: "user", content: prompt }],
@@ -6874,16 +6896,8 @@ app.post("/api/smart-search", requireAuth, async (req, res) => {
   if (!resumeText) return res.status(400).json({ error: "resumeText required" });
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });
   try {
-    const classifierStart = Date.now();
     const classifierResult = await classify(anthropic, resumeText, "", {
-      onUsage: (usage, model) => trackApiCall(db, {
-        userId: req.user.id,
-        eventType: "classifier",
-        eventSubtype: "profile_setup",
-        model,
-        usage,
-        durationMs: Date.now() - classifierStart,
-      }),
+      db, userId: req.user.id, eventSubtype: "profile_setup",
     });
     const qualKey    = resolveFromClassifier(classifierResult);
     const qualTemplates = getSearchQueryTemplates(qualKey);
@@ -7044,7 +7058,8 @@ app.post("/api/standalone/ats", standaloneRateLimit("ats", 1, 3), standaloneUplo
     if (!resumeText || resumeText.length < 50) return res.status(400).json({ error: "Could not extract text from PDF" });
 
     const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):\n${jdText}\n\nRESUME TEXT (check which JD keywords appear here):\n${resumeText}`;
-    const msg = await anthropic.messages.create({
+    const msg = await callModel({
+      anthropic, db, purpose: "standalone_ats", userId: SYSTEM_USER_ID,
       model: MODEL_HAIKU,
       max_tokens: 900,
       system: ATS_SYSTEM_PROMPT,
@@ -7071,7 +7086,11 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     // No domain profile for standalone users â€” use classifier
     let domainModuleKey = "general";
     try {
-      const cr = await classify(anthropic, resumeText, jdText);
+      // Was the third classify() caller and the only one that passed no tracking context, so
+      // its spend was invisible. Unauthenticated route — attributed to the system sentinel.
+      const cr = await classify(anthropic, resumeText, jdText, {
+        db, userId: SYSTEM_USER_ID, eventSubtype: "standalone",
+      });
       const qk = resolveFromClassifier(cr, null);
       domainModuleKey = getDomainModuleKey(qk, cr.roleFamily, cr.domain);
     } catch {}
@@ -7080,7 +7099,8 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     const runtimeInputs = buildRuntimeInputs({}, fakeJob, resumeText, "GENERATE", []);
     const { systemBlocks } = assemblePrompt(domainModuleKey, "GENERATE", runtimeInputs);
 
-    const resumeMsg = await anthropic.messages.create({
+    const resumeMsg = await callModel({
+      anthropic, db, purpose: "standalone_generate", userId: SYSTEM_USER_ID,
       model: MODEL_SONNET,
       // See the enhance call site: explicit thinking:disabled + denser-tokenizer headroom.
       thinking: { type: "disabled" },
@@ -7094,7 +7114,8 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     const cachedText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     let atsScore = null;
     try {
-      const atsMsg = await anthropic.messages.create({
+      const atsMsg = await callModel({
+        anthropic, db, purpose: "standalone_ats", userId: SYSTEM_USER_ID,
         model: MODEL_HAIKU, max_tokens: 900,
         system: ATS_SYSTEM_PROMPT,
         messages: [{ role: "user", content: `JOB DESCRIPTION:\n${jdText}\n\nRESUME TEXT:\n${cachedText}` }],
@@ -7164,7 +7185,8 @@ REQUIREMENTS:
 - Plain text output only — no markdown, no bullet points`;
 
   try {
-    const message = await anthropic.messages.create({
+    const message = await callModel({
+      anthropic, db, purpose: "cover_letter", userId: req.user.id, company: company || null,
       model: MODEL_HAIKU,
       max_tokens: 800,
       messages: [{ role: "user", content: prompt }],

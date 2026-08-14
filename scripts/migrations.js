@@ -2082,4 +2082,33 @@ export const MIGRATIONS = [
         ALTER TABLE apply_run_jobs ADD COLUMN approved_from_run_job_id INTEGER;
       `,
     },
+    {
+      // Cost observability. `purpose` names the FEATURE a model call served, separately from
+      // event_type — which stays exactly as it is because services/limitEnforcer.js enforces
+      // per-user quotas with `WHERE event_type = ?`, so repurposing that column would silently
+      // change what counts against a limit.
+      //
+      // Additive and nullable on purpose: every row written before this migration was recorded by
+      // a call site that had no notion of purpose, and inventing one for them would put a claim in
+      // the cost history that nothing verified. NULL reads as "recorded before purpose existed" —
+      // routes/admin.js groups it as 'unattributed' rather than dropping it.
+      //
+      // The 'system' user (id 0) is what background work — enrichment, import extraction, job
+      // classification, the unauthenticated standalone endpoints — is attributed to.
+      // usage_events.user_id is NOT NULL REFERENCES users(id), and better-sqlite3 turns
+      // foreign_keys ON by default, so a bare sentinel id with no row is REJECTED: verified by a
+      // real run, where every background insert failed with "FOREIGN KEY constraint failed" and
+      // the largest untracked spender stayed untracked.
+      // id 0 can never collide with a real account (users.id is AUTOINCREMENT, so it starts at 1)
+      // and the password hash is a literal that no hash function can produce, so it is not a
+      // login. INSERT OR IGNORE keeps this migration safe to re-run.
+      id: "075_usage_events_purpose",
+      sql: `
+        ALTER TABLE usage_events ADD COLUMN purpose TEXT;
+        CREATE INDEX IF NOT EXISTS idx_usage_events_purpose
+          ON usage_events(purpose, created_at);
+        INSERT OR IGNORE INTO users (id, username, password_hash, is_admin)
+          VALUES (0, 'system', '!unusable', 0);
+      `,
+    },
   ];

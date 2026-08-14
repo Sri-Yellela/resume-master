@@ -24,6 +24,7 @@ import {
 } from "../services/profileSignalAggregator.js";
 import { mergeUniqueSignalLabels } from "../shared/profileSignals.js";
 import { MODEL_HAIKU } from "../shared/anthropicModels.js";
+import { callModel } from "../services/modelCall.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -549,7 +550,8 @@ Rules:
 - tools: exactly 5 software tools or platforms, not in existing list`;
 
     try {
-      const msg = await anthropic.messages.create({
+      const msg = await callModel({
+        anthropic, db, purpose: "domain_chips", userId: req.user.id,
         model: MODEL_HAIKU,
         max_tokens: 600,
         messages: [{ role: "user", content: prompt }],
