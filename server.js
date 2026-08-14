@@ -2445,6 +2445,34 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           VALUES (0, 'system', '!unusable', 0);
       `,
     },
+    {
+      // Persisted tracking failures. The in-process counters added with 075 reset on restart, so
+      // a failure that happened and was then followed by a deploy left no trace at all: the cost
+      // panel would report healthy coverage for a gap that really occurred.
+      //
+      // user_id carries NO foreign key, deliberately. The first real run of the wrapper failed
+      // with "FOREIGN KEY constraint failed" on usage_events.user_id — an FK violation is one of
+      // the reasons a usage insert fails, so putting an FK here would make the failure record
+      // itself fail for exactly the cases most worth recording. Every column except created_at is
+      // nullable for the same reason: a partial record beats no record.
+      //
+      // This still cannot capture a database that is entirely unreachable — that case degrades to
+      // the in-process counter and the error log, and routes/admin.js says so rather than
+      // implying the persisted count is complete.
+      id: "076_usage_tracking_failures",
+      sql: `
+        CREATE TABLE IF NOT EXISTS usage_tracking_failures (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          model TEXT,
+          purpose TEXT,
+          user_id INTEGER,
+          error_text TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_usage_tracking_failures_created
+          ON usage_tracking_failures(created_at);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

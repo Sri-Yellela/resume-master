@@ -459,16 +459,71 @@ export function createAdminRouter(db) {
       // usage inserts that THREW — spend that happened and was not recorded. It is process-local
       // and resets on restart, which is stated here rather than left to be discovered.
       const t = getTrackingStats();
+      // Persisted failure history (migration 076). The in-process counters reset on restart, so
+      // on their own a failure followed by a deploy left no trace and this read healthy for a gap
+      // that really happened. Tolerates a pre-076 database rather than 500ing: an older schema is
+      // reported as unavailable, which is honest, instead of being silently counted as zero.
+      let persisted = { available: true, inRange: 0, allTime: 0, lastAt: null, recent: [] };
+      try {
+        const inRange = db.prepare(`
+          SELECT COUNT(*) AS c, MAX(created_at) AS last
+          FROM usage_tracking_failures WHERE created_at BETWEEN ? AND ?
+        `).get(from, to);
+        persisted.inRange = inRange.c;
+        persisted.lastAt = inRange.last;
+        persisted.allTime = db.prepare("SELECT COUNT(*) AS c FROM usage_tracking_failures").get().c;
+        persisted.recent = db.prepare(`
+          SELECT model, purpose, error_text, created_at
+          FROM usage_tracking_failures ORDER BY created_at DESC, id DESC LIMIT 10
+        `).all();
+      } catch (tableError) {
+        persisted = {
+          available: false,
+          reason: "usage_tracking_failures is not present — migration 076 has not run on this database.",
+          detail: tableError.message,
+          inRange: null, allTime: null, lastAt: null, recent: [],
+        };
+      }
+
+      // Healthy means BOTH signals are clean: nothing failed in this process, and nothing was
+      // recorded as having failed in the range being reported on.
+      const processClean = t.failed === 0;
+      const persistedClean = persisted.available ? persisted.inRange === 0 : null;
+      const healthy = processClean && persistedClean !== false;
+
       const coverage = {
-        recordedSinceBoot: t.recorded,
-        failedSinceBoot: t.failed,
-        lastError: t.lastError,
-        lastErrorAt: t.lastErrorAt,
-        healthy: t.failed === 0,
-        note: t.failed === 0
-          ? "Every model call this process made was recorded."
-          : `${t.failed} usage insert(s) FAILED since boot — spend happened that is NOT in these totals.`,
-        scope: "Counted in-process since the last restart; not a historical figure.",
+        healthy,
+        // Survives restarts.
+        failuresInRange: persisted.inRange,
+        failuresAllTime: persisted.allTime,
+        lastFailureAt: persisted.lastAt,
+        recentFailures: persisted.recent,
+        persistedHistory: persisted.available
+          ? { available: true }
+          : { available: false, reason: persisted.reason },
+        // Last-resort signal, for the one case persistence cannot cover.
+        sinceBoot: {
+          recorded: t.recorded,
+          failed: t.failed,
+          persisted: t.persistedFailures,
+          unpersisted: t.unpersistedFailures,
+          lastError: t.lastError,
+          lastErrorAt: t.lastErrorAt,
+          lastPersistError: t.lastPersistError,
+        },
+        note: healthy
+          ? "No tracking failure recorded in this range, and none in this process since boot."
+          : [
+              persisted.inRange ? `${persisted.inRange} tracking failure(s) recorded in this range` : null,
+              t.failed ? `${t.failed} in this process since boot` : null,
+            ].filter(Boolean).join("; ") +
+            " — spend happened that is NOT in these totals.",
+        // The honest limit, stated rather than left to be discovered.
+        limitation: t.unpersistedFailures > 0
+          ? `${t.unpersistedFailures} failure(s) could not be persisted either — the database was ` +
+            "unreachable, so those are visible only until this process restarts."
+          : "A failure is only persisted if the database is reachable; a wholly unreachable " +
+            "database degrades to the sinceBoot counters and the error log.",
       };
 
       // Empty state. "No rows" must read as "nothing was recorded", never as "nothing was spent"

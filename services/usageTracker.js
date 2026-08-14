@@ -34,7 +34,18 @@ function cacheEventTypeForState(state) {
 // as the Jobo unconfigured skip and the enrichment empty-write stamp. A cost table that is empty
 // because every insert threw looked identical to one that is empty because nothing ran. These
 // counters make that distinguishable, and routes/admin.js reports them as coverage.
-const trackingStats = { recorded: 0, failed: 0, lastError: null, lastErrorAt: null };
+const trackingStats = {
+  recorded: 0,
+  failed: 0,
+  // Of the failures above, how many were written to usage_tracking_failures (migration 076) and
+  // therefore survive a restart, versus how many could not be persisted either — which is what a
+  // wholly unreachable database looks like from in here.
+  persistedFailures: 0,
+  unpersistedFailures: 0,
+  lastError: null,
+  lastErrorAt: null,
+  lastPersistError: null,
+};
 
 /** Recorded vs failed usage inserts for this process. Read by the admin cost endpoint. */
 export function getTrackingStats() {
@@ -45,8 +56,11 @@ export function getTrackingStats() {
 export function resetTrackingStats() {
   trackingStats.recorded = 0;
   trackingStats.failed = 0;
+  trackingStats.persistedFailures = 0;
+  trackingStats.unpersistedFailures = 0;
   trackingStats.lastError = null;
   trackingStats.lastErrorAt = null;
+  trackingStats.lastPersistError = null;
 }
 
 export function trackApiCall(db, {
@@ -123,6 +137,34 @@ export function trackApiCall(db, {
     trackingStats.failed++;
     trackingStats.lastError = e.message;
     trackingStats.lastErrorAt = Math.floor(Date.now() / 1000);
+
+    // PERSIST the gap (migration 076). The counters above reset on restart, so without this a
+    // failure followed by a deploy left no trace and coverage read healthy for a gap that really
+    // happened.
+    //
+    // This write is attempted BECAUSE a write just failed, so it is wrapped separately and can
+    // never throw out of here. It succeeds for the common causes — a constraint violation, a
+    // missing column, a bad table name — because those are specific to usage_events. It cannot
+    // succeed when the database itself is unreachable, which is why the in-process counters stay:
+    // they are the last resort, and routes/admin.js reports both rather than implying the
+    // persisted count is complete.
+    try {
+      db.prepare(`INSERT INTO usage_tracking_failures
+        (model, purpose, user_id, error_text) VALUES (?,?,?,?)`)
+        .run(
+          model ?? null,
+          purpose ?? eventType ?? null,
+          // No FK on this column: an FK violation on usage_events.user_id is one of the reasons
+          // tracking fails, so the failure record must not be able to fail the same way.
+          userId ?? null,
+          String(e?.message ?? e).slice(0, 500)
+        );
+      trackingStats.persistedFailures++;
+    } catch (persistError) {
+      trackingStats.unpersistedFailures++;
+      trackingStats.lastPersistError = persistError.message;
+    }
+
     console.error("[usageTracker] FAILED TO RECORD USAGE — spend is happening and is not being " +
       `logged. model=${model} purpose=${purpose ?? eventType}: ${e.message}`);
   }
