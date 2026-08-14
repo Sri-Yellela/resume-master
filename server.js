@@ -35,6 +35,7 @@ import { runHiringSignalsRollup } from "./services/jobs/hiringSignals.js";
 // services/modelCall.js. trackApiCall is no longer imported here: server.js called it
 // directly at 4 of 14 call sites, which is how the other 10 went unrecorded.
 import { callModel, SYSTEM_USER_ID } from "./services/modelCall.js";
+import { drainInto as drainTrackingFailureSink } from "./services/trackingFailureSink.js";
 import { MODEL_SONNET, MODEL_HAIKU } from "./shared/anthropicModels.js";
 import { classifyGenerationError } from "./shared/failureAttribution.js";
 import { checkLimit } from "./services/limitEnforcer.js";
@@ -2473,6 +2474,19 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON usage_tracking_failures(created_at);
       `,
     },
+    {
+      // Distinguishes a failure recorded LIVE from one recovered out of the out-of-process sink
+      // (services/trackingFailureSink.js) after the database came back. Conflating them would hide
+      // the more serious fact: a sink-recovered row means the database itself was unreachable at
+      // the time, not merely that one insert was rejected.
+      //
+      // Nullable: rows written by 076 predate the distinction, and NULL reads as "recorded live,
+      // before this column existed" rather than being backfilled with a claim nothing verified.
+      id: "077_tracking_failure_source",
+      sql: `
+        ALTER TABLE usage_tracking_failures ADD COLUMN source TEXT;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -2493,6 +2507,22 @@ console.log(`[boot] database ready: ${DB_PATH}`);
     }
   }
   console.log(`[boot] migrations complete (${migrationCount} applied)`);
+
+// Drain the out-of-process failure sink now that the database is known reachable. Anything the
+// sink caught while it was NOT reachable is imported as source='sink_recovered', so coverage
+// becomes complete again instead of permanently short by however many calls happened during the
+// outage. Runs after migrations so the source column (077) exists; never fatal — a sink that
+// cannot be drained is left in place for the next boot rather than discarded.
+try {
+  const drain = drainTrackingFailureSink(db);
+  if (drain.drained || drain.failed || drain.corrupt) {
+    console.warn(`[boot] tracking-failure sink drained: recovered=${drain.drained} ` +
+      `failed=${drain.failed} corrupt=${drain.corrupt}` + (drain.error ? ` error=${drain.error}` : "") +
+      " — these are model calls whose spend was NOT recorded at the time.");
+  }
+} catch (e) {
+  console.error("[boot] tracking-failure sink drain failed:", e.message);
+}
 }
 
 // Load layered prompt system at startup

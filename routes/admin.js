@@ -2,6 +2,7 @@
 // routes/admin.js — Usage analytics and limits admin API
 import { Router } from "express";
 import { getTrackingStats } from "../services/usageTracker.js";
+import { pendingCount as sinkPendingCount, sinkPath } from "../services/trackingFailureSink.js";
 
 export function createAdminRouter(db) {
   const router = Router();
@@ -472,6 +473,14 @@ export function createAdminRouter(db) {
         persisted.inRange = inRange.c;
         persisted.lastAt = inRange.last;
         persisted.allTime = db.prepare("SELECT COUNT(*) AS c FROM usage_tracking_failures").get().c;
+        // A sink-recovered row means the DATABASE was unreachable when the call happened, which is
+        // a different and more serious fact than one insert being rejected. Never conflated.
+        try {
+          persisted.recoveredFromSink = db.prepare(`
+            SELECT COUNT(*) AS c FROM usage_tracking_failures
+            WHERE source = 'sink_recovered' AND created_at BETWEEN ? AND ?
+          `).get(from, to).c;
+        } catch { persisted.recoveredFromSink = null; }
         persisted.recent = db.prepare(`
           SELECT model, purpose, error_text, created_at
           FROM usage_tracking_failures ORDER BY created_at DESC, id DESC LIMIT 10
@@ -487,9 +496,16 @@ export function createAdminRouter(db) {
 
       // Healthy means BOTH signals are clean: nothing failed in this process, and nothing was
       // recorded as having failed in the range being reported on.
+      // Anything still sitting in the out-of-process sink has NOT been imported yet, so it is a
+      // known gap the database cannot see. Read from disk, independently of the database.
+      let sink = { available: true, pending: 0, path: sinkPath() };
+      try { sink.pending = sinkPendingCount(); }
+      catch (e) { sink = { available: false, pending: null, path: sinkPath(), error: e.message }; }
+
       const processClean = t.failed === 0;
       const persistedClean = persisted.available ? persisted.inRange === 0 : null;
-      const healthy = processClean && persistedClean !== false;
+      const sinkClean = sink.available ? sink.pending === 0 : null;
+      const healthy = processClean && persistedClean !== false && sinkClean !== false;
 
       const coverage = {
         healthy,
@@ -498,6 +514,20 @@ export function createAdminRouter(db) {
         failuresAllTime: persisted.allTime,
         lastFailureAt: persisted.lastAt,
         recentFailures: persisted.recent,
+        // Of the failures in range, how many were recovered after an outage rather than recorded
+        // live. Non-zero means the database was down while model calls were being made.
+        recoveredFromSinkInRange: persisted.recoveredFromSink,
+        // Out-of-process sink: survives an unreachable database, drained at the next boot.
+        sink: {
+          available: sink.available,
+          pendingNotYetImported: sink.pending,
+          path: sink.path,
+          ...(sink.error ? { error: sink.error } : {}),
+          note: sink.pending
+            ? `${sink.pending} failure(s) are in the sink and NOT yet in the database — the database ` +
+              "was unreachable when they happened. They import at the next boot."
+            : "Nothing pending.",
+        },
         persistedHistory: persisted.available
           ? { available: true }
           : { available: false, reason: persisted.reason },
@@ -507,23 +537,30 @@ export function createAdminRouter(db) {
           failed: t.failed,
           persisted: t.persistedFailures,
           unpersisted: t.unpersistedFailures,
+          sunkToFile: t.sinkedFailures,
+          lost: t.lostFailures,
           lastError: t.lastError,
           lastErrorAt: t.lastErrorAt,
           lastPersistError: t.lastPersistError,
         },
         note: healthy
-          ? "No tracking failure recorded in this range, and none in this process since boot."
+          ? "No tracking failure recorded in this range, none pending in the sink, and none in " +
+            "this process since boot."
           : [
               persisted.inRange ? `${persisted.inRange} tracking failure(s) recorded in this range` : null,
+              sink.pending ? `${sink.pending} still pending in the out-of-process sink` : null,
               t.failed ? `${t.failed} in this process since boot` : null,
             ].filter(Boolean).join("; ") +
             " — spend happened that is NOT in these totals.",
         // The honest limit, stated rather than left to be discovered.
-        limitation: t.unpersistedFailures > 0
-          ? `${t.unpersistedFailures} failure(s) could not be persisted either — the database was ` +
-            "unreachable, so those are visible only until this process restarts."
-          : "A failure is only persisted if the database is reachable; a wholly unreachable " +
-            "database degrades to the sinceBoot counters and the error log.",
+        // The remaining limit, stated rather than left to be discovered. Three fallbacks deep:
+        // database -> out-of-process sink -> log line. Only the last is not machine-readable.
+        limitation: t.lostFailures > 0
+          ? `${t.lostFailures} failure(s) reached NEITHER the database NOR the sink — the ` +
+            "filesystem was unwritable too, and the error log is the only remaining record."
+          : "A failure is recorded in the database when it is reachable, and in the " +
+            "out-of-process sink when it is not. If the filesystem is also unwritable, only the " +
+            "error log remains — counted as lostFailures.",
       };
 
       // Empty state. "No rows" must read as "nothing was recorded", never as "nothing was spent"

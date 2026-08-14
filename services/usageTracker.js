@@ -12,6 +12,7 @@ import {
   calculateCost as calcCost,
   cacheCreationTokensOf,
 } from "../shared/anthropicModels.js";
+import { appendFailure } from "./trackingFailureSink.js";
 
 function cacheState(usage = {}) {
   const inputTokens = usage?.input_tokens || 0;
@@ -42,6 +43,11 @@ const trackingStats = {
   // wholly unreachable database looks like from in here.
   persistedFailures: 0,
   unpersistedFailures: 0,
+  // Of the unpersisted ones, how many reached the out-of-process sink (and so survive an
+  // unreachable database), versus how many were LOST outright — the filesystem was unwritable too,
+  // and nothing but the log below remains.
+  sinkedFailures: 0,
+  lostFailures: 0,
   lastError: null,
   lastErrorAt: null,
   lastPersistError: null,
@@ -58,6 +64,8 @@ export function resetTrackingStats() {
   trackingStats.failed = 0;
   trackingStats.persistedFailures = 0;
   trackingStats.unpersistedFailures = 0;
+  trackingStats.sinkedFailures = 0;
+  trackingStats.lostFailures = 0;
   trackingStats.lastError = null;
   trackingStats.lastErrorAt = null;
   trackingStats.lastPersistError = null;
@@ -163,10 +171,25 @@ export function trackApiCall(db, {
     } catch (persistError) {
       trackingStats.unpersistedFailures++;
       trackingStats.lastPersistError = persistError.message;
+
+      // THIRD fallback, out of process: the database could not even record that it failed, which
+      // is what an unreachable database looks like from here. An append-only file needs no
+      // service, no network and no working database, and is drained back in at the next boot.
+      const sunk = appendFailure({
+        model, purpose: purpose ?? eventType, userId,
+        errorText: String(e?.message ?? e),
+        persistError: persistError.message,
+      });
+      if (sunk) trackingStats.sinkedFailures++;
+      else      trackingStats.lostFailures++;
     }
 
     console.error("[usageTracker] FAILED TO RECORD USAGE — spend is happening and is not being " +
-      `logged. model=${model} purpose=${purpose ?? eventType}: ${e.message}`);
+      `logged. model=${model} purpose=${purpose ?? eventType}: ${e.message}` +
+      (trackingStats.lostFailures > 0
+        ? " — AND it could not be written to the database or the out-of-process sink, so this log " +
+          "line is the only remaining record of it."
+        : ""));
   }
 }
 

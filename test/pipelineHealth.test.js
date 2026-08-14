@@ -26,6 +26,29 @@ function makeDb() {
       is_clearance_required INTEGER, org_unit_raw TEXT,
       enriched_at INTEGER, content_hash TEXT, sources_seen TEXT, req_uid TEXT
     );
+    -- Enrichment now records usage through callModel (services/modelCall.js), so these fixtures
+    -- have to carry the tracking tables. Without them every enriched job produced a tracking
+    -- failure that fell through to the out-of-process sink and wrote into the real data/ directory
+    -- — non-hermetic, and it hid the fact that enrichment spend was not being recorded here at all.
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, event_type TEXT NOT NULL,
+      event_subtype TEXT, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+      cache_read_tokens INTEGER DEFAULT 0, cache_creation_tokens INTEGER DEFAULT 0,
+      cached INTEGER NOT NULL DEFAULT 0, model TEXT, cost_usd REAL DEFAULT 0,
+      ats_score_before INTEGER, ats_score_after INTEGER, duration_ms INTEGER, job_id TEXT,
+      company TEXT, success INTEGER NOT NULL DEFAULT 1, error_text TEXT, purpose TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE TABLE IF NOT EXISTS cache_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, event_type TEXT NOT NULL,
+      layer TEXT, domain_module TEXT, tokens_in_cache INTEGER DEFAULT 0,
+      tokens_saved INTEGER DEFAULT 0, cost_saved_usd REAL DEFAULT 0, model TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE TABLE IF NOT EXISTS usage_tracking_failures (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, model TEXT, purpose TEXT, user_id INTEGER,
+      error_text TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), source TEXT
+    );
     CREATE TABLE pipeline_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_kind TEXT NOT NULL, source TEXT, status TEXT NOT NULL,

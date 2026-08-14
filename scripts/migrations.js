@@ -2139,4 +2139,17 @@ export const MIGRATIONS = [
           ON usage_tracking_failures(created_at);
       `,
     },
+    {
+      // Distinguishes a failure recorded LIVE from one recovered out of the out-of-process sink
+      // (services/trackingFailureSink.js) after the database came back. Conflating them would hide
+      // the more serious fact: a sink-recovered row means the database itself was unreachable at
+      // the time, not merely that one insert was rejected.
+      //
+      // Nullable: rows written by 076 predate the distinction, and NULL reads as "recorded live,
+      // before this column existed" rather than being backfilled with a claim nothing verified.
+      id: "077_tracking_failure_source",
+      sql: `
+        ALTER TABLE usage_tracking_failures ADD COLUMN source TEXT;
+      `,
+    },
   ];
