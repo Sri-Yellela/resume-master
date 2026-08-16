@@ -34,6 +34,10 @@ const FACET_DIMENSIONS = {
   experience_level: { column: 'sj.experience_level' },
   employment_type:  { column: 'sj.employment_type' },
   sources:          { column: 'sj.source' },
+  // Grouped through the same COALESCE the tier filter uses, so the count the user sees next to
+  // "Unknown" is the count they get when they select it — a facet that omitted NULL rows would
+  // advertise a smaller number than the filter returns.
+  automation_tier:  { column: "COALESCE(sj.automation_tier, 'unknown')" },
   skills:           { column: null },
 };
 
@@ -106,7 +110,8 @@ function buildQSql(q) {
  *
  * Recognized keys (all optional): q, locations, sources, work_models, employment_types,
  * experience_levels, salary_min_usd, salary_max_usd, posted_after, discovered_after,
- * skills_include, skills_exclude, companies_include, companies_exclude.
+ * skills_include, skills_exclude, companies_include, companies_exclude,
+ * sources_include, sources_exclude, tiers_include, tiers_exclude.
  */
 function buildJobFilters(params = {}) {
   const clauses = [];
@@ -224,6 +229,62 @@ function buildJobFilters(params = {}) {
   if (params.sponsorship_friendly) {
     clauses.push(`(sj.requires_work_auth IS NULL OR sj.requires_work_auth != 1)`);
     clauses.push(`(sj.is_h1b_sponsor IS NULL OR sj.is_h1b_sponsor != 0)`);
+  }
+
+  // ── Provider (source) include/exclude ────────────────────────────────────────────────────
+  // NO null guard, and that is not an oversight — it is the difference between these two columns
+  // and the reason they are commented separately.
+  //
+  // sj.source is written by every scraped_jobs writer as a NOT-NULL-in-practice value (the crawl
+  // path passes the ATS name, the live-search path defaults to 'serpapi', the LinkedIn path
+  // passes the literal 'LinkedIn'), so there is no "not classified yet" state to protect. A plain
+  // IN / NOT IN says exactly what it means here. Adding a soft-null escape would be worse than
+  // useless: it would make `sources_exclude` unable to exclude anything if a NULL ever appeared.
+  const sourcesInclude = toArray(params.sources_include);
+  if (sourcesInclude.length) {
+    clauses.push(`sj.source IN (${sourcesInclude.map(() => '?').join(',')})`);
+    args.push(...sourcesInclude);
+  }
+  const sourcesExclude = toArray(params.sources_exclude);
+  if (sourcesExclude.length) {
+    clauses.push(`sj.source NOT IN (${sourcesExclude.map(() => '?').join(',')})`);
+    args.push(...sourcesExclude);
+  }
+
+  // ── Automation tier include/exclude ──────────────────────────────────────────────────────
+  // NULL IS COALESCED TO 'unknown', in BOTH directions. Read this next to the soft-null comments
+  // on skills_include / experience_levels above — it is the same class of hazard reached by a
+  // different route, and the decision it takes is deliberately different from theirs.
+  //
+  // The hazard: automation_tier arrived with migration 078 and is populated by the writers and by
+  // the boot backfill, but between the column landing and either of those running, rows are NULL.
+  // `NULL IN ('direct')` is NULL, not false — so a bare IN drops those rows silently, and so does
+  // a bare `NOT IN ('gated')`, which is the mirror trap: the exclusion direction discards exactly
+  // the rows the user never asked to exclude. That silent-drop shape is what took the board to
+  // zero before.
+  //
+  // The decision, and why it is not the `IS NULL OR ...` escape used above: those columns come
+  // from a LAGGING background LLM pass and their filters are DERIVED BY DEFAULT from the profile,
+  // so admitting NULL is the only thing that stops a lagging queue from zeroing everyone's board.
+  // Neither is true here — this tier is computed synchronously on write, and nothing derives it by
+  // default, so an unconditional `IS NULL OR` would instead mean that asking for `direct` returns
+  // rows we have made no claim about. That is the promise automationTier.js exists to refuse.
+  //
+  // COALESCE to 'unknown' resolves both at once, because 'unknown' is already the tier that means
+  // "we have not established this". A NULL row therefore behaves identically to a row we HAVE
+  // classified as unclassifiable: excluded from `tiers_include=direct` (no false promise),
+  // included by `tiers_include=unknown` (it genuinely is), kept by `tiers_exclude=gated` (it is
+  // not known to be gated), and dropped by `tiers_exclude=unknown` (the user asked to hide exactly
+  // this). No row can vanish from both directions, which is the property that failed before.
+  const tiersInclude = toArray(params.tiers_include);
+  if (tiersInclude.length) {
+    clauses.push(`COALESCE(sj.automation_tier, 'unknown') IN (${tiersInclude.map(() => '?').join(',')})`);
+    args.push(...tiersInclude);
+  }
+  const tiersExclude = toArray(params.tiers_exclude);
+  if (tiersExclude.length) {
+    clauses.push(`COALESCE(sj.automation_tier, 'unknown') NOT IN (${tiersExclude.map(() => '?').join(',')})`);
+    args.push(...tiersExclude);
   }
 
   const companiesInclude = toArray(params.companies_include);

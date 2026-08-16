@@ -348,6 +348,33 @@ const EXPERIENCE_LEVEL_OPTIONS = [
   { value:"executive", label:"Executive" },
 ];
 
+// Provider (scraped_jobs.source) options for the include/exclude control. Mirrors the vocabulary
+// the writers actually emit — the same "UI options duplicate the server's vocabulary" idiom as
+// WORK_MODEL_OPTIONS / EXPERIENCE_LEVEL_OPTIONS above, deliberately NOT an import of the server
+// module. The counts beside each come from jobQuery.js's `sources` facet at runtime, so a provider
+// with 0 rows shows "(0)" rather than being silently absent.
+const SOURCE_OPTIONS = [
+  { value:"greenhouse", label:"Greenhouse" },
+  { value:"lever",      label:"Lever"      },
+  { value:"ashby",      label:"Ashby"      },
+  { value:"jobo",       label:"Jobo"       },
+  { value:"adzuna",     label:"Adzuna"     },
+  { value:"serpapi",    label:"SerpAPI"    },
+  { value:"LinkedIn",   label:"LinkedIn"   },
+];
+
+// Automation tier (services/jobs/automationTier.js). Order is decreasing confidence, matching the
+// module's AUTOMATION_TIERS. The descriptions are the point of this control: "account" is the one
+// that changes what the user has to do, and "unknown" must read as an open question rather than
+// as either a promise or a warning.
+const TIER_OPTIONS = [
+  { value:"direct",  label:"Direct",   hint:"No account — one-page apply" },
+  { value:"guest",   label:"Guest",    hint:"Account optional, guest path exists" },
+  { value:"account", label:"Account",  hint:"You sign in once, then autofill takes over" },
+  { value:"gated",   label:"Gated",    hint:"Account + CAPTCHA/ID check — cannot be automated" },
+  { value:"unknown", label:"Unknown",  hint:"Not established — may be either" },
+];
+
 function defaultFilterSnapshot() {
   return {
     roleFilter: "",
@@ -368,6 +395,12 @@ function defaultFilterSnapshot() {
     experienceLevels: [],
     skillsInclude: [],
     sponsorFriendly: false,
+    // Provider + automation-tier include/exclude. Empty arrays are the default-off state: buildParams
+    // emits nothing at all for them, which is what keeps the default querystring byte-identical.
+    sourcesInclude: [],
+    sourcesExclude: [],
+    tiersInclude: [],
+    tiersExclude: [],
   };
 }
 
@@ -392,6 +425,10 @@ function FiltersPanel({
   experienceLevels, setExperienceLevels,
   skillsInclude, setSkillsInclude,
   sponsorFriendly, setSponsorFriendly,
+  sourcesInclude, setSourcesInclude,
+  sourcesExclude, setSourcesExclude,
+  tiersInclude, setTiersInclude,
+  tiersExclude, setTiersExclude,
   facetCounts,
   onReset,
 }) {
@@ -408,6 +445,46 @@ function FiltersPanel({
     return hit ? hit.count : null;
   };
   const withCount = (label, count) => (count != null ? `${label} (${count})` : label);
+
+  // Tri-state pill: neutral -> include -> exclude -> neutral. One control per option instead of
+  // two parallel lists, because "greenhouse is in both include and exclude" is a state the user
+  // can otherwise reach and the server cannot answer sensibly. Include and exclude are therefore
+  // mutually exclusive by construction here, not by validation after the fact.
+  const IncludeExcludeRow = ({ options, dimension, included, setIncluded, excluded, setExcluded }) => (
+    <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+      {options.map(opt => {
+        const isIn  = included.includes(opt.value);
+        const isOut = excluded.includes(opt.value);
+        const cycle = () => {
+          if (isIn) {                                   // include -> exclude
+            setIncluded(included.filter(v => v !== opt.value));
+            setExcluded([...excluded, opt.value]);
+          } else if (isOut) {                           // exclude -> neutral
+            setExcluded(excluded.filter(v => v !== opt.value));
+          } else {                                      // neutral -> include
+            setIncluded([...included, opt.value]);
+          }
+        };
+        const border = isIn ? theme.accent : isOut ? "#dc2626" : theme.border;
+        const bg     = isIn ? theme.accentMuted : isOut ? "#fee2e2" : "transparent";
+        const fg     = isIn ? theme.accentText : isOut ? "#991b1b" : theme.textMuted;
+        return (
+          <button key={opt.value} type="button" onClick={cycle}
+            title={[opt.hint, isIn ? "Included — click to exclude" : isOut ? "Excluded — click to clear" : "Click to include"]
+              .filter(Boolean).join(" · ")}
+            style={{
+              padding:"5px 12px", borderRadius:999, fontSize:11, fontWeight:600,
+              cursor:"pointer", border:`1px solid ${border}`, background:bg, color:fg,
+              transition:"all 0.15s", textDecoration: isOut ? "line-through" : "none",
+            }}>
+            {isOut ? "− " : isIn ? "+ " : ""}
+            {withCount(opt.label, dimension ? countFor(dimension, opt.value) : null)}
+          </button>
+        );
+      })}
+    </div>
+  );
+
   const selStyle = {
     width:"100%", height:36, padding:"0 10px",
     border:`1px solid ${theme.border}`, borderRadius:4,
@@ -565,6 +642,35 @@ function FiltersPanel({
             <option value="linkedin">LinkedIn</option>
             <option value="indeed">Indeed</option>
           </select>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Provider</div>
+          <IncludeExcludeRow
+            options={SOURCE_OPTIONS}
+            dimension="sources"
+            included={sourcesInclude} setIncluded={setSourcesInclude}
+            excluded={sourcesExclude} setExcluded={setSourcesExclude}
+          />
+          <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
+            Which job board the posting came from. Click once to include, twice to exclude.
+            Counts are for your current board.
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>Automation Tier</div>
+          <IncludeExcludeRow
+            options={TIER_OPTIONS}
+            dimension="automation_tier"
+            included={tiersInclude} setIncluded={setTiersInclude}
+            excluded={tiersExclude} setExcluded={setTiersExclude}
+          />
+          <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
+            What the apply page will ask of you. <strong>Unknown</strong> means we have not
+            established it — those postings may apply cleanly or may need an account, and are
+            neither promised nor ruled out.
+          </div>
         </div>
 
         <div>
@@ -1261,6 +1367,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [experienceLevels,setExperienceLevels]= useState([]);
   const [skillsInclude,  setSkillsInclude]  = useState([]);
   const [sponsorFriendly,setSponsorFriendly]= useState(false);
+  // Provider + automation-tier include/exclude. Default [] on all four — buildParams emits nothing
+  // for an empty array, so the default querystring is unchanged.
+  const [sourcesInclude, setSourcesInclude] = useState([]);
+  const [sourcesExclude, setSourcesExclude] = useState([]);
+  const [tiersInclude,   setTiersInclude]   = useState([]);
+  const [tiersExclude,   setTiersExclude]   = useState([]);
   const [facetCounts,    setFacetCounts]    = useState(null);
   const [pendingFilters, setPendingFilters] = useState(defaultFilterSnapshot);
 
@@ -1294,10 +1406,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     experienceLevels,
     skillsInclude,
     sponsorFriendly,
+    sourcesInclude,
+    sourcesExclude,
+    tiersInclude,
+    tiersExclude,
   }), [
     roleFilter, locationFilter, workType, employmentTypePrefs,
     catFilter, srcFilter, minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter,
     salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
+    sourcesInclude, sourcesExclude, tiersInclude, tiersExclude,
   ]);
 
   const stageFilter = useCallback((key, value) => {
@@ -1330,11 +1447,42 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setExperienceLevels(Array.isArray(next.experienceLevels) ? next.experienceLevels : []);
     setSkillsInclude(Array.isArray(next.skillsInclude) ? next.skillsInclude : []);
     setSponsorFriendly(!!next.sponsorFriendly);
+    setSourcesInclude(Array.isArray(next.sourcesInclude) ? next.sourcesInclude : []);
+    setSourcesExclude(Array.isArray(next.sourcesExclude) ? next.sourcesExclude : []);
+    setTiersInclude(Array.isArray(next.tiersInclude) ? next.tiersInclude : []);
+    setTiersExclude(Array.isArray(next.tiersExclude) ? next.tiersExclude : []);
     setFiltersOpen(false);
   }, [pendingFilters]);
 
   const resetPendingFilters = useCallback(() => {
     setPendingFilters(defaultFilterSnapshot());
+  }, []);
+
+  // How many COMMITTED filters are narrowing the board right now. Compared against
+  // defaultFilterSnapshot() rather than against a hand-written list, so a filter added later is
+  // counted without anyone remembering to come back here.
+  const activeFilterCount = useMemo(() => {
+    const current = activeFilterSnapshot();
+    const base = defaultFilterSnapshot();
+    return Object.keys(base).filter(k => {
+      const a = current[k], b = base[k];
+      if (Array.isArray(b)) return JSON.stringify(a ?? []) !== JSON.stringify(b);
+      return (a ?? "") !== (b ?? "");
+    }).length;
+  }, [activeFilterSnapshot]);
+
+  // Clears every committed filter AND the staged copy, so the drawer does not reopen still
+  // showing the filters the user just cleared from the empty-board notice.
+  const clearAllFilters = useCallback(() => {
+    const base = defaultFilterSnapshot();
+    setPendingFilters(base);
+    setRoleFilter(""); setLocationFilter(""); setWorkType("");
+    setEmploymentTypePrefs(base.employmentTypePrefs);
+    setCatFilter(""); setSrcFilter(""); setMinYoe(""); setMaxYoe(""); setMaxApplicants("");
+    setVisitedFilter(""); setAgeFilter(""); setSalaryMin(""); setSalaryMax("");
+    setWorkModels([]); setExperienceLevels([]); setSkillsInclude([]); setSponsorFriendly(false);
+    setSourcesInclude([]); setSourcesExclude([]); setTiersInclude([]); setTiersExclude([]);
+    setCurrentPage(1);
   }, []);
 
   const makeProfileSnapshot = useCallback((overrides = {}) => ({
@@ -1634,6 +1782,14 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     // soft, null-preserving filter; OFF emits nothing at all (falls back to whatever the
     // active profile already derives by default — see services/jobs/profileFilterBridge.js).
     if (sponsorFriendly)         p.set("sponsorship_friendly", "1");
+    // Provider + automation tier (services/jobs/jobQuery.js). Each is emitted ONLY when the user
+    // has actually picked something, so with the drawer untouched none of these four keys appear
+    // and the default querystring is byte-for-byte what it was before this change — the same
+    // property FE-2 established and verified for its own additions.
+    if (sourcesInclude.length) p.set("sources_include", sourcesInclude.join(","));
+    if (sourcesExclude.length) p.set("sources_exclude", sourcesExclude.join(","));
+    if (tiersInclude.length)   p.set("tiers_include",   tiersInclude.join(","));
+    if (tiersExclude.length)   p.set("tiers_exclude",   tiersExclude.join(","));
     // posted_after: derived from the SAME named-interval the legacy ageFilter already uses —
     // no new UI control, matching the server's own AGE_MAP (server.js's /api/jobs handler).
     // Redundant with ageFilter's own inline clause (same date, same source of truth) — both
@@ -1645,7 +1801,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     return p.toString();
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, localSearch,
-      salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly]);
+      salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
+      sourcesInclude, sourcesExclude, tiersInclude, tiersExclude]);
 
   // FE-2: opt-in facet counts for the panel currently being edited — requested against the
   // CURRENTLY-COMMITTED filters (buildParams(1)), not the still-being-staged pendingFilters, so
@@ -1655,7 +1812,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const fetchFacets = useCallback(async () => {
     try {
       const qs = buildParams(1);
-      const data = await api(`/api/jobs?${qs}&include_facets=work_model,experience_level,employment_type,sources`);
+      const data = await api(`/api/jobs?${qs}&include_facets=work_model,experience_level,employment_type,sources,automation_tier`);
       setFacetCounts(data?.facets || null);
     } catch {
       setFacetCounts(null);
@@ -1864,6 +2021,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       // above — they were missing from this list, so changing ONLY one of them (leaving every
       // legacy filter untouched) would build the right querystring but never actually refetch.
       salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
+      // Same failure, third time this file has been at risk of it: a new filter that feeds
+      // buildParams but is missing HERE builds a correct querystring that is never sent, so the
+      // control looks dead. FE-3 fixed it for FE-2's params; these four are added in the same
+      // commit that introduces them precisely so there is no fourth time. Verified by changing
+      // only a provider pill and watching a request fire.
+      sourcesInclude, sourcesExclude, tiersInclude, tiersExclude,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -2036,6 +2199,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setExperienceLevels(p.get("experience_levels") ? p.get("experience_levels").split(",") : []);
     setSkillsInclude(p.get("skills_include") ? p.get("skills_include").split(",") : []);
     setSponsorFriendly(p.get("sponsorship_friendly") === "1");
+    // A saved search stores buildParams' raw querystring, so a param buildParams emits but this
+    // function never reads is silently dropped on apply — the saved search would come back
+    // subtly wider than the one that was saved. These four round-trip through the same
+    // comma-joined encoding buildParams writes.
+    const csv = key => (p.get(key) ? p.get(key).split(",") : []);
+    setSourcesInclude(csv("sources_include"));
+    setSourcesExclude(csv("sources_exclude"));
+    setTiersInclude(csv("tiers_include"));
+    setTiersExclude(csv("tiers_exclude"));
     setCurrentPage(1);
   }, [activeDomainProfile]);
 
@@ -2855,6 +3027,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             experienceLevels={pendingFilters.experienceLevels} setExperienceLevels={value => stageFilter("experienceLevels", value)}
             skillsInclude={pendingFilters.skillsInclude} setSkillsInclude={value => stageFilter("skillsInclude", value)}
             sponsorFriendly={pendingFilters.sponsorFriendly} setSponsorFriendly={value => stageFilter("sponsorFriendly", value)}
+            sourcesInclude={pendingFilters.sourcesInclude || []} setSourcesInclude={value => stageFilter("sourcesInclude", value)}
+            sourcesExclude={pendingFilters.sourcesExclude || []} setSourcesExclude={value => stageFilter("sourcesExclude", value)}
+            tiersInclude={pendingFilters.tiersInclude || []}   setTiersInclude={value => stageFilter("tiersInclude", value)}
+            tiersExclude={pendingFilters.tiersExclude || []}   setTiersExclude={value => stageFilter("tiersExclude", value)}
             facetCounts={facetCounts}
             onReset={resetPendingFilters}
           />
@@ -3867,6 +4043,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 importedLinkedInJobs={importedLinkedInJobs}
                 linkedinImportSummary={linkedinImportSummary}
                 onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
+                activeFilterCount={activeFilterCount}
+                onClearFilters={clearAllFilters}
                 cardTier={1}
               />
             )}
@@ -3959,6 +4137,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               importedLinkedInJobs={importedLinkedInJobs}
               linkedinImportSummary={linkedinImportSummary}
               onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
+              activeFilterCount={activeFilterCount}
+              onClearFilters={clearAllFilters}
               cardTier={effectiveTier}
               containerRef={jobsPanelElementRef}
             />
@@ -4083,9 +4263,17 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       importedLinkedInJobs = [],
                       linkedinImportSummary = { total: 0, lastImportedAt: null },
                       onRefreshImportedLinkedIn,
+                      activeFilterCount = 0, onClearFilters,
                       cardTier = 1, containerRef }) {
   const [pageInput, setPageInput] = useState("");
   const shouldShowEmptyState = jobs.length === 0 && !scraping && !showImportedLinkedInSection;
+  // An empty board has two completely different causes and only ever admitted to one of them.
+  // "Search for a role above" is right when nothing is filtered; when filters ARE narrowing the
+  // board it is a lie that costs the user their next move — they go and search again instead of
+  // widening the filter that hid everything. It is also the exact reading that let the NULL-IN
+  // outage look like an ordinary empty board for as long as it did, which is why an empty board
+  // now has to say which of the two it is.
+  const emptyBecauseFiltered = shouldShowEmptyState && activeFilterCount > 0;
   const visiblePages = buildVisiblePageItems(currentPage, totalPages);
   useEffect(() => {
     setPageInput(String(currentPage || ""));
@@ -4101,7 +4289,11 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
   return (
     <div ref={containerRef} style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
                   background: `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)` }}>
-      {shouldShowEmptyState ? <EmptyState theme={theme}/> : (
+      {shouldShowEmptyState ? (
+        emptyBecauseFiltered
+          ? <FilteredEmptyState theme={theme} count={activeFilterCount} onClearFilters={onClearFilters}/>
+          : <EmptyState theme={theme}/>
+      ) : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
           {/* Scrape error banner */}
@@ -4374,6 +4566,36 @@ function EmptyState({ theme }) {
       <div style={{ fontSize:12, textAlign:"center", color:th.textDim, maxWidth:320, lineHeight:1.8 }}>
         LinkedIn + Indeed - full-time only - deduplicated - ghost jobs filtered
       </div>
+    </div>
+  );
+}
+
+// â"€â"€ Empty state, filtered variant â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// Says WHICH empty this is and gives the one action that resolves it. Never "no jobs available" —
+// the jobs are there, the filter set is hiding them, and those are different problems with
+// different fixes. Excluding every provider or every tier lands here.
+function FilteredEmptyState({ theme, count, onClearFilters }) {
+  const { theme: t } = useTheme();
+  const th = theme || t;
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+                  justifyContent:"center", gap:14, padding:40, color:th.textDim }}>
+      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                    fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase", color:th.text,
+                    textAlign:"center" }}>
+        Your filters exclude all jobs
+      </div>
+      <div style={{ fontSize:12, textAlign:"center", color:th.textDim, maxWidth:360, lineHeight:1.8 }}>
+        {count} filter{count === 1 ? " is" : "s are"} active on this board and nothing matches all
+        of them. The postings are still there — widen or clear the filters to see them.
+      </div>
+      {onClearFilters && (
+        <button type="button" onClick={onClearFilters}
+          style={{ border:"none", borderRadius:6, padding:"8px 16px", background:th.accent,
+                   color:"#0f0f0f", fontWeight:800, fontSize:12, cursor:"pointer" }}>
+          Clear all filters
+        </button>
+      )}
     </div>
   );
 }
