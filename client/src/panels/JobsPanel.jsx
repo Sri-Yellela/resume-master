@@ -37,6 +37,11 @@ function normalizeApiJob(job) {
     salaryCurrency: job.salaryCurrency ?? job.salary_currency ?? null,
     workType:       job.workType       ?? (job.remote === true ? "Remote" : job.remote === false ? "On-site" : null),
     employmentType: job.employmentType ?? job.contract_type ?? null,
+    // mapJobRow already emits camelCase automationTier and the `...job` spread above would carry
+    // it through untouched — this line is here for the endpoints that hand this function a raw
+    // row rather than a mapped one (the poll feed), so the card gets the same field either way.
+    // null stays null: JobCard's TierChip renders null exactly as it renders 'unknown'.
+    automationTier: job.automationTier ?? job.automation_tier ?? null,
   };
 }
 
@@ -3086,6 +3091,40 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                   style={{ border:"none", background:"transparent", color:theme.textDim, cursor:"pointer", padding:0 }}>x</button>
               </span>
             ))}
+            {/* Automation tier, applied to the queue BEFORE the run starts.
+                Requirement: full-auto must never be offered for `account` or `gated`. It is not —
+                and not because of a check added here. The only action on this bar posts
+                mode:"auto" with no approvalMode, which the server treats as approval-required, so
+                every job in every queue already takes the fill-then-hold-for-a-human path. That
+                IS the semi hand-off: the human authenticates once, the resolver fills the form,
+                nothing is submitted without approval. There is no full-auto control to withhold.
+                `gated` additionally cannot be completed at all — a CAPTCHA or identity check is
+                not something to defeat, so it is named as the user's own job rather than
+                attempted. What was missing was telling the user any of this before they queued,
+                which is what this line does. */}
+            {(() => {
+              const needsAuth = applyQueue.filter(j => j.automationTier === "account");
+              const cannotAuto = applyQueue.filter(j => j.automationTier === "gated");
+              if (!needsAuth.length && !cannotAuto.length) return null;
+              return (
+                <span style={{ flexBasis:"100%", fontSize:11, color:theme.textMuted, lineHeight:1.6 }}>
+                  {needsAuth.length > 0 && (
+                    <>
+                      <strong style={{ color:"#854d0e" }}>{needsAuth.length}</strong> of these need
+                      you to sign in to the employer's account first — autofill fills the form once
+                      you have.{" "}
+                    </>
+                  )}
+                  {cannotAuto.length > 0 && (
+                    <>
+                      <strong style={{ color:"#991b1b" }}>{cannotAuto.length}</strong> sit behind a
+                      CAPTCHA or identity check and cannot be automated at all; you will need to
+                      apply to {cannotAuto.length === 1 ? "that one" : "those"} yourself.
+                    </>
+                  )}
+                </span>
+              );
+            })()}
             {applyQueue.length > 0 && (
               <>
                 {/* One action, because there is one behaviour. "Run Auto Apply" sat here alongside

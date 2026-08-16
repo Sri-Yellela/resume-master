@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { validatePlugin } from './sources/base.js';
 import { stripInternalFields, computeFingerprint, computeReqUid } from './schema.js';
 import { filterDirectApplyOnly, DIRECT_ATS_SOURCES } from './directApplyFilter.js';
+import { deriveAutomationTier } from './automationTier.js';
 import { classifyJob } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
 import { runEnrichment } from './enrichJob.js';
@@ -224,7 +225,8 @@ function getCacheStmts(db) {
            salary_min_usd, salary_max_usd, salary_period, skills_json,
            salary_min, salary_max, salary_currency,
            is_h1b_sponsor, requires_work_auth, is_clearance_required,
-           discovered_at, updated_at, is_active, fingerprint, sources_seen, req_uid)
+           discovered_at, updated_at, is_active, fingerprint, sources_seen, req_uid,
+           automation_tier)
         VALUES
           (@job_id, @search_query, @_hash, @title, @company, @location, @url, @source, @source_label,
            @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description,
@@ -233,7 +235,8 @@ function getCacheStmts(db) {
            @salary_min_usd, @salary_max_usd, @salary_period, @skills_json,
            @salary_min, @salary_max, @salary_currency,
            @is_h1b_sponsor, @requires_work_auth, @is_clearance_required,
-           @discovered_at, @updated_at, 1, @fingerprint, @sources_seen, @req_uid)
+           @discovered_at, @updated_at, 1, @fingerprint, @sources_seen, @req_uid,
+           @automation_tier)
         ON CONFLICT(job_id) DO UPDATE SET
           search_query              = excluded.search_query,
           _hash                     = excluded._hash,
@@ -261,6 +264,11 @@ function getCacheStmts(db) {
           fingerprint               = excluded.fingerprint,
           sources_seen              = excluded.sources_seen,
           req_uid                   = excluded.req_uid,
+          -- Source column, not an enrichment one: it is derived purely from source + url, both of
+          -- which take the crawl's value two lines up. COALESCE(existing, excluded) here would
+          -- pin the tier to whatever the first crawl saw and leave a posting that MOVED to a new
+          -- ATS still advertised under the old one's promise.
+          automation_tier           = excluded.automation_tier,
           -- structured range wins when the source has one, never nulls out an existing figure
           salary_min      = COALESCE(excluded.salary_min,      scraped_jobs.salary_min),
           salary_max      = COALESCE(excluded.salary_max,      scraped_jobs.salary_max),
@@ -384,6 +392,12 @@ function upsertCanonicalJob(db, {
     fingerprint:               dedup.fingerprint,
     sources_seen:              dedup.sourcesSeen,
     req_uid:                   dedup.reqUid,
+    // The single write shared by cacheJobs(), cacheJoboFeed() and importJob.js, so all three
+    // route through the one derivation. No apply_url column is written on this path — canonical.url
+    // IS the apply destination here, which is what mapJobRow hands the client as applyUrl.
+    // This is also why source alone would not do: every `jobo` row in production carries a
+    // jobs.ashbyhq.com apply URL, so the URL is what tells the truth about where the user lands.
+    automation_tier:           deriveAutomationTier(canonical.source, canonical.apply_url || canonical.url),
   });
 
   // job_role_map.role_key is NOT NULL — an unclassified import (verdict.roleKey === null,

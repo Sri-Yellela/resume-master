@@ -2152,4 +2152,30 @@ export const MIGRATIONS = [
         ALTER TABLE usage_tracking_failures ADD COLUMN source TEXT;
       `,
     },
+    {
+      // Automation tier — what the candidate will face at the apply destination, decided at
+      // browse time. services/jobs/automationTier.js owns the mapping; this column stores its
+      // output so services/jobs/jobQuery.js can filter on it in SQL. Deriving it at read time
+      // instead would force that mapping to be re-expressed as a CASE expression here, and a
+      // second copy of a mapping is exactly what left model ids half-migrated across the
+      // codebase.
+      //
+      // NULLABLE, AND NOT BACKFILLED BY THIS MIGRATION — deliberately. The backfill needs
+      // deriveAutomationTier(), which is JavaScript; writing it as a SQL CASE would create the
+      // duplicate this column exists to avoid. Existing rows are populated instead by the
+      // boot-time backfill immediately below this runner and by
+      // scripts/recomputeAutomationTier.js, both of which call that one function.
+      //
+      // So NULL is a state the board must survive: it means "written before this column
+      // existed and not yet recomputed", which is indistinguishable from 'unknown' as far as
+      // any promise to the user goes. jobQuery.js's tiers_include/tiers_exclude therefore
+      // COALESCE it to 'unknown' rather than letting `NULL IN (...)` (which is NULL, not
+      // false) silently drop the row from BOTH directions of the filter.
+      id: "078_scraped_jobs_automation_tier",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN automation_tier TEXT;
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_automation_tier
+          ON scraped_jobs(automation_tier, is_active);
+      `,
+    },
   ];

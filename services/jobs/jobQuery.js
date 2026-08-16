@@ -23,6 +23,7 @@ const ALLOWED_FIELDS = new Set([
   'workplace_type', 'valid_through', 'salary_min_usd', 'salary_max_usd', 'salary_period',
   'skills_json', 'is_h1b_sponsor', 'requires_work_auth', 'is_clearance_required',
   'discovered_at', 'updated_at', 'is_active', 'fingerprint', 'sources_seen',
+  'automation_tier',
 ]);
 
 // Facet dimensions the caller may request via include_facets. `skills` isn't a plain SQL

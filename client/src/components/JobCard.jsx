@@ -108,6 +108,45 @@ function VisaBadge({ isH1bSponsor, requiresWorkAuth }) {
   return null;
 }
 
+// ── Automation tier chip ─────────────────────────────────────────
+// What the candidate will face at the apply destination, known before they queue instead of
+// mid-run (services/jobs/automationTier.js; the runtime counterpart is applyAutomation.js's
+// classifyFlowState, which only answers once a run is already holding).
+//
+// `direct` renders NOTHING, and that is the point: it is the default and the overwhelming
+// majority of the board, so a chip on it would be noise on every card while telling the user
+// nothing they did not already assume. Chip only what changes their expectation.
+//
+// null and 'unknown' are the SAME rendering, because they mean the same thing to a user — nobody
+// has established what this destination demands. It is worded as an open question, never as
+// "one-click" and never as "needs an account"; a company careers page might be either, and saying
+// so honestly is the whole point of keeping `unknown` out of `manual`.
+//
+// Sizes match the badges it sits beside in this row (WorkBadge/VisaBadge/NewPill: radius 999,
+// 10px, 700) rather than MetaChips' own 11px, so the row reads as one set.
+const TIER_CHIP = {
+  guest:   { label:"Guest apply",  bg:"#f0f9ff", fg:"#0284c7",
+             title:"An account is offered but a guest path exists — autofill can usually complete this." },
+  account: { label:"Account req.", bg:"#fef9c3", fg:"#854d0e",
+             title:"This employer requires a self-service account. You sign in once; the resolver fills the form." },
+  gated:   { label:"Login + check", bg:"#fee2e2", fg:"#991b1b",
+             title:"Account plus a CAPTCHA or identity check — this one cannot be automated. Apply here yourself." },
+  unknown: { label:"Apply path?",  bg:"var(--color-surface-offset)", fg:"var(--color-text-muted)",
+             title:"We have not established what this destination asks for. It may apply cleanly, or may need an account." },
+};
+
+function TierChip({ tier }) {
+  if (tier === "direct") return null;                 // the default — see note above
+  const s = TIER_CHIP[tier] || TIER_CHIP.unknown;     // null/unrecognised read as unknown
+  return (
+    <span title={s.title}
+      style={{ background:s.bg, color:s.fg, padding:"2px 8px",
+               borderRadius:999, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>
+      {s.label}
+    </span>
+  );
+}
+
 // ── NEW pill (FE-1) — discoveredAt is unix seconds ───────────────
 function isNewJob(discoveredAt) {
   if (!discoveredAt) return false;
@@ -537,6 +576,7 @@ export default function JobCard({
               <WorkBadge t={job.workType} theme={theme}/>
               {isNewJob(job.discoveredAt) && <NewPill/>}
               <VisaBadge isH1bSponsor={job.isH1bSponsor} requiresWorkAuth={job.requiresWorkAuth}/>
+              <TierChip tier={job.automationTier}/>
               <span style={{ display:"flex", alignItems:"center", gap:4 }}>
                 <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>
               </span>
