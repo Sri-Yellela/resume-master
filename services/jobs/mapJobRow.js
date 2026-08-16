@@ -53,6 +53,11 @@ function mapJobRow(j) {
     experienceLevel:     j.experience_level      ?? null,
     workplaceType:       j.workplace_type        ?? null,
     skills:              parseSkillsList(j.skills_json ?? j.skills) ?? [],
+    // Automation tier (services/jobs/automationTier.js): what the candidate will face at the
+    // apply destination, known at browse time instead of mid-run. null here means the row predates
+    // migration 078 and has not been recomputed yet — the client must read that exactly the way it
+    // reads 'unknown' (no promise in either direction), never as 'direct'.
+    automationTier:      j.automation_tier       ?? j.automationTier ?? null,
     discoveredAt:        j.discovered_at         ?? null,
     summary:             j.summary               ?? null,
     validThrough:        j.valid_through         ?? null,

@@ -98,6 +98,8 @@ import {
   FACET_DIMENSIONS,
 } from "./services/jobs/jobQuery.js";
 import { mapJobRow } from "./services/jobs/mapJobRow.js";
+import { deriveAutomationTier } from "./services/jobs/automationTier.js";
+import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
@@ -2487,6 +2489,32 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE usage_tracking_failures ADD COLUMN source TEXT;
       `,
     },
+    {
+      // Automation tier — what the candidate will face at the apply destination, decided at
+      // browse time. services/jobs/automationTier.js owns the mapping; this column stores its
+      // output so services/jobs/jobQuery.js can filter on it in SQL. Deriving it at read time
+      // instead would force that mapping to be re-expressed as a CASE expression here, and a
+      // second copy of a mapping is exactly what left model ids half-migrated across the
+      // codebase.
+      //
+      // NULLABLE, AND NOT BACKFILLED BY THIS MIGRATION — deliberately. The backfill needs
+      // deriveAutomationTier(), which is JavaScript; writing it as a SQL CASE would create the
+      // duplicate this column exists to avoid. Existing rows are populated instead by the
+      // boot-time backfill immediately below this runner and by
+      // scripts/recomputeAutomationTier.js, both of which call that one function.
+      //
+      // So NULL is a state the board must survive: it means "written before this column
+      // existed and not yet recomputed", which is indistinguishable from 'unknown' as far as
+      // any promise to the user goes. jobQuery.js's tiers_include/tiers_exclude therefore
+      // COALESCE it to 'unknown' rather than letting `NULL IN (...)` (which is NULL, not
+      // false) silently drop the row from BOTH directions of the filter.
+      id: "078_scraped_jobs_automation_tier",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN automation_tier TEXT;
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_automation_tier
+          ON scraped_jobs(automation_tier, is_active);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -2507,6 +2535,29 @@ console.log(`[boot] database ready: ${DB_PATH}`);
     }
   }
   console.log(`[boot] migrations complete (${migrationCount} applied)`);
+
+// Populate migration 078's automation_tier for rows written before it existed. This is here
+// rather than inside the migration because the derivation is JavaScript
+// (services/jobs/automationTier.js) and re-expressing it as a SQL CASE would create the second
+// copy of the mapping the stored column exists to avoid.
+//
+// NULL-only by default, so it is a no-op on every boot after the first and costs one indexed
+// scan. It does NOT re-derive existing values: a mapping change needs
+// `node scripts/recomputeAutomationTier.js --all`, which is the documented admin action, because
+// silently rewriting stored tiers on every restart would hide when the mapping moved.
+//
+// Never fatal. A board whose tiers are NULL still works — jobQuery.js reads NULL as 'unknown' in
+// both directions of the tier filter — so failing the boot over it would trade a degraded label
+// for an outage.
+try {
+  const tierFill = backfillAutomationTier(db);
+  if (tierFill.updated > 0) {
+    console.log(`[boot] automation_tier backfilled: ${tierFill.updated} of ${tierFill.scanned} rows ` +
+      `(${Object.entries(tierFill.byTier).map(([t, n]) => `${t}=${n}`).join(" ")})`);
+  }
+} catch (e) {
+  console.error("[boot] automation_tier backfill failed (board falls back to 'unknown'):", e.message);
+}
 
 // Drain the out-of-process failure sink now that the database is known reachable. Anything the
 // sink caught while it was NOT reachable is imported as source='sink_recovered', so coverage
@@ -2937,8 +2988,8 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
      is_frequent_repost, _hash, scraped_at, source_platform,
      salary_min, salary_max, salary_currency, applicant_count, company_icon_url,
      employment_type, domain_profile_id, collar, classification_confidence,
-     fingerprint, sources_seen, req_uid)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     fingerprint, sources_seen, req_uid, automation_tier)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
   const rejectJobStmt  = db.prepare(`
@@ -3024,6 +3075,10 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         dedup.fingerprint,
         dedup.sourcesSeen,
         dedup.reqUid,
+        // Same (source, apply_url ?? url) contract every other writer uses. This is the one path
+        // that actually populates apply_url, and it is the destination that decides the tier —
+        // item.url is the LinkedIn posting page, item.applyUrl is where the candidate lands.
+        deriveAutomationTier('LinkedIn', item.applyUrl || item.url),
       );
       if (result.changes > 0) inserted++;
       else if (domainProfileId) {
@@ -5467,12 +5522,12 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
               (job_id, _hash, title, company, location, url, source, source_label,
                via, bucket_role, bucket_seniority, bucket_domain,
                company_icon_url, direct_apply, posted_at, scraped_at,
-               fingerprint, sources_seen, req_uid)
+               fingerprint, sources_seen, req_uid, automation_tier)
             VALUES
               (@job_id, @_hash, @title, @company, @location, @url, @source, @source_label,
                @via, @bucket_role, @bucket_seniority, @bucket_domain,
                @company_icon_url, @direct_apply, @posted_at, strftime('%s','now'),
-               @fingerprint, @sources_seen, @req_uid)
+               @fingerprint, @sources_seen, @req_uid, @automation_tier)
           `);
           const insertMany = db.transaction((jobs) => {
             for (const j of jobs) {
@@ -5511,6 +5566,9 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
                 fingerprint:      dedup.fingerprint,
                 sources_seen:     dedup.sourcesSeen,
                 req_uid:          dedup.reqUid,
+                // This insert writes no apply_url column at all, so `url` IS the apply
+                // destination — the same value mapJobRow will hand the client as applyUrl.
+                automation_tier:  deriveAutomationTier(j.source || 'serpapi', j.url || ''),
               });
             }
           });

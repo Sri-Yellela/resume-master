@@ -27,7 +27,10 @@ function db0() {
       skills_json TEXT, is_h1b_sponsor INTEGER, requires_work_auth INTEGER,
       is_clearance_required INTEGER, org_unit_raw TEXT, content_hash TEXT, enriched_at INTEGER,
       discovered_at INTEGER, updated_at INTEGER,
-      is_active INTEGER DEFAULT 1, fingerprint TEXT, sources_seen TEXT, req_uid TEXT
+      is_active INTEGER DEFAULT 1, fingerprint TEXT, sources_seen TEXT, req_uid TEXT,
+      -- migration 078: this fixture hand-rolls the schema, so it has to track the real one or
+      -- the aggregator's upsert fails against it (which is how this column's absence surfaced).
+      automation_tier TEXT
     );
     CREATE TABLE job_role_map (
       job_id TEXT PRIMARY KEY,
