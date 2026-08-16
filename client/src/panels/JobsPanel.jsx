@@ -1303,11 +1303,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     ? `/api/domain-profiles/${activeDomainProfile.id}/adopt-enhanced`
     : null;
 
+  // Distinguishes "the profile list came back empty" from "the profile list has not come back".
+  // fetchJobs keys its board-clearing branch off this — see the note there.
+  const profilesLoadedRef = useRef(false);
+
   // Load domain profiles on mount and seed the shared active profile id.
   useEffect(() => {
     api("/api/domain-profiles")
       .then(rows => {
         const profiles = Array.isArray(rows) ? rows : [];
+        profilesLoadedRef.current = true;
         setDomainProfiles(profiles);
         const active = profiles.find(p => p.is_active) || profiles[0];
         if (active && !activeProfileId) setActiveProfileId?.(active.id);
@@ -1868,9 +1873,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const fetchJobs = useCallback(async (page = 1, mergeMode = false, options = {}) => {
     if (boardTab === "pending") { fetchPending(); return; }
     if (!activeDomainProfile) {
-      setJobs([]);
-      setTotalJobs(0);
-      setTotalPages(0);
+      // "No active profile" has two causes that must not be treated alike: the profile list has
+      // genuinely come back empty (a new account — clear the board, setupBlock takes over the
+      // UI), or /api/domain-profiles simply has not answered yet. Clearing on the second is how
+      // a transient loading state became data loss: any caller reaching here early wiped a board
+      // that had already loaded, and nothing refetched afterwards because no dependency had
+      // changed. Absence of an answer is not an answer — leave what is on screen alone.
+      if (profilesLoadedRef.current) {
+        setJobs([]);
+        setTotalJobs(0);
+        setTotalPages(0);
+      }
       // setupBlock already gates the UI — no need to set scrapeError here
       return;
     }
@@ -2033,12 +2046,36 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setSearchPhase("idle");
   }, [activeProfileKey, searchInput]);
 
-  // Debounced backend search — fires 300ms after user stops typing
+  // Debounced backend search — fires 300ms after user stops typing.
+  //
+  // Two things here are load-bearing, and the board came up empty on every cold load without
+  // them.
+  //
+  // 1. It must NOT fire on mount. `localSearch` starts "" and this effect ran once anyway, 300ms
+  //    after mount — a "search" for the empty string that nobody typed. The board is already
+  //    being loaded by the boot effect and the refetch effect, so that call was never needed;
+  //    it only raced them.
+  //
+  // 2. It must call through fetchJobsRef, not the captured `fetchJobs`. The dep array is
+  //    [localSearch] alone, so when localSearch never changes the effect never re-runs and the
+  //    timer keeps the closure from the FIRST render — the render where /api/domain-profiles had
+  //    not answered yet, so activeDomainProfile was still null. That stale closure hit
+  //    fetchJobs' "no active profile" branch and called setJobs([]) 300ms in, wiping the 11 jobs
+  //    the real fetch had just delivered ~170ms earlier. Traced in a browser: `fetchJobs SET
+  //    {total:11}` at +3661ms, then `fetchJobs ENTER {hasProfile=false, nProfiles=0}` at +3838ms
+  //    while the component's own next render logged nProfiles:1 — the call was reading a dead
+  //    render's state. fetchJobsRef is already maintained a few lines above for exactly this
+  //    hazard (startPollLoop's empty deps); this is the second caller that needed it.
+  const searchDebounceReady = useRef(false);
   useEffect(() => {
+    // The mount-skip is checked BEFORE the `user` guard on purpose. Putting it after would leave
+    // the flag unset whenever the component mounts logged-out, and the user's FIRST real search
+    // would then be swallowed as if it were the mount run.
+    if (!searchDebounceReady.current) { searchDebounceReady.current = true; return; }
     if (!user) return;
     const timer = setTimeout(() => {
       setCurrentPage(1);
-      fetchJobs(1);
+      fetchJobsRef.current?.(1);
     }, 300);
     return () => clearTimeout(timer);
   }, [localSearch]); // eslint-disable-line react-hooks/exhaustive-deps
