@@ -165,6 +165,65 @@ export function PrivacyPage() {
             </LI>
           </UL>
 
+          <H3>Filling an Application</H3>
+          <P>
+            Some employers require an account, or a CAPTCHA, before they will accept an
+            application. You cross that sign-in yourself, in your own browser. Once you are
+            through it and looking at the application form, you can invoke the extension to fill
+            it in. Specifically:
+          </P>
+          <UL>
+            <LI>
+              The extension only reaches that page because <Strong>you invoked it there</Strong>.
+              It holds no standing permission for any employer or job-portal site; pressing the
+              shortcut is what grants it access, to that one tab, at that moment.
+            </LI>
+            <LI>
+              It fetches from your Resume Master account the details you have already saved there
+              — your name, email, phone, postal address, work-authorization answers and your
+              resume — and enters them into that employer's form. This is{" "}
+              <Strong>your own data, going to the employer you chose</Strong>, and it goes nowhere
+              else.
+            </LI>
+            <LI>
+              It shows you every answer it filled in, and where each one came from, before you do
+              anything. You can change any of them.
+            </LI>
+            <LI>
+              It does <Strong>not</Strong> submit the application. You press the employer's own
+              submit button.
+            </LI>
+            <LI>
+              It does <Strong>not</Strong> sign you in, create an account for you, or attempt a
+              CAPTCHA, and it never reads or stores any employer's password, session cookie or
+              verification code.
+            </LI>
+            <LI>
+              The prepared answers are held only while you are working on that application: in
+              memory-backed browser storage, for ten minutes, and cleared when the tab closes.
+            </LI>
+          </UL>
+
+          <H3>Learning an Application Form (optional, off by default)</H3>
+          <P>
+            If you turn it on, the extension can report back the <Strong>structure</Strong> of an
+            application form it filled — the questions it asks, their types, which are required,
+            and the options in any dropdowns. We use this so the same employer's form is
+            recognised for other candidates. This setting is <Strong>off unless you switch it
+            on</Strong>, and it is enforced on our servers, not just in the extension.
+          </P>
+          <UL>
+            <LI>
+              We store the form's <Strong>questions</Strong>, never your{" "}
+              <Strong>answers</Strong> — not the values you typed, not anything about you, and
+              nothing from the page other than the form's shape.
+            </LI>
+            <LI>
+              What is stored is a fact about the employer's form, not about you. It is not linked
+              to your account.
+            </LI>
+          </UL>
+
           <H3>Usage Data</H3>
           <P>
             We collect standard server logs (IP address, browser type, pages visited, timestamps)
