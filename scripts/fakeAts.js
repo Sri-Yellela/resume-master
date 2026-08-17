@@ -22,6 +22,10 @@
  *   GET  /greenhouse           2-step form (traps: sponsorship inversion, name ambiguity)
  *   GET  /lever                1-step form (traps: lowercase yes/no, "Review and Submit")
  *   GET  /ashby                1-step form (traps: required typeahead, date format)
+ *   GET  /multistep            2-step form offering BOTH navigation styles from one step 1
+ *                              (real POST -> new document, history.pushState -> same document)
+ *                              plus a cross-origin control. Built for TASK G0: whether an
+ *                              activeTab grant survives a step transition.
  *   GET  /spa                  JS-RENDERED form — fields injected in two chunks after a delay
  *                              (?delay=ms, default 2500; ?delay=0 renders synchronously).
  *                              Reproduces the hydration timing every real ATS has and that
@@ -295,6 +299,94 @@ function spaForm(delayMs) {
   </script>`);
 }
 
+// ── G0: multi-step form carrying BOTH navigation styles ──────────────────────
+// Exists for TASK G0 in docs/GATED_HANDOFF_PROMPTS.md. Chrome revokes an activeTab grant when
+// the tab "navigates away", and the entire interaction model of the gated handoff turns on
+// whether a portal's own step transition counts as navigating away. Workday and Amazon paginate
+// both ways — sometimes a real document load, sometimes an SPA route change — and there is no
+// reason to assume the two behave alike.
+//
+// So one step 1 carries THREE advance controls, identical in outcome and different only in
+// mechanism:
+//   #adv-post    real form POST -> a NEW document at the same origin
+//   #adv-spa     history.pushState + DOM rewrite -> SAME document, new URL, no load
+//   #adv-cross   a DIFFERENT origin (127.0.0.1 instead of localhost, same server) — the CONTROL.
+//                A probe reporting "grant survived" here is broken; without this case a passing
+//                result cannot be told apart from a probe that never observes a revocation.
+//
+// Every page stamps window.__g0DocId at parse time. A probe reading the same id before and after
+// an advance proves the document was never replaced, so "same-document" is observed rather than
+// asserted from the mechanism's name. Both advance paths render a byte-identical field set from
+// step2FieldsHtml(), because the probe counts controls and a differing count would be read as a
+// grant difference.
+//
+// G0-SPIKE is in every title on purpose: a chrome.commands hotkey can only be delivered as real
+// keyboard input to a focused OS window, so the harness has to locate this window by title.
+const g0DocStamp =
+  `<script>window.__g0DocId='doc-'+Math.random().toString(36).slice(2,10);</script>`;
+
+function step2FieldsHtml() {
+  return `
+    ${field('Years of professional experience',
+      `<input type="number" name="years_experience" min="0" required>`, true)}
+    ${field('Earliest start date', `<input type="date" name="start_date">`)}
+    ${field('LinkedIn Profile', `<input type="url" name="linkedin">`)}
+    ${field('Are you legally authorized to work in the country of employment?',
+      `<select name="legally_authorized" aria-required="true">
+         <option value="">Select...</option>
+         <option value="Yes">Yes</option>
+         <option value="No">No</option>
+       </select>`, true)}`;
+}
+
+function multistepStep1() {
+  const step2 = step2FieldsHtml();
+  return page('G0-SPIKE Multi-step — Step 1', `
+  ${g0DocStamp}
+  <h1>Multi-step application — Step 1</h1>
+  <p>Three ways to reach step 2. Only the mechanism differs.</p>
+  <!-- novalidate: the G0 probe is read-only — it counts controls and never types into one — so
+       constraint validation would block the real-POST advance and the trial would time out instead
+       of measuring anything. The required flags stay for anything else reading this fixture. -->
+  <form id="step1form" method="POST" action="/multistep/step2" novalidate>
+    ${field('First Name', `<input name="first_name" required>`, true)}
+    ${field('Last Name',  `<input name="last_name" required>`, true)}
+    ${field('Email',      `<input name="email" type="email" required>`, true)}
+    <button id="adv-post" type="submit">Next — real POST (new document)</button>
+  </form>
+  <div id="app"></div>
+  <button id="adv-spa" type="button">Next — pushState (same document)</button>
+  <p><a id="adv-cross" href="http://127.0.0.1:${PORT}/multistep">Different origin (control)</a></p>
+  <script>
+  (function(){
+    var STEP2 = ${JSON.stringify(step2)};
+    document.getElementById('adv-spa').addEventListener('click', function(){
+      // Order matters: rewrite first, then push. A grant revoked by the URL change would
+      // otherwise be indistinguishable from one revoked by the DOM replacement.
+      document.getElementById('step1form').remove();
+      this.remove();
+      document.getElementById('app').innerHTML =
+        '<h2>Step 2 of 2 — Eligibility (SPA)</h2>' + STEP2;
+      history.pushState({ step: 2 }, '', '/multistep/step2?spa=1');
+    });
+  })();
+  </script>`);
+}
+
+function multistepStep2(carry = {}) {
+  const hidden = Object.entries(carry)
+    .map(([k, v]) => `<input type="hidden" name="${k}" value="${escapeHtml(String(v))}">`).join('');
+  return page('G0-SPIKE Multi-step — Step 2', `
+  ${g0DocStamp}
+  <h1>Multi-step application — Step 2</h1>
+  <p>Reached by a real document load.</p>
+  <form method="POST" action="/_submit/multistep">
+    ${hidden}
+    ${step2FieldsHtml()}
+    <button type="submit">Submit Application</button>
+  </form>`);
+}
+
 // ── Workday-flavoured IFRAME form ────────────────────────────────────────────
 // The non-greenhouse coverage case. platformDetector.usesIframe() is true for workday, icims and
 // taleo — three of the nine providers outside the v1 full-auto allowlist — yet nothing in this
@@ -353,6 +445,8 @@ function indexPage() {
     <li><a href="/lever">/lever</a> — 1-step (lowercase yes/no, "Review and Submit" button)</li>
     <li><a href="/spa">/spa</a> — JS-rendered, fields appear after a delay (SPA hydration)</li>
     <li><a href="/ashby">/ashby</a> — 1-step (required typeahead, non-ISO date)</li>
+    <li><a href="/multistep">/multistep</a> — 2-step offering a real POST, a pushState advance and
+      a cross-origin control from one step 1 (TASK G0: activeTab grant lifetime)</li>
   </ul>
   <p><a href="/_submissions">/_submissions</a> — recorded submissions (JSON). Each record carries
   <code>fields</code> (text parts), <code>files</code> (uploads — <code>null</code> where the input
@@ -446,6 +540,10 @@ const server = http.createServer(async (req, res) => {
       const q = url.searchParams.get('delay');
       return send(200, spaForm(q === null ? undefined : Number(q)));
     }
+    if (path === '/multistep')       return send(200, multistepStep1());
+    // Also GET-able so the pushState URL is a real address — a reload after an SPA advance must
+    // land on the same step rather than a 404, as it does on a real portal.
+    if (path === '/multistep/step2') return send(200, multistepStep2());
     if (path === '/workday')       return send(200, workdayShell());
     if (path === '/workday/inner') return send(200, workdayInner());
     if (path === '/workday/decoy') return send(200, workdayDecoy());
@@ -469,6 +567,10 @@ const server = http.createServer(async (req, res) => {
 
     if (path === '/greenhouse/step2') {
       return send(200, greenhouseStep2(fields, files));
+    }
+
+    if (path === '/multistep/step2') {
+      return send(200, multistepStep2(fields));
     }
 
     if (path.startsWith('/_submit/')) {
