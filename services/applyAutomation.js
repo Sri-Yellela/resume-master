@@ -144,6 +144,12 @@ export const AUTO_SUBMIT_MIN_CONFIDENCE = 0.8;
 // (requirement 6). Only the two exact paths clear a prefilled field.
 export const CLEAR_FIRST_MIN_CONFIDENCE = 0.9;
 
+// The flow states that are GATES: a human can cross them, so the run holds with a prepared packet
+// rather than failing (TASK G1, docs/GATED_HANDOFF_ARCHITECTURE.md §3). Deliberately NOT including
+// 'expired' — an expired posting has nothing behind it for a human to finish, and conflating the two
+// would offer a handoff for an application that cannot exist.
+export const GATE_FLOW_STATES = new Set(['login_required', 'captcha_required']);
+
 // -- Eligibility-class fields ---------------------------------------------------
 // A wrong answer here is a materially false attestation to an employer, so these resolve by exact
 // mapping or not at all — never by fuzzy label matching. Order matters: a label may mention two
@@ -1873,13 +1879,23 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     const flowState = await classifyFlowState(page, originalDomain);
 
     // Terminal states
-    if (isUnattended && (flowState === 'login_required' || flowState === 'captcha_required' || flowState === 'expired')) {
+    if (isUnattended && (GATE_FLOW_STATES.has(flowState) || flowState === 'expired')) {
       const pageTitle = await page.title().catch(() => "");
       const ss = await takeScreenshot(page, jobId);
-      inProgress.set(String(jobId), { status: flowState, browser: null });
+      // A GATE is not a failure and not the same thing as an expired posting, which is why the two
+      // now part company here. `expired` means there is nothing to apply to; a gate means there IS,
+      // and a human can finish it. G1 gives the gate its own terminal status so routes/apply.js can
+      // park a packet for the handoff — and so the ~14 endpoints that key on status='held_review'
+      // stop picking up jobs whose form was never even reached.
+      const isGate = GATE_FLOW_STATES.has(flowState);
+      // Read before the browser closes: this is where the human has to go, after any redirect the
+      // portal performed on the way to its sign-in page. jobUrl is where we STARTED, which for a
+      // gated portal is frequently not where we ended up.
+      const gateUrl = isGate ? await page.url() : null;
+      inProgress.set(String(jobId), { status: isGate ? 'held_gate' : flowState, browser: null });
       await browser.close();
       return {
-        status:           flowState,
+        status:           isGate ? 'held_gate' : flowState,
         reasonCode:       flowState,
         flowState,
         fieldsFilled:     totalFilled,
@@ -1887,6 +1903,21 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         pageTitle,
         screenshotBase64: ss.base64,
         screenshotPath:   ss.path,
+        // Gate-only, so an `expired` result keeps exactly the shape it had.
+        //
+        // `answers` is withheld for login_required ON PURPOSE. classifyFlowState returns that state
+        // because it found a password field or a /signin URL — meaning the controls discovery walked
+        // belong to a CREDENTIAL form, not to the application. Passing them on would build the packet
+        // from a sign-in page's email box and label the result 'discovered_form', which is a worse
+        // packet than resolving the canonical questions from the profile, and a confidently wrong one.
+        //
+        // captcha_required is the opposite case: the challenge usually sits on the real application
+        // form, so those answers are genuine field-matched evidence and are better than anything
+        // reconstructed.
+        ...(isGate ? {
+          gate: { flowState, applyUrl: gateUrl, startedFrom: jobUrl },
+          answers: flowState === 'captcha_required' ? resolvedAnswers : [],
+        } : {}),
       };
     }
 

@@ -164,7 +164,15 @@ is a separate question and still G4's gate; it has not been re-measured here.
 - ~~Does the `activeTab` grant survive in-portal step navigation?~~ **SETTLED in G0 — see §9.**
 - Web Store re-submission: the extension is published at v1.2.0. Any manifest change ships on
   review latency. Batch manifest changes into one submission.
-- Whether `held_gate` is a new terminal status or a reason code on the existing `held_review`.
+- ~~Whether `held_gate` is a new terminal status or a reason code on the existing `held_review`.~~
+  **SETTLED in G1: a new terminal status `held_gate`.** The deciding fact was in the code rather than
+  in the trade-off as stated: `routes/apply.js` has ~14 queries keyed on `status='held_review'`, and a
+  gate already landed there — `finalStatus`'s fallback made it `held_review` with
+  `reason_code='login_required'`. So a reason code was not the conservative option, it was the status
+  quo, and it meant the review and approval endpoints already saw jobs whose form was never reached.
+  A distinct status makes them invisible to all fourteen without an exclusion having to be remembered
+  in each one. `expired` deliberately did NOT move with them: there is nothing behind an expired
+  posting for a human to finish.
 - Whether schema capture is opt-in per user. It sends no personal data, but it does report on a
   page behind that user's authenticated session, which is worth an explicit consent decision.
 

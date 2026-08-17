@@ -299,6 +299,44 @@ function spaForm(delayMs) {
   </script>`);
 }
 
+// ── G1: a portal that demands an account before it will show the form ────────
+// The gated case, which nothing here could reproduce: Meta, Amazon, Google and per-tenant Workday
+// all want a session before an application exists. classifyFlowState already detects it
+// (login_required / captcha_required) but there was no local target to detect it ON, so the gate
+// branch of autoApply had never been exercised end to end.
+//
+// /gated 302s to /gated/signin, which carries a password field and a /signin URL — the two signals
+// classifyFlowState reads. There is deliberately NO application form on the sign-in page: that is the
+// whole point of the case, and it is what makes the packet fall back to the canonical profile
+// resolution rather than to discovered fields.
+//
+// NOTHING HERE CAN BE AUTOMATED PAST. There is no valid credential, by design — the hard boundary is
+// that a human crosses every gate. The form posts nowhere and the harness must never try.
+function gatedSignin() {
+  return page('Sign in to continue — Careers', `
+  <h1>Sign in to apply</h1>
+  <p>You need an account with us before you can apply to this role.</p>
+  <form method="POST" action="/gated/signin">
+    ${field('Email', `<input name="login_email" type="email" required>`, true)}
+    ${field('Password', `<input name="login_password" type="password" required>`, true)}
+    <button type="submit">Sign in</button>
+  </form>
+  <p style="font-size:12px;color:#666">There is no valid credential here on purpose. This route exists
+  so the gate can be OBSERVED, not crossed — see the hard boundary in
+  docs/GATED_HANDOFF_PROMPTS.md. A run reaching this page must end held_gate with a packet.</p>`);
+}
+
+function gatedCaptcha() {
+  return page('Verify you are human — Careers', `
+  <h1>Verify you are human</h1>
+  <p>Complete the challenge to continue to the application.</p>
+  <div class="g-recaptcha" data-sitekey="fake-site-key-not-real">
+    <iframe title="reCAPTCHA" src="about:blank" style="width:300px;height:74px;border:1px solid #ccc"></iframe>
+  </div>
+  <p style="font-size:12px;color:#666">A fixture, not a real challenge, and not solvable — solving one
+  is permanently out of scope. It exists so captcha_required can be observed.</p>`);
+}
+
 // ── G0: multi-step form carrying BOTH navigation styles ──────────────────────
 // Exists for TASK G0 in docs/GATED_HANDOFF_PROMPTS.md. Chrome revokes an activeTab grant when
 // the tab "navigates away", and the entire interaction model of the gated handoff turns on
@@ -447,6 +485,9 @@ function indexPage() {
     <li><a href="/ashby">/ashby</a> — 1-step (required typeahead, non-ISO date)</li>
     <li><a href="/multistep">/multistep</a> — 2-step offering a real POST, a pushState advance and
       a cross-origin control from one step 1 (TASK G0: activeTab grant lifetime)</li>
+    <li><a href="/gated">/gated</a> — 302 to a sign-in wall, no form behind it
+      (TASK G1: login_required → held_gate + packet). <a href="/gated/captcha">/gated/captcha</a>
+      is the captcha_required variant. Neither is crossable, by design.</li>
   </ul>
   <p><a href="/_submissions">/_submissions</a> — recorded submissions (JSON). Each record carries
   <code>fields</code> (text parts), <code>files</code> (uploads — <code>null</code> where the input
@@ -540,6 +581,15 @@ const server = http.createServer(async (req, res) => {
       const q = url.searchParams.get('delay');
       return send(200, spaForm(q === null ? undefined : Number(q)));
     }
+    // A 302 rather than serving the sign-in directly, because that is what a real portal does and it
+    // is what makes the run's final URL differ from the URL it was queued with — the reason the gate
+    // packet stores the URL the gate was OBSERVED at.
+    if (path === '/gated') {
+      res.writeHead(302, { Location: '/gated/signin' });
+      return res.end();
+    }
+    if (path === '/gated/signin')  return send(200, gatedSignin());
+    if (path === '/gated/captcha') return send(200, gatedCaptcha());
     if (path === '/multistep')       return send(200, multistepStep1());
     // Also GET-able so the pushState URL is a real address — a reload after an SPA advance must
     // land on the same step rather than a 404, as it does on a real portal.
