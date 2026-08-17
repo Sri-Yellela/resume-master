@@ -337,6 +337,57 @@ function gatedCaptcha() {
   is permanently out of scope. It exists so captcha_required can be observed.</p>`);
 }
 
+// ── G1/G3: the application form BEHIND the gate ──────────────────────────────
+// What the candidate reaches after signing in themselves — the page the extension hands off onto.
+// Nothing here is reachable by the server; it exists so G2's fill and G3's review overlay have a
+// realistic target, and it carries the traps that make the review worth reading:
+//
+//   job_application[requires_sponsorship]  Greenhouse's real naming. An eligibility answer must
+//                                          still be matched here, by unwrapping the namespace —
+//                                          exact-name-only would never fill it on any real ATS.
+//   work_authorization                     bare canonical name, the easy case
+//   org / "Current Company"                no name match; only a LABEL match can fill it, which is
+//                                          what makes it a guess the overlay must ask about
+//   authorized_no_sponsorship              the INVERSION trap: same words, opposite sense. Nothing
+//                                          may fill this from a `requires_sponsorship` answer.
+function gatedForm() {
+  return page('G3-TRAPS Senior Engineer — Application', `
+  <h1>Senior Engineer</h1>
+  <p>Signed in. Complete your application.</p>
+  <form method="POST" action="/_submit/gated" enctype="multipart/form-data">
+    ${field('First Name', `<input name="first_name" required>`, true)}
+    ${field('Last Name',  `<input name="last_name" required>`, true)}
+    ${field('Email',      `<input name="email" type="email" required>`, true)}
+    ${field('Phone',      `<input name="phone" type="tel">`)}
+    ${field('Resume', `<input type="file" name="resume" accept=".pdf" required>`, true)}
+
+    <fieldset><legend>TRAP: label-only match</legend>
+      ${field('Current Company', `<input name="org">`)}
+    </fieldset>
+
+    <fieldset><legend>Eligibility</legend>
+      ${field('Do you now or in the future require sponsorship for work authorization?',
+        `<select name="job_application[requires_sponsorship]" aria-required="true">
+           <option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option>
+         </select>`, true)}
+      ${field('Are you legally authorized to work in the country of employment?',
+        `<select name="work_authorization" aria-required="true">
+           <option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option>
+         </select>`, true)}
+    </fieldset>
+
+    <fieldset><legend>TRAP: sponsorship_inversion</legend>
+      <p style="font-size:13px;color:#666">Same words as the question above, opposite sense. A
+      <code>requires_sponsorship: "No"</code> answer placed here would attest the opposite of the
+      truth. Nothing may fill it.</p>
+      ${field('I am authorized to work without sponsorship',
+        `<input type="checkbox" name="authorized_no_sponsorship">`)}
+    </fieldset>
+
+    <button type="submit">Submit Application</button>
+  </form>`);
+}
+
 // ── G0: multi-step form carrying BOTH navigation styles ──────────────────────
 // Exists for TASK G0 in docs/GATED_HANDOFF_PROMPTS.md. Chrome revokes an activeTab grant when
 // the tab "navigates away", and the entire interaction model of the gated handoff turns on
@@ -487,7 +538,9 @@ function indexPage() {
       a cross-origin control from one step 1 (TASK G0: activeTab grant lifetime)</li>
     <li><a href="/gated">/gated</a> — 302 to a sign-in wall, no form behind it
       (TASK G1: login_required → held_gate + packet). <a href="/gated/captcha">/gated/captcha</a>
-      is the captcha_required variant. Neither is crossable, by design.</li>
+      is the captcha_required variant. Neither is crossable, by design.
+      <a href="/gated/form">/gated/form</a> is what waits behind it — the handoff target for G2/G3,
+      carrying the sponsorship-inversion and label-only-match traps.</li>
   </ul>
   <p><a href="/_submissions">/_submissions</a> — recorded submissions (JSON). Each record carries
   <code>fields</code> (text parts), <code>files</code> (uploads — <code>null</code> where the input
@@ -589,6 +642,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     if (path === '/gated/signin')  return send(200, gatedSignin());
+    // The form the candidate reaches after crossing the gate themselves — G2 fills it, G3 reviews it.
+    if (path === '/gated/form')    return send(200, gatedForm());
     if (path === '/gated/captcha') return send(200, gatedCaptcha());
     if (path === '/multistep')       return send(200, multistepStep1());
     // Also GET-able so the pushState URL is a real address — a reload after an SPA advance must

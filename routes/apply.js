@@ -1491,6 +1491,67 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     });
   });
 
+  /**
+   * What the candidate actually saw and did before submitting (TASK G3 requirement 6).
+   *
+   * For a gated application this is the ONLY record of human review: the submission happens in the
+   * candidate's own browser, on a portal we cannot reach, so nothing else observes it. Written to its
+   * own column rather than merged into answers_json — those are two claims made at different times by
+   * different parties, and merging them would make it impossible to say afterwards whether a value
+   * was the resolver's or the candidate's correction.
+   *
+   * Idempotent by overwrite: the overlay reports its state on every change, and the last report is
+   * the one that describes what the candidate ended up looking at.
+   */
+  app.post("/api/apply/gate-review", requireAuth, (req, res) => {
+    const runJobId = Number(req.body?.runJobId);
+    if (!Number.isInteger(runJobId) || runJobId <= 0) return res.status(400).json({ error: "bad_run_job_id" });
+
+    const rj = db.prepare("SELECT id, run_id, job_id FROM apply_run_jobs WHERE id=? AND user_id=?")
+      .get(runJobId, req.user.id);
+    if (!rj) return res.status(404).json({ error: "not_found" });
+
+    const acknowledged = Array.isArray(req.body?.acknowledged) ? req.body.acknowledged.map(String).slice(0, 200) : [];
+    // Field identity and the fact of a change, never the new value. A correction is the candidate's
+    // own data and the audit question is WHAT THEY CHANGED, not what they changed it to — which is
+    // already going to the employer either way.
+    const edits = (Array.isArray(req.body?.edits) ? req.body.edits : []).slice(0, 200)
+      .map(e => ({ field: String(e?.key ?? "").slice(0, 200), changed: true }));
+
+    const record = {
+      version: 1,
+      packetId: req.body?.packetId ?? null,
+      ready: req.body?.ready === true,
+      acknowledgedCount: acknowledged.length,
+      acknowledged,
+      editedCount: edits.length,
+      edits,
+      recordedAt: Math.floor(Date.now() / 1000),
+    };
+
+    try {
+      const cols = new Set(db.prepare("PRAGMA table_info(apply_run_jobs)").all().map(c => c.name));
+      if (!cols.has("gate_review_json")) {
+        // Same posture as the audit columns: an un-migrated deployment degrades to the event log
+        // rather than failing the candidate's review.
+        logEvent(rj.run_id, rj.id, req.user.id, rj.job_id, "gate_review_recorded",
+          "Gate review recorded (event only — run migration 080)", record);
+        return res.json({ ok: true, persisted: "event_only" });
+      }
+      db.prepare("UPDATE apply_run_jobs SET gate_review_json=? WHERE id=? AND user_id=?")
+        .run(JSON.stringify(record), runJobId, req.user.id);
+      logEvent(rj.run_id, rj.id, req.user.id, rj.job_id, "gate_review_recorded",
+        record.ready
+          ? `Candidate reviewed: ${record.acknowledgedCount} acknowledged, ${record.editedCount} corrected`
+          : `Candidate review in progress: ${record.acknowledgedCount} acknowledged`,
+        record);
+      res.json({ ok: true, persisted: "column" });
+    } catch (e) {
+      console.warn("[applyRoutes] gate review persist failed:", e.message);
+      res.status(500).json({ error: "persist_failed" });
+    }
+  });
+
   // ── Queue-then-approve ───────────────────────────────────────────────────────
   // An 'auto' run now previews by default: it fills the form, runs every gate, stops short of the
   // click and parks. Approving releases a job to a run that submits — and that run refuses if the

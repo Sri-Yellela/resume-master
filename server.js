@@ -2558,6 +2558,25 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON apply_gate_packets(user_id, expected_origin, consumed_at);
       `,
     },
+    {
+      // What a human actually saw before an application went out (TASK G3, §4's review-as-provenance).
+      // The audit trail already records what was ANSWERED and with what provenance; this records what
+      // was REVIEWED — which fields the candidate approved as-is, which they corrected, and which
+      // low-confidence guesses they had to acknowledge before the overlay would call itself ready.
+      //
+      // Separate from answers_json rather than merged into it: those are two different claims made at
+      // two different times by two different parties, and collapsing them would make it impossible to
+      // say afterwards whether a value was the resolver's or the candidate's. For a gated application
+      // this is the ONLY record of human review, because the submission itself happens in a browser we
+      // never see.
+      //
+      // Nullable, not backfilled: a NULL means the application predates the overlay or was never
+      // reviewed through it, which is not the same as "reviewed and nothing changed".
+      id: "080_apply_gate_review",
+      sql: `
+        ALTER TABLE apply_run_jobs ADD COLUMN gate_review_json TEXT;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

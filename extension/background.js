@@ -1,5 +1,5 @@
 import {
-  runGatedHandoff, clearPacketForTab, sweepExpiredPackets,
+  runGatedHandoff, clearPacketForTab, sweepExpiredPackets, applyOverlayEdit,
 } from './gated-handoff.js';
 
 // Keep in sync with config.js (service workers cannot share plain-script globals).
@@ -73,6 +73,54 @@ async function handleGatedHandoff() {
   } catch { /* session storage is best-effort here */ }
 
   return result;
+}
+
+// ── Review overlay traffic (TASK G3) ─────────────────────────────────────────
+// The overlay runs in the page's isolated world and talks back through here. Two messages: a
+// corrected value, and the running readiness state.
+//
+// Kept OUT of the onMessage listener above, which answers synchronously; these need to await.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === 'GATE_REVIEW_EDIT') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ ok: false, reason: 'no_tab' }); return true; }
+    applyOverlayEdit({ tabId, field: msg.field, value: msg.value })
+      .then(result => sendResponse({ ok: true, result }))
+      .catch(e => sendResponse({ ok: false, reason: e.message }));
+    return true;                                            // async response
+  }
+
+  if (msg?.type === 'GATE_REVIEW_STATE') {
+    // Recorded against the application's audit row: for a gated application this is the ONLY record
+    // of what a human saw before it went out, because the submission happens in a browser we never
+    // observe. Best-effort — a failure here must never block the candidate from submitting.
+    void recordGateReview(sender.tab?.id, msg);
+    sendResponse({ ok: true });
+    return true;
+  }
+  return false;
+});
+
+async function recordGateReview(tabId, msg) {
+  if (!tabId) return;
+  const stored = await chrome.storage.session.get(`gate:${tabId}`);
+  const entry = stored?.[`gate:${tabId}`];
+  const runJobId = entry?.packet?.runJobId;
+  if (!runJobId) return;
+  try {
+    await fetch(`${RESUME_MASTER_URL}/api/apply/gate-review`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        runJobId,
+        packetId: entry.packetId ?? null,
+        ready: !!msg.ready,
+        acknowledged: msg.acknowledged || [],
+        edits: msg.edits || [],
+      }),
+    });
+  } catch { /* the candidate's submission does not depend on our bookkeeping */ }
 }
 
 // The packet outlives its activeTab grant (G0 §9 measured this), so nothing expires it on its own.

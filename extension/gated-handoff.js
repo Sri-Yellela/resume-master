@@ -26,6 +26,8 @@
  * click is the candidate's, always.
  */
 
+import { orderForReview, readinessOf, renderOverlay } from './review-overlay.js';
+
 /** Matches the server's token TTL. A packet outlives its grant (G0 §9), so it is cleared on purpose. */
 export const PACKET_TTL_MS = 10 * 60 * 1000;
 
@@ -188,10 +190,25 @@ export function matchAnswersToFields(answers, fields) {
   const plan = [], unmatched = [];
   const taken = new Set();
 
+  // An ATS namespaces its controls: Greenhouse serves `job_application[requires_sponsorship]`, not
+  // `requires_sponsorship`. Unwrapping that is STRUCTURAL — it reads the form's own naming
+  // convention — and is not the same thing as guessing from a label. Without it, eligibility answers
+  // would be exact-matched against a name no real ATS emits and would therefore never be filled on
+  // any of them, which is a different failure from the one the exact-match rule exists to prevent.
+  const segments = (n) => String(n || '')
+    .split(/[[\].]+/).map(s => s.trim()).filter(Boolean);
+
+  const nameMatches = (fieldName, answerName) => {
+    if (!fieldName || !answerName) return false;
+    if (fieldName === answerName) return true;
+    const segs = segments(fieldName);
+    return segs.length > 1 && segs[segs.length - 1] === answerName;
+  };
+
   const byExact = (a) => fields.find(f =>
     !taken.has(f.index) && (
-      (a.name && f.name && f.name === a.name) ||
-      (a.name && f.id && f.id === a.name) ||
+      nameMatches(f.name, a.name) ||
+      nameMatches(f.id, a.name) ||
       (a.field_id && f.id && f.id === a.field_id)
     ));
 
@@ -429,15 +446,87 @@ async function fillFromPacket({ tab, origin, released, serverUrl, reused }) {
     return { ok: false, reason: 'inject_failed', message: `Could not fill the form: ${e.message}` };
   }
 
+  // ── The review overlay (TASK G3) ────────────────────────────────────────────
+  // What was actually written, with the rule that produced each value, ordered so the candidate
+  // reads the three uncertain fields instead of the thirty certain ones.
+  // matchedBy travels with each item: the overlay combines it with the value's provenance, because
+  // a certain value placed into a field matched only by its label is uncertain overall, and showing
+  // it as "resolved exactly" would be the more dangerous half of the truth.
+  const reviewItems = plan
+    .filter(step => (outcome?.filled || []).some(f => f.name === step.name && f.field === step.label))
+    .map(step => ({
+      field: step.label, name: step.name, id: step.id, index: step.index,
+      value: step.value, provenance: step.provenance, confidence: step.confidence,
+      eligibility: step.eligibility, matchedBy: step.matchedBy,
+    }));
+
+  const bands = orderForReview(reviewItems);
+  const readiness = readinessOf(reviewItems);
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      // ISOLATED, unlike the fill: the overlay needs chrome.runtime to send edits back, and only the
+      // isolated world has it. The DOM is shared either way, so it is still a real element on the
+      // real page.
+      func: renderOverlay,
+      args: [bands, {
+        filledCount: outcome?.filled?.length || 0,
+        resumeAttached: outcome?.resume?.attached === true,
+        resolverBug: readiness.resolverBug,
+      }],
+    });
+  } catch (e) {
+    // A form filled without an overlay is degraded, not broken — the values are in the page and the
+    // candidate can still read them. Reported rather than swallowed.
+    return {
+      ok: true, reused: !!reused, packetId: released.packetId,
+      filled: outcome?.filled || [], skipped: outcome?.skipped || [], unmatched,
+      resume: outcome?.resume || null,
+      overlay: { rendered: false, error: e.message },
+      review: { ready: readiness.ready, guessCount: readiness.guessCount },
+      message: `Filled ${outcome?.filled?.length || 0} field(s). Review and submit yourself.`,
+    };
+  }
+
   return {
     ok: true,
     reused: !!reused,
     packetId: released.packetId,
+    runJobId: released.packet?.runJobId ?? null,
     filled: outcome?.filled || [],
     skipped: outcome?.skipped || [],
     unmatched,
     resume: outcome?.resume || (released.resumeUrl ? { attached: false, reason: 'fetch_failed' } : null),
+    overlay: { rendered: true, rows: reviewItems.length },
+    review: {
+      ready: readiness.ready,
+      guessCount: readiness.guessCount,
+      eligibilityCount: bands.eligibility.length,
+      uncertainCount: bands.uncertain.length,
+      settledCount: bands.settled.length,
+      // A fuzzy eligibility match is a resolver defect, not something to ask the candidate about.
+      resolverBug: readiness.resolverBug,
+    },
     // Never auto-submitted. The last action is the candidate's — §6, without exception.
     message: `Filled ${outcome?.filled?.length || 0} field(s). Review and submit yourself.`,
   };
+}
+
+// ── Edits from the overlay ───────────────────────────────────────────────────
+
+/**
+ * Write one corrected value into the real input.
+ *
+ * Goes through the same MAIN-world native-setter path the fill uses (G2 requirement 4, which G3
+ * requirement 3 explicitly requires it reuse). A correction written any other way is reverted by the
+ * page's next render, and the candidate would be looking at their own value on a form that no longer
+ * holds it.
+ */
+export async function applyOverlayEdit({ tabId, field, value }) {
+  const step = { index: field.index, name: field.name, id: field.id, label: field.label, value };
+  const [r] = await chrome.scripting.executeScript({
+    target: { tabId }, world: 'MAIN', func: applyPlan, args: [[step], null],
+  });
+  return r?.result || null;
 }
