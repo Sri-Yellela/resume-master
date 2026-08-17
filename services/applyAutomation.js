@@ -198,6 +198,54 @@ export const IDENTITY_HANDLERS = new Set([
 ]);
 const IDENTITY_KEY_RE = /\b(?:name|email|phone|mobile|linkedin|github|website|portfolio|address|city|state|zip|location)\b/i;
 
+// -- Credential fields ---------------------------------------------------------
+// A portal's SIGN-IN box is not an application field, and the candidate's details must never be
+// typed into one.
+//
+// This is not hypothetical. A gated posting redirects to a sign-in page; discovery walks it, finds
+// an input named `login_email` labelled "Email", resolves it to the `email` handler and fills it
+// with the candidate's address at field_map_exact — 0.9 confidence, the second-highest tier. The run
+// then correctly detects the gate and holds, having already typed into a third party's login form.
+// Nothing was submitted, but the address was entered, and on a real portal an email in a sign-in box
+// is an account-existence probe against that candidate's own identity.
+//
+// Two signals, and the first is the one that generalises:
+//
+//   1. THE OWNING FORM CONTAINS A PASSWORD INPUT. That form is a credential form whatever its
+//      controls are called, which catches `login_email`, a plain `email`, and anything else in it.
+//      This deliberately also refuses a form that mixes application fields with account creation —
+//      filling one of those IS automated account creation, which the design places permanently out
+//      of scope, so refusing is the boundary being enforced rather than a capability lost.
+//
+//   2. The control itself names a credential. Catches a login box that is not inside a <form> at
+//      all, which is common in SPA portals.
+//
+// Kept separate from the gate CLASSIFIER on purpose. classifyFlowState decides what a page is;
+// this decides what a control is, and it has to hold on pages the classifier does not flag — a
+// sign-in widget beside a real application form, or a login form the heuristics simply miss.
+export const CREDENTIAL_AUTOCOMPLETE = new Set([
+  'username', 'current-password', 'new-password', 'one-time-code',
+]);
+
+// Tested against a subject with [_-] normalised to spaces, because \b does not break on an
+// underscore: `login_email` is one word to a word-boundary regex, so /\blogin\b/ never matches it —
+// which is precisely the field this exists to catch.
+export const CREDENTIAL_SUBJECT_RE =
+  /\b(?:user\s?name|user\s?id|login|log\s?in|sign\s?in|password|passwd|passphrase|passcode|one\s?time\s?code|verification\s?code|security\s?code|otp|2fa|mfa)\b/i;
+
+/**
+ * True when a discovered control belongs to a credential form, or is itself a credential field.
+ * Such a control is never answered, in any mode, on any page.
+ */
+export function isCredentialField({
+  name = '', id = '', label = '', autocomplete = '', type = '', in_credential_form = false,
+} = {}) {
+  if (String(type).toLowerCase() === 'password') return true;
+  if (in_credential_form) return true;
+  if (CREDENTIAL_AUTOCOMPLETE.has(String(autocomplete).toLowerCase().trim())) return true;
+  return CREDENTIAL_SUBJECT_RE.test(`${name} ${id} ${label}`.replace(/[_-]+/g, ' '));
+}
+
 // Negation/inversion tokens. A key must not fuzzy-match a label that inverts its sense.
 const INVERSION_RE = /\b(?:not|never|without|require[sd]?|requiring|need(?:s|ed)?|unable|cannot|can't|don'?t|do\s+not|lack)\b/i;
 
@@ -450,6 +498,15 @@ export function coerceAffirmative(value) {
  */
 export function sanitizeDiscoveredFields(fields) {
   for (const f of fields || []) {
+    // A credential control is marked before anything else and keeps NO handler, whatever the handler
+    // was derived from. The login_email case resolved through an ATTRIBUTE, not a label, so a check
+    // scoped to label-derived handlers — like the one below — would have let it straight through.
+    if (isCredentialField(f)) {
+      f.credential = true;
+      if (f.handler_type) f.handler_rejected = `${f.handler_type}:credential_field`;
+      f.handler_type = null;
+      continue;
+    }
     if (f?.handler_source !== 'label' || !f.handler_type) continue;
     const reason = refuseReason({ label: f.label, name: f.name, handler: f.handler_type });
     if (reason) {
@@ -522,6 +579,24 @@ function(autofillData, labelMap, guards) {
       el.dispatchEvent(new Event(ev, { bubbles: true })));
   }
 
+  // A portal's SIGN-IN box is not an application field. This sweep bypasses buildAnswers entirely,
+  // so the credential rule has to be enforced here as well or it is not enforced on this path at
+  // all — the same reason the eligibility guards above are duplicated into it. The policy itself is
+  // defined once, in Node (isCredentialField); only its regex source crosses into the page.
+  function isCredential(el) {
+    try {
+      const form = el.form || el.closest('form');
+      if (form && form.querySelector('input[type="password"]')) return true;
+    } catch {}
+    const ac = (el.getAttribute('autocomplete') || '').toLowerCase().trim();
+    if ((g.credentialAutocomplete || []).indexOf(ac) !== -1) return true;
+    const lbl = (el.labels && el.labels[0] ? el.labels[0].textContent : '') || '';
+    try {
+      return new RegExp(g.credentialRe, 'i')
+        .test((describe(el) + ' ' + lbl).replace(/[_-]+/g, ' '));
+    } catch { return false; }
+  }
+
   // 1. Generic name/id/autocomplete fill
   for (const [name, value] of Object.entries(fm)) {
     if (!value) continue;
@@ -532,6 +607,7 @@ function(autofillData, labelMap, guards) {
     ].join(",");
     document.querySelectorAll(sel).forEach(el => {
       if (["hidden","submit","button","file","image"].includes(el.type)) return;
+      if (isCredential(el)) return;
       // Do not overwrite a value that is already there. Steps 2 and 3 always checked this; step 1
       // did not, so it clobbered both ATS-prefilled values (requirement 6) and buildAnswers' own
       // vetted output — it was overwriting a date formatted to the field's advertised MM/DD/YYYY
@@ -559,6 +635,7 @@ function(autofillData, labelMap, guards) {
     "input:not([type='hidden']):not([type='submit']):not([type='button']):not([type='file']),textarea"
   ).forEach(el => {
     if (el.value) return;
+    if (isCredential(el)) return;
     const hint = ((el.placeholder||"") + " " + (el.getAttribute("aria-label")||"")).toLowerCase();
     const subject = describe(el);
     for (const [key, fieldKey] of Object.entries(HINT_MAP)) {
@@ -582,6 +659,7 @@ function(autofillData, labelMap, guards) {
       ? (document.getElementById(forId) || document.querySelector('[name="'+forId+'"]'))
       : lbl.querySelector("input,textarea,select");
     if (!el || el.value) return;
+    if (isCredential(el)) return;
     // The label text is the authoritative description here; include the control's own attributes.
     if (refused(text + ' ' + describe(el), matchedKey)) return;
     if (el.tagName === "SELECT") {
@@ -597,6 +675,7 @@ function(autofillData, labelMap, guards) {
   for (const [key, matchValues] of Object.entries(ddm)) {
     if (!matchValues?.length) continue;
     document.querySelectorAll('select[name="'+key+'"],select[id="'+key+'"]').forEach(sel => {
+      if (isCredential(sel)) return;
       for (const opt of sel.options) {
         if (matchValues.some(v =>
           opt.text.toLowerCase().includes(v.toLowerCase()) ||
@@ -610,6 +689,7 @@ function(autofillData, labelMap, guards) {
 
   // 5. Radio buttons: sponsorship + clearance
   document.querySelectorAll("input[type='radio']").forEach(r => {
+    if (isCredential(r)) return;
     const n   = (r.name  || "").toLowerCase();
     const v   = (r.value || "").toLowerCase();
     const lbl = (r.labels?.[0]?.textContent || "").toLowerCase();
@@ -766,6 +846,12 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
       current_value = (el.value !== undefined ? el.value : (el.textContent || '')).trim();
     }
 
+    // Reported, not decided, in the page: whether this control sits in a form that also holds a
+    // password input. The DECISION is isCredentialField() in Node, where it is unit-testable — this
+    // side only supplies the one fact that needs the DOM.
+    const ownerForm = el.form || el.closest('form');
+    const in_credential_form = !!(ownerForm && ownerForm.querySelector('input[type="password"]'));
+
     fields.push({
       field_id: el.id || name,
       name,
@@ -776,6 +862,8 @@ function(handlerByAttr, profileKeyToHandler, labelMap) {
       handler_type: handler_type || null,
       handler_source: handler_source || null,
       current_value,
+      autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
+      in_credential_form,
     });
   }
 
@@ -858,6 +946,10 @@ export function buildAnswers(fields, profilePayload) {
 
   for (const field of fields) {
     if (SKIP_TYPES.has(field.type)) continue;
+    // Skipped like a password field is, and for the same reason. Clearing handler_type in
+    // sanitizeDiscoveredFields is not sufficient on its own: steps 3 and 4 below match on the LABEL,
+    // and a sign-in box labelled "Email" is matched by both.
+    if (field.credential || isCredentialField(field)) continue;
 
     const label = field.label || '';
     const guardCtx = { label, name: field.name || '' };
@@ -1293,6 +1385,57 @@ async function applyTypeaheadAnswer(page, answer) {
   }
 }
 
+// -- detectGate ----------------------------------------------------------------
+/**
+ * The two page states only a human may cross: a CAPTCHA, and a sign-in wall.
+ *
+ * Extracted out of classifyFlowState so the PRE-FILL check and the terminal classification cannot
+ * disagree about what a gate looks like. classifyFlowState still owns everything else it decides —
+ * submitted, expired, next_available — none of which is meaningful before a form has been filled,
+ * which is why the gate part is what gets lifted rather than the whole classifier being moved
+ * earlier.
+ *
+ * @returns {'login_required'|'captcha_required'|null}
+ */
+export async function detectGate(page) {
+  const hasCaptcha = await page.evaluate(`!!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]') || document.querySelector('.g-recaptcha') || document.querySelector('.h-captcha') || document.querySelector('[data-sitekey]'))`).catch(() => false);
+  if (hasCaptcha) return 'captcha_required';
+
+  const hasPassword = await page.evaluate(`!!document.querySelector('input[type="password"]')`).catch(() => false);
+  if (hasPassword) return 'login_required';
+
+  const urlLower = (page.url() || '').toLowerCase();
+  if (/\/login|\/signin|\/sign-in/.test(urlLower)) return 'login_required';
+
+  return null;
+}
+
+/**
+ * The result of meeting a gate. Shared by the pre-fill check and the post-fill classification so the
+ * two cannot drift into producing different shapes for the same outcome.
+ */
+async function buildGateHold({ page, jobId, flowState, detected, totalFilled, jobUrl, resolvedAnswers }) {
+  const pageTitle = await page.title().catch(() => "");
+  const ss = await takeScreenshot(page, jobId);
+  return {
+    status:           'held_gate',
+    reasonCode:       flowState,
+    flowState,
+    fieldsFilled:     totalFilled,
+    platform:         detected,
+    pageTitle,
+    screenshotBase64: ss.base64,
+    screenshotPath:   ss.path,
+    // Where the human has to go, read before the browser closes: a gated portal usually redirects to
+    // a sign-in on the way, so this is not the URL the run was queued with.
+    gate: { flowState, applyUrl: await page.url(), startedFrom: jobUrl },
+    // Withheld for login_required ON PURPOSE — the controls on a sign-in page are a CREDENTIAL form,
+    // not the application. captcha_required is the opposite case: that challenge usually sits on the
+    // real application form, so those answers are genuine field-matched evidence.
+    answers: flowState === 'captcha_required' ? (resolvedAnswers || []) : [],
+  };
+}
+
 // -- classifyFlowState ---------------------------------------------------------
 export async function classifyFlowState(page, originalDomain) {
   try {
@@ -1313,15 +1456,9 @@ export async function classifyFlowState(page, originalDomain) {
       return 'expired';
     }
 
-    // 4. CAPTCHA
-    const hasCaptcha = await page.evaluate(`!!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]') || document.querySelector('.g-recaptcha') || document.querySelector('.h-captcha') || document.querySelector('[data-sitekey]'))`).catch(() => false);
-    if (hasCaptcha) return 'captcha_required';
-
-    // 5. Login
-    const hasPassword = await page.evaluate(`!!document.querySelector('input[type="password"]')`).catch(() => false);
-    if (hasPassword) return 'login_required';
-    const urlLower = (page.url() || '').toLowerCase();
-    if (/\/login|\/signin|\/sign-in/.test(urlLower)) return 'login_required';
+    // 4 & 5. CAPTCHA, then login
+    const gate = await detectGate(page);
+    if (gate) return gate;
 
     // 6. Redirect pending
     const hasMetaRefresh = await page.evaluate(`(()=>{const m=document.querySelector('meta[http-equiv="refresh"]');return !!(m && (m.getAttribute('content')||'').toLowerCase().includes('url='));})()`).catch(() => false);
@@ -1524,7 +1661,12 @@ async function discoverAndFill(page, frames, provider, autofillData, labelMap, o
 }
 
 // -- Helpers -------------------------------------------------------------------
-async function fillContext(pageOrFrame, autofillData, labelMap) {
+/**
+ * The legacy in-page sweep. Exported for tests: this is the path that fills by attribute and label
+ * heuristics WITHOUT producing an answer object, so nothing about it is observable from the resolver
+ * side — and it is the path whose guards have twice turned out to be the ones that matter.
+ */
+export async function fillContext(pageOrFrame, autofillData, labelMap) {
   try {
     // FILL_FN_SRC is an anonymous function expression -- invoke as IIFE with args.
     // Named function expressions (function foo(){}) have their name scoped only
@@ -1536,6 +1678,8 @@ async function fillContext(pageOrFrame, autofillData, labelMap) {
       canonicalKeys: ELIGIBILITY_CANONICAL_KEYS,
       thirdPartyRe:  THIRD_PARTY_SUBJECT_RE.source,
       identityKeyRe: IDENTITY_KEY_RE.source,
+      credentialRe:  CREDENTIAL_SUBJECT_RE.source,
+      credentialAutocomplete: [...CREDENTIAL_AUTOCOMPLETE],
     };
     return await pageOrFrame.evaluate(
       `(${FILL_FN_SRC})(${JSON.stringify(autofillData)}, ${JSON.stringify(labelMap)}, ${JSON.stringify(guards)})`
@@ -1757,6 +1901,26 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       return !r.escalation;
     };
 
+    // GATE BEFORE FILL. The classifier used to run only after the form had been filled, so a run
+    // that met a sign-in wall typed into it first and held afterwards — the candidate's email went
+    // into the portal's login box at 0.9 confidence, because `login_email` labelled "Email" resolves
+    // to the email handler like any other field. Nothing was submitted, but on a real portal that is
+    // an account-existence probe against the candidate's own identity.
+    //
+    // Checking here costs two evaluates on a page we are about to walk anyway, and a gate found now
+    // means nothing is typed at all. `fieldsFilled: 0` is then the truth rather than a count of
+    // writes into a form that was never the application.
+    const preFillGate = isUnattended ? await detectGate(page) : null;
+    if (preFillGate) {
+      console.log(`[autoApply] gate detected BEFORE filling (${preFillGate}) — nothing typed`);
+      inProgress.set(String(jobId), { status: 'held_gate', browser: null });
+      const held = await buildGateHold({
+        page, jobId, flowState: preFillGate, detected, totalFilled: 0, jobUrl, resolvedAnswers: [],
+      });
+      await browser.close();
+      return held;
+    }
+
     await runDiscovery();
 
     // "Autofilled 0 fields" was previously indistinguishable from a clean run: the pipeline
@@ -1880,22 +2044,30 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
     // Terminal states
     if (isUnattended && (GATE_FLOW_STATES.has(flowState) || flowState === 'expired')) {
+      // A GATE is not a failure and not the same thing as an expired posting, which is why the two
+      // part company here. `expired` means there is nothing to apply to; a gate means there IS, and a
+      // human can finish it. G1 gives the gate its own terminal status so routes/apply.js can park a
+      // packet for the handoff — and so the ~14 endpoints that key on status='held_review' stop
+      // picking up jobs whose form was never even reached.
+      //
+      // Reaching a gate HERE rather than in the pre-fill check means the page only became one after
+      // we filled: a portal that asks to sign in when the form is submitted, or a CAPTCHA that
+      // appears on interaction. So this path can still carry answers, and the pre-fill path cannot.
+      if (GATE_FLOW_STATES.has(flowState)) {
+        inProgress.set(String(jobId), { status: 'held_gate', browser: null });
+        const held = await buildGateHold({
+          page, jobId, flowState, detected, totalFilled, jobUrl, resolvedAnswers,
+        });
+        await browser.close();
+        return held;
+      }
+
       const pageTitle = await page.title().catch(() => "");
       const ss = await takeScreenshot(page, jobId);
-      // A GATE is not a failure and not the same thing as an expired posting, which is why the two
-      // now part company here. `expired` means there is nothing to apply to; a gate means there IS,
-      // and a human can finish it. G1 gives the gate its own terminal status so routes/apply.js can
-      // park a packet for the handoff — and so the ~14 endpoints that key on status='held_review'
-      // stop picking up jobs whose form was never even reached.
-      const isGate = GATE_FLOW_STATES.has(flowState);
-      // Read before the browser closes: this is where the human has to go, after any redirect the
-      // portal performed on the way to its sign-in page. jobUrl is where we STARTED, which for a
-      // gated portal is frequently not where we ended up.
-      const gateUrl = isGate ? await page.url() : null;
-      inProgress.set(String(jobId), { status: isGate ? 'held_gate' : flowState, browser: null });
+      inProgress.set(String(jobId), { status: flowState, browser: null });
       await browser.close();
       return {
-        status:           isGate ? 'held_gate' : flowState,
+        status:           flowState,
         reasonCode:       flowState,
         flowState,
         fieldsFilled:     totalFilled,
@@ -1903,21 +2075,6 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         pageTitle,
         screenshotBase64: ss.base64,
         screenshotPath:   ss.path,
-        // Gate-only, so an `expired` result keeps exactly the shape it had.
-        //
-        // `answers` is withheld for login_required ON PURPOSE. classifyFlowState returns that state
-        // because it found a password field or a /signin URL — meaning the controls discovery walked
-        // belong to a CREDENTIAL form, not to the application. Passing them on would build the packet
-        // from a sign-in page's email box and label the result 'discovered_form', which is a worse
-        // packet than resolving the canonical questions from the profile, and a confidently wrong one.
-        //
-        // captcha_required is the opposite case: the challenge usually sits on the real application
-        // form, so those answers are genuine field-matched evidence and are better than anything
-        // reconstructed.
-        ...(isGate ? {
-          gate: { flowState, applyUrl: gateUrl, startedFrom: jobUrl },
-          answers: flowState === 'captcha_required' ? resolvedAnswers : [],
-        } : {}),
       };
     }
 

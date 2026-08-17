@@ -326,6 +326,38 @@ function gatedSignin() {
   docs/GATED_HANDOFF_PROMPTS.md. A run reaching this page must end held_gate with a packet.</p>`);
 }
 
+// A sign-in form and an application form on ONE page — the case where classifying the page is not
+// enough and only a per-CONTROL rule protects the candidate.
+//
+// The two forms both have a control named `email`, which is the whole difficulty: name and label are
+// identical, and the only thing distinguishing them is which form they belong to. The login side also
+// uses the shapes the legacy in-page sweep matches on (a bare `name="email"`, a placeholder, an
+// autocomplete token), so a run that fills this page wrongly does so through that sweep rather than
+// through the resolver.
+function gatedMixed() {
+  return page('G-CRED Senior Engineer — Apply or sign in', `
+  <h1>Senior Engineer</h1>
+  <p>Returning candidate? Sign in. Otherwise apply below.</p>
+
+  <form id="loginform" method="POST" action="/gated/signin">
+    <fieldset><legend>Sign in — NOTHING here may ever be filled</legend>
+      ${field('Email', `<input name="email" id="login_email" type="email" placeholder="Email" autocomplete="username" required>`, true)}
+      ${field('Password', `<input name="password" id="login_password" type="password" autocomplete="current-password" required>`, true)}
+      <button type="submit">Sign in</button>
+    </fieldset>
+  </form>
+
+  <form id="applyform" method="POST" action="/_submit/mixed" enctype="multipart/form-data">
+    <fieldset><legend>Apply — this is the application</legend>
+      ${field('First Name', `<input name="first_name" required>`, true)}
+      ${field('Last Name',  `<input name="last_name" required>`, true)}
+      ${field('Email Address', `<input name="applicant_email" type="email" placeholder="Email" required>`, true)}
+      ${field('Phone', `<input name="phone" type="tel">`)}
+      <button type="submit">Submit Application</button>
+    </fieldset>
+  </form>`);
+}
+
 function gatedCaptcha() {
   return page('Verify you are human — Careers', `
   <h1>Verify you are human</h1>
@@ -540,7 +572,10 @@ function indexPage() {
       (TASK G1: login_required → held_gate + packet). <a href="/gated/captcha">/gated/captcha</a>
       is the captcha_required variant. Neither is crossable, by design.
       <a href="/gated/form">/gated/form</a> is what waits behind it — the handoff target for G2/G3,
-      carrying the sponsorship-inversion and label-only-match traps.</li>
+      carrying the sponsorship-inversion and label-only-match traps.
+      <a href="/gated/mixed">/gated/mixed</a> puts a sign-in form and an application form on ONE page,
+      both with a control named <code>email</code>: the case where only a per-control rule protects
+      the candidate's details from the login box.</li>
   </ul>
   <p><a href="/_submissions">/_submissions</a> — recorded submissions (JSON). Each record carries
   <code>fields</code> (text parts), <code>files</code> (uploads — <code>null</code> where the input
@@ -645,6 +680,7 @@ const server = http.createServer(async (req, res) => {
     // The form the candidate reaches after crossing the gate themselves — G2 fills it, G3 reviews it.
     if (path === '/gated/form')    return send(200, gatedForm());
     if (path === '/gated/captcha') return send(200, gatedCaptcha());
+    if (path === '/gated/mixed')   return send(200, gatedMixed());
     if (path === '/multistep')       return send(200, multistepStep1());
     // Also GET-able so the pushState URL is a real address — a reload after an SPA advance must
     // land on the same step rather than a 404, as it does on a real portal.
