@@ -1,8 +1,13 @@
 import os from "os";
+import crypto from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { autoApply } from "../services/applyAutomation.js";
+import {
+  buildGatePacket, mintPacketToken, verifyPacketToken, hashToken, originOf,
+  DEFAULT_TOKEN_TTL_MS,
+} from "../services/applyGatePacket.js";
 import { probeBrowserAvailability } from "../services/browserLauncher.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
 import { classifyRuntimeError } from "../shared/failureAttribution.js";
@@ -12,6 +17,25 @@ import { canUseAPlusResume, normalisePlanTier } from "../services/entitlements.j
 // Must match services/applyAutomation.js SCREENSHOT_DIR — screenshot_path rows are absolute paths
 // written by takeScreenshot(), and this is the only directory they are ever allowed to resolve into.
 const SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "screenshots");
+
+// ── Gate-packet token secret (TASK G1) ───────────────────────────────────────────────────────
+// Read from the environment here rather than threaded through applyRoutes()' already long parameter
+// list, which server.js is the only caller of — adding an eighth positional argument for this would
+// be a worse trade than one module-scope constant.
+//
+// Falls back to SESSION_SECRET because it is the secret this deployment already has and rotating it
+// invalidates gate tokens, which is the correct blast radius. In production with neither set the
+// value is empty and minting REFUSES: a run then still holds as held_gate with no packet, which is a
+// visible degradation. Minting on a known-weak dev secret in production would be worse than that —
+// the token unlocks a home address and eligibility answers.
+const GATE_TOKEN_SECRET =
+  process.env.APPLY_GATE_TOKEN_SECRET ||
+  process.env.SESSION_SECRET ||
+  (process.env.NODE_ENV === "production" ? "" : "dev-gate-token-secret-change-me");
+
+/** Exchange attempts allowed per user per window. The endpoint returns a home address. */
+const GATE_EXCHANGE_MAX_ATTEMPTS = 20;
+const GATE_EXCHANGE_WINDOW_SEC = 10 * 60;
 
 function publicApplication(row) {
   if (!row) return null;
@@ -290,6 +314,77 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       console.warn("[applyRoutes] audit persist failed:", e.message,
         "— payload retained in apply_job_logs");
       return { written: [], skipped: AUDIT_COLUMNS, error: e.message };
+    }
+  }
+
+  // ── Gate packets (TASK G1) ───────────────────────────────────────────────────
+  // Persisted when a run observes a login wall or a CAPTCHA. The packet is everything already
+  // decided, waiting for the human who will cross that gate.
+  //
+  // NO TOKEN IS MINTED HERE, deliberately, and this departs from §3's step ordering. A token with a
+  // minutes-long TTL — which requirement 3 asks for, because it unlocks a home address and
+  // eligibility answers — minted when the gate is observed would be expired long before the
+  // candidate reads the notification and clicks Review. Either the TTL becomes hours, or the token is
+  // minted on demand. Minting on demand is the one that keeps the short TTL meaningful, so the row is
+  // created with a placeholder hash that no real token can ever match and an already-past expiry,
+  // meaning "no outstanding token" until /token is called.
+  const GATE_PACKET_NO_TOKEN = () => `unminted:${crypto.randomUUID()}`;
+
+  function createGatePacket({ runId, runJobId, userId, jobId, result, autofillPayload, resumeArtifactId }) {
+    // jobUrl is where the run STARTED; a gated portal usually redirects to a sign-in on the way, and
+    // the URL the gate was actually observed at is where the human has to go.
+    const applyUrl = result.gate?.applyUrl || result.gate?.startedFrom || null;
+    let packet;
+    try {
+      packet = buildGatePacket({
+        resolvedAnswers: result.answers,
+        autofillPayload,
+        applyUrl,
+        jobId, runId, runJobId,
+        resumeArtifactId,
+        gateReason: result.reasonCode || "login_required",
+      });
+    } catch (e) {
+      // An unparseable apply URL is the one case buildGatePacket refuses, because a packet with no
+      // expected origin could only be released by trusting whatever page it landed on.
+      logEvent(runId, runJobId, userId, jobId, "gate_packet_failed",
+        "Could not prepare a handoff packet for this gate", { reasonCode: e.reasonCode || null, error: e.message });
+      return null;
+    }
+
+    try {
+      const ins = db.prepare(`
+        INSERT INTO apply_gate_packets
+          (user_id, run_id, run_job_id, job_id, apply_url, expected_origin, gate_reason,
+           answers_json, resume_artifact_id, token_hash, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+      `).run(userId, runId, runJobId, String(jobId), packet.applyUrl, packet.expectedOrigin,
+             packet.gateReason, JSON.stringify(packet), resumeArtifactId, GATE_PACKET_NO_TOKEN());
+
+      const packetId = Number(ins.lastInsertRowid);
+      // Counts, origins and provenance mix — never a value, and never a token. This event is the
+      // durable record that a handoff was prepared, and it lands in the same log the rest of the
+      // audit trail uses.
+      logEvent(runId, runJobId, userId, jobId, "gate_packet_created",
+        `Handoff packet prepared: ${packet.answers.length} answer(s) ready, ${packet.unresolved.length} for you to answer`, {
+          packetId,
+          gateReason:      packet.gateReason,
+          expectedOrigin:  packet.expectedOrigin,
+          source:          packet.source,
+          answerCount:     packet.answers.length,
+          unresolvedCount: packet.unresolved.length,
+          eligibilityCount: packet.answers.filter(a => a.eligibility).length,
+          provenanceMix:   packet.answers.reduce((m, a) => { m[a.provenance ?? "none"] = (m[a.provenance ?? "none"] || 0) + 1; return m; }, {}),
+          resumeArtifactId,
+        });
+      return { packetId, packet };
+    } catch (e) {
+      // Never let a packet failure change the run's outcome: the job is held either way, and a held
+      // job with no packet is a degraded handoff rather than a lost application.
+      logEvent(runId, runJobId, userId, jobId, "gate_packet_failed",
+        "Handoff packet could not be stored", { error: e.message });
+      console.warn("[applyRoutes] gate packet insert failed:", e.message);
+      return null;
     }
   }
 
@@ -587,8 +682,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // had worked. This does NOT widen the submit gate: only reason_code 'awaiting_approval' rows
       // are releasable by the approve endpoints, so a generation_failed hold can never be
       // approved into a submission.
+      // A gated portal gets its OWN terminal status rather than landing in held_review's fallback,
+      // which is where it used to end up: reason_code 'login_required' on a held_review row made a
+      // job whose form was never reached indistinguishable, to every status='held_review' query, from
+      // one that was filled and needs three answers checked. See the G1 decision in §8.
+      const gated = result.status === "held_gate";
       const finalStatus = submitted ? "submitted"
         : genFailure ? "held_review"
+        : gated ? "held_gate"
         : previewed || atsHeld || result.status === "awaiting_user" ? "held_review"
         : result.status === "error" ? "failed"
         : "held_review";
@@ -650,6 +751,15 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           ...(audit.skipped.length ? { columnsSkipped: audit.skipped } : {}),
           ...(audit.error ? { persistError: audit.error } : {}),
         });
+
+      // Gated portal: park the prepared packet for the handoff. After the audit on purpose — the
+      // audit row is the record of the attempt and must not depend on the packet succeeding.
+      if (finalStatus === "held_gate") {
+        createGatePacket({
+          runId, runJobId, userId, jobId, result, autofillPayload,
+          resumeArtifactId: usedArtifactId,
+        });
+      }
 
       // Outside the persistence path on purpose: this used to sit inside the same try, so a failed
       // UPDATE also swallowed the questions the correction loop depends on.
@@ -996,7 +1106,18 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         AND COALESCE(rj.reason_code, '') != 'awaiting_approval'
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id);
-    res.json({ runs: runs.map(publicRun), review: review.map(publicRunJob) });
+    // Gated jobs used to land in `review` above, as held_review rows with reason_code
+    // 'login_required'. Giving them their own terminal status took them out of that list, and leaving
+    // it there would have made them silently disappear from the only place they were visible. They
+    // get their own key instead of being folded back in: a gated job has nothing to review yet — its
+    // form was never reached — so it needs a different offer ("sign in once") rather than the same
+    // one. ADDITIVE: `runs` and `review` are unchanged, so an existing caller sees no difference.
+    const gated = db.prepare(`
+      ${RUN_JOB_SELECT}
+      WHERE rj.user_id=? AND rj.status='held_gate'
+      ORDER BY rj.created_at DESC LIMIT 50
+    `).all(req.user.id);
+    res.json({ runs: runs.map(publicRun), review: review.map(publicRunJob), gated: gated.map(publicRunJob) });
   });
 
   app.get("/api/apply/runs/:runId", requireAuth, (req, res) => {
@@ -1157,6 +1278,217 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     if (!existsSync(resolved)) return res.status(404).json({ error: "screenshot_missing" });
     res.setHeader("Content-Type", "image/png");
     return res.sendFile(resolved);
+  });
+
+  // ── Gated handoff: packet list, token mint, packet exchange (TASK G1) ────────
+  // The server prepared everything it could and then met a gate only a human can cross. These three
+  // endpoints are how what it prepared reaches the extension standing on the other side.
+  //
+  // Nothing here submits, and nothing here crosses a gate. See §6.
+
+  /** Attempts in the recent window, counted from the durable log rather than process memory. */
+  function gateExchangeAttempts(userId) {
+    const since = Math.floor(Date.now() / 1000) - GATE_EXCHANGE_WINDOW_SEC;
+    return db.prepare(`
+      SELECT COUNT(*) AS c FROM apply_job_logs
+      WHERE user_id=? AND event LIKE 'gate_packet_exchange%' AND created_at > ?
+    `).get(userId, since).c;
+  }
+
+  /**
+   * Log an exchange outcome. Every rejection reason is its OWN event (requirement 4): a forged
+   * signature, an expired token, a replayed one and one belonging to another account are four
+   * different facts, and only one of them means somebody is probing.
+   */
+  function logExchange(userId, outcome, details = {}) {
+    logEvent(details.runId ?? null, details.runJobId ?? null, userId, details.jobId ?? "-",
+      `gate_packet_exchange_${outcome}`, `Gate packet exchange: ${outcome}`, details);
+  }
+
+  /** Jobs held at a gate, with what is prepared for each. Grouped by portal in G5; flat here. */
+  app.get("/api/apply/gate-packets", requireAuth, (req, res) => {
+    const rows = db.prepare(`
+      SELECT p.id, p.job_id, p.run_id, p.run_job_id, p.apply_url, p.expected_origin, p.gate_reason,
+             p.answers_json, p.resume_artifact_id, p.consumed_at, p.created_at,
+             sj.title, sj.company
+      FROM apply_gate_packets p
+      LEFT JOIN scraped_jobs sj ON sj.job_id = p.job_id
+      WHERE p.user_id=? AND p.consumed_at IS NULL
+      ORDER BY p.created_at DESC LIMIT 100
+    `).all(req.user.id);
+
+    res.json({
+      packets: rows.map(r => {
+        const body = parseJson(r.answers_json, {});
+        return {
+          packetId:       r.id,
+          jobId:          r.job_id,
+          runId:          r.run_id,
+          runJobId:       r.run_job_id,
+          title:          r.title ?? null,
+          company:        r.company ?? null,
+          applyUrl:       r.apply_url,
+          expectedOrigin: r.expected_origin,
+          gateReason:     r.gate_reason,
+          createdAt:      toMs(r.created_at),
+          // COUNTS ONLY on the list. The values are behind the token exchange, so opening the queue
+          // does not spray a home address across every row of a list response.
+          answerCount:      Array.isArray(body.answers) ? body.answers.length : 0,
+          unresolvedCount:  Array.isArray(body.unresolved) ? body.unresolved.length : 0,
+          resumeAvailable:  r.resume_artifact_id != null,
+        };
+      }),
+    });
+  });
+
+  /**
+   * Mint a single-use token for an unconsumed packet. This is what "click Review" calls.
+   *
+   * On demand rather than at gate-detection time because the TTL is minutes: a token minted when the
+   * run observed the gate would be dead long before anyone read the notification. Re-minting rotates
+   * the outstanding token, so an abandoned handoff leaves nothing usable behind.
+   */
+  app.post("/api/apply/gate-packets/:packetId/token", requireAuth, (req, res) => {
+    const packetId = Number(req.params.packetId);
+    if (!Number.isInteger(packetId) || packetId <= 0) return res.status(400).json({ error: "bad_packet_id" });
+
+    const row = db.prepare("SELECT * FROM apply_gate_packets WHERE id=? AND user_id=?")
+      .get(packetId, req.user.id);
+    // Not-found and not-yours are the same response on purpose: distinguishing them would confirm
+    // another account's packet exists.
+    if (!row) return res.status(404).json({ error: "packet_not_found" });
+    if (row.consumed_at != null) {
+      return res.status(409).json({
+        error: "packet_consumed",
+        message: "This handoff was already completed. Re-queue the job to prepare a new one.",
+      });
+    }
+
+    if (!GATE_TOKEN_SECRET) {
+      return res.status(503).json({
+        error: "gate_token_secret_missing",
+        message: "Handoff tokens cannot be issued: no server secret is configured.",
+      });
+    }
+
+    const { token, tokenHash, expiresAt } = mintPacketToken({
+      secret: GATE_TOKEN_SECRET, userId: req.user.id, jobId: row.job_id, packetId,
+      ttlMs: DEFAULT_TOKEN_TTL_MS,
+    });
+    db.prepare("UPDATE apply_gate_packets SET token_hash=?, expires_at=? WHERE id=?")
+      .run(tokenHash, expiresAt, packetId);
+
+    logEvent(row.run_id, row.run_job_id, req.user.id, row.job_id, "gate_packet_token_minted",
+      "Handoff token issued", { packetId, expiresAt, expectedOrigin: row.expected_origin });
+
+    res.json({
+      token,
+      expiresAt: expiresAt * 1000,
+      // Returned so the extension knows what to target-match BEFORE it asks for the packet, and so a
+      // mismatch costs nothing: it can refuse without ever holding the answers.
+      expectedOrigin: row.expected_origin,
+      applyUrl: row.apply_url,
+      // Where the extension fetches the resume as a blob. This route already existed for the audit
+      // trail (requirement 5) and is session-authenticated, so nothing new was added for it.
+      resumeUrl: row.resume_artifact_id != null && row.run_job_id != null
+        ? `/api/apply/run-jobs/${row.run_job_id}/resume`
+        : null,
+    });
+  });
+
+  /**
+   * Exchange a token for the packet, ONCE.
+   *
+   * Rejections are deliberately NOT collapsed into one generic 400 (requirement 4):
+   *   401 token_invalid / token_malformed   signature failed or the token is not a token
+   *   403 token_user_mismatch              a valid token belonging to another account
+   *   409 token_consumed                   a replay
+   *   410 token_expired                    past its TTL
+   *   429 rate_limited
+   */
+  app.post("/api/apply/gate-packet/exchange", requireAuth, (req, res) => {
+    const userId = req.user.id;
+
+    // Before anything else: this endpoint returns a home address and work-authorization answers.
+    const attempts = gateExchangeAttempts(userId);
+    if (attempts >= GATE_EXCHANGE_MAX_ATTEMPTS) {
+      logExchange(userId, "rate_limited", { attempts, limit: GATE_EXCHANGE_MAX_ATTEMPTS });
+      return res.status(429).json({
+        error: "rate_limited",
+        message: `Too many handoff attempts (${attempts} in the last ${GATE_EXCHANGE_WINDOW_SEC / 60} minutes).`,
+        retryAfterSeconds: GATE_EXCHANGE_WINDOW_SEC,
+      });
+    }
+
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    const verified = verifyPacketToken(token, { secret: GATE_TOKEN_SECRET });
+    if (!verified.ok) {
+      logExchange(userId, verified.reason);
+      const status = verified.reason === "token_expired" ? 410
+                   : verified.reason === "no_secret" ? 503
+                   : 401;
+      return res.status(status).json({ error: verified.reason });
+    }
+
+    const { pid, uid, jid } = verified.payload;
+    // The token is bound to a user. A signature that verifies still does not entitle THIS session to
+    // the packet — that is the difference between a valid token and an authorised one.
+    if (uid !== userId) {
+      logExchange(userId, "token_user_mismatch", { packetId: pid, tokenUserId: uid });
+      return res.status(403).json({ error: "token_user_mismatch" });
+    }
+
+    const row = db.prepare("SELECT * FROM apply_gate_packets WHERE id=?").get(pid);
+    if (!row || row.user_id !== userId || String(row.job_id) !== String(jid)) {
+      logExchange(userId, "token_binding_mismatch", { packetId: pid, tokenJobId: jid });
+      return res.status(403).json({ error: "token_binding_mismatch" });
+    }
+    // The hash on the row is the ONE outstanding token. An older token for the same packet verifies
+    // by signature and is still refused here, which is what makes re-minting a rotation rather than
+    // handing out a second key.
+    if (row.token_hash !== hashToken(token)) {
+      logExchange(userId, "token_superseded", { packetId: pid, jobId: row.job_id });
+      return res.status(401).json({ error: "token_superseded" });
+    }
+
+    // SINGLE USE. Claimed with a conditional UPDATE, not a read-then-write: two concurrent exchanges
+    // would both pass a `consumed_at IS NULL` check and both be served. Whichever UPDATE changes a
+    // row is the one that won.
+    const claim = db.prepare(`
+      UPDATE apply_gate_packets
+      SET consumed_at=unixepoch(), exchange_attempts=exchange_attempts+1
+      WHERE id=? AND consumed_at IS NULL
+    `).run(pid);
+    if (claim.changes === 0) {
+      db.prepare("UPDATE apply_gate_packets SET exchange_attempts=exchange_attempts+1 WHERE id=?").run(pid);
+      logExchange(userId, "token_consumed", { packetId: pid, jobId: row.job_id, runId: row.run_id, runJobId: row.run_job_id });
+      return res.status(409).json({ error: "token_consumed" });
+    }
+
+    const body = parseJson(row.answers_json, null);
+    if (!body) {
+      logExchange(userId, "packet_corrupt", { packetId: pid });
+      return res.status(500).json({ error: "packet_corrupt" });
+    }
+
+    logExchange(userId, "released", {
+      packetId: pid, jobId: row.job_id, runId: row.run_id, runJobId: row.run_job_id,
+      expectedOrigin: row.expected_origin,
+      answerCount: Array.isArray(body.answers) ? body.answers.length : 0,
+    });
+
+    res.json({
+      packetId: pid,
+      // Repeated at the top level because the extension target-matches on it before releasing
+      // anything into a page (G2 requirement 3), and it must not have to dig for it.
+      expectedOrigin: row.expected_origin,
+      applyUrl: row.apply_url,
+      gateReason: row.gate_reason,
+      resumeUrl: row.resume_artifact_id != null && row.run_job_id != null
+        ? `/api/apply/run-jobs/${row.run_job_id}/resume`
+        : null,
+      packet: body,
+    });
   });
 
   // ── Queue-then-approve ───────────────────────────────────────────────────────

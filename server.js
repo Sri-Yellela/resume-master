@@ -2515,6 +2515,49 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON scraped_jobs(automation_tier, is_active);
       `,
     },
+    {
+      // The prepared packet for a gated portal (docs/GATED_HANDOFF_ARCHITECTURE.md §3 step 3). A run
+      // that hits a login wall or a CAPTCHA cannot finish on the server, so everything already
+      // decided is parked here for the human who will cross that gate, and handed to the extension
+      // in exchange for a single-use token.
+      //
+      // expected_origin is stored SEPARATELY from apply_url rather than derived at read time. It is
+      // the value the extension target-matches before releasing anything, and this packet carries a
+      // home address and work-authorization answers — so the thing being compared has to be a stored
+      // fact, decided once when the run observed the gate, not a re-parse of a URL that may have been
+      // rewritten since.
+      //
+      // token_hash, not the token: a database read must not yield a usable credential. The token
+      // exists only in the response that mints it. consumed_at is what makes it single-use, and it is
+      // set in the same statement that claims the packet, so two concurrent exchanges cannot both win.
+      //
+      // exchange_attempts counts every attempt including rejected ones, so a packet being probed is
+      // visible on the row itself and not only in the log.
+      id: "079_apply_gate_packets",
+      sql: `
+        CREATE TABLE IF NOT EXISTS apply_gate_packets (
+          id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          run_id             INTEGER,
+          run_job_id         INTEGER REFERENCES apply_run_jobs(id) ON DELETE CASCADE,
+          job_id             TEXT    NOT NULL,
+          apply_url          TEXT    NOT NULL,
+          expected_origin    TEXT    NOT NULL,
+          gate_reason        TEXT    NOT NULL,
+          answers_json       TEXT    NOT NULL,
+          resume_artifact_id INTEGER,
+          token_hash         TEXT    NOT NULL UNIQUE,
+          expires_at         INTEGER NOT NULL,
+          consumed_at        INTEGER,
+          exchange_attempts  INTEGER NOT NULL DEFAULT 0,
+          created_at         INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+        CREATE INDEX IF NOT EXISTS idx_gate_packets_user_job
+          ON apply_gate_packets(user_id, job_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_gate_packets_origin
+          ON apply_gate_packets(user_id, expected_origin, consumed_at);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

@@ -3757,13 +3757,19 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 </div>
               )}
               {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).map(job => {
+                // held_gate reads as "Sign in", not "Review" and not "Failed". The portal wants an
+                // account or a CAPTCHA before it will take an application, so the next move is the
+                // candidate's and it is a specific one — which is a different message from "check
+                // these answers". Blue rather than amber for the same reason: nothing is wrong here.
                 const statusColor = job.status === "submitted" ? "#16a34a"
                   : job.status === "held_review" ? "#d97706"
+                  : job.status === "held_gate" ? "#2563eb"
                   : job.status === "failed" ? "#dc2626"
                   : job.status === "running" ? theme.accent
                   : theme.textMuted;
                 const statusLabel = job.status === "submitted" ? "Submitted"
                   : job.status === "held_review" ? "Review"
+                  : job.status === "held_gate" ? "Sign in"
                   : job.status === "failed" ? "Failed"
                   : job.status === "running" ? "Running"
                   : job.status === "queued" ? "Queued"
