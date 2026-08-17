@@ -214,9 +214,21 @@ test("a login_required gate does not carry the sign-in page's fields into the pa
   // classifyFlowState returns login_required because it found a password field or a /signin URL, so
   // the controls discovery walked are a CREDENTIAL form. Building the packet from them would label a
   // sign-in page's email box 'discovered_form'.
+  //
+  // Now asserted against buildGateHold, which both the pre-fill and post-fill gate paths return
+  // through — before that refactor this rule lived inline in one of them, so the other could have
+  // been written without it.
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
-  assert.match(src, /answers:\s*flowState === 'captcha_required' \? resolvedAnswers : \[\]/,
-    "the gate return must withhold discovered answers for login_required");
+  const helper = src.slice(src.indexOf("async function buildGateHold"));
+  assert.ok(helper.length > 0, "the shared gate result must exist");
+  assert.match(helper.slice(0, 2500),
+    /answers:\s*flowState === 'captcha_required' \? \(?resolvedAnswers\b/,
+    "the gate result must withhold discovered answers for login_required");
+
+  // And the stronger guarantee the credential fix adds: on a sign-in page there are no fillable
+  // answers to withhold in the first place, because nothing was filled.
+  assert.match(src, /const preFillGate = isUnattended \? await detectGate\(page\) : null;/,
+    "a gate must be detected before the fill, not only after it");
 });
 
 // ── Migration ────────────────────────────────────────────────────────────────
