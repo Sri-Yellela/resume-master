@@ -61,7 +61,44 @@ missing, if `manifest.json` carries a UTF-8 BOM, or if any bundled script has an
 `localhost` URL — i.e. the DEV SWITCH in `config.js`/`background.js` is flipped. Bump `version`
 in `manifest.json` before building; the version comes from there, not from the filename.
 
+## Publish (Chrome Web Store)
+```
+npm run publish:extension -- --dry-run     # full preflight, sends nothing, needs no credentials
+npm run publish:extension                  # preflight, then upload as a DRAFT (nobody sees it)
+npm run publish:extension -- --publish     # ...and publish to everyone
+npm run publish:extension -- --publish --target=trustedTesters
+npm run publish:extension -- --publish --percent=10
+```
+Publishing is irreversible — once a version is live it is on real users' machines and the only
+remedy is another review cycle — so the default uploads a draft and stops. Going live needs
+`--publish`, typed deliberately.
+
+The preflight runs before anything leaves the machine, and a failure means nothing was touched
+remotely. It refuses if the zip has drifted from `extension/`, if the dev switch is flipped, if the
+version does not move forward, if the privacy policy URL does not resolve, or if
+`submission/STORE_LISTING.md` is still headed with the previous version. That last one is not
+bureaucracy: v1.3.0 was ready to be uploaded beside a v1.2.0 listing that declared "personally
+identifiable information — not collected" about a build that fills a candidate's postal address into
+an employer's form. Nothing in the store's API would have caught it.
+
+Credentials come from the environment (`CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`,
+`CWS_ITEM_ID`) and are never printed; see `.env.example` for how to obtain them. `--dry-run` needs
+none of them, so the preflight is safe to run anywhere, including CI on a fork.
+
 ## Privacy
-This extension collects no personal data. Job description text is sent to Resume Master only
-when you explicitly trigger a capture, click "Save Job", or click "ATS Score Tool"/"Send to
-Resume Master". See resumemaster.one/privacy for the full policy.
+Job description text is sent to Resume Master when you explicitly trigger a capture, click "Save
+Job", or click "ATS Score Tool"/"Send to Resume Master".
+
+Since v1.3.0 the extension can also fill an application form on a portal you have signed in to
+yourself. When you invoke it there, it fetches the details you saved in your Resume Master account —
+name, email, phone, postal address, work-authorization answers and your resume — and enters them
+into that employer's form. It shows you every answer and where it came from; you press submit. It
+never signs you in, never attempts a CAPTCHA, and never reads any portal's password or session
+cookie.
+
+It can optionally report the *structure* of a form it filled — the questions, their types, which are
+required — so the same employer's form is recognised for other candidates. That is **off unless you
+turn it on**, it stores the form's questions and never your answers, and it is enforced on the
+server rather than only here.
+
+See resumemaster.one/privacy for the full policy.
