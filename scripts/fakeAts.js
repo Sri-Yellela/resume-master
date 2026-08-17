@@ -265,7 +265,11 @@ function ashbyForm() {
 // Fields are injected in TWO chunks so the control count climbs rather than jumping straight to
 // its final value: a readiness check that merely waits for "any field" would fire on the first
 // chunk and still miss half the form. Only waiting for the count to STOP CHANGING is correct.
-function spaForm(delayMs) {
+//
+// ?variant=2 serves a CHANGED form — one question added, one removed, one made required. Forms
+// change, and a schema captured once and trusted forever is worse than no schema (TASK G4
+// requirement 3), so the store has to be able to observe the change rather than assume stability.
+function spaForm(delayMs, variant = 1) {
   const d = Number.isFinite(delayMs) ? delayMs : 2500;
   return page('SPA ATS — Apply', `
   <h1>Senior Data Engineer</h1>
@@ -281,14 +285,22 @@ function spaForm(delayMs) {
       '<label for="f_phone">Phone</label><input id="f_phone" name="phone">' +
       '<div id="chunk2"></div>' +
       '<button type="submit">Submit application</button></form>';
-    var chunk2 =
+    var chunk2 = ${variant === 2 ? `
+      '<label class="req" for="f_resume">Resume</label>' +
+      '<input id="f_resume" type="file" name="resume" required>' +
+      '<label for="f_linkedin">LinkedIn</label><input id="f_linkedin" name="linkedin">' +
+      '<label for="f_addr">Address</label><input id="f_addr" name="address1">' +
+      '<label class="req" for="f_portfolio">Portfolio URL</label>' +
+      '<input id="f_portfolio" name="portfolio" required>' +
+      '<label class="req" for="f_auth">I am authorized to work without sponsorship</label>' +
+      '<input id="f_auth" type="checkbox" name="authorized_no_sponsorship" required>'` : `
       '<label class="req" for="f_resume">Resume</label>' +
       '<input id="f_resume" type="file" name="resume" required>' +
       '<label for="f_linkedin">LinkedIn</label><input id="f_linkedin" name="linkedin">' +
       '<label for="f_github">GitHub</label><input id="f_github" name="github">' +
       '<label for="f_addr">Address</label><input id="f_addr" name="address1">' +
       '<label class="req" for="f_auth">I am authorized to work without sponsorship</label>' +
-      '<input id="f_auth" type="checkbox" name="authorized_no_sponsorship" required>';
+      '<input id="f_auth" type="checkbox" name="authorized_no_sponsorship" required>'`};
     setTimeout(function(){
       var b = document.getElementById('boot'); if (b) b.remove();
       document.getElementById('app').innerHTML = chunk1;
@@ -666,8 +678,10 @@ const server = http.createServer(async (req, res) => {
     if (path === '/ashby')      return send(200, ashbyForm());
     if (path === '/spa') {
       // ?delay=<ms> overrides the hydration delay; ?delay=0 renders synchronously.
+      // ?variant=2 serves a CHANGED form, for the schema-reconciliation case.
       const q = url.searchParams.get('delay');
-      return send(200, spaForm(q === null ? undefined : Number(q)));
+      const variant = Number(url.searchParams.get('variant') || 1);
+      return send(200, spaForm(q === null ? undefined : Number(q), variant));
     }
     // A 302 rather than serving the sign-in directly, because that is what a real portal does and it
     // is what makes the run's final URL differ from the URL it was queued with — the reason the gate

@@ -8,6 +8,9 @@ import {
   buildGatePacket, mintPacketToken, verifyPacketToken, hashToken, originOf,
   DEFAULT_TOKEN_TTL_MS,
 } from "../services/applyGatePacket.js";
+import {
+  recordFormSchema, formSchemaSummary, hostOf,
+} from "../services/kb/formSchemaLayer.js";
 import { probeBrowserAvailability } from "../services/browserLauncher.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
 import { classifyRuntimeError } from "../shared/failureAttribution.js";
@@ -1516,6 +1519,88 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         : null,
       packet: body,
     });
+  });
+
+  // ── Form schema capture (TASK G4) ────────────────────────────────────────────
+  // Behind a gate is a place the server can never reach. The extension is standing inside it, so the
+  // form's STRUCTURE comes back here and the next candidate's packet arrives pre-mapped.
+  //
+  // OPT-IN, DEFAULT OFF, ENFORCED SERVER-SIDE. The extension checks the setting too, but only to
+  // avoid pointless work — the refusal that matters is this one, because a client-side check is a
+  // request the client can simply not make.
+
+  /** Whether this account has turned capture on. Read by the extension before it captures. */
+  app.get("/api/apply/form-schema/consent", requireAuth, (req, res) => {
+    const row = db.prepare("SELECT form_schema_capture FROM users WHERE id=?").get(req.user.id);
+    res.json({ enabled: row?.form_schema_capture === 1 });
+  });
+
+  app.post("/api/apply/form-schema/consent", requireAuth, (req, res) => {
+    const enabled = req.body?.enabled === true;
+    try {
+      db.prepare("UPDATE users SET form_schema_capture=? WHERE id=?").run(enabled ? 1 : 0, req.user.id);
+    } catch (e) {
+      // An un-migrated deployment has no column. Reporting that is better than reporting success and
+      // silently never capturing.
+      return res.status(503).json({ error: "consent_unavailable", message: "Run migration 081." });
+    }
+    res.json({ ok: true, enabled });
+  });
+
+  /**
+   * Receive one observation of a company's application form.
+   *
+   * Takes STRUCTURE ONLY, and it is this endpoint's job to make that true rather than to trust the
+   * sender: normaliseCapturedFields whitelists the properties that may be stored, so a client that
+   * posted values — by mistake or otherwise — cannot get them in.
+   */
+  app.post("/api/apply/form-schema", requireAuth, (req, res) => {
+    const consent = db.prepare("SELECT form_schema_capture FROM users WHERE id=?").get(req.user.id);
+    if (consent?.form_schema_capture !== 1) {
+      return res.status(403).json({
+        error: "capture_not_enabled",
+        message: "Form schema capture is off for this account.",
+      });
+    }
+
+    const applyHost = hostOf(req.body?.applyUrl) || String(req.body?.applyHost || "").toLowerCase();
+    if (!applyHost) return res.status(400).json({ error: "bad_apply_host" });
+
+    try {
+      const result = recordFormSchema(db, {
+        applyHost,
+        company:  req.body?.company ?? null,
+        platform: req.body?.platform ?? null,
+        fields:   req.body?.fields,
+        // Named so a schema learned by a candidate crossing a gate is distinguishable from one our
+        // own crawl of a public careers page produced. Same store, same shape.
+        source:   "extension_gated",
+      });
+      logEvent(null, null, req.user.id, req.body?.jobId ?? "-", "form_schema_captured",
+        `Form schema ${result.changed ? "changed" : "corroborated"} for ${applyHost}: ` +
+        `${result.fieldCount} field(s), ${result.unmappedCount} we cannot answer`,
+        // Counts and identity, never the fields themselves — the log is not a second copy of the
+        // store, and a form's shape belongs in one place.
+        { applyHost, ...result });
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      // An empty capture is REFUSED, not stored. Persisting one would cache the absence of
+      // information into the asset that is supposed to compound, and a later reader could not tell
+      // "this form has no fields" from "discovery ran before the page rendered" — which is exactly
+      // the failure this task was blocked on.
+      const code = e.reasonCode === "form_schema_empty" ? 422 : 400;
+      return res.status(code).json({ error: e.reasonCode || "capture_failed", message: e.message });
+    }
+  });
+
+  /**
+   * What we already know about the form behind a URL — for IMPORT and QUEUE time, which is when
+   * knowing costs nothing and helps most (requirement 4).
+   */
+  app.get("/api/apply/form-schema", requireAuth, (req, res) => {
+    const summary = formSchemaSummary(db, req.query.url || req.query.host || "");
+    if (!summary) return res.json({ known: false });
+    res.json(summary);
   });
 
   /**
