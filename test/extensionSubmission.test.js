@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "fs";
 import path from "path";
 import JSZip from "jszip";
+import { collectRequiredFiles } from "../scripts/buildExtension.mjs";
 
 // Guards the exact failure this replaced. The hand-assembled v1.1.0 submission drifted so far
 // from extension/ that it shipped a `saved-jobs-content.js` content script which no longer
@@ -46,19 +47,12 @@ test("every file in the submission zip is byte-identical to extension/ source", 
 test("the submission zip ships nothing unreachable from the manifest", async () => {
   // The saved-jobs-content.js case: a ghost file bundled into the published extension long
   // after the capability it implemented was removed from the codebase.
-  const reachable = new Set(["manifest.json"]);
-  reachable.add(manifest.background.service_worker);
-  reachable.add(manifest.action.default_popup);
-  if (manifest.options_page) reachable.add(manifest.options_page);
-  Object.values(manifest.action.default_icon || {}).forEach(p => reachable.add(p));
-  for (const cs of manifest.content_scripts || []) (cs.js || []).forEach(f => reachable.add(f));
-  for (const html of [manifest.action.default_popup, manifest.options_page].filter(Boolean)) {
-    const text = fs.readFileSync(path.join(SRC, html), "utf8");
-    for (const m of text.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/g)) {
-      if (!/^(https?:)?\/\//i.test(m[1])) reachable.add(m[1].replace(/^\.\//, ""));
-    }
-  }
-
+  //
+  // Reachability comes from the BUILDER's own collectRequiredFiles rather than a copy of the rules
+  // kept here. The copy drifted the moment the builder learned to follow ES imports: the zip
+  // correctly contained gated-handoff.js, which background.js imports, and this test called it an
+  // unreachable file that should not be shipping.
+  const reachable = new Set(collectRequiredFiles(manifest));
   const zip = await loadZip();
   for (const entry of Object.values(zip.files).filter(f => !f.dir)) {
     assert.ok(reachable.has(entry.name),
@@ -69,16 +63,10 @@ test("the submission zip ships nothing unreachable from the manifest", async () 
 test("every file the manifest references is present in the zip", async () => {
   const zip = await loadZip();
   const names = new Set(Object.values(zip.files).filter(f => !f.dir).map(f => f.name));
-  const required = [
-    "manifest.json",
-    manifest.background.service_worker,
-    manifest.action.default_popup,
-    manifest.options_page,
-    ...Object.values(manifest.action.default_icon || {}),
-    ...(manifest.content_scripts || []).flatMap(cs => cs.js || []),
-  ].filter(Boolean);
-
-  for (const f of required) assert.ok(names.has(f), `manifest references ${f} but the zip does not contain it`);
+  // Same one definition as above, so "shipped" and "required" cannot disagree about what counts.
+  for (const f of collectRequiredFiles(manifest)) {
+    assert.ok(names.has(f), `manifest references ${f} but the zip does not contain it`);
+  }
 });
 
 test("no bundled script points at localhost — the dev switch must not ship flipped", async () => {

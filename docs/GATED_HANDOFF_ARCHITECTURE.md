@@ -162,8 +162,27 @@ is a separate question and still G4's gate; it has not been re-measured here.
 ## 8. Open decisions
 
 - ~~Does the `activeTab` grant survive in-portal step navigation?~~ **SETTLED in G0 — see §9.**
-- Web Store re-submission: the extension is published at v1.2.0. Any manifest change ships on
-  review latency. Batch manifest changes into one submission.
+- ~~Web Store re-submission: the extension is published at v1.2.0.~~ **SETTLED in G2: batch in the
+  repo, submit once after G5.** The batch is built and validated at v1.3.0; nothing has been
+  submitted. G2–G5 are developed against an unpacked build, which is how G0 already ran.
+
+  **The complete batch, so a second submission is not needed:**
+
+  | Change | Needed by | Status |
+  |---|---|---|
+  | `commands: fill-gated-application` (Ctrl+Shift+Y) | G2 | done |
+  | `version` 1.2.0 → 1.3.0 | all | done |
+  | `activeTab`, `scripting`, `storage` | G2, G3, G4 | already present |
+  | `https://resumemaster.one/*` host permission | G2 packet fetch | already present |
+  | `web_accessible_resources` | G3 overlay | **avoided** — the overlay injects its CSS inline via `scripting`, so no page-reachable asset is needed |
+  | portal host permissions | never | **refused by design** — access is per tab, per gesture |
+  | `externally_connectable` | never | **stays absent** — the extension pulls, nothing pushes in |
+  | anything for schema capture | G4 | none — it rides the same `activeTab` grant |
+  | anything for per-portal batching | G5 | none — grouping is server-side |
+
+  `Ctrl+Shift+G` was the first choice and Chrome silently refused to bind it (it is Chrome's own
+  find-previous), leaving the command present with no key — indistinguishable from a working build
+  until invoked. `Ctrl+Shift+Y` is bound and verified.
 - ~~Whether `held_gate` is a new terminal status or a reason code on the existing `held_review`.~~
   **SETTLED in G1: a new terminal status `held_gate`.** The deciding fact was in the code rather than
   in the trade-off as stated: `routes/apply.js` has ~14 queries keyed on `status='held_review'`, and a
