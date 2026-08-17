@@ -192,8 +192,21 @@ is a separate question and still G4's gate; it has not been re-measured here.
   A distinct status makes them invisible to all fourteen without an exclusion having to be remembered
   in each one. `expired` deliberately did NOT move with them: there is nothing behind an expired
   posting for a human to finish.
-- Whether schema capture is opt-in per user. It sends no personal data, but it does report on a
-  page behind that user's authenticated session, which is worth an explicit consent decision.
+- ~~Whether schema capture is opt-in per user.~~ **SETTLED (decided ahead of G4, which remains
+  blocked): OPT-IN, DEFAULT OFF.** It sends no personal data and the structure-only filter is
+  testable — but the guarantee would rest entirely on that filter being correct, and the thing being
+  reported on sits behind the candidate's own authenticated session. Opt-in is the only answer that
+  survives "what does it send from behind my login?" without the reply depending on trusting us. It
+  also matches the posture of the rest of the extension, which asks for nothing it does not need and
+  takes access per tab, per gesture. The cost is real and accepted: the asset compounds only from
+  users who say yes.
+
+  **G4 REMAINS BLOCKED.** Its own ⛔ is about discovery reliability, not consent. Measured against
+  fakeAts's JS-rendered `/spa` route: an immediate DOM walk finds **0 fields**, reproducing the
+  reported failure exactly, and `waitForFormReady` then finds **8 of 8** across both hydration
+  chunks (3.76s). So the blocker is cleared AT FIXTURE LEVEL. The original observation was a live
+  Ashby posting, and the testing convention forbids pointing automation at a real ATS — so whether
+  discovery holds on a real, heavier SPA is still unmeasured, and that is what G4 waits on.
 
 ---
 

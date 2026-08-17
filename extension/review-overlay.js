@@ -190,6 +190,8 @@ export function renderOverlay(bands, meta) {
     #${ID} .rm-bug { margin: 8px 16px; padding: 9px 11px; border-radius: 9px; background: #fee2e2;
       border: 1px solid #fca5a5; color: #991b1b; font-size: 11px; }
     #${ID} details > summary { cursor: pointer; font-size: 11px; color: #64748b; padding: 6px 0; }
+    #${ID} .rm-next { margin-top: 10px; padding: 9px 11px; border-radius: 9px; background: #eff6ff;
+      border: 1px solid #bfdbfe; color: #1e3a8a; font-size: 11px; }
   `;
 
   const root = document.createElement('div');
@@ -250,6 +252,14 @@ export function renderOverlay(bands, meta) {
     <div class="rm-ft">
       <div class="rm-state" data-role="state"></div>
       <div class="rm-s" style="margin-top:6px">Submit the form yourself when you are happy with it.</div>
+      ${meta.portal && meta.portal.remaining > 0 ? `
+        <div class="rm-next">
+          <div><b>${meta.portal.remaining}</b> more ready at ${esc(meta.portal.host)} —
+            you are already signed in.</div>
+          ${meta.portal.next ? `<div class="rm-s" style="margin-top:2px">Next:
+            ${esc(meta.portal.next.title || meta.portal.next.company || 'application')}</div>` : ''}
+          <button class="rm-btn" data-role="next" style="margin-top:7px">Submit this one first, then go to the next</button>
+        </div>` : ''}
     </div>`;
   root.appendChild(body);
   document.documentElement.appendChild(root);
@@ -283,7 +293,33 @@ export function renderOverlay(bands, meta) {
   root.addEventListener('click', (ev) => {
     const btn = ev.target.closest('button');
     if (!btn) return;
+
+    // Role first, row second. The batch button lives in the FOOTER, not in a field row, so looking
+    // up `.rm-row` before checking the role threw on a null row and killed the handler — the button
+    // did nothing at all, silently, because the throw happened inside the listener.
+    if (btn.dataset.role === 'next') {
+      btn.disabled = true;
+      btn.textContent = 'opening the next one…';
+      try {
+        // The reply is read, not discarded. A batch that cannot advance used to leave this button
+        // sitting on "opening…" forever, which is indistinguishable from slow.
+        chrome.runtime.sendMessage({ type: 'GATE_BATCH_NEXT' }, (reply) => {
+          if (chrome.runtime.lastError || !reply?.ok) {
+            btn.disabled = false;
+            btn.textContent = 'Could not open the next one — try again';
+            btn.dataset.error = chrome.runtime.lastError?.message || reply?.reason || 'no_reply';
+          }
+        });
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Could not open the next one — try again';
+        btn.dataset.error = e.message;
+      }
+      return;
+    }
+
     const row = btn.closest('.rm-row');
+    if (!row) return;
     const item = bandOf(row.dataset.band)[Number(row.dataset.idx)];
     if (!item) return;
     const key = `${item.name || ''}::${item.field || ''}`;

@@ -1317,7 +1317,34 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       ORDER BY p.created_at DESC LIMIT 100
     `).all(req.user.id);
 
+    // ── Amortise the gate per PORTAL, not per application (TASK G5) ───────────
+    // The architecture doc calls this the highest-leverage item in the design, and it is a
+    // reframing rather than machinery: the same rows, grouped by the origin the candidate has to
+    // authenticate against. One ten-second CAPTCHA that releases seven applications is a different
+    // product from seven separate reviews.
+    //
+    // Grouped here rather than in the client because G0 established the unit that matters is the
+    // ORIGIN — the grant survives every same-origin navigation and dies when it leaves — and the
+    // origin is a stored fact on the packet, not something a UI should be re-deriving from a URL.
+    const portals = [...rows.reduce((m, r) => {
+      const g = m.get(r.expected_origin) || {
+        origin: r.expected_origin,
+        host: (() => { try { return new URL(r.expected_origin).host; } catch { return r.expected_origin; } })(),
+        count: 0, packetIds: [], oldestAt: null, gateReasons: new Set(),
+      };
+      g.count++;
+      g.packetIds.push(r.id);
+      g.oldestAt = g.oldestAt == null ? r.created_at : Math.min(g.oldestAt, r.created_at);
+      g.gateReasons.add(r.gate_reason);
+      m.set(r.expected_origin, g);
+      return m;
+    }, new Map()).values()]
+      .map(g => ({ ...g, oldestAt: toMs(g.oldestAt), gateReasons: [...g.gateReasons] }))
+      // Biggest batch first: that is the one where crossing a gate once buys the most.
+      .sort((a, b) => b.count - a.count);
+
     res.json({
+      portals,
       packets: rows.map(r => {
         const body = parseJson(r.answers_json, {});
         return {
@@ -1489,6 +1516,59 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         : null,
       packet: body,
     });
+  });
+
+  /**
+   * A handoff that was released but never completed — the portal signed the candidate out partway
+   * through a batch, or the tab was closed on the way (TASK G5 requirement 4).
+   *
+   * The token was already spent, and un-spending it would make "single use" conditional on our own
+   * bookkeeping being right. So this issues a FRESH packet for the same job instead: the original row
+   * stays consumed and auditable, and the new one starts with no outstanding token. Single use holds
+   * absolutely; what is reopened is the handoff, not the token.
+   *
+   * Refused once a review has been recorded, because then the candidate did see the form and the
+   * application is theirs to finish — reopening would offer a second copy of an application that is
+   * already in front of them.
+   */
+  app.post("/api/apply/gate-packets/:packetId/reopen", requireAuth, (req, res) => {
+    const packetId = Number(req.params.packetId);
+    if (!Number.isInteger(packetId) || packetId <= 0) return res.status(400).json({ error: "bad_packet_id" });
+
+    const row = db.prepare("SELECT * FROM apply_gate_packets WHERE id=? AND user_id=?")
+      .get(packetId, req.user.id);
+    if (!row) return res.status(404).json({ error: "packet_not_found" });
+    if (row.consumed_at == null) {
+      // Nothing to reopen: the packet is still usable exactly as it is.
+      return res.json({ ok: true, packetId, reopened: false, reason: "still_open" });
+    }
+
+    const rj = row.run_job_id
+      ? db.prepare("SELECT status, gate_review_json FROM apply_run_jobs WHERE id=? AND user_id=?")
+          .get(row.run_job_id, req.user.id)
+      : null;
+    if (rj?.gate_review_json) {
+      return res.status(409).json({
+        error: "already_reviewed",
+        message: "This application was already opened and reviewed. Finish it in the tab you started.",
+      });
+    }
+    if (rj && rj.status !== "held_gate") {
+      return res.status(409).json({ error: "not_held", message: `This job is ${rj.status}, not waiting at a gate.` });
+    }
+
+    const ins = db.prepare(`
+      INSERT INTO apply_gate_packets
+        (user_id, run_id, run_job_id, job_id, apply_url, expected_origin, gate_reason,
+         answers_json, resume_artifact_id, token_hash, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(row.user_id, row.run_id, row.run_job_id, row.job_id, row.apply_url, row.expected_origin,
+           row.gate_reason, row.answers_json, row.resume_artifact_id, GATE_PACKET_NO_TOKEN());
+
+    const newId = Number(ins.lastInsertRowid);
+    logEvent(row.run_id, row.run_job_id, req.user.id, row.job_id, "gate_packet_reopened",
+      "Handoff reopened after an incomplete session", { from: packetId, to: newId, expectedOrigin: row.expected_origin });
+    res.json({ ok: true, packetId: newId, reopened: true, from: packetId });
   });
 
   /**
