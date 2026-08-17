@@ -544,6 +544,21 @@ async function fillFromPacket({ tab, origin, released, serverUrl, reused }) {
     };
   }
 
+  // ── Schema capture (TASK G4) ────────────────────────────────────────────────
+  // The extension is standing inside a place the server can never reach. What goes back is the
+  // form's SHAPE — labels, types, required flags, option lists, order — so the next candidate
+  // through this portal arrives pre-mapped.
+  //
+  // The probe output from the target match is reused rather than the page being read a second time.
+  // It already contains no values: probeFormShape reports what the form ASKS, never what is in it.
+  // The server whitelists again on arrival, because a client-side promise is not an enforcement.
+  //
+  // Opt-in and default off. Asked every time rather than cached: consent that cannot be withdrawn
+  // until a cache expires is not consent, and this is one request against our own server.
+  const capture = await captureFormSchema({
+    serverUrl, origin, shape, released,
+  }).catch(() => null);
+
   const portal = portalForOverlay;
   if (portal.remaining > 0) {
     await saveBatchForTab(tab.id, { origin, host: portal.host, remaining: portal.remaining });
@@ -562,6 +577,7 @@ async function fillFromPacket({ tab, origin, released, serverUrl, reused }) {
     unmatched,
     resume: outcome?.resume || (released.resumeUrl ? { attached: false, reason: 'fetch_failed' } : null),
     overlay: { rendered: true, rows: reviewItems.length },
+    capture,
     review: {
       ready: readiness.ready,
       guessCount: readiness.guessCount,
@@ -574,6 +590,55 @@ async function fillFromPacket({ tab, origin, released, serverUrl, reused }) {
     // Never auto-submitted. The last action is the candidate's — §6, without exception.
     message: `Filled ${outcome?.filled?.length || 0} field(s). Review and submit yourself.`,
   };
+}
+
+/**
+ * Send the form's structure back, if this candidate has turned capture on.
+ *
+ * STRUCTURE ONLY, and the shape passed in is the same one used to decide whether to release the
+ * packet at all — so there is no second read of the page and no opportunity for a value to be picked
+ * up on the way. `current_value` does not exist in probeFormShape's output; the server's whitelist
+ * is what makes that hold for every other producer too.
+ *
+ * Never allowed to affect the fill. A candidate's application does not depend on our bookkeeping, so
+ * every failure here is swallowed and reported as a result field rather than raised.
+ */
+async function captureFormSchema({ serverUrl, origin, shape, released }) {
+  if (!serverUrl || !shape?.fields?.length) return { attempted: false, reason: 'nothing_to_capture' };
+
+  try {
+    const consentRes = await api(serverUrl, '/api/apply/form-schema/consent');
+    if (!consentRes.ok) return { attempted: false, reason: 'consent_unreadable' };
+    const { enabled } = await consentRes.json();
+    if (!enabled) return { attempted: false, reason: 'not_enabled' };
+  } catch {
+    return { attempted: false, reason: 'consent_unreadable' };
+  }
+
+  try {
+    const res = await api(serverUrl, '/api/apply/form-schema', {
+      method: 'POST',
+      body: JSON.stringify({
+        applyUrl: shape.url || origin,
+        jobId: released.packet?.jobId ?? null,
+        // Deliberately NOT the packet's answers, and deliberately not the filled DOM: the fields as
+        // the form presented them, before anything was written into it.
+        fields: shape.fields.map(f => ({
+          order: f.index, label: f.label, type: f.type, required: f.required,
+          options: f.options || [], name: f.name || f.id,
+        })),
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { attempted: true, ok: false, reason: err.error || `http_${res.status}` };
+    }
+    const body = await res.json();
+    return { attempted: true, ok: true, changed: body.changed, fieldCount: body.fieldCount,
+             unmappedCount: body.unmappedCount, status: body.status };
+  } catch (e) {
+    return { attempted: true, ok: false, reason: 'network_error' };
+  }
 }
 
 // ── Edits from the overlay ───────────────────────────────────────────────────

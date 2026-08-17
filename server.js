@@ -2577,6 +2577,61 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE apply_run_jobs ADD COLUMN gate_review_json TEXT;
       `,
     },
+    {
+      // A company's application form, as a KB fact (TASK G4). Behind a gate is a place the server
+      // can never reach, but the extension is standing inside it — so the form's STRUCTURE comes
+      // back and the next candidate's packet arrives pre-mapped. It is the mechanism that replaces
+      // hand-writing platformDetector's PLATFORM_LABEL_MAPS one ATS at a time.
+      //
+      // KEYED BY APPLY HOST, not by job. One careers page serves every posting behind it, so a
+      // schema captured once from any of them serves all the others — which is the only reason this
+      // compounds rather than being a per-application cache.
+      //
+      // STRUCTURE ONLY. fields_json holds labels, types, required flags, option lists and order.
+      // Never a value, never anything about the candidate. discoverFields returns current_value and
+      // this store must never receive it, which is enforced by a whitelist in formSchemaLayer.js and
+      // asserted by test rather than promised by a comment.
+      //
+      // shape_hash is what makes a CHANGED form observable. Forms change; a stale schema that is
+      // trusted is worse than no schema, so a differing hash is treated as a new claim about the
+      // form — corroboration resets and a confirmed schema drops back to proposed. That last part
+      // deliberately DIVERGES from company_org_units, which never demotes: an org unit that stops
+      // appearing may simply not be hiring, whereas a form that comes back different is positive
+      // evidence the stored one is now wrong.
+      //
+      // `source` distinguishes a capture made by a candidate standing behind a gate from one our own
+      // crawl of a public careers page produced. Both write the same shape on purpose — this is the
+      // store imported-careers-page support needs too, and a gated-only variant would have to be
+      // merged into it later.
+      //
+      // users.form_schema_capture is the consent switch, DEFAULT 0. Capture reports on a page behind
+      // that candidate's own authenticated session, and opt-in is the only answer to "what does it
+      // send from behind my login?" that does not rest on trusting our filter.
+      id: "081_company_form_schemas",
+      sql: `
+        CREATE TABLE IF NOT EXISTS company_form_schemas (
+          apply_host           TEXT    NOT NULL PRIMARY KEY,
+          company              TEXT,
+          platform             TEXT,
+          fields_json          TEXT    NOT NULL,
+          field_count          INTEGER NOT NULL DEFAULT 0,
+          unmapped_json        TEXT,
+          unmapped_count       INTEGER NOT NULL DEFAULT 0,
+          shape_hash           TEXT    NOT NULL,
+          confidence           REAL    NOT NULL DEFAULT 0,
+          corroboration_count  INTEGER NOT NULL DEFAULT 0,
+          status               TEXT    NOT NULL DEFAULT 'proposed',
+          source               TEXT    NOT NULL,
+          first_seen           INTEGER NOT NULL,
+          last_seen            INTEGER NOT NULL,
+          changed_at           INTEGER,
+          previous_shape_hash  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_company_form_schemas_company
+          ON company_form_schemas(company, status);
+        ALTER TABLE users ADD COLUMN form_schema_capture INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

@@ -1,6 +1,13 @@
 # Gated Portal Handoff — Architecture
 
-**Status:** DESIGN. Nothing built. Depends on a prerequisite that is currently broken (§7).
+**Status:** BUILT. G0–G5 are implemented, real-run verified and merged; every open decision in §8 is
+settled. Migrations 079–081. The extension manifest is batched at v1.3.0 and **not yet submitted** to
+the Web Store — that is the one remaining action, and it is deliberate (see §8).
+
+Each task has a harness that drives a real browser rather than a mock: `scripts/g0ActiveTabSpike.mjs`
+(the grant-lifetime spike), `g1GatePacket`, `g2ExtensionHandoff`, `g3ReviewOverlay`,
+`g4SchemaCapture`, `g5PortalBatch`, and `g6CredentialGuard` for the credential-leak fix that came out
+of G1's review.
 
 **Problem.** Portals like Meta, Amazon, Google and per-tenant Workday require an account, and
 often a CAPTCHA or identity verification, before an application can be submitted. `classifyFlowState`
@@ -151,6 +158,12 @@ and Meta are heavier SPAs than Ashby.
 Building schema capture before discovery is reliable would persist EMPTY schemas — caching the bug
 into the asset that is supposed to compound. Fix discovery before task G4.
 
+RESOLVED (G4). Discovery is readiness-aware and measured on every capture run: 0 fields without a
+readiness wait, the whole form with one. The prerequisite is also no longer the only thing standing
+between a bad reading and a poisoned store — `recordFormSchema` REFUSES an empty capture rather than
+persisting it, so the specific failure this section warned about is now structurally impossible
+rather than merely unlikely.
+
 Correction (G0, from reading the repo rather than this doc): the second half of that instruction is
 already done. `scripts/fakeAts.js` has served a JS-rendered `/spa` route since the hydration fix —
 fields injected in two chunks after a configurable delay, specifically so a discovery pass that does
@@ -201,12 +214,19 @@ is a separate question and still G4's gate; it has not been re-measured here.
   takes access per tab, per gesture. The cost is real and accepted: the asset compounds only from
   users who say yes.
 
-  **G4 REMAINS BLOCKED.** Its own ⛔ is about discovery reliability, not consent. Measured against
-  fakeAts's JS-rendered `/spa` route: an immediate DOM walk finds **0 fields**, reproducing the
-  reported failure exactly, and `waitForFormReady` then finds **8 of 8** across both hydration
-  chunks (3.76s). So the blocker is cleared AT FIXTURE LEVEL. The original observation was a live
-  Ashby posting, and the testing convention forbids pointing automation at a real ATS — so whether
-  discovery holds on a real, heavier SPA is still unmeasured, and that is what G4 waits on.
+  **G4 SHIPPED** on the owner's call, with the blocker's status recorded rather than waved through.
+  Measured against fakeAts's JS-rendered `/spa` route, and re-measured on every run of
+  `scripts/g4SchemaCapture.mjs` rather than assumed: an immediate DOM walk finds **0 fields**,
+  reproducing the reported failure exactly, and `waitForFormReady` then finds **8 of 8** across both
+  hydration chunks (~3.7s). The harness refuses to proceed if that first number is ever non-zero and
+  the second ever zero, because capturing then would persist empty schemas.
+
+  **What is still unmeasured:** the original observation was a live Ashby posting, and the testing
+  convention forbids pointing automation at a real ATS, so whether discovery holds on a real, heavier
+  SPA has not been established. Two things limit the damage if it does not. An empty capture is
+  REFUSED (422, `form_schema_empty`) rather than stored, so the failure mode the ⛔ existed to prevent
+  cannot occur even if discovery regresses. And a schema that comes back different reconciles — the
+  store cannot be poisoned permanently by one bad reading, only temporarily by a repeated one.
 
 ---
 
