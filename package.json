@@ -15,7 +15,8 @@
     "migrate": "node scripts/migration.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/backup.js restore",
-    "build:extension": "node scripts/buildExtension.mjs"
+    "build:extension": "node scripts/buildExtension.mjs",
+    "publish:extension": "node scripts/publishExtension.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
