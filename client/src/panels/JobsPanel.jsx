@@ -1211,6 +1211,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [applyQueue, setApplyQueue] = useState([]);
   const [applyRuns, setApplyRuns] = useState([]);
   const [applyReviewJobs, setApplyReviewJobs] = useState([]); // held_review items across all runs
+  // Gated jobs, grouped by the portal you have to sign in to. One crossing releases the whole group,
+  // which is a different offer from N separate reviews — see TASK G5.
+  const [applyGatePortals, setApplyGatePortals] = useState([]);
   const [applyQueueMsg, setApplyQueueMsg] = useState("");
   const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
   const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
@@ -2277,6 +2280,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       setApplyRuns(Array.isArray(data.runs) ? data.runs : []);
       setApplyReviewJobs(Array.isArray(data.review) ? data.review : []);
     } catch {}
+    // Separate call: the grouping lives with the packets, and a failure here must not blank the runs
+    // list that the rest of this panel is built on.
+    try {
+      const gates = await api("/api/apply/gate-packets");
+      setApplyGatePortals(Array.isArray(gates.portals) ? gates.portals : []);
+    } catch { setApplyGatePortals([]); }
   }, []);
 
   const loadApplyRunDetail = useCallback(async (runId) => {
@@ -3747,6 +3756,35 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                       <span style={{ fontSize:11, color:theme.accentText }}>{answersMsg}</span>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Sign in once, and everything queued behind that gate is ready. The count is the
+                  offer: a ten-second sign-in that releases seven applications is a different
+                  product from seven separate reviews. Only shown on the cross-run view, because a
+                  single run's detail is about that run. */}
+              {!applyRunDetail && applyGatePortals.length > 0 && (
+                <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
+                  {applyGatePortals.map(p => (
+                    <div key={p.origin} style={{
+                      border:`1px solid ${theme.border}`, borderRadius:8, padding:"10px 14px",
+                      background:theme.surfaceHigh, display:"flex", alignItems:"center", gap:10 }}>
+                      <span style={{ fontSize:9, fontWeight:700, padding:"1px 7px", borderRadius:999,
+                                     background:"#dbeafe", color:"#1e40af", whiteSpace:"nowrap" }}>
+                        {p.gateReasons?.includes("captcha_required") ? "verify" : "sign in"}
+                      </span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:12.5, fontWeight:700, color:theme.text,
+                                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          Sign in to {p.host} once
+                        </div>
+                        <div style={{ fontSize:11, color:theme.textMuted }}>
+                          {p.count} application{p.count === 1 ? "" : "s"} ready · reviewed one at a time
+                        </div>
+                      </div>
+                      <span style={{ fontSize:18, fontWeight:800, color:theme.text }}>{p.count}</span>
+                    </div>
+                  ))}
                 </div>
               )}
 

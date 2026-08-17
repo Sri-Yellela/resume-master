@@ -284,6 +284,54 @@ export async function sweepExpiredPackets(now = Date.now()) {
   return dead.length;
 }
 
+// ── Per-portal batching (TASK G5) ────────────────────────────────────────────
+// The gate is amortised per PORTAL, not per application: once the candidate is authenticated at
+// Amazon, that session serves every queued Amazon job. G0 is what makes this more than a list —
+// the activeTab grant survives every same-origin navigation, so moving the SAME TAB to the next
+// application keeps the grant alive and no second gesture is needed.
+//
+// Batching the GATE must not batch the REVIEW. Each application is still target-matched on its own
+// and still gets its own overlay to approve; what is shared is the sign-in, not the attestation.
+
+const batchKey = (tabId) => `batch:${tabId}`;
+
+export async function saveBatchForTab(tabId, batch) {
+  await chrome.storage.session.set({ [batchKey(tabId)]: { ...batch, updatedAt: Date.now() } });
+}
+
+export async function loadBatchForTab(tabId) {
+  const got = await chrome.storage.session.get(batchKey(tabId));
+  return got?.[batchKey(tabId)] || null;
+}
+
+export async function clearBatchForTab(tabId) {
+  await chrome.storage.session.remove(batchKey(tabId));
+}
+
+/** What else is waiting on this portal, newest first, excluding one already in hand. */
+export async function portalQueueFor(serverUrl, origin, excludePacketId = null) {
+  try {
+    const res = await api(serverUrl, '/api/apply/gate-packets');
+    if (!res.ok) return { remaining: 0, next: null, packets: [] };
+    const body = await res.json();
+    const mine = (body.packets || [])
+      .filter(p => p.expectedOrigin === origin && p.packetId !== excludePacketId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const portal = (body.portals || []).find(g => g.origin === origin) || null;
+    return {
+      remaining: mine.length,
+      host: portal?.host || origin,
+      next: mine[0] ? {
+        packetId: mine[0].packetId, applyUrl: mine[0].applyUrl,
+        title: mine[0].title, company: mine[0].company,
+      } : null,
+      packets: mine,
+    };
+  } catch {
+    return { remaining: 0, next: null, packets: [] };
+  }
+}
+
 // ── The handoff ──────────────────────────────────────────────────────────────
 
 const api = (serverUrl, path, init = {}) => fetch(`${serverUrl}${path}`, {
@@ -314,7 +362,7 @@ export async function runGatedHandoff({ serverUrl, tab }) {
   // moved to another step. Reuse it rather than spending a second token.
   const cached = await loadPacketForTab(tab.id);
   if (cached && cached.expectedOrigin === origin) {
-    return fillFromPacket({ tab, origin, released: cached, reused: true });
+    return fillFromPacket({ tab, origin, released: cached, serverUrl, reused: true });
   }
 
   let list;
@@ -463,6 +511,12 @@ async function fillFromPacket({ tab, origin, released, serverUrl, reused }) {
   const bands = orderForReview(reviewItems);
   const readiness = readinessOf(reviewItems);
 
+  // Fetched before the overlay renders, because "3 more ready at amazon.jobs" is part of what the
+  // candidate is deciding about — finding out after they have closed the tab is finding out too late.
+  const portalForOverlay = serverUrl
+    ? await portalQueueFor(serverUrl, origin, released.packetId)
+    : { remaining: 0, next: null, packets: [] };
+
   try {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -474,6 +528,7 @@ async function fillFromPacket({ tab, origin, released, serverUrl, reused }) {
         filledCount: outcome?.filled?.length || 0,
         resumeAttached: outcome?.resume?.attached === true,
         resolverBug: readiness.resolverBug,
+        portal: portalForOverlay,
       }],
     });
   } catch (e) {
@@ -489,11 +544,19 @@ async function fillFromPacket({ tab, origin, released, serverUrl, reused }) {
     };
   }
 
+  const portal = portalForOverlay;
+  if (portal.remaining > 0) {
+    await saveBatchForTab(tab.id, { origin, host: portal.host, remaining: portal.remaining });
+  } else {
+    await clearBatchForTab(tab.id);
+  }
+
   return {
     ok: true,
     reused: !!reused,
     packetId: released.packetId,
     runJobId: released.packet?.runJobId ?? null,
+    portal,
     filled: outcome?.filled || [],
     skipped: outcome?.skipped || [],
     unmatched,
