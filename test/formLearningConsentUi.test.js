@@ -15,6 +15,7 @@ import express from "express";
 import Database from "better-sqlite3";
 import applyRoutes from "../routes/apply.js";
 import { MIGRATIONS } from "../scripts/migrations.js";
+import { FIELD_KEYS } from "../services/kb/formSchemaLayer.js";
 
 const panel = fs.readFileSync("client/src/panels/IntegrationsPanel.jsx", "utf8");
 
@@ -156,6 +157,43 @@ test("the copy says what is sent and what never is", () => {
   assert.match(panel, /your answers/i, "it must say what is NOT sent");
   assert.match(panel, /off unless you turn it on/i, "it must state the default");
   assert.match(panel, /turn it off at any time/i, "consent that cannot be withdrawn is not consent");
+  assert.match(panel, /own sign-in/i,
+    "it must say the page is one the candidate reached through their own authenticated session");
+});
+
+/**
+ * Every property the store keeps, and the phrase in the consent copy that discloses it.
+ *
+ * This is the enforcement of "the copy is the substance". The first version described three of the
+ * seven whitelisted properties — it never mentioned that the CHOICES IN A DROPDOWN are captured,
+ * which is the most user-visible of the ones it missed. A consent control that under-describes what
+ * it sends is the same defect as a privacy policy that does, just closer to the user.
+ */
+const DISCLOSURE_FOR = {
+  label:        /wording/i,
+  type:         /their type/i,
+  options:      /choices in any dropdown/i,
+  required:     /which ones are required/i,
+  order:        /order they appear in/i,
+  name:         /own internal name/i,
+  handler_type: /kind<\/em>? of profile field|kind of profile field/i,
+};
+
+test("THE COPY DISCLOSES EVERY PROPERTY THE STORE ACTUALLY KEEPS", () => {
+  for (const key of FIELD_KEYS) {
+    const phrase = DISCLOSURE_FOR[key];
+    assert.ok(phrase,
+      `formSchemaLayer stores "${key}" and this test has no phrase for it — add the disclosure to ` +
+      `the consent copy, then add the phrase here. Do not just add the phrase.`);
+    assert.match(panel, phrase, `the consent copy must disclose "${key}"`);
+  }
+});
+
+test("the disclosure map has not drifted ahead of the whitelist either", () => {
+  // The other direction: a phrase promising something we no longer capture is also a false statement.
+  for (const key of Object.keys(DISCLOSURE_FOR)) {
+    assert.ok(FIELD_KEYS.includes(key), `the copy discloses "${key}" but the store no longer keeps it`);
+  }
 });
 
 test("the panel reconciles against the server rather than trusting its own optimism", () => {

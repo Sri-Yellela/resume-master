@@ -202,13 +202,17 @@ export function IntegrationsPanel() {
               label="Share the structure of application forms"
             />
             <div style={{ fontSize:12, color:"var(--color-text-muted)", lineHeight:1.6 }}>
-              When you use the extension to fill an application, it can send back{" "}
-              <strong style={{ color:"var(--color-text)" }}>the questions that form asks</strong> —
-              their wording, their type, which ones are required. The next person applying to that
-              company then gets a form we already understand, and fewer questions to answer by hand.
+              When you use the extension to fill an application — on a page you reached through your
+              own sign-in — it can send back{" "}
+              <strong style={{ color:"var(--color-text)" }}>the questions that form asks</strong>:
+              their wording, their type, the choices in any dropdown, which ones are required, the
+              order they appear in, and the form's own internal name for each one. It also records
+              which <em>kind</em> of profile field could answer each question — "email", say — never
+              the value in yours. The next person applying to that company then gets a form we
+              already understand, and fewer questions to answer by hand.
               <div style={{ marginTop:6 }}>
                 We never send <strong style={{ color:"var(--color-text)" }}>your answers</strong>,
-                anything about you, or anything else on the page. This is off unless you turn it on,
+                anything about you, or anything else on that page. This is off unless you turn it on,
                 and you can turn it off at any time.
               </div>
               {capture === null && (
