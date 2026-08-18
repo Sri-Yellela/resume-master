@@ -187,6 +187,32 @@ export function extractJobPayload() {
     };
   }
 
+  // Workday's hiringOrganization is an internal org unit, not the employer. Measured across two
+  // tenants: "2100 NVIDIA USA" and "100 Salesforce, Inc." — a numeric company code, then a regional
+  // or legal-entity variant of the name. Stored as-is, neither would match the same employer
+  // captured from Greenhouse or LinkedIn, so the cross-source reconciler would treat them as
+  // different companies.
+  //
+  // The tenant subdomain is the dependable signal (nvidia.wd5.myworkdayjobs.com), but it is
+  // lowercase, and "Nvidia" is not how NVIDIA writes it. So the tenant supplies WHICH token to use
+  // and the page supplies its CASING — taken from wherever the employer already spells it out.
+  function workdayCompany(rawOrg) {
+    const tenant = location.hostname.split('.')[0];
+    const stripped = (rawOrg || '').replace(/^\d+\s+/, '').trim();
+    if (!tenant) return stripped;
+
+    const re = new RegExp('\\b' + tenant.replace(/[^a-z0-9]/gi, '.') + '\\b', 'i');
+    for (const src of [rawOrg, document.title,
+                       document.querySelector('h1')?.innerText || '',
+                       ...[...document.querySelectorAll('img')].map(i => i.alt || '')]) {
+      const m = src && re.exec(src);
+      if (m) return m[0];
+    }
+    // The tenant is an abbreviation the page never spells out (ipg, hcahealthcare). The org name
+    // with its code stripped is then the better of the two, not the worse.
+    return stripped || tenant.charAt(0).toUpperCase() + tenant.slice(1);
+  }
+
   function genericData() {
     const ld = extractJsonLdJobPosting();
     const ldOrg = ld?.hiringOrganization;
@@ -210,6 +236,8 @@ export function extractJobPayload() {
       if (!company) company = parts[1]?.trim() || '';
     }
     if (!title) title = firstText(['h1']);
+
+    if (location.hostname.includes('myworkdayjobs.com')) company = workdayCompany(company);
 
     return { title, company, location: ldCity?.trim() || '', workType: '', salary: null };
   }

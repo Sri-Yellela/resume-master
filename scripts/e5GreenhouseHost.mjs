@@ -45,11 +45,12 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Greenhouse-powered listings on the EMPLOYER's own domain — the case that was impossible before,
 // and the case no manifest could ever have enumerated.
 const PAGES = [
-  { label: 'greenhouse (vercel)',   url: 'https://job-boards.greenhouse.io/vercel/jobs/6136160004', named: true },
-  { label: 'greenhouse (airtable)', url: 'https://job-boards.greenhouse.io/airtable/jobs/8403127002', named: true },
-  { label: 'ashby (ramp)',          url: 'https://jobs.ashbyhq.com/ramp/34413f8d-26bf-4bbc-8ade-eb309a0e2245', named: true },
-  { label: 'ashby (linear)',        url: 'https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff', named: true },
-  { label: 'workday (nvidia)',      url: 'https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-Solutions-Architect--Agentic-AI---Safety-and-Security_JR2023191', named: true },
+  { label: 'greenhouse (vercel)',   url: 'https://job-boards.greenhouse.io/vercel/jobs/6136160004', named: true, company: 'Vercel' },
+  { label: 'greenhouse (airtable)', url: 'https://job-boards.greenhouse.io/airtable/jobs/8403127002', named: true, company: 'Airtable' },
+  { label: 'ashby (ramp)',          url: 'https://jobs.ashbyhq.com/ramp/34413f8d-26bf-4bbc-8ade-eb309a0e2245', named: true, company: 'Ramp' },
+  { label: 'ashby (linear)',        url: 'https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff', named: true, company: 'Linear' },
+  { label: 'workday (nvidia)',      url: 'https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-Solutions-Architect--Agentic-AI---Safety-and-Security_JR2023191', named: true, company: 'NVIDIA' },
+  { label: 'workday (salesforce)',  url: 'https://salesforce.wd12.myworkdayjobs.com/en-US/External_Career_Site/job/Indiana---Indianapolis/Manager--Go-To-Market-Financial-Planning---Analysis_JR354325', named: true, company: 'Salesforce' },
   { label: 'EMBEDDED — stripe.com',     url: 'https://stripe.com/jobs/search?gh_jid=8077887', named: false },
   { label: 'EMBEDDED — databricks.com', url: 'https://www.databricks.com/company/careers/open-positions/job?gh_jid=8559344002', named: false },
 ];
@@ -102,7 +103,7 @@ async function main() {
   });
 
   try {
-    for (const { label, url, named } of PAGES) {
+    for (const { label, url, named, company } of PAGES) {
       console.log(`\n── ${label} ──`);
       const page = await browser.newPage();
       let loaded = true;
@@ -128,6 +129,16 @@ async function main() {
       if (named) {
         check(`${label}: extracted a posting`, payload.ok === true,
           payload.ok ? `${desc} chars` : 'ok=false — the selector map missed');
+
+        // The company has to be the EMPLOYER, spelled the way the employer spells it, or the
+        // cross-source reconciler will not match this posting to the same job seen on another
+        // board. Workday is the reason this is checked: its hiringOrganization is an internal org
+        // unit with a numeric code — "2100 NVIDIA USA", "100 Salesforce, Inc." — which would have
+        // been stored verbatim and matched nothing.
+        if (company) {
+          check(`${label}: company is the employer, correctly cased`, payload.company === company,
+            `got "${payload.company}", want "${company}"`);
+        }
         // THE CHECK THAT ACTUALLY TESTS THE SELECTORS. Ashby and Workday both publish JSON-LD, and
         // the extractor prefers it — so a per-site selector can be flatly wrong and the page still
         // captures perfectly. That is not hypothetical: the Ashby entry used to pin a CSS-module
