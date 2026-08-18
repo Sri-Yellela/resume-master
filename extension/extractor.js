@@ -67,7 +67,24 @@ export function extractJobPayload() {
     // selector this used to carry — exists on neither.
     'greenhouse.io': () => trySelectors(['.job__description', 'main.job-post']),
     'workable.com':  () => trySelectors(['.job-description']),
-    'ashbyhq.com':   () => trySelectors(['._descriptionText_sq2af_201', '[class*="descriptionText"]']),
+    // Ashby renders through CSS modules, so its description class carries a build hash —
+    // `_descriptionText_5yu8i_201` today, something else after their next deploy. An earlier version
+    // of this file pinned one of those hashes verbatim, which never matched anything and was only
+    // harmless because Ashby also publishes JSON-LD and that path wins first. `#overview` is theirs
+    // and stable; the attribute-contains selector survives the hash rotating.
+    'ashbyhq.com':   () => trySelectors(['#overview', '[class*="descriptionText"]']),
+    // Workday's automation ids are contractual — they exist so their own test tooling can find
+    // things — which makes them the most durable hooks on any board here.
+    //
+    // ADDING THIS EXTRACTOR DOES NOT MEAN ADDING A WORKDAY HOST PERMISSION, and it must never come
+    // to mean that. Workday is the gated portal the handoff fills; its pages are reached only
+    // through the activeTab grant the user's own invocation creates, and a host permission would
+    // silently convert that into standing access to every tenant. Capture reaching a Workday
+    // posting is the same per-invocation read as any other page.
+    'myworkdayjobs.com': () => trySelectors([
+      '[data-automation-id="jobPostingDescription"]',
+      '[data-automation-id="job-posting-details"]',
+    ]),
   };
 
   function trySelectors(selectors) {

@@ -80,6 +80,13 @@ from both triggers, and asserts first that the extension cannot even see that ta
 **No portal origin is declared** — not Workday, not Amazon, not Meta. Nor any job board. Every page
 the extension reads is reached per-tab, per-invocation, by the user's own gesture.
 
+**`extractor.js` has a Workday entry, and that is not a contradiction.** The selector map says how to
+read a page IF the user invokes capture on one; it grants nothing and is consulted only after access
+already exists. Workday is also the portal the gated handoff fills, so the temptation to "make it
+work properly" by adding `*.myworkdayjobs.com` to `host_permissions` is exactly the mistake to avoid:
+it would convert a per-invocation grant into standing access to every tenant the user can reach.
+`test/manifestMinimumPermission.test.js` fails if a workday host is ever declared.
+
 ## Content scripts
 
 **None.** The extension declares no content script and injects nothing on page load.
@@ -92,7 +99,14 @@ until the user presses the shortcut or opens the popup, and only the tab they di
 The extractor lives in `extractor.js` and is injected by `chrome.scripting.executeScript`. Its
 per-site selector map is an OPTIMISATION, not a gate — an unlisted site falls through to a generic
 largest-content-block heuristic and still captures, which is exactly what makes an embedded board
-work.
+work. It currently names LinkedIn, Indeed, Glassdoor, Lever, Greenhouse, Workable, Ashby and
+Workday, verified against real postings by `scripts/e5GreenhouseHost.mjs`.
+
+Several of those boards publish JSON-LD, which the extractor prefers over any selector — so a
+selector can be wrong and the page still capture perfectly. That is not theoretical: the Ashby entry
+once pinned a CSS-module class with a build hash in it and matched nothing, for weeks, invisibly.
+e5 therefore re-runs each named board with the JSON-LD deleted, so the selectors have to do the work
+they exist for, and a test rejects build-hashed class names outright.
 
 ## Commands
 
