@@ -2,6 +2,7 @@ import {
   runGatedHandoff, clearPacketForTab, sweepExpiredPackets, applyOverlayEdit,
   loadBatchForTab, clearBatchForTab,
 } from './gated-handoff.js';
+import { extractJobPayload, showCaptureToast } from './extractor.js';
 
 // Keep in sync with config.js (service workers cannot share plain-script globals).
 // DEV SWITCH: comment line A, uncomment line B.
@@ -58,16 +59,93 @@ async function importCapturedJob({ url, text }) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Capture, from either trigger. The content script extracts and hands the text here; this is the
-  // only place the request is made and the only place its result is worded.
-  if (message.type === 'IMPORT_CAPTURED_JOB') {
-    importCapturedJob(message.payload || {}).then(result => {
-      // Recorded so the popup can show the outcome of a hotkey capture it was not open for.
-      chrome.storage.local.set({ lastCapture: { ...result, at: Date.now() } }).catch(() => {});
-      sendResponse(result);
+// ── THE capture implementation. One function, every trigger. ─────────────────
+//
+// Extraction is INJECTED rather than delivered by a content script, and that is the whole design.
+// A content script needs a host permission for every origin it runs on, so capture only ever worked
+// on the six boards the manifest happened to name — never on a Greenhouse board embedded at
+// stripe.com/jobs, never on Ashby, never on a company careers page. You cannot enumerate every
+// employer's domain, so that approach had a ceiling built into it.
+//
+// activeTab has no such ceiling. The user's invocation — the toolbar click or the hotkey — grants
+// access to that one tab, and executeScript reaches it whatever the origin. G0 measured the grant
+// on a real Workday tenant with no host permission for it; E6 measured that a toolbar click grants
+// it to the popup too. So the extension now asks for NO job-board host permission at all and
+// captures more sites than it did with seven.
+//
+// It also means the extension has no standing access to anything. Before, it could read six sites
+// whenever they were open. Now it can read one tab, at the moment you point it at one.
+async function captureActiveTab(tab) {
+  if (!tab?.id) return { success: false, message: 'No active tab.' };
+
+  // tab.url is only readable once the grant exists, so treat "unreadable" as "not yet granted"
+  // rather than as a bad page — the injection below will produce the real error if there is one.
+  if (tab.url && !/^https?:$/.test(new URL(tab.url).protocol)) {
+    return { success: false, message: 'Only http(s) pages can be captured.' };
+  }
+
+  let extracted;
+  try {
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractJobPayload });
+    extracted = r?.result;
+  } catch (e) {
+    // The grant is missing or lapsed — Chrome revokes it when the tab leaves the origin it was
+    // taken on. This is an expected state with a clear remedy, not a failure worth a stack trace.
+    return { success: false, message: 'Press the shortcut again on the job page you want to capture.' };
+  }
+
+  if (!extracted?.ok) {
+    const miss = { success: false, message: 'No job found on this page' };
+    await reportCapture(tab.id, miss);
+    return miss;
+  }
+
+  const result = await importCapturedJob({ url: extracted.url, text: extracted.text });
+  await reportCapture(tab.id, result);
+  return result;
+}
+
+/** Same feedback for every trigger: the toast in the page, and the record the popup reads later. */
+async function reportCapture(tabId, result) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId }, func: showCaptureToast, args: [result.message, !!result.success],
     });
+  } catch (_) { /* the toast is a courtesy; never let it change the outcome */ }
+  // Recorded so the popup can show the outcome of a hotkey capture it was not open for.
+  chrome.storage.local.set({ lastCapture: { ...result, at: Date.now() } }).catch(() => {});
+}
+
+/** What the popup shows before you commit to capturing. Same extractor, no network, no writes. */
+async function previewActiveTab(tab) {
+  const capturable = !!tab?.id && (!tab.url || /^https?:$/.test(new URL(tab.url).protocol));
+  if (!capturable) return { capturable: false };
+  try {
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractJobPayload });
+    const p = r?.result;
+    return { capturable: true, ok: !!p?.ok, title: p?.title || '', company: p?.company || '', location: p?.location || '' };
+  } catch (_) {
+    // No grant yet. The button still shows: clicking it is itself an invocation, and the capture
+    // that follows will succeed where this speculative read could not.
+    return { capturable: true, ok: false, unreadable: true };
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Capture, from the popup button. The hotkey reaches the same function through onCommand below;
+  // neither trigger has an implementation of its own.
+  if (message.type === 'CAPTURE_ACTIVE_TAB') {
+    chrome.tabs.query({ active: true, currentWindow: true })
+      .then(([tab]) => captureActiveTab(tab))
+      .then(sendResponse);
     return true;                                            // async response
+  }
+
+  if (message.type === 'PREVIEW_ACTIVE_TAB') {
+    chrome.tabs.query({ active: true, currentWindow: true })
+      .then(([tab]) => previewActiveTab(tab))
+      .then(sendResponse);
+    return true;
   }
 
   // The popup's auth probe, moved here for the same CORS reason: from the popup this request
@@ -102,19 +180,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-// Default hotkey (chrome://extensions/shortcuts owns the actual binding — see
-// linkedin-content.js for the separate custom-override mechanism, which is page-scoped and
-// cannot be a real chrome.commands rebinding). Relays to the active tab's content script,
-// which does the actual capture (it has DOM access; this service worker does not).
+// The hotkey. chrome://extensions/shortcuts owns the binding, and that is now the only way to
+// rebind it: the old page-scoped keydown override lived in the content script, which no longer
+// exists. Chrome's own rebinding UI works on every page rather than only the six the content
+// script reached, so this is a smaller extension doing more.
+//
+// THE LISTENER FIRING IS THE PERMISSION. A chrome.commands invocation is a user gesture, which is
+// what grants activeTab for the tab they are on — the same grant the gated handoff runs on.
 chrome.commands.onCommand.addListener((command) => {
   if (command === 'fill-gated-application') { void handleGatedHandoff(); return; }
   if (command !== 'capture-job') return;
-  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-    if (tab?.id) chrome.tabs.sendMessage(tab.id, { type: 'CAPTURE_AND_IMPORT' }, () => {
-      // Ignore "no receiving end" errors — happens on pages with no content script injected.
-      void chrome.runtime.lastError;
-    });
-  });
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => { void captureActiveTab(tab); });
 });
 
 // ── Gated portal handoff (TASK G2) ───────────────────────────────────────────

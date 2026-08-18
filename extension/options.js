@@ -1,73 +1,46 @@
-// shortcutUtils.js (loaded first) provides: DEFAULT_CAPTURE_COMBO, isModifierOnlyKeyEvent,
-// eventToCombo, comboHasModifier, isReservedCombo, isAssignableCombo, formatCombo.
+// Reads the real binding from Chrome and sends the user to the only page that can change it.
+//
+// This page used to record a custom key combination into chrome.storage.sync, which the content
+// script then watched for. That mechanism died with the content script — and it was always the
+// weaker of the two, because a page-scoped keydown listener only fires while one of the six
+// declared job sites has focus. Capture now runs wherever you invoke it, so a shortcut that only
+// worked on six sites would be the one limited thing left.
+//
+// An extension cannot rebind its own chrome.commands entry; chrome://extensions/shortcuts is the
+// only surface that can, so this defers to it rather than pretending otherwise. Saving a setting
+// that quietly does nothing is worse than having no setting.
 
 const input   = document.getElementById('shortcut-input');
 const hint    = document.getElementById('hint');
 const status  = document.getElementById('status');
-const btnSave = document.getElementById('btn-save');
-const btnReset = document.getElementById('btn-reset');
-
-let pendingCombo = null; // set only once a valid, non-reserved combo is captured
-
-function setHint(message, isError) {
-  hint.textContent = message || '';
-  hint.classList.toggle('error', !!isError);
-}
-
-function shakeInput() {
-  input.classList.remove('shake');
-  // Re-trigger the animation even if it just ran.
-  requestAnimationFrame(() => input.classList.add('shake'));
-  setTimeout(() => input.classList.remove('shake'), 450);
-}
+const btnChange = document.getElementById('btn-change');
 
 async function loadCurrentShortcut() {
-  const { captureShortcut } = await chrome.storage.sync.get('captureShortcut');
-  input.value = captureShortcut
-    ? formatCombo(captureShortcut)
-    : `${formatCombo(DEFAULT_CAPTURE_COMBO)} (default)`;
+  try {
+    const commands = await chrome.commands.getAll();
+    const capture = commands.find(c => c.name === 'capture-job');
+    if (capture?.shortcut) {
+      input.value = capture.shortcut;
+      hint.textContent = '';
+    } else {
+      // Chrome silently refuses some combinations, which leaves a command with no key at all and
+      // no error anywhere. Saying so beats showing a blank box.
+      input.value = 'Not set';
+      hint.textContent = 'No key is bound to capture right now — set one below.';
+      hint.classList.add('error');
+    }
+  } catch (_) {
+    input.value = 'Unavailable';
+  }
 }
 
-input.addEventListener('keydown', (event) => {
-  event.preventDefault();
-  if (isModifierOnlyKeyEvent(event)) return; // wait for the real key, not just the modifier
-
-  const combo = eventToCombo(event);
-
-  if (!comboHasModifier(combo)) {
-    shakeInput();
-    setHint('Include a modifier key (Ctrl, Alt, or Cmd).', true);
-    return;
-  }
-  if (isReservedCombo(combo)) {
-    shakeInput();
-    setHint('That combination is reserved by your browser or OS — choose another.', true);
-    return;
-  }
-
-  pendingCombo = combo;
-  input.value = formatCombo(combo);
-  setHint('Press Save to confirm this shortcut.', false);
-  btnSave.disabled = false;
+btnChange.addEventListener('click', async () => {
+  await chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  status.textContent = 'Find "Resume Master" in the list and set the capture shortcut.';
+  setTimeout(() => { status.textContent = ''; }, 6000);
 });
 
-btnSave.addEventListener('click', async () => {
-  if (!pendingCombo) return;
-  await chrome.storage.sync.set({ captureShortcut: pendingCombo });
-  status.textContent = `Saved — ${formatCombo(pendingCombo)} will now capture the current job.`;
-  btnSave.disabled = true;
-  setHint('', false);
-  setTimeout(() => { status.textContent = ''; }, 4000);
-});
-
-btnReset.addEventListener('click', async () => {
-  await chrome.storage.sync.remove('captureShortcut');
-  pendingCombo = null;
-  btnSave.disabled = true;
-  await loadCurrentShortcut();
-  status.textContent = 'Reset to the default Ctrl+Shift+K (⌘+Shift+K on Mac).';
-  setHint('', false);
-  setTimeout(() => { status.textContent = ''; }, 4000);
-});
+// A combination saved by the retired recorder would sit in sync storage forever, doing nothing.
+chrome.storage.sync.remove('captureShortcut').catch(() => {});
 
 loadCurrentShortcut();

@@ -145,16 +145,26 @@ export function PrivacyPage() {
 
           <H3>Browser Extension</H3>
           <P>
-            The Resume Master browser extension reads job listing pages that you actively visit
-            on six job boards — LinkedIn, Indeed, Glassdoor, Lever, Greenhouse and Workable — and
-            only on the individual job-posting pages of those sites, not the sites as a whole.
-            Specifically:
+            <Strong>The extension reads nothing until you invoke it.</Strong> It requests no
+            permission for any job site, runs no code on any page automatically, and cannot see what
+            you are browsing. When you press its keyboard shortcut or open it from the toolbar, and
+            only then, it reads the one tab you are looking at — and its access to that tab ends
+            when you navigate away from that site.
+          </P>
+          <P>
+            This is a change from earlier versions, and it is worth being exact about what changed
+            in each direction. Previously the extension held standing permission for six named job
+            boards and ran a script on their pages automatically whenever one was open; it could not
+            read anything else. Now it holds no standing permission for any site, reads nothing
+            automatically anywhere — and the page it reads when you do invoke it can be any job
+            posting, including employers' own careers pages. It trades constant access to six sites
+            for momentary access to the one you point it at.
           </P>
           <UL>
             <LI>
-              It reads the <Strong>visible text</Strong> of a job posting to extract
-              title, company, location, and description. It does this when you capture the job,
-              by clicking the toolbar button or pressing the keyboard shortcut.
+              It reads the <Strong>visible text</Strong> of the page you invoke it on, to extract
+              title, company, location, and description. It does this when you capture the job, by
+              clicking the toolbar button or pressing the keyboard shortcut — never before.
             </LI>
             <LI>
               It reads the <Strong>address (URL) of the tab you invoke it on</Strong>, to
@@ -162,14 +172,13 @@ export function PrivacyPage() {
               of any other tab, and it does not record where you go.
             </LI>
             <LI>
-              On a supported job posting the extension adds a small{" "}
-              <Strong>"ATS Score this job"</Strong> button to the corner of the page. The same
-              action is also available as <Strong>ATS Score Tool</Strong> in the extension's popup.
-              If you click either one, it copies the visible text of that page and opens your
-              Resume Master ATS Score page with the text already filled in. That text travels in
-              the address of the page it opens, which means it may appear in our ordinary server
-              logs. Adding the button is the only change the extension makes to a job page, and it
-              reads nothing until you click it.
+              If you click <Strong>ATS Score Tool</Strong> in the extension's popup, it copies the
+              visible text of the page you are on and opens your Resume Master ATS Score page with
+              the text already filled in. That text travels in the address of the page it opens,
+              which means it may appear in our ordinary server logs. Earlier versions also added an
+              "ATS Score this job" button into job pages themselves; that button has been removed,
+              and the extension no longer changes the appearance of any page except to show you a
+              confirmation message after a capture you asked for.
             </LI>
             <LI>
               Data extracted by the extension is sent to resumemaster.one and associated with
@@ -192,9 +201,9 @@ export function PrivacyPage() {
             </LI>
             <LI>
               It does <Strong>not</Strong> read your messages, connections, or profile feed on any
-              site, and does <Strong>not</Strong> read any page outside the six job boards above —
-              with the single exception of an application form you have opened and invoked it on
-              yourself, described under "Filling an Application" below.
+              site. It reads a page only when you invoke it on that page, and only that one tab —
+              so the question is not which sites it is allowed to read, but which single page you
+              chose to point it at.
             </LI>
             <LI>
               It does <Strong>not</Strong> collect lists of jobs. It reads the one posting you are
@@ -211,15 +220,13 @@ export function PrivacyPage() {
 
           <H3>What the Extension Stores in Your Browser</H3>
           <P>
-            The extension keeps three things in your browser's own extension storage. None of it
-            is sent anywhere by the extension, and all of it disappears when you uninstall it.
+            The extension keeps two things in your browser's own extension storage. Neither is sent
+            anywhere by the extension, and both disappear when you uninstall it. (Earlier versions
+            also stored a custom keyboard shortcut; that setting was removed, and any value it left
+            behind is deleted when you open the extension's options page. Shortcuts are now managed
+            by Chrome itself.)
           </P>
           <UL>
-            <LI>
-              <Strong>Your capture shortcut preference</Strong>, if you change it — a key
-              combination. Kept until you change it again or uninstall, and synced by Chrome
-              across your signed-in browsers.
-            </LI>
             <LI>
               <Strong>The result of your most recent capture</Strong> — the job title and whether
               it succeeded — so the popup can show you the outcome of a capture you made with the

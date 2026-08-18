@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import fs from "fs";
 
 const serverSrc = fs.readFileSync("server.js", "utf8");
-const contentSrc = fs.readFileSync("extension/linkedin-content.js", "utf8");
+const extractorSrc = fs.readFileSync("extension/extractor.js", "utf8");
 const popupSrc = fs.readFileSync("extension/popup.js", "utf8");
 const bgSrc = fs.readFileSync("extension/background.js", "utf8");
 
@@ -72,23 +72,37 @@ test("the table itself is NOT dropped", () => {
 // ── One capture path, two triggers ───────────────────────────────────────────
 
 test("THE EXTENSION HAS EXACTLY ONE CAPTURE IMPLEMENTATION", () => {
-  assert.doesNotMatch(contentSrc, /function saveJob/,
-    "saveJob() was deleted, not left unreferenced — an orphaned second path is how this diverged");
-  assert.doesNotMatch(contentSrc, /api\/extension\/save-job/,
-    "the content script must not call the retired endpoint");
-  assert.equal((contentSrc.match(/async function captureAndImport/g) || []).length, 1,
-    "exactly one capture function");
+  // saveJob() is long gone; what this now guards is that the ONE implementation stayed one while
+  // moving from a content script to an injected function. Both triggers reach captureActiveTab()
+  // and neither carries a copy of it.
+  assert.equal((bgSrc.match(/async function captureActiveTab/g) || []).length, 1,
+    "exactly one capture function, in the service worker");
+  assert.doesNotMatch(popupSrc, /function saveJob|api\/extension\/save-job/,
+    "the popup must not grow a capture of its own again");
+  assert.doesNotMatch(extractorSrc, /api\/extension\/save-job|fetch\(/,
+    "the injected extractor extracts and returns; it never talks to the network");
 });
 
-test("both triggers send the SAME message", () => {
-  assert.doesNotMatch(contentSrc, /'SAVE_JOB'/,
-    "SAVE_JOB is gone rather than aliased — zero users means no compatibility is owed");
-  assert.doesNotMatch(popupSrc, /SAVE_JOB/);
-  assert.match(popupSrc, /type: 'CAPTURE_AND_IMPORT'/,
-    "the popup button routes to the same message the hotkey does");
-  assert.match(bgSrc, /command !== 'capture-job'\) return/,
-    "the hotkey command still routes to the content script's capture message");
-  assert.match(bgSrc, /type: 'CAPTURE_AND_IMPORT'/);
+test("both triggers reach the same function", () => {
+  assert.doesNotMatch(popupSrc, /SAVE_JOB|CAPTURE_AND_IMPORT/,
+    "retired message names are gone rather than aliased — zero users means no compatibility is owed");
+  assert.match(popupSrc, /type: 'CAPTURE_ACTIVE_TAB'/,
+    "the popup button routes to the service worker's capture");
+  assert.match(bgSrc, /command !== 'capture-job'\) return/);
+  assert.match(bgSrc, /captureActiveTab\(tab\)/,
+    "the hotkey command calls the same function the popup's message does");
+});
+
+test("CAPTURE INJECTS RATHER THAN MESSAGING A CONTENT SCRIPT", () => {
+  // This is the property that removed six host permissions and made an embedded Greenhouse board
+  // capturable. chrome.tabs.sendMessage needs a content script at the other end, which needs a host
+  // permission for that origin; executeScript needs only the activeTab grant the user just created.
+  assert.match(bgSrc, /chrome\.scripting\.executeScript\(\{ target: \{ tabId: tab\.id \}, func: extractJobPayload \}\)/,
+    "capture must inject the extractor, not message a content script");
+  assert.doesNotMatch(bgSrc, /chrome\.tabs\.sendMessage/,
+    "a sendMessage in the capture path means a content script came back, and the hosts with it");
+  assert.ok(!fs.existsSync("extension/linkedin-content.js"),
+    "the content script was deleted, not left unreferenced");
 });
 
 test("the outcome is worded in ONE place, so the triggers cannot disagree", () => {
@@ -97,8 +111,8 @@ test("the outcome is worded in ONE place, so the triggers cannot disagree", () =
     "the request and its message live in the service worker");
   assert.match(popupSrc, /result\?\.message/,
     "the popup displays the message it was given rather than composing its own");
-  assert.match(contentSrc, /showCaptureToast\(result\.message, result\.success\)/,
-    "the toast displays the same message");
+  assert.match(bgSrc, /func: showCaptureToast, args: \[result\.message, !!result\.success\]/,
+    "the toast is injected with the same message, from the same place");
 });
 
 // ── The production CORS trap this convergence had to clear ───────────────────
@@ -112,8 +126,8 @@ test("THE CAPTURE REQUEST IS MADE FROM THE SERVICE WORKER, NOT THE CONTENT SCRIP
   //
   // A service-worker fetch is not subject to CORS for a host in host_permissions, and
   // https://resumemaster.one/* is declared.
-  assert.doesNotMatch(contentSrc, /fetch\(/,
-    "the content script must not make network requests — it extracts and hands off");
+  assert.doesNotMatch(extractorSrc, /fetch\(/,
+    "the injected extractor must not make network requests — it extracts and returns");
   assert.match(bgSrc, /fetch\(`\$\{RESUME_MASTER_URL\}\/api\/import\/job`/);
   assert.match(bgSrc, /credentials: 'include'/);
 });
@@ -129,7 +143,11 @@ test("the extracted text travels with the capture", () => {
   // importJob() returns needsClientCapture for login-walled hosts when it has to fetch the page
   // itself. Sending the text we already hold means that round-trip cannot come back to the client
   // that has the content.
-  assert.match(contentSrc, /const payload = \{ url: [^\n]*text: buildCaptureText\(data\) \}/);
+  assert.match(bgSrc, /importCapturedJob\(\{ url: extracted\.url, text: extracted\.text \}\)/,
+    "the text the extractor read in the page is what gets posted");
   assert.match(bgSrc, /needsClientCapture/,
     "and it is still handled if it somehow arrives, rather than silently succeeding");
+  // Capture is no longer fenced to six known job sites, so "there is an h1" is not enough to call a
+  // page a posting — a description has to be there too, or any page with a heading files as a job.
+  assert.match(extractorSrc, /ok: !!data\.title && \(description \|\| ''\)\.length > 120/);
 });

@@ -50,17 +50,20 @@ test("every declared host permission appears in the reconciliation table", () =>
   }
 });
 
-test("the policy names every job board the extension actually reads", () => {
-  // If a board is added to the manifest without being named in the policy, the extension reads a
-  // site the policy does not admit to reading.
-  const boards = { linkedin: "LinkedIn", indeed: "Indeed", glassdoor: "Glassdoor",
-                   lever: "Lever", greenhouse: "Greenhouse", workable: "Workable" };
-  for (const [key, label] of Object.entries(boards)) {
-    const declared = manifest.host_permissions.some(h => h.includes(key));
-    if (!declared) continue;
-    assert.ok(policyText.includes(label),
-      `the manifest declares ${key} but the privacy policy never names ${label}`);
-  }
+test("the policy's account of WHAT the extension can read matches the manifest", () => {
+  // The old rule was "every declared job board must be named in the policy". There are no declared
+  // job boards now, so that rule passes vacuously and would keep passing if a host crept back in.
+  // The real invariant is the other way round: the policy claims access is per-invocation, and that
+  // claim is only true while no site is declared.
+  const jobHosts = manifest.host_permissions.filter(h => !h.includes("resumemaster.one"));
+  assert.deepEqual(jobHosts, [],
+    `the policy says the extension holds no standing permission for any site, but the manifest ` +
+    `declares ${jobHosts.join(", ")} — narrow the code or widen the claim, and prefer the first`);
+
+  assert.match(policyText, /reads nothing until you invoke it/i,
+    "the policy must state the per-invocation rule it now depends on");
+  assert.match(policyText, /only that one tab|only the one tab/i,
+    "and that access is limited to the invoked tab");
 });
 
 test("THE POLICY DOES NOT CLAIM A CAPABILITY THAT WAS REMOVED", () => {
@@ -86,17 +89,17 @@ test("the policy discloses the ATS Score Tool's page-text transmission", () => {
   assert.match(policyText, /server logs/i,
     "the ATS text travels in a URL and can land in server logs; the policy should say so");
 
-  // The SAME action also has an in-page trigger. It was missed on the first pass precisely because
-  // it is not in the popup and not behind a permission: the content script already has DOM access,
-  // so nothing in the manifest points at it. A capability with no permission attached is the
-  // easiest one to leave undisclosed.
-  const content = fs.readFileSync("extension/linkedin-content.js", "utf8");
-  if (/rm-send-btn/.test(content)) {
-    assert.match(policyText, /ATS Score this job/,
-      "linkedin-content.js injects an in-page ATS button, but the policy never mentions it");
-    assert.match(policyText, /only change the extension makes to a job page/i,
-      "the policy should say the injected button is the only page modification");
-  }
+  // The in-page trigger is GONE. It was a button the content script appended to job pages; with the
+  // content script retired there is no code that can modify a page on load, so a policy still
+  // describing that button would be disclosing a practice that no longer happens — the same false
+  // disclosure the saved-jobs claim was, caught the same way.
+  const extractor = fs.readFileSync("extension/extractor.js", "utf8");
+  assert.ok(!fs.existsSync("extension/linkedin-content.js"),
+    "the content script is gone; nothing can add a button to a page any more");
+  assert.doesNotMatch(extractor, /rm-send-btn/,
+    "the injected extractor must not reintroduce an in-page button");
+  assert.match(policyText, /no longer changes the appearance of any page/i,
+    "the policy should state that the in-page button was removed");
 });
 
 test("the policy describes ONE capture path, not two", () => {
@@ -105,8 +108,8 @@ test("the policy describes ONE capture path, not two", () => {
   // reviewer applying the single-purpose rule.
   assert.match(policyText, /one\s*<?\/?\w*>?\s*capture action|has\s*one\s*capture/i,
     "the policy should state that there is a single capture action with two triggers");
-  const content = fs.readFileSync("extension/linkedin-content.js", "utf8");
-  assert.doesNotMatch(content, /function saveJob/,
+  const bg = fs.readFileSync("extension/background.js", "utf8");
+  assert.equal((bg.match(/async function captureActiveTab/g) || []).length, 1,
     "a second capture implementation is back; the policy's one-path claim is no longer true");
 });
 

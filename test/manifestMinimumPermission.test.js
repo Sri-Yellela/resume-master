@@ -106,21 +106,47 @@ test("content script matches never exceed the declared host permissions", () => 
   }
 });
 
-test("every content script match has a real extractor behind it", () => {
-  // The store listing and the policy both claim the extension reads only the six supported job
-  // boards. That claim is only true while every matched host has an extractor.
-  const content = fs.readFileSync(path.join(SRC, "linkedin-content.js"), "utf8");
-  const extractors = [...content.matchAll(/^\s*'([a-z0-9.-]+\.[a-z]{2,})':\s*\(\)/gm)].map(m => m[1]);
-  assert.ok(extractors.length >= 6, `expected the six job-board extractors, found ${extractors.length}`);
+test("THE EXTENSION DECLARES NO CONTENT SCRIPT", () => {
+  // Not a stylistic preference — it is the property that removed six host permissions. A content
+  // script needs a host permission for every origin it runs on, so re-adding one would drag the
+  // job-board hosts back with it, and would give the extension standing access to pages the user
+  // has not invoked it on. Capture injects on demand under activeTab instead.
+  assert.ok(!manifest.content_scripts || manifest.content_scripts.length === 0,
+    "a content script is declared again — see MANIFEST_RATIONALE.md, Content scripts");
+});
 
-  for (const cs of manifest.content_scripts || []) {
-    for (const m of cs.matches) {
-      const host = new URL(m.replace(/\*/g, "x")).hostname.replace(/^x\./, "");
-      const registrable = host.split(".").slice(-2).join(".");
-      assert.ok(extractors.some(e => host.endsWith(e) || registrable === e),
-        `content script matches ${m} but linkedin-content.js has no extractor for ${registrable}`);
-    }
+test("the injected extractor is self-contained", () => {
+  // executeScript serialises the FUNCTION, so anything at module scope is silently absent when it
+  // runs in the page: no imports, no shared constants, no helpers defined outside the body. This is
+  // invisible at build time and fails only in a real page, which is the worst place to find it.
+  const src = fs.readFileSync(path.join(SRC, "extractor.js"), "utf8");
+
+  assert.doesNotMatch(src, /^import\s/m,
+    "extractor.js must not import — an injected function cannot carry its imports into the page");
+
+  // Everything above the first export must be comment or blank; a module-scope const would not
+  // survive serialisation.
+  const beforeFirstExport = src.slice(0, src.indexOf("export function"));
+  for (const line of beforeFirstExport.split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;
+    assert.fail(`extractor.js has module-scope code that will not reach the page: ${t.slice(0, 60)}`);
   }
+
+  assert.match(src, /export function extractJobPayload\(\)/);
+  assert.match(src, /export function showCaptureToast\(/);
+});
+
+test("the extractor still knows the named job boards, and still works without them", () => {
+  const src = fs.readFileSync(path.join(SRC, "extractor.js"), "utf8");
+  for (const board of ["linkedin.com", "indeed.com", "glassdoor.com", "lever.co", "greenhouse.io", "workable.com"]) {
+    assert.match(src, new RegExp(`'${board.replace(".", "\\.")}'`),
+      `the per-site selector map lost ${board}`);
+  }
+  // The fallback is what makes an unlisted site — an embedded Greenhouse board on an employer's own
+  // domain — capturable at all. Without it the map would be a gate again, just a softer one.
+  assert.match(src, /function genericDescription\(\)/,
+    "the generic fallback is what makes an unnamed site work; it must not be removed");
 });
 
 test("externally_connectable stays absent", () => {

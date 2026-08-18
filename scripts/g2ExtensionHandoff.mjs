@@ -432,11 +432,18 @@ async function main() {
 
     // ── 7. regression ──────────────────────────────────────────────────────
     console.log('\n── regression ──');
-    const src = fs.readFileSync(path.join(ROOT, 'extension', 'linkedin-content.js'), 'utf8');
-    check('the existing capture path is untouched',
-      src.includes('CAPTURE_AND_IMPORT') && src.includes('/api/import/job'));
-    check('the popup SAVE_JOB path is untouched',
-      fs.readFileSync(path.join(ROOT, 'extension', 'popup.js'), 'utf8').includes("type: 'SAVE_JOB'"));
+    // These assertions were written against an extension that no longer exists, and had been
+    // failing silently since E2 — one of them required popup.js to still contain `type: 'SAVE_JOB'`,
+    // which E2 deleted on purpose. A regression check that pins the old shape stops being a
+    // regression check the moment the shape legitimately changes; it just fails, and gets ignored.
+    // Rewritten against what the handoff actually depends on.
+    const bg = fs.readFileSync(path.join(ROOT, 'extension', 'background.js'), 'utf8');
+    check('capture still posts to the import router',
+      bg.includes('/api/import/job') && bg.includes('captureActiveTab'));
+    check('capture and the handoff reach a page the same way — executeScript, no content script',
+      bg.includes('chrome.scripting.executeScript') && !bg.includes('chrome.tabs.sendMessage'));
+    check('no content script is declared, so the handoff keeps its activeTab-only access story',
+      !JSON.parse(fs.readFileSync(path.join(ROOT, 'extension', 'manifest.json'), 'utf8')).content_scripts);
     check('saved-jobs-content.js is still gone from the source tree',
       !fs.existsSync(path.join(ROOT, 'extension', 'saved-jobs-content.js')));
 

@@ -46,30 +46,29 @@
 <body>
   <h1>Resume Master — Capture Shortcut</h1>
   <p class="subtitle">
-    Press a key combination to capture the job on the page you're viewing into your
-    Resume Master job pool. The default is Ctrl+Shift+K (⌘+Shift+K on Mac).
+    Press the shortcut on any job posting to capture it into your Resume Master job pool.
+    The default is Ctrl+Shift+K (&#8984;+Shift+K on Mac).
   </p>
 
-  <label for="shortcut-input">Capture shortcut</label>
-  <input id="shortcut-input" type="text" readonly value="Ctrl+Shift+K (default)" tabindex="0">
+  <label for="shortcut-input">Current shortcut</label>
+  <input id="shortcut-input" type="text" readonly value="Loading&hellip;" tabindex="-1">
   <p class="hint" id="hint"></p>
 
   <div class="btn-row">
-    <button class="btn btn-primary" id="btn-save" disabled>Save</button>
-    <button class="btn btn-secondary" id="btn-reset">Reset to default</button>
+    <button class="btn btn-primary" id="btn-change">Change shortcut&hellip;</button>
   </div>
   <p class="status" id="status"></p>
 
   <hr class="divider">
   <p class="note">
-    This custom shortcut only works while a supported job page has focus (LinkedIn, Indeed,
-    Glassdoor, Lever, Greenhouse, Workable). It cannot override browser or OS shortcuts —
-    reserved combinations (Ctrl/Cmd+C, Ctrl/Cmd+T, devtools shortcuts, etc.) are rejected.
-    The default Ctrl+Shift+K binding is managed by Chrome itself and can also be changed at
-    chrome://extensions/shortcuts.
+    Shortcuts are set in Chrome's own shortcuts page, which is the only thing that can actually
+    rebind one &mdash; an extension cannot reassign its own keys. This page used to record a
+    custom combination itself, but that only worked while one of six job sites had focus, because
+    it was implemented by a script running on those pages. Capture no longer works that way: it
+    runs on whatever page you invoke it on, so the shortcut is Chrome's to own and it works
+    everywhere.
   </p>
 
-  <script src="shortcutUtils.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

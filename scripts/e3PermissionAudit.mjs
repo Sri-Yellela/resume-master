@@ -113,7 +113,10 @@ async function main() {
     manifest.action.default_popup,
     manifest.options_page,
     ...Object.values(manifest.action.default_icon || {}),
-    ...manifest.content_scripts.flatMap(cs => cs.js || []),
+    // No content_scripts any more — capture injects extractor.js under activeTab instead, so the
+    // extractor is reachable through background.js's import graph rather than the manifest.
+    ...(manifest.content_scripts || []).flatMap(cs => cs.js || []),
+    'extractor.js',
   ];
   for (const r of refs) {
     check(`${r} exists`, fs.existsSync(path.join(SRC, r)));
@@ -151,7 +154,7 @@ async function main() {
 
       if (perm === 'storage') {
         check('removing storage BREAKS chrome.storage', caps.storage === false,
-          'the shortcut setting, the last-capture record and the handoff packet all depend on it');
+          'the last-capture record and the handoff packet both depend on it');
       } else if (perm === 'scripting') {
         check('removing scripting BREAKS chrome.scripting', caps.scripting === false,
           'no form probe, no fill, no overlay, no ATS text collection');
@@ -181,11 +184,13 @@ async function main() {
         console.log('      Measured in scripts/g0ActiveTabSpike.mjs (real OS-level gesture);');
         console.log('      see docs/GATED_HANDOFF_ARCHITECTURE.md §9, trial C = REVOKED.');
 
-        const portalHost = manifest.host_permissions.find(h =>
-          !/resumemaster\.one|linkedin|indeed|glassdoor|lever|greenhouse|workable/i.test(h));
+        // Any host but our own backend would be a source of access other than the grant. The job
+        // boards used to be listed as acceptable exceptions here; they are not declared any more,
+        // so the check tightened along with the manifest instead of keeping a hole open for them.
+        const portalHost = manifest.host_permissions.find(h => !/resumemaster\.one/i.test(h));
         check('no host permission could substitute for the grant',
           !portalHost,
-          portalHost ? `${portalHost} would give standing access` : 'the six boards + our own origin only');
+          portalHost ? `${portalHost} would give standing access` : 'our own origin is the only host declared');
 
         const handoff = fs.readFileSync(path.join(SRC, 'gated-handoff.js'), 'utf8');
         check('the handoff still depends on injecting into the granted tab',

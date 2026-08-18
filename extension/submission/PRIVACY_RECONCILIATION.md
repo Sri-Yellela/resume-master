@@ -38,19 +38,18 @@ store, or transmit your session cookies, login credentials, or any authenticatio
 
 ## Host permissions
 
+**One, and it is our own server.** No job board, no employer portal, nothing the extension reads a
+job from. Capture injects under the `activeTab` grant the user's invocation creates, so the
+extension needs no standing access to any site in order to capture from it — and holds none.
+
 | Manifest host | Code that requires it | Policy paragraph | Dashboard justification |
 |---|---|---|---|
 | `https://resumemaster.one/*` | `background.js:26` `/api/import/job`; `:76` `/api/auth/me`; `:195` `/api/apply/gate-review`; `:216` `/api/apply/gate-packets`; `gated-handoff.js:338,469`. All `credentials:'include'`, no embedded secret. | *Browser Extension* — "Data extracted by the extension is sent to resumemaster.one and associated with your logged-in account using a browser session cookie". | Our own backend. The extension fetches with the user's existing session cookie; it never reads the cookie's value. |
-| `https://www.linkedin.com/jobs/view/*` | `linkedin-content.js:44` `linkedin.com` extractor; content script match; `popup.js:12` `isLinkedInJobPage`. | *Browser Extension* — "reads job listing pages that you actively visit on six job boards … and only on the individual job-posting pages of those sites". | A supported job board. Needed so the popup can tell it is on a job posting; without it Chrome hides the tab URL and the capture button never appears. |
-| `https://www.indeed.com/viewjob*` | `linkedin-content.js:53` `indeed.com` extractor; content script match. | same paragraph | same |
-| `https://www.glassdoor.com/job-listing/*` | `linkedin-content.js:54` `glassdoor.com` extractor; content script match. | same paragraph | same |
-| `https://jobs.lever.co/*/*` | `linkedin-content.js:55` `lever.co` extractor; content script match. | same paragraph | same |
-| `https://job-boards.greenhouse.io/*/*` | `linkedin-content.js:61` `greenhouse.io` extractor; content script match. | same paragraph | same |
-| `https://*.workable.com/j/*` | `linkedin-content.js:62` `workable.com` extractor; content script match. | same paragraph | same |
 
-`content_scripts[0].matches` is byte-identical to the six job-board hosts above — asserted by
-`test/manifestMinimumPermission.test.js`, so a content script can never run somewhere the manifest
-has not declared and the policy has not named.
+**No content script is declared**, so there is no origin the extension runs on automatically. The
+policy's central claim — "reads nothing until you invoke it" — is true because of that absence, and
+`test/privacyReconciliation.test.js` fails if any non-`resumemaster.one` host is declared again,
+because the claim would stop being true the moment one is.
 
 ## Data flows with no permission of their own
 
@@ -59,10 +58,9 @@ and each still needs a policy paragraph.
 
 | Flow | Code | Policy paragraph | Retained server-side? |
 |---|---|---|---|
-| Captured job posting → the user's account | `linkedin-content.js` extract → `background.js:26` `POST /api/import/job` | *Job Listings*, *Browser Extension* | Yes — title, company, location, description, URL, in `scraped_jobs`, linked to the account |
-| ATS Score page text → `/ats-score?jd=…`, from the popup | `popup.js:188` `chrome.scripting` collect → `background.js:85` `chrome.tabs.create` | *Browser Extension*, ATS bullet — states plainly that the text travels in the URL and may appear in server logs | Only as ordinary request logs; not stored as a record |
-| ATS Score page text, from the **in-page button** | `linkedin-content.js:422` click → `:249` `sendCurrentJob()` → `background.js:85`. No `scripting` needed: the content script already has DOM access on the six declared hosts. | same bullet — names the on-page "ATS Score this job" button explicitly | same |
-| The in-page button itself | `linkedin-content.js:398-424` creates and appends it at `document_idle` | same bullet — "the only change the extension makes to a job page, and it reads nothing until you click it" | Not a data flow; disclosed because a reviewer will see the page modified |
+| Captured job posting → the user's account | `background.js` `captureActiveTab()` injects `extractor.js` `extractJobPayload()` → `background.js:26` `POST /api/import/job` | *Job Listings*, *Browser Extension* | Yes — title, company, location, description, URL, in `scraped_jobs`, linked to the account |
+| ATS Score page text → `/ats-score?jd=…` | `popup.js` `chrome.scripting` collect → `background.js:85` `chrome.tabs.create` | *Browser Extension*, ATS bullet — states plainly that the text travels in the URL and may appear in server logs | Only as ordinary request logs; not stored as a record |
+| The capture confirmation shown in the page | `extractor.js` `showCaptureToast()`, injected by `background.js` `reportCapture()` after a capture the user asked for | *Browser Extension*, ATS bullet — "no longer changes the appearance of any page except to show you a confirmation message after a capture you asked for" | Not a data flow; disclosed because it is the only thing the extension puts on a page |
 | Job description → Anthropic | server-side ATS scoring / enrichment | *Browser Extension*, fifth bullet, cross-referencing *Third-Party Services* | Per Anthropic's API terms; not used for training |
 | Profile answers → employer's form | `gated-handoff.js` fill | *Filling an Application* | Not retained by us; released into the page the user opened |
 | Form **structure** → our server (opt-in, default OFF) | `gated-handoff.js` schema capture, server-enforced consent | *Learning an Application Form* | Yes, as a fact about the employer's form; not linked to the user |
@@ -71,9 +69,9 @@ and each still needs a policy paragraph.
 
 | Policy claim | Why it is true |
 |---|---|
-| No browsing-history collection | No `history`, `tabs` or `webNavigation` permission. Tab URLs are readable only for the six declared hosts and, on invocation, the active tab. |
+| No browsing-history collection | No `history`, `tabs` or `webNavigation` permission, and now no host permission for any site either — a tab's URL is readable only after the user invokes the extension on it. `e2CaptureConvergence.mjs` asserts the negative directly: before invocation the extension cannot see the job tab at all. |
 | No scraping of job lists or saved-job lists | `saved-jobs-content.js` and `SCRAPE_SAVED_JOBS` are absent from source and from the packed zip — asserted by `test/extensionSubmission.test.js`. |
-| No reading pages outside the six job boards | `content_scripts.matches` = the six job-view paths. The only other page reached is one the user invokes the handoff on, via `activeTab`. |
+| Nothing is read until you invoke it, and only that tab | No content script and no job-board host permission exist, so there is no origin the extension can run on unbidden. Every read — capture, ATS, handoff — is an `executeScript` into the tab an invocation just granted. |
 | No remotely hosted code | CSP `script-src 'self'`; no `eval`, `new Function`, `importScripts` or remote `<script src>` anywhere in the bundle. |
 | No sale of personal data; no unrelated transfer; no creditworthiness use | No such code path exists. Third parties are enumerated in *Third-Party Services*: Railway, Anthropic, SerpApi, Apify, Adzuna, Clearbit Logo API, LinkedIn OAuth. |
 | Nothing pushes data into the extension | `externally_connectable` absent — no website can message it. |
