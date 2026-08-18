@@ -107,7 +107,7 @@ the ATS Score Tool. The capture path itself uses the declared content script, no
 | `https://www.indeed.com/viewjob*` | Job posting pages only |
 | `https://www.glassdoor.com/job-listing/*` | Job posting pages only |
 | `https://jobs.lever.co/*/*` | Job posting pages only |
-| `https://boards.greenhouse.io/*/*` | Job posting pages only |
+| `https://job-boards.greenhouse.io/*/*` | Job posting pages only |
 | `https://*.workable.com/j/*` | Job posting pages only |
 
 Full derivation, including every permission deliberately **not** requested and why, is in

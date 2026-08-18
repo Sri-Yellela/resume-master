@@ -34,7 +34,7 @@ access **revoked**, which is the removal case. Findings: `docs/GATED_HANDOFF_ARC
 |---|---|---|
 | `activeTab` | `background.js:112` (hotkey capture), `background.js:130` (gated handoff), `popup.js:9` (`getCurrentTab`) | The gated handoff cannot reach the portal at all — there is deliberately no host permission for any portal origin, so this grant, taken per tab at the moment the user invokes the extension, is the only access that exists. Injection fails with "Cannot access contents of the page". |
 | `scripting` | `gated-handoff.js:398,452,486,521,656` (probe, fill, overlay, edits), `popup.js` ATS button | `chrome.scripting` is undefined. The gated handoff cannot read a form, fill one, or render the review overlay; the ATS-score button cannot collect the page text. |
-| `storage` | `background.js:67` (`storage.local` last capture), `background.js:147,190` + `gated-handoff.js:253-266` (`storage.session` packets and batch state), `options.js` (`storage.sync` shortcut) | `chrome.storage` is undefined. The custom capture shortcut cannot be saved, the popup cannot show the result of a hotkey capture it was not open for, and the handoff cannot hold a packet across an MV3 service-worker teardown. |
+| `storage` | `background.js:67` (`storage.local` last capture), `background.js:147,190` + `gated-handoff.js:259-308` (`storage.session` packets and batch state), `options.js` (`storage.sync` shortcut) | `chrome.storage` is undefined. The custom capture shortcut cannot be saved, the popup cannot show the result of a hotkey capture it was not open for, and the handoff cannot hold a packet across an MV3 service-worker teardown. |
 
 **Not declared, deliberately:**
 
@@ -57,11 +57,11 @@ button never appears. They therefore need to cover only the paths the content sc
 | Host | Required by | What breaks without it |
 |---|---|---|
 | `https://resumemaster.one/*` | `background.js` — every server call | The service worker's fetches become subject to CORS. `corsOrigin` refuses `chrome-extension://` in production, so capture, the auth probe and the whole handoff fail. |
-| `https://www.linkedin.com/jobs/view/*` | `linkedin-content.js:43-57` extractor + `popup.js` `isJobPage` | `tab.url` hidden → the popup shows no capture button on a LinkedIn job. |
+| `https://www.linkedin.com/jobs/view/*` | `linkedin-content.js:43-63` extractor + `popup.js` `isJobPage` | `tab.url` hidden → the popup shows no capture button on a LinkedIn job. |
 | `https://www.indeed.com/viewjob*` | same | same, for Indeed |
 | `https://www.glassdoor.com/job-listing/*` | same | same, for Glassdoor |
 | `https://jobs.lever.co/*/*` | same | same, for Lever |
-| `https://boards.greenhouse.io/*/*` | same | same, for Greenhouse |
+| `https://job-boards.greenhouse.io/*/*` | same | same, for Greenhouse. This is the host postings actually live on: `boards.greenhouse.io` 301s here for every board, so the old declaration could never run a content script and was dropped rather than kept alongside. |
 | `https://*.workable.com/j/*` | same | same, for Workable |
 
 **No portal origin is declared** — not Workday, not Amazon, not Meta. The gated handoff reaches those
@@ -71,7 +71,7 @@ central security property and it is why the handoff needed no new permission.
 ## Content scripts
 
 `matches` is the same six job-view paths, never a bare domain wildcard. Each one has a real extractor
-behind it in `linkedin-content.js:43-57`; there is no host matched without one.
+behind it in `linkedin-content.js:43-63`; there is no host matched without one.
 
 ## Commands
 
