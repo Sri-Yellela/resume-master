@@ -641,7 +641,7 @@ Run from `C:\Users\sriye\resume-master\`:
 | Run migrations | `npm run migrate` | `node scripts/migration.js` — safe, additive schema update |
 | Create backup | `npm run backup` | `node scripts/backup.js` — saves timestamped backup |
 | Restore backup | `npm run restore <file>` | `node scripts/backup.js restore <filename>` |
-| Run tests | `npm test` | `node --test` — 1006 tests, no external services needed |
+| Run tests | `npm test` | `node --test` — 1018 tests, no external services needed |
 | Build extension | `npm run build:extension` | Writes `extension/submission/…-v<version>.zip` from source. `-- --check` validates only |
 | Publish extension | `npm run publish:extension` | Preflight, then upload a **draft**. `-- --dry-run` needs no credentials; `-- --publish` goes live |
 
