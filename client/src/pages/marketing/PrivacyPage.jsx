@@ -3,8 +3,11 @@ import { Link } from "react-router-dom";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
 
-const LAST_UPDATED  = 'May 19, 2026';
-const CONTACT_EMAIL = 'privacy@resumemaster.one';
+// Effective date, not just "last touched". The Chrome Web Store rules that took effect on
+// 2026-08-01 require a policy to state when it takes effect and to commit to telling users about
+// material changes to data handling — see the "Changes to This Policy" section.
+const EFFECTIVE_DATE = 'August 18, 2026';
+const CONTACT_EMAIL  = 'privacy@resumemaster.one';
 
 function Section({ title, children }) {
   return (
@@ -93,7 +96,7 @@ export function PrivacyPage() {
             Privacy Policy
           </h1>
           <p style={{ fontSize: 13, color: "var(--color-text-faint)" }}>
-            Last updated: {LAST_UPDATED}
+            Effective: {EFFECTIVE_DATE}
           </p>
         </header>
 
@@ -129,39 +132,99 @@ export function PrivacyPage() {
 
           <H3>Job Listings</H3>
           <P>
-            When you search for jobs, save jobs, or import jobs via the browser extension, we
-            store job listing data (title, company, location, description, URL) in association
-            with your account. This data comes from public job boards and pages you actively
-            visit — we do not access job data without your interaction.
+            When you search for jobs on our site, or capture the job you are viewing with the
+            browser extension, we store job listing data (title, company, location, description,
+            URL) in association with your account. This data comes from public job boards and
+            pages you actively visit — we do not access job data without your interaction.
+          </P>
+          <P>
+            The extension has <Strong>one</Strong> capture action, and the toolbar button and the
+            keyboard shortcut are two ways of triggering it. They send the same data to the same
+            place, so capturing a job twice updates one record rather than creating a second.
           </P>
 
           <H3>Browser Extension</H3>
           <P>
             The Resume Master browser extension reads job listing pages that you actively visit
-            on LinkedIn, Indeed, Glassdoor, Lever, Greenhouse, and Workable. Specifically:
+            on six job boards — LinkedIn, Indeed, Glassdoor, Lever, Greenhouse and Workable — and
+            only on the individual job-posting pages of those sites, not the sites as a whole.
+            Specifically:
           </P>
           <UL>
             <LI>
-              It reads the <Strong>visible text</Strong> of job listing pages to extract
-              title, company, location, and description.
+              It reads the <Strong>visible text</Strong> of a job posting to extract
+              title, company, location, and description. It does this when you capture the job,
+              by clicking the toolbar button or pressing the keyboard shortcut.
             </LI>
             <LI>
-              It does <Strong>not</Strong> read, store, or transmit your LinkedIn
-              session cookies, login credentials, or any authentication tokens.
+              It reads the <Strong>address (URL) of the tab you invoke it on</Strong>, to
+              recognise whether that page is a supported job posting. It cannot see the address
+              of any other tab, and it does not record where you go.
             </LI>
             <LI>
-              It does <Strong>not</Strong> access any LinkedIn page you have not
-              navigated to yourself.
-            </LI>
-            <LI>
-              It does <Strong>not</Strong> read your LinkedIn messages, connections,
-              profile feed, or any page other than job listings and your saved jobs list.
+              If you click <Strong>ATS Score Tool</Strong> while on a job posting, it copies the
+              visible text of that page and opens your Resume Master ATS Score page with the text
+              already filled in. That text travels in the address of the page it opens, which
+              means it may appear in our ordinary server logs.
             </LI>
             <LI>
               Data extracted by the extension is sent to resumemaster.one and associated with
               your logged-in account using a browser session cookie — the same session used
-              when you log into the website. The extension never directly reads or transmits
-              this cookie.
+              when you log into the website. Because it is attached to your account, captured job
+              data is personal information, and we treat it as such. The extension never itself
+              reads or transmits the cookie's contents.
+            </LI>
+            <LI>
+              Job descriptions you capture may be sent to Anthropic's API when you use them for
+              ATS scoring or resume generation, as described under Third-Party Services below.
+            </LI>
+            <LI>
+              It does <Strong>not</Strong> read, store, or transmit your session cookies, login
+              credentials, or any authentication tokens for any site.
+            </LI>
+            <LI>
+              It does <Strong>not</Strong> read any page you have not navigated to yourself, and
+              does <Strong>not</Strong> collect your browsing history.
+            </LI>
+            <LI>
+              It does <Strong>not</Strong> read your messages, connections, or profile feed on any
+              site, and does <Strong>not</Strong> read any page outside the six job boards above —
+              with the single exception of an application form you have opened and invoked it on
+              yourself, described under "Filling an Application" below.
+            </LI>
+            <LI>
+              It does <Strong>not</Strong> collect lists of jobs. It reads the one posting you are
+              looking at. It does not gather search results, job lists, or your saved-jobs list on
+              any site — an earlier version of the extension could read a LinkedIn saved-jobs
+              list, and that capability was removed.
+            </LI>
+            <LI>
+              It contains <Strong>no remotely hosted code</Strong>. Everything it runs is in the
+              package you install from the Chrome Web Store; it never downloads or executes code
+              fetched from a server.
+            </LI>
+          </UL>
+
+          <H3>What the Extension Stores in Your Browser</H3>
+          <P>
+            The extension keeps three things in your browser's own extension storage. None of it
+            is sent anywhere by the extension, and all of it disappears when you uninstall it.
+          </P>
+          <UL>
+            <LI>
+              <Strong>Your capture shortcut preference</Strong>, if you change it — a key
+              combination. Kept until you change it again or uninstall, and synced by Chrome
+              across your signed-in browsers.
+            </LI>
+            <LI>
+              <Strong>The result of your most recent capture</Strong> — the job title and whether
+              it succeeded — so the popup can show you the outcome of a capture you made with the
+              keyboard while the popup was closed. Overwritten by the next capture.
+            </LI>
+            <LI>
+              <Strong>The prepared answers for an application in progress</Strong>, during a form
+              fill only. Held in memory-backed storage that is cleared when you restart your
+              browser, expiring after ten minutes and deleted when the tab closes.
             </LI>
           </UL>
 
@@ -284,6 +347,13 @@ export function PrivacyPage() {
               sent to SerpApi's servers; no personal data is included in search queries.
             </LI>
             <LI>
+              <Strong>Apify</Strong> (optional) — job search, using an Apify account you connect
+              yourself with your own token. When you run a search, the job titles, locations and
+              filters for that search are sent to Apify to run a public job-board search. Your
+              resume, your profile and any captured job data are not sent. If you do not connect
+              an Apify token, nothing is sent to them.
+            </LI>
+            <LI>
               <Strong>Adzuna</Strong> — job listings via their official publisher API.
             </LI>
             <LI>
@@ -346,9 +416,17 @@ export function PrivacyPage() {
         {/* Changes */}
         <Section title="Changes to This Policy">
           <P>
-            We may update this policy from time to time. The "Last updated" date at the top
-            reflects any changes. For significant changes we will notify registered users
-            by email.
+            We may update this policy from time to time. The "Effective" date at the top reflects
+            when the current version took effect.
+          </P>
+          <P>
+            If we make a <Strong>material change to how we handle your data</Strong> — collecting
+            something new, using it for a new purpose, or sharing it with someone new — we will
+            tell registered users by email <Strong>before that change takes effect</Strong>, and
+            we will not apply it retroactively to data already collected under an earlier version
+            of this policy. This applies to the browser extension as well as the website: if a new
+            version of the extension would collect something this policy does not already
+            describe, the policy is updated and users are notified first.
           </P>
         </Section>
 

@@ -133,7 +133,8 @@ These are the answers for the **Privacy practices** tab.
 - **Website content** — **collected, in three narrow cases.**
   1. The text of a job posting the user explicitly captures, sent to their account.
   2. The visible text of a job page when the user clicks **ATS Score Tool**, passed to their own
-     ATS Score page so it arrives prefilled.
+     ATS Score page so it arrives prefilled. It travels in the URL of the page that opens, so it
+     can appear in ordinary server logs; the privacy policy states this explicitly.
   3. *Optional and off by default:* the **structure** of an application form — its field labels,
      types, required flags and option lists. Never the values in it, never anything about the user.
      This is used to recognise the same form for other users. It is controlled by a per-account
@@ -188,7 +189,10 @@ Privacy policy URL: `https://resumemaster.one/privacy` (set in `manifest.json`).
 - [ ] `node scripts/e3PermissionAudit.mjs` — removes each declared permission in a real Chrome and
       confirms something actually breaks
 - [ ] Confirm `https://resumemaster.one/privacy` returns 200 **anonymously** and its Browser
-      Extension section matches the disclosures above
+      Extension section matches the disclosures above. The policy is served by the deployed client
+      build, so a policy change is not live until it is **deployed**, not merely committed.
+- [ ] Read `PRIVACY_RECONCILIATION.md` — the four-column join of manifest, code, policy and the
+      justifications on this page. Every row complete; an orphan in any column is a rejection
 - [ ] Fill the **Privacy practices** tab with the disclosures above
 - [ ] Fill the **single purpose** field with the statement above
 - [ ] Upload `resume-master-extension-v1.0.0.zip`
