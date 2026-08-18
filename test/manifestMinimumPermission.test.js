@@ -139,7 +139,8 @@ test("the injected extractor is self-contained", () => {
 
 test("the extractor still knows the named job boards, and still works without them", () => {
   const src = fs.readFileSync(path.join(SRC, "extractor.js"), "utf8");
-  for (const board of ["linkedin.com", "indeed.com", "glassdoor.com", "lever.co", "greenhouse.io", "workable.com"]) {
+  for (const board of ["linkedin.com", "indeed.com", "glassdoor.com", "lever.co", "greenhouse.io",
+                       "workable.com", "ashbyhq.com", "myworkdayjobs.com"]) {
     assert.match(src, new RegExp(`'${board.replace(".", "\\.")}'`),
       `the per-site selector map lost ${board}`);
   }
@@ -147,6 +148,28 @@ test("the extractor still knows the named job boards, and still works without th
   // domain — capturable at all. Without it the map would be a gate again, just a softer one.
   assert.match(src, /function genericDescription\(\)/,
     "the generic fallback is what makes an unnamed site work; it must not be removed");
+
+  // NO BUILD-HASHED CLASS NAMES. Ashby renders through CSS modules, so its description class is
+  // `_descriptionText_<hash>_201` and the hash changes when they deploy. A selector pinning one was
+  // committed here and matched nothing on any real page — invisibly, because Ashby also publishes
+  // JSON-LD and the extractor prefers it, so the site captured fine while the selector was dead.
+  // A selector that cannot fail loudly has to be prevented rather than tested for.
+  //
+  // Comments are stripped first. Without that, an apostrophe in prose ("Ashby's", "their own")
+  // opens a span the quote-matching treats as a string literal, so the guard flagged the very
+  // comment explaining the rule — a false positive that would have taught the next person to
+  // delete the check.
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").map(l => l.replace(/\/\/.*$/, "")).join("\n");
+  const hashed = code.match(/'[^']*_[A-Za-z]+_[a-z0-9]{4,}_\d+[^']*'/g);
+  assert.equal(hashed, null,
+    `extractor.js pins a build-hashed CSS-module class: ${hashed?.join(", ")}. ` +
+    `Use a stable id or [class*="..."] — the hash rotates on the site's next deploy.`);
+
+  // Workday having an extractor must never be read as Workday having a host permission.
+  assert.ok(!manifest.host_permissions.some(h => /workday/i.test(h)),
+    "an extractor entry is not a permission — the handoff's activeTab-only access depends on this");
 });
 
 test("externally_connectable stays absent", () => {

@@ -2,7 +2,7 @@
 /**
  * E5 — the extractor, run against REAL job pages including ones no manifest could ever name.
  * ============================================================================================
- * Two findings drove this file, and it now guards both.
+ * Three findings drove this file, and it now guards all of them.
  *
  * First: Greenhouse moved. boards.greenhouse.io 301-redirects to job-boards.greenhouse.io for every
  * board, including for a job id that does not exist, and `#content` — the selector the extractor
@@ -18,6 +18,11 @@
  * What this checks is the EXTRACTOR against real markup — whether the payload it builds is the
  * posting or the page furniture. It evaluates the real exported function in the real page, which is
  * the same serialisation executeScript performs, so what runs here is what runs in production.
+ *
+ * Third: several boards publish JSON-LD, and the extractor prefers it over any selector — so a
+ * per-site selector can be flatly wrong and the page still captures perfectly. The Ashby entry
+ * pinned a CSS-module class with a build hash in it, matched nothing on any real page, and nobody
+ * could tell. Every named board is therefore run twice, the second time with the JSON-LD deleted.
  *
  * The grant mechanism is NOT re-proven here; e2CaptureConvergence.mjs captures end to end from an
  * origin with no host permission, and e6PopupGrant.mjs measures the grant itself.
@@ -36,12 +41,16 @@ import { extractJobPayload } from '../extension/extractor.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// Real postings. The first two are the greenhouse host the manifest used to name; the last two are
-// Greenhouse-powered listings on the EMPLOYER's own domain — the case that was impossible before.
+// Real postings. The named ones exercise the per-site selector map; the last two are
+// Greenhouse-powered listings on the EMPLOYER's own domain — the case that was impossible before,
+// and the case no manifest could ever have enumerated.
 const PAGES = [
-  { label: 'job-boards.greenhouse.io (vercel)',  url: 'https://job-boards.greenhouse.io/vercel/jobs/6136160004', named: true },
-  { label: 'job-boards.greenhouse.io (airtable)', url: 'https://job-boards.greenhouse.io/airtable/jobs/8403127002', named: true },
-  { label: 'EMBEDDED — stripe.com',   url: 'https://stripe.com/jobs/search?gh_jid=8077887', named: false },
+  { label: 'greenhouse (vercel)',   url: 'https://job-boards.greenhouse.io/vercel/jobs/6136160004', named: true },
+  { label: 'greenhouse (airtable)', url: 'https://job-boards.greenhouse.io/airtable/jobs/8403127002', named: true },
+  { label: 'ashby (ramp)',          url: 'https://jobs.ashbyhq.com/ramp/34413f8d-26bf-4bbc-8ade-eb309a0e2245', named: true },
+  { label: 'ashby (linear)',        url: 'https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff', named: true },
+  { label: 'workday (nvidia)',      url: 'https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-Solutions-Architect--Agentic-AI---Safety-and-Security_JR2023191', named: true },
+  { label: 'EMBEDDED — stripe.com',     url: 'https://stripe.com/jobs/search?gh_jid=8077887', named: false },
   { label: 'EMBEDDED — databricks.com', url: 'https://www.databricks.com/company/careers/open-positions/job?gh_jid=8559344002', named: false },
 ];
 
@@ -51,6 +60,22 @@ const check = (label, cond, extra = '') => {
   if (!cond) failures++;
 };
 const soft = (label, extra = '') => console.log(`NOTE  ${label}${extra ? '  — ' + extra : ''}`);
+
+/** Re-load the page with its JSON-LD removed, so the per-site selectors have to carry it alone. */
+async function withoutJsonLd(url, browser) {
+  const page = await browser.newPage();
+  try {
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    await new Promise(r => setTimeout(r, 2000));
+    await page.evaluate(() =>
+      document.querySelectorAll('script[type="application/ld+json"]').forEach(s => s.remove()));
+    return await page.evaluate(extractJobPayload);
+  } catch (_) {
+    return null;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
 
 async function main() {
   console.log('=== E5 — the extractor against real job pages ===\n');
@@ -103,12 +128,20 @@ async function main() {
       if (named) {
         check(`${label}: extracted a posting`, payload.ok === true,
           payload.ok ? `${desc} chars` : 'ok=false — the selector map missed');
-        // Check the greenhouse ENTRY, not the whole file: the retired selector is named in a comment
-        // explaining why it went, and matching that comment made this fail while the code was right.
-        const entry = /'greenhouse\.io':[^\n]*/.exec(
-          fs.readFileSync(path.join(ROOT, 'extension', 'extractor.js'), 'utf8'))?.[0] || '';
-        check(`${label}: the greenhouse selectors are the current ones`,
-          entry.includes('.job__description') && !entry.includes('#content'), entry.trim().slice(0, 70));
+        // THE CHECK THAT ACTUALLY TESTS THE SELECTORS. Ashby and Workday both publish JSON-LD, and
+        // the extractor prefers it — so a per-site selector can be flatly wrong and the page still
+        // captures perfectly. That is not hypothetical: the Ashby entry used to pin a CSS-module
+        // class with a build hash in it (`_descriptionText_sq2af_201`), which matched nothing on any
+        // real page and went unnoticed for exactly that reason. Deleting the JSON-LD first is what
+        // makes the selector do the job it is there to do.
+        const selectorsOnly = await withoutJsonLd(url, browser);
+        if (selectorsOnly === null) {
+          soft(`${label}: could not re-load for the selector-only pass`);
+        } else {
+          check(`${label}: the selectors work WITHOUT JSON-LD`,
+            selectorsOnly.ok === true && (selectorsOnly.text || '').length > 1000,
+            `${(selectorsOnly.text || '').length} chars from selectors alone`);
+        }
       } else {
         // THE POINT OF THE REARCHITECTURE. These hosts are on no list and never will be.
         check(`${label}: capturable despite being on NO declared host`, payload.ok === true,
