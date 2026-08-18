@@ -1,6 +1,23 @@
-// E4 verification: the hosted policy, fetched and rendered ANONYMOUSLY.
+#!/usr/bin/env node
+/**
+ * TASK E4 — the hosted privacy policy, verified where it actually lives.
+ * ============================================================================================
+ * A policy that is correct in the repo and stale on the server is the version a reviewer reads.
+ * The two can differ by a whole deploy, and the failure is invisible from inside the repo: every
+ * test passes, the file says the right thing, and resumemaster.one/privacy still describes the
+ * extension from three releases ago.
+ *
+ * So this checks the deployed page, not the source. Anonymously — no cookies, no session — because
+ * a policy behind auth is a rejection, and because a reviewer is not signed in.
+ *
+ * It renders the page rather than curling it: the policy is client-rendered, so the raw HTML is an
+ * empty shell and a text search against it would pass or fail for reasons unrelated to the prose.
+ *
+ * Usage:  node scripts/e4PolicyVerify.mjs
+ */
+
 import puppeteer from 'puppeteer-core';
-import { resolveBrowserExecutable } from './services/browserLauncher.js';
+import { resolveBrowserExecutable } from '../services/browserLauncher.js';
 
 const URL_ = 'https://resumemaster.one/privacy';
 
@@ -32,6 +49,8 @@ const MUST = [
   ['no job lists collected',    /does not collect lists of jobs/i],
   ['saved-jobs capability gone',/saved-jobs list.{0,80}removed|capability was removed/i],
   ['ATS Score Tool disclosed',  /ATS Score Tool/],
+  ['in-page ATS button named',  /ATS Score this job/],
+  ['only page change stated',   /only change the extension makes to a job page/i],
   ['server logs admitted',      /server logs/i],
   ['browser storage section',   /What the Extension Stores in Your Browser/i],
   ['ten minute expiry',         /ten minutes/i],
