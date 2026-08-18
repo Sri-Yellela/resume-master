@@ -1,5 +1,12 @@
 # LinkedIn / Chrome Extension Pipeline — Audit & Completion Plan
 
+> **SUPERSEDED — historical.** This audit describes the extension as it was: a declared content
+> script on six job boards, a popup "Save Job" path separate from the hotkey, `popup.css`, and a
+> saved-jobs scraper. None of that survives. Capture is now one implementation injected under
+> `activeTab` with no job-board host permission at all. Kept as the record of what was found and
+> why, not as a description of the code. Current state: documentation.md §8.2 and
+> `extension/MANIFEST_RATIONALE.md`.
+
 **Status:** Audit (current state + next steps). Not yet executed.
 **Scope:** The Chrome extension (`extension/`) and its server-side import
 endpoints — the pipeline that pulls LinkedIn (and other ATS) job listings into

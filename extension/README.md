@@ -1,44 +1,60 @@
-# Resume Master - Chrome Extension v1.2
+# Resume Master — Chrome Extension v1.0.0
 
-Companion extension for Resume Master. Lightweight, privacy-first.
+Companion extension for Resume Master. It asks for permission to no job site at all, and reads a
+page only at the moment you point it at one.
 
 ## What It Does
-- **Capture this job**: on any supported job listing (LinkedIn, Indeed, Glassdoor, Lever,
-  Greenhouse, Workable), press the capture shortcut (default `Ctrl+Shift+K`, customizable in
-  Settings) to send the ONE job you're currently viewing into your Resume Master job pool.
-  Exactly one job per press — no scrolling, no list harvesting, no background collection.
-- **Save Job**: on a supported job listing, open the popup and click "Save Job" to add it to
-  your Resume Master saved list.
-- **ATS Score**: on supported job listings, click the floating "ATS Score this job" button (or
-  the popup's "ATS Score Tool") to send the visible job description to Resume Master's ATS
-  scoring tool.
-- **LinkedIn Import**: opens the secure LinkedIn OAuth consent flow so you can import your name
-  and email to pre-fill your resume.
-- **Quick Access**: open the resume builder from anywhere.
+- **Capture the job you're viewing** — press `Ctrl+Shift+K` or open the popup and click
+  **Capture job**. Both are triggers for the same implementation: same destination, same duplicate
+  detection, same wording of the result. Exactly one job per press — no scrolling, no list
+  harvesting, no background collection.
+  Works on **any job posting**, including ones hosted on an employer's own careers domain. Tuned
+  extraction for LinkedIn, Indeed, Glassdoor, Lever, Greenhouse, Workable, Ashby and Workday; a
+  generic reader everywhere else.
+- **Fill an application you signed in to reach** — `Ctrl+Shift+Y` on a form you have opened
+  yourself. It fills answers you already saved in your account and shows a review panel. **You**
+  press the employer's submit button.
+- **ATS Score** — the popup's **ATS Score Tool** sends the visible text of the page you're on to
+  your ATS Score page, prefilled.
+- **LinkedIn Import** — opens the LinkedIn OAuth consent flow to import your name and email.
+- **Quick Access** — opens the resume builder.
 
 ## What It Does NOT Do
 - Does not scrape, read, or collect saved-jobs lists or any batch of listings — only the single
-  job on the page you're viewing, only when you trigger it (shortcut or button click).
+  job on the page you're viewing, only when you trigger it.
 - Does not scrape, read, or collect any profile data.
-- Does not auto-apply to any jobs.
-- Does not run in the background or collect anything without a direct user action.
-- Does not request access to pages you are not currently viewing.
+- Does not submit an application. It fills and shows; you submit.
+- Does not sign you in or attempt a CAPTCHA, and never reads any site's password or session cookie.
+- Does not run in the background, and **declares no content script** — nothing runs on page load,
+  anywhere.
+- Does not request access to any job site. It has no standing access to anything.
+- Contains no remotely hosted code.
+
+## How it reaches a page
+
+Through `activeTab` — the grant Chrome creates when you invoke the extension — and
+`chrome.scripting.executeScript`. That is the whole access story, and it is why the manifest
+declares exactly one host permission (`resumemaster.one`, our own backend) and no job boards.
+
+It used to work the other way: a declared content script running automatically on six named sites.
+That gave the extension standing access to those six and made every other job page unreachable,
+including Greenhouse boards embedded on employers' own domains — which are common, and which no
+list of hosts could have enumerated. See `MANIFEST_RATIONALE.md`.
 
 ## Capture Shortcut Settings
-Open the extension's Settings page (popup → "Capture Shortcut Settings", or
-`chrome://extensions` → Resume Master → Details → Extension options) to set a custom capture
-shortcut. Reserved browser/OS combinations (Ctrl/Cmd+C, Ctrl/Cmd+T, devtools shortcuts, etc.)
-are rejected. The default `Ctrl+Shift+K` binding is a real Chrome shortcut and can also be
-changed at `chrome://extensions/shortcuts`; a custom override set in this extension's Settings
-page only works while a supported job page has focus.
+The options page (popup → "Capture Shortcut Settings") shows the current binding and links to
+`chrome://extensions/shortcuts`, which is the only surface that can actually rebind a command — an
+extension cannot reassign its own keys. An earlier version recorded a custom combination itself;
+that only worked while one of six job sites had focus, and it was removed along with the content
+script it depended on.
 
 ## Permissions Explained
-- `activeTab`: reads the page you are on only when you click the extension button or trigger a
-  capture.
-- `scripting`: lets the popup collect visible page text from the active tab after you click ATS
-  Score Tool.
-- `storage`: persists your custom capture shortcut (if you set one) and the result of your most
-  recent capture, so the popup can show it to you.
+- `activeTab`: reads the page you are on, only when you click the extension button or press a
+  shortcut, and only that one tab. Access ends when the tab leaves that site.
+- `scripting`: injects the extractor to read a posting, collect text for an ATS score, fill a form,
+  and render the review panel. Nothing is injected into any other tab.
+- `storage`: the result of your most recent capture (so the popup can show it), and — during a form
+  fill only — the prepared answers, in memory-backed session storage with a 10-minute expiry.
 
 ## Install (Development)
 1. Chrome -> chrome://extensions -> Enable Developer Mode.

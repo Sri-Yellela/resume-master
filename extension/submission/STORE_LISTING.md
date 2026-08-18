@@ -51,10 +51,22 @@ account, or the extension's own options page. They request no permission of thei
 | **Ctrl+Shift+Y** on an application form | The gated handoff: fetches the answers the user already saved in their account, fills the form, shows a review panel. The user submits. |
 | Toolbar → **ATS Score Tool** | Collects the visible text of the page in view and opens the user's ATS Score page with it prefilled. |
 | Toolbar → **Open Resume Builder** / **Sign in with LinkedIn** | Opens a Resume Master page in a new tab. Nothing is read from the current page. |
-| Toolbar → **Capture Shortcut Settings** | Opens the extension's own options page. |
+| Toolbar → **Capture Shortcut Settings** | Opens the extension's own options page, which shows the current shortcut and links to Chrome's own shortcuts page — the only place a command can actually be rebound. |
 
 There is exactly **one** capture implementation. The button and the shortcut are two triggers for
 it, they land in the same place with the same duplicate detection, and they report the same text.
+
+### Which sites it works on
+
+**Any job posting the user opens it on.** There is no supported-sites list, because there is no
+mechanism that could enforce one: the extension reads whichever tab the user invoked it on, and it
+holds no permission for any site in advance.
+
+It carries tuned extraction for LinkedIn, Indeed, Glassdoor, Lever, Greenhouse, Workable, Ashby and
+Workday, and falls back to a generic reader everywhere else. That distinction is about extraction
+quality, not access — a Greenhouse posting embedded on an employer's own careers domain is captured
+by the generic path and works. Verified against live postings on all of the above by
+`scripts/e5GreenhouseHost.mjs`, including two employer-hosted pages.
 
 ---
 
@@ -68,27 +80,34 @@ it, they land in the same place with the same duplicate detection, and they repo
 > a page **only** through that per-tab, per-invocation grant. It never accesses a tab the user is not
 > on, and never acts without a direct user action.
 
-*(Code: `background.js:112` `chrome.commands.onCommand` and `popup.js:9` both call
+*(Code: `background.js` `chrome.commands.onCommand` and `popup.js` `getCurrentTab()` both call
 `chrome.tabs.query({active: true, currentWindow: true})` only inside a user-gesture handler.
-`gated-handoff.js` `runGatedHandoff()` is reached only from that handler, via `background.js:130`.)*
+`captureActiveTab()`, `previewActiveTab()` and `handleGatedHandoff()` are reached only from there.)*
 
 **`scripting`**
-> Injects a one-off script into the invoked tab to (a) collect the visible job description text when
-> the user asks for an ATS score, and (b) fill the application form and render the review panel on a
-> handoff. Nothing is injected into any other tab, and no script is registered to run persistently.
+> Injects a one-off script into the invoked tab to (a) read the job posting the user is capturing,
+> (b) collect the visible text when the user asks for an ATS score, and (c) fill the application form
+> and render the review panel on a handoff. Nothing is injected into any other tab, and no script is
+> registered to run persistently — the extension declares no content script at all.
+>
+> This is how the extension reads a job page without holding a permission for the site. It is also
+> why it can capture a posting on an employer's own careers domain, which no list of declared hosts
+> could ever have covered.
 
-*(Code: `gated-handoff.js:398,452,486,521,656` for the probe, fill and overlay; `popup.js:188` for
-the ATS Score Tool. The capture path itself uses the declared content script, not injection.)*
+*(Code: `background.js` `captureActiveTab()` and `reportCapture()`, injecting `extractor.js`
+`extractJobPayload()` and `showCaptureToast()`; `gated-handoff.js` `probeFormShape()`, `applyPlan()`
+and `applyOverlayEdit()`; `review-overlay.js` `renderOverlay()`; `popup.js` for the ATS Score Tool.)*
 
 **`storage`**
-> Persists the user's own capture-shortcut preference, the result of their most recent capture, and —
-> during a handoff only — the prepared answers for the tab they are working in, held in
-> `chrome.storage.session` (memory-backed, cleared on browser restart) with a 10-minute expiry and
-> cleared when the tab closes.
+> Persists the result of the user's most recent capture, so the popup can show the outcome of a
+> capture made with the keyboard while the popup was closed; and — during a handoff only — the
+> prepared answers for the tab they are working in, held in `chrome.storage.session` (memory-backed,
+> cleared on browser restart) with a 10-minute expiry and cleared when the tab closes.
 
-*(Code: `options.js` (`storage.sync`); `background.js:67` (`storage.local` last capture);
-`background.js:147,190` and `gated-handoff.js:259-308` `savePacketForTab` / `clearPacketForTab` /
-`sweepExpiredPackets` (`storage.session`).)*
+*(Code: `background.js` `reportCapture()` (`storage.local`) and `reportHandoff()`; `gated-handoff.js`
+`savePacketForTab()` / `clearPacketForTab()` / `sweepExpiredPackets()` (`storage.session`).
+`options.js` touches `storage.sync` only to delete a value the retired shortcut recorder left
+behind.)*
 
 **Host permissions** — one, and it is our own backend
 > `https://resumemaster.one/*` is our own server, which the extension fetches from with the user's
