@@ -15,7 +15,7 @@
     "https://www.indeed.com/viewjob*",
     "https://www.glassdoor.com/job-listing/*",
     "https://jobs.lever.co/*/*",
-    "https://boards.greenhouse.io/*/*",
+    "https://job-boards.greenhouse.io/*/*",
     "https://*.workable.com/j/*"
   ],
   "background": {
@@ -54,7 +54,7 @@
         "https://www.indeed.com/viewjob*",
         "https://www.glassdoor.com/job-listing/*",
         "https://jobs.lever.co/*/*",
-        "https://boards.greenhouse.io/*/*",
+        "https://job-boards.greenhouse.io/*/*",
         "https://*.workable.com/j/*"
       ],
       "js": [

@@ -53,7 +53,12 @@
     'indeed.com':    () => trySelectors(['#jobDescriptionText']),
     'glassdoor.com': () => trySelectors(['.jobDescriptionContent']),
     'lever.co':      () => trySelectors(['.posting-description', '.section-wrapper']),
-    'greenhouse.io': () => trySelectors(['#content .job__description', '#content']),
+    // Greenhouse moved. boards.greenhouse.io now 301s to job-boards.greenhouse.io for every board
+    // — measured against figma, anthropic, discord and airtable, and it redirects even a job id
+    // that does not exist, so it is a blanket host redirect rather than a per-company migration.
+    // #content went with it: it appears on neither host, so the old selectors could not match
+    // anything and capture here was falling through to the body-text fallback.
+    'greenhouse.io': () => trySelectors(['.job__description', 'main.job-post']),
     'workable.com':  () => trySelectors(['.job-description']),
   };
 
