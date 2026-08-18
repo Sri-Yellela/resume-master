@@ -478,6 +478,8 @@ leaves the origin or the portal opens a step in a new tab.
 - **Credential controls are never filled.** A control inside a form containing a password input is a
   sign-in box, whatever it is called — see `isCredentialField` in `services/applyAutomation.js`.
 - **Schema capture stores the form's questions, never anyone's answers**, enforced by a whitelist.
+  It is opt-in and off by default; the switch is in the Integrations panel under "Form Learning",
+  and the server refuses a capture from an account that has not turned it on.
 
 ### Where it lives
 `services/applyGatePacket.js`, `services/kb/formSchemaLayer.js`, `extension/gated-handoff.js`,
