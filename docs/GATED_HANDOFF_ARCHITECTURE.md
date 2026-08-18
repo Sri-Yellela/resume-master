@@ -4,6 +4,9 @@
 settled. Migrations 079–081. The extension manifest is batched at v1.3.0 and **not yet submitted** to
 the Web Store — that is the one remaining action, and it is deliberate (see §8).
 
+**Build status, decisions and what is left: `docs/GATED_HANDOFF_STATUS.md`** — read that first if
+you are picking this up cold.
+
 Each task has a harness that drives a real browser rather than a mock: `scripts/g0ActiveTabSpike.mjs`
 (the grant-lifetime spike), `g1GatePacket`, `g2ExtensionHandoff`, `g3ReviewOverlay`,
 `g4SchemaCapture`, `g5PortalBatch`, and `g6CredentialGuard` for the credential-leak fix that came out
