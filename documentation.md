@@ -1,7 +1,8 @@
 # Resume Master v5 — Complete Project Documentation
 
 > **Freshness note.** Sections 3–5 and 8.1 were brought current with the gated-portal handoff work
-> (migrations 079–081, extension v1.3.0). Other sections predate it and are known to drift in places
+> (migrations 079–081). The extension tree above and §8.2 are current as of the v1.0.0 capture
+> rearchitecture. Other sections predate both and are known to drift in places
 > — §8's autofill architecture diagram still describes the pre-`applyAutomation.js` extension-side
 > fill, and §6's prompt structure has moved on. Treat anything not listed here as indicative rather
 > than authoritative, and check the code. `docs/GATED_HANDOFF_STATUS.md` is the current state of the
@@ -101,16 +102,17 @@ resume-master/
 │       ├── manifest.json            # Index of all backup files
 │       └── resume_master_*.db       # Timestamped backup files
 │
-├── extension/                       # Chrome Extension (Manifest V3) — repo v1.3.0, store v1.2.0
-│   ├── manifest.json
-│   ├── background.js                # Service worker — commands, gated handoff, batch advance
-│   ├── linkedin-content.js          # Declared content script — job capture on 6 job sites
+├── extension/                       # Chrome Extension (Manifest V3) — v1.0.0, never published
+│   ├── manifest.json                # ONE host permission (resumemaster.one). No content scripts.
+│   ├── background.js                # Service worker — capture, commands, gated handoff, batching
+│   ├── extractor.js                 # INJECTED by executeScript, not a content script (see below)
 │   ├── gated-handoff.js             # Packet exchange, target match, form fill, schema capture
 │   ├── review-overlay.js            # In-page provenance overlay (see 8.1)
 │   ├── popup.html / popup.js        # Extension popup UI
-│   ├── options.html / options.js    # Capture-shortcut settings
+│   ├── options.html / options.js    # Shows the shortcut; defers rebinding to Chrome
 │   ├── icons/
-│   └── submission/                  # Built zips + STORE_LISTING.md (dashboard copy)
+│   ├── MANIFEST_RATIONALE.md        # Every declared permission, justified; enforced by a test
+│   └── submission/                  # Built zip, STORE_LISTING.md, PRIVACY_RECONCILIATION.md
 │
 └── client/                          # React frontend (Vite)
     ├── index.html                   # HTML entry point
@@ -487,6 +489,66 @@ leaves the origin or the portal opens a step in a new tab.
 
 **Status, decisions and what is left: `docs/GATED_HANDOFF_STATUS.md`.** Each task has a real-browser
 harness at `scripts/g0ActiveTabSpike.mjs` … `scripts/g6CredentialGuard.mjs`.
+
+---
+
+## 8.2 Job capture — how the extension reads a page
+
+**One implementation, two triggers, no content script.** The popup's *Capture job* button and
+`Ctrl+Shift+K` both reach `background.js` `captureActiveTab()`, which injects `extractor.js`
+`extractJobPayload()` into the invoked tab with `chrome.scripting.executeScript`, then posts the
+result through `importCapturedJob()` to `/api/import/job` — the BYO-1 reconciler, in `scraped_jobs`.
+
+```
+popup button ─┐
+              ├─► captureActiveTab(tab)  ──executeScript──► extractJobPayload()  (in the page)
+Ctrl+Shift+K ─┘            │                                        │
+                           └──► importCapturedJob({url, text}) ◄────┘
+                                        POST /api/import/job
+```
+
+### Why injection instead of a content script
+
+A content script needs a **host permission for every origin it runs on**. That capped what capture
+could ever reach: six declared job boards, and nothing else — not Ashby, and crucially not a
+Greenhouse board embedded on an employer's own careers domain, which is common and which no list of
+hosts could enumerate. On those pages the extension was not failing, it was absent.
+
+`activeTab` has no such cap. The user's invocation grants access to that one tab whatever the
+origin, which is the same mechanism the gated handoff (§8.1) uses to reach a Workday tenant nothing
+declares. So the extension now captures from **more** sites while declaring **fewer** permissions:
+`host_permissions` is just `resumemaster.one`, and nothing runs on page load anywhere.
+
+The measurement that unblocked this is `scripts/e6PopupGrant.mjs`: an earlier conclusion that the
+job-board hosts were load-bearing came from a harness that opened the popup **as a tab**, which is
+not an action invocation and therefore never carries a grant. Driven by a real `_execute_action`
+keypress, the popup reads `tab.url` and injects on an origin with no host permission; the control
+arm does neither.
+
+### The extractor
+
+`extractor.js` is injected, so it is **serialised** — nothing outside a function body travels with
+it, which is why every helper is nested and there are no imports. It tries JSON-LD `JobPosting`
+first, then a per-site selector map, then a largest-plausible-content-block fallback.
+
+The selector map is an **optimisation, not a gate**: an unlisted site falls through to the generic
+reader and still captures. Two traps worth knowing, both of which bit:
+
+- **JSON-LD masks broken selectors.** Ashby and Workday both publish it, so a wrong selector still
+  captures perfectly. The Ashby entry pinned a CSS-module class with a build hash in it and matched
+  nothing for weeks. `scripts/e5GreenhouseHost.mjs` therefore re-runs every named board with the
+  JSON-LD deleted, and a test rejects hashed class names.
+- **The company field is not always the company.** Workday's `hiringOrganization` is an internal org
+  unit (`"2100 NVIDIA USA"`); employer-hosted pages often state no company at all. Both are inferred
+  from the hostname — the host decides which token, the page decides its casing — guarded by an
+  `ATS_HOSTS` list so `jobs.lever.co` never becomes company "Lever". A wrong company here would
+  silently split one employer into two in the cross-source reconciler.
+
+### Where it lives
+`extension/background.js`, `extension/extractor.js`, `extension/popup.js`, `routes/importJob.js`,
+`services/jobs/importJob.js`. Permission derivation: `extension/MANIFEST_RATIONALE.md`.
+Real-run harnesses: `scripts/e2CaptureConvergence.mjs` (both triggers, one row, no host permission),
+`scripts/e5GreenhouseHost.mjs` (extraction against live postings), `scripts/e6PopupGrant.mjs`.
 
 ---
 

@@ -20,15 +20,22 @@ manifest does not declare, or if the manifest declares one this file does not co
 Policy paragraph references are to section headings on
 `https://resumemaster.one/privacy` (source: `client/src/pages/marketing/PrivacyPage.jsx`).
 
+**Code is cited by SYMBOL, not by line number.** This table originally carried `file:line`, and the
+line numbers were wrong twice within a day — once when capture moved to the service worker and again
+when it moved to injection. A citation that rots silently is worse than a vague one, because it
+still looks precise. Symbols survive edits, they are what a reviewer actually wants to grep for, and
+`test/privacyReconciliation.test.js` now fails if a cited symbol is not in the file it is cited
+from — so this table cannot drift the way the line numbers did.
+
 ---
 
 ## Permissions
 
 | Manifest permission | Code that requires it | Policy paragraph | Dashboard justification |
 |---|---|---|---|
-| `activeTab` | `background.js:112` hotkey capture `tabs.query`; `background.js:130` handoff `tabs.query`; `popup.js:9` `getCurrentTab()`. The grant is the `chrome.commands` / toolbar invocation itself. | *Browser Extension* — "It reads the address (URL) of the tab you invoke it on… It cannot see the address of any other tab". *Filling an Application* — "The extension only reaches that page because **you invoked it there**. It holds no standing permission for any employer or job-portal site". | Granted only on explicit invocation; used to read the job posting in view and to fill an application form the user opened. No host permission exists for any portal, so this per-tab grant is the only access. Never touches a tab the user is not on. |
-| `scripting` | `gated-handoff.js:398,452` form probe; `:486` fill; `:521` review overlay; `:656` overlay edit; `popup.js:188` ATS Score Tool page-text collection. | *Browser Extension* — "If you click **ATS Score Tool** … it copies the visible text of that page". *Filling an Application* — "enters them into that employer's form", "It shows you every answer it filled in". | Injects a one-off script into the invoked tab to collect job text for an ATS score, and to fill the form and render the review panel. Nothing is injected into any other tab; nothing is registered to run persistently. |
-| `storage` | `options.js:25,56,64` `storage.sync` shortcut preference; `background.js:67` `storage.local` last capture; `background.js:147,190` and `gated-handoff.js:259-308` `storage.session` handoff packet; `linkedin-content.js:387` reads the shortcut. | *What the Extension Stores in Your Browser* — all three items, each with its lifetime. | Stores the user's capture-shortcut preference, the result of their most recent capture, and — during a handoff only — the prepared answers, in memory-backed session storage with a 10-minute expiry, cleared when the tab closes. |
+| `activeTab` | `background.js` `captureActiveTab()`, `previewActiveTab()` and `handleGatedHandoff()`, each reached only from `chrome.commands.onCommand` or a popup message; `popup.js` `getCurrentTab()`. The grant IS the invocation. | *Browser Extension* — "reads nothing until you invoke it… only that one tab". *Filling an Application* — "It holds no standing permission for any employer or job-portal site". | Granted only on explicit invocation; used to read the job posting in view and to fill an application form the user opened. No host permission exists for any site the extension reads a job from, so this per-tab grant is the only access there is. |
+| `scripting` | `background.js` `captureActiveTab()` and `reportCapture()`, which inject the two functions in `extractor.js` — `extractJobPayload()` and `showCaptureToast()`; `gated-handoff.js` `probeFormShape()`, `applyPlan()`, `applyOverlayEdit()`; `review-overlay.js` `renderOverlay()`; `popup.js` ATS Score Tool. | *Browser Extension* — "If you click **ATS Score Tool** … it copies the visible text of that page". *Filling an Application* — "enters them into that employer's form". | Injects a one-off script into the invoked tab to read the posting, collect text for an ATS score, fill the form and render the review panel. Nothing is injected into any other tab, and nothing is registered to run persistently. |
+| `storage` | `background.js` `reportCapture()` (`storage.local`, last capture) and `reportHandoff()`; `gated-handoff.js` `savePacketForTab()`, `loadPacketForTab()`, `clearPacketForTab()`, `sweepExpiredPackets()` (`storage.session`). `options.js` uses `storage.sync` only to DELETE a value the retired shortcut recorder left behind. | *What the Extension Stores in Your Browser* — both items, each with its lifetime, plus the retired third. | Stores the result of the most recent capture so the popup can show the outcome of a hotkey capture it was not open for, and — during a handoff only — the prepared answers, in memory-backed session storage with a 10-minute expiry, cleared when the tab closes. |
 
 **Declared nowhere, deliberately:** `tabs`, `cookies`, `notifications`, `history`, `webNavigation`,
 `<all_urls>`. Each is asserted absent by `test/manifestMinimumPermission.test.js`; the reasoning is
@@ -44,7 +51,7 @@ extension needs no standing access to any site in order to capture from it — a
 
 | Manifest host | Code that requires it | Policy paragraph | Dashboard justification |
 |---|---|---|---|
-| `https://resumemaster.one/*` | `background.js:26` `/api/import/job`; `:76` `/api/auth/me`; `:195` `/api/apply/gate-review`; `:216` `/api/apply/gate-packets`; `gated-handoff.js:338,469`. All `credentials:'include'`, no embedded secret. | *Browser Extension* — "Data extracted by the extension is sent to resumemaster.one and associated with your logged-in account using a browser session cookie". | Our own backend. The extension fetches with the user's existing session cookie; it never reads the cookie's value. |
+| `https://resumemaster.one/*` | `background.js` — `importCapturedJob()` posts `/api/import/job`, the `PROBE_AUTH` handler calls `/api/auth/me`, `recordGateReview()` posts `/api/apply/gate-review`, `advanceBatch()` calls `/api/apply/gate-packets`; `gated-handoff.js` `api()` and its resume fetch. All `credentials:'include'`, no embedded secret. | *Browser Extension* — "Data extracted by the extension is sent to resumemaster.one and associated with your logged-in account using a browser session cookie". | Our own backend. The extension fetches with the user's existing session cookie; it never reads the cookie's value. |
 
 **No content script is declared**, so there is no origin the extension runs on automatically. The
 policy's central claim — "reads nothing until you invoke it" — is true because of that absence, and
@@ -58,8 +65,8 @@ and each still needs a policy paragraph.
 
 | Flow | Code | Policy paragraph | Retained server-side? |
 |---|---|---|---|
-| Captured job posting → the user's account | `background.js` `captureActiveTab()` injects `extractor.js` `extractJobPayload()` → `background.js:26` `POST /api/import/job` | *Job Listings*, *Browser Extension* | Yes — title, company, location, description, URL, in `scraped_jobs`, linked to the account |
-| ATS Score page text → `/ats-score?jd=…` | `popup.js` `chrome.scripting` collect → `background.js:85` `chrome.tabs.create` | *Browser Extension*, ATS bullet — states plainly that the text travels in the URL and may appear in server logs | Only as ordinary request logs; not stored as a record |
+| Captured job posting → the user's account | `background.js` `captureActiveTab()` then `importCapturedJob()`, which posts `/api/import/job`; the page is read by `extractor.js` `extractJobPayload()` | *Job Listings*, *Browser Extension* | Yes — title, company, location, description, URL, in `scraped_jobs`, linked to the account |
+| ATS Score page text → `/ats-score?jd=…` | `popup.js` ATS button collects via `chrome.scripting` → `background.js` `OPEN_ATS_SCORE` opens the tab | *Browser Extension*, ATS bullet — states plainly that the text travels in the URL and may appear in server logs | Only as ordinary request logs; not stored as a record |
 | The capture confirmation shown in the page | `extractor.js` `showCaptureToast()`, injected by `background.js` `reportCapture()` after a capture the user asked for | *Browser Extension*, ATS bullet — "no longer changes the appearance of any page except to show you a confirmation message after a capture you asked for" | Not a data flow; disclosed because it is the only thing the extension puts on a page |
 | Job description → Anthropic | server-side ATS scoring / enrichment | *Browser Extension*, fifth bullet, cross-referencing *Third-Party Services* | Per Anthropic's API terms; not used for training |
 | Profile answers → employer's form | `gated-handoff.js` fill | *Filling an Application* | Not retained by us; released into the page the user opened |

@@ -57,8 +57,9 @@ This makes the design permission-minimal by construction:
 
 **Direction matters.** `externally_connectable` is absent from the manifest, so the website cannot
 message the extension. Invert it: the **extension fetches the packet from our server** with
-`credentials: 'include'`, exactly as `extension/linkedin-content.js:369` already does against
-`/api/import/job`. Nothing pushes inward, so the missing manifest key never becomes a blocker.
+`credentials: 'include'`, exactly as capture already does against `/api/import/job` (that call now
+lives in `extension/background.js` `importCapturedJob()`; it was in the content script when this was
+written, and the content script is gone — see documentation.md §8.2). Nothing pushes inward, so the missing manifest key never becomes a blocker.
 
 ---
 

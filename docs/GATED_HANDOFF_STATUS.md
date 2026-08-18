@@ -26,7 +26,7 @@ what is verified and how to re-verify it, and what is genuinely left.
 
 Tests: **877 → 1018**, zero introduced failures at every step.
 Migrations: high-water **078 → 081**.
-Extension: published v1.2.0, repo at **v1.3.0, built and NOT submitted**.
+Extension: **never published**. Repo at v1.0.0 — a deliberate first-submission reset; the store entry is a draft with zero users.
 
 ---
 
@@ -68,12 +68,13 @@ transition it was supposed to test did not actually happen.
 | `routes/apply.js` | All gate endpoints; the `held_gate` status mapping |
 | `routes/companyKb.js` | `GET /:company/form-schemas` — the KB read surface |
 
-### Extension (v1.3.0, unsubmitted)
+### Extension (v1.0.0, unsubmitted)
 | File | Role |
 |---|---|
 | `extension/gated-handoff.js` | Target match, packet exchange, fill, resume attach, batching, capture |
 | `extension/review-overlay.js` | The provenance overlay: ordering, readiness, in-page render |
-| `extension/background.js` | Command handler, batch advance, overlay messages |
+| `extension/background.js` | Command handler, capture, batch advance, overlay messages |
+| `extension/extractor.js` | The injected page reader. NOT a content script — see documentation.md §8.2 |
 
 ### Endpoints
 ```

@@ -50,6 +50,38 @@ test("every declared host permission appears in the reconciliation table", () =>
   }
 });
 
+test("EVERY SYMBOL THE RECONCILIATION CITES ACTUALLY EXISTS", () => {
+  // The table used to cite file:line. Those line numbers were wrong twice in a day — once when
+  // capture moved into the service worker, again when it moved to injection — and nothing caught
+  // either, because a stale line number still looks precise. Citing symbols only helps if the
+  // symbols are real, so this checks them.
+  //
+  // Parses "`file.js` `symbol()`" pairs: a backticked filename, then the backticked identifiers
+  // attributed to it up to the next filename.
+  const cited = [];
+  let current = null;
+  for (const m of recon.matchAll(/`([A-Za-z0-9_.\-/]+\.(?:js|jsx))`|`([A-Za-z_$][\w$]*)\(\)`/g)) {
+    if (m[1]) current = m[1];
+    else if (current && m[2]) cited.push([current, m[2]]);
+  }
+  assert.ok(cited.length >= 8, `expected the table to cite real symbols, found ${cited.length}`);
+
+  const roots = ["extension", "client/src/pages/marketing", "scripts", "routes", "services", "."];
+  const seen = new Set();
+  for (const [file, symbol] of cited) {
+    const key = `${file}::${symbol}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const found = roots.map(r => `${r}/${file}`).find(p => fs.existsSync(p));
+    assert.ok(found, `PRIVACY_RECONCILIATION.md cites ${file}, which does not exist`);
+    const src = fs.readFileSync(found, "utf8");
+    assert.ok(src.includes(symbol),
+      `PRIVACY_RECONCILIATION.md attributes "${symbol}()" to ${file}, which does not contain it — ` +
+      `the citation rotted, which is exactly what replacing line numbers with symbols was meant to stop`);
+  }
+});
+
 test("the policy's account of WHAT the extension can read matches the manifest", () => {
   // The old rule was "every declared job board must be named in the policy". There are no declared
   // job boards now, so that rule passes vacuously and would keep passing if a host crept back in.
