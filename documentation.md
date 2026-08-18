@@ -1,5 +1,12 @@
 # Resume Master v5 — Complete Project Documentation
 
+> **Freshness note.** Sections 3–5 and 8.1 were brought current with the gated-portal handoff work
+> (migrations 079–081, extension v1.3.0). Other sections predate it and are known to drift in places
+> — §8's autofill architecture diagram still describes the pre-`applyAutomation.js` extension-side
+> fill, and §6's prompt structure has moved on. Treat anything not listed here as indicative rather
+> than authoritative, and check the code. `docs/GATED_HANDOFF_STATUS.md` is the current state of the
+> apply/handoff surface.
+
 **Last updated:** April 2026  
 **Status:** Local development complete, pre-deployment  
 **Owner:** Sri Balaji (Software Engineer, Boston MA)
@@ -80,7 +87,12 @@ resume-master/
 │
 ├── scripts/
 │   ├── backup.js                    # Backup + restore logic (imported by server.js)
-│   └── migrate.js                   # Additive schema migration runner
+│   ├── migration.js                 # Additive schema migration runner (CLI)
+│   ├── migrations.js                # The migration list — shared with server.js's boot runner
+│   ├── fakeAts.js                   # Local ATS fixture; every form carries a deliberate trap
+│   ├── buildExtension.mjs           # Builds the Web Store zip from extension/ source
+│   ├── publishExtension.mjs         # Uploads it — preflight first, draft by default
+│   └── g0…g6*.mjs                   # Real-browser harnesses for the gated handoff (see 8.1)
 │
 ├── data/
 │   ├── resume_master.db             # SQLite database — all user data lives here
@@ -89,15 +101,16 @@ resume-master/
 │       ├── manifest.json            # Index of all backup files
 │       └── resume_master_*.db       # Timestamped backup files
 │
-├── extension/                       # Chrome Extension (Manifest V3)
+├── extension/                       # Chrome Extension (Manifest V3) — repo v1.3.0, store v1.2.0
 │   ├── manifest.json
-│   ├── background.js                # Service worker — fetches autofill data, relays to tabs
-│   ├── content.js                   # Injected on all pages — ATS detection, field filling
-│   ├── popup.html                   # Extension popup UI
-│   ├── popup.js                     # Popup logic
-│   ├── icon16.png
-│   ├── icon48.png
-│   └── icon128.png
+│   ├── background.js                # Service worker — commands, gated handoff, batch advance
+│   ├── linkedin-content.js          # Declared content script — job capture on 6 job sites
+│   ├── gated-handoff.js             # Packet exchange, target match, form fill, schema capture
+│   ├── review-overlay.js            # In-page provenance overlay (see 8.1)
+│   ├── popup.html / popup.js        # Extension popup UI
+│   ├── options.html / options.js    # Capture-shortcut settings
+│   ├── icons/
+│   └── submission/                  # Built zips + STORE_LISTING.md (dashboard copy)
 │
 └── client/                          # React frontend (Vite)
     ├── index.html                   # HTML entry point
@@ -198,8 +211,22 @@ Populated automatically when a user exports a PDF. Also editable inline in the D
 ### `refresh_log`
 Tracks job scrape refreshes per user for rate limiting (4/day rolling window).
 
+### `apply_gate_packets`
+The prepared answer packet for a portal that demanded an account or a CAPTCHA (migration 079). Holds
+the resolved answers with provenance, the URL the gate was observed at, the `expected_origin` the
+extension target-matches before releasing anything, and the **hash** of the outstanding single-use
+token — never the token itself. `consumed_at` is what makes it single use.
+
+### `company_form_schemas`
+A company's application form, learned once and reused (migration 081). Keyed by **apply host**, so
+one capture serves every posting behind it. Stores structure only — labels, types, required flags,
+option lists, field order — and never a value anyone typed. Carries the usual KB fields
+(`corroboration_count`, `last_seen`, `status`) plus `shape_hash`, which is what makes a changed form
+observable rather than assumed. `source` distinguishes a capture made behind a gate from one our own
+crawl produced; both write the same shape.
+
 ### `schema_migrations`
-Tracks which migrations have been applied. Never edit manually.
+Tracks which migrations have been applied. Never edit manually. Current high-water: **081**.
 
 ---
 
@@ -261,6 +288,22 @@ All routes are prefixed `/api/`. All except auth routes require a valid session 
 | GET | `/api/applications` | All applications for this user |
 | PATCH | `/api/applications/:jobId` | Edit fields: company, role, location, notes, applied_at |
 | DELETE | `/api/applications/:jobId` | Remove application |
+
+### Gated portal handoff
+See §8.1. All require a session; the packet endpoints return a home address and eligibility answers,
+so the exchange is rate-limited and every rejection reason is distinct.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/apply/gate-packets` | Held-gate queue, grouped by portal (`portals`) plus the flat list. Counts only — no answer values |
+| POST | `/api/apply/gate-packets/:id/token` | Mint a single-use, minutes-TTL token. On demand, not at gate time |
+| POST | `/api/apply/gate-packet/exchange` | Spend it, once. 401/403/409/410/429 are distinct outcomes |
+| POST | `/api/apply/gate-packets/:id/reopen` | Recover a released-but-unfinished handoff by issuing a NEW packet |
+| POST | `/api/apply/gate-review` | Record what the candidate approved or corrected |
+| GET | `/api/apply/form-schema?url=` | What we already know about the form behind a URL |
+| POST | `/api/apply/form-schema` | Capture a form's structure. Refused unless the account opted in |
+| GET/POST | `/api/apply/form-schema/consent` | Read/set the opt-in (default OFF) |
+| GET | `/api/kb/:company/form-schemas` | Full stored schemas for a company |
 
 ### Export
 | Method | Path | Description |
@@ -390,6 +433,58 @@ content.js watches for next/continue/proceed buttons via MutationObserver. When 
 2. Load unpacked → select `extension/` folder
 3. Click popup → set Resume Master URL (`http://localhost:3001` local, Railway URL in production)
 4. Must be logged into Resume Master in the same Chrome profile
+
+---
+
+## 8.1 Gated Portal Handoff
+
+Some portals — Meta, Amazon, per-tenant Workday — want an account, or a CAPTCHA, before they will
+accept an application. `classifyFlowState` has always detected that; the run used to stop there with
+nothing to show for the work already done. It now hands off to the candidate.
+
+**The human crosses every gate and submits every application.** Nothing here solves a CAPTCHA,
+automates identity verification, or creates an account, and nothing stores a portal credential. That
+is a permanent boundary, not a deferred feature.
+
+```
+run meets a gate            services/applyAutomation.js detectGate() — BEFORE any field is filled
+    ↓ status held_gate      not `failed`; own terminal status, invisible to held_review queries
+packet parked               services/applyGatePacket.js -> apply_gate_packets (migration 079)
+    ↓
+candidate signs in          themselves, in their own browser. We do nothing here.
+    ↓ Ctrl+Shift+Y          a chrome.commands invocation IS the activeTab grant
+extension pulls the packet  origin + form checked BEFORE the single-use token is spent
+    ↓
+form filled                 native value setter in the MAIN world; resume via DataTransfer
+overlay shown               extension/review-overlay.js — eligibility first, then guesses
+    ↓
+candidate submits           always. The overlay has no path to submitting.
+    ↓
+form structure returned     optional, opt-in, structure only -> company_form_schemas
+```
+
+### Why access is safe by construction
+The manifest holds **no host permission for any job portal**, and `externally_connectable` is absent.
+The extension reaches a portal only through `activeTab`, granted per tab, per user gesture, and it
+*pulls* from our server rather than anything pushing inward. Measured behaviour of that grant is in
+`docs/GATED_HANDOFF_ARCHITECTURE.md` §9 — it survives same-origin navigation, and dies when the tab
+leaves the origin or the portal opens a step in a new tab.
+
+### Guarantees worth knowing
+- **Target match before release.** Origin and form presence are checked before the token is spent, so
+  a mismatch costs nothing and leaks nothing.
+- **Eligibility answers are matched exactly or not at all.** "Do you require sponsorship?" and "are
+  you authorized to work without sponsorship?" share almost every word and are opposite questions.
+- **Credential controls are never filled.** A control inside a form containing a password input is a
+  sign-in box, whatever it is called — see `isCredentialField` in `services/applyAutomation.js`.
+- **Schema capture stores the form's questions, never anyone's answers**, enforced by a whitelist.
+
+### Where it lives
+`services/applyGatePacket.js`, `services/kb/formSchemaLayer.js`, `extension/gated-handoff.js`,
+`extension/review-overlay.js`, `routes/apply.js`.
+
+**Status, decisions and what is left: `docs/GATED_HANDOFF_STATUS.md`.** Each task has a real-browser
+harness at `scripts/g0ActiveTabSpike.mjs` … `scripts/g6CredentialGuard.mjs`.
 
 ---
 
@@ -523,6 +618,13 @@ LinkedIn Developer Portal:
 
 Provider secrets must never be committed. The UI only shows connected status, account email/name metadata, and readiness warnings; it does not expose tokens or cookies.
 
+### Gated handoff / Chrome Web Store
+
+| Variable | Needed for | Notes |
+|---|---|---|
+| `APPLY_GATE_TOKEN_SECRET` | Signing gate-packet tokens | Falls back to `SESSION_SECRET`. In production with neither set, minting **refuses** rather than signing with a known-weak dev value |
+| `CWS_CLIENT_ID` / `CWS_CLIENT_SECRET` / `CWS_REFRESH_TOKEN` / `CWS_ITEM_ID` | Publishing the extension | Only for `npm run publish:extension`. The refresh token belongs to the account that owns the store item — treat it as a password. `--dry-run` needs none of them |
+
 ---
 
 ## 12. npm Scripts
@@ -534,9 +636,12 @@ Run from `C:\Users\sriye\resume-master\`:
 | Start server | `npm start` | `node server.js` |
 | Dev (auto-restart) | `npm run dev` | `node --watch server.js` |
 | Build frontend | `npm run build` | Runs `cd client && npm install && npm run build` |
-| Run migrations | `npm run migrate` | `node scripts/migrate.js` — safe schema update |
+| Run migrations | `npm run migrate` | `node scripts/migration.js` — safe, additive schema update |
 | Create backup | `npm run backup` | `node scripts/backup.js` — saves timestamped backup |
 | Restore backup | `npm run restore <file>` | `node scripts/backup.js restore <filename>` |
+| Run tests | `npm test` | `node --test` — 1006 tests, no external services needed |
+| Build extension | `npm run build:extension` | Writes `extension/submission/…-v<version>.zip` from source. `-- --check` validates only |
+| Publish extension | `npm run publish:extension` | Preflight, then upload a **draft**. `-- --dry-run` needs no credentials; `-- --publish` goes live |
 
 ---
 
