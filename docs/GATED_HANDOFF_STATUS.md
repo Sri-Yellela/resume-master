@@ -1,6 +1,6 @@
 # Gated Portal Handoff — build status and handover
 
-**As of commit `fbbd3a1`+.** Companion to `GATED_HANDOFF_ARCHITECTURE.md` (the design, now updated to
+**As of commit `4e02450`.** Companion to `GATED_HANDOFF_ARCHITECTURE.md` (the design, now updated to
 match what was built) and `GATED_HANDOFF_PROMPTS.md` (the task definitions).
 
 Read this first if you are picking the work up cold. It says what exists, what was decided and why,
@@ -24,7 +24,7 @@ what is verified and how to re-verify it, and what is genuinely left.
 
 **All four open decisions in architecture §8 are settled.** Three by the owner, one by measurement.
 
-Tests: **877 → 1016**, zero introduced failures at every step.
+Tests: **877 → 1018**, zero introduced failures at every step.
 Migrations: high-water **078 → 081**.
 Extension: published v1.2.0, repo at **v1.3.0, built and NOT submitted**.
 
@@ -141,7 +141,7 @@ A1_RESUME=<any.pdf> node scripts/g3ReviewOverlay.mjs        # overlay order, rea
 node scripts/g4SchemaCapture.mjs                            # capture, reconcile, consent
 A1_RESUME=<any.pdf> node scripts/g5PortalBatch.mjs          # two portals, one batch
 node scripts/g6CredentialGuard.mjs                          # nothing enters a login form
-npm test                                                     # 1006
+npm test                                                     # 1018
 ```
 
 `data/a5-fixture/John Doe Resume.pdf` works for `A1_RESUME`. All of them start their own `fakeAts`
