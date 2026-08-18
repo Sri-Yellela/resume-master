@@ -167,6 +167,17 @@ test("the extractor still knows the named job boards, and still works without th
     `extractor.js pins a build-hashed CSS-module class: ${hashed?.join(", ")}. ` +
     `Use a stable id or [class*="..."] — the hash rotates on the site's next deploy.`);
 
+  // The company fallback infers an employer from the page's own domain. On an ATS host that
+  // hostname is the VENDOR, so without this list every Lever posting would be filed under "Lever"
+  // — a wrong company on every row, which the cross-source reconciler would then act on.
+  assert.match(src, /const ATS_HOSTS = /,
+    "the ATS host list is what makes companyFromEmployerHost safe; it must not be removed");
+  for (const vendor of ["greenhouse", "lever", "ashbyhq", "myworkdayjobs", "workable", "linkedin",
+                        "indeed", "glassdoor", "smartrecruiters", "icims"]) {
+    assert.ok(new RegExp(vendor, "i").test(src.match(/const ATS_HOSTS = [^;]+;/)?.[0] || ""),
+      `${vendor} is missing from ATS_HOSTS — postings there would be filed under the vendor's name`);
+  }
+
   // Workday having an extractor must never be read as Workday having a host permission.
   assert.ok(!manifest.host_permissions.some(h => /workday/i.test(h)),
     "an extractor entry is not a permission — the handoff's activeTab-only access depends on this");

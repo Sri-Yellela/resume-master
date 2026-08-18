@@ -51,8 +51,9 @@ const PAGES = [
   { label: 'ashby (linear)',        url: 'https://jobs.ashbyhq.com/linear/d3bc1ced-3ce4-4086-a050-555055dbb1ff', named: true, company: 'Linear' },
   { label: 'workday (nvidia)',      url: 'https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-Solutions-Architect--Agentic-AI---Safety-and-Security_JR2023191', named: true, company: 'NVIDIA' },
   { label: 'workday (salesforce)',  url: 'https://salesforce.wd12.myworkdayjobs.com/en-US/External_Career_Site/job/Indiana---Indianapolis/Manager--Go-To-Market-Financial-Planning---Analysis_JR354325', named: true, company: 'Salesforce' },
-  { label: 'EMBEDDED — stripe.com',     url: 'https://stripe.com/jobs/search?gh_jid=8077887', named: false },
-  { label: 'EMBEDDED — databricks.com', url: 'https://www.databricks.com/company/careers/open-positions/job?gh_jid=8559344002', named: false },
+  { label: 'lever (match group)',   url: 'https://jobs.lever.co/matchgroup/3414ba28-35f7-45d3-8e13-35c883959635', named: true, company: 'Match Group' },
+  { label: 'EMBEDDED — stripe.com',     url: 'https://stripe.com/jobs/search?gh_jid=8077887', named: false, company: 'Stripe' },
+  { label: 'EMBEDDED — databricks.com', url: 'https://www.databricks.com/company/careers/open-positions/job?gh_jid=8559344002', named: false, company: 'Databricks' },
 ];
 
 let failures = 0;
@@ -158,6 +159,13 @@ async function main() {
         check(`${label}: capturable despite being on NO declared host`, payload.ok === true,
           payload.ok ? `${desc} chars via the generic fallback` : 'ok=false — the generic path missed');
         check(`${label}: got a title`, !!payload.title, payload.title || 'none');
+        if (company) {
+          // These pages state the employer nowhere a machine can read it — databricks.com has no
+          // JSON-LD at all — so the company is inferred from the employer's own domain. The guard
+          // that makes that safe is ATS_HOSTS; the lever entry above is its regression case.
+          check(`${label}: company inferred from the employer's own domain`,
+            payload.company === company, `got "${payload.company}", want "${company}"`);
+        }
       }
     }
   } finally {

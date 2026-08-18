@@ -187,27 +187,67 @@ export function extractJobPayload() {
     };
   }
 
-  // Workday's hiringOrganization is an internal org unit, not the employer. Measured across two
-  // tenants: "2100 NVIDIA USA" and "100 Salesforce, Inc." — a numeric company code, then a regional
-  // or legal-entity variant of the name. Stored as-is, neither would match the same employer
-  // captured from Greenhouse or LinkedIn, so the cross-source reconciler would treat them as
-  // different companies.
-  //
-  // The tenant subdomain is the dependable signal (nvidia.wd5.myworkdayjobs.com), but it is
-  // lowercase, and "Nvidia" is not how NVIDIA writes it. So the tenant supplies WHICH token to use
-  // and the page supplies its CASING — taken from wherever the employer already spells it out.
-  function workdayCompany(rawOrg) {
-    const tenant = location.hostname.split('.')[0];
-    const stripped = (rawOrg || '').replace(/^\d+\s+/, '').trim();
-    if (!tenant) return stripped;
-
-    const re = new RegExp('\\b' + tenant.replace(/[^a-z0-9]/gi, '.') + '\\b', 'i');
-    for (const src of [rawOrg, document.title,
+  /**
+   * The employer's own spelling of `token`, found wherever the page already writes it.
+   *
+   * A hostname tells you WHICH word is the company but not how the company capitalises it, and
+   * "Nvidia" is not how NVIDIA writes it. So the host decides the token and the page decides the
+   * casing. Returns '' when the page never spells the token out, which is the signal to fall back
+   * rather than to invent something.
+   */
+  function casedToken(token, extraSources = []) {
+    if (!token) return '';
+    const re = new RegExp('\\b' + token.replace(/[^a-z0-9]/gi, '.') + '\\b', 'i');
+    for (const src of [...extraSources, document.title,
                        document.querySelector('h1')?.innerText || '',
+                       document.querySelector('meta[property="og:site_name"]')?.content || '',
                        ...[...document.querySelectorAll('img')].map(i => i.alt || '')]) {
       const m = src && re.exec(src);
       if (m) return m[0];
     }
+    return '';
+  }
+
+  // Hosts that belong to an applicant tracking system rather than to an employer. On these the
+  // hostname says who runs the job board, not who is hiring — deriving a company from it would file
+  // every Lever posting under "Lever". This list is the load-bearing half of the host fallback
+  // below; without it the fallback is actively worse than leaving the company blank.
+  const ATS_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|workday\.com|workable\.com|linkedin\.com|indeed\.com|glassdoor\.com|smartrecruiters\.com|icims\.com|jobvite\.com|breezy\.hr|teamtailor\.com|recruitee\.com|bamboohr\.com|paylocity\.com|dayforcehcm\.com|taleo\.net|successfactors\.com|eightfold\.ai|ripplingats\.com|pinpointhq\.com|personio\.de)$/i;
+
+  /**
+   * The employer, inferred from their own domain — for career pages that state the company nowhere
+   * a machine can read it.
+   *
+   * databricks.com serves a posting with no JSON-LD, no og:site_name, and the company only as a
+   * title suffix ("… - Databricks"). Employers hosting their own listings are the common case for
+   * this, and they are exactly the pages the extension could not reach at all before capture moved
+   * to activeTab, so nothing here had to be right until now.
+   *
+   * Deliberately conservative: it runs only when nothing else produced a company, never on an ATS
+   * host, and never invents a name the page does not already contain.
+   */
+  function companyFromEmployerHost() {
+    const host = location.hostname.replace(/^www\./, '');
+    if (ATS_HOSTS.test(host)) return '';
+    const parts = host.split('.');
+    // Walk in from the TLD past registry suffixes, so foo.co.uk yields "foo" rather than "co".
+    let i = parts.length - 2;
+    while (i > 0 && /^(co|com|org|net|gov|ac|edu)$/i.test(parts[i])) i--;
+    return casedToken(parts[i] || '');
+  }
+
+  // Workday's hiringOrganization is an internal org unit, not the employer. Measured across two
+  // tenants: "2100 NVIDIA USA" and "100 Salesforce, Inc." — a numeric company code, then a regional
+  // or legal-entity variant of the name. Stored as-is, neither would match the same employer
+  // captured from Greenhouse or LinkedIn, so the cross-source reconciler would treat them as
+  // different companies. The tenant is the FIRST label here, not the registrable domain.
+  function workdayCompany(rawOrg) {
+    const tenant = location.hostname.split('.')[0];
+    const stripped = (rawOrg || '').replace(/^\d+\s+/, '').trim();
+    if (!tenant) return stripped;
+    // The org name goes in front: it is where the employer's real casing usually appears.
+    const cased = casedToken(tenant, [rawOrg]);
+    if (cased) return cased;
     // The tenant is an abbreviation the page never spells out (ipg, hcahealthcare). The org name
     // with its code stripped is then the better of the two, not the worse.
     return stripped || tenant.charAt(0).toUpperCase() + tenant.slice(1);
@@ -238,6 +278,16 @@ export function extractJobPayload() {
     if (!title) title = firstText(['h1']);
 
     if (location.hostname.includes('myworkdayjobs.com')) company = workdayCompany(company);
+    if (!company) company = companyFromEmployerHost();
+
+    // "<role> - Databricks". Once the company is known it can be taken off the end of the title,
+    // which the fixed suffix list above could never do — it only knows the ATS vendors, and an
+    // employer's own careers page is titled with the employer.
+    if (company) {
+      title = title.replace(
+        new RegExp('\\s*[-–—|]\\s*' + company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i'),
+        '').trim();
+    }
 
     return { title, company, location: ldCity?.trim() || '', workType: '', salary: null };
   }
