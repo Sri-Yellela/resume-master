@@ -1,6 +1,6 @@
 # Gated Portal Handoff — build status and handover
 
-**As of commit `d7d6584`.** Companion to `GATED_HANDOFF_ARCHITECTURE.md` (the design, now updated to
+**As of commit `fbbd3a1`+.** Companion to `GATED_HANDOFF_ARCHITECTURE.md` (the design, now updated to
 match what was built) and `GATED_HANDOFF_PROMPTS.md` (the task definitions).
 
 Read this first if you are picking the work up cold. It says what exists, what was decided and why,
@@ -20,10 +20,11 @@ what is verified and how to re-verify it, and what is genuinely left.
 | **G5** | Amortise the gate per portal: one sign-in releases a batch | Done |
 | — | **Credential-leak fix** (found while reviewing G1, not in the task list) | Done |
 | — | **Chrome Web Store publish script** | Done — nothing submitted |
+| — | **Form-learning consent toggle** (Integrations panel) | Done — the switch G4 needed to be usable |
 
 **All four open decisions in architecture §8 are settled.** Three by the owner, one by measurement.
 
-Tests: **877 → 1006**, zero introduced failures at every step.
+Tests: **877 → 1016**, zero introduced failures at every step.
 Migrations: high-water **078 → 081**.
 Extension: published v1.2.0, repo at **v1.3.0, built and NOT submitted**.
 
@@ -117,6 +118,10 @@ notification. Re-minting rotates rather than issuing a second key.
 structure-only filter is testable, but the guarantee would rest entirely on that filter being
 correct, and the page being reported on sits behind the candidate's own authenticated session.
 
+The switch lives in the Integrations panel as "Form Learning", because it governs what the extension
+may do rather than who the user is. It holds `null` while unknown instead of rendering as OFF — "off"
+and "we could not ask" are different claims, and this one is a permission.
+
 **Manifest changes are batched in the repo and not submitted.** The full forward list is in
 architecture §8; G3, G4 and G5 needed nothing further, so the batch is still exactly one `commands`
 entry and a version bump.
@@ -191,10 +196,5 @@ byte-for-byte and will fail the suite. `npm run build:extension`.
    Two things limit the exposure: an empty capture is **refused** (422) rather than stored, and a
    changed schema reconciles — so one bad reading cannot permanently poison the store.
 
-4. **A consent toggle in the web UI.** The API exists (`/api/apply/form-schema/consent`) and the
-   extension honours it, but nothing in the client renders a switch, so capture cannot currently be
-   turned on by a user. Small, and the reason it is listed rather than done is that it is UI scope
-   nobody signed off.
-
-5. **No live gate has ever been crossed end to end.** Everything is verified against `fakeAts`. The
+4. **No live gate has ever been crossed end to end.** Everything is verified against `fakeAts`. The
    first real run against a real portal is still ahead, and the A5 live gate still stands.

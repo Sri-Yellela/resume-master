@@ -12,6 +12,37 @@ function StatusPill({ status, healthy, theme }) {
   );
 }
 
+/**
+ * A real switch, not a button labelled "Turn on".
+ *
+ * This is a consent control: it decides whether we may report anything from a page the user reached
+ * through their own login. It should read as a setting with a current state, and be operable and
+ * announced as one — hence role="switch" and aria-checked rather than a styled div.
+ */
+function ConsentSwitch({ checked, disabled, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!!checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      style={{
+        position:"relative", width:44, height:24, flex:"none", padding:0,
+        borderRadius:999, cursor: disabled ? "wait" : "pointer",
+        border:`1px solid ${checked ? "#16a34a" : "var(--color-border)"}`,
+        background: checked ? "#16a34a" : "var(--color-surface-offset)",
+        opacity: disabled ? 0.6 : 1, transition:"background .15s, border-color .15s",
+      }}>
+      <span style={{
+        position:"absolute", top:2, left: checked ? 22 : 2, width:18, height:18, borderRadius:999,
+        background:"#fff", boxShadow:"0 1px 3px rgba(0,0,0,.3)", transition:"left .15s",
+      }}/>
+    </button>
+  );
+}
+
 function Section({ title, subtitle, status, children, theme }) {
   const resolvedStatus = status || { healthy: false, status: "missing" };
   return (
@@ -36,9 +67,41 @@ export function IntegrationsPanel() {
   const { theme } = useTheme();
   const [status, setStatus] = useState(null);
   const [msg, setMsg] = useState("");
+  // null while unknown: an un-migrated deployment answers 503 here, and rendering the switch as OFF
+  // in that case would be a claim we cannot support — "off" and "we could not ask" are different.
+  const [capture, setCapture] = useState(null);
+  const [captureBusy, setCaptureBusy] = useState(false);
+  const [captureError, setCaptureError] = useState("");
 
   const load = () => api("/api/integrations/status").then(setStatus).catch(e => setMsg(e.message));
-  useEffect(() => { load(); }, []);
+
+  const loadCapture = () => api("/api/apply/form-schema/consent")
+    .then(r => { setCapture(!!r.enabled); setCaptureError(""); })
+    .catch(() => { setCapture(null); setCaptureError("unavailable"); });
+
+  useEffect(() => { load(); loadCapture(); }, []);
+
+  const setCaptureConsent = async (next) => {
+    setCaptureBusy(true);
+    // Optimistic, then reconciled against what the server actually stored — this is the only
+    // control here whose state is a permission, so it must not appear to be on when it is not.
+    setCapture(next);
+    try {
+      const r = await api("/api/apply/form-schema/consent", {
+        method: "POST", body: JSON.stringify({ enabled: next }),
+      });
+      setCapture(!!r.enabled);
+      setCaptureError("");
+      setMsg(r.enabled
+        ? "Form learning is on. Only the questions a form asks are sent — never your answers."
+        : "Form learning is off. Nothing is sent from application pages.");
+    } catch (e) {
+      await loadCapture();
+      setCaptureError(e.message || "Could not save that setting.");
+    } finally {
+      setCaptureBusy(false);
+    }
+  };
 
   const startOAuth = (provider) => {
     const readiness = status?.oauth?.[provider];
@@ -119,6 +182,43 @@ export function IntegrationsPanel() {
             {(status.jobSources || []).some(s => s.configured)
               ? `Job search active — ${(status.jobSources || []).filter(s => s.configured).length} provider(s) configured.`
               : "No job feed providers configured. Contact the app operator."}
+          </div>
+        </Section>
+
+        {/* The consent control for TASK G4's schema capture. It lives here rather than in the
+            profile because it is about what the browser extension may do, not about who the user is.
+            The copy states what is sent and what never is — a switch labelled only "form learning"
+            would be asking for agreement to something the user cannot evaluate. */}
+        <Section theme={theme} title="Form Learning"
+          subtitle="Help Resume Master recognise application forms it has seen before."
+          status={capture === null
+            ? { healthy:false, status: captureError ? "unavailable" : "loading" }
+            : { healthy: capture, status: capture ? "on" : "off" }}>
+          <div style={{ display:"flex", alignItems:"flex-start", gap:12 }}>
+            <ConsentSwitch
+              checked={capture === true}
+              disabled={captureBusy || capture === null}
+              onChange={setCaptureConsent}
+              label="Share the structure of application forms"
+            />
+            <div style={{ fontSize:12, color:"var(--color-text-muted)", lineHeight:1.6 }}>
+              When you use the extension to fill an application, it can send back{" "}
+              <strong style={{ color:"var(--color-text)" }}>the questions that form asks</strong> —
+              their wording, their type, which ones are required. The next person applying to that
+              company then gets a form we already understand, and fewer questions to answer by hand.
+              <div style={{ marginTop:6 }}>
+                We never send <strong style={{ color:"var(--color-text)" }}>your answers</strong>,
+                anything about you, or anything else on the page. This is off unless you turn it on,
+                and you can turn it off at any time.
+              </div>
+              {capture === null && (
+                <div style={{ marginTop:6, color:"#d97706" }}>
+                  {captureError
+                    ? "This setting is unavailable right now, so it cannot be changed. Nothing is being sent."
+                    : "Checking…"}
+                </div>
+              )}
+            </div>
           </div>
         </Section>
 
