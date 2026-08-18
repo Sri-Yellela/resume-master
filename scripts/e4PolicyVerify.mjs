@@ -49,14 +49,21 @@ const MUST = [
   ['no job lists collected',    /does not collect lists of jobs/i],
   ['saved-jobs capability gone',/saved-jobs list.{0,80}removed|capability was removed/i],
   ['ATS Score Tool disclosed',  /ATS Score Tool/],
-  ['in-page ATS button named',  /ATS Score this job/],
-  ['only page change stated',   /only change the extension makes to a job page/i],
+  ['in-page button removed',    /that button has been removed/i],
+  ['no page modification',      /no longer changes the appearance of any page/i],
+  ['per-invocation rule',       /reads nothing until you invoke it/i],
+  ['no standing site access',   /holds no standing permission for any site/i],
   ['server logs admitted',      /server logs/i],
   ['browser storage section',   /What the Extension Stores in Your Browser/i],
   ['ten minute expiry',         /ten minutes/i],
   ['no browsing history',       /not\s*collect your browsing history/i],
   ['no remotely hosted code',   /no remotely hosted code/i],
-  ['six boards named',          /LinkedIn, Indeed, Glassdoor, Lever, Greenhouse and Workable/i],
+  // The policy used to have to name the six job boards, because those were the only pages the
+  // extension could read and the list WAS the limit. There is no such list now, and reprinting one
+  // would imply a boundary that does not exist — so what is checked instead is the claim that
+  // replaced it: that access is momentary and tied to an invocation.
+  ['access is momentary',       /access to that tab ends when you navigate away/i],
+  ['both directions stated',    /trades constant access to six sites for momentary access/i],
   ['Apify disclosed',           /Apify/],
   ['proactive change notice',   /before that change takes effect/i],
   ['account-linked PII',        /captured job data is personal information/i],
