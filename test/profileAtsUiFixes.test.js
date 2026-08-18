@@ -61,18 +61,12 @@ test("profile selector exposes direct manage-profiles access from the jobs flow"
   assert.match(selector, /href="\/app\/profile"/);
 });
 
-test("saved jobs section renders imported LinkedIn jobs inside Starred with instructions", () => {
+test("the imported-LinkedIn section is gone, and the bulk-import CTA stays gone (E2)", () => {
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
-
-  assert.match(jobsPanel, /function StarredLinkedInSection/);
-  assert.match(jobsPanel, /showImportedLinkedInSection=\{boardTab === "saved"\}/);
-  // The section's copy was rewritten in cleanup 5.3 (7a88522). It used to describe the LinkedIn
-  // bulk saved-jobs import — a flow whose bridge functions had been stubs since BYO-2 and whose
-  // extension-side script v1.2.0 deleted, so the instructions told users to do something that
-  // could not work. It now describes the live single-job capture path.
-  assert.match(jobsPanel, /Open a LinkedIn job and capture it with the Resume Master extension/);
-  assert.match(jobsPanel, /No captured LinkedIn jobs yet/);
-  // Comments stripped first: the removal's own explanatory note in JobsPanel quotes the old CTA.
+  // The section is removed — see jobsUiProfileFilters for the full symbol sweep and the reason.
+  assert.doesNotMatch(jobsPanel, /function StarredLinkedInSection/);
+  // The original point of this test survives the removal: the retired bulk-import CTA must not
+  // reappear under any surface. Comments stripped, since the removal notes quote the old copy.
   const jobsPanelCode = jobsPanel
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
     .replace(/\/\*[\s\S]*?\*\//g, "")

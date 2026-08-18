@@ -25,7 +25,6 @@ import { createAccountRouter } from "./routes/account.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createAdminDbRouter } from "./routes/adminDb.js";
 import { createDomainProfilesRouter } from "./routes/domainProfiles.js";
-import { createImportedJobsRouter } from "./routes/importedJobs.js";
 import { createImportJobRouter } from "./routes/importJob.js";
 import { createCompanyKbRouter } from "./routes/companyKb.js";
 import { runOrgLayerRollup } from "./services/kb/orgLayer.js";
@@ -4959,7 +4958,16 @@ app.get("/api/auth/active-profile", requireAuth, (req, res) => {
 app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic, emitToUser));
 app.use("/api/import", requireAuth, createImportJobRouter(db, anthropic));
 app.use("/api/company-kb", requireAuth, createCompanyKbRouter(db, requireAdmin));
-app.use("/api/imported-jobs", requireAuth, createImportedJobsRouter(db));
+// RETIRED (E2). imported_jobs had exactly one writer — save-job, above — and zero rows. Its reading
+// surface was a board panel promising that captured jobs "appear here", which they never did: the
+// hotkey has always written to scraped_jobs. Converged captures are starred into user_jobs by
+// importJob's attachImportToUser, so they now appear in the board's own "Saved" tab, which already
+// queries starred=1. One populated surface instead of two, one of which was always empty.
+app.all(/^\/api\/imported-jobs(\/.*)?$/, (_req, res) => {
+  res.status(410).json({
+    error: "Imported jobs have been merged into the main board. Captured jobs appear under Saved.",
+  });
+});
 
 // FE-4 company view — aggregates technographics (Task 5) + org units (9.5) + hiring signals
 // (9.7) into one read-only payload. Same auth tier as /api/company-kb (session only, no admin
@@ -4980,55 +4988,31 @@ app.post("/api/company/:company/consistency-check", requireAuth, (req, res) => {
   res.json(checkCandidateConsistency(db, req.params.company, resumeText));
 });
 
-// ─── CHROME EXTENSION — Save job from LinkedIn ───────────────────────────────
-// Allows chrome-extension:// origins (credentialed fetch with session cookie)
-app.options("/api/extension/save-job", cors({ origin: corsOriginExtension, credentials: true }));
-app.post("/api/extension/save-job",
+// ─── CHROME EXTENSION — save-job, RETIRED (E2) ───────────────────────────────
+// The extension had two capture paths: this one wrote to imported_jobs keyed by dedupe_key, while
+// the hotkey wrote to scraped_jobs keyed by req_uid. Same button-shaped promise, two destinations,
+// two dedup identities — so a job captured both ways existed twice and neither copy knew about the
+// other. They are now one path: /api/import/job into scraped_jobs, which is the BYO-1 reconciler and
+// the only writer that participates in cross-source dedup (direct ATS > provider > aggregator >
+// import).
+//
+// 410 rather than deletion, following the /api/scrape precedent: a caller that still exists learns
+// what happened instead of getting an ambiguous 404. imported_jobs itself is left in place —
+// migrations here are additive-only — but nothing writes to it any more.
+app.all("/api/extension/save-job",
   cors({ origin: corsOriginExtension, credentials: true }),
-  requireAuth,
-  (req, res) => {
-    const { title, company, location, workType, description, jobUrl, externalJobId } = req.body || {};
-    if (!title || !company) return res.status(400).json({ error: "title and company required" });
+  (_req, res) => {
+    res.status(410).json({
+      error: "The save-job endpoint has been removed. Capture now uses /api/import/job, which is " +
+             "the same path the capture shortcut uses.",
+    });
+  });
 
-    const dedupe = externalJobId
-      ? `linkedin_ext_${externalJobId}`
-      : `linkedin_ext_${Buffer.from((jobUrl || title + company).slice(0, 200)).toString("base64").slice(0, 64)}`;
-
-    const existing = db.prepare(
-      "SELECT id FROM imported_jobs WHERE user_id=? AND source_key=? AND dedupe_key=?"
-    ).get(req.user.id, "linkedin_extension", dedupe);
-
-    if (existing) {
-      db.prepare("UPDATE imported_jobs SET import_count=import_count+1, last_seen_at=unixepoch() WHERE id=?").run(existing.id);
-      return res.json({ success: true, alreadySaved: true, id: existing.id });
-    }
-
-    const result = db.prepare(`
-      INSERT INTO imported_jobs
-        (user_id, source_key, source_label, source_platform, external_job_id, dedupe_key,
-         title, company, location, work_type, description, job_url, apply_url)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `).run(
-      req.user.id, "linkedin_extension", "LinkedIn (Extension)", "linkedin",
-      externalJobId || null, dedupe,
-      title.slice(0, 500), company.slice(0, 500),
-      (location || "").slice(0, 300),
-      (workType || "").slice(0, 100),
-      (description || "").slice(0, 20000),
-      (jobUrl || "").slice(0, 2000),
-      (jobUrl || "").slice(0, 2000)
-    );
-
-    res.json({ success: true, alreadySaved: false, id: result.lastInsertRowid });
-  }
-);
-
-// Bulk save from extension (LinkedIn saved jobs import)
 // /api/extension/save-jobs-bulk REMOVED (cleanup 5.4). Its only client was the extension's
 // saved-jobs-content.js, deleted in v1.2.0 along with the LinkedIn bulk-scraping capability
 // BYO-2 retired. The endpoint outlived its caller and still accepted bulk writes into
-// imported_jobs. The SINGLE-job /api/extension/save-job above stays live — it is called by
-// extension/linkedin-content.js and is what populates the Starred LinkedIn section.
+// imported_jobs. The single-job save-job endpoint above is now retired too (E2), so nothing
+// writes to imported_jobs at all.
 
 // Metadata is also public â€” mount without requireAuth at a sub-path so
 // the chip registry is accessible from the wizard before login

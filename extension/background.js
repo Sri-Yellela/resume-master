@@ -8,7 +8,78 @@ import {
 const RESUME_MASTER_URL = 'https://resumemaster.one'; // A: production
 // const RESUME_MASTER_URL = 'http://localhost:3000'; // B: local dev
 
+// ── Capture (E2) ─────────────────────────────────────────────────────────────
+// THE ONE NETWORK PATH FOR CAPTURE, and it lives in the service worker rather than the content
+// script for a reason that only shows up in production.
+//
+// A content script's fetch carries the PAGE's origin — https://www.linkedin.com — not the
+// extension's. server.js's corsOrigin admits only APP_BASE_ORIGIN/FRONTEND_ORIGIN in production, and
+// corsOriginExtension additionally admits chrome-extension:// but not a job board either. So every
+// capture posted from the content script would be refused by CORS the moment NODE_ENV=production —
+// invisible in development, where corsOrigin returns true for everything.
+//
+// A service worker fetch is not subject to CORS for a host in host_permissions, and
+// https://resumemaster.one/* is declared. Moving the call here fixes it without widening the
+// server's CORS to six job boards, which is the alternative and a far worse trade.
+async function importCapturedJob({ url, text }) {
+  try {
+    const res = await fetch(`${RESUME_MASTER_URL}/api/import/job`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, text }),
+    });
+
+    if (res.status === 401) {
+      return { success: false, message: 'Sign in to Resume Master first' };
+    }
+    const json = await res.json().catch(() => ({}));
+    if (json.needsClientCapture) {
+      // Should not happen: we always send the extracted text. Reported rather than swallowed, so a
+      // regression in extraction is visible instead of looking like a generic failure.
+      return { success: false, message: json.message || 'Could not read this job automatically' };
+    }
+    if (!res.ok) {
+      return { success: false, message: json.error || `Import failed (${res.status})` };
+    }
+
+    const job = json.job || {};
+    const label = [job.title, job.company].filter(Boolean).join(' @ ') || 'job';
+    return {
+      success: true,
+      // One message, produced in one place, so the popup and the hotkey cannot word it differently.
+      message: json.alreadyImported || json.reconciled
+        ? `Already on your board: ${label}`
+        : `Captured: ${label}`,
+      jobId: job.jobId || json.jobId || null,
+    };
+  } catch (e) {
+    return { success: false, message: 'Could not reach Resume Master' };
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Capture, from either trigger. The content script extracts and hands the text here; this is the
+  // only place the request is made and the only place its result is worded.
+  if (message.type === 'IMPORT_CAPTURED_JOB') {
+    importCapturedJob(message.payload || {}).then(result => {
+      // Recorded so the popup can show the outcome of a hotkey capture it was not open for.
+      chrome.storage.local.set({ lastCapture: { ...result, at: Date.now() } }).catch(() => {});
+      sendResponse(result);
+    });
+    return true;                                            // async response
+  }
+
+  // The popup's auth probe, moved here for the same CORS reason: from the popup this request
+  // carries chrome-extension://, which corsOrigin refuses in production.
+  if (message.type === 'PROBE_AUTH') {
+    fetch(`${RESUME_MASTER_URL}/api/auth/me`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => sendResponse({ authenticated: d?.authenticated === true }))
+      .catch(() => sendResponse({ authenticated: false }));
+    return true;
+  }
+
   if (message.type === 'OPEN_ATS_SCORE') {
     const encoded = encodeURIComponent((message.jobText || '').slice(0, 5000));
     chrome.tabs.create({ url: `${RESUME_MASTER_URL}/ats-score?jd=${encoded}` });
