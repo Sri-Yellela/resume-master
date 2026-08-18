@@ -162,10 +162,14 @@ export function PrivacyPage() {
               of any other tab, and it does not record where you go.
             </LI>
             <LI>
-              If you click <Strong>ATS Score Tool</Strong> while on a job posting, it copies the
-              visible text of that page and opens your Resume Master ATS Score page with the text
-              already filled in. That text travels in the address of the page it opens, which
-              means it may appear in our ordinary server logs.
+              On a supported job posting the extension adds a small{" "}
+              <Strong>"ATS Score this job"</Strong> button to the corner of the page. The same
+              action is also available as <Strong>ATS Score Tool</Strong> in the extension's popup.
+              If you click either one, it copies the visible text of that page and opens your
+              Resume Master ATS Score page with the text already filled in. That text travels in
+              the address of the page it opens, which means it may appear in our ordinary server
+              logs. Adding the button is the only change the extension makes to a job page, and it
+              reads nothing until you click it.
             </LI>
             <LI>
               Data extracted by the extension is sent to resumemaster.one and associated with

@@ -60,7 +60,9 @@ and each still needs a policy paragraph.
 | Flow | Code | Policy paragraph | Retained server-side? |
 |---|---|---|---|
 | Captured job posting → the user's account | `linkedin-content.js` extract → `background.js:26` `POST /api/import/job` | *Job Listings*, *Browser Extension* | Yes — title, company, location, description, URL, in `scraped_jobs`, linked to the account |
-| ATS Score Tool page text → `/ats-score?jd=…` | `popup.js:188` collect → `background.js:85` `chrome.tabs.create` | *Browser Extension*, third bullet — states plainly that the text travels in the URL and may appear in server logs | Only as ordinary request logs; not stored as a record |
+| ATS Score page text → `/ats-score?jd=…`, from the popup | `popup.js:188` `chrome.scripting` collect → `background.js:85` `chrome.tabs.create` | *Browser Extension*, ATS bullet — states plainly that the text travels in the URL and may appear in server logs | Only as ordinary request logs; not stored as a record |
+| ATS Score page text, from the **in-page button** | `linkedin-content.js:417` click → `:244` `sendCurrentJob()` → `background.js:85`. No `scripting` needed: the content script already has DOM access on the six declared hosts. | same bullet — names the on-page "ATS Score this job" button explicitly | same |
+| The in-page button itself | `linkedin-content.js:393-419` creates and appends it at `document_idle` | same bullet — "the only change the extension makes to a job page, and it reads nothing until you click it" | Not a data flow; disclosed because a reviewer will see the page modified |
 | Job description → Anthropic | server-side ATS scoring / enrichment | *Browser Extension*, fifth bullet, cross-referencing *Third-Party Services* | Per Anthropic's API terms; not used for training |
 | Profile answers → employer's form | `gated-handoff.js` fill | *Filling an Application* | Not retained by us; released into the page the user opened |
 | Form **structure** → our server (opt-in, default OFF) | `gated-handoff.js` schema capture, server-enforced consent | *Learning an Application Form* | Yes, as a fact about the employer's form; not linked to the user |

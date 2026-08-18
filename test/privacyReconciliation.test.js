@@ -85,6 +85,18 @@ test("the policy discloses the ATS Score Tool's page-text transmission", () => {
     "popup.js collects page text for the ATS Score Tool, but the policy never mentions it");
   assert.match(policyText, /server logs/i,
     "the ATS text travels in a URL and can land in server logs; the policy should say so");
+
+  // The SAME action also has an in-page trigger. It was missed on the first pass precisely because
+  // it is not in the popup and not behind a permission: the content script already has DOM access,
+  // so nothing in the manifest points at it. A capability with no permission attached is the
+  // easiest one to leave undisclosed.
+  const content = fs.readFileSync("extension/linkedin-content.js", "utf8");
+  if (/rm-send-btn/.test(content)) {
+    assert.match(policyText, /ATS Score this job/,
+      "linkedin-content.js injects an in-page ATS button, but the policy never mentions it");
+    assert.match(policyText, /only change the extension makes to a job page/i,
+      "the policy should say the injected button is the only page modification");
+  }
 });
 
 test("the policy describes ONE capture path, not two", () => {
