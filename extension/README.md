@@ -56,7 +56,9 @@ caught it because there was no build to diff against.
 
 `scripts/buildExtension.mjs` derives the file list from `manifest.json` plus the HTML entry
 points, so a newly referenced script cannot be left out and an unreferenced one is not shipped
-(`popup.css` and this README are excluded today). It refuses to build if a referenced file is
+(this README and `MANIFEST_RATIONALE.md` are excluded today; `popup.css` was deleted outright at
+v1.0.0 rather than left unshipped — the popup's styles are inline in `popup.html`). It refuses to
+build if a referenced file is
 missing, if `manifest.json` carries a UTF-8 BOM, or if any bundled script has an **active**
 `localhost` URL — i.e. the DEV SWITCH in `config.js`/`background.js` is flipped. Bump `version`
 in `manifest.json` before building; the version comes from there, not from the filename.

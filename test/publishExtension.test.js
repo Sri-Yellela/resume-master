@@ -138,8 +138,14 @@ test("a malformed version blocks the upload", () => {
 });
 
 test("builtVersions reads the real submission directory", () => {
+  // What matters is that this reads the filesystem rather than a fixture. It used to prove that by
+  // naming v1.3.0, which pinned the assertion to one artifact — so deleting that zip (E3 retired
+  // every never-published build) failed a test about directory reading for a reason that had
+  // nothing to do with directory reading. Assert against the version actually being shipped.
+  const version = JSON.parse(fs.readFileSync("extension/manifest.json", "utf8")).version;
   const versions = builtVersions();
-  assert.ok(versions.includes("1.3.0"), versions.join(", "));
+  assert.ok(versions.includes(version),
+    `no built zip for the manifest's v${version} — run npm run build:extension. Found: ${versions.join(", ") || "(none)"}`);
 });
 
 // ── The irreversible step is opt-in ──────────────────────────────────────────

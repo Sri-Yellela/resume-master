@@ -1,54 +1,59 @@
-# Chrome Web Store listing — Resume Master v1.3.0
+# Chrome Web Store listing — Resume Master v1.0.0
 
 Copy for the Web Store developer dashboard. Every justification below was written against the
 actual code and cites the file that uses the permission, because the dashboard rejects
 justifications that don't match observable behaviour.
 
-Upload artifact: `extension/submission/resume-master-extension-v1.3.0.zip`
+Upload artifact: `extension/submission/resume-master-extension-v1.0.0.zip`
 (build with `npm run build:extension` — never hand-assemble it; see extension/README.md).
 
-> **READ THIS BEFORE SUBMITTING.** v1.3.0 is not a bug-fix release. The extension now fills
-> application forms on portals the user has signed in to, renders a review panel over those forms,
-> and can optionally report the form's structure back. The v1.2.0 listing declared "no auto-apply"
-> and "personally identifiable information — not collected"; **neither is true any more**, and
-> submitting the old copy would be submitting justifications that do not match observable
-> behaviour. The single purpose, the data disclosures and the privacy policy all change here.
-
----
-
-## What changed since the published v1.2.0
-
-| | v1.2.0 (published) | v1.3.0 (this submission) |
-|---|---|---|
-| Permissions | `activeTab`, `scripting`, `storage` | **unchanged** |
-| Host permissions | 7 entries | **unchanged** |
-| Keyboard commands | `capture-job` | + **`fill-gated-application`** (Ctrl+Shift+Y / Cmd+Shift+Y) |
-| New scripts | — | `gated-handoff.js`, `review-overlay.js` |
-| Reads job pages | yes | yes |
-| **Fills application forms** | no | **yes, on user invocation** |
-| **Sends the user's own details into a page** | no | **yes — see disclosures** |
-| **Reports form structure back** | no | **optional, off by default** |
-
-**No permission was added.** The permission set is byte-identical to the approved v1.2.0. What
-changed is what the extension *does* with `activeTab`, which is the part the review should focus on.
+> **THIS IS A FIRST SUBMISSION.** The item has never been published: the Web Store entry is a
+> draft, no version has been publicly available, and there are zero installed users. Earlier
+> version numbers exist in this repo's history (v0.1.0 through v1.3.0) but **none of them was ever
+> published**, and the zips have been deleted. Nothing below should be read as a change description
+> against a live version, because there is no live version. v1.0.0 is a deliberate reset to a
+> first-submission number for the first build that will actually be reviewed.
 
 ---
 
 ## Single purpose
 
 > Help the user complete a job application they have chosen to make: capture the posting they are
-> viewing, and — when they invoke the extension on an application form they have opened themselves —
-> fill it with answers they have already given us, for them to review and submit.
+> viewing into their own Resume Master account, and — when they invoke the extension on an
+> application form they have opened and signed in to themselves — fill it with answers they have
+> already given us, for them to review and submit.
 
 The capture half and the fill half are the same purpose at two points in one flow: the user finds a
-job, and the user applies to it. Nothing runs without a direct user action.
+job, and the user applies to it. Nothing runs without a direct user action — there is no background
+activity of any kind, and no listener that fires on page load.
+
+The popup's other buttons (Open Resume Builder, ATS Score Tool, Sign in with LinkedIn, Capture
+Shortcut Settings) are not separate features; they open a page of the user's own Resume Master
+account, or the extension's own options page. They request no permission of their own beyond the
+`scripting` call the ATS Score Tool makes on a job page, which is disclosed below.
 
 ---
 
-## Description (matches `manifest.json`)
+## Description (matches `manifest.json` byte for byte)
 
 > Capture the job you're viewing, and fill the application you signed in to reach. You review every
 > answer and submit it yourself.
+
+---
+
+## What the extension does, end to end
+
+| Trigger | What happens |
+|---|---|
+| Toolbar button → **Capture job** | Reads the job description on the page in view, sends it to the user's Resume Master account. |
+| **Ctrl+Shift+K** (rebindable) | **The identical capture.** Same implementation, same destination, same wording of the result. |
+| **Ctrl+Shift+Y** on an application form | The gated handoff: fetches the answers the user already saved in their account, fills the form, shows a review panel. The user submits. |
+| Toolbar → **ATS Score Tool** on a job page | Collects the page's visible text and opens the user's ATS Score page with it prefilled. |
+| Toolbar → **Open Resume Builder** / **Sign in with LinkedIn** | Opens a Resume Master page in a new tab. Nothing is read from the current page. |
+| Toolbar → **Capture Shortcut Settings** | Opens the extension's own options page. |
+
+There is exactly **one** capture implementation. The button and the shortcut are two triggers for
+it, they land in the same place with the same duplicate detection, and they report the same text.
 
 ---
 
@@ -62,56 +67,85 @@ job, and the user applies to it. Nothing runs without a direct user action.
 > a page **only** through that per-tab, per-invocation grant. It never accesses a tab the user is not
 > on, and never acts without a direct user action.
 
-*(Code: `background.js` `chrome.commands.onCommand` and `popup.js` both call
+*(Code: `background.js:112` `chrome.commands.onCommand` and `popup.js:9` both call
 `chrome.tabs.query({active: true, currentWindow: true})` only inside a user-gesture handler.
-`gated-handoff.js` `runGatedHandoff()` is reached only from that handler.)*
+`gated-handoff.js` `runGatedHandoff()` is reached only from that handler, via `background.js:130`.)*
 
 **`scripting`**
-> Injects a one-off script into the invoked tab to (a) collect the visible job description text on
-> capture, and (b) fill the application form and render the review panel on a handoff. Nothing is
-> injected into any other tab, and no script is registered to run persistently.
+> Injects a one-off script into the invoked tab to (a) collect the visible job description text when
+> the user asks for an ATS score, and (b) fill the application form and render the review panel on a
+> handoff. Nothing is injected into any other tab, and no script is registered to run persistently.
 
-*(Code: `linkedin-content.js` for capture; `gated-handoff.js` `probeFormShape` / `applyPlan` and
-`review-overlay.js` `renderOverlay` for the handoff.)*
+*(Code: `gated-handoff.js:398,452,486,521,656` for the probe, fill and overlay; `popup.js:188` for
+the ATS Score Tool. The capture path itself uses the declared content script, not injection.)*
 
 **`storage`**
-> Persists the user's own capture-shortcut preference, the result of their most recent action, and —
+> Persists the user's own capture-shortcut preference, the result of their most recent capture, and —
 > during a handoff only — the prepared answers for the tab they are working in, held in
 > `chrome.storage.session` (memory-backed, cleared on browser restart) with a 10-minute expiry and
 > cleared when the tab closes.
 
-*(Code: `options.js`, `shortcutUtils.js`; `gated-handoff.js` `savePacketForTab` /
-`clearPacketForTab` / `sweepExpiredPackets`.)*
+*(Code: `options.js` (`storage.sync`); `background.js:67` (`storage.local` last capture);
+`background.js:147,190` and `gated-handoff.js:259-308` `savePacketForTab` / `clearPacketForTab` /
+`sweepExpiredPackets` (`storage.session`).)*
 
-**Host permissions** (`resumemaster.one`, LinkedIn, Indeed, Glassdoor, Lever, Greenhouse, Workable)
+**Host permissions** (`resumemaster.one`, and six job-board job-view paths)
 > `resumemaster.one` is our own backend, which the extension fetches from with the user's existing
-> session cookie. The six job sites are where the capture content script runs. **No job portal that
-> the handoff fills is on this list, and none will be** — reaching those pages depends entirely on
-> `activeTab`.
+> session cookie. The six job-site entries are the exact posting paths where the capture content
+> script runs — not whole domains. Without a host permission matching the tab, Chrome hides the tab's
+> URL from the extension and the popup cannot tell whether it is looking at a job posting, so the
+> capture button never appears.
+>
+> **No job portal that the handoff fills is on this list, and none will be** — reaching those pages
+> depends entirely on `activeTab`.
+
+| Host | Why |
+|---|---|
+| `https://resumemaster.one/*` | Our own backend: capture, the auth probe, the handoff packet |
+| `https://www.linkedin.com/jobs/view/*` | Job posting pages only |
+| `https://www.indeed.com/viewjob*` | Job posting pages only |
+| `https://www.glassdoor.com/job-listing/*` | Job posting pages only |
+| `https://jobs.lever.co/*/*` | Job posting pages only |
+| `https://boards.greenhouse.io/*/*` | Job posting pages only |
+| `https://*.workable.com/j/*` | Job posting pages only |
+
+Full derivation, including every permission deliberately **not** requested and why, is in
+`extension/MANIFEST_RATIONALE.md`. `test/manifestMinimumPermission.test.js` fails the build if that
+file and the manifest ever disagree in either direction.
 
 ---
 
 ## Data usage disclosures
 
-These are the answers for the **Privacy practices** tab, and they are different from v1.2.0's.
+These are the answers for the **Privacy practices** tab.
 
-- **Personally identifiable information** — **collected and transmitted.** During a handoff the
-  extension fetches, from the user's own Resume Master account, the details they previously saved
-  there — name, email, phone, postal address, and work-authorization answers — and enters them into
-  the application form the user has opened. This is the user's own data, sent to the employer's form
-  at the user's instruction, in a tab they opened and signed in to. It is held only for the duration
-  of that handoff and is never sent to any third party other than the employer's own form.
-- **Website content** — **collected, in two narrow cases.**
+- **Personally identifiable information** — **collected and transmitted.** Two distinct flows:
+  1. *Capture and ATS scoring.* Job postings the user captures are stored in **their own Resume
+     Master account**, which is an identified account. The posting text itself is employer-authored,
+     but it is account-linked, so this is collection of personally identifiable information and is
+     declared as such.
+  2. *The handoff.* The extension fetches, from the user's own Resume Master account, the details
+     they previously saved there — name, email, phone, postal address, and work-authorization
+     answers — and enters them into the application form the user has opened. This is the user's own
+     data, sent to the employer's form at the user's instruction, in a tab they opened and signed in
+     to. It is held only for the duration of that handoff and is never sent to any third party other
+     than the employer's own form.
+- **Website content** — **collected, in three narrow cases.**
   1. The text of a job posting the user explicitly captures, sent to their account.
-  2. *Optional and off by default:* the **structure** of an application form — its field labels,
+  2. The visible text of a job page when the user clicks **ATS Score Tool**, passed to their own
+     ATS Score page so it arrives prefilled.
+  3. *Optional and off by default:* the **structure** of an application form — its field labels,
      types, required flags and option lists. Never the values in it, never anything about the user.
      This is used to recognise the same form for other users. It is controlled by a per-account
      setting that defaults to OFF and is enforced on our server, not only in the extension.
 - **Authentication information** — *not collected.* The extension never reads, stores or transmits
   any portal's session cookie, password, or token. It cannot sign the user in and does not try; the
-  user crosses every sign-in and CAPTCHA themselves.
+  user crosses every sign-in and CAPTCHA themselves. It holds no `cookies` permission.
+- **Web history** — *not collected.* The extension reads the URL only of the tab the user has
+  invoked it on, and only to decide whether that page is a supported job posting. It holds no
+  `tabs`, `history` or `webNavigation` permission, so it cannot see any other tab.
+- **User activity** — *not collected.* No clickstream, no analytics, no telemetry.
 - **Health / financial / personal communications / location** — *not collected.*
-- **User activity** — *not collected.* No clickstream, browsing history, or analytics.
 
 Certifications:
 - Not being sold to third parties.
@@ -119,15 +153,14 @@ Certifications:
 - Not being used or transferred to determine creditworthiness or for lending purposes.
 
 Privacy policy URL: `https://resumemaster.one/privacy` (set in `manifest.json`).
-**The policy's "Browser Extension" section must be updated before submission** — see the checklist.
 
 ---
 
 ## Reviewer notes
 
 > The extension never submits an application. It fills the form and shows a review panel; the user
-> presses the employer's own submit button. There is no background activity of any kind: both
-> behaviours begin at a toolbar click or a keyboard shortcut.
+> presses the employer's own submit button. There is no background activity of any kind: every
+> behaviour begins at a toolbar click or a keyboard shortcut.
 >
 > It also never crosses a sign-in or a CAPTCHA. The user authenticates on the portal themselves, in
 > their own browser; only then can they invoke the extension, and that invocation is what grants
@@ -137,6 +170,12 @@ Privacy policy URL: `https://resumemaster.one/privacy` (set in `manifest.json`).
 > Before releasing anything into a page, it checks that the tab's origin matches the origin our
 > server nominated for that application and that a form is actually present. On a mismatch it
 > releases nothing.
+>
+> No remotely hosted code. Everything executed ships in the package: no `eval`, no `new Function`,
+> no `importScripts`, no remote `<script src>`. The CSP in the manifest is `script-src 'self'`.
+>
+> `externally_connectable` is deliberately absent. No website can message this extension; the data
+> flow is outbound-only, from the extension to our own server with the user's own session.
 
 ---
 
@@ -144,13 +183,12 @@ Privacy policy URL: `https://resumemaster.one/privacy` (set in `manifest.json`).
 
 - [ ] `npm run build:extension` — regenerates the zip and fails on a flipped dev switch
 - [ ] `npm test` — includes `extensionSubmission.test.js`, which proves the zip is byte-identical
-      to `extension/` and ships nothing unreachable from the manifest
-- [ ] **Update the privacy policy's "Browser Extension" section** at `resumemaster.one/privacy`.
-      The published text describes an extension that only reads job pages; it must describe the form
-      fill and the optional structure capture before this listing points at it.
-- [ ] Update the **Privacy practices** tab with the disclosures above — in particular, flip
-      *personally identifiable information* to **collected**, which v1.2.0 declared as not collected
-- [ ] Update the **single purpose** field, which no longer matches
-- [ ] Upload `resume-master-extension-v1.3.0.zip`
-- [ ] Expect a longer review than v1.2.0's: the behaviour change is material even though the
-      permission set is not
+      to `extension/` and ships nothing unreachable from the manifest, and
+      `manifestMinimumPermission.test.js`, which proves every permission is justified
+- [ ] `node scripts/e3PermissionAudit.mjs` — removes each declared permission in a real Chrome and
+      confirms something actually breaks
+- [ ] Confirm `https://resumemaster.one/privacy` returns 200 **anonymously** and its Browser
+      Extension section matches the disclosures above
+- [ ] Fill the **Privacy practices** tab with the disclosures above
+- [ ] Fill the **single purpose** field with the statement above
+- [ ] Upload `resume-master-extension-v1.0.0.zip`
