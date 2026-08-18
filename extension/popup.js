@@ -10,30 +10,6 @@ async function getCurrentTab() {
   return tab;
 }
 
-function isLinkedInJobPage(url = '') {
-  return /linkedin\.com\/jobs\/view\//.test(url);
-}
-
-function isJobPage(url = '') {
-  return (
-    isLinkedInJobPage(url) ||
-    /indeed\.com\/viewjob/.test(url) ||
-    /glassdoor\.com\/job-listing/.test(url) ||
-    /lever\.co\/.+\/.+/.test(url) ||
-    /greenhouse\.io/.test(url) ||
-    /workable\.com\/j\//.test(url)
-  );
-}
-
-function detectSource(url = '') {
-  if (url.includes('indeed.com'))     return 'Indeed';
-  if (url.includes('glassdoor.com'))  return 'Glassdoor';
-  if (url.includes('lever.co'))       return 'Lever';
-  if (url.includes('greenhouse.io'))  return 'Greenhouse';
-  if (url.includes('workable.com'))   return 'Workable';
-  return 'Direct';
-}
-
 function showJobPreview(jobData) {
   document.getElementById('preview-title').textContent = jobData.title || '';
   document.getElementById('preview-company').textContent =
@@ -81,61 +57,36 @@ async function init() {
 
   await showLastCapture();
 
-  const tab = await getCurrentTab();
-  if (!tab?.url) return;
+  // The popup no longer decides whether this page is capturable from a hardcoded list of six
+  // hostnames. It asks the service worker, which injects the real extractor under the activeTab
+  // grant this popup's own opening created (measured in scripts/e6PopupGrant.mjs).
+  //
+  // That inverts the old rule. Before, the button appeared only where a content script was
+  // declared, so a Greenhouse board on a company's own domain looked unsupported — the extension
+  // was not broken there, it was absent. Now the button appears on any http(s) page and the
+  // extractor decides. Being wrong costs one "No job found on this page"; the old behaviour cost
+  // every embedded board, silently.
+  const preview = await chrome.runtime.sendMessage({ type: 'PREVIEW_ACTIVE_TAB' }).catch(() => null);
 
-  if (isLinkedInJobPage(tab.url) && tab.id) {
-    // Query the content script for structured job data
-    try {
-      const jobData = await chrome.tabs.sendMessage(tab.id, { type: 'GET_CURRENT_JOB' });
-      if (jobData?.title && jobData?.company) {
-        currentJobData = jobData;
-        showJobPreview(currentJobData);
-        setStatus('LinkedIn job detected');
-      } else {
-        setStatus('Job listing detected');
-      }
-    } catch (_) {
-      setStatus('Job listing detected');
-    }
-  } else if (isJobPage(tab.url) && tab.id) {
-    // Generic ATS sites — extract text + parse title from page title
-    try {
-      const textRes = await chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_JOB_TEXT' });
-      const pageTitle = tab.title || '';
-      const cleanTitle = pageTitle
-        .replace(/\s*[-–—|]\s*(Indeed|Glassdoor|Workable|Greenhouse|Lever|Jobs).*$/i, '')
-        .trim();
-      const parts = cleanTitle.split(/\s+(?:at|@)\s+/i);
+  if (!preview?.capturable) {
+    setStatus('Open a job posting to capture it');
+    return;
+  }
 
-      currentJobData = {
-        title:          parts[0]?.trim() || cleanTitle,
-        company:        parts[1]?.trim() || '',
-        location:       '',
-        workType:       '',
-        description:    textRes?.jobText || '',
-        jobUrl:         tab.url,
-        applyUrl:       tab.url,
-        externalJobId:  null,
-        salary:         null,
-        postedDate:     null,
-        companyLogo:    null,
-        sourceLabel:    detectSource(tab.url),
-      };
+  document.getElementById('btn-capture-job').style.display = 'flex';
 
-      if (currentJobData.title) {
-        showJobPreview(currentJobData);
-        setStatus(detectSource(tab.url) + ' job detected');
-      } else {
-        setStatus('Job listing detected');
-      }
-    } catch (_) {
-      setStatus('Job listing detected');
-    }
-  } else if (/linkedin\.com\/in\//.test(tab.url)) {
-    setStatus('LinkedIn profile page');
+  if (preview.ok) {
+    currentJobData = { title: preview.title, company: preview.company, location: preview.location };
+    showJobPreview(currentJobData);
+    setStatus('Job detected');
+  } else if (preview.unreadable) {
+    // No grant yet, so the speculative read failed. Clicking the button is itself an invocation.
+    setStatus('Ready to capture');
+  } else {
+    setStatus('No job detected here — capture anyway to try');
   }
 }
+
 
 // The SAME capture the hotkey runs — same message, same implementation, same destination, same
 // wording. Previously this button called a second implementation that wrote to a different table
@@ -146,10 +97,9 @@ document.getElementById('btn-capture-job').addEventListener('click', async () =>
   btn.disabled = true;
 
   try {
-    const tab = await getCurrentTab();
-    const result = await chrome.tabs.sendMessage(tab.id, { type: 'CAPTURE_AND_IMPORT' });
-    // The message is produced once, in the service worker, so the popup cannot word the outcome
-    // differently from the toast the page just showed.
+    // One message to the service worker, which runs the same captureActiveTab() the hotkey runs.
+    // The popup does not extract, does not fetch, and does not word the outcome.
+    const result = await chrome.runtime.sendMessage({ type: 'CAPTURE_ACTIVE_TAB' });
     setStatus(result?.message || 'Capture failed — try again', 3000);
     if (result?.success) {
       btn.textContent = 'Captured';
@@ -181,24 +131,26 @@ document.getElementById('btn-linkedin').addEventListener('click', async () => {
   setTimeout(() => window.close(), 900);
 });
 
+// Collecting the page text was gated on the same hardcoded six-hostname list the capture button
+// used, so the ATS tool refused to read a Greenhouse posting on a company's own careers domain and
+// opened an empty scorer instead. The gate was never what made the read legal — the activeTab grant
+// from opening this popup is — so it is gone. On a page with nothing to read the extraction simply
+// comes back empty and the scorer opens blank, which is the old else-branch behaviour anyway.
 document.getElementById('btn-ats').addEventListener('click', async () => {
   const tab = await getCurrentTab();
-  if (isJobPage(tab?.url) && tab?.id) {
+  let jobText = '';
+  if (tab?.id) {
     try {
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => document.body?.innerText?.slice(0, 6000) || '',
       });
-      await chrome.runtime.sendMessage({ type: 'OPEN_ATS_SCORE', jobText: result || '' });
-      setStatus('Sending to ATS Score...', 1000);
-    } catch (_err) {
-      await chrome.runtime.sendMessage({ type: 'OPEN_ATS_SCORE', jobText: '' });
-    }
-    setTimeout(() => window.close(), 900);
-  } else {
-    await chrome.tabs.create({ url: `${RESUME_MASTER_URL}/ats-score` });
-    setTimeout(() => window.close(), 300);
+      jobText = result || '';
+    } catch (_err) { /* no grant, or a page that cannot be injected: open the scorer empty */ }
   }
+  await chrome.runtime.sendMessage({ type: 'OPEN_ATS_SCORE', jobText });
+  setStatus('Sending to ATS Score...', 1000);
+  setTimeout(() => window.close(), 900);
 });
 
 // ─── Settings (capture shortcut) ───────────────────────────────────────────

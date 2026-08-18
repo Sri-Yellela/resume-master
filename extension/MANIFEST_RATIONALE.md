@@ -34,50 +34,71 @@ access **revoked**, which is the removal case. Findings: `docs/GATED_HANDOFF_ARC
 |---|---|---|
 | `activeTab` | `background.js:112` (hotkey capture), `background.js:130` (gated handoff), `popup.js:9` (`getCurrentTab`) | The gated handoff cannot reach the portal at all — there is deliberately no host permission for any portal origin, so this grant, taken per tab at the moment the user invokes the extension, is the only access that exists. Injection fails with "Cannot access contents of the page". |
 | `scripting` | `gated-handoff.js:398,452,486,521,656` (probe, fill, overlay, edits), `popup.js` ATS button | `chrome.scripting` is undefined. The gated handoff cannot read a form, fill one, or render the review overlay; the ATS-score button cannot collect the page text. |
-| `storage` | `background.js:67` (`storage.local` last capture), `background.js:147,190` + `gated-handoff.js:259-308` (`storage.session` packets and batch state), `options.js` (`storage.sync` shortcut) | `chrome.storage` is undefined. The custom capture shortcut cannot be saved, the popup cannot show the result of a hotkey capture it was not open for, and the handoff cannot hold a packet across an MV3 service-worker teardown. |
+| `storage` | `background.js` `reportCapture()` (`storage.local` last capture), `background.js:147,190` + `gated-handoff.js:259-308` (`storage.session` packets and batch state) | `chrome.storage` is undefined. The popup cannot show the result of a hotkey capture it was not open for, and the handoff cannot hold a packet across an MV3 service-worker teardown. (`storage.sync` is no longer used: the custom-shortcut recorder it backed was retired with the content script, and rebinding is now Chrome's own.) |
 
 **Not declared, deliberately:**
 
-- `tabs` — `activeTab` plus the host permissions below already give every tab URL the extension needs
-  to read. A blanket `tabs` grant would expose the URL and title of *every* open tab.
+- `tabs` — `activeTab` already gives the extension the only tab URL it needs: the one the user just
+  invoked it on. A blanket `tabs` grant would expose the URL and title of *every* open tab, which is
+  the opposite of what this design is for.
 - `cookies` — the extension never reads a cookie. Credentialed requests carry the user's session
   because `credentials: 'include'` lets the browser attach it; nothing reads its value. (The retired
   v0.1.0 builds declared this; they are deleted.)
 - `notifications` — the handoff reports through `chrome.action`'s badge instead, so no additional
   user-facing consent prompt is requested for a status message.
 - `<all_urls>` — never. See host permissions.
+- **any job board or employer origin** — no longer needed at all, and that is the point. See host
+  permissions.
 
 ## Host permissions
 
-Narrowed at v1.0.0 from whole-domain (`https://*.linkedin.com/*`) to the exact job-view paths. They
-exist for **one** reason: without a host permission matching a tab, `tab.url` is hidden from the
-extension, and `popup.js`'s `init()` cannot tell whether it is looking at a job page — so the capture
-button never appears. They therefore need to cover only the paths the content script already matches.
+**There is exactly one, and it is our own server.** No job board is declared. No employer portal is
+declared. Nothing the extension reads a job from is declared.
+
+That is not a narrowing of the old list, it is a different mechanism. Capture used to run from a
+CONTENT SCRIPT, which needs a host permission for every origin it runs on — so the extension could
+only capture from sites the manifest named, and naming them was also what let `popup.js` read
+`tab.url` to decide whether to show the button. Seven hosts bought six job boards, and no more:
+a Greenhouse posting embedded on an employer's own careers domain was unreachable, and there is no
+list of employer domains to add.
+
+Capture now injects on demand under the `activeTab` grant the user's own invocation creates, which
+is the same mechanism the gated handoff has always used to reach a Workday tenant it has no
+permission for. The extension therefore captures from ANY job page while asking for access to NONE
+of them, and it holds no standing access to any site at any time.
 
 | Host | Required by | What breaks without it |
 |---|---|---|
-| `https://resumemaster.one/*` | `background.js` — every server call | The service worker's fetches become subject to CORS. `corsOrigin` refuses `chrome-extension://` in production, so capture, the auth probe and the whole handoff fail. |
-| `https://www.linkedin.com/jobs/view/*` | `linkedin-content.js:43-63` extractor + `popup.js` `isJobPage` | `tab.url` hidden → the popup shows no capture button on a LinkedIn job. |
-| `https://www.indeed.com/viewjob*` | same | same, for Indeed |
-| `https://www.glassdoor.com/job-listing/*` | same | same, for Glassdoor |
-| `https://jobs.lever.co/*/*` | same | same, for Lever |
-| `https://job-boards.greenhouse.io/*/*` | same | same, for Greenhouse. This is the host postings actually live on: `boards.greenhouse.io` 301s here for every board, so the old declaration could never run a content script and was dropped rather than kept alongside. |
-| `https://*.workable.com/j/*` | same | same, for Workable |
+| `https://resumemaster.one/*` | `background.js:26` `/api/import/job`, `:76` `/api/auth/me`, `:195` `/api/apply/gate-review`, `:216` `/api/apply/gate-packets`; `gated-handoff.js:338,469` | The service worker's fetches become subject to CORS. `corsOrigin` refuses `chrome-extension://` in production, so capture, the auth probe and the whole handoff fail. |
 
-**No portal origin is declared** — not Workday, not Amazon, not Meta. The gated handoff reaches those
-pages only through `activeTab`, granted per tab by the user's own invocation. That is the design's
-central security property and it is why the handoff needed no new permission.
+Measured, not argued: `scripts/e6PopupGrant.mjs` opens a real popup by a real invocation on an
+origin with no host permission and confirms it can both read `tab.url` and inject; its control arm —
+the same page opened as an ordinary tab, which is not an invocation — can do neither.
+`scripts/e2CaptureConvergence.mjs` then captures from a fixture origin the manifest does not cover,
+from both triggers, and asserts first that the extension cannot even see that tab until invoked.
+
+**No portal origin is declared** — not Workday, not Amazon, not Meta. Nor any job board. Every page
+the extension reads is reached per-tab, per-invocation, by the user's own gesture.
 
 ## Content scripts
 
-`matches` is the same six job-view paths, never a bare domain wildcard. Each one has a real extractor
-behind it in `linkedin-content.js:43-63`; there is no host matched without one.
+**None.** The extension declares no content script and injects nothing on page load.
+
+This is the change that removed the six job-board host permissions, and it is worth stating as a
+privacy property rather than a refactor: there is no longer any page the extension runs on
+automatically. Before, six sites were read whenever a tab of theirs was open. Now nothing is read
+until the user presses the shortcut or opens the popup, and only the tab they did it on.
+
+The extractor lives in `extractor.js` and is injected by `chrome.scripting.executeScript`. Its
+per-site selector map is an OPTIMISATION, not a gate — an unlisted site falls through to a generic
+largest-content-block heuristic and still captures, which is exactly what makes an embedded board
+work.
 
 ## Commands
 
 | Command | Default | Feature |
 |---|---|---|
-| `capture-job` | `Ctrl+Shift+K` | Capture the posting in view. One implementation, shared with the popup button (E2). |
+| `capture-job` | `Ctrl+Shift+K` | Capture the posting in view. One implementation, shared with the popup button (E2), injected under `activeTab` (E7). Rebindable only at `chrome://extensions/shortcuts` — the page-scoped custom override retired with the content script, and it never worked outside six sites anyway. |
 | `fill-gated-application` | `Ctrl+Shift+Y` | The gated handoff. `Ctrl+Shift+G` was the first choice and Chrome silently refuses to bind it — it is Chrome's own find-previous — leaving a command with no key. |
 
 ## Deliberate absences

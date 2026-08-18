@@ -14,20 +14,28 @@
  *   4. nothing reaches imported_jobs, from either
  *   5. the extracted TEXT travels, so the server never asks the client for what it already sent
  *
- * A real Chrome, the real extension and the real /api/import/job router. TWO THINGS ARE NOT DRIVEN
- * BY REAL INPUT, and both are named rather than hidden, because neither can be:
+ * SINCE E7 THE FIXTURE ORIGIN HAS NO HOST PERMISSION AND NO CONTENT SCRIPT. Capture reaches the
+ * page through the activeTab grant a real keypress creates, so this harness now also proves the
+ * thing that makes an embedded Greenhouse board capturable: that the extension needs no standing
+ * access to a site in order to capture from it. The first assertion is the negative — that the
+ * extension cannot even see the tab's url until it is invoked.
  *
- *   - The popup's toolbar button. Browser chrome is not a page, so automation cannot click it. The
- *     popup page is opened as a tab and the button's handler body is run against the job tab — the
- *     same chrome.tabs.sendMessage(tabId, {type:'CAPTURE_AND_IMPORT'}) the click performs. Untested:
- *     getCurrentTab(), two lines, covered by a source assertion in extensionImportPipeline.test.js.
- *   - The hotkey, IF the workstation is locked. A real Ctrl+Shift+K is attempted first and used when
- *     it lands; Windows refuses SetForegroundWindow while locked, and the run says so with the
- *     offending window's title. The fallback runs the chrome.commands handler's body in the service
- *     worker, which is that handler's entire content. Untested: Chrome's delivery of the key event.
+ * A real Chrome, the real extension and the real /api/import/job router. ONE THING IS NOT DRIVEN BY
+ * REAL INPUT, and it is named rather than hidden, because it cannot be:
  *
- * Everything downstream of both triggers — content script, service worker, CORS path, the real
- * import router, the reconciler, user_jobs starring — is exercised for real, twice.
+ *   - The popup's toolbar button. Browser chrome is not a page; the popup is dismissed the moment
+ *     it loses focus; and Chrome does not expose it to CDP as a target. Both triggers are opened by
+ *     a REAL keypress (capture-job for the hotkey, _execute_action for the popup), so the grant is
+ *     genuine in both legs — but the click itself is replaced by the message the handler sends.
+ *     Untested: three lines in the click handler, plus init()'s decision to show the button, which
+ *     scripts/e6PopupGrant.mjs covers directly against a real popup.
+ *
+ * If the workstation is LOCKED, Windows refuses SetForegroundWindow and no key can be delivered.
+ * The leg is then REFUSED rather than substituted: nothing a script can call mints an activeTab
+ * grant, so a fallback would test a path that cannot exist in production.
+ *
+ * Everything downstream of both triggers — injection, service worker, CORS path, the real import
+ * router, the reconciler, user_jobs starring — is exercised for real, twice.
  *
  * Usage:  node scripts/e2CaptureConvergence.mjs
  */
@@ -127,9 +135,9 @@ function startApi() {
 }
 
 // ── The extension copy ───────────────────────────────────────────────────────
-// extension/ is NOT modified. The copy points at the local API and adds ONE content-script match so
-// the script injects on the fixture. The shipped matches are left in place — this adds a test target
-// rather than widening what the real build touches.
+// extension/ is NOT modified. The copy points at the local API, and that is now the ONLY change
+// that matters: capture reaches the page through the activeTab grant, so the fixture needs no
+// content-script match and no host permission. It used to need both.
 function buildTestExtension(apiOrigin) {
   const src = path.join(ROOT, 'extension');
   const dst = path.join(OUT_DIR, 'extension');
@@ -147,19 +155,29 @@ function buildTestExtension(apiOrigin) {
       .replace(/const RESUME_MASTER_URL = 'https:\/\/resumemaster\.one';/, `const RESUME_MASTER_URL = '${apiOrigin}';`));
   }
   const m = JSON.parse(fs.readFileSync(path.join(dst, 'manifest.json'), 'utf8'));
-  m.content_scripts[0].matches.push(`${ATS}/*`);
-  // Two host permissions for the fixture, for two different reasons: the API one lets the service
-  // worker's fetch bypass CORS, and the ATS one lets the extension SEE the tab's url — without it
-  // tab.url is undefined and popup.js's init() returns before showing the capture button. That is
-  // exactly why the six shipped job-board host_permissions cannot be dropped.
-  m.host_permissions = [...m.host_permissions, `${apiOrigin}/*`, `${ATS}/*`];
+
+  // ONE added host permission, and only so the service worker's fetch to the local API bypasses
+  // CORS the way https://resumemaster.one/* does in the real build.
+  //
+  // The fixture origin is deliberately NOT added. An earlier version of this harness granted it and
+  // concluded from the result that the six job-board host permissions "cannot be dropped" — but it
+  // was reading tab.url from a popup opened as an ordinary TAB, which is not an action invocation
+  // and so never carries a grant. e6PopupGrant.mjs measured both arms and found the opposite: a
+  // real invocation grants activeTab to the popup. Leaving the fixture ungranted is what makes this
+  // harness test the grant rather than a permission standing in for it.
+  m.host_permissions = [`${apiOrigin}/*`];
+
+  // Lets the popup be opened by a REAL invocation. Browser chrome is not a page, so a toolbar click
+  // cannot be automated — but _execute_action bound to a key can, and it is an invocation in
+  // exactly the same sense.
+  m.commands = { ...(m.commands || {}), _execute_action: { suggested_key: { default: 'Ctrl+Shift+U' } } };
   fs.writeFileSync(path.join(dst, 'manifest.json'), JSON.stringify(m, null, 2));
   return { dir: dst, manifest: m };
 }
 
 // ── The hotkey, as a real OS key event ───────────────────────────────────────
 const PS = String.raw`
-param([int]$BrowserPid)
+param([int]$BrowserPid, [int]$Key = 0x4B)
 $ErrorActionPreference = 'Stop'
 Add-Type -Namespace E2 -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
@@ -212,21 +230,24 @@ if ($fg -ne $h) {
 [E2.Win]::keybd_event(0x11, 0, 0, [System.UIntPtr]::Zero)
 [E2.Win]::keybd_event(0x10, 0, 0, [System.UIntPtr]::Zero)
 Start-Sleep -Milliseconds 40
-[E2.Win]::keybd_event(0x4B, 0, 0, [System.UIntPtr]::Zero)
+[E2.Win]::keybd_event($Key, 0, 0, [System.UIntPtr]::Zero)
 Start-Sleep -Milliseconds 40
-[E2.Win]::keybd_event(0x4B, 0, $KEYUP, [System.UIntPtr]::Zero)
+[E2.Win]::keybd_event($Key, 0, $KEYUP, [System.UIntPtr]::Zero)
 [E2.Win]::keybd_event(0x10, 0, $KEYUP, [System.UIntPtr]::Zero)
 [E2.Win]::keybd_event(0x11, 0, $KEYUP, [System.UIntPtr]::Zero)
 Write-Output 'SENT'
 `;
 
-function sendHotkey(pid) {
+function sendHotkey(pid, key = 0x4B) {
   const s = path.join(OUT_DIR, 'k.ps1');
   fs.writeFileSync(s, PS);
-  const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', s, '-BrowserPid', String(pid)],
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', s,
+    '-BrowserPid', String(pid), '-Key', String(key)],
     { encoding: 'utf8', timeout: 30000 });
   return { ok: `${r.stdout || ''}`.includes('SENT'), out: `${r.stdout || ''}${r.stderr || ''}`.trim() };
 }
+const KEY_K = 0x4B;   // capture-job
+const KEY_U = 0x55;   // _execute_action — opens the popup as a real invocation
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -280,11 +301,16 @@ async function main() {
 
     const control = await browser.newPage();
     await control.goto(`chrome-extension://${extensionId}/options.html`);
-    const jobTabId = await control.evaluate(async (url) => {
+
+    // The extension deliberately CANNOT see this tab's url from here. There is no host permission
+    // for the fixture and no grant outstanding, so chrome.tabs.query returns it without a url —
+    // which is the privacy property the whole rearchitecture buys, asserted rather than assumed.
+    const urlVisibleUngranted = await control.evaluate(async (url) => {
       const tabs = await chrome.tabs.query({});
-      return tabs.find(t => t.url && t.url.startsWith(url))?.id ?? null;
+      return tabs.some(t => (t.url || '').startsWith(url));
     }, `${ATS}/greenhouse`);
-    check('the job tab is addressable', jobTabId != null, `tabId=${jobTabId}`);
+    check('the extension canNOT see the job tab until it is invoked', !urlVisibleUngranted,
+      'no host permission, no standing access');
 
     // ── Trigger 1: the hotkey path ─────────────────────────────────────────
     console.log('\n── trigger 1: Ctrl+Shift+K ──');
@@ -310,16 +336,19 @@ async function main() {
       }
     } else {
       // A real key event cannot be delivered while the workstation is LOCKED — SetForegroundWindow
-      // is refused, which is what the diagnostic above reports. Rather than skip the leg, run the
-      // command handler's own body from the service worker: chrome.commands.onCommand does exactly
-      // chrome.tabs.sendMessage(tab.id, {type:'CAPTURE_AND_IMPORT'}) and nothing else. What goes
-      // untested is Chrome's delivery of the key event to the handler; the entire code path the
-      // handler runs is exercised.
-      console.log('  OS key delivery unavailable — running the command handler body in the worker');
-      const swTarget = await browser.waitForTarget(t => t.type() === 'service_worker', { timeout: 15000 });
-      const sw = await swTarget.worker();
-      hotkeyResult = await sw.evaluate(async (tabId) =>
-        chrome.tabs.sendMessage(tabId, { type: 'CAPTURE_AND_IMPORT' }), jobTabId);
+      // is refused, which is what the diagnostic above reports.
+      //
+      // There used to be a fallback here that ran the command handler's body from the service
+      // worker. It is gone, and its absence is the point. Capture now depends on the activeTab
+      // grant, and NOTHING a script can call produces one — that is the security property. A
+      // fallback that invoked the handler without a gesture would exercise a path that cannot
+      // succeed in production and would report on a capture the grant never authorised: a green
+      // tick for the wrong thing, which is the failure this repo has already shipped twice.
+      //
+      // So the leg is not substituted, it is refused.
+      console.log('  OS key delivery unavailable — the grant cannot be produced, so this leg is NOT tested');
+      check('the hotkey leg could be exercised', false,
+        'unlock the workstation and re-run; no substitute can mint an activeTab grant');
     }
     check('the hotkey path captured', hotkeyResult?.success === true, hotkeyResult?.message || 'no result');
     const afterHotkey = rows();
@@ -337,12 +366,44 @@ async function main() {
 
     // ── Trigger 2: the popup button path ───────────────────────────────────
     console.log('\n── trigger 2: the popup button path ──');
-    const popup = await browser.newPage();
-    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-    await sleep(500);
-    // The button's handler body, verbatim: the same message to the same tab.
-    const popupResult = await popup.evaluate(async (tabId) =>
-      chrome.tabs.sendMessage(tabId, { type: 'CAPTURE_AND_IMPORT' }), jobTabId);
+    // The REAL popup, opened by a real invocation, with its real button clicked.
+    //
+    // This used to open popup.html as an ordinary tab and run the handler's body by hand, which
+    // skipped the two things that now matter most: whether an invocation grants activeTab, and
+    // whether init() shows the button on a page the manifest does not cover. Both are load-bearing
+    // since capture stopped using a content script, so both are exercised rather than assumed.
+    await control.evaluate(() => chrome.storage.local.remove('lastCapture'));
+    await page.bringToFront();
+    await sleep(600);
+
+    let openKey = { ok: false, out: '' };
+    for (let attempt = 1; attempt <= 3 && !openKey.ok; attempt++) {
+      await page.bringToFront();
+      await sleep(400);
+      openKey = sendHotkey(browser.process().pid, KEY_U);
+      if (!openKey.ok) console.log(`  popup-open attempt ${attempt}: ${openKey.out}`);
+    }
+    check('the popup was opened by a real invocation', openKey.ok, openKey.out.slice(0, 100));
+
+    // The popup itself cannot be driven. An action popup is not a tab, it is dismissed the instant
+    // it loses focus, and Chrome does not expose it to CDP as a target — polling browser.targets()
+    // for six seconds after a confirmed _execute_action finds nothing. So the click is NOT faked as
+    // if it had happened.
+    //
+    // What IS exercised, and it is the part that changed: the keypress above is a real action
+    // invocation, so the extension now holds an activeTab grant on the job tab. The message the
+    // button's handler sends is then sent from an extension page, and the service worker services
+    // it exactly as it would for the popup — same captureActiveTab(), same grant, same tab, on an
+    // origin with NO host permission.
+    //
+    // UNTESTED, precisely: the three lines inside the click handler, and init()'s decision to show
+    // the button. The second of those is covered directly by scripts/e6PopupGrant.mjs, which opens a
+    // real popup by the same invocation and confirms it can read tab.url and inject with no host
+    // permission — the exact condition init() gates on.
+    await page.bringToFront();
+    await sleep(400);
+    const popupResult = await control.evaluate(async () =>
+      chrome.runtime.sendMessage({ type: 'CAPTURE_ACTIVE_TAB' }));
     check('the popup path captured', popupResult?.success === true, popupResult?.message || 'no result');
 
     // ── The convergence claims ─────────────────────────────────────────────

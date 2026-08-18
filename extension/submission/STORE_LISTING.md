@@ -25,7 +25,8 @@ Upload artifact: `extension/submission/resume-master-extension-v1.0.0.zip`
 
 The capture half and the fill half are the same purpose at two points in one flow: the user finds a
 job, and the user applies to it. Nothing runs without a direct user action — there is no background
-activity of any kind, and no listener that fires on page load.
+activity of any kind, and **no content script**, so nothing runs on page load either. Every read of
+every page begins with a click or a keystroke.
 
 The popup's other buttons (Open Resume Builder, ATS Score Tool, Sign in with LinkedIn, Capture
 Shortcut Settings) are not separate features; they open a page of the user's own Resume Master
@@ -45,11 +46,10 @@ account, or the extension's own options page. They request no permission of thei
 
 | Trigger | What happens |
 |---|---|
-| Toolbar button → **Capture job** | Reads the job description on the page in view, sends it to the user's Resume Master account. |
+| Toolbar button → **Capture job** | Reads the job description on the page in view, sends it to the user's Resume Master account. Works on any job posting, including employers' own careers pages — not a fixed list of sites. |
 | **Ctrl+Shift+K** (rebindable) | **The identical capture.** Same implementation, same destination, same wording of the result. |
 | **Ctrl+Shift+Y** on an application form | The gated handoff: fetches the answers the user already saved in their account, fills the form, shows a review panel. The user submits. |
-| Toolbar → **ATS Score Tool** on a job page | Collects the page's visible text and opens the user's ATS Score page with it prefilled. |
-| In-page **"ATS Score this job"** button | The same ATS action, reachable without opening the popup. The content script adds this button to supported job postings; it is the only change the extension makes to a page, and it reads nothing until clicked. |
+| Toolbar → **ATS Score Tool** | Collects the visible text of the page in view and opens the user's ATS Score page with it prefilled. |
 | Toolbar → **Open Resume Builder** / **Sign in with LinkedIn** | Opens a Resume Master page in a new tab. Nothing is read from the current page. |
 | Toolbar → **Capture Shortcut Settings** | Opens the extension's own options page. |
 
@@ -90,25 +90,20 @@ the ATS Score Tool. The capture path itself uses the declared content script, no
 `background.js:147,190` and `gated-handoff.js:259-308` `savePacketForTab` / `clearPacketForTab` /
 `sweepExpiredPackets` (`storage.session`).)*
 
-**Host permissions** (`resumemaster.one`, and six job-board job-view paths)
-> `resumemaster.one` is our own backend, which the extension fetches from with the user's existing
-> session cookie. The six job-site entries are the exact posting paths where the capture content
-> script runs — not whole domains. Without a host permission matching the tab, Chrome hides the tab's
-> URL from the extension and the popup cannot tell whether it is looking at a job posting, so the
-> capture button never appears.
+**Host permissions** — one, and it is our own backend
+> `https://resumemaster.one/*` is our own server, which the extension fetches from with the user's
+> existing session cookie.
 >
-> **No job portal that the handoff fills is on this list, and none will be** — reaching those pages
-> depends entirely on `activeTab`.
+> **No job board and no employer portal is declared, and none will be.** The extension has no
+> standing access to any site it reads a job from. It reads a page only by injecting into the tab
+> the user has just invoked it on, under the `activeTab` grant that invocation creates, and that
+> access ends when the tab leaves the origin. Earlier builds declared six job boards and ran a
+> content script on them automatically; that is gone, and with it the extension's ability to read
+> anything the user has not deliberately pointed it at.
 
 | Host | Why |
 |---|---|
 | `https://resumemaster.one/*` | Our own backend: capture, the auth probe, the handoff packet |
-| `https://www.linkedin.com/jobs/view/*` | Job posting pages only |
-| `https://www.indeed.com/viewjob*` | Job posting pages only |
-| `https://www.glassdoor.com/job-listing/*` | Job posting pages only |
-| `https://jobs.lever.co/*/*` | Job posting pages only |
-| `https://job-boards.greenhouse.io/*/*` | Job posting pages only |
-| `https://*.workable.com/j/*` | Job posting pages only |
 
 Full derivation, including every permission deliberately **not** requested and why, is in
 `extension/MANIFEST_RATIONALE.md`. `test/manifestMinimumPermission.test.js` fails the build if that
@@ -172,6 +167,11 @@ Privacy policy URL: `https://resumemaster.one/privacy` (set in `manifest.json`).
 > Before releasing anything into a page, it checks that the tab's origin matches the origin our
 > server nominated for that application and that a form is actually present. On a mismatch it
 > releases nothing.
+>
+> The extension asks for no site permissions. Capture, the ATS reader and the form fill all reach a
+> page the same way: `chrome.scripting.executeScript` into the tab the user just invoked on, under
+> `activeTab`. There is no content script and no job-board host permission, so there is no page the
+> extension can read without a deliberate gesture on that exact tab.
 >
 > No remotely hosted code. Everything executed ships in the package: no `eval`, no `new Function`,
 > no `importScripts`, no remote `<script src>`. The CSP in the manifest is `script-src 'self'`.
