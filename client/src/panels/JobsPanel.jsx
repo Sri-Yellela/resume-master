@@ -1122,10 +1122,6 @@ function buildAtsPayload(job, artifact = null) {
   };
 }
 
-function isImportedBoardJob(job) {
-  return !!(["linkedin", "linkedin_saved", "linkedin_extension"].includes(job?.boardSource) && job?.importedJobId != null);
-}
-
 // -- Main panel ------------------------------------------------
 export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive = true }) {
   const { theme } = useTheme();
@@ -1279,8 +1275,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   // Board tabs — shared via JobBoardContext (destructured earlier, near line 887)
   const [pendingJobs, setPendingJobs] = useState([]);
-  const [importedLinkedInJobs, setImportedLinkedInJobs] = useState([]);
-  const [linkedinImportSummary, setLinkedinImportSummary] = useState({ total: 0, lastImportedAt: null });
   // linkedinInstallModalOpen / linkedinImporting / linkedinExtensionNotice removed in cleanup
   // 5.3 along with the bulk-import flow that was their only writer.
   // extensionState / refreshExtensionState stubs removed in cleanup 5.3 — the last readers of
@@ -1613,12 +1607,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     const g2 = generated[selectedJob.jobId];
     const done2 = !!g2?.html;
     const st2 = loading[selectedJob.jobId];
-    const isImported = isImportedBoardJob(selectedJob);
     setSelectedJobMeta({
       g: g2, done: done2, st: st2,
-      applyMode, canUseGenerate: !isImported && canUseGenerate, canUseAPlusResume: false,
+      applyMode, canUseGenerate, canUseAPlusResume: false,
       resumeText,
-      onGenerate: isImported ? undefined : (force) => generate(selectedJob, force),
+      onGenerate: (force) => generate(selectedJob, force),
       onViewSandbox: isImported ? undefined : () => {
         const e2 = { ...g2, company: g2?.company || selectedJob.company, title: g2?.title || selectedJob.title };
         openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2));
@@ -1725,10 +1718,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       return job;
     });
     markVisited(job);
-    if (!job.visited && !isImportedBoardJob(job)) {
+    if (!job.visited) {
       api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" }).catch(()=>{});
-    } else if (!job.visited && isImportedBoardJob(job)) {
-      api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" }).catch(()=>{});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1833,28 +1824,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     fetchFacets();
   }, [activeFilterSnapshot, fetchFacets]);
 
-  const fetchImportedSummary = useCallback(async () => {
-    try {
-      const data = await api("/api/imported-jobs/summary");
-      const linkedin = (data?.sources || []).find(source => source.sourceKey === "linkedin");
-      setLinkedinImportSummary({
-        total: linkedin?.total || 0,
-        lastImportedAt: linkedin?.lastImportedAt || null,
-      });
-    } catch {
-      setLinkedinImportSummary({ total: 0, lastImportedAt: null });
-    }
-  }, []);
-
-  const fetchImportedLinkedInJobs = useCallback(async () => {
-    try {
-      const data = await api("/api/imported-jobs/linkedin");
-      setImportedLinkedInJobs(Array.isArray(data?.jobs) ? data.jobs : []);
-    } catch {
-      setImportedLinkedInJobs([]);
-    }
-  }, []);
-
   // openLinkedInExtensionPopup / closeLinkedInImportTab / startLinkedInImport removed in cleanup
   // 5.3. They drove the LinkedIn bulk saved-jobs import, and every one of them called
   // sendExtensionRequest — a stub returning an empty promise since BYO-2. startLinkedInImport
@@ -1940,7 +1909,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     } finally {
       if (requestSeq === jobsFetchSeqRef.current) setBgLoading(false);
     }
-  }, [activeDomainProfile, buildParams, boardTab, fetchImportedLinkedInJobs, fetchPending, jobs, makeProfileSnapshot, setProfileCache]);
+  }, [activeDomainProfile, buildParams, boardTab, fetchPending, jobs, makeProfileSnapshot, setProfileCache]);
   // Keep stable ref in sync so callbacks with empty deps (e.g. startPollLoop) always
   // call the current fetchJobs closure without needing it in their dep arrays.
   fetchJobsRef.current = fetchJobs;
@@ -1952,8 +1921,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       api("/api/jobs?page=1&pageSize=25&sort=dateDesc"),
       api("/api/categories"),
       api("/api/resumes"),
-      api("/api/imported-jobs/summary").catch(() => ({ sources: [] })),
-    ]).then(([jr, cats, gr, importSummary]) => {
+    ]).then(([jr, cats, gr]) => {
       setJobs((jr.jobs || []).map(normalizeApiJob));
       setTotalJobs(jr.total || 0);
       setTotalPages(jr.totalPages || 0);
@@ -1967,13 +1935,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           toolLabel:r.apply_mode === "CUSTOM_SAMPLER" ? TOOL_LABELS[A_PLUS_TOOL] : TOOL_LABELS[GENERATE_TOOL] }; });
         setGenerated(map);
       }
-      const linkedin = (importSummary?.sources || []).find(source => source.sourceKey === "linkedin");
-      setLinkedinImportSummary({
-        total: linkedin?.total || 0,
-        lastImportedAt: linkedin?.lastImportedAt || null,
-      });
     }).catch(console.error);
-  }, [user, fetchImportedSummary]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!user) return;
@@ -2000,11 +1963,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     });
   }, [user, activeProfileResumePath, activeProfileEnhanceStatusPath]);
 
-  useEffect(() => {
-    if (!user) return;
-    fetchImportedSummary();
-  }, [user, fetchImportedSummary]);
-
   // Bulk-import completion effect removed in cleanup 5.3. `extensionState` is a hardcoded
   // { status: "IDLE" } literal, so neither branch could ever run — it watched for DONE/ERROR
   // states that nothing has published since the bridge became a stub.
@@ -2016,11 +1974,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   useEffect(() => {
     if (["linkedin", "linkedin_saved"].includes(boardTab)) setBoardTab("saved");
   }, [boardTab, setBoardTab]);
-
-  useEffect(() => {
-    if (!user || boardTab !== "saved") return;
-    fetchImportedLinkedInJobs();
-  }, [user, boardTab, fetchImportedLinkedInJobs]);
 
   // Re-fetch when server-side filters/sort/tab change (background — board stays visible)
   // Note: localSearch is NOT in this dep array — it has its own debounced effect below
@@ -2102,12 +2055,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     },
     scrape_complete: () => {
       fetchJobs(1);
-    },
-    imported_jobs_updated: ({ sourceKey }) => {
-      if (sourceKey === "linkedin" || sourceKey === "linkedin_saved") {
-        fetchImportedSummary();
-        if (boardTab === "saved") fetchImportedLinkedInJobs();
-      }
     },
   });
 
@@ -2856,15 +2803,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   // -- Starred toggle ----------------------------------------
   const toggleStar = useCallback(async (jobId, job = null) => {
-    if (isImportedBoardJob(job)) {
-      try {
-        const d = await api(`/api/imported-jobs/${job.importedJobId}/starred`, { method:"PATCH" });
-        setImportedLinkedInJobs(prev => prev.map(j =>
-          j.importedJobId === job.importedJobId ? { ...j, starred: d.starred, disliked: false } : j
-        ));
-      } catch {}
-      return;
-    }
     try {
       const d = await api(`/api/jobs/${jobId}/starred`, { method:"PATCH" });
       setJobs(prev => prev.map(j => j.jobId === jobId ? {...j, starred: d.starred, disliked: false} : j));
@@ -2877,16 +2815,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // (sort change, filter change, pagination, etc.) within this session.
   // Only a page reload clears the ref and lets the server exclusion apply.
   const toggleDislike = useCallback(async (jobId, job = null) => {
-    if (isImportedBoardJob(job)) {
-      try {
-        const d = await api(`/api/imported-jobs/${job.importedJobId}/disliked`, { method:"PATCH" });
-        const isNowDisliked = !!d.disliked;
-        setImportedLinkedInJobs(prev => prev.map(j =>
-          j.importedJobId === job.importedJobId ? { ...j, disliked: isNowDisliked, starred: false } : j
-        ));
-      } catch {}
-      return;
-    }
     try {
       const d = await dislikeJob(jobId);
       const isNowDisliked = !!d.disliked;
@@ -2910,12 +2838,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   // -- Mark visited in local state ---------------------------
   const markVisited = useCallback((job) => {
-    if (isImportedBoardJob(job)) {
-      setImportedLinkedInJobs(prev => prev.map(j =>
-        j.importedJobId === job.importedJobId ? { ...j, visited: true } : j
-      ));
-      return;
-    }
     setJobs(prev => prev.map(j => j.jobId === job.jobId ? {...j, visited:true} : j));
   }, []);
 
@@ -2923,11 +2845,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const visitUrl = useCallback(async (job) => {
     if (!job.url) return;
     try {
-      if (isImportedBoardJob(job)) {
-        await api(`/api/imported-jobs/${job.importedJobId}/visited`, { method:"PATCH" });
-      } else {
-        await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" });
-      }
+      await api(`/api/jobs/${job.jobId}/visited`, { method:"PATCH" });
     } catch {}
     markVisited(job);
     window.open(job.url, "_blank", "noreferrer");
@@ -4120,10 +4038,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 goPage={goPage} onPullRefresh={handlePullRefresh}
                 setMobilePane={setMobilePane} isMobile={isMobile}
                 onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
-                showImportedLinkedInSection={boardTab === "saved"}
-                importedLinkedInJobs={importedLinkedInJobs}
-                linkedinImportSummary={linkedinImportSummary}
-                onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
                 activeFilterCount={activeFilterCount}
                 onClearFilters={clearAllFilters}
                 cardTier={1}
@@ -4214,10 +4128,6 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               goPage={goPage} onPullRefresh={handlePullRefresh}
               setMobilePane={setMobilePane} isMobile={isMobile}
               compact={false} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
-              showImportedLinkedInSection={boardTab === "saved"}
-              importedLinkedInJobs={importedLinkedInJobs}
-              linkedinImportSummary={linkedinImportSummary}
-              onRefreshImportedLinkedIn={fetchImportedLinkedInJobs}
               activeFilterCount={activeFilterCount}
               onClearFilters={clearAllFilters}
               cardTier={effectiveTier}
@@ -4340,14 +4250,10 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       goPage, onPullRefresh,
                       setMobilePane, isMobile,
                       compact, selectedJobId, onJobSelect,
-                      showImportedLinkedInSection = false,
-                      importedLinkedInJobs = [],
-                      linkedinImportSummary = { total: 0, lastImportedAt: null },
-                      onRefreshImportedLinkedIn,
                       activeFilterCount = 0, onClearFilters,
                       cardTier = 1, containerRef }) {
   const [pageInput, setPageInput] = useState("");
-  const shouldShowEmptyState = jobs.length === 0 && !scraping && !showImportedLinkedInSection;
+  const shouldShowEmptyState = jobs.length === 0 && !scraping;
   // An empty board has two completely different causes and only ever admitted to one of them.
   // "Search for a role above" is right when nothing is filtered; when filters ARE narrowing the
   // board it is a lie that costs the user their next move — they go and search again instead of
@@ -4398,20 +4304,6 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                   cursor:"pointer", color:"#991b1b", fontSize:14 }}>x</button>
               </div>
             </div>
-          )}
-
-          {showImportedLinkedInSection && (
-            <StarredLinkedInSection
-              jobs={importedLinkedInJobs}
-              theme={theme}
-              onRefresh={onRefreshImportedLinkedIn}
-              importCount={linkedinImportSummary.total}
-              lastImportedAt={linkedinImportSummary.lastImportedAt}
-              onVisit={visitUrl}
-              onDislike={toggleDislike}
-              onJobSelect={onJobSelect}
-              selectedJobId={selectedJobId}
-            />
           )}
 
           {/* Job cards â€" always rendered (even when scraping) */}
@@ -4555,84 +4447,6 @@ function buildVisiblePageItems(currentPage, totalPages) {
 // whose extension-side content script was deleted in v1.2.0. Clicking either only ever opened an
 // "install the extension" modal that no install could satisfy. The LIST below stays — it is fed
 // by the single-job capture path (/api/extension/save-job), which is live.
-function StarredLinkedInSection({
-  jobs,
-  theme,
-  onRefresh,
-  importCount,
-  lastImportedAt,
-  onVisit,
-  onDislike,
-  onJobSelect,
-  selectedJobId,
-}) {
-  const importedAgo = lastImportedAt ? ago(lastImportedAt * 1000) : null;
-  return (
-    <div style={{ margin:"10px 16px 12px", border:`1px solid ${theme.border}`, borderRadius:10,
-                  background:theme.surface, overflow:"hidden", boxShadow:theme.shadowSm }}>
-      <div style={{ padding:"12px 14px", display:"flex", alignItems:"center", gap:8,
-                    borderBottom:`1px solid ${theme.border}`, flexShrink:0 }}>
-        <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:16, fontWeight:800,
-                       letterSpacing:"0.06em", textTransform:"uppercase", color:theme.text }}>
-          LinkedIn Jobs
-        </span>
-        <span style={{ fontSize:12, color:theme.textMuted }}>
-          {importCount} LinkedIn saved job{importCount !== 1 ? "s" : ""}
-        </span>
-        {importedAgo && (
-          <span style={{ fontSize:11, color:theme.textDim }}>
-            last import {importedAgo} ago
-          </span>
-        )}
-        <div style={{ flex:1 }}/>
-        <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
-      </div>
-      <div style={{ padding:"12px 14px", borderBottom:`1px solid ${theme.border}`,
-                    background:theme.surfaceHigh }}>
-        <div style={{ fontSize:12, color:theme.textMuted, lineHeight:1.6 }}>
-          Open a LinkedIn job and capture it with the Resume Master extension — press{" "}
-          <strong>Ctrl+Shift+K</strong> (⌘+Shift+K on Mac) or use <strong>Save Job</strong> in the
-          extension popup. Captured jobs are deduped against the board and appear here.
-        </div>
-      </div>
-      {jobs.length === 0 ? (
-        <div style={{ display:"flex", flexDirection:"column",
-                      alignItems:"center", justifyContent:"center", gap:12, padding:24 }}>
-          <div style={{ fontWeight:700, color:theme.textMuted, fontSize:14 }}>No captured LinkedIn jobs yet</div>
-          <div style={{ fontSize:12, color:theme.textDim, textAlign:"center", maxWidth:420, lineHeight:1.8 }}>
-            Open a job on LinkedIn and press <strong>Ctrl+Shift+K</strong> (⌘+Shift+K on Mac), or
-            click <strong>Save Job</strong> in the Resume Master extension popup. You can also
-            paste a job link straight into the board with <strong>+ Import</strong>.
-          </div>
-        </div>
-      ) : (
-        <div style={{ paddingTop:8, paddingBottom:12 }}>
-          {jobs.map(job => (
-            <JobCard
-              key={job.jobId}
-              job={job}
-              theme={theme}
-              showDislike={true}
-              showApplyButton={true}
-              applyMode="SIMPLE"
-              canUseGenerate={false}
-              canUseAPlusResume={false}
-              compact={false}
-              selected={selectedJobId === job.jobId}
-              onSelect={onJobSelect ? () => onJobSelect(job) : undefined}
-              onVisit={() => onVisit(job)}
-              onDislike={() => onDislike(job.jobId, job)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// JobCard is imported from ../components/JobCard.jsx
-
-// â"€â"€ Empty state â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function EmptyState({ theme }) {
   const { theme: t } = useTheme();
   const th = theme || t;

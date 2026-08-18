@@ -258,27 +258,6 @@
     });
   }
 
-  async function saveJob() {
-    const data = extractLinkedInJobData();
-    if (!data.title || !data.company) {
-      return { success: false, error: 'Could not extract job title or company' };
-    }
-    try {
-      const res = await fetch(`${RESUME_MASTER_URL}/api/extension/save-job`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(data),
-      });
-      if (res.status === 401) return { success: false, error: 'Not logged in' };
-      if (!res.ok) return { success: false, error: `Server error ${res.status}` };
-      const json = await res.json();
-      return { success: true, alreadySaved: json.alreadySaved || false };
-    } catch (e) {
-      return { success: false, error: e.message };
-    }
-  }
-
   // ─── Single-job capture → /api/import/job (BYO-2) ──────────────────────────
   // Reuses extractLinkedInJobData() as-is on LinkedIn (proven, untouched); everywhere else
   // uses this generic extractor, mirroring popup.js's existing non-LinkedIn title-parsing
@@ -353,50 +332,43 @@
     toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 4000);
   }
 
+  /**
+   * THE capture path. One implementation, reached from the popup button, the default hotkey and a
+   * custom hotkey — they were three triggers on two implementations, which is how they drifted into
+   * writing to two different tables with two different dedup identities.
+   *
+   * Extraction happens here, because only the content script can see the page. The REQUEST happens
+   * in the service worker: a content script's fetch carries the page's origin, which server.js's
+   * CORS refuses in production. See background.js importCapturedJob().
+   *
+   * Returns the same result object to every caller, and shows the same toast, so no trigger can
+   * report differently from another.
+   */
   async function captureAndImport() {
     const isLinkedIn = window.location.hostname.includes('linkedin.com');
     const data = isLinkedIn ? extractLinkedInJobData() : extractGenericJobData();
 
     if (!data.title) {
-      showCaptureToast('No job found on this page', false);
-      return;
+      const miss = { success: false, message: 'No job found on this page' };
+      showCaptureToast(miss.message, false);
+      return miss;
     }
 
+    // The extracted TEXT travels with the URL. importJob() returns needsClientCapture for
+    // login-walled hosts when it has to fetch the page itself — sending the text we already hold
+    // means it never has to, so that round-trip cannot come back to the client that has the content.
     const payload = { url: data.jobUrl || window.location.href, text: buildCaptureText(data) };
-    let resultRecord;
 
+    let result;
     try {
-      const res = await fetch(`${RESUME_MASTER_URL}/api/import/job`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.status === 401) {
-        showCaptureToast('Sign in to Resume Master first', false);
-        resultRecord = { success: false, message: 'Sign in to Resume Master first', at: Date.now() };
-      } else {
-        const json = await res.json();
-        if (json.needsClientCapture) {
-          showCaptureToast(json.message || 'Could not import this job automatically', false);
-          resultRecord = { success: false, message: json.message, at: Date.now() };
-        } else if (!res.ok) {
-          showCaptureToast(json.error || 'Import failed — try again', false);
-          resultRecord = { success: false, message: json.error, at: Date.now() };
-        } else {
-          const title = json.job?.title || data.title;
-          const company = json.job?.company || data.company;
-          showCaptureToast(`Captured "${title}"${company ? ' @ ' + company : ''}`, true);
-          resultRecord = { success: true, message: `${title}${company ? ' @ ' + company : ''}`, at: Date.now() };
-        }
-      }
+      result = await chrome.runtime.sendMessage({ type: 'IMPORT_CAPTURED_JOB', payload });
     } catch (e) {
-      showCaptureToast('Network error — try again', false);
-      resultRecord = { success: false, message: e.message, at: Date.now() };
+      result = { success: false, message: 'Could not reach Resume Master' };
     }
+    if (!result) result = { success: false, message: 'Could not reach Resume Master' };
 
-    try { chrome.storage.local.set({ lastCapture: resultRecord }); } catch (_) { /* storage unavailable */ }
+    showCaptureToast(result.message, result.success);
+    return result;
   }
 
   // Custom-shortcut override (see shortcutUtils.js). This is page-scoped JS, NOT a real
@@ -460,12 +432,11 @@
       sendResponse(extractLinkedInJobData());
       return true;
     }
-    if (message.type === 'SAVE_JOB') {
-      saveJob().then(sendResponse);
-      return true; // async
-    }
+    // ONE capture message. SAVE_JOB is gone rather than aliased: the popup and this script ship in
+    // the same package, so no message-name compatibility is owed to anything, and an alias is how a
+    // second path survives a convergence.
     if (message.type === 'CAPTURE_AND_IMPORT') {
-      captureAndImport().then(() => sendResponse({ ok: true }));
+      captureAndImport().then(sendResponse);   // the caller gets the full result, not just {ok}
       return true; // async
     }
     return false;

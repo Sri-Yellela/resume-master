@@ -39,7 +39,7 @@ function showJobPreview(jobData) {
   document.getElementById('preview-company').textContent =
     (jobData.company || '') + (jobData.location ? ' · ' + jobData.location : '');
   document.getElementById('job-preview').style.display = 'block';
-  document.getElementById('btn-save-job').style.display = 'flex';
+  document.getElementById('btn-capture-job').style.display = 'flex';
 }
 
 let currentJobData = null;
@@ -58,12 +58,13 @@ async function showLastCapture() {
   } catch (_) { /* storage unavailable */ }
 }
 
+// Asked via the service worker, not fetched here. A popup's fetch carries chrome-extension:// as
+// its origin, which server.js's corsOrigin refuses in production — so this worked in development
+// and would have shown "Sign in" to every production user, hiding the capture button entirely.
 async function probeAuth() {
   try {
-    const res = await fetch(`${RESUME_MASTER_URL}/api/auth/me`, { credentials: 'include' });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return data.authenticated === true;
+    const res = await chrome.runtime.sendMessage({ type: 'PROBE_AUTH' });
+    return res?.authenticated === true;
   } catch (_) {
     return false;
   }
@@ -74,7 +75,7 @@ async function init() {
 
   if (!isAuthed) {
     document.getElementById('btn-sign-in').style.display = 'flex';
-    setStatus('Sign in to save and import jobs');
+    setStatus('Sign in to capture jobs');
     return;
   }
 
@@ -136,29 +137,30 @@ async function init() {
   }
 }
 
-document.getElementById('btn-save-job').addEventListener('click', async () => {
-  if (!currentJobData) return;
-  const btn = document.getElementById('btn-save-job');
-  btn.textContent = 'Saving...';
+// The SAME capture the hotkey runs — same message, same implementation, same destination, same
+// wording. Previously this button called a second implementation that wrote to a different table
+// with a different dedup identity, so "Save Job" and Ctrl+Shift+K were two features wearing one name.
+document.getElementById('btn-capture-job').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-capture-job');
+  btn.textContent = 'Capturing...';
   btn.disabled = true;
 
   try {
     const tab = await getCurrentTab();
-    const result = await chrome.tabs.sendMessage(tab.id, { type: 'SAVE_JOB' });
+    const result = await chrome.tabs.sendMessage(tab.id, { type: 'CAPTURE_AND_IMPORT' });
+    // The message is produced once, in the service worker, so the popup cannot word the outcome
+    // differently from the toast the page just showed.
+    setStatus(result?.message || 'Capture failed — try again', 3000);
     if (result?.success) {
-      btn.textContent = result.alreadySaved ? 'Already saved' : 'Saved!';
-      setStatus(result.alreadySaved ? 'Already in your list' : 'Job saved to Resume Master', 2000);
+      btn.textContent = 'Captured';
     } else {
-      btn.textContent = 'Save Job';
+      btn.textContent = 'Capture job';
       btn.disabled = false;
-      setStatus(result?.error === 'Not logged in'
-        ? 'Sign in to Resume Master first'
-        : 'Save failed — try again', 3000);
     }
   } catch (e) {
-    btn.textContent = 'Save Job';
+    btn.textContent = 'Capture job';
     btn.disabled = false;
-    setStatus('Error: ' + (e.message || 'unknown'), 3000);
+    setStatus('Could not reach the page — reload and try again', 3000);
   }
 });
 

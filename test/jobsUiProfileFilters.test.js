@@ -51,15 +51,28 @@ test("the dead LinkedIn bulk-import flow stays removed", () => {
   }
 });
 
-test("the Starred LinkedIn section still renders captured jobs", () => {
-  // The DISPLAY is live and must survive the cleanup — it is fed by the single-job capture path
-  // (/api/extension/save-job), which extension/linkedin-content.js still calls.
+test("THE STARRED LINKEDIN SECTION IS GONE, AND SO IS EVERYTHING THAT FED IT (E2)", () => {
+  // It read imported_jobs, which had exactly one writer — /api/extension/save-job — and zero rows.
+  // Its own copy promised that Ctrl+Shift+K captures "appear here", which they never did: the hotkey
+  // has always written to scraped_jobs. Rather than leave a panel that could only ever be empty, the
+  // capture paths were converged and this surface removed; captured jobs are starred into user_jobs
+  // by importJob's attachImportToUser, so they show up in the board's own Saved tab, which already
+  // queries starred=1.
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
-  assert.ok(jobsPanel.indexOf("function StarredLinkedInSection") > 0,
-    "the section component must still exist");
-  assert.match(jobsPanel, /showImportedLinkedInSection=\{boardTab === "saved"\}/);
-  assert.match(jobsPanel, /api\("\/api\/imported-jobs\/linkedin"\)/,
-    "it must still read back captured LinkedIn jobs");
+  for (const symbol of [
+    "StarredLinkedInSection", "showImportedLinkedInSection", "importedLinkedInJobs",
+    "linkedinImportSummary", "fetchImportedLinkedInJobs", "isImportedBoardJob",
+    "/api/imported-jobs",
+  ]) {
+    assert.doesNotMatch(jobsPanel, new RegExp(symbol.replace(/[/]/g, "\/")),
+      `${symbol} fed the removed panel and must not come back`);
+  }
+});
+
+test("the Saved tab is what surfaces captured jobs now", () => {
+  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+  assert.match(jobsPanel, /boardTab === "saved"\) p\.set\("starred","1"\)/,
+    "Saved queries starred=1, and importJob stars every capture — so captures land there");
 });
 
 test("job profiles have a dedicated app section and menu entry", () => {
