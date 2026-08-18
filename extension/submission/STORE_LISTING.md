@@ -49,6 +49,7 @@ account, or the extension's own options page. They request no permission of thei
 | **Ctrl+Shift+K** (rebindable) | **The identical capture.** Same implementation, same destination, same wording of the result. |
 | **Ctrl+Shift+Y** on an application form | The gated handoff: fetches the answers the user already saved in their account, fills the form, shows a review panel. The user submits. |
 | Toolbar → **ATS Score Tool** on a job page | Collects the page's visible text and opens the user's ATS Score page with it prefilled. |
+| In-page **"ATS Score this job"** button | The same ATS action, reachable without opening the popup. The content script adds this button to supported job postings; it is the only change the extension makes to a page, and it reads nothing until clicked. |
 | Toolbar → **Open Resume Builder** / **Sign in with LinkedIn** | Opens a Resume Master page in a new tab. Nothing is read from the current page. |
 | Toolbar → **Capture Shortcut Settings** | Opens the extension's own options page. |
 
