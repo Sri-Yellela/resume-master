@@ -44,7 +44,7 @@ await browser.close();
 console.log(`length   ${text.length} chars of rendered prose\n`);
 
 const MUST = [
-  ['effective date',            /Effective:\s*August 18, 2026/i],
+  ['effective date',            /Effective:\s*August 19, 2026/i],
   ['ONE capture action',        /one capture action/i],
   ['no job lists collected',    /does not collect lists of jobs/i],
   ['saved-jobs capability gone',/saved-jobs list.{0,80}removed|capability was removed/i],
