@@ -6,7 +6,7 @@ import { Footer } from "../../components/Footer.jsx";
 // Effective date, not just "last touched". The Chrome Web Store rules that took effect on
 // 2026-08-01 require a policy to state when it takes effect and to commit to telling users about
 // material changes to data handling — see the "Changes to This Policy" section.
-const EFFECTIVE_DATE = 'August 18, 2026';
+const EFFECTIVE_DATE = 'August 19, 2026';
 const CONTACT_EMAIL  = 'privacy@resumemaster.one';
 
 function Section({ title, children }) {
@@ -358,18 +358,30 @@ export function PrivacyPage() {
               sent to SerpApi's servers; no personal data is included in search queries.
             </LI>
             <LI>
-              <Strong>Apify</Strong> (optional) — job search, using an Apify account you connect
-              yourself with your own token. When you run a search, the job titles, locations and
-              filters for that search are sent to Apify to run a public job-board search. Your
-              resume, your profile and any captured job data are not sent. If you do not connect
-              an Apify token, nothing is sent to them.
+              <Strong>Apify</Strong> (optional, and off unless you connect it) — a job-scraping
+              service you may link with your own Apify token from your account settings. It is
+              <Strong>not</Strong> used by ordinary job search. It is reached only when an
+              administrator runs a manual refresh for an account that has connected a token, and
+              what is sent is the job titles, locations and filters for that refresh. Your resume,
+              your profile and any captured job data are never sent. If you have not connected a
+              token, nothing is ever sent to them.
             </LI>
             <LI>
-              <Strong>Adzuna</Strong> — job listings via their official publisher API.
+              <Strong>Adzuna</Strong> — job listings via their official publisher API. Your search
+              terms and filters are sent to Adzuna when you search; no personal data is included.
             </LI>
             <LI>
-              <Strong>Clearbit Logo API</Strong> — company logo images. We request
-              logos by company domain only; no user data is sent.
+              <Strong>Job boards we search directly</Strong> — Greenhouse, Lever, Ashby, Workday,
+              SmartRecruiters, Workable and Recruitee. When you run a job search we query these
+              boards' public APIs, which means your search terms and filters reach them. No
+              personal data is included, and nothing about your resume, profile or saved jobs is
+              sent.
+            </LI>
+            <LI>
+              <Strong>Clearbit Logo API</Strong> — company logo images. We build a logo address
+              from the company's own domain and your browser loads the image from Clearbit, so
+              Clearbit sees that request the way it sees any image request. Only the company domain
+              is in the address; we send them no data about you.
             </LI>
             <LI>
               <Strong>LinkedIn OAuth</Strong> (optional) — if you choose to sign in
