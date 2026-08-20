@@ -23,8 +23,8 @@ import {
 // leaves that sum alone, so the dock cannot move.
 //
 // SIDE BY SIDE, AND THE PANEL THAT DOES NOT FIT. Up to THREE panels tile — all three peers can be
-// on screen at once, which is the arrangement the set was built for. When a FOURTH would open, the
-// rule U3 decided stands unchanged: the LEAST RECENTLY FOCUSED panel is closed to make room.
+// on screen at once, which is the arrangement the set was built for. When one more would open than
+// fits, a panel is CLOSED rather than the new one being refused:
 //
 //   - Refusing to open would leave a dead click. The user asked for a surface and nothing would
 //     appear; the generate flow in particular calls openSandbox() itself, so a refusal there would
@@ -32,10 +32,13 @@ import {
 //   - Replacing the least recently focused is the one eviction the user is least likely to notice,
 //     because it is by definition the panel they have not touched.
 //
-// Focus order, not open order, drives eviction. Open order alone would evict the panel you opened
-// first even if you were actively using it. With three slots and three panel types the rule is now
-// mostly theoretical — it fires only if a fourth type is ever added — but it stays because "what
-// happens when one more opens" must have an answer that is written down rather than emergent.
+// WHICH panel is closed depends on how many slots there are, and the two cases are different
+// questions rather than one rule with an exception — see the eviction effect below for the measured
+// reason. With TWO OR MORE slots it is the least recently focused: focus order, not open order,
+// because open order alone would evict the panel you opened first even while you were using it.
+// With ONE slot there is no "the one you have not touched" to appeal to, so the survivor is decided
+// by the DESCRIPTOR ORDER as a declared priority. Both answers are written down rather than
+// emergent, which is the whole point of having them here.
 /**
  * @param {Array<{id: string, open: boolean, close: Function}>} descriptors
  *        Declared in a stable order. `open` is owned by the caller; `close` is how the host evicts.
@@ -100,12 +103,35 @@ export function usePanelHost(descriptors, viewportWidth) {
   }, [openIds]);
 
   // Eviction. Runs after the focus order is current, so "least recently focused" is accurate.
+  //
+  // ABOVE CAPACITY 1 the rule is unchanged: keep the `capacity` most recently focused, drop the
+  // rest. Focus recency is a real signal there — the panel you have not touched is the one you are
+  // least likely to miss, and there is still a panel you HAVE touched for it to be compared against.
+  //
+  // AT CAPACITY 1 that comparison does not exist, and using recency there turned a product decision
+  // into a coin toss. Measured at 880x700 and 600x900: pressing Generate opened the PDF sandbox
+  // (immediately, as a "generating" skeleton), then the ATS report arrived with the response a few
+  // seconds later — so the sandbox was, quite correctly, the least recently focused of the two, and
+  // was evicted. The one open panel was the score and not the resume, and usePanelHost's own note
+  // says refusing to open would "silently discard a resume the user just paid a model call for".
+  // The eviction was doing exactly that, and it was decided by which setState happened to run first.
+  //
+  // With one slot, every open panel is either THE panel or not on screen at all; "the one you have
+  // not touched" is meaningless. The question is only which surface deserves the slot, which is a
+  // decision, so it is declared: the DESCRIPTOR ORDER is a priority, later = higher, and the highest
+  // priority open panel keeps the slot. JobsPanel declares [jd, ats, pdf] — the resume outranks its
+  // report, which outranks the job description it was generated from. Seven call sites open the
+  // sandbox and the report together and all seven now resolve the same way, whatever order their
+  // setState calls land in.
   useEffect(() => {
     const order = focusOrderRef.current;
     if (order.length <= capacity) return;
-    const evictCount = order.length - capacity;
-    // order[0] is least recently focused.
-    for (const id of order.slice(0, evictCount)) {
+    const priority = descriptors.map(d => d.id);
+    const keep = capacity === 1
+      ? [...order].sort((a, b) => priority.indexOf(a) - priority.indexOf(b)).slice(-1)
+      : order.slice(order.length - capacity);   // the `capacity` most recently focused
+    for (const id of order) {
+      if (keep.includes(id)) continue;
       descriptors.find(d => d.id === id)?.close?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

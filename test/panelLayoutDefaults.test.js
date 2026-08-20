@@ -106,13 +106,26 @@ test("side-by-side has a defined capacity and a defined overflow rule", () => {
   // THREE panels tile — all three peers on screen at once is the arrangement the set exists for.
   assert.match(geometry, /export const MAX_TILED = 3;/);
   // The decision, asserted so it cannot drift into "whatever the code happens to do": the panel
-  // that does not fit evicts the LEAST RECENTLY FOCUSED one rather than being refused.
-  assert.match(host, /const evictCount = order\.length - capacity;/);
-  assert.match(host, /order\.slice\(0, evictCount\)/);
+  // that does not fit evicts rather than being refused, and it is never refused silently.
   assert.match(host, /descriptors\.find\(d => d\.id === id\)\?\.close\?\.\(\)/);
-  // Eviction is by FOCUS order, not open order — otherwise the panel you are actively using is the
-  // one that gets closed.
+  // ABOVE capacity 1: keep the `capacity` MOST RECENTLY FOCUSED. By focus order, not open order —
+  // otherwise the panel you are actively using is the one that gets closed.
+  assert.match(host, /order\.slice\(order\.length - capacity\)/);
   assert.match(host, /focusOrderRef/);
+  // AT capacity 1: by DECLARED PRIORITY, not recency. Recency needs two panels to compare, and with
+  // one slot there is only ever the one on screen — so it reduced a product decision to whichever
+  // setState ran first. Measured at 880x700: Generate opened the sandbox as a skeleton, the ATS
+  // report arrived seconds later and evicted it, and the single visible panel was the score rather
+  // than the resume the model call had just produced. `descriptors` order is the priority, later =
+  // higher, and JobsPanel declares [jd, ats, pdf].
+  assert.match(host, /const priority = descriptors\.map\(d => d\.id\);/);
+  assert.match(host, /capacity === 1/);
+  assert.match(host, /priority\.indexOf\(a\) - priority\.indexOf\(b\)\)\.slice\(-1\)/);
+  const at = jobsPanel.indexOf("const panelDescriptors");
+  const descriptors = jobsPanel.slice(at, at + 420);
+  assert.ok(descriptors.indexOf('id: "jd"') < descriptors.indexOf('id: "ats"')
+         && descriptors.indexOf('id: "ats"') < descriptors.indexOf('id: "pdf"'),
+    "the descriptor order IS the capacity-1 priority: the resume must outrank its report, which must outrank the JD");
 });
 
 test("panels tile inside the dock, not against the viewport", () => {

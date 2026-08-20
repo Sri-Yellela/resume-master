@@ -41,6 +41,15 @@ export const Z = {
   // The search surface: the main bar OR the collapsed pill, never both (see useSearchSurface).
   // Above CONTENT and above PANEL_POPOVER, so it floats cleanly over panel content instead of
   // being underlapped by it. Below MODAL, because a drawer is a focused task that should cover it.
+  //
+  // BOTH RENDERINGS OF THAT SURFACE BELONG HERE. There are two: UnifiedSearchBar (the expanded bar,
+  // client/src/components/UnifiedSearchBar.css) and TopBar's collapsed filter pill. The pill used to
+  // carry NAV instead, which put ONE surface in two tiers depending only on the scroll offset — and
+  // on opposite sides of MODAL_SCRIM. Measured with the page scrolled and two panels open: the pill
+  // painted at 1500 over a scrim at 800 and tiles at 850, cutting 10px across both tiles' headers,
+  // undimmed, and — because useBoardLock deliberately spares everything at or above NAV — still
+  // clickable and tab-reachable through the modal. Anything that renders the search surface reads
+  // SEARCH; NAV is for the nav bar itself, which is meant to stay live over a panel.
   SEARCH: 400,
 
   // Modal drawers — the job-detail panel and its peers (PDF, ATS). The scrim dims the app without

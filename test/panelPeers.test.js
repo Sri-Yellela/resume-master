@@ -225,3 +225,57 @@ test("keyboard scrolling targets the focused panel, not the page", () => {
   assert.match(shell, /scrollRef\.current\?\.focus\?\.\(\{ preventScroll: true \}\)/);
   assert.match(shell, /tabIndex=\{-1\} data-panel-body=""/);
 });
+
+// ── The corrective pass: two things the panels' CONTAINER was right about and the app was not ──
+
+test("the collapsed search surface is in the SEARCH tier, so the scrim and the tiles cover it", () => {
+  // The one defect behind "the search bar renders above the panel bodies". The search surface has
+  // two renderings — UnifiedSearchBar (expanded) and TopBar's collapsed filter pill — and the pill
+  // carried Z.NAV while the bar carried Z.SEARCH. One surface, two tiers, chosen by nothing but the
+  // scroll offset, and they landed on opposite sides of MODAL_SCRIM.
+  //
+  // Measured at 1280x800 with the page scrolled 500 and the PDF + ATS tiles open: the pill painted
+  // at z 1500 over a scrim at 800 and tiles at 850, overlapping BOTH tiles' headers by 10px, at full
+  // brightness while the board beneath it was dimmed. And because useBoardLock spares every shell
+  // child at or above Z.NAV — correctly, so the nav stays reachable — the board's tab buttons, sort
+  // select, profile switcher and filter input stayed clickable and tab-reachable through the modal.
+  // That is also why STATE A looked right and STATE B looked wrong: at scroll 0 the surface is the
+  // BAR, which was always below the scrim.
+  const topbar = read("client/src/components/TopBar.jsx");
+  const pillAt = topbar.indexOf("{pillIsTheSearchSurface");
+  assert.ok(pillAt > 0, "the collapsed search surface is gone");
+  const pill = topbar.slice(pillAt, pillAt + 1600);
+  assert.match(pill, /zIndex: Z\.SEARCH,/);
+  assert.ok(!/zIndex: Z\.NAV,/.test(pill),
+    "the collapsed search surface is back in the NAV tier, above the scrim and above the tiles");
+  // Pill 1 — the nav bar itself — DOES stay at NAV. It is real nav chrome and is meant to remain
+  // live over an open panel; inerting it would leave a control that looks clickable and is not.
+  assert.match(topbar.slice(0, pillAt), /zIndex: Z\.NAV,/);
+  // And the CSS half of the same surface declares the tier once, on the base rule, so the three
+  // layouts cannot disagree: .usb--dock was inheriting a bare 200, i.e. below PANEL_POPOVER.
+  const usbCss = read("client/src/components/UnifiedSearchBar.css");
+  assert.ok(!/z-index: 200;/.test(usbCss), "the search surface is back below panel popovers");
+  assert.equal((usbCss.match(/z-index:/g) || []).length, 1,
+    "one tier, declared once — two copies is how the dock layout drifted from the hero layout");
+});
+
+test("the panel openers do not switch to mobile panes that no longer exist", () => {
+  // openSandbox / closeSandbox / openAtsPanel used to set mobilePane to "editor" / "ats". Those
+  // panes rendered the sandbox and the report INLINE and were deleted when both became popup
+  // panels — the mobile branch renders the board and nothing else. So the switch emptied the board
+  // behind the overlay, and closeAtsPanel never reset it, so closing the panels left it empty.
+  // Measured at 880x700 and 600x900: zero job cards behind an open panel, and zero after closing.
+  // Stripped source: this test's own notes name the mechanism being asserted absent, and a comment
+  // describing a removed switch reads as the switch still being there.
+  const jobsCode = jobs.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.ok(!/setMobilePane/.test(jobsCode),
+    "the pane switch is back, pointing at a pane that renders nothing");
+  assert.ok(!/mobilePane/.test(jobsCode),
+    "the board is gated on a pane value again; nothing can set it, so it can only hide the board");
+  // The bottom-nav Resume / ATS items reach the PANELS that own those surfaces now, rather than a
+  // pane — the tab still shows the resume and still shows the report.
+  assert.match(jobs, /onPress: \(\) => openSandbox\(sandbox\)/);
+  assert.match(jobs, /onPress: \(\) => openAtsPanel\(null\)/);
+  assert.match(jobs, /enabled: !!sandbox,/);
+  assert.match(jobs, /enabled: !!activeAts,/);
+});

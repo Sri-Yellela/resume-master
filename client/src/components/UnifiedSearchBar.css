@@ -1,7 +1,13 @@
 /* ── Single element, always fixed, mode driven by class ── */
 .usb {
   position: fixed;
-  z-index: 200;
+  /* SEARCH tier — see client/src/styles/zLayers.js, which publishes these custom properties from
+     the single scale definition so this file never holds a literal. It lives on the BASE rule, not
+     on .usb--inline.usb--hero, because the tier is a property of the search surface and not of one
+     of its three layouts: .usb--dock was inheriting a bare 200, i.e. BELOW PANEL_POPOVER (300), so
+     a date popover inside a panel could paint over the search bar in the dock layout while the same
+     bar in the hero layout sat correctly above it. */
+  z-index: var(--z-search, 400);
   box-sizing: border-box;
   /* single source of truth for all transitions */
   transition:
@@ -66,11 +72,8 @@
   transform: none;
   margin-left: auto;
   margin-right: auto;
-  /* SEARCH tier — see client/src/styles/zLayers.js, which publishes these custom properties from
-     the single scale definition so this file never holds a literal. It was 50, which is BELOW
-     several panel-internal values (DatabasePanel's date popover at 300, its detail modal at 1000):
-     that is why the search surface was underlapped by panel content instead of floating over it. */
-  z-index: var(--z-search, 400);
+  /* No z-index here: the SEARCH tier is declared once, on .usb. Two copies of a tier is how the
+     dock layout ended up on 200 while the hero layout was on 400. */
 }
 .usb--inline.usb--hero {
   width: min(920px, 94vw);
