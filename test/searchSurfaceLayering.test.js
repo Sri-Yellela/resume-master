@@ -111,7 +111,14 @@ test("no surface on the scale carries a literal any more", () => {
   // primitive means one place that decides the tier, which is the whole point of extracting it.
   const shell = read("client/src/components/PanelShell.jsx");
   assert.match(shell, /zIndex: Z\.MODAL_SCRIM/);
-  assert.match(shell, /zIndex: Z\.MODAL \+ \(focused \? 1 : 0\)/);
+  // The modal tier is carried by the DOCK — the one fixed overlay surface the panels tile inside —
+  // rather than by each panel. That is what made tiling internal, and it also means the tier is
+  // declared once for the group instead of once per peer. Ordering BETWEEN peers is then a local
+  // z-index within the dock's stacking context, which is a 0/1 by construction and not a scale
+  // value competing with the app's.
+  assert.match(shell, /zIndex: Z\.MODAL,/);
+  assert.match(shell, /export function PanelDock/);
+  assert.match(shell, /zIndex: focused \? 1 : 0,/);
   assert.ok(!/zIndex:30,/.test(shell) && !/zIndex:40,/.test(shell),
     "a drawer is back under the search surface");
   // And JD must not have grown its own drawer chrome back.

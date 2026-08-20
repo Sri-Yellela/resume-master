@@ -121,13 +121,14 @@ function ActionBtn({ onClick, title, children, accent = "#0284c7", active, disab
   );
 }
 
-// Layout props (slot, rightOffset, focused, fullScreen, onFocus, onWidthChange) come from
-// usePanelHost via JobsPanel — this panel is one peer in an ordered set now, not the only drawer.
-// Escape handling, focus-on-open, the portal, the scrim, the animation and the two sticky regions
-// all moved into PanelShell, which is shared with the PDF and ATS panels.
+// Layout props (slot, width, focused, fullScreen, resizeMode and the three resize callbacks) come
+// from usePanelHost via JobsPanel — this panel is one peer in an ordered set now, not the only
+// drawer, and its width is allocated from the dock's budget rather than owned here. Escape
+// handling, focus-on-open, the overlay surface, the scrim, the animation and the two pinned regions
+// all live in PanelShell, which is shared with the PDF and ATS panels.
 export default function JobDetailPanel({
-  slot = 0, rightOffset = 16, focused = true, fullScreen = false,
-  onFocus, onWidthChange,
+  slot = 0, width, focused = true, fullScreen = false, resizeMode = "dock",
+  onFocus, onResizeStart, onResize, onResizeEnd,
 }) {
   const { selectedJob, setSelectedJob, selectedJobMeta } = useJobBoard();
   const { theme } = useTheme();
@@ -180,8 +181,10 @@ export default function JobDetailPanel({
   return (
     <PanelShell
       panelId="jd"
-      slot={slot} rightOffset={rightOffset} focused={focused} fullScreen={fullScreen}
-      onClose={close} onFocus={onFocus} onWidthChange={onWidthChange}
+      slot={slot} width={width} focused={focused} fullScreen={fullScreen}
+      resizeMode={resizeMode}
+      onClose={close} onFocus={onFocus}
+      onResizeStart={onResizeStart} onResize={onResize} onResizeEnd={onResizeEnd}
       header={
         <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
               <CompanyIcon company={selectedJob.company} iconUrl={selectedJob.companyIconUrl}/>

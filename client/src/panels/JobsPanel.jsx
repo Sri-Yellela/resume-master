@@ -10,8 +10,9 @@ import JobCard from "../components/JobCard.jsx";
 import JobDetailPanel from "../components/JobDetailPanel.jsx";
 import SandboxPanel from "./SandboxPanel.jsx";
 import AtsReportPanel from "./AtsReportPanel.jsx";
-import { PanelScrim } from "../components/PanelShell.jsx";
+import { PanelScrim, PanelDock } from "../components/PanelShell.jsx";
 import { usePanelHost } from "../hooks/usePanelHost.js";
+import { useBoardLock } from "../hooks/useBoardLock.js";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
 import ProfileSelectorDropdown from "../components/ProfileSelectorDropdown.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
@@ -1144,24 +1145,35 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // that still lives where it always did (selectedJob in JobBoardContext, sandboxOpen and
   // rightPanelOpen here), set by the same dozen call sites as before, including the generate flow's
   // own openSandbox(). It observes them, orders them by focus, tiles them, and evicts the least
-  // recently focused when a third opens. See hooks/usePanelHost.js for why eviction rather than
-  // refusal.
+  // recently focused when one more opens than will fit. See hooks/usePanelHost.js for why eviction
+  // rather than refusal.
   const panelDescriptors = useMemo(() => ([
     { id: "jd",  open: !!selectedJob,   close: () => setSelectedJob(null) },
     { id: "pdf", open: sandboxOpen,     close: () => { setSandboxOpen(false); setSandbox(null); } },
     { id: "ats", open: rightPanelOpen,  close: () => setRightPanelOpen(false) },
   ]), [selectedJob, sandboxOpen, rightPanelOpen, setSelectedJob]);
-  const { visible: visiblePanels, focusPanel, reportWidth, openCount: openPanelCount } =
-    usePanelHost(panelDescriptors, vpWidth);
+  const {
+    visible: visiblePanels, dockWidth, focusPanel,
+    beginResize, resizeBy, endResize,
+    openCount: openPanelCount, fullScreenMode: panelsFullScreen,
+  } = usePanelHost(panelDescriptors, vpWidth);
   const panelProps = useCallback((id) => {
     const p = visiblePanels.find(v => v.id === id);
     if (!p) return null;
     return {
-      slot: p.slot, rightOffset: p.rightOffset, focused: p.focused, fullScreen: p.fullScreen,
+      slot: p.slot, width: p.width, focused: p.focused, fullScreen: p.fullScreen,
+      resizeMode: p.resizeMode,
       onFocus: () => focusPanel(id),
-      onWidthChange: (w) => reportWidth(id, w),
+      onResizeStart: beginResize,
+      onResize: (delta) => resizeBy(id, delta),
+      onResizeEnd: endResize,
     };
-  }, [visiblePanels, focusPanel, reportWidth]);
+  }, [visiblePanels, focusPanel, beginResize, resizeBy, endResize]);
+
+  // While any panel is open the board is inert and the page is frozen at its current scroll offset,
+  // which is restored exactly on close. See hooks/useBoardLock.js — a scrim alone stopped neither
+  // the Tab key nor the wheel.
+  useBoardLock(openPanelCount > 0);
 
   const closeAtsPanel = useCallback(() => {
     setRightPanelOpen(false);
@@ -4112,40 +4124,51 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         </div>
       )}
 
-      {/* ── The popup panel group: JD, PDF and ATS as peers ────────────────────────────────────
+      {/* ── The popup panel group: JD, PDF and ATS as peers, inside ONE overlay surface ────────
           All three render through PanelShell and are laid out by one host, so "replace" and
-          "side by side" are properties of the set rather than of any one panel. ONE scrim for the
-          whole group: two stacked 45% scrims compound to ~70% and the board stops being visible
-          behind them, which would break the "dims but does not hide" property exactly when a second
-          panel opens. Clicking it closes the focused panel — the same gesture the JD drawer's own
-          backdrop has always had. */}
+          "side by side" are properties of the set rather than of any one panel.
+
+          The dock is what makes the tiling INTERNAL. Panels are its flex children, so they lay out
+          against each other and against nothing else — the board cannot be a party to it. It is
+          also what gives the group outer bounds to keep still: before it, each panel was
+          independently right-anchored to the viewport, and dragging one wider pushed its neighbour
+          off the left edge of the screen rather than resizing against it.
+
+          ONE scrim for the whole group: two stacked 45% scrims compound to ~70% and the board stops
+          being visible behind them, which would break the "dims but does not hide" property exactly
+          when a second panel opens. Clicking it closes the focused panel — the same gesture the JD
+          drawer's own backdrop has always had. The dock is always mounted, and is an empty
+          pointer-events:none box when nothing is open, so AnimatePresence still gets to play the
+          last panel's exit instead of having its container yanked mid-animation. */}
       <PanelScrim show={openPanelCount > 0} onClick={() => {
         const focused = visiblePanels.find(p => p.focused);
         panelDescriptors.find(d => d.id === focused?.id)?.close?.();
       }}/>
-      <AnimatePresence>
-        {panelProps("jd")  && <JobDetailPanel key="panel-jd" {...panelProps("jd")}/>}
-        {panelProps("pdf") && (
-          <SandboxPanel key="panel-pdf" {...panelProps("pdf")}
-            entry={sandbox} onClose={closeSandbox}
-            onSave={saveSandboxHtml} onExport={exportAndTrack}/>
-        )}
-        {panelProps("ats") && (
-          <AtsReportPanel key="panel-ats" {...panelProps("ats")}
-            onClose={closeAtsPanel}
-            theme={theme} activeAts={activeAts}
-            rightTab={rightTab} setRightTab={setRightTab} genCount={genCount}
-            jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}
-            historyContent={
-              <HistoryList generated={generated} theme={theme}
-                onOpen={e => {
-                  openSandbox(e);
-                  openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
-                }}
-                onExport={exportAndTrack}/>
-            }/>
-        )}
-      </AnimatePresence>
+      <PanelDock width={dockWidth} fullScreen={panelsFullScreen && openPanelCount > 0}>
+        <AnimatePresence>
+          {panelProps("jd")  && <JobDetailPanel key="panel-jd" {...panelProps("jd")}/>}
+          {panelProps("pdf") && (
+            <SandboxPanel key="panel-pdf" {...panelProps("pdf")}
+              entry={sandbox} onClose={closeSandbox}
+              onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+          )}
+          {panelProps("ats") && (
+            <AtsReportPanel key="panel-ats" {...panelProps("ats")}
+              onClose={closeAtsPanel}
+              theme={theme} activeAts={activeAts}
+              rightTab={rightTab} setRightTab={setRightTab} genCount={genCount}
+              jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}
+              historyContent={
+                <HistoryList generated={generated} theme={theme}
+                  onOpen={e => {
+                    openSandbox(e);
+                    openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
+                  }}
+                  onExport={exportAndTrack}/>
+              }/>
+          )}
+        </AnimatePresence>
+      </PanelDock>
     </div>
   );
 }

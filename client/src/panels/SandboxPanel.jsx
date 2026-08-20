@@ -20,12 +20,16 @@ import PanelShell from "../components/PanelShell.jsx";
 const RESUME_PAGE_WIDTH  = 794;  // A4 at 96dpi
 const RESUME_PAGE_HEIGHT = 1123; // A4 at 96dpi
 const RESUME_PAGE_GAP    = 12;
+// Below this panel width, scaling an A4 page to fit stops producing readable text (794 * 700/794
+// is already 0.88, and the fall-off is linear from there), so the reflowed view becomes the default.
+const PAGE_VIEW_MIN_WIDTH = 700;
 
 export default function SandboxPanel({
   entry, onClose, onSave, onExport,
   // Panel-host layout props — this is a PEER of the JD drawer now, rendered through the same
   // PanelShell primitive, not a react-resizable-panels column squeezed in below the search bar.
-  slot = 0, rightOffset = 16, focused = true, fullScreen = false, onFocus, onWidthChange,
+  slot = 0, width, focused = true, fullScreen = false, resizeMode = "dock",
+  onFocus, onResizeStart, onResize, onResizeEnd,
 }) {
   const { theme } = useTheme();
   // ── Page view vs Reading view ───────────────────────────────────────────────────────────────
@@ -41,7 +45,21 @@ export default function SandboxPanel({
   // in a narrow panel with no zooming. The cost is real and is stated in the UI rather than hidden:
   // reflowed text does not break where A4 breaks, so this view cannot show pagination. It is a
   // reading aid, not a preview.
-  const [viewMode, setViewMode] = useState("page");
+  //
+  // WHICH VIEW LEADS DEPENDS ON THE WIDTH, and that is the point of requirement 7: the preview must
+  // be re-rendered at the panel's current width, not scaled down to it. Page view scales A4 (794px)
+  // to whatever the panel has, so its legibility is a pure function of that width — at the 360px
+  // minimum the scale is 0.45 and 12.5px body text lands under 6px, which is a picture of a resume
+  // rather than a readable one. Below PAGE_VIEW_MIN_WIDTH the panel therefore opens in Reading
+  // view, which re-renders the same HTML at the measured width so the text reflows at full size.
+  // At or above it, Page view leads, because it is the only view whose page breaks match the
+  // exported PDF and there is no legibility reason to give that up.
+  //
+  // `viewChoice` is null until the user picks. An explicit choice wins at every width thereafter —
+  // the width decides the DEFAULT, it does not override the person.
+  const [viewChoice, setViewChoice] = useState(null);
+  const viewMode = viewChoice
+    || ((width ?? PAGE_VIEW_MIN_WIDTH) >= PAGE_VIEW_MIN_WIDTH ? "page" : "reading");
   const [exporting,   setExporting]   = useState(false);
   const [exportError, setExportError] = useState("");
   const [dirty,       setDirty]       = useState(false);
@@ -77,6 +95,8 @@ export default function SandboxPanel({
     setExportError("");
     setPageCount(1);
     setFindingDecisions({});
+    // A new resume follows the panel width again; the previous choice was about the old document.
+    setViewChoice(null);
     currentHtmlRef.current = entry?.html || "";
     frameRefs.current = [];
     frameCleanupRef.current = [];
@@ -268,11 +288,12 @@ export default function SandboxPanel({
 
   const actions = (activeEntry?.generating || activeEntry?.error || activeEntry?.missing) ? null : (
     <>
-      {/* View toggle. Page view is listed first and is the default — the faithful one leads. */}
+      {/* View toggle. Page is listed first because it is the faithful view; which one is SELECTED
+          on open depends on whether the panel is wide enough for it to be legible. */}
       <div style={{ display:"flex", gap:2, border:"1px solid var(--color-border)",
                     borderRadius:999, padding:2 }}>
         {[["page","Page"],["reading","Reading"]].map(([id,lbl]) => (
-          <button key={id} onClick={() => setViewMode(id)}
+          <button key={id} onClick={() => setViewChoice(id)}
             title={id === "page"
               ? "A4 pages, scaled to fit — matches the exported PDF"
               : "Reflow to panel width for legibility — does not show real pagination"}
@@ -304,8 +325,10 @@ export default function SandboxPanel({
   return (
     <PanelShell
       panelId="pdf"
-      slot={slot} rightOffset={rightOffset} focused={focused} fullScreen={fullScreen}
-      onClose={onClose} onFocus={onFocus} onWidthChange={onWidthChange}
+      slot={slot} width={width} focused={focused} fullScreen={fullScreen}
+      resizeMode={resizeMode}
+      onClose={onClose} onFocus={onFocus}
+      onResizeStart={onResizeStart} onResize={onResize} onResizeEnd={onResizeEnd}
       header={header} actions={actions}
     >
     <div style={{ display:"flex", flexDirection:"column", minHeight:"100%", minWidth:0, background:"var(--color-bg)" }}>
