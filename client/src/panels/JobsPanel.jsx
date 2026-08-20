@@ -1086,8 +1086,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const isMobile   = vpMode === "mobile" || vpMode === "tablet";
   const isPortrait = vpMode === "portrait" || vpMode === "laptop";
 
-  // Mobile pane state
-  const [mobilePane, setMobilePane] = useState("jobs"); // "jobs" | "editor" | "ats"
+  // The mobile pane switch is GONE. It had three values, "jobs" | "editor" | "ats", and only the
+  // first still renders anything: the editor and ats panes were deleted when the PDF sandbox and the
+  // ATS report became popup panels. Nothing sets it any more (see openSandbox / the bottom nav), so
+  // holding it as state would be holding a constant, and reading it would be gating the board on a
+  // value that can no longer change. The board is what the mobile branch renders; the panels overlay
+  // it full-screen on a narrow viewport, which is usePanelHost's fallback.
 
   // Tracks jobs disliked in this browser session — survives filter/sort refetches
   // but is cleared on page reload (so server exclusions take effect on next login)
@@ -1121,24 +1125,32 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     selectedJob, setSelectedJob, setSelectedJobMeta,
   } = useJobBoard();
 
-  // Open / close sandbox — panel size rebalancing handled by useEffect below
+  // Open / close sandbox — panel size rebalancing handled by useEffect below.
+  //
+  // NO `setMobilePane` HERE ANY MORE, and that is a fix rather than a tidy-up. These three used to
+  // switch the mobile board to the "editor" / "ats" pane, from when those panes rendered the sandbox
+  // and the ATS report inline. Both panes were deleted when the surfaces became popup panels, which
+  // left the mobile branch rendering JobsColumn for `mobilePane === "jobs"` and NOTHING for the other
+  // two values — so the switch pointed at a pane that no longer existed. Observed at 880x700 and
+  // 600x900 before this change:
+  // pressing Generate opened the panel over a COMPLETELY EMPTY board, and because closeAtsPanel
+  // never reset the pane, closing the panels left the board still empty until the user found the
+  // bottom-nav "Jobs" button. On a narrow viewport the panel is a full-screen overlay (see
+  // usePanelHost's fallback) and the board simply stays where it is underneath it.
   const openSandbox = useCallback((entry) => {
     setSandbox(entry);
     setSandboxOpen(true);
-    if (isMobile) setMobilePane("editor");
-  }, [isMobile]);
+  }, []);
 
   const closeSandbox = useCallback(() => {
     setSandboxOpen(false);
-    if (isMobile) setMobilePane("jobs");
-  }, [isMobile]);
+  }, []);
 
   const openAtsPanel = useCallback((atsData) => {
     if (atsData) setActiveAts(atsData);
     setRightPanelOpen(true);
     setRightTab("ats");
-    if (isMobile) setMobilePane("ats");
-  }, [isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── The panel host ──────────────────────────────────────────────────────────────────────────
   // JD, PDF and ATS are peers in one ordered set. The host does not own their open/closed state —
@@ -1147,10 +1159,22 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // own openSandbox(). It observes them, orders them by focus, tiles them, and evicts the least
   // recently focused when one more opens than will fit. See hooks/usePanelHost.js for why eviction
   // rather than refusal.
+  //
+  // THE ORDER OF THIS ARRAY IS A PRIORITY, later = higher, and the host reads it when only ONE
+  // panel fits (see the eviction note in hooks/usePanelHost.js). Seven call sites open the PDF
+  // sandbox and the ATS report together — the generate flow, the reuse flow, the cached-artifact
+  // flow, the card's eye button, the JD panel's Regen and Preview, the history list — and at
+  // capacity 1 exactly one of them can be on screen. Which one was previously decided by whichever
+  // setState ran first, which for the generate flow meant the sandbox (opened immediately as a
+  // skeleton) lost its slot to the report that arrived with the response seconds later.
+  //
+  // [jd, ats, pdf]: the resume outranks its report, which outranks the job description it was
+  // generated from. Above capacity 1 nothing here applies — eviction is still by focus recency —
+  // and JD open on its own is unaffected either way.
   const panelDescriptors = useMemo(() => ([
     { id: "jd",  open: !!selectedJob,   close: () => setSelectedJob(null) },
-    { id: "pdf", open: sandboxOpen,     close: () => { setSandboxOpen(false); setSandbox(null); } },
     { id: "ats", open: rightPanelOpen,  close: () => setRightPanelOpen(false) },
+    { id: "pdf", open: sandboxOpen,     close: () => { setSandboxOpen(false); setSandbox(null); } },
   ]), [selectedJob, sandboxOpen, rightPanelOpen, setSelectedJob]);
   const {
     visible: visiblePanels, dockWidth, focusPanel,
@@ -4014,50 +4038,61 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         <SetupGateNotice theme={theme} {...setupBlock} />
       ) : isMobile && (
         <div style={{ flex:1, minHeight:0, minWidth:0, display:"flex", flexDirection:"column", overflow:"hidden", position:"relative" }}>
-          {/* Active pane */}
+          {/* The board. Unconditional now — there is no pane to switch away to. */}
           <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:"column" }}>
-            {mobilePane === "jobs" && (
-              <JobsColumn
-                jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
-                onClearScrapeError={() => setScrapeError("")}
-                pollStatus={pollStatus}
-                onRetryPoll={handlePullRefresh}
-                generated={generated} loading={loading}
-                applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
-                theme={theme}
-                totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
-                generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
-                visitUrl={visitUrl} toggleStar={toggleStar} openAtsPanel={openAtsPanel}
-                goPage={goPage} onPullRefresh={handlePullRefresh}
-                setMobilePane={setMobilePane} isMobile={isMobile}
-                onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
-                activeFilterCount={activeFilterCount}
-                onClearFilters={clearAllFilters}
-                searchActive={!!localSearch.trim()}
-                profileName={activeDomainProfile?.profile_name || null}
-                cardTier={1}
-              />
-            )}
+            <JobsColumn
+              jobs={displayJobs} scraping={scraping} scrapeError={scrapeError}
+              onClearScrapeError={() => setScrapeError("")}
+              pollStatus={pollStatus}
+              onRetryPoll={handlePullRefresh}
+              generated={generated} loading={loading}
+              applyMode={applyMode} canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
+              theme={theme}
+              totalPages={totalPages} currentPage={currentPage} isLastPage={isLastPage}
+              generate={generate} openSandbox={openSandbox} exportAndTrack={exportAndTrack}
+              visitUrl={visitUrl} toggleStar={toggleStar} openAtsPanel={openAtsPanel}
+              goPage={goPage} onPullRefresh={handlePullRefresh}
+              isMobile={isMobile}
+              onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
+              activeFilterCount={activeFilterCount}
+              onClearFilters={clearAllFilters}
+              searchActive={!!localSearch.trim()}
+              profileName={activeDomainProfile?.profile_name || null}
+              cardTier={1}
+            />
             {/* The mobile "editor" pane is gone: the PDF sandbox is a popup panel now and renders
                 full-screen on a narrow viewport (usePanelHost's fallback), so a second inline copy
                 of it would be a divergent implementation of the same surface. */}
             {/* Likewise the mobile "ats" pane — AtsReportPanel renders full-screen on narrow
                 viewports through the shared primitive. */}
           </div>
-          {/* Bottom nav */}
+          {/* Bottom nav.
+              Resume and ATS now OPEN THE PANEL that owns each surface instead of switching to a
+              pane. They used to call setMobilePane("editor"/"ats"), and those panes were deleted
+              when the surfaces became popup panels — so both buttons emptied the board and showed
+              nothing in its place. The tab still shows the resume and still shows the report; the
+              surface it reaches is the full-screen panel rather than a second inline copy of it.
+              Disabled when there is nothing to show yet, which is honest about a resume that has
+              not been generated instead of opening an empty sandbox. */}
           <div style={{ display:"flex", borderTop:`1px solid ${theme.border}`,
                         background:theme.surface, flexShrink:0 }}>
             {[
-              { id:"jobs",   label:"Jobs",   icon:"Jobs" },
-              { id:"editor", label:"Resume", icon:"Edit" },
-              { id:"ats",    label:"ATS",    icon:"ATS" },
-            ].map(({ id, label, icon }) => (
-              <button key={id} onClick={() => setMobilePane(id)}
+              { id:"jobs",   label:"Jobs",   icon:"Jobs", active: !sandboxOpen && !rightPanelOpen,
+                enabled: true,          onPress: () => { closeSandbox(); closeAtsPanel(); } },
+              { id:"editor", label:"Resume", icon:"Edit", active: sandboxOpen,
+                enabled: !!sandbox,     onPress: () => openSandbox(sandbox) },
+              { id:"ats",    label:"ATS",    icon:"ATS",  active: rightPanelOpen,
+                enabled: !!activeAts,   onPress: () => openAtsPanel(null) },
+            ].map(({ id, label, icon, active, enabled, onPress }) => (
+              <button key={id} onClick={onPress} disabled={!enabled}
+                title={enabled ? undefined : `No ${label.toLowerCase()} yet — generate a resume first`}
                 style={{
-                  flex:1, padding:"10px 0", border:"none", cursor:"pointer",
+                  flex:1, padding:"10px 0", border:"none",
+                  cursor: enabled ? "pointer" : "not-allowed",
                   background:"transparent", display:"flex", flexDirection:"column",
                   alignItems:"center", gap:2,
-                  color: mobilePane===id ? theme.accent : theme.textMuted,
+                  opacity: enabled ? 1 : 0.4,
+                  color: active ? theme.accent : theme.textMuted,
                   fontSize:10, fontWeight:700,
                 }}>
                 <span style={{ fontSize:18 }}>{icon}</span>
@@ -4092,7 +4127,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               visitUrl={visitUrl} toggleStar={toggleStar} toggleDislike={toggleDislike}
               openAtsPanel={openAtsPanel}
               goPage={goPage} onPullRefresh={handlePullRefresh}
-              setMobilePane={setMobilePane} isMobile={isMobile}
+              isMobile={isMobile}
               compact={false} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
               activeFilterCount={activeFilterCount}
               onClearFilters={clearAllFilters}
@@ -4207,7 +4242,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       generate, openSandbox, exportAndTrack,
                       visitUrl, toggleStar, toggleDislike, openAtsPanel,
                       goPage, onPullRefresh,
-                      setMobilePane, isMobile,
+                      isMobile,
                       compact, selectedJobId, onJobSelect,
                       activeFilterCount = 0, onClearFilters,
                       searchActive = false, profileName = null,

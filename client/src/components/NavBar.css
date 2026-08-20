@@ -1,7 +1,18 @@
 .navbar {
   position: fixed;
   top: 0; left: 0; right: 0;
-  z-index: 300; /* above UnifiedSearchBar (z-index:200) */
+  /* NAV tier — fixed application chrome. See client/src/styles/zLayers.js, which publishes these
+     custom properties from the one scale definition.
+
+     This used to be 300, annotated "above UnifiedSearchBar (z-index:200)" — a hardcoded
+     cross-reference to another component's literal, which the scale's own header calls out as the
+     clearest sign that the numbers had become a shared secret. It also broke the moment .usb was
+     corrected to read the SEARCH tier from the scale (400): on the landing page in dock mode the bar
+     sits at top:56px, flush under this 56px-tall nav, so at 300-vs-400 the bar would have painted
+     over the nav and its drawer. Reading the tier instead of a neighbour's number keeps the
+     relationship the comment was trying to express — nav above the search surface — and keeps it
+     true when either one moves. */
+  z-index: var(--z-nav, 1500);
   display: flex;
   align-items: center;
   gap: var(--space-6, 1.5rem);
@@ -110,7 +121,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1, .25rem);
-  z-index: 299;
+  /* One below the nav bar it hangs from, so the bar's own border still reads as the top edge — and
+     therefore still above the search surface, which is the relationship that matters here. */
+  z-index: calc(var(--z-nav, 1500) - 1);
   animation: navbar-drawer-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes navbar-drawer-in {

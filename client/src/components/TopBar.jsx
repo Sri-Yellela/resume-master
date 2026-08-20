@@ -649,11 +649,30 @@ export default function TopBar({
         </div>
       </div>
 
-      {/* ── Pill 2: filter row — slides down when scrolled + hovered ── */}
+      {/* ── Pill 2: the COLLAPSED SEARCH SURFACE ── */}
       {/* Gated on the SHARED surface value plus the presence of board controls to render — not on a
           second scroll boolean of its own. `hovered` is deliberately NOT part of this condition:
           it was an independent input, and requirement was one source of truth, so hover no longer
-          decides whether the pill exists. */}
+          decides whether the pill exists.
+
+          IT LIVES IN THE SEARCH TIER, NOT THE NAV TIER — and that one value was the whole defect.
+          This element and UnifiedSearchBar are two renderings of ONE surface: whichever is showing,
+          it is the app's search surface. The bar was at Z.SEARCH (400) and this was at Z.NAV (1500),
+          so the same surface sat in two different tiers depending only on the scroll offset, and the
+          two halves ended up on opposite sides of the modal scrim.
+
+          Measured, at 1280x800, page scrolled 500, PDF + ATS open: this pill painted at z 1500 over
+          a scrim at 800 and tiles at 850, overlapping both tiles' headers by 10px, undimmed while
+          the board behind it was dimmed. useBoardLock then spared it as well — it skips every shell
+          child at or above Z.NAV, on the correct reasoning that nav chrome must stay reachable — so
+          the board's tab / star / pending buttons, its sort select, its profile switcher and its
+          filter input all remained clickable and tab-reachable through an open modal. That is why
+          the panels looked wrong only sometimes: at scroll 0 the surface is the BAR, correctly below
+          the scrim, and everything looked right; scrolled, the surface became this pill, above it.
+
+          At Z.SEARCH the pill is dimmed by the scrim, covered by the tiles and inerted with the rest
+          of the board, exactly as the bar already was. Pill 1 above keeps Z.NAV: it is genuinely nav
+          chrome and is meant to stay live over a panel. */}
       {pillIsTheSearchSurface && boardTab !== undefined && (
         <div
           onMouseEnter={handleMouseEnter}
@@ -677,7 +696,8 @@ export default function TopBar({
             gap: 6,
             opacity: pillWidth <= 0 ? 0 : 1,
             pointerEvents: pillWidth <= 0 ? "none" : "auto",
-            zIndex: Z.NAV,
+            // The SEARCH tier — the same one UnifiedSearchBar uses. See the note above the gate.
+            zIndex: Z.SEARCH,
             fontFamily: "'DM Sans',system-ui,sans-serif",
             animation: "slideDown 200ms ease",
             whiteSpace: "nowrap",
