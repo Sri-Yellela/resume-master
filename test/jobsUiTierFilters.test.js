@@ -75,9 +75,27 @@ test("filter state, the staged snapshot and the commit path all know the four fi
   for (const f of NEW_FIELDS) {
     assert.ok(snapshot.includes(f), `${f} missing from defaultFilterSnapshot — Reset All would not clear it`);
   }
-  const commit = panel.slice(panel.indexOf("const applyPendingFilters = useCallback"), panel.indexOf("const resetPendingFilters"));
-  for (const f of NEW_FIELDS) {
-    assert.ok(commit.includes(f), `${f} is staged in the drawer but never committed on Apply`);
+
+  // The commit path is now applyPendingFilters -> applyFilterSnapshot, one writer shared with the
+  // profile-switch/reload restore and with Clear All. Those three used to set the filter states by
+  // hand, and only the first had been taught about these four fields — so applying a work model and
+  // reloading came back unfiltered. Asserting the routing plus "the writer covers every key of
+  // defaultFilterSnapshot" is strictly stronger than looking for four names in Apply's body: it
+  // fails for a FIFTH field too, which a hardcoded list never would.
+  const apply = panel.slice(panel.indexOf("const applyPendingFilters = useCallback"), panel.indexOf("const resetPendingFilters"));
+  assert.match(apply, /applyFilterSnapshot\(pendingFilters\)/,
+    "Apply must commit through the shared filter writer");
+
+  const writerStart = panel.indexOf("const applyFilterSnapshot = useCallback");
+  assert.notEqual(writerStart, -1, "applyFilterSnapshot moved");
+  const writer = panel.slice(writerStart, panel.indexOf("const applyPendingFilters = useCallback", writerStart));
+  const defaultKeys = [...snapshot.matchAll(/^\s{4}([A-Za-z0-9_$]+):/gm)].map((m) => m[1]);
+  assert.ok(defaultKeys.length >= 21, `expected defaultFilterSnapshot to declare many keys, saw ${defaultKeys.length}`);
+  for (const key of defaultKeys) {
+    const setter = "set" + key[0].toUpperCase() + key.slice(1);
+    assert.ok(writer.includes(setter),
+      `${key} is in defaultFilterSnapshot but ${setter} is never called by applyFilterSnapshot — ` +
+      `it would not be committed on Apply, restored on reload, or cleared by Clear All`);
   }
 });
 

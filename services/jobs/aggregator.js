@@ -1,9 +1,9 @@
 import crypto from 'crypto';
 import { validatePlugin } from './sources/base.js';
-import { stripInternalFields, computeFingerprint, computeReqUid } from './schema.js';
+import { stripInternalFields, computeFingerprint, computeReqUid, normalizeEmploymentType } from './schema.js';
 import { filterDirectApplyOnly, DIRECT_ATS_SOURCES } from './directApplyFilter.js';
 import { deriveAutomationTier } from './automationTier.js';
-import { classifyJob } from './classifyJob.js';
+import { classifyJob, ROLE_KEY_FALLBACK } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
 import { runEnrichment } from './enrichJob.js';
 import { recordPipelineRun } from './pipelineRunLog.js';
@@ -226,7 +226,7 @@ function getCacheStmts(db) {
            salary_min, salary_max, salary_currency,
            is_h1b_sponsor, requires_work_auth, is_clearance_required,
            discovered_at, updated_at, is_active, fingerprint, sources_seen, req_uid,
-           automation_tier)
+           automation_tier, employment_type)
         VALUES
           (@job_id, @search_query, @_hash, @title, @company, @location, @url, @source, @source_label,
            @posted_at, @scraped_at, @bucket_role, @bucket_seniority, @bucket_domain, @direct_apply, @description,
@@ -236,7 +236,7 @@ function getCacheStmts(db) {
            @salary_min, @salary_max, @salary_currency,
            @is_h1b_sponsor, @requires_work_auth, @is_clearance_required,
            @discovered_at, @updated_at, 1, @fingerprint, @sources_seen, @req_uid,
-           @automation_tier)
+           @automation_tier, @employment_type)
         ON CONFLICT(job_id) DO UPDATE SET
           search_query              = excluded.search_query,
           _hash                     = excluded._hash,
@@ -269,6 +269,10 @@ function getCacheStmts(db) {
           -- pin the tier to whatever the first crawl saw and leave a posting that MOVED to a new
           -- ATS still advertised under the old one's promise.
           automation_tier           = excluded.automation_tier,
+          -- Also a source column, not an enrichment one: the employer owns whether a req is
+          -- full-time or a contract, so a later crawl reflecting a change should win. COALESCE here
+          -- would pin it to whatever the first crawl happened to parse.
+          employment_type           = excluded.employment_type,
           -- structured range wins when the source has one, never nulls out an existing figure
           salary_min      = COALESCE(excluded.salary_min,      scraped_jobs.salary_min),
           salary_max      = COALESCE(excluded.salary_max,      scraped_jobs.salary_max),
@@ -291,6 +295,18 @@ function getCacheStmts(db) {
           (job_id, role_key, role_family, domain, confidence, matched_by)
         VALUES
           (@job_id, @role_key, @role_family, @domain, @confidence, @matched_by)
+      `),
+      // Existence probe for the unclassified-import fallback in upsertCanonicalJob — "does this
+      // job_id carry ANY bucket yet", not "does it carry this one". See the note at its call site.
+      hasAnyRoleMapStmt: db.prepare(`SELECT 1 FROM job_role_map WHERE job_id = ? LIMIT 1`),
+      // Retires a SUPERSEDED classifier bucket — see the note at its call site in
+      // upsertCanonicalJob. `source_profile_id IS NULL` is what separates a classifier-derived row
+      // from a profile-derived one: server.js's assignJobRoleMap always stamps the profile id,
+      // roleMapStmt never sets the column at all. Matching on that rather than on matched_by
+      // strings means a new matched_by value cannot quietly opt out of this.
+      retireOtherClassifierBucketsStmt: db.prepare(`
+        DELETE FROM job_role_map
+        WHERE job_id = ? AND role_key != ? AND source_profile_id IS NULL
       `),
       rejectStmt: db.prepare(`
         INSERT OR REPLACE INTO rejected_jobs (job_id, title, company, source, reason, rejected_at)
@@ -328,7 +344,8 @@ function getCacheStmts(db) {
 function upsertCanonicalJob(db, {
   jobId, canonical, verdict, contentHash, searchQuery, sourceLabel, matchedBy, dedup, now,
 }) {
-  const { upsertStmt, roleMapStmt, getDiscoveredAt } = getCacheStmts(db);
+  const { upsertStmt, roleMapStmt, hasAnyRoleMapStmt, retireOtherClassifierBucketsStmt,
+          getDiscoveredAt } = getCacheStmts(db);
 
   // discovered_at must mean "first time we saw this job", full stop. Because the write below is
   // INSERT OR REPLACE, a re-crawl of a posting whose text CHANGED was resetting it to now —
@@ -398,11 +415,32 @@ function upsertCanonicalJob(db, {
     // This is also why source alone would not do: every `jobo` row in production carries a
     // jobs.ashbyhq.com apply URL, so the URL is what tells the truth about where the user lands.
     automation_tier:           deriveAutomationTier(canonical.source, canonical.apply_url || canonical.url),
+    // Six sources parse an employment type and each spells it differently; normalizeEmploymentType
+    // folds them onto the vocabulary the board already filters with. Unrecognised -> null, which the
+    // soft-null filter reads as "not established" and keeps visible. See services/jobs/schema.js.
+    employment_type:           normalizeEmploymentType(canonical.contract_type ?? canonical.employment_type),
   });
 
-  // job_role_map.role_key is NOT NULL — an unclassified import (verdict.roleKey === null,
-  // never possible for the crawled-source callers since they already filtered those out
-  // before reaching here) simply gets no role_map row, same as it getting no role tagging.
+  // job_role_map.role_key is NOT NULL, and /api/jobs reads the board through an INNER JOIN on it
+  // (`JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?`). So "no role_map row"
+  // does not mean "untagged" — it means the row is unreachable on EVERY board, for every user,
+  // under every filter, including ?curate=off. A crawled source can afford that because it already
+  // dropped unclassifiable postings upstream; an explicit user import cannot, and importJob.js's own
+  // contract says so in as many words: "an explicit user import must never silently vanish (approved
+  // decision)". It did vanish, exactly here.
+  //
+  // ROLE_KEY_FALLBACK keeps the row in the shared pool rather than inventing per-user scoping: an
+  // import lands in the same global scraped_jobs pool as everything else, so it gets the same kind of
+  // bucket everything else gets. 'general' is the bucket classifyJob already documents for
+  // "white-collar but not confidently bucketed", so this reuses that meaning instead of adding one.
+  //
+  // The fallback is guarded on the job_id NOT already being mapped, and that guard is deliberately
+  // scoped to the fallback alone. job_role_map's PRIMARY KEY is (job_id, role_key), so a real verdict
+  // is already idempotent per bucket under INSERT OR REPLACE, and a job legitimately carries more
+  // than one bucket — server.js's assignJobRoleMap adds a profile-scoped one. Applying the guard to
+  // real verdicts too would suppress those. Applying it to the fallback prevents the one case that is
+  // never wanted: re-importing a posting a crawl has ALREADY classified (say 'engineering') must not
+  // also file it under 'general' and surface the same job on a second board.
   if (verdict.roleKey != null) {
     roleMapStmt.run({
       job_id:      jobId,
@@ -411,6 +449,26 @@ function upsertCanonicalJob(db, {
       domain:      verdict.domain || null,
       confidence:  verdict.confidence || 0,
       matched_by:  matchedBy,
+    });
+    // A job gets ONE classifier bucket. job_role_map's PRIMARY KEY is (job_id, role_key), so the
+    // upsert above only replaces the row for THIS key — when a re-crawl produces a DIFFERENT verdict
+    // than last time, the previous bucket survives beside the new one and the same posting shows up
+    // on two different profiles' boards. Observed on real data: Figma's "Software Engineer - Machine
+    // Learning" ended up in both 'engineering' (the corrected verdict) and the stale 'general'.
+    //
+    // Latent until now, because verdicts almost never changed. Fixing the exclusion precedence in
+    // classifyTitle is exactly what makes them change, so it has to be handled here rather than left
+    // for the first person to notice a duplicated card. Profile-derived buckets are untouched — they
+    // answer a different question ("this profile scraped this job") and are keyed by profile id.
+    retireOtherClassifierBucketsStmt.run(jobId, verdict.roleKey);
+  } else if (!hasAnyRoleMapStmt.get(jobId)) {
+    roleMapStmt.run({
+      job_id:      jobId,
+      role_key:    ROLE_KEY_FALLBACK,
+      role_family: ROLE_KEY_FALLBACK,
+      domain:      verdict.domain || null,
+      confidence:  verdict.confidence || 0,
+      matched_by:  `${matchedBy}_unclassified`,
     });
   }
 }

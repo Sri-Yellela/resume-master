@@ -27,10 +27,15 @@ function db0() {
       is_active INTEGER DEFAULT 1, fingerprint TEXT, sources_seen TEXT, req_uid TEXT,
       -- migration 078: this fixture hand-rolls the schema, so it has to track the real one or
       -- the aggregator's upsert fails against it (which is how this column's absence surfaced).
-      automation_tier TEXT
+      automation_tier TEXT,
+      -- Source-owned column now written by aggregator's upsertStmt (six sources parse an
+      -- employment type; none of it was persisted before). Hand-rolled fixtures have to track the
+      -- real schema or the upsert fails against them — the same way automation_tier surfaced.
+      employment_type TEXT
     );
     CREATE TABLE job_role_map (
       job_id TEXT PRIMARY KEY, role_key TEXT, role_family TEXT, domain TEXT,
+      source_profile_id INTEGER, -- upsertCanonicalJob retires superseded classifier buckets by this column
       confidence REAL, matched_by TEXT
     );
     CREATE TABLE rejected_jobs (

@@ -659,11 +659,37 @@ export function classifyTitle(title, description = "") {
   const scores  = {};
   const details = {};
 
+  // Pass 1: which roles have a STRONG TITLE anchor, ignoring exclusions entirely.
+  //
+  // This exists because an unconditional exclusion silently outranked a strong anchor, and a
+  // strong anchor is documented two comments up as "decisive". "Software Engineer, Machine
+  // Learning" carries engineering's strong anchor "software engineer" AND engineering's
+  // exclusion "machine learning", so engineering was disqualified with -Infinity; `data` needs
+  // the contiguous phrase "machine learning engineer", which that title does not contain, so it
+  // scored weak-only at 0.35 and the title fell through to 'general' — a bucket almost no
+  // profile's role_key maps to, i.e. invisible on every board. A specialisation QUALIFIER was
+  // being treated as a reassignment.
+  //
+  // So exclusions are applied CONDITIONALLY below: a role is disqualified by its exclusion list
+  // only when some OTHER role actually claims the title with a strong title anchor of its own.
+  // That preserves every case the exclusions were written for — "embedded software engineer"
+  // still loses engineering to engineering_embedded_firmware, "machine learning engineer" and
+  // "data engineer" still go to data, "product manager, engineering" still goes to pm, because
+  // in each of those the specialist family DOES strong-claim the title — while a qualifier that
+  // no other family claims no longer strips a title of the family its own anchor named.
+  const strongTitleHits = {};
+  for (const [roleKey, signals] of Object.entries(SIGNALS)) {
+    strongTitleHits[roleKey] = signals.strongAnchors.filter(a => t.includes(a)).length;
+  }
+  const strongClaimants = Object.keys(strongTitleHits).filter(k => strongTitleHits[k] >= 1);
+
   for (const [roleKey, signals] of Object.entries(SIGNALS)) {
     const { strongAnchors, descriptionAnchors = [], weakSignals, exclusions } = signals;
 
-    // Exclusion check — any hit immediately disqualifies this role key for this title
-    if (exclusions.some(ex => t.includes(ex))) {
+    // Conditional exclusion — see the two-pass note above. Disqualify only if the exclusion is
+    // actually contested: another role strong-claims this title.
+    if (exclusions.some(ex => t.includes(ex))
+        && strongClaimants.some(k => k !== roleKey)) {
       scores[roleKey]  = -Infinity;
       details[roleKey] = "excluded";
       continue;

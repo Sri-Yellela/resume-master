@@ -204,4 +204,45 @@ function stripInternalFields(job) {
   return clientJob;
 }
 
-export { normalizeJob, stripInternalFields, JOB_SCHEMA_VERSION, computeFingerprint, normalizeForFingerprint, computeReqUid };
+// ── Employment type: source vocabulary -> the board's vocabulary ────────────────────────────────
+//
+// Six of the nine sources already extract an employment/contract type (adzuna, jobo, recruitee,
+// smartrecruiters, workable, workday) and each spells it differently: workday sends `timeType`
+// ("Full time"), smartrecruiters a `typeOfEmployment.id`, adzuna its own mapped `full_time`,
+// the rest raw source strings. None of it was ever persisted — aggregator's upsert had no
+// employment_type column — so the value was parsed on every crawl and thrown away, and the board's
+// Employment Type filter queried a column nothing could write. It matched zero rows for its whole
+// life.
+//
+// Canonicalises onto the vocabulary the CLIENT already sends and saved searches already store
+// (JobsPanel's EMPLOYMENT_TYPES: full-time | part-time | contract | internship), so no existing
+// stored querystring has to change meaning.
+//
+// UNRECOGNISED INPUT RETURNS null, deliberately. The column is filtered with the soft-null pattern
+// `(employment_type IS NULL OR employment_type IN (...))`, so null means "not established" and the
+// row stays visible; guessing instead would hide a posting under a label the source never gave it.
+// Same call this codebase's import path already makes: an honest "cannot parse this one" beats a
+// wrong guess.
+const EMPLOYMENT_TYPE_SYNONYMS = new Map(Object.entries({
+  'full-time': 'full-time', 'full time': 'full-time', 'full_time': 'full-time',
+  'fulltime': 'full-time', 'permanent': 'full-time', 'permanent_employee': 'full-time',
+  'regular': 'full-time', 'ft': 'full-time',
+  'part-time': 'part-time', 'part time': 'part-time', 'part_time': 'part-time',
+  'parttime': 'part-time', 'pt': 'part-time',
+  'contract': 'contract', 'contractor': 'contract', 'contract_employee': 'contract',
+  'fixed-term': 'contract', 'fixed term': 'contract', 'freelance': 'contract',
+  'temporary': 'contract', 'temp': 'contract', 'seasonal': 'contract',
+  'internship': 'internship', 'intern': 'internship', 'trainee': 'internship',
+  'apprentice': 'internship', 'apprenticeship': 'internship', 'co-op': 'internship',
+}));
+
+function normalizeEmploymentType(raw) {
+  if (raw == null) return null;
+  const key = String(raw).trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!key) return null;
+  return EMPLOYMENT_TYPE_SYNONYMS.get(key)
+      ?? EMPLOYMENT_TYPE_SYNONYMS.get(key.replace(/[\s_]/g, '-'))
+      ?? null;
+}
+
+export { normalizeJob, stripInternalFields, JOB_SCHEMA_VERSION, computeFingerprint, normalizeForFingerprint, computeReqUid, normalizeEmploymentType };

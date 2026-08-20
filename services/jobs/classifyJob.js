@@ -5,6 +5,12 @@
 import { detectCollar, STRONG_WHITE_ANCHORS } from './collarClassifier.js';
 import { classifyTitle, INGEST_CONFIDENCE_THRESHOLD } from './jobTaxonomy.js';
 
+// The bucket for "white-collar, but not confidently placed in a family". Named rather than
+// repeated as a literal because services/jobs/aggregator.js now also needs it: a verdict with
+// roleKey === null used to write NO job_role_map row, and /api/jobs joins that table with an
+// INNER JOIN, so such a row was unreachable on every board. Both places must mean the same bucket.
+export const ROLE_KEY_FALLBACK = 'general';
+
 // ── Seniority ─────────────────────────────────────────────────────────────────
 const SENIORITY_LEVELS = [
   { level: 'intern',   re: /\b(intern|internship|co.?op)\b/i },
@@ -80,11 +86,11 @@ export function classifyJob(title, description, company) {
     // High confidence: use whatever classifyTitle returned (could be 'unclassified'
     // only if threshold is ever reached with no_signal — practically impossible, but
     // guard it anyway).
-    roleKey = (raw === 'unclassified') ? 'general' : raw;
+    roleKey = (raw === 'unclassified') ? ROLE_KEY_FALLBACK : raw;
   } else if (STRONG_WHITE_ANCHORS.some(p => p.test((title || '').toLowerCase()))) {
     // Policy #2: white-collar signal is clear but role family is ambiguous → 'general'.
     // Must be rare; tight SIGNALS means most white-collar titles are already bucketed.
-    roleKey = 'general';
+    roleKey = ROLE_KEY_FALLBACK;
   } else {
     // No confident bucket AND no strong white-collar signal → drop.
     roleKey = null;

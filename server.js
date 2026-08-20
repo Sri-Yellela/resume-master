@@ -5267,6 +5267,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       maxApplicants  = null,
       visited        = '',
       localSearch    = '',
+      starred        = '',
     } = req.query;
 
     // NOTE: bare `q` is not consumed here — no existing caller sends it (checked: the
@@ -5303,17 +5304,44 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     const locFilter = location ? `AND sj.location LIKE ?` : '';
     const locArgs   = location ? [`%${location}%`] : [];
 
-    // Work-type / employment-type (opt-in)
-    const wtFilter = workType       ? `AND sj.work_type       = ?` : '';
-    const wtArgs   = workType       ? [workType]                   : [];
-    const etFilter = employmentType ? `AND sj.employment_type = ?` : '';
-    const etArgs   = employmentType ? [employmentType]             : [];
+    // Work-type / employment-type / category (opt-in) — SOFT-NULL, the same pattern and for the
+    // same reason as services/jobs/jobQuery.js's workplace_type / experience_level / skills_json
+    // clauses; read those comments alongside these. These three columns are written only by paths
+    // that have the value to write, and on a real ATS-crawled board that is none of them: all 35
+    // active rows in production carry NULL in all three. A hard `= ?` makes `NULL = 'Remote'` NULL,
+    // i.e. not-true, so each of these three controls took the board to exactly 0 rows and read as
+    // "no remote jobs exist" rather than "not classified yet". A row must never be hidden purely
+    // because we have not classified it — only on an explicit mismatch once we have.
+    const wtFilter = workType ? `AND (sj.work_type IS NULL OR sj.work_type = ?)` : '';
+    const wtArgs   = workType ? [workType]                                      : [];
 
-    // Category / source (opt-in)
-    const catSql  = category ? `AND sj.category = ?` : '';
-    const catArgs = category ? [category]            : [];
+    // employmentType additionally had a SHAPE bug independent of the NULL one: buildParams sends a
+    // comma-joined multi-select (employmentTypePrefs.join(",")) and this bound it to a scalar `= ?`,
+    // so "full-time,contract" could not match a row even with data present. Split to an IN list —
+    // the shape services/jobs/jobQuery.js already uses for its own `employment_types` key.
+    const etValues = String(employmentType).split(',').map(v => v.trim()).filter(Boolean);
+    const etFilter = etValues.length
+      ? `AND (sj.employment_type IS NULL OR sj.employment_type IN (${etValues.map(() => '?').join(',')}))`
+      : '';
+    const etArgs   = etValues;
+
+    const catSql  = category ? `AND (sj.category IS NULL OR sj.category = ?)` : '';
+    const catArgs = category ? [category]                                    : [];
+
+    // source stays a HARD match, deliberately, for the reason jobQuery.js's sources_include comment
+    // already records: every scraped_jobs writer sets `source`, so there is no "not classified yet"
+    // state to protect, and a soft-null escape would make the filter unable to exclude anything the
+    // moment a NULL appeared.
     const srcSql  = source   ? `AND sj.source   = ?` : '';
     const srcArgs = source   ? [source]              : [];
+
+    // Starred (opt-in) — the Saved ★ tab. buildParams has always emitted starred=1 for
+    // boardTab === "saved"; this handler destructured it nowhere and built no clause for it, so the
+    // Saved tab silently returned the ENTIRE unfiltered board. Measured against production before
+    // this fix: starred=1 returned 27 of 27 rows for a user with zero starred rows. `uj` is already
+    // LEFT JOINed per (user, profile) below, so this reads that user's own flag and nobody else's.
+    // Any value other than '1' emits nothing, so the default board querystring is unchanged.
+    const starredSql = starred === '1' ? `AND uj.starred = 1` : '';
 
     // Applicant count cap (opt-in)
     const maxAppVal = maxApplicants !== null && maxApplicants !== '' ? parseInt(maxApplicants, 10) : null;
@@ -5453,6 +5481,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
           ${srcSql}
           ${maxAppSql}
           ${visitedSql}
+          ${starredSql}
           ${ageSql}
           ${yoeSql}
           ${minYoeSql}
