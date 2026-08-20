@@ -335,7 +335,12 @@ import { classifyJob } from "../services/jobs/classifyJob.js";
 
 test("phase4: aggregator imports classifyJob (unified collar gate) not classifyForIngest", () => {
   const agg = fs.readFileSync("services/jobs/aggregator.js", "utf8");
-  assert.match(agg, /import \{ classifyJob \} from '\.\/classifyJob\.js'/, "aggregator must import classifyJob");
+  // The named-import list is matched loosely on purpose: the property under test is WHICH gate the
+  // aggregator classifies through, not how many other symbols it happens to pull from the same
+  // module. It now also imports ROLE_KEY_FALLBACK from there, for the unclassified-import bucket
+  // (see upsertCanonicalJob) — pinning the exact one-symbol form made that a test failure with no
+  // behavioural change behind it.
+  assert.match(agg, /import \{[^}]*\bclassifyJob\b[^}]*\} from '\.\/classifyJob\.js'/, "aggregator must import classifyJob");
   assert.doesNotMatch(agg, /import \{ classifyForIngest \}/, "aggregator must not import classifyForIngest (replaced by classifyJob)");
 });
 

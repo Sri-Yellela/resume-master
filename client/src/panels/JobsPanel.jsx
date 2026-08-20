@@ -60,17 +60,17 @@ function writeProfileUiCache(profileId, snapshot) {
   if (profileId == null || !snapshot) return;
   try {
     const all = JSON.parse(localStorage.getItem(PROFILE_UI_CACHE_KEY) || "{}");
-    const {
-      boardTab, localSearch, sortBy, roleFilter, locationFilter, workType,
-      employmentTypePrefs, catFilter, srcFilter, minYoe, maxYoe, maxApplicants,
-      visitedFilter, ageFilter, currentPage,
-    } = snapshot;
-    all[String(profileId)] = {
-      boardTab, localSearch, sortBy, roleFilter, locationFilter, workType,
-      employmentTypePrefs, catFilter, srcFilter, minYoe, maxYoe, maxApplicants,
-      visitedFilter, ageFilter, currentPage,
-      cachedAt: Date.now(),
-    };
+    // The persisted key set is DERIVED from defaultFilterSnapshot() plus the four non-filter board
+    // keys, instead of being spelled out. It used to be a hand-written list of 15 names that stopped
+    // at ageFilter, so every filter added after it — salary, work models, experience levels, skills,
+    // sponsor-friendly, providers, tiers — was silently dropped on reload: the board came back
+    // unfiltered while the drawer had claimed the filter was applied.
+    const persisted = { cachedAt: Date.now() };
+    for (const key of ["boardTab", "localSearch", "sortBy", "currentPage",
+                       ...Object.keys(defaultFilterSnapshot())]) {
+      persisted[key] = snapshot[key];
+    }
+    all[String(profileId)] = persisted;
     localStorage.setItem(PROFILE_UI_CACHE_KEY, JSON.stringify(all));
   } catch {}
 }
@@ -329,8 +329,9 @@ const EMP_TYPE_OPTIONS = [
   { value:"part-time",  label:"Part-time" },
 ];
 
-// FE-2: jobQuery.js's work_models dimension (sj.workplace_type — the Task-5 ENRICHMENT column,
-// different from the legacy single-select Work Type above which filters sj.work_type).
+// jobQuery.js's work_models dimension (sj.workplace_type — the Task-5 ENRICHMENT column). This is
+// now the only work-location control: the legacy single-select over sj.work_type was removed because
+// no write path populates that column, and this one filters the column enrichment actually fills.
 const WORK_MODEL_OPTIONS = [
   { value:"remote", label:"Remote" },
   { value:"hybrid", label:"Hybrid" },
@@ -533,13 +534,12 @@ function FiltersPanel({
             style={{...selStyle, padding:"0 10px", height:36, borderRadius:4}}/>
         </div>
 
-        <div>
-          <div style={labelStyle}>Work Type</div>
-          <select value={workType} onChange={e=>setWorkType(e.target.value)} style={selStyle}>
-            <option value="">All types</option>
-            <option>Remote</option><option>Hybrid</option><option>Onsite</option>
-          </select>
-        </div>
+        {/* Work Type (sj.work_type) removed: no write path populates that column — it is absent
+            from aggregator's upsertStmt, the single writer shared by cacheJobs, cacheJoboFeed and
+            importJob — so the control could never change the result set. "Work Model" below filters
+            sj.workplace_type, which enrichment DOES populate (remote/hybrid/onsite all non-zero on
+            a real board), and covers the same intent. The workType PARAM is still honoured by
+            /api/jobs, soft-null, so saved searches and API callers are unaffected. */}
 
         <div>
           <div style={labelStyle}>Employment Type</div>
@@ -571,7 +571,7 @@ function FiltersPanel({
         </div>
 
         <div>
-          <div style={labelStyle}>Workplace Type (enriched)</div>
+          <div style={labelStyle}>Work Model</div>
           <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
             {WORK_MODEL_OPTIONS.map(opt => {
               const active = workModels.includes(opt.value);
@@ -594,8 +594,8 @@ function FiltersPanel({
             })}
           </div>
           <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
-            Matches enrichment-tagged postings only — broader than "Work Type" above, but
-            coverage may lag for very recently-crawled jobs.
+            Remote / hybrid / onsite as tagged by enrichment. Postings not yet tagged are kept
+            rather than hidden, so coverage may lag for very recently-crawled jobs.
           </div>
         </div>
 
@@ -627,22 +627,21 @@ function FiltersPanel({
           </div>
         </div>
 
-        <div>
-          <div style={labelStyle}>Category</div>
-          <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={selStyle}>
-            <option value="">All categories</option>
-            {categories.map(c=><option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
+        {/* Category removed for two independent reasons, either of which is fatal: sj.category is
+            not in aggregator's upsertStmt so nothing can write it, AND the options came from
+            /api/categories — a hardcoded marketing taxonomy ("Fintech / Banking", "Design / UX")
+            whose strings never matched that column's vocabulary even in principle. A domain filter
+            worth having would read sj.bucket_domain, which IS written (from classifyJob's
+            detectDomain); that is a separate piece of work, not a rename of this one. The category
+            param stays honoured server-side. */}
 
-        <div>
-          <div style={labelStyle}>Source</div>
-          <select value={srcFilter} onChange={e=>setSrcFilter(e.target.value)} style={selStyle}>
-            <option value="">All sources</option>
-            <option value="linkedin">LinkedIn</option>
-            <option value="indeed">Indeed</option>
-          </select>
-        </div>
+        {/* Legacy Source select removed. Unlike the others here its COLUMN is fine — sj.source is
+            written by every path — but its two options were "linkedin" and "indeed", and neither is
+            a value any current writer produces (the live sources are greenhouse/lever/ashby/
+            workday/smartrecruiters/workable/recruitee/jobo). So both choices returned 0 rows while
+            "All sources" was a no-op: dead by vocabulary rather than by NULL. "Provider" directly
+            below is the same filter done properly — real source values, live facet counts, and an
+            exclude direction. The source param stays honoured server-side as a hard match. */}
 
         <div>
           <div style={labelStyle}>Provider</div>
@@ -685,30 +684,18 @@ function FiltersPanel({
           </select>
         </div>
 
-        <div>
-          <div style={labelStyle}>
-            Years of Experience: {minYoe || 0}-{maxYoe || "Any"}
-          </div>
-          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <input type="number" min={0} max={30} placeholder="Min"
-              value={minYoe} onChange={e=>setMinYoe(e.target.value)}
-              style={{...selStyle, width:70}}/>
-            <span style={{ fontSize:12, color:theme.textMuted }}>to</span>
-            <input type="number" min={0} max={30} placeholder="Max"
-              value={maxYoe} onChange={e=>setMaxYoe(e.target.value)}
-              style={{...selStyle, width:70}}/>
-          </div>
-        </div>
+        {/* Years of Experience removed: sj.min_years_exp has no writer at all — not in the upsert,
+            not in enrichment — so both inputs were no-ops. server.js's own sort comment already
+            records this ("nothing on the ATS crawl path ever writes it"). "Experience Level" above
+            expresses the same intent over sj.experience_level, which enrichment does populate
+            (intern/mid/senior/lead all non-zero). The YoE SORT is unaffected: it already ranks by
+            experience_level when min_years_exp is null. minYoe/maxYoe stay honoured server-side,
+            soft-null, including the profile-derived default. */}
 
-        <div>
-          <div style={labelStyle}>Max Applicants</div>
-          <input type="number" min={0} placeholder="e.g. 100"
-            value={maxApplicants} onChange={e=>setMaxApplicants(e.target.value)}
-            style={{...selStyle, width:"100%"}}/>
-          <div style={{ fontSize:10, color:theme.textDim, marginTop:4 }}>
-            Hide jobs with more applicants than this
-          </div>
-        </div>
+        {/* Max Applicants removed: sj.applicant_count has no writer either. It was fed by the
+            LinkedIn bulk saved-jobs import, which cleanup 5.3 deleted outright — so the column is
+            orphaned from a feature that no longer exists, and no ATS board exposes an applicant
+            count. The param stays honoured server-side, soft-null. */}
 
         <div>
           <div style={labelStyle}>Status</div>
@@ -1426,8 +1413,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // openFilterPanel is defined after buildParams below (it needs to call fetchFacets, which
   // needs buildParams — both declared further down in this component).
 
-  const applyPendingFilters = useCallback(() => {
-    const next = { ...defaultFilterSnapshot(), ...pendingFilters };
+  // THE ONE WRITER for the committed filter states. Three separate places used to set them by hand
+  // — the drawer's Apply, the profile-switch/reload restore, and Clear All — and the newer filters
+  // (salary, work models, experience levels, skills, sponsor, providers, tiers) were only ever added
+  // to the first of the three. The consequence was measured in a browser: apply Onsite, board goes
+  // 27 → 4, reload, board comes back 27 with the filter silently gone, because the restore path had
+  // never heard of workModels. That is the same "a new filter was left out of a hand-maintained
+  // list" failure as the refetch dep array, in its third location. One writer, keyed off
+  // defaultFilterSnapshot, so a filter added there is picked up by every path at once.
+  const applyFilterSnapshot = useCallback((snap) => {
+    const next = { ...defaultFilterSnapshot(), ...(snap || {}) };
     setRoleFilter(next.roleFilter || "");
     setLocationFilter(next.locationFilter || "");
     setWorkType(next.workType || "");
@@ -1453,8 +1448,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setSourcesExclude(Array.isArray(next.sourcesExclude) ? next.sourcesExclude : []);
     setTiersInclude(Array.isArray(next.tiersInclude) ? next.tiersInclude : []);
     setTiersExclude(Array.isArray(next.tiersExclude) ? next.tiersExclude : []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const applyPendingFilters = useCallback(() => {
+    applyFilterSnapshot(pendingFilters);
     setFiltersOpen(false);
-  }, [pendingFilters]);
+  }, [pendingFilters, applyFilterSnapshot]);
 
   const resetPendingFilters = useCallback(() => {
     setPendingFilters(defaultFilterSnapshot());
@@ -1478,15 +1477,18 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const clearAllFilters = useCallback(() => {
     const base = defaultFilterSnapshot();
     setPendingFilters(base);
-    setRoleFilter(""); setLocationFilter(""); setWorkType("");
-    setEmploymentTypePrefs(base.employmentTypePrefs);
-    setCatFilter(""); setSrcFilter(""); setMinYoe(""); setMaxYoe(""); setMaxApplicants("");
-    setVisitedFilter(""); setAgeFilter(""); setSalaryMin(""); setSalaryMax("");
-    setWorkModels([]); setExperienceLevels([]); setSkillsInclude([]); setSponsorFriendly(false);
-    setSourcesInclude([]); setSourcesExclude([]); setTiersInclude([]); setTiersExclude([]);
+    applyFilterSnapshot(base);
+    // localSearch is counted as a narrowing filter by JobsColumn's empty-state branch, so it has to
+    // be cleared here too — otherwise "Clear all filters" leaves the board empty and the notice
+    // still up, which reads as the button being broken.
+    setLocalSearch("");
     setCurrentPage(1);
-  }, []);
+  }, [applyFilterSnapshot, setLocalSearch]);
 
+  // Spreads activeFilterSnapshot() rather than re-listing the filters: this snapshot is what gets
+  // persisted (writeProfileUiCache) and restored, so a filter missing here is a filter that does not
+  // survive a reload or a profile switch. It listed only the 11 legacy ones, which is why applying a
+  // work-model filter and reloading silently returned the unfiltered board.
   const makeProfileSnapshot = useCallback((overrides = {}) => ({
     jobs,
     pendingJobs,
@@ -1496,22 +1498,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     boardTab,
     localSearch,
     sortBy,
-    roleFilter,
-    locationFilter,
-    workType,
-    employmentTypePrefs,
-    catFilter,
-    srcFilter,
-    minYoe,
-    maxYoe,
-    maxApplicants,
-    visitedFilter,
-    ageFilter,
+    ...activeFilterSnapshot(),
     selectedJob,
     ...overrides,
   }), [jobs, pendingJobs, totalJobs, totalPages, currentPage, boardTab, localSearch, sortBy,
-      roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
-      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, selectedJob]);
+      activeFilterSnapshot, selectedJob]);
 
   latestSnapshotRef.current = makeProfileSnapshot();
 
@@ -1527,19 +1518,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setBoardTab(["linkedin", "linkedin_saved"].includes(snapshot.boardTab) ? "saved" : (snapshot.boardTab || "all"));
     setLocalSearch(snapshot.localSearch || "");
     setSortBy(snapshot.sortBy || "dateDesc");
-    setRoleFilter(snapshot.roleFilter || "");
-    setLocationFilter(snapshot.locationFilter || "");
-    setWorkType(snapshot.workType || "");
-    setEmploymentTypePrefs(snapshot.employmentTypePrefs?.length ? snapshot.employmentTypePrefs : ["full-time"]);
-    setCatFilter(snapshot.catFilter || "");
-    setSrcFilter(snapshot.srcFilter || "");
-    setMinYoe(snapshot.minYoe || "");
-    setMaxYoe(snapshot.maxYoe || "");
-    setMaxApplicants(snapshot.maxApplicants || "");
-    setVisitedFilter(snapshot.visitedFilter || "");
-    setAgeFilter(snapshot.ageFilter || "");
+    // Restore every committed filter through the single writer, and re-stage the drawer to match, so
+    // reopening it shows the filters the board is actually applying. Hand-listing them here is what
+    // dropped the newer ones on every reload and profile switch.
+    applyFilterSnapshot(snapshot);
+    setPendingFilters({ ...defaultFilterSnapshot(), ...snapshot });
     setSelectedJob(snapshot.selectedJob || null);
-  }, [setBoardTab, setLocalSearch, setSortBy]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [setBoardTab, setLocalSearch, setSortBy, applyFilterSnapshot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fileRef        = useRef();
   const jobCountRef    = useRef(0);
@@ -1702,14 +1687,16 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     requestAnimationFrame(() => { switchingProfileRef.current = false; });
   }, [activeProfileKey, applyProfileSnapshot, getProfileCache, setProfileCache]);
 
+  // Keyed on makeProfileSnapshot rather than on a hand-listed copy of everything the snapshot
+  // contains. That list was the FOURTH copy of the filter set in this file and it stopped at
+  // ageFilter too, so changing a work model updated the board but never rewrote the cache — the
+  // stale cache was then what a reload restored. makeProfileSnapshot's own deps now run through
+  // activeFilterSnapshot, so this effect fires for any filter, including ones added later.
   useEffect(() => {
     if (!activeProfileKey || switchingProfileRef.current) return;
     setProfileCache?.(activeProfileKey, latestSnapshotRef.current);
     writeProfileUiCache(activeProfileKey, latestSnapshotRef.current);
-  }, [activeProfileKey, jobs, pendingJobs, totalJobs, totalPages, currentPage, boardTab,
-      localSearch, sortBy, roleFilter, locationFilter, workType, employmentTypePrefs,
-      catFilter, srcFilter, minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter,
-      selectedJob, setProfileCache]);
+  }, [activeProfileKey, makeProfileSnapshot, setProfileCache]);
 
   // -- Split-view: job selection ---------------------------------
   const handleJobSelect = useCallback((job) => {
@@ -1915,17 +1902,33 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   fetchJobsRef.current = fetchJobs;
 
   // -- Boot --------------------------------------------------
+  //
+  // This effect deliberately does NOT fetch /api/jobs, and must not start again.
+  //
+  // It used to open with api("/api/jobs?page=1&pageSize=25&sort=dateDesc") — a hardcoded
+  // querystring, i.e. a SECOND param builder alongside buildParams, which is the one thing
+  // buildParams exists to prevent. Three separate defects came out of that one line:
+  //
+  //   1. It ignored every committed filter, so whatever it returned was the unfiltered first page.
+  //   2. It had neither of fetchJobs' two guards — no jobsFetchSeqRef sequence check and no
+  //      activeProfileKeyRef check — so its response could not be recognised as stale and simply
+  //      won whenever it landed last.
+  //   3. Its dep array is [user], and JobsConsole was rebuilding `user` as a fresh object literal
+  //      on every parent render (see client/src/consoles/PlanConsoles.jsx), so it re-ran on any
+  //      ancestor re-render and called setJobs() with (1). That is the "board reverts to its
+  //      first-load state on trivial interaction" report, and it was measured: one click on IMPORT
+  //      produced one unfiltered /api/jobs and reset the list.
+  //
+  // Nothing was lost by deleting it. The "Re-fetch when server-side filters/sort/tab change" effect
+  // below already runs on mount and loads the board through buildParams()/fetchJobs(), and fetchJobs
+  // sets every piece of state this used to set — jobs, totalJobs, totalPages and attribution. The
+  // categories and resumes loads below are genuine boot-only reads and stay here.
   useEffect(() => {
     if (!user) return;
     Promise.all([
-      api("/api/jobs?page=1&pageSize=25&sort=dateDesc"),
       api("/api/categories"),
       api("/api/resumes"),
-    ]).then(([jr, cats, gr]) => {
-      setJobs((jr.jobs || []).map(normalizeApiJob));
-      setTotalJobs(jr.total || 0);
-      setTotalPages(jr.totalPages || 0);
-      if (Array.isArray(jr.attribution)) setAttribution(jr.attribution);
+    ]).then(([cats, gr]) => {
       setCategories(cats || []);
       if (gr?.length) {
         const map = {};
@@ -4040,6 +4043,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 onJobSelect={handleJobSelect} selectedJobId={selectedJob?.jobId}
                 activeFilterCount={activeFilterCount}
                 onClearFilters={clearAllFilters}
+                searchActive={!!localSearch.trim()}
+                profileName={activeDomainProfile?.profile_name || null}
                 cardTier={1}
               />
             )}
@@ -4130,6 +4135,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               compact={false} selectedJobId={selectedJob?.jobId} onJobSelect={handleJobSelect}
               activeFilterCount={activeFilterCount}
               onClearFilters={clearAllFilters}
+              searchActive={!!localSearch.trim()}
+              profileName={activeDomainProfile?.profile_name || null}
               cardTier={effectiveTier}
               containerRef={jobsPanelElementRef}
             />
@@ -4251,6 +4258,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       setMobilePane, isMobile,
                       compact, selectedJobId, onJobSelect,
                       activeFilterCount = 0, onClearFilters,
+                      searchActive = false, profileName = null,
                       cardTier = 1, containerRef }) {
   const [pageInput, setPageInput] = useState("");
   const shouldShowEmptyState = jobs.length === 0 && !scraping;
@@ -4260,7 +4268,15 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
   // widening the filter that hid everything. It is also the exact reading that let the NULL-IN
   // outage look like an ordinary empty board for as long as it did, which is why an empty board
   // now has to say which of the two it is.
-  const emptyBecauseFiltered = shouldShowEmptyState && activeFilterCount > 0;
+  // localSearch counts toward "filtered" here even though it is not one of the drawer's filters:
+  // it narrows the board server-side exactly like they do, and an empty board caused only by a
+  // stale search term used to fall through to "Search for a role above" — advice to do the very
+  // thing that was hiding the jobs. onClearFilters clears the search too, so the count and the
+  // button agree.
+  const narrowingCount      = activeFilterCount + (searchActive ? 1 : 0);
+  const emptyBecauseFiltered = shouldShowEmptyState && narrowingCount > 0;
+  // Third case: nothing is narrowing the board and it is still empty. See RoleScopedEmptyState.
+  const emptyBecauseRole     = shouldShowEmptyState && narrowingCount === 0 && !!profileName;
   const visiblePages = buildVisiblePageItems(currentPage, totalPages);
   useEffect(() => {
     setPageInput(String(currentPage || ""));
@@ -4278,8 +4294,10 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                   background: `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)` }}>
       {shouldShowEmptyState ? (
         emptyBecauseFiltered
-          ? <FilteredEmptyState theme={theme} count={activeFilterCount} onClearFilters={onClearFilters}/>
-          : <EmptyState theme={theme}/>
+          ? <FilteredEmptyState theme={theme} count={narrowingCount} onClearFilters={onClearFilters}/>
+          : emptyBecauseRole
+            ? <RoleScopedEmptyState theme={theme} profileName={profileName}/>
+            : <EmptyState theme={theme}/>
       ) : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
@@ -4491,6 +4509,36 @@ function FilteredEmptyState({ theme, count, onClearFilters }) {
           Clear all filters
         </button>
       )}
+    </div>
+  );
+}
+
+// ── Empty state, role-scoped variant ────────────────────────────────────────────────────────
+// The THIRD reason a board can be empty, and until now the only one with no voice of its own.
+//
+// /api/jobs is profile-scoped through an INNER JOIN on job_role_map.role_key, so a board with no
+// filters at all and zero rows is not "search for something" — it means nothing in the shared pool
+// is bucketed under THIS profile's role. Saying "Search for a role above" there sent the user off to
+// run a search that could not change the answer. Naming the profile makes the actual next move
+// (switch or widen the profile) findable, and it is honest whether the cause is an empty pool or a
+// role with no matches: either way, nothing matches this profile's role.
+function RoleScopedEmptyState({ theme, profileName }) {
+  const { theme: t } = useTheme();
+  const th = theme || t;
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+                  justifyContent:"center", gap:14, padding:40, color:th.textDim }}>
+      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                    fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase", color:th.text,
+                    textAlign:"center" }}>
+        No jobs in your profile&rsquo;s role
+      </div>
+      <div style={{ fontSize:12, textAlign:"center", color:th.textDim, maxWidth:380, lineHeight:1.8 }}>
+        This board only shows postings matching the role of your active profile
+        {profileName ? <> (<strong style={{ color:th.text }}>{profileName}</strong>)</> : null}, and
+        no filters are narrowing it — nothing in the pool is classified under that role yet. Switch
+        profiles, or run a search to pull in new postings.
+      </div>
     </div>
   );
 }

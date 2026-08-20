@@ -108,9 +108,14 @@ test("the shared canonical write populates automation_tier, and a re-crawl re-de
       skills_json TEXT, is_h1b_sponsor INTEGER, requires_work_auth INTEGER,
       is_clearance_required INTEGER, discovered_at INTEGER, updated_at INTEGER,
       is_active INTEGER DEFAULT 1, fingerprint TEXT, sources_seen TEXT, req_uid TEXT,
-      automation_tier TEXT
+      automation_tier TEXT,
+      -- Source-owned column now written by aggregator's upsertStmt (six sources parse an
+      -- employment type; none of it was persisted before). Hand-rolled fixtures have to track the
+      -- real schema or the upsert fails against them — the same way automation_tier surfaced.
+      employment_type TEXT
     );
-    CREATE TABLE job_role_map (job_id TEXT PRIMARY KEY, role_key TEXT, role_family TEXT, domain TEXT, confidence REAL, matched_by TEXT);
+    -- source_profile_id: upsertCanonicalJob retires superseded classifier buckets by this column.
+    CREATE TABLE job_role_map (job_id TEXT PRIMARY KEY, role_key TEXT, role_family TEXT, domain TEXT, source_profile_id INTEGER, confidence REAL, matched_by TEXT);
     CREATE TABLE rejected_jobs (job_id TEXT PRIMARY KEY, title TEXT, company TEXT, source TEXT, reason TEXT, rejected_at INTEGER);
   `);
   const verdict = { roleKey: "engineering", seniority: "mid", domain: "software", collar: "white", confidence: 0.9 };
