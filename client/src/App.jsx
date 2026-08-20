@@ -180,7 +180,16 @@ function AppDashboard({ authUser, setAuthUser }) {
   return (
     <JobBoardProvider>
       <AppScrollProvider>
-        <div style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
+        {/* data-app-shell marks the element whose children are the app's own surfaces, so the panel
+            host can make the BOARD inert while a panel is open without hunting for it by class or
+            position. It does not need to know WHICH child is the board: useBoardLock inerts every
+            child that renders BELOW the scrim and leaves alone every child at or above Z.NAV. That
+            rule is the reason TopBar stays interactive — it paints above the scrim and is therefore
+            undimmed and visibly clickable, and a control that looks live but is inert is worse than
+            one that works. Keying on the z-tier rather than a marker prop also means TopBar's second
+            pill is covered without either component knowing about the other. */}
+        <div data-app-shell
+             style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
                       minHeight:"100vh", display:"flex", flexDirection:"column",
                       color:theme.text }}>
 

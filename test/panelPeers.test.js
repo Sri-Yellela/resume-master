@@ -25,11 +25,17 @@ const app     = read("client/src/App.jsx");
 // ── The seven properties of the reference panel ───────────────────────────────────────────────
 
 test("1. right-anchored overlay, inset from the viewport edges, with rounded corners", () => {
+  // The INSET is the dock's — it is the overlay surface now, and the panels tile inside it. That is
+  // the fix: three independently viewport-anchored panels were not a group, so one could be pushed
+  // off the screen by its neighbour growing.
   assert.match(shell, /position: "fixed"/);
-  assert.match(shell, /\{ right: rightOffset, top: 80, bottom: 16,/);   // inset on all four sides
+  assert.match(shell, /\{ right: EDGE_GAP, top: 80, bottom: 16, width:/);   // inset on all four sides
   assert.match(shell, /borderRadius: 16,/);
-  // Not full-height, not flush, and not in the layout flow: it is portalled to body.
+  // Not full-height, not flush, and not in the layout flow: the dock is portalled to body.
   assert.match(shell, /document\.body\s*\)/);
+  assert.equal((shell.match(/createPortal\(/g) || []).length, 2,
+    "expected exactly two portals — the scrim and the dock. A panel portalling itself is how they " +
+    "stopped being a group in the first place");
 });
 
 test("2. the scrim dims but does not hide, and there is exactly one for the group", () => {
@@ -83,7 +89,10 @@ test("7. modal tier: above the board, the Applications table AND the search over
   assert.ok(Z.MODAL > Z.SEARCH);
   assert.ok(Z.MODAL > Z.PANEL_POPOVER);
   assert.ok(Z.MODAL_SCRIM > Z.SEARCH);
-  assert.match(shell, /zIndex: Z\.MODAL \+ \(focused \? 1 : 0\)/);
+  // Declared once, on the dock, for the whole group. Ordering BETWEEN peers is then local to the
+  // dock's stacking context rather than a second scale value competing with the app's.
+  assert.match(shell, /zIndex: Z\.MODAL,/);
+  assert.match(shell, /zIndex: focused \? 1 : 0,/);
 });
 
 // ── Peers, not lookalikes ─────────────────────────────────────────────────────────────────────
@@ -121,9 +130,18 @@ test("one host owns the ordered set, and JD moved under it", () => {
 
 // ── The PDF's two render paths ────────────────────────────────────────────────────────────────
 
-test("the PDF defaults to the faithful A4 view, with reflow as an opt-in", () => {
-  assert.match(sandbox, /const \[viewMode, setViewMode\] = useState\("page"\);/,
-    "Page view must be the default — it is the only view that matches the exported PDF");
+test("the PDF view that leads is the one that is legible at the panel's width", () => {
+  // Page view scales A4 (794px) to whatever the panel has, so its legibility is a pure function of
+  // width: at the 360px minimum the scale is 0.45 and body text lands under 6px. Below the
+  // threshold the panel therefore opens REFLOWED, re-rendered at its measured width rather than
+  // scaled down to it. At or above it, Page leads, because it is the only view whose page breaks
+  // match the exported PDF.
+  assert.match(sandbox, /const PAGE_VIEW_MIN_WIDTH = 700;/);
+  assert.match(sandbox, /const \[viewChoice, setViewChoice\] = useState\(null\);/);
+  assert.match(sandbox, /\(\(width \?\? PAGE_VIEW_MIN_WIDTH\) >= PAGE_VIEW_MIN_WIDTH \? "page" : "reading"\)/);
+  // An explicit choice wins at every width thereafter — the width decides the DEFAULT, it does not
+  // override the person.
+  assert.match(sandbox, /const viewMode = viewChoice/);
   assert.match(sandbox, /viewMode === "reading" \? \(/);
   // Reading view reflows by rendering at the panel's measured width — no transform, no A4 width.
   assert.match(sandbox, /width: "100%",/);
@@ -162,5 +180,48 @@ test("the generate -> sandbox flow is untouched", () => {
 
 test("Escape closes only the focused panel", () => {
   // One keypress closing every open panel is never what "go back" means.
-  assert.match(shell, /if \(!focused\) return;[\s\S]*?e\.key === "Escape"/);
+  assert.match(shell, /if \(!focused\) return undefined;[\s\S]*?e\.key === "Escape"/);
+});
+
+// ── The board behind the scrim ────────────────────────────────────────────────────────────────
+
+test("the board is inert and frozen while any panel is open", () => {
+  const lock = read("client/src/hooks/useBoardLock.js");
+  assert.match(jobs, /useBoardLock\(openPanelCount > 0\)/);
+
+  // FOCUS. `pointer-events: none` stops the mouse and nothing else — Tab walked into the board's
+  // controls behind the scrim and put the focus ring on an element the user could not see. `inert`
+  // is the only thing that removes a subtree from the tab order, the a11y tree and hit-testing at
+  // once.
+  assert.match(lock, /child\.setAttribute\("inert", ""\)/);
+  assert.match(lock, /for \(const el of inerted\) el\.removeAttribute\("inert"\)/);
+  // What stays alive is read from the z-scale, not from a list of component names: anything
+  // painting at or above NAV is above the scrim, therefore undimmed and visibly clickable, and a
+  // control that looks live but is inert is worse than one that works.
+  assert.match(lock, /if \(Number\.isFinite\(z\) && z >= Z\.NAV\) continue;/);
+  assert.match(app, /data-app-shell/);
+
+  // SCROLL, and the scroll POSITION. `overflow: hidden` on body is the lock that loses it — the
+  // document stops being scrollable, the browser clamps scrollTop, and closing the panel drops the
+  // user at the top of a board they had scrolled halfway down.
+  assert.match(lock, /const scrollY = window\.scrollY/);
+  assert.match(lock, /body\.style\.position = "fixed";/);
+  assert.match(lock, /body\.style\.top = `-\$\{scrollY\}px`;/);
+  assert.match(lock, /window\.scrollTo\(0, scrollY\)/);
+  assert.ok(!/body\.style\.overflow = "hidden"/.test(lock),
+    "the lock that discards the scroll position is back");
+
+  // And the gutter it opens up, measured BEFORE locking — after it there is no scrollbar left to
+  // measure and the compensation would always be zero.
+  assert.match(lock, /const gutter = Math\.max\(0, window\.innerWidth - document\.documentElement\.clientWidth\);/);
+  assert.match(lock, /body\.style\.paddingRight = `\$\{priorPad \+ gutter\}px`;/);
+});
+
+test("keyboard scrolling targets the focused panel, not the page", () => {
+  // The browser already does this for free when the focused element is inside the scroll container,
+  // so the fix is to put focus there rather than to re-derive the browser's scrolling rules in a
+  // key handler. tabIndex -1 keeps it programmatically focusable without joining the tab order, so
+  // Tab still reaches the close button and the action bar in their natural positions.
+  assert.match(shell, /scrollRef\.current\?\.focus\?\.\(\{ preventScroll: true \}\)/);
+  assert.match(shell, /tabIndex=\{-1\} data-panel-body=""/);
 });

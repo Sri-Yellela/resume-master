@@ -14,7 +14,8 @@ import { ATSPanel } from "./ATSPanel.jsx";
 // inline version's tabs already sat relative to its content, so the arrangement the user knows is
 // preserved while the chrome around it becomes the shared one.
 export default function AtsReportPanel({
-  slot = 0, rightOffset = 16, focused = true, fullScreen = false, onFocus, onWidthChange, onClose,
+  slot = 0, width, focused = true, fullScreen = false, resizeMode = "dock",
+  onFocus, onResizeStart, onResize, onResizeEnd, onClose,
   theme, activeAts, rightTab, setRightTab, genCount,
   jobId, resumeText, activeProfileId,
   historyContent,
@@ -63,8 +64,10 @@ export default function AtsReportPanel({
   return (
     <PanelShell
       panelId="ats"
-      slot={slot} rightOffset={rightOffset} focused={focused} fullScreen={fullScreen}
-      onClose={onClose} onFocus={onFocus} onWidthChange={onWidthChange}
+      slot={slot} width={width} focused={focused} fullScreen={fullScreen}
+      resizeMode={resizeMode}
+      onClose={onClose} onFocus={onFocus}
+      onResizeStart={onResizeStart} onResize={onResize} onResizeEnd={onResizeEnd}
       header={header} actions={actions}
     >
       {/* ATSPanel used to be handed height:100% inside a fixed-height column and scrolled itself.
