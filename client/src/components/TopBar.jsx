@@ -10,6 +10,7 @@ import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { api } from "../lib/api.js";
 import { DockPortal } from "./DockPortal.jsx";
 import ProfileSelectorDropdown from "./ProfileSelectorDropdown.jsx";
+import { Z } from "../styles/zLayers.js";
 
 // ── Inject slideDown keyframe once ────────────────────────────
 function injectKeyframes() {
@@ -430,9 +431,20 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
 // ═══════════════════════════════════════════════════════════════
 export default function TopBar({
   user, onTabChange, onLogout, onUserChange, onProfileActivate,
+  // "bar" | "pill" — which search surface AppDashboard has decided is showing. Defaults to "bar"
+  // so any caller that does not pass it (none today) gets the collapsed pill hidden rather than
+  // a second surface appearing alongside the main one.
+  searchSurface = "bar",
 }) {
   const { theme } = useTheme();
   const { progress: rawProgress, pinned } = useAppScroll();
+  // The collapsed pill's VISIBILITY is not decided here any more — it comes from the one derived
+  // search-surface value in AppDashboard (hooks/useSearchSurface.js). This component used to answer
+  // the same question independently from the board's inner scroll container while the main bar
+  // answered it from window.scrollY, which is exactly how both ended up on screen together.
+  // `scrolled` below still drives this bar's own GEOMETRY (the nav collapse animation), which is a
+  // different question and stays local.
+  const pillIsTheSearchSurface = searchSurface === "pill";
   // pinned (pagination click) holds dock fully collapsed
   const p = pinned ? 1 : rawProgress;
   const scrolled = p >= 0.5;
@@ -600,7 +612,7 @@ export default function TopBar({
           overflow: "visible",
           opacity: pillWidth <= 0 ? 0 : 1,
           pointerEvents: pillWidth <= 0 ? "none" : "auto",
-          zIndex: 1000,
+          zIndex: Z.NAV,
           fontFamily: "'DM Sans',system-ui,sans-serif",
         }}>
         {/* Logo — "R" always visible, "esume Master" collapses */}
@@ -625,7 +637,11 @@ export default function TopBar({
       </div>
 
       {/* ── Pill 2: filter row — slides down when scrolled + hovered ── */}
-      {scrolled && hovered && boardTab !== undefined && (
+      {/* Gated on the SHARED surface value plus the presence of board controls to render — not on a
+          second scroll boolean of its own. `hovered` is deliberately NOT part of this condition:
+          it was an independent input, and requirement was one source of truth, so hover no longer
+          decides whether the pill exists. */}
+      {pillIsTheSearchSurface && boardTab !== undefined && (
         <div
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
@@ -648,7 +664,7 @@ export default function TopBar({
             gap: 6,
             opacity: pillWidth <= 0 ? 0 : 1,
             pointerEvents: pillWidth <= 0 ? "none" : "auto",
-            zIndex: 1000,
+            zIndex: Z.NAV,
             fontFamily: "'DM Sans',system-ui,sans-serif",
             animation: "slideDown 200ms ease",
             whiteSpace: "nowrap",

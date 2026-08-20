@@ -5,6 +5,7 @@ import { api, printResume } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import JobCard      from "../components/JobCard.jsx";
+import { DockPortal } from "../components/DockPortal.jsx";
 
 // ── Calendar component ────────────────────────────────────────
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -56,12 +57,13 @@ function Calendar({ value, onChange, onClose, theme }) {
   };
 
   return (
-    <div style={{ background:theme.surface, border:`1px solid ${theme.border}`,
-                  borderRadius:16, padding:16, width:260,
-                  boxShadow:theme.shadowLg,
-                  position:"absolute", zIndex:300,
-                  top:"calc(100% + 6px)", left:0,
-                  maxHeight:"320px", overflowY:"auto" }}>
+    // No position/z-index/frame of its own: this is rendered INSIDE a DockPortal, which supplies
+    // the surface, the viewport clamping and the tier. It used to be position:absolute with
+    // z-index:300 inside the Applications sheet — and the sheet's root is `flex:1; overflow:hidden`,
+    // so the popover was CLIPPED by its ancestor rather than underlapped. That is why it appeared to
+    // bleed into the table, and why no z-index value could have fixed it: clipping is resolved before
+    // stacking is even considered. Only leaving the clipping ancestor fixes it.
+    <div style={{ padding:16, width:260, maxHeight:"320px", overflowY:"auto" }}>
       <div style={{ display:"flex", alignItems:"center",
                     justifyContent:"space-between", marginBottom:12 }}>
         <button style={{ background:"transparent",
@@ -359,6 +361,7 @@ export function DatabasePanel({ user }) {
   const [sortDir,      setSortDir]      = useState("desc");
   const [filterDate,   setFilterDate]   = useState("");
   const [calFilter,    setCalFilter]    = useState(false);
+  const [calFilterRect, setCalFilterRect] = useState(null);
 
   // ── Saved Jobs tab state ──────────────────────────────────────
   const [savedJobs,    setSavedJobs]    = useState([]);
@@ -451,15 +454,12 @@ export function DatabasePanel({ user }) {
   useEffect(() => { if (activeSheet === "pending") loadPending(); }, [activeSheet, loadPending]);
   useEffect(() => { if (editCell && inputRef.current) inputRef.current.focus(); }, [editCell]);
 
-  useEffect(() => {
-    const h = e => {
-      if (calRef.current && !calRef.current.contains(e.target)) {
-        setCalCell(null); setCalFilter(false);
-      }
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
+  // The document mousedown handler that used to close these calendars lived here and tested
+  // `calRef.contains(e.target)`. Now that the calendar is portalled to document.body it is no longer
+  // a DOM descendant of calRef, so that test would have reported every click INSIDE the calendar as
+  // an outside click — picking a day or changing month would have dismissed it instead. DockPortal
+  // owns outside-click dismissal for both calendars (it tests the portalled panel itself and
+  // hit-tests the trigger), and unlike this handler it does not consume the click.
 
   const toggleSort = key => {
     if (sortCol === key) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -679,7 +679,10 @@ export function DatabasePanel({ user }) {
                        border:`1px solid ${filterDate ? "color-mix(in srgb, var(--color-primary) 25%, transparent)" : theme.border}`,
                        borderRadius:999, padding:"6px 14px", cursor:"pointer", fontSize:12,
                        fontWeight:600, whiteSpace:"nowrap" }}
-              onClick={() => setCalFilter(o => !o)}>
+              onClick={() => {
+                setCalFilterRect(calRef.current?.getBoundingClientRect() || null);
+                setCalFilter(o => !o);
+              }}>
               📅 {filterDate ? `Date: ${fmtDate(filterDate)}` : "Filter by date"}
               {filterDate && (
                 <span style={{ marginLeft:4, color:theme.textMuted, fontWeight:700, fontSize:10 }}
@@ -687,17 +690,20 @@ export function DatabasePanel({ user }) {
               )}
             </button>
             <AnimatePresence>
-              {calFilter && (
-                <motion.div key="cal-filter"
-                  initial={{ opacity:0, scale:0.96, y:-4 }}
-                  animate={{ opacity:1, scale:1, y:0 }}
-                  exit={{ opacity:0, scale:0.96, y:-4 }}
-                  transition={{ duration:0.15 }}>
-                  <Calendar theme={theme}
-                    value={filterDate}
-                    onChange={setFilterDate}
-                    onClose={() => setCalFilter(false)}/>
-                </motion.div>
+              {calFilter && calFilterRect && (
+                <DockPortal anchorRect={calFilterRect} theme={theme}
+                  onClose={() => setCalFilter(false)} style={{ minWidth:260, padding:0 }}>
+                  <motion.div key="cal-filter"
+                    initial={{ opacity:0, scale:0.96, y:-4 }}
+                    animate={{ opacity:1, scale:1, y:0 }}
+                    exit={{ opacity:0, scale:0.96, y:-4 }}
+                    transition={{ duration:0.15 }}>
+                    <Calendar theme={theme}
+                      value={filterDate}
+                      onChange={setFilterDate}
+                      onClose={() => setCalFilter(false)}/>
+                  </motion.div>
+                </DockPortal>
               )}
             </AnimatePresence>
           </div>
@@ -819,24 +825,29 @@ export function DatabasePanel({ user }) {
                                          borderRadius:8, color:isoVal ? theme.accent : theme.textDim,
                                          fontSize:11, padding:"3px 10px",
                                          cursor:"pointer", whiteSpace:"nowrap" }}
-                                onClick={() => setCalCell(isCalOpen ? null : { rowId })}>
+                                onClick={e => setCalCell(isCalOpen ? null : {
+                                  rowId, rect: e.currentTarget.getBoundingClientRect(),
+                                })}>
                                 {isoVal ? fmtDate(isoVal) : (
                                   <span style={{ color:theme.textDim }}>+ Set date</span>
                                 )}
                                 {isSaving && <span style={{ color:theme.warning, marginLeft:4 }}>⏳</span>}
                               </button>
                               <AnimatePresence>
-                                {isCalOpen && (
-                                  <motion.div key="cal"
-                                    initial={{ opacity:0, scale:0.96, y:-4 }}
-                                    animate={{ opacity:1, scale:1, y:0 }}
-                                    exit={{ opacity:0, scale:0.96, y:-4 }}
-                                    transition={{ duration:0.15 }}>
-                                    <Calendar theme={theme}
-                                      value={isoVal}
-                                      onChange={iso => handleDatePick(rowId, iso)}
-                                      onClose={() => setCalCell(null)}/>
-                                  </motion.div>
+                                {isCalOpen && calCell?.rect && (
+                                  <DockPortal anchorRect={calCell.rect} theme={theme}
+                                    onClose={() => setCalCell(null)} style={{ minWidth:260, padding:0 }}>
+                                    <motion.div key="cal"
+                                      initial={{ opacity:0, scale:0.96, y:-4 }}
+                                      animate={{ opacity:1, scale:1, y:0 }}
+                                      exit={{ opacity:0, scale:0.96, y:-4 }}
+                                      transition={{ duration:0.15 }}>
+                                      <Calendar theme={theme}
+                                        value={isoVal}
+                                        onChange={iso => handleDatePick(rowId, iso)}
+                                        onClose={() => setCalCell(null)}/>
+                                    </motion.div>
+                                  </DockPortal>
                                 )}
                               </AnimatePresence>
                             </div>
