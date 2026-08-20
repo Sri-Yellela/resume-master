@@ -43,6 +43,17 @@ export default function UnifiedSearchBar({
   activeTab,
   onTabChange,
   actions,   // optional ReactNode rendered right-aligned in the tabs row (see below)
+  // `hidden` hides this bar WITHOUT removing it from the layout. The caller owns exactly one search
+  // surface at a time (hooks/useSearchSurface.js), and it used to express that by unmounting this
+  // component — which took its reserved space with it, changed the document height by 386px above
+  // the fold, and let Chrome's scroll anchoring drag the scroll offset back across the very
+  // threshold that had just been crossed. `visibility` keeps the space, paints nothing, and takes
+  // the whole subtree out of the tab order, so the hidden surface is unreachable by keyboard too.
+  //
+  // It is applied HERE rather than by a wrapper for the same reason `actions` is a slot: .usb is
+  // position:sticky with auto margins, and an intermediate box would become its containing block
+  // and leave it nothing to stick to.
+  hidden = false,
 }) {
   const [q,       setQ]       = useState('');
   const [loc,     setLoc]     = useState('');
@@ -107,7 +118,9 @@ export default function UnifiedSearchBar({
 
   return (
     <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero') + (variant === 'inline' ? ' usb--inline' : '')}
-         role="search" aria-label="Job search">
+         role="search" aria-label="Job search"
+         aria-hidden={hidden || undefined}
+         style={hidden ? { visibility: 'hidden' } : undefined}>
 
       {/* `actions` is an optional trailing slot in this row. It lives INSIDE .usb rather than
           being wrapped around the component by the caller because .usb is position:sticky with

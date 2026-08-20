@@ -32,6 +32,7 @@ const topbar     = read("client/src/components/TopBar.jsx");
 const hook       = read("client/src/hooks/useSearchSurface.js");
 const zLayers    = read("client/src/styles/zLayers.js");
 const usbCss     = read("client/src/components/UnifiedSearchBar.css");
+const usb        = read("client/src/components/UnifiedSearchBar.jsx");
 const jdPanel    = read("client/src/components/JobDetailPanel.jsx");
 const dockPortal = read("client/src/components/DockPortal.jsx");
 const dbPanel    = read("client/src/panels/DatabasePanel.jsx");
@@ -40,8 +41,13 @@ const dbPanel    = read("client/src/panels/DatabasePanel.jsx");
 
 test("the two surfaces are chosen by ONE derived value, not two booleans", () => {
   assert.match(app, /const \{ surface: searchSurface, sentinelRef \} = useSearchSurface\(\)/);
-  // The bar renders only for one value of it...
-  assert.match(app, /\{searchSurface === "bar" && \(/);
+  // The bar is VISIBLE for only one value of it. It is no longer unmounted for the other: doing
+  // that removed 386px of above-the-fold layout at the threshold (scrollHeight 1763 -> 1377), and
+  // Chrome's scroll anchoring compensated by pulling scrollY back across the same threshold. One
+  // value still decides, but it now decides paint, not existence.
+  assert.match(app, /hidden=\{searchSurface !== "bar"\}/);
+  assert.match(app, /visibility: searchSurface === "bar" \? "visible" : "hidden"/);
+  assert.match(usb, /style=\{hidden \? \{ visibility: 'hidden' \} : undefined\}/);
   // ...and TopBar is TOLD which surface is showing rather than deciding again.
   assert.match(app, /searchSurface=\{searchSurface\}/);
   assert.match(topbar, /searchSurface = "bar",/);
@@ -70,23 +76,60 @@ test("hover is not resurrected as a second input to pill visibility", () => {
 
 // ── (i) The observed condition ─────────────────────────────────────────────────────────────────
 
-test("visibility is driven by IntersectionObserver, on a sentinel, with hysteresis", () => {
-  assert.match(hook, /new IntersectionObserver/);
-  // A sentinel, not the bar: observing the bar unmounts the observer's target the moment the pill
-  // takes over, so the pill could never hand back. This is the failure mode the naive version has.
+test("the condition is read from a sentinel, in pixels, with real hysteresis", () => {
+  // A sentinel, not the bar: the bar is `position: sticky` and never leaves the viewport, so it
+  // cannot be its own condition. The sentinel holds the bar's SLOT and does leave.
   assert.match(app, /<div ref=\{sentinelRef\} aria-hidden="true" style=\{\{ height: 0 \}\}\/>/);
-  // Two DIFFERENT thresholds = hysteresis. One threshold chatters at the boundary.
-  assert.match(hook, /HIDE_RATIO = 0\.01/);
-  assert.match(hook, /SHOW_RATIO = 0\.5/);
-  assert.ok(/prev === "bar"\s+&& ratio <= HIDE_RATIO/.test(hook), "missing bar -> pill transition guard");
-  assert.ok(/prev === "pill" && ratio >= SHOW_RATIO/.test(hook), "missing pill -> bar transition guard");
+
+  // PIXELS, not intersectionRatio. The sentinel is zero-height, and IntersectionObserver reports a
+  // zero-area target as ratio 1 when intersecting and 0 when not — never anything between.
+  // Instrumenting the real observer across a full scroll returned exactly two distinct ratios,
+  // [1, 0], so the two ratio thresholds tested the same instant and the hysteresis was inert.
+  assert.ok(!/intersectionRatio/.test(hook), "the ratio test is back; on a zero-height target it cannot have two thresholds");
+  assert.match(hook, /const HIDE_ABOVE = 40;/);
+  assert.match(hook, /const SHOW_BELOW = 120;/);
+  assert.ok(/prev === "bar"\s+&& top <= HIDE_ABOVE/.test(hook), "missing bar -> pill transition guard");
+  assert.ok(/prev === "pill" && top >= SHOW_BELOW/.test(hook), "missing pill -> bar transition guard");
+  assert.ok(HIDE_BAND_IS_WIDE(), "the two thresholds must be meaningfully apart, not adjacent");
+  function HIDE_BAND_IS_WIDE() {
+    const hide = Number(/const HIDE_ABOVE = (\d+);/.exec(hook)[1]);
+    const show = Number(/const SHOW_BELOW = (\d+);/.exec(hook)[1]);
+    return show - hide >= 40;
+  }
+
+  // rAF-coalesced, and listening in the capture phase so a scroll inside a nested container counts.
+  assert.match(hook, /frame = requestAnimationFrame\(measure\)/);
+  assert.match(hook, /"scroll", schedule, \{ capture: true, passive: true \}/);
+});
+
+test("the surface cannot move the geometry it is decided from", () => {
+  // The loop that produced the flicker: the sentinel sat below the hero, the hero rendered only
+  // while the surface was "bar", so flipping unmounted it and the scroll offset followed. Both the
+  // hero and the bar now keep their space whichever surface is showing, so the sentinel's position
+  // is a function of the scroll offset alone.
+  assert.match(app, /\{activeTab === "console" && \(/);
+  assert.ok(!/activeTab === "console" && searchSurface === "bar" && \(/.test(app),
+    "the hero is being unmounted by the surface again — that is the feedback loop");
 });
 
 test("first paint shows exactly one surface, and never zero", () => {
   // Seeded to "bar", which is the correct answer at rest, so there is no frame with no surface.
   assert.match(hook, /useState\("bar"\)/);
-  // No IntersectionObserver (old browser, SSR) must still leave one surface up, not none.
-  assert.match(hook, /typeof IntersectionObserver === "undefined"/);
+  // And measured once immediately, so a page restored mid-scroll corrects within a frame rather
+  // than showing the wrong surface until the user scrolls.
+  assert.match(hook, /\n    measure\(\);\n/);
+});
+
+test("there is no dead frame at the swap: the incoming surface never fades in", () => {
+  // The bar disappears synchronously. An incoming pill that animated opacity 0 -> 1 therefore left a
+  // window with neither surface visible — captured at the crossing as
+  // `bar: null, pill: { opacity: 0 }`, which is the reported gap. The pill still slides in, but on
+  // transform only, at full opacity from its first frame.
+  const kf = topbar.slice(topbar.indexOf("@keyframes slideDown"), topbar.indexOf("@keyframes slideDown") + 220);
+  assert.ok(!/opacity/.test(kf), "the pill fades in again — that is the gap between the two surfaces");
+  assert.match(kf, /transform: translateX\(-50%\) translateY\(-8px\)/);
+  // And the motion itself is optional.
+  assert.match(topbar, /@media \(prefers-reduced-motion: reduce\) \{\s*@keyframes slideDown/);
 });
 
 // ── (ii) The z-index scale ─────────────────────────────────────────────────────────────────────
