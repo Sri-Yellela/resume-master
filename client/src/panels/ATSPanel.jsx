@@ -184,8 +184,12 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   const selectedVerbLookup = new Set((profileSelections.activeVerbs || []).map(profileSignalKey).filter(Boolean));
 
   return (
-    <div style={{ padding:"16px 16px", display:"flex", flexDirection:"column",
-                  gap:14, overflowY:"auto", height:"100%" }}>
+    // No scroller and no height:100% of its own any more. This used to be handed a fixed-height
+    // react-resizable-panels column and had to scroll itself; it is now rendered inside
+    // PanelShell's body (see AtsReportPanel), which is the scroll container. Keeping overflowY:auto
+    // here would nest a second scrollbar inside the first, and height:100% would clip the report to
+    // the panel body's height instead of letting it extend and scroll.
+    <div style={{ padding:"16px 16px", display:"flex", flexDirection:"column", gap:14 }}>
 
       {/* Score card — shown when a score is available */}
       {activeReport.score != null && (

@@ -1,13 +1,11 @@
-import { useState, useCallback, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { useState, useCallback, useEffect } from "react";
 import { HighlightedDescription } from "./HighlightedDescription.jsx";
 import { api } from "../lib/api.js";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { useTheme } from "../styles/theme.jsx";
 import CoverLetterModal from "./CoverLetterModal.jsx";
 import CompanyViewModal from "./CompanyViewModal.jsx";
-import { Z } from "../styles/zLayers.js";
+import PanelShell from "./PanelShell.jsx";
 
 function ago(postedAt, scrapedAt) {
   let ms = postedAt ? new Date(postedAt).getTime() : NaN;
@@ -123,19 +121,17 @@ function ActionBtn({ onClick, title, children, accent = "#0284c7", active, disab
   );
 }
 
-export default function JobDetailPanel() {
+// Layout props (slot, rightOffset, focused, fullScreen, onFocus, onWidthChange) come from
+// usePanelHost via JobsPanel — this panel is one peer in an ordered set now, not the only drawer.
+// Escape handling, focus-on-open, the portal, the scrim, the animation and the two sticky regions
+// all moved into PanelShell, which is shared with the PDF and ATS panels.
+export default function JobDetailPanel({
+  slot = 0, rightOffset = 16, focused = true, fullScreen = false,
+  onFocus, onWidthChange,
+}) {
   const { selectedJob, setSelectedJob, selectedJobMeta } = useJobBoard();
   const { theme } = useTheme();
-  const closeBtnRef = useRef(null);
   const close = useCallback(() => setSelectedJob(null), [setSelectedJob]);
-
-  useEffect(() => {
-    if (!selectedJob) return;
-    const onKey = (e) => { if (e.key === "Escape") close(); };
-    document.addEventListener("keydown", onKey);
-    closeBtnRef.current?.focus();
-    return () => document.removeEventListener("keydown", onKey);
-  }, [selectedJob, close]);
 
   // Apply automation state (self-contained in portal)
   const [applyLoading, setApplyLoading] = useState(false);
@@ -179,34 +175,15 @@ export default function JobDetailPanel() {
     setSemiActive(false); setApplyResult(null);
   }, [selectedJob]);
 
-  return createPortal(
-    <AnimatePresence>
-      {selectedJob && (
-        <>
-          <motion.div key="backdrop"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }} onClick={close}
-            style={{ position:"fixed", inset:0, zIndex:Z.MODAL_SCRIM,
-                     background:"rgba(0,0,0,0.45)", backdropFilter:"blur(4px)", WebkitBackdropFilter:"blur(4px)" }}/>
-          <motion.div key="drawer"
-            initial={{ x: 560, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 560, opacity: 0 }}
-            transition={{ type:"spring", damping:26, stiffness:220 }}
-            className="liquid-panel"
-            style={{
-              position:"fixed", right:16, top:80, bottom:16,
-              width:"min(560px, 92vw)", borderRadius:16,
-              // MODAL tier. Was 40 — below the search surface at 50, so opening a job put the
-              // drawer BEHIND the search bar. Above SEARCH is the correct relationship and the one
-              // the panel spec requires.
-              zIndex:Z.MODAL, overflow:"hidden",
-              display:"flex", flexDirection:"column",
-            }}>
-            {/* Drawer header */}
-            <div style={{
-              display:"flex", alignItems:"flex-start", gap:10,
-              padding:"12px 14px 10px", borderBottom:"1px solid var(--border-glass)",
-              flexShrink:0, background:"var(--color-surface)",
-            }}>
+  if (!selectedJob) return null;
+
+  return (
+    <PanelShell
+      panelId="jd"
+      slot={slot} rightOffset={rightOffset} focused={focused} fullScreen={fullScreen}
+      onClose={close} onFocus={onFocus} onWidthChange={onWidthChange}
+      header={
+        <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
               <CompanyIcon company={selectedJob.company} iconUrl={selectedJob.companyIconUrl}/>
               <div style={{ flex:1, minWidth:0 }}>
                 <div onClick={() => setShowCompanyView(true)} title={`View ${selectedJob.company}'s KB profile`}
@@ -263,16 +240,9 @@ export default function JobDetailPanel() {
                   );
                 })()}
               </div>
-              <button ref={closeBtnRef} onClick={close}
-                style={{ background:"none", border:"none", cursor:"pointer", color:"var(--color-text-muted)",
-                         fontSize:16, padding:"0 2px", flexShrink:0, lineHeight:1 }}
-                aria-label="Close detail">
-                ✕
-              </button>
-            </div>
-
-            {/* Action bar */}
-            {selectedJobMeta && (() => {
+        </div>
+      }
+      actions={selectedJobMeta ? (() => {
               const { g, done, st, applyMode: am, canUseGenerate: canGen, onGenerate, onViewSandbox, onExport, onStar, onDislike, onQueueApply } = selectedJobMeta;
               // Same orphan as the one removed from JobCard: this action bar has no dedicated A+
               // button, so the `aPlusLoading` flag beside this one was computed and never read.
@@ -281,11 +251,7 @@ export default function JobDetailPanel() {
               // in-flight state for whichever tool is running.
               const generateLoading = st === "generate";
               return (
-                <div style={{
-                  display:"flex", alignItems:"center", gap:6, flexWrap:"wrap",
-                  padding:"8px 14px", borderBottom:"1px solid var(--border-glass)",
-                  flexShrink:0, background:"var(--color-surface)",
-                }}>
+                <>
                   {canGen && onGenerate && (
                     <ActionBtn onClick={() => onGenerate(done && g?.html !== "__exists__")}
                       title={done ? "Regenerate resume" : "Generate resume"} accent="var(--color-primary)" disabled={!!st}>
@@ -335,9 +301,15 @@ export default function JobDetailPanel() {
                   <ActionBtn onClick={() => setShowCoverLetter(true)} title="Write a cover letter" accent="#7c3aed">
                     ✉ Cover Letter
                   </ActionBtn>
-                </div>
+                </>
               );
-            })()}
+            })() : null}
+    >
+      {/* ── BODY (the only scrolling region) ───────────────────────────────────────────────────
+          The modals below render through their own portals, so their position here is immaterial;
+          the apply toast and the automation banner are inline and stay directly above the
+          description, which is what they annotate. */}
+      <div style={{ display:"flex", flexDirection:"column", minHeight:"100%" }}>
 
             {/* Company view (FE-4) */}
             {showCompanyView && (
@@ -397,8 +369,10 @@ export default function JobDetailPanel() {
               </div>
             )}
 
-            {/* Scrollable description */}
-            <div style={{ flex:1, overflowY:"auto", padding:"14px 14px" }}>
+            {/* Description. PanelShell's body is the scroll container (property 5), so this is a
+                plain padded block — nesting another overflow:auto here would put a second scrollbar
+                inside the first. */}
+            <div style={{ flex:1, padding:"14px 14px" }}>
               {selectedJob.applicantCount != null && (
                 <div style={{ fontSize:11, color:"var(--color-text-faint)", marginBottom:10 }}>
                   👥 {selectedJob.applicantCount > 200 ? "200+" : selectedJob.applicantCount} applicants
@@ -425,10 +399,7 @@ export default function JobDetailPanel() {
                 </div>
               )}
             </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>,
-    document.body
+      </div>
+    </PanelShell>
   );
 }

@@ -21,7 +21,6 @@ import { PlansPanel }            from "./panels/PlansPanel.jsx";
 import { IntegrationsPanel }     from "./panels/IntegrationsPanel.jsx";
 import { RecruiterPanel }        from "./panels/RecruiterPanel.jsx";
 import { JobsConsole }            from "./consoles/PlanConsoles.jsx";
-import JobDetailPanel            from "./components/JobDetailPanel.jsx";
 import UnifiedSearchBar          from "./components/UnifiedSearchBar.jsx";
 import ImportJobModal            from "./components/ImportJobModal.jsx";
 import { Plus }                  from "lucide-react";
@@ -264,7 +263,13 @@ function AppDashboard({ authUser, setAuthUser }) {
             {activeTab === "recruiter"    && <RecruiterPanel/>}
           </main>
 
-          <JobDetailPanel/>
+          {/* JobDetailPanel moved into JobsPanel, which is where the PDF and ATS panels live and
+              where the shared panel host runs — three peers cannot tile side by side from two
+              different parents. One visible consequence, stated rather than hidden: switching tabs
+              from the TopBar (which sits above the scrim at Z.NAV) now hides the drawer with the
+              board it belongs to instead of leaving it floating over the Database panel. The
+              selection itself lives in JobBoardContext, above the tab switch, so returning to Jobs
+              restores the same open drawer. */}
 
           {importOpen && (
             <ImportJobModal
