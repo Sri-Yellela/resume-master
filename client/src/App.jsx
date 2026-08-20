@@ -11,6 +11,7 @@ import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
 import DBInspector               from "./pages/admin/DBInspector.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import AppShell                  from "./components/AppShell.jsx";
+import { useSearchSurface }      from "./hooks/useSearchSurface.js";
 import { AppScrollProvider } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
@@ -89,9 +90,13 @@ function AppDashboard({ authUser, setAuthUser }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
-  const [uiMode, setUiMode] = useState("hero");
   const [importOpen, setImportOpen] = useState(false);
-  const DOCK_THRESHOLD = 80;
+  // ONE derived value decides which search surface renders — see hooks/useSearchSurface.js. It
+  // replaces a `uiMode` state driven by window.scrollY, which on this layout never changed
+  // (documentElement.scrollHeight === innerHeight: the window does not scroll), so the main bar
+  // could never yield to the pill while TopBar's pill was being decided independently from the
+  // board's inner scroll container. That pair of unrelated booleans is why both were visible.
+  const { surface: searchSurface, sentinelRef } = useSearchSurface();
   const consolePath = `/app/${CONSOLE_ROUTE}`;
   const routeKey = location.pathname.replace(/^\/app\/?/, "") || "";
   const activeTab = routeKey === CONSOLE_ROUTE || LEGACY_CONSOLE_ROUTES.has(routeKey) || routeKey === ""
@@ -169,13 +174,9 @@ function AppDashboard({ authUser, setAuthUser }) {
     return () => window.removeEventListener("rm:session-expired", handle);
   }, [handleLogout]);
 
-  // Scroll-driven hero <-> dock
-  useEffect(() => {
-    const onScroll = () => setUiMode(window.scrollY > DOCK_THRESHOLD ? "dock" : "hero");
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
+  // The scroll listener that used to drive hero <-> dock is gone: it read window.scrollY, which is
+  // permanently 0 here, and it re-rendered this component on every scroll event — which is how a
+  // trivial scroll reset the job board (see JobsPanel's boot-effect note and PlanConsoles' memo).
 
   return (
     <JobBoardProvider>
@@ -186,13 +187,14 @@ function AppDashboard({ authUser, setAuthUser }) {
 
           <TopBar
             user={authUser}
+            searchSurface={searchSurface}
             onTabChange={handlePanelChange}
             onLogout={handleLogout}
             onUserChange={setAuthUser}
             onProfileActivate={handleProfileActivate}
           />
 
-          {activeTab === "console" && uiMode === "hero" && (
+          {activeTab === "console" && searchSurface === "bar" && (
             <div style={{ textAlign:"center", padding:"80px 20px 40px",
                           animation:"fadeUp 0.6s ease both" }}>
               <div style={{
@@ -208,8 +210,18 @@ function AppDashboard({ authUser, setAuthUser }) {
             </div>
           )}
 
+          {/* Sentinel: holds the main bar's PLACE in the layout and stays mounted whichever surface
+              is showing, so the observed condition remains observable in both states. Observing the
+              bar itself would unmount the observer's target the instant the pill took over, and the
+              pill could never hand back. Zero height, so it cannot affect layout. */}
+          <div ref={sentinelRef} aria-hidden="true" style={{ height: 0 }}/>
+
+          {/* Exactly one search surface, from one value. Never zero, never two — by construction,
+              not by two components agreeing. The pill branch lives in TopBar (its collapsed filter
+              row), which receives the same value rather than deciding for itself. */}
+          {searchSurface === "bar" && (
           <UnifiedSearchBar
-            mode={uiMode}
+            mode="hero"
             variant="inline"
             tabs={appTabs}
             activeTab={activeTab}
@@ -237,6 +249,7 @@ function AppDashboard({ authUser, setAuthUser }) {
               </button>
             ) : null}
           />
+          )}
 
           <main style={{ flex:1, paddingTop: 24 }}>
             {activeTab === "console" && (

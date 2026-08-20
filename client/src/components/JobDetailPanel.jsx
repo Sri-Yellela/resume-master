@@ -7,6 +7,7 @@ import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { useTheme } from "../styles/theme.jsx";
 import CoverLetterModal from "./CoverLetterModal.jsx";
 import CompanyViewModal from "./CompanyViewModal.jsx";
+import { Z } from "../styles/zLayers.js";
 
 function ago(postedAt, scrapedAt) {
   let ms = postedAt ? new Date(postedAt).getTime() : NaN;
@@ -185,7 +186,7 @@ export default function JobDetailPanel() {
           <motion.div key="backdrop"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }} onClick={close}
-            style={{ position:"fixed", inset:0, zIndex:30,
+            style={{ position:"fixed", inset:0, zIndex:Z.MODAL_SCRIM,
                      background:"rgba(0,0,0,0.45)", backdropFilter:"blur(4px)", WebkitBackdropFilter:"blur(4px)" }}/>
           <motion.div key="drawer"
             initial={{ x: 560, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 560, opacity: 0 }}
@@ -194,7 +195,10 @@ export default function JobDetailPanel() {
             style={{
               position:"fixed", right:16, top:80, bottom:16,
               width:"min(560px, 92vw)", borderRadius:16,
-              zIndex:40, overflow:"hidden",
+              // MODAL tier. Was 40 — below the search surface at 50, so opening a job put the
+              // drawer BEHIND the search bar. Above SEARCH is the correct relationship and the one
+              // the panel spec requires.
+              zIndex:Z.MODAL, overflow:"hidden",
               display:"flex", flexDirection:"column",
             }}>
             {/* Drawer header */}

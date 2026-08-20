@@ -91,7 +91,13 @@ test("profile menus use viewport scrolling and dropdown actions", () => {
   assert.match(dockPortal, /calc\(100vh - \$\{pos\.top \+ 12\}px\)/);
   assert.match(dockPortal, /overflowY:\s+"auto"/);
   assert.match(dockPortal, /overflowX:\s+"hidden"/);
-  assert.match(dockPortal, /zIndex:\s+10000/);
+  // Asserts the TIER, not the integer. The menu surface must sit at the top layer so nothing clips
+  // or underlaps it; the number that implements that now lives in client/src/styles/zLayers.js
+  // (Z.POPOVER === 10000), because twelve components each owning a literal is how the ordering
+  // between any two surfaces became an accident. Pinning the literal here would mean this test fails
+  // whenever the scale is renumbered, without anything having actually broken.
+  assert.match(dockPortal, /zIndex: Z\.POPOVER,/);
+  assert.match(dockPortal, /import \{ Z \} from "\.\.\/styles\/zLayers\.js";/);
   // The maxHeight/overflowY pair belongs to DockPortal, asserted above — it is the component that
   // actually renders the scrollable menu surface. These two assertions previously duplicated it
   // onto ScrollDock, which no longer hosts a menu at all.

@@ -66,7 +66,11 @@
   transform: none;
   margin-left: auto;
   margin-right: auto;
-  z-index: 50;
+  /* SEARCH tier — see client/src/styles/zLayers.js, which publishes these custom properties from
+     the single scale definition so this file never holds a literal. It was 50, which is BELOW
+     several panel-internal values (DatabasePanel's date popover at 300, its detail modal at 1000):
+     that is why the search surface was underlapped by panel content instead of floating over it. */
+  z-index: var(--z-search, 400);
 }
 .usb--inline.usb--hero {
   width: min(920px, 94vw);
