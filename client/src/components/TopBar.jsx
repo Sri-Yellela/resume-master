@@ -18,9 +18,22 @@ function injectKeyframes() {
   const s = document.createElement("style");
   s.id = "topbar-kf";
   s.textContent = `
+    /* TRANSFORM ONLY — deliberately not opacity.
+       The collapsed pill is the incoming half of a swap whose outgoing half (the main search bar)
+       disappears synchronously. Fading in from opacity 0 therefore opened a window in which the bar
+       was already gone and the pill was not yet visible: captured at the crossing as
+       \`bar: null, pill: { opacity: 0 }\`, which is the reported gap between the two surfaces. The
+       pill is now at full opacity on its first frame and only slides into place, so there is no
+       point at which neither surface is on screen. */
     @keyframes slideDown {
-      from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
-      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+      from { transform: translateX(-50%) translateY(-8px); }
+      to   { transform: translateX(-50%) translateY(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      @keyframes slideDown {
+        from { transform: translateX(-50%) translateY(0); }
+        to   { transform: translateX(-50%) translateY(0); }
+      }
     }
   `;
   document.head.appendChild(s);

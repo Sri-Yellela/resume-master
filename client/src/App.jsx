@@ -202,9 +202,20 @@ function AppDashboard({ authUser, setAuthUser }) {
             onProfileActivate={handleProfileActivate}
           />
 
-          {activeTab === "console" && searchSurface === "bar" && (
-            <div style={{ textAlign:"center", padding:"80px 20px 40px",
-                          animation:"fadeUp 0.6s ease both" }}>
+          {/* The hero and the search bar below it stay MOUNTED whichever surface is showing, and are
+              hidden with `visibility` rather than removed. Unmounting them took 386px out of the
+              document (measured: scrollHeight 1763 -> 1377), all of it above the fold, and Chrome's
+              scroll anchoring compensates for that by subtracting it from the scroll offset —
+              scrollY fell 250 -> 0, which put the sentinel back on screen and flipped the surface
+              straight back. The threshold was moving itself. Keeping the space reserved costs
+              nothing on screen, because at the moment of the flip both are scrolled out of view by
+              definition. `visibility: hidden` also takes them out of the tab order, so the hidden
+              surface cannot be reached by keyboard. */}
+          {activeTab === "console" && (
+            <div aria-hidden={searchSurface !== "bar"}
+                 style={{ textAlign:"center", padding:"80px 20px 40px",
+                          animation:"fadeUp 0.6s ease both",
+                          visibility: searchSurface === "bar" ? "visible" : "hidden" }}>
               <div style={{
                 fontFamily:"var(--font-display, 'Instrument Serif', serif)",
                 fontSize:"clamp(2rem, 5vw, 4rem)", fontWeight:400,
@@ -226,9 +237,14 @@ function AppDashboard({ authUser, setAuthUser }) {
 
           {/* Exactly one search surface, from one value. Never zero, never two — by construction,
               not by two components agreeing. The pill branch lives in TopBar (its collapsed filter
-              row), which receives the same value rather than deciding for itself. */}
-          {searchSurface === "bar" && (
+              row), which receives the same value rather than deciding for itself.
+
+              `hidden` rather than a conditional render, for the layout reason above. The bar is
+              `position: sticky` and reserves its own space, so removing it moved everything below
+              it; and it cannot be wrapped in a hiding container either, because an intermediate box
+              would become sticky's containing block and there would be no room left to stick to. */}
           <UnifiedSearchBar
+            hidden={searchSurface !== "bar"}
             mode="hero"
             variant="inline"
             tabs={appTabs}
@@ -257,7 +273,6 @@ function AppDashboard({ authUser, setAuthUser }) {
               </button>
             ) : null}
           />
-          )}
 
           <main style={{ flex:1, paddingTop: 24 }}>
             {activeTab === "console" && (
