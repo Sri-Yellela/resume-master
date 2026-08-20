@@ -107,10 +107,16 @@ test("no surface on the scale carries a literal any more", () => {
   assert.match(zLayers, /installZLayerVars/);
   assert.match(usbCss, /z-index: var\(--z-search, 400\);/);
   assert.ok(!/z-index: 50;/.test(usbCss), "the app search bar is back below panel content");
-  assert.match(jdPanel, /zIndex:Z\.MODAL_SCRIM/);
-  assert.match(jdPanel, /zIndex:Z\.MODAL,/);
-  assert.ok(!/zIndex:30,/.test(jdPanel) && !/zIndex:40,/.test(jdPanel),
-    "the job-detail drawer is back under the search surface");
+  // The drawer's tiers moved into PanelShell when JD, PDF and ATS were unified onto it — one
+  // primitive means one place that decides the tier, which is the whole point of extracting it.
+  const shell = read("client/src/components/PanelShell.jsx");
+  assert.match(shell, /zIndex: Z\.MODAL_SCRIM/);
+  assert.match(shell, /zIndex: Z\.MODAL \+ \(focused \? 1 : 0\)/);
+  assert.ok(!/zIndex:30,/.test(shell) && !/zIndex:40,/.test(shell),
+    "a drawer is back under the search surface");
+  // And JD must not have grown its own drawer chrome back.
+  assert.ok(!/position:"fixed", inset:0, zIndex:/.test(jdPanel),
+    "JobDetailPanel is hand-rolling its own scrim again instead of using the shared primitive");
   assert.match(topbar, /zIndex: Z\.NAV/);
   assert.match(dockPortal, /zIndex: Z\.POPOVER/);
 });

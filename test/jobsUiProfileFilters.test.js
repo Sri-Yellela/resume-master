@@ -58,7 +58,14 @@ test("THE STARRED LINKEDIN SECTION IS GONE, AND SO IS EVERYTHING THAT FED IT (E2
   // capture paths were converged and this surface removed; captured jobs are starred into user_jobs
   // by importJob's attachImportToUser, so they show up in the board's own Saved tab, which already
   // queries starred=1.
-  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+  // Read the CODE, not the comments. This is a "must not come back" assertion, and the note left
+  // where `isImported` was finally removed necessarily names isImportedBoardJob in order to explain
+  // which predicate it was and why restoring it would be wrong — six dangling `isImported ?` guards
+  // outlived the function's deletion in 190258a and threw a ReferenceError on every job selection,
+  // so that explanation is worth keeping. Stripping comments keeps this test about the machinery.
+  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
   for (const symbol of [
     "StarredLinkedInSection", "showImportedLinkedInSection", "importedLinkedInJobs",
     "linkedinImportSummary", "fetchImportedLinkedInJobs", "isImportedBoardJob",
@@ -67,6 +74,9 @@ test("THE STARRED LINKEDIN SECTION IS GONE, AND SO IS EVERYTHING THAT FED IT (E2
     assert.doesNotMatch(jobsPanel, new RegExp(symbol.replace(/[/]/g, "\/")),
       `${symbol} fed the removed panel and must not come back`);
   }
+  // And the dangling references that survived its deletion must not return either.
+  assert.doesNotMatch(jobsPanel, /\bisImported\b/,
+    "isImported has no definition — any reference to it throws the instant a job is selected");
 });
 
 test("the Saved tab is what surfaces captured jobs now", () => {

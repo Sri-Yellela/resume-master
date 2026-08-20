@@ -91,12 +91,19 @@ test("resume sandbox layout keeps scroll ownership inside the preview pane", () 
   const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
   const sandbox = fs.readFileSync("client/src/panels/SandboxPanel.jsx", "utf8");
 
-  // The background moved from the theme.bg JS token to the var(--color-bg) CSS custom property.
-  // That is incidental to this test, which is about SCROLL OWNERSHIP — the minHeight:0/minWidth:0
-  // pair on the flex column is what stops the pane from growing past its parent and handing the
-  // scrollbar to the page. Asserting that pair, not the paint.
-  assert.match(sandbox, /flexDirection:"column", height:"100%", minHeight:0, minWidth:0/);
-  assert.match(sandbox, /flex:1,\s*[\s\S]*minHeight:0,\s*[\s\S]*overflowY: "auto"/);
+  // Still about SCROLL OWNERSHIP — the sandbox must never hand its scrollbar to the page — but the
+  // owner moved. The sandbox used to be a fixed-height react-resizable-panels column that scrolled
+  // itself; it is a popup panel now, and PanelShell's body is the single scroll container shared by
+  // all three panel types. So these assertions moved with the mechanism.
+  const shell = fs.readFileSync("client/src/components/PanelShell.jsx", "utf8");
+  assert.match(shell, /flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden",/);
+  // overscrollBehavior is the part the old inline pane never had: without it, reaching the end of
+  // the preview starts scrolling the app behind the panel.
+  assert.match(shell, /overscrollBehavior: "contain"/);
+  // And the sandbox must NOT nest a second scroller inside that body.
+  assert.match(sandbox, /overflowY: "visible"/);
+  assert.ok(!/overflowY: "auto"/.test(sandbox),
+    "the sandbox is scrolling itself again — that puts a second scrollbar inside PanelShell's body");
+  // The board keeps the only column; the panels overlay it rather than taking space from it.
   assert.match(jobsPanel, /PanelGroup orientation="horizontal" style=\{\{ flex: 1, minHeight:0, minWidth:0, overflow: "hidden" \}\}/);
-  assert.match(jobsPanel, /style=\{\{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden"/);
 });

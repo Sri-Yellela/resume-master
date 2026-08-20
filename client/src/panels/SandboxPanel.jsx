@@ -15,13 +15,33 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "../styles/theme.jsx";
+import PanelShell from "../components/PanelShell.jsx";
 
 const RESUME_PAGE_WIDTH  = 794;  // A4 at 96dpi
 const RESUME_PAGE_HEIGHT = 1123; // A4 at 96dpi
 const RESUME_PAGE_GAP    = 12;
 
-export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
+export default function SandboxPanel({
+  entry, onClose, onSave, onExport,
+  // Panel-host layout props — this is a PEER of the JD drawer now, rendered through the same
+  // PanelShell primitive, not a react-resizable-panels column squeezed in below the search bar.
+  slot = 0, rightOffset = 16, focused = true, fullScreen = false, onFocus, onWidthChange,
+}) {
   const { theme } = useTheme();
+  // ── Page view vs Reading view ───────────────────────────────────────────────────────────────
+  //
+  // TWO RENDER PATHS, and the default is the faithful one.
+  //
+  // "page" is the A4 page stack: the real resume HTML in one iframe per page at
+  // RESUME_PAGE_WIDTH, scaled to fit the panel. pageCount and every page boundary are computed at
+  // that width, so this is the only view that can honestly claim to show where the exported PDF
+  // breaks. It stays the default for exactly that reason.
+  //
+  // "reading" re-renders the same HTML at the panel's own width, so text reflows and stays legible
+  // in a narrow panel with no zooming. The cost is real and is stated in the UI rather than hidden:
+  // reflowed text does not break where A4 breaks, so this view cannot show pagination. It is a
+  // reading aid, not a preview.
+  const [viewMode, setViewMode] = useState("page");
   const [exporting,   setExporting]   = useState(false);
   const [exportError, setExportError] = useState("");
   const [dirty,       setDirty]       = useState(false);
@@ -40,6 +60,10 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
   const stackedPreviewHeight = previewHeight + Math.max(0, pageCount - 1) * RESUME_PAGE_GAP;
 
   const frameRefs    = useRef([]);
+  // Reading view needs the panel's live inner width to render at, and that changes on every drag of
+  // the resize handle. State, not a ref: the iframe's width must actually re-render.
+  const [readingWidth, setReadingWidth] = useState(0);
+  const readingHostRef = useRef(null);
   const containerRef = useRef(null);  // outer scroll container, observed by ResizeObserver
   const innerRef     = useRef(null);  // scale host — transform applied directly to DOM
   const scaleRef     = useRef(1);     // current scale value — never stored in state
@@ -205,8 +229,86 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
     transition:"all 0.15s",
   });
 
+  // Observe the reading host so dragging the resize handle reflows the document live.
+  useEffect(() => {
+    const el = readingHostRef.current;
+    if (!el || viewMode !== "reading") return;
+    const ro = new ResizeObserver(entries => {
+      const w = Math.round(entries[0].contentRect.width);
+      setReadingWidth(prev => (Math.abs(prev - w) > 1 ? w : prev));
+    });
+    ro.observe(el);
+    setReadingWidth(Math.round(el.getBoundingClientRect().width));
+    return () => ro.disconnect();
+  }, [viewMode]);
+
+  const header = (
+    <div style={{ minWidth:0 }}>
+      <div style={{ fontWeight:700, fontSize:14, color:"var(--color-text)", overflow:"hidden",
+                    textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+        {activeEntry?.company || "Sandbox"}
+      </div>
+      <div style={{ fontSize:12, color:"var(--color-text-muted)", marginTop:2, overflow:"hidden",
+                    textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+        {activeEntry?.title || "Resume preview"}
+      </div>
+      <div style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:5, marginTop:5 }}>
+        <span style={{ fontSize:10, fontWeight:700, color:"var(--color-primary)" }}>PDF SANDBOX</span>
+        {viewMode === "page" && (
+          <span style={{ fontSize:10, color:"var(--color-text-faint)" }}>
+            {pageCount} page{pageCount === 1 ? "" : "s"} · A4
+          </span>
+        )}
+        {dirty && <span style={{ fontSize:10, color:"var(--color-warning)", fontWeight:700 }}>● unsaved</span>}
+        {saveMsg && <span style={{ fontSize:10, fontWeight:700,
+          color: saveMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>{saveMsg}</span>}
+      </div>
+    </div>
+  );
+
+  const actions = (activeEntry?.generating || activeEntry?.error || activeEntry?.missing) ? null : (
+    <>
+      {/* View toggle. Page view is listed first and is the default — the faithful one leads. */}
+      <div style={{ display:"flex", gap:2, border:"1px solid var(--color-border)",
+                    borderRadius:999, padding:2 }}>
+        {[["page","Page"],["reading","Reading"]].map(([id,lbl]) => (
+          <button key={id} onClick={() => setViewMode(id)}
+            title={id === "page"
+              ? "A4 pages, scaled to fit — matches the exported PDF"
+              : "Reflow to panel width for legibility — does not show real pagination"}
+            style={{ ...btnStyle(), padding:"3px 10px", borderRadius:999, border:"none",
+                     background: viewMode===id ? "var(--color-primary)" : "transparent",
+                     color: viewMode===id ? "var(--color-on-primary,#fff)" : "var(--color-text-muted)" }}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+      {variantKeys.length > 1 && variantKeys.map(tool => (
+        <button key={tool} onClick={() => setSelectedTool(tool)}
+          style={{ ...btnStyle(), padding:"4px 8px",
+                   color:selectedTool === tool ? "var(--color-primary)" : "var(--color-text-muted)",
+                   borderColor:selectedTool === tool ? "var(--color-primary)" : "var(--color-border)" }}>
+          {variants[tool]?.toolLabel || (tool === "a_plus_resume" ? "A+ Resume" : "Generate")}
+        </button>
+      ))}
+      <div style={{ flex:1 }}/>
+      <button style={btnStyle()} onClick={save} disabled={!activeEntry?.html}>Save{dirty?"*":""}</button>
+      <button style={btnStyle()} onClick={downloadHtml} disabled={!activeEntry?.html}>HTML</button>
+      <button style={btnStyle()} onClick={exportPdf} disabled={!activeEntry?.html||exporting}>
+        {exporting ? "Exporting…" : "PDF"}
+      </button>
+      {exportError && <span style={{ fontSize:10, color:"#991b1b" }}>{exportError}</span>}
+    </>
+  );
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", height:"100%", minHeight:0, minWidth:0, background:"var(--color-bg)" }}>
+    <PanelShell
+      panelId="pdf"
+      slot={slot} rightOffset={rightOffset} focused={focused} fullScreen={fullScreen}
+      onClose={onClose} onFocus={onFocus} onWidthChange={onWidthChange}
+      header={header} actions={actions}
+    >
+    <div style={{ display:"flex", flexDirection:"column", minHeight:"100%", minWidth:0, background:"var(--color-bg)" }}>
       <style>{`
         @keyframes rmShimmer { from { opacity: 0.4; } to { opacity: 0.9; } }
       `}</style>
@@ -268,50 +370,10 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
       {/* Normal sandbox UI — only when not generating/errored */}
       {!activeEntry?.generating && !activeEntry?.error && (
         <>
-          {/* Toolbar */}
-          <div style={{
-            background:"var(--color-surface)", borderBottom:`1px solid ${"var(--color-border)"}`,
-            padding:"8px 14px", display:"flex", alignItems:"center",
-            gap:8, flexShrink:0,
-          }}>
-            <span style={{ fontWeight:800, fontSize:12, color:"var(--color-primary)" }}>✏ Sandbox</span>
-            {entry && (
-              <span style={{ fontSize:11, color:"var(--color-text-muted)",
-                             borderLeft:`1px solid ${"var(--color-border)"}`, paddingLeft:10 }}>
-                {activeEntry.company} — {activeEntry.title}
-              </span>
-            )}
-            {variantKeys.length > 1 && (
-              <div style={{ display:"flex", gap:4, borderLeft:`1px solid ${"var(--color-border)"}`, paddingLeft:10 }}>
-                {variantKeys.map(tool => (
-                  <button key={tool} onClick={() => setSelectedTool(tool)}
-                    style={{
-                      ...btnStyle(),
-                      padding:"4px 8px",
-                      color:selectedTool === tool ? "var(--color-primary)" : "var(--color-text-muted)",
-                      borderColor:selectedTool === tool ? "var(--color-primary)" : "var(--color-border)",
-                    }}>
-                    {variants[tool]?.toolLabel || (tool === "a_plus_resume" ? "A+ Resume" : "Generate")}
-                  </button>
-                ))}
-              </div>
-            )}
-            {dirty && <span style={{ fontSize:10, color:"var(--color-warning)", fontWeight:700 }}>● unsaved</span>}
-            {saveMsg && <span style={{ fontSize:10, fontWeight:700,
-              color: saveMsg.startsWith("✓") ? "#16a34a" : "#dc2626" }}>{saveMsg}</span>}
-            <div style={{ flex:1 }}/>
-            <button style={btnStyle()} onClick={save} disabled={!activeEntry?.html}>💾 Save{dirty?"*":""}</button>
-            <button style={btnStyle()} onClick={downloadHtml} disabled={!activeEntry?.html}>⬇ HTML</button>
-            <button style={btnStyle()} onClick={exportPdf} disabled={!activeEntry?.html||exporting}>
-              {exporting ? "⏳ Exporting…" : "🖨 PDF"}
-            </button>
-            {exportError && (
-              <span style={{ fontSize:10, color:"#991b1b" }}>✗ {exportError}</span>
-            )}
-            <button onClick={onClose}
-              style={{ ...btnStyle(), color:"#ef4444", borderColor:"#1f0a0a" }}>✕</button>
-          </div>
-
+          {/* The toolbar that used to live here is now PanelShell's action bar (sticky region 2),
+              so it cannot scroll away and it matches the JD panel's action bar exactly. Its close
+              button is gone too: PanelShell renders the single close affordance, top-right of the
+              header, for all three panel types. */}
           {/* Company KB failsafe review strip (Task 9.6) — renders nothing when there are no
               findings, which is the common case, so most generations look exactly as before. */}
           {activeEntry?.kbFindings?.length > 0 && (
@@ -372,16 +434,56 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
               <div style={{ fontWeight:700, fontSize:14 }}>Generate a resume to populate the sandbox.</div>
             </div>
           ) : (
-            // containerRef — observed by ResizeObserver, single vertical scroll surface.
+            viewMode === "reading" ? (
+              // ── READING VIEW ─────────────────────────────────────────────────────────────────
+              // The same HTML, re-rendered at the panel's own width so it REFLOWS instead of being
+              // scaled down. No transform, no fixed A4 width, no page slicing — one continuous
+              // document, legible at any panel width including the 360px minimum.
+              //
+              // The banner is not decoration. Reflowed text does not break where A4 breaks, so this
+              // view genuinely cannot show real pagination, and a resume preview that silently
+              // implied it could would be worse than one that scaled down.
+              <div ref={readingHostRef} style={{ display:"flex", flexDirection:"column", minWidth:0 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, padding:"7px 12px",
+                              background:"var(--color-primary-muted)", color:"var(--color-primary-text)",
+                              fontSize:10, fontWeight:700, flexShrink:0 }}>
+                  <span>Reading view reflows to the panel width — page breaks are not shown.</span>
+                  <button onClick={() => setViewMode("page")}
+                    style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
+                             color:"inherit", fontSize:10, fontWeight:800, textDecoration:"underline" }}>
+                    Page view
+                  </button>
+                </div>
+                <iframe
+                  key={"reading-" + selectedTool}
+                  srcDoc={currentHtmlRef.current || activeEntry.html}
+                  title="resume-reading-view"
+                  sandbox="allow-same-origin allow-scripts"
+                  style={{
+                    width: "100%",
+                    // Tall enough that the document lays out fully; PanelShell's body scrolls it.
+                    // Keyed off the measured width so a resize re-renders rather than rescaling.
+                    height: Math.max(600, readingWidth * 2.6) + "px",
+                    border: "none", display: "block", background: "var(--color-surface)",
+                  }}
+                />
+              </div>
+            ) : (
+            // containerRef — still the ResizeObserver target that decides the fit-to-width scale.
             // innerRef     — scale host, transform applied directly to DOM (no re-render).
+            //
+            // It no longer scrolls itself: PanelShell's body is the scroll container (property 5),
+            // and a nested overflowY:auto here would put a second scrollbar inside the first — the
+            // exact double-scrollbar the JD panel's body avoids. overflowX stays hidden so a
+            // wider-than-panel page can never produce a horizontal scrollbar.
             <div
               ref={containerRef}
               style={{
                 flex:1,
                 minHeight:0,
                 minWidth:0,
-                overflowX: "hidden",  // never horizontal scroll
-                overflowY: "auto",    // one clean vertical scrollbar
+                overflowX: "hidden",
+                overflowY: "visible",
                 background: "var(--color-bg)",
                 padding: "4px",
                 boxSizing: "border-box",
@@ -441,9 +543,11 @@ export default function SandboxPanel({ entry, onClose, onSave, onExport }) {
                 ))}
               </div>
             </div>
+            )
           )}
         </>
       )}
     </div>
+    </PanelShell>
   );
 }

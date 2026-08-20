@@ -9,7 +9,9 @@ import { useViewport } from "../hooks/useViewport.js";
 import JobCard from "../components/JobCard.jsx";
 import JobDetailPanel from "../components/JobDetailPanel.jsx";
 import SandboxPanel from "./SandboxPanel.jsx";
-import { ATSPanel } from "./ATSPanel.jsx";
+import AtsReportPanel from "./AtsReportPanel.jsx";
+import { PanelScrim } from "../components/PanelShell.jsx";
+import { usePanelHost } from "../hooks/usePanelHost.js";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
 import ProfileSelectorDropdown from "../components/ProfileSelectorDropdown.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
@@ -1030,20 +1032,19 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
 
 
 // DEFAULT SIZES (canonical, do not edit inline):
-// A only:                 A=100
-// A + one other panel:    A=30, other=70
-// A + 2+ other panels:    A=6, residual split uniformly
-// Resume panel exception: resume receives 10 percentage points more than
-// each other non-collapsed panel; A is excluded from that bonus.
-// Rule: panel defaults reapply on every open/close transition.
-// Manual resize remains in effect until the next transition.
-// To change defaults edit getPanelDefaults() below.
+// The percentage-split rules that used to be documented here (A=100 alone, A=30 with one panel,
+// A=6 with two or more, plus a bonus for the resume column) described getPanelDefaults, which is
+// gone: the PDF and ATS surfaces are popup panels rendered through PanelShell, so the board is the
+// only column left and simply keeps the full width. Panel widths are per-type, dragged on the panel
+// and persisted across sessions by PanelShell.
 // -- Card tier — driven by open-panel count, not pixel width ------
-// Tier 1 (full layout):  A alone, or A+B (detail only, 30% default)
-// Tier 3 (condensed):    A+B+C or A+B+C+D (panel A shrinks to 6%)
-// Tier 2 (medium):       only reached by manual drag — ResizeObserver
-//                        overrides Tier 1 ? 2 when user drags A to 180-279px.
-//                        Tier 3 always wins over pixel measurement.
+// Still driven by how many panels are open, which is still what decides how much room the board's
+// cards have — the panels overlay it now rather than taking columns from it, so a wide panel over a
+// narrow board is the same legibility problem it always was.
+// Tier 1 (full layout):  board alone, or board + one panel
+// Tier 3 (condensed):    board + two panels (the side-by-side maximum)
+// Tier 2 (medium):       only reached by manual drag — ResizeObserver overrides Tier 1 -> 2 when
+//                        the board is dragged to 180-279px. Tier 3 always wins over pixels.
 function getCardTier(panelBVisible, panelCVisible, panelDVisible) {
   const extraPanels = [panelBVisible, panelCVisible, panelDVisible].filter(Boolean).length;
   if (extraPanels === 0) return 1; // A only — full width
@@ -1051,42 +1052,7 @@ function getCardTier(panelBVisible, panelCVisible, panelDVisible) {
   return 3;                        // A+B+C or A+B+C+D — 6%, condensed
 }
 
-function getPanelDefaults(showDetail, showSandbox, showAts) {
-  const openPanels = [
-    ["detail", showDetail],
-    ["sandbox", showSandbox],
-    ["ats", showAts],
-  ].filter(([, visible]) => visible).map(([key]) => key);
-
-  if (openPanels.length === 0) return { jobs: 100, detail: 0, sandbox: 0, ats: 0 };
-  if (openPanels.length === 1) {
-    return {
-      jobs: 30,
-      detail: showDetail ? 70 : 0,
-      sandbox: showSandbox ? 70 : 0,
-      ats: showAts ? 70 : 0,
-    };
-  }
-
-  const jobs = 6;
-  const residualWidth = 100 - jobs;
-  const hasResumePanel = openPanels.includes("sandbox");
-  const baseShare = hasResumePanel
-    ? Math.max(0, (residualWidth - 10) / openPanels.length)
-    : residualWidth / openPanels.length;
-  const panelShare = key => (
-    openPanels.includes(key)
-      ? (hasResumePanel && key === "sandbox" ? baseShare + 10 : baseShare)
-      : 0
-  );
-
-  return {
-    jobs,
-    detail: panelShare("detail"),
-    sandbox: panelShare("sandbox"),
-    ats: panelShare("ats"),
-  };
-}
+// getPanelDefaults removed — see the note where the rebalancing effect used to be.
 
 function buildAtsPayload(job, artifact = null) {
   const activeArtifact = artifact ? getActiveArtifact(artifact, artifact.activeTool || artifact.tool) : null;
@@ -1112,7 +1078,7 @@ function buildAtsPayload(job, artifact = null) {
 // -- Main panel ------------------------------------------------
 export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive = true }) {
   const { theme } = useTheme();
-  const { mode: vpMode } = useViewport();
+  const { mode: vpMode, w: vpWidth } = useViewport();
   const navigate = useNavigate();
   const { pin: pinDock, scrollToTopRef, progress: scrollProgress } = useAppScroll();
   const isWide     = vpMode === "wide";
@@ -1173,6 +1139,30 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     if (isMobile) setMobilePane("ats");
   }, [isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── The panel host ──────────────────────────────────────────────────────────────────────────
+  // JD, PDF and ATS are peers in one ordered set. The host does not own their open/closed state —
+  // that still lives where it always did (selectedJob in JobBoardContext, sandboxOpen and
+  // rightPanelOpen here), set by the same dozen call sites as before, including the generate flow's
+  // own openSandbox(). It observes them, orders them by focus, tiles them, and evicts the least
+  // recently focused when a third opens. See hooks/usePanelHost.js for why eviction rather than
+  // refusal.
+  const panelDescriptors = useMemo(() => ([
+    { id: "jd",  open: !!selectedJob,   close: () => setSelectedJob(null) },
+    { id: "pdf", open: sandboxOpen,     close: () => { setSandboxOpen(false); setSandbox(null); } },
+    { id: "ats", open: rightPanelOpen,  close: () => setRightPanelOpen(false) },
+  ]), [selectedJob, sandboxOpen, rightPanelOpen, setSelectedJob]);
+  const { visible: visiblePanels, focusPanel, reportWidth, openCount: openPanelCount } =
+    usePanelHost(panelDescriptors, vpWidth);
+  const panelProps = useCallback((id) => {
+    const p = visiblePanels.find(v => v.id === id);
+    if (!p) return null;
+    return {
+      slot: p.slot, rightOffset: p.rightOffset, focused: p.focused, fullScreen: p.fullScreen,
+      onFocus: () => focusPanel(id),
+      onWidthChange: (w) => reportWidth(id, w),
+    };
+  }, [visiblePanels, focusPanel, reportWidth]);
+
   const closeAtsPanel = useCallback(() => {
     setRightPanelOpen(false);
   }, []);
@@ -1230,14 +1220,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [genStage, setGenStage] = useState("");
   const genTimerRef = useRef(null);
 
-  // Panel resize refs (react-resizable-panels imperative API)
+  // Panel resize refs (react-resizable-panels imperative API). Only the board column is a
+  // resizable Panel now, so detailPanelRef / atsPanelRef / the "have defaults been applied" and
+  // "what was visible last render" bookkeeping went with the rebalancing effect that used them.
   const jobsPanelRef    = useRef(null);
-  const detailPanelRef  = useRef(null);
-  const sandboxPanelRef = useRef(null);
-  const atsPanelRef     = useRef(null);
   const detailPanelElementRef = useRef(null);
-  const initialPanelDefaultsAppliedRef = useRef(false);
-  const prevPanelVisibilityRef = useRef({ detail: false, sandbox: false, ats: false });
 
   // ResizeObserver: tracks manual drag width for Tier 1 ? 2 override only
   const jobsPanelElementRef = useRef(null);
@@ -1535,37 +1522,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const canUseGenerate = planTier === "PLUS" || planTier === "PRO";
   const canUseAPlusResume = planTier === "PRO";
 
-  // Reset panel sizes to defaults on first desktop render and every open/close transition.
-  // Triple RAF ensures react-resizable-panels has committed the layout first.
-  useEffect(() => {
-    if (isMobile) return;
-    const showDetail  = !!selectedJob;
-    const showSandbox = sandboxOpen;
-    const showAts     = rightPanelOpen;
-    const prev = prevPanelVisibilityRef.current;
-    const visibilityChanged = prev.detail !== showDetail || prev.sandbox !== showSandbox || prev.ats !== showAts;
-    const shouldApply = !initialPanelDefaultsAppliedRef.current || visibilityChanged;
-    prevPanelVisibilityRef.current = { detail: showDetail, sandbox: showSandbox, ats: showAts };
-    if (!shouldApply) return;
-
-    const d = getPanelDefaults(showDetail, showSandbox, showAts);
-    let r1, r2, r3;
-    r1 = requestAnimationFrame(() => {
-      r2 = requestAnimationFrame(() => {
-        r3 = requestAnimationFrame(() => {
-          try {
-            if (jobsPanelRef.current)                           jobsPanelRef.current.resize(d.jobs);
-            if (showDetail  && detailPanelRef.current)          detailPanelRef.current.resize(d.detail);
-            if (showSandbox && sandboxPanelRef.current)         sandboxPanelRef.current.resize(d.sandbox);
-            if (showAts     && atsPanelRef.current)             atsPanelRef.current.resize(d.ats);
-            initialPanelDefaultsAppliedRef.current = true;
-          } catch(e) { console.warn("[panels] resize not ready:", e.message); }
-        });
-      });
-    });
-    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); cancelAnimationFrame(r3); };
-  }, [!!selectedJob, sandboxOpen, rightPanelOpen, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
-
+  // The panel-size rebalancing effect that lived here is gone, along with getPanelDefaults and the
+  // sandbox/ats/detail Panel refs it drove. It redistributed react-resizable-panels PERCENTAGES
+  // across the board/detail/sandbox/ats columns whenever one opened or closed — three triple-RAF
+  // .resize() calls to work around the library not having committed its layout yet. None of that has
+  // anything left to act on: the JD, PDF and ATS surfaces are popup panels now, and the board is the
+  // only remaining column, so it simply keeps 100%. Panel widths are per-type, dragged on the panel
+  // itself and persisted by PanelShell.
   // ResizeObserver — only used for Tier 1 → 2 manual-drag fallback
   useEffect(() => {
     const nodes = [jobsPanelElementRef.current, detailPanelElementRef.current].filter(Boolean);
@@ -1596,18 +1559,32 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       g: g2, done: done2, st: st2,
       applyMode, canUseGenerate, canUseAPlusResume: false,
       resumeText,
+      // Every callback here is unconditional now. Six of them used to read
+      // `isImported ? undefined : ...`, and `isImported` HAD NO DEFINITION — so this effect threw
+      // `ReferenceError: isImported is not defined` the instant a job was selected, and the JD
+      // drawer never opened at all. Not a regression from the panel work: `isImportedBoardJob()`
+      // and the `const isImported = ...` line that called it were both deleted in 190258a ("one
+      // capture, two triggers"), which converged the extension's two capture paths, and these six
+      // references were left behind.
+      //
+      // Restoring the guard would be wrong, not just unnecessary. It tested
+      // `boardSource in [linkedin, linkedin_saved, linkedin_extension] && importedJobId != null`,
+      // i.e. a row in the `imported_jobs` table — the surface that same convergence removed. Every
+      // capture now lands in scraped_jobs and is indistinguishable from a crawled row, so the
+      // predicate is unconditionally false and the actions it disabled (sandbox, export, star, ATS,
+      // resume, queue) are all valid for any board job.
       onGenerate: (force) => generate(selectedJob, force),
-      onViewSandbox: isImported ? undefined : () => {
+      onViewSandbox: () => {
         const e2 = { ...g2, company: g2?.company || selectedJob.company, title: g2?.title || selectedJob.title };
         openSandbox(e2); openAtsPanel(buildAtsPayload(selectedJob, g2));
       },
-      onExport: isImported ? undefined : () => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)),
+      onExport: () => exportAndTrack(selectedJob, getActiveArtifact(g2)?.html, selectedJob.company, getActiveArtifact(g2)),
       onVisit: () => visitUrl(selectedJob),
-      onStar: isImported ? undefined : () => toggleStar(selectedJob.jobId, selectedJob),
+      onStar: () => toggleStar(selectedJob.jobId, selectedJob),
       onDislike: () => toggleDislike?.(selectedJob.jobId, selectedJob),
-      onAts: isImported ? undefined : () => openAtsPanel(buildAtsPayload(selectedJob, g2)),
-      onResume: isImported ? undefined : () => generate(selectedJob, false),
-      onQueueApply: isImported ? undefined : addToApplyQueue,
+      onAts: () => openAtsPanel(buildAtsPayload(selectedJob, g2)),
+      onResume: () => generate(selectedJob, false),
+      onQueueApply: addToApplyQueue,
     });
   }, [selectedJob, generated, loading, applyMode, canUseGenerate, resumeText]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2920,8 +2897,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         }
       : null;
 
-  // Panel sizing is handled by react-resizable-panels + getPanelDefaults().
-  // See the getPanelDefaults() function above for default size rules.
+  // Panel sizing: the board is the only react-resizable-panels column. The JD, PDF and ATS panels
+  // are popups mounted at the end of this component and sized by PanelShell (drag + persisted
+  // per-type width), not by percentage redistribution.
 
   return (
     <div style={{ flex:1, minHeight:0, minWidth:0, display:"flex", flexDirection:"column", overflow:"hidden", background:theme.bg }}>
@@ -4048,40 +4026,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
                 cardTier={1}
               />
             )}
-            {mobilePane === "editor" && (
-              <SandboxPanel entry={sandbox} onClose={closeSandbox}
-                onSave={saveSandboxHtml} onExport={exportAndTrack}/>
-            )}
-            {mobilePane === "ats" && (
-              <div style={{ flex:1, minHeight:0, minWidth:0, overflowY:"auto" }}>
-                <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
-                              padding:"0 14px", flexShrink:0 }}>
-                  {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
-                    <button key={id} onClick={() => setRightTab(id)}
-                      style={{
-                        padding:"10px 16px", border:"none", background:"transparent",
-                        fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                        fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
-                        color: rightTab===id ? theme.text : theme.textDim,
-                        cursor:"pointer", position:"relative",
-                        borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
-                      }}>
-                      {lbl}
-                    </button>
-                  ))}
-                </div>
-                {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}/>}
-                {rightTab === "history" && (
-                  <HistoryList generated={generated}
-                    theme={theme}
-                    onOpen={e => {
-                      openSandbox(e);
-                      openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
-                    }}
-                    onExport={exportAndTrack}/>
-                )}
-              </div>
-            )}
+            {/* The mobile "editor" pane is gone: the PDF sandbox is a popup panel now and renders
+                full-screen on a narrow viewport (usePanelHost's fallback), so a second inline copy
+                of it would be a divergent implementation of the same surface. */}
+            {/* Likewise the mobile "ats" pane — AtsReportPanel renders full-screen on narrow
+                viewports through the shared primitive. */}
           </div>
           {/* Bottom nav */}
           <div style={{ display:"flex", borderTop:`1px solid ${theme.border}`,
@@ -4142,67 +4091,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             />
           </Panel>
 
-          {/* PANEL C â€" Sandbox / Resume */}
-          {/* No maxSize cap â€" CSS scale transform in SandboxPanel handles wider-than-A4 display. */}
-          {sandboxOpen && (
-            <>
-              <ResizeHandle theme={theme} />
-              <Panel
-                ref={sandboxPanelRef}
-                defaultSize={40}
-                minSize={10}
-                style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
-                         borderLeft: `1px solid ${theme.border}` }}>
-                <SandboxPanel entry={sandbox} onClose={closeSandbox}
-                  onSave={saveSandboxHtml} onExport={exportAndTrack}/>
-              </Panel>
-            </>
-          )}
-
-          {/* PANEL D â€" ATS + History */}
-          {rightPanelOpen && (
-            <>
-              <ResizeHandle theme={theme} />
-              <Panel
-                ref={atsPanelRef}
-                defaultSize={20}
-                minSize={10}
-                style={{ display: "flex", flexDirection: "column", minHeight:0, minWidth:0, overflow: "hidden",
-                         borderLeft: `1px solid ${theme.border}` }}>
-                <div style={{ display:"flex", borderBottom:`1px solid ${theme.border}`,
-                              padding:"0 14px", flexShrink:0, alignItems:"center" }}>
-                  {[["ats","ATS Report"],["history",`History${genCount>0?` (${genCount})`:""}`]].map(([id,lbl]) => (
-                    <button key={id} onClick={() => setRightTab(id)}
-                      style={{
-                        padding:"10px 16px", border:"none", background:"transparent",
-                        fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
-                        fontSize:13, letterSpacing:"0.06em", textTransform:"uppercase",
-                        color: rightTab===id ? theme.text : theme.textDim,
-                        cursor:"pointer",
-                        borderBottom: rightTab===id ? `2px solid ${theme.accent}` : "2px solid transparent",
-                      }}>
-                      {lbl}
-                    </button>
-                  ))}
-                  <button onClick={closeAtsPanel} title="Close panel"
-                    style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer",
-                             color:theme.textMuted, fontSize:16, padding:"4px 6px" }}>x</button>
-                </div>
-                <div style={{ flex:1, minHeight:0, minWidth:0, overflowY:"auto" }}>
-                  {rightTab === "ats" && <ATSPanel report={activeAts?.report} score={activeAts?.score} jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}/>}
-                  {rightTab === "history" && (
-                    <HistoryList generated={generated} theme={theme}
-                      onOpen={e => {
-                        openSandbox(e);
-                        openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
-                      }}
-                      onExport={exportAndTrack}/>
-                  )}
-                </div>
-              </Panel>
-            </>
-          )}
-
+          {/* PANEL C (sandbox) and PANEL D (ATS) are gone from this layout on purpose. They were
+              react-resizable-panels columns wedged into the region below the search bar, which is
+              why they were cramped and why they sat BEHIND the JD drawer instead of beside it. Both
+              are now popup panels rendered through PanelShell — peers of the JD drawer — mounted at
+              the bottom of this component. The board keeps the full width of the layout, which is
+              also what stops it being squeezed down to a few hundred pixels when they are open. */}
         </PanelGroup>
         </div>
       )}
@@ -4217,6 +4111,41 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           ))}
         </div>
       )}
+
+      {/* ── The popup panel group: JD, PDF and ATS as peers ────────────────────────────────────
+          All three render through PanelShell and are laid out by one host, so "replace" and
+          "side by side" are properties of the set rather than of any one panel. ONE scrim for the
+          whole group: two stacked 45% scrims compound to ~70% and the board stops being visible
+          behind them, which would break the "dims but does not hide" property exactly when a second
+          panel opens. Clicking it closes the focused panel — the same gesture the JD drawer's own
+          backdrop has always had. */}
+      <PanelScrim show={openPanelCount > 0} onClick={() => {
+        const focused = visiblePanels.find(p => p.focused);
+        panelDescriptors.find(d => d.id === focused?.id)?.close?.();
+      }}/>
+      <AnimatePresence>
+        {panelProps("jd")  && <JobDetailPanel key="panel-jd" {...panelProps("jd")}/>}
+        {panelProps("pdf") && (
+          <SandboxPanel key="panel-pdf" {...panelProps("pdf")}
+            entry={sandbox} onClose={closeSandbox}
+            onSave={saveSandboxHtml} onExport={exportAndTrack}/>
+        )}
+        {panelProps("ats") && (
+          <AtsReportPanel key="panel-ats" {...panelProps("ats")}
+            onClose={closeAtsPanel}
+            theme={theme} activeAts={activeAts}
+            rightTab={rightTab} setRightTab={setRightTab} genCount={genCount}
+            jobId={selectedJob?.jobId} resumeText={resumeText} activeProfileId={activeProfileId}
+            historyContent={
+              <HistoryList generated={generated} theme={theme}
+                onOpen={e => {
+                  openSandbox(e);
+                  openAtsPanel({ score:e.atsScore, report:e.atsReport, company:e.company, title:e.title||e.role });
+                }}
+                onExport={exportAndTrack}/>
+            }/>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
