@@ -4,49 +4,29 @@ import UsbSelect from './UsbSelect.jsx';
 import UsbSuggest from './UsbSuggest.jsx';
 import './UnifiedSearchBar.css';
 
-// These VALUES are the scraped_jobs.experience_level vocabulary, which is also what the FILTERS
-// drawer's Experience Level pills emit and what jobQuery.js's experience_levels filter compares
-// against. They did not used to be: the values were 'entry level' / 'mid level' / 'staff' /
-// 'director', none of which is a value any writer produces (the column holds mid, lead, senior,
-// entry, intern, executive), so every option here was unmatchable on its face. That was masked for
-// as long as the select was wired to nothing at all; the moment it is wired, the vocabulary has to
-// be real. One control vocabulary shared with the drawer, not a second one — picking Senior here
-// and Senior there must mean the same thing.
-const EXP_OPTIONS = [
-  { v: '',          l: 'Any Level' },
-  { v: 'intern',    l: 'Intern'    },
-  { v: 'entry',     l: 'Entry'     },
-  { v: 'mid',       l: 'Mid'       },
-  { v: 'senior',    l: 'Senior'    },
-  { v: 'lead',      l: 'Lead'      },
-  { v: 'executive', l: 'Executive' },
+// ── Option lists come from the shared filter contract ────────────────────────────────────────
+//
+// These three selects USED to carry their own literals, and two of them were unmatchable on their
+// face: 'entry level' / 'mid level' / 'staff' / 'director' against a column holding
+// mid|lead|senior|entry|intern|executive, and 'ai ml' against a classifier that writes 'ai_ml'.
+// Both were harmless for as long as the controls were wired to nothing and became live defects the
+// moment they were wired up. W1 corrected the values in place; this removes the second copy, so
+// the drawer's pills and this bar's selects cannot drift apart again — picking Senior here and
+// Senior there must mean the same thing, and now it is literally the same array.
+//
+// `toSelect` adapts { value, label } to the { v, l } shape UsbSelect takes, and prepends the
+// "any" option. It does NOT rename or remap any value.
+import { EXPERIENCE_LEVELS, DOMAINS, BOARD_STATUS } from '../../../shared/jobFilterOptions.js';
+
+const toSelect = (dim, anyLabel) => [
+  { v: '', l: anyLabel },
+  ...dim.options.filter(o => o.value !== '').map(o => ({ v: o.value, l: o.label })),
 ];
 
-// Values are the scraped_jobs.bucket_domain vocabulary — classifyJob.js's DOMAIN_PATTERNS, which is
-// what GET /api/jobs now filters on. One correction was needed to make the list truthful: the
-// classifier spells it `ai_ml`, so the old 'ai ml' could never match a row. Every other option here
-// is a domain DOMAIN_PATTERNS can actually emit, `climate` included — it has no rows on this
-// database today, but it is a real bucket and an empty result for it is a fact about the data, not
-// a dead control. 'general' is deliberately NOT offered: it is detectDomain's fallback for "matched
-// nothing" (714 of 1,253 rows here), not a domain anyone would choose.
-const DOMAIN_OPTIONS = [
-  { v: '',           l: 'Any Domain'   },
-  { v: 'saas',       l: 'Tech / SaaS'  },
-  { v: 'fintech',    l: 'Fintech'      },
-  { v: 'healthtech', l: 'Healthtech'   },
-  { v: 'ai_ml',      l: 'AI / ML'      },
-  { v: 'ecommerce',  l: 'E-commerce'   },
-  { v: 'climate',    l: 'Climate Tech' },
-  { v: 'devtools',   l: 'Dev Tools'    },
-  { v: 'edtech',     l: 'EdTech'       },
-];
-
-const STATUS_OPTIONS = [
-  { v: '',        l: 'All Jobs' },
-  { v: 'new',     l: 'New Only' },
-  { v: 'starred', l: 'Starred'  },
-  { v: 'applied', l: 'Applied'  },
-];
+const EXP_OPTIONS    = toSelect(EXPERIENCE_LEVELS, 'Any Level');
+const DOMAIN_OPTIONS = toSelect(DOMAINS, 'Any Domain');
+// BOARD_STATUS already carries its own empty option, with the label this control has always used.
+const STATUS_OPTIONS = BOARD_STATUS.options.map(o => ({ v: o.value, l: o.label }));
 
 const DCLICK_MS = 5000;
 

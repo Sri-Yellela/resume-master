@@ -101,6 +101,10 @@ import { deriveAutomationTier } from "./services/jobs/automationTier.js";
 import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { suggest } from "./services/jobs/searchSuggestions.js";
+// The filter option contract — the ONE definition of every board filter's value vocabulary.
+// GET /api/jobs validates against it (rejectInvalidFilterValues below) so an unknown value is a
+// 400 rather than a board that silently matches nothing. See shared/jobFilterOptions.js.
+import { FILTER_DIMENSIONS, invalidEntries, ageDaysMap } from "./shared/jobFilterOptions.js";
 import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
 
@@ -5324,8 +5328,56 @@ app.get("/api/jobs/suggest", requireAuth, (req, res) => {
 
 // JOBS â€” shared pool with pagination, filters, sort
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/**
+ * Reject a filter value the vocabulary does not contain — LOUDLY.
+ *
+ * The failure this replaces is the one shared/jobFilterOptions.js exists for: a select emitting
+ * 'mid level' at a column holding 'mid' did not error, it returned zero rows. To the user that is
+ * indistinguishable from "there are no mid-level jobs", and it stayed shipped through two rounds of
+ * filter fixes because nothing anywhere said the value was wrong.
+ *
+ * WHAT IS CHECKED. Every dimension in FILTER_DIMENSIONS, under every param name it answers to — its
+ * own `param`, plus `excludeParam` and `legacyParam` where it has them, so `sources_exclude=LinkedIn`
+ * is caught as surely as `sources_include=LinkedIn`.
+ *
+ * WHAT IS NOT CHECKED, DELIBERATELY:
+ *   - An ABSENT or EMPTY param. "No opinion on this dimension" is the default board, and 400ing it
+ *     would break every caller.
+ *   - The PROFILE-DERIVED defaults. Those come from deriveProfileFilters, i.e. from our own code, so
+ *     an invalid one is an internal bug and not the caller's fault — a 400 would blame the user for
+ *     it. test/filterOptionContract.test.js covers that direction instead, by asserting the bridge's
+ *     own level table only emits values this contract knows.
+ *   - Free-text and numeric params (q, role, location, salary_min_usd, skills_include...). They have
+ *     no enumerated vocabulary to check against.
+ *
+ * Returns a problem string, or null when everything present is recognised.
+ */
+function rejectInvalidFilterValues(query) {
+  for (const [name, dim] of Object.entries(FILTER_DIMENSIONS)) {
+    const params = [dim.param, dim.excludeParam, dim.legacyParam].filter(Boolean);
+    for (const key of params) {
+      const bad = invalidEntries(dim, query[key]);
+      if (bad.length) {
+        // Name the offending VALUES, not just the dimension. A multi-valued param arrives as
+        // "remote,hybrid" and "invalid work_models" with no indication of which entry is wrong is
+        // the same dead end as the silent empty board.
+        return `Unknown ${name} value${bad.length === 1 ? "" : "s"} for "${key}": ${bad.join(", ")}`;
+      }
+    }
+  }
+  return null;
+}
+
 app.get("/api/jobs", requireAuth, async (req, res) => {
   try {
+    // Validate the enumerated filter vocabularies BEFORE any work — a bad value must not reach the
+    // query builder and come back as an empty board. 400 rather than 200-with-nothing: the caller
+    // sent something this endpoint does not understand, and saying so is the whole point.
+    const filterProblem = rejectInvalidFilterValues(req.query);
+    if (filterProblem) {
+      return res.status(400).json({ success: false, error: filterProblem, jobs: [], total: 0 });
+    }
+
     const {
       q              = '',
       role           = '',
@@ -5472,7 +5524,10 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
 
     // Age filter — support named intervals ("1d","2d","3d","1w","1m") + raw day counts
     let ageSql  = '', ageArgs = [];
-    const AGE_MAP = { '1d': 1, '2d': 2, '3d': 3, '1w': 7, '1m': 30 };
+    // The second copy of this table lived in JobsPanel's AGE_DAYS_MAP. Both read the shared
+    // POSTING_AGE definition now, so the client's derived `posted_after` and this clause cannot
+    // come to disagree about how many days "past week" is.
+    const AGE_MAP = ageDaysMap();
     const ageDays = AGE_MAP[ageFilter] ?? parseInt(ageFilter, 10);
     if (ageFilter && !isNaN(ageDays) && ageDays > 0) {
       ageSql  = `AND sj.scraped_at >= ?`;
@@ -6136,9 +6191,17 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
   });
 });
 
-const VALID_EMP_TYPES       = new Set(["full-time","part-time","contract","internship","temporary"]);
-const VALID_WORKPLACE_TYPES = new Set(["remote","hybrid","office"]);
-const VALID_POSTED_LIMITS   = new Set(["24h","1w","1m"]);
+// VALID_EMP_TYPES / VALID_WORKPLACE_TYPES / VALID_POSTED_LIMITS were removed here.
+//
+// All three were DECLARED AND NEVER READ — grep-proven, zero references in this file or any other.
+// Apify left them behind. They mattered because they looked exactly like the validation this
+// endpoint was missing while being a decoy: VALID_WORKPLACE_TYPES said "office" where every live
+// definition of that dimension says "onsite", and VALID_EMP_TYPES listed "temporary", which
+// schema.js's synonym table folds into "contract" and the column therefore can never hold. A
+// validation set nothing reads does not stay correct; it just stays convincing.
+//
+// The real validation is rejectInvalidFilterValues() on GET /api/jobs, which reads
+// shared/jobFilterOptions.js — the same definition the controls render from.
 
 function isExternalScrapeQuotaError(err) {
   const msg = String(err?.message || err || "").toLowerCase();

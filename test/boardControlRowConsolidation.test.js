@@ -6,6 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { SORTS } from "../shared/jobFilterOptions.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const panel   = read("client/src/panels/JobsPanel.jsx");
@@ -25,19 +26,21 @@ test("the filter and sort triggers sit beside IMPORT, in the search bar's action
 });
 
 test("every sort option moved across intact — same values, same labels", () => {
-  // A MOVE, not a redesign. The seven options the removed "Newest" select carried are exactly the
-  // seven here, and the collapsed pill's own list must agree with them (asserted in
-  // test/boardOrderingTieBreak.test.js, which also checks the server handles each).
-  const block = app.slice(app.indexOf("const SORT_OPTIONS = ["), app.indexOf("];", app.indexOf("const SORT_OPTIONS = [")));
-  for (const [v, l] of [
-    ["dateDesc", "Newest"], ["dateAsc", "Oldest"],
-    ["compHigh", "Pay high to low"], ["compLow", "Pay low to high"],
-    ["yoeLow", "Exp low to high"], ["yoeHigh", "Exp high to low"],
-    ["atsScore", "ATS Sort"],
-  ]) {
-    assert.ok(block.includes(`v: "${v}"`), `the sort menu lost ${v}`);
-    assert.ok(block.includes(`l: "${l}"`), `the sort menu lost the label "${l}"`);
-  }
+  // A MOVE, not a redesign — still asserted, but no longer by scraping a literal array out of
+  // App.jsx. X1 made SORTS in shared/jobFilterOptions.js the one definition of this dimension, and
+  // App.jsx maps over it, so the seven pairs are checked against THAT. The old version read a
+  // literal `const SORT_OPTIONS = [...]`; that is exactly the second copy X1 removed, and a test
+  // that requires the copy to exist is a test that forbids the fix.
+  assert.deepEqual(
+    SORTS.options.map(o => [o.value, o.label]),
+    [["dateDesc", "Newest"], ["dateAsc", "Oldest"],
+     ["compHigh", "Pay high to low"], ["compLow", "Pay low to high"],
+     ["yoeLow", "Exp low to high"], ["yoeHigh", "Exp high to low"],
+     ["atsScore", "ATS Sort"]],
+    "the sort menu's values or labels changed");
+  // ...and that App.jsx really renders FROM it rather than keeping a copy beside it.
+  assert.match(app, /const SORT_OPTIONS = SORTS\.options\.map/,
+    "App.jsx holds its own sort list again");
   // Reuses the bar's dropdown rather than being a second implementation.
   assert.match(app, /<UsbSelect\s*\n?\s*iconOnly/);
 });

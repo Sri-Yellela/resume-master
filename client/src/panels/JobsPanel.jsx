@@ -23,6 +23,12 @@ import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { Z } from "../styles/zLayers.js";
 import { toast } from "../hooks/use-toast.js";
 import ROLE_ALIAS_MAP from "../../../data/ROLE_ALIAS_MAP.json";
+// The filter option contract. Every option list below renders FROM these tables — see
+// shared/jobFilterOptions.js for why they are not literals here any more.
+import {
+  EXPERIENCE_LEVELS, WORK_MODELS, EMPLOYMENT_TYPES, SOURCES, AUTOMATION_TIERS,
+  POSTING_AGE, VISITED, ageDaysMap,
+} from "../../../shared/jobFilterOptions.js";
 
 // The three extension-bridge stubs that stood here (getLinkedInExtensionInstallUrl,
 // isLinkedInExtensionInstalled, sendExtensionRequest) are gone with cleanup 5.3. They returned
@@ -89,9 +95,10 @@ function writeProfileUiCache(profileId, snapshot) {
 // path — the server derives it from the profile; board filters stay out of it.
 
 // â"€â"€ Helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-// FE-2: mirrors server.js's own AGE_MAP for the /api/jobs handler's ageFilter — used to derive
-// posted_after client-side from the SAME named interval, without a second UI control.
-const AGE_DAYS_MAP = { "1d": 1, "2d": 2, "3d": 3, "1w": 7, "1m": 30 };
+// The ageFilter -> days mapping, DERIVED rather than restated. It used to be a literal here and a
+// second literal in server.js's AGE_MAP, which is two copies of one definition; both now read the
+// shared POSTING_AGE table, so "past week" cannot come to mean two different things.
+const AGE_DAYS_MAP = ageDaysMap();
 
 function ago(ts) {
   if (!ts) return "-";
@@ -323,59 +330,35 @@ function IconBtn({ bg, onClick, title, children, disabled = false, size = 28 }) 
   );
 }
 
-const EMP_TYPE_OPTIONS = [
-  { value:"full-time",  label:"Full-time" },
-  { value:"contract",   label:"Contract"  },
-  { value:"internship", label:"Internship"},
-  { value:"part-time",  label:"Part-time" },
-];
+// Every one of the five option lists this file used to declare is now a reference to the shared
+// contract. They were all correct — that is exactly why they are dangerous as copies: nothing
+// fails when one of them is edited and the others are not, and the board simply stops matching.
+const EMP_TYPE_OPTIONS = EMPLOYMENT_TYPES.options;
 
 // jobQuery.js's work_models dimension (sj.workplace_type — the Task-5 ENRICHMENT column). This is
 // now the only work-location control: the legacy single-select over sj.work_type was removed because
 // no write path populates that column, and this one filters the column enrichment actually fills.
-const WORK_MODEL_OPTIONS = [
-  { value:"remote", label:"Remote" },
-  { value:"hybrid", label:"Hybrid" },
-  { value:"onsite", label:"Onsite" },
-];
+const WORK_MODEL_OPTIONS = WORK_MODELS.options;
 
 // FE-2: jobQuery.js's experience_levels dimension (sj.experience_level — the profile-bridge's
-// derived default; an explicit selection here overrides it, per server.js's per-key merge).
-const EXPERIENCE_LEVEL_OPTIONS = [
-  { value:"intern",    label:"Intern" },
-  { value:"entry",     label:"Entry" },
-  { value:"mid",       label:"Mid" },
-  { value:"senior",    label:"Senior" },
-  { value:"lead",      label:"Lead" },
-  { value:"executive", label:"Executive" },
-];
+// derived default; an explicit selection here overrides it, per server.js's per-key merge). Shared
+// with the search bar's Experience select, which is the pairing W1 had to correct by hand.
+const EXPERIENCE_LEVEL_OPTIONS = EXPERIENCE_LEVELS.options;
 
-// Provider (scraped_jobs.source) options for the include/exclude control. Mirrors the vocabulary
-// the writers actually emit — the same "UI options duplicate the server's vocabulary" idiom as
-// WORK_MODEL_OPTIONS / EXPERIENCE_LEVEL_OPTIONS above, deliberately NOT an import of the server
-// module. The counts beside each come from jobQuery.js's `sources` facet at runtime, so a provider
-// with 0 rows shows "(0)" rather than being silently absent.
-const SOURCE_OPTIONS = [
-  { value:"greenhouse", label:"Greenhouse" },
-  { value:"lever",      label:"Lever"      },
-  { value:"ashby",      label:"Ashby"      },
-  { value:"jobo",       label:"Jobo"       },
-  { value:"adzuna",     label:"Adzuna"     },
-  { value:"serpapi",    label:"SerpAPI"    },
-  { value:"LinkedIn",   label:"LinkedIn"   },
-];
+// Provider (scraped_jobs.source) options for the include/exclude control. The comment here used to
+// say this list "mirrors the vocabulary the writers actually emit ... deliberately NOT an import of
+// the server module" — and it did not mirror it. It offered `LinkedIn`, which no writer emits (the
+// extension writes `linkedin_extension`), and omitted workday, smartrecruiters, workable and
+// recruitee, which are all registered aggregator plugins. Deliberately not importing the vocabulary
+// is precisely how it came to be wrong. It is imported now. The counts beside each still come from
+// jobQuery.js's `sources` facet at runtime, so a provider with 0 rows shows "(0)" rather than being
+// silently absent.
+const SOURCE_OPTIONS = SOURCES.options;
 
-// Automation tier (services/jobs/automationTier.js). Order is decreasing confidence, matching the
-// module's AUTOMATION_TIERS. The descriptions are the point of this control: "account" is the one
-// that changes what the user has to do, and "unknown" must read as an open question rather than
-// as either a promise or a warning.
-const TIER_OPTIONS = [
-  { value:"direct",  label:"Direct",   hint:"No account — one-page apply" },
-  { value:"guest",   label:"Guest",    hint:"Account optional, guest path exists" },
-  { value:"account", label:"Account",  hint:"You sign in once, then autofill takes over" },
-  { value:"gated",   label:"Gated",    hint:"Account + CAPTCHA/ID check — cannot be automated" },
-  { value:"unknown", label:"Unknown",  hint:"Not established — may be either" },
-];
+// Automation tier. Order is decreasing confidence; the hints travel with the values in the shared
+// table, because a tier without its explanation is the control that reads as either a promise or a
+// warning. services/jobs/automationTier.js's AUTOMATION_TIERS is derived from the same table.
+const TIER_OPTIONS = AUTOMATION_TIERS.options;
 
 function defaultFilterSnapshot() {
   return {
@@ -780,13 +763,12 @@ function FiltersPanel({
 
         <div>
           <div style={labelStyle}>Date Posted</div>
+          {/* Rendered from POSTING_AGE, which also owns the days each key means — so the option
+              the user picks and the `posted_after` timestamp derived from it cannot disagree. */}
           <select value={ageFilter} onChange={e=>setAgeFilter(e.target.value)} style={selStyle}>
-            <option value="">Any time</option>
-            <option value="1d">Past 24h</option>
-            <option value="2d">Past 2 days</option>
-            <option value="3d">Past 3 days</option>
-            <option value="1w">Past week</option>
-            <option value="1m">Past month</option>
+            {POSTING_AGE.options.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
         </div>
 
@@ -807,9 +789,9 @@ function FiltersPanel({
           <div style={labelStyle}>Status</div>
           <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
             <select value={visitedFilter} onChange={e=>setVisitedFilter(e.target.value)} style={selStyle}>
-              <option value="">Visited & unvisited</option>
-              <option value="0">Unvisited only</option>
-              <option value="1">Visited only</option>
+              {VISITED.options.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
         </div>

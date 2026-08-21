@@ -17,6 +17,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { EXPERIENCE_LEVELS, DOMAINS, values } from "../shared/jobFilterOptions.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const usb     = read("client/src/components/UnifiedSearchBar.jsx");
@@ -95,17 +96,24 @@ test("the bar's select values are vocabularies the database actually stores", ()
   // nothing. EXP_OPTIONS held 'entry level' / 'mid level' / 'staff' / 'director' against a column
   // whose values are intern/entry/mid/senior/lead/executive; DOMAIN_OPTIONS held 'ai ml' against a
   // classifier that writes 'ai_ml'.
-  const values = (name) => {
-    const a = usb.indexOf(`const ${name} = [`);
-    assert.notEqual(a, -1, `${name} moved`);
-    return [...usb.slice(a, usb.indexOf("];", a)).matchAll(/\{ v: '([^']*)'/g)]
-      .map((x) => x[1]).filter(Boolean);
-  };
+  //
+  // X1 MOVED WHERE THIS IS CHECKED, AND THIS TEST NOW GUARDS THE MOVE. Reading the values back out
+  // of literal arrays in UnifiedSearchBar.jsx required those arrays to BE literals, which is the
+  // duplication that let the bar and the drawer disagree in the first place. The join itself — every
+  // option against what the writers can store, in both directions, for all ten dimensions — lives
+  // in test/filterOptionContract.test.js. What is left here is the thing specific to this file: the
+  // bar's three selects must render from the shared contract and not from a copy.
+  assert.match(usb, /import \{ EXPERIENCE_LEVELS, DOMAINS, BOARD_STATUS \} from '\.\.\/\.\.\/\.\.\/shared\/jobFilterOptions\.js'/,
+    "the search bar no longer reads the shared filter contract");
+  assert.match(usb, /const EXP_OPTIONS\s+= toSelect\(EXPERIENCE_LEVELS, 'Any Level'\);/);
+  assert.match(usb, /const DOMAIN_OPTIONS = toSelect\(DOMAINS, 'Any Domain'\);/);
+  assert.match(usb, /const STATUS_OPTIONS = BOARD_STATUS\.options\.map/);
 
-  // scraped_jobs.experience_level — the same vocabulary the FILTERS drawer's pills emit, so the two
-  // controls cannot disagree about what "Senior" means.
-  const EXPERIENCE_LEVELS = ["intern", "entry", "mid", "senior", "lead", "executive"];
-  assert.deepEqual(values("EXP_OPTIONS").sort(), [...EXPERIENCE_LEVELS].sort());
+  // The values themselves, asserted against the contract rather than against a restatement — this
+  // is the assertion that would have failed on 'mid level', and it still would.
+  assert.deepEqual(values(EXPERIENCE_LEVELS), ["intern", "entry", "mid", "senior", "lead", "executive"]);
+  assert.ok(values(DOMAINS).includes("ai_ml"), "the Domain select lost the classifier's spelling");
+  assert.ok(!values(DOMAINS).includes("ai ml"), "'ai ml' is back — it can never match a row");
 
   // classifyJob.js's DOMAIN_PATTERNS is the source of truth for bucket_domain, so read it rather
   // than restating it — an option the classifier cannot emit is a control that returns nothing.
@@ -114,11 +122,11 @@ test("the bar's select values are vocabularies the database actually stores", ()
     [...classify.matchAll(/\{ domain: '([^']+)'/g)].map((m) => m[1]),
   );
   assert.ok(emittable.size >= 8, "DOMAIN_PATTERNS moved or shrank unexpectedly");
-  for (const v of values("DOMAIN_OPTIONS")) {
+  for (const v of values(DOMAINS)) {
     assert.ok(emittable.has(v), `the Domain select offers '${v}', which detectDomain can never emit`);
   }
   // 'general' is detectDomain's "matched nothing" fallback and must not be offered as a choice.
-  assert.ok(!values("DOMAIN_OPTIONS").includes("general"));
+  assert.ok(!values(DOMAINS).includes("general"));
 });
 
 test("Status fans out to three separate dimensions, each reset when it is not selected", () => {

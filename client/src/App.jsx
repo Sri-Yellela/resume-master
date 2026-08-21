@@ -27,6 +27,7 @@ import UnifiedSearchBar          from "./components/UnifiedSearchBar.jsx";
 import ImportJobModal            from "./components/ImportJobModal.jsx";
 import { Plus, SlidersHorizontal, ArrowUpDown } from "lucide-react";
 import UsbSelect                 from "./components/UsbSelect.jsx";
+import { SORTS }                 from "../../shared/jobFilterOptions.js";
 import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
@@ -138,17 +139,11 @@ function BoardSearchBar({ tabs, ...props }) {
   );
 }
 
-// The board's sort options. Same list, same values, that the removed "Newest" select in the
-// control row held — this is a MOVE, not a redesign, so nothing is added or dropped here.
-const SORT_OPTIONS = [
-  { v: "dateDesc", l: "Newest"          },
-  { v: "dateAsc",  l: "Oldest"          },
-  { v: "compHigh", l: "Pay high to low" },
-  { v: "compLow",  l: "Pay low to high" },
-  { v: "yoeLow",   l: "Exp low to high" },
-  { v: "yoeHigh",  l: "Exp high to low" },
-  { v: "atsScore", l: "ATS Sort"        },
-];
+// The board's sort options, from the shared filter contract. Same list, same values, that the
+// removed "Newest" select in the control row held. It was a literal here AND a second literal in
+// TopBar's collapsed pill, and the two had already drifted on labels ("Pay high to low" here vs
+// "Pay ↓" there) — one control, two renderings, disagreeing about what to call the same value.
+const SORT_OPTIONS = SORTS.options.map(o => ({ v: o.value, l: o.label }));
 
 // The consolidated control row (W4): a filter icon and a sort icon, beside IMPORT.
 //

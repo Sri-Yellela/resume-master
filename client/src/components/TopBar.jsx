@@ -11,6 +11,7 @@ import { api } from "../lib/api.js";
 import { DockPortal } from "./DockPortal.jsx";
 import ProfileSelectorDropdown from "./ProfileSelectorDropdown.jsx";
 import { Z } from "../styles/zLayers.js";
+import { SORTS } from "../../../shared/jobFilterOptions.js";
 
 // ── Inject slideDown keyframe once ────────────────────────────
 function injectKeyframes() {
@@ -721,13 +722,13 @@ export default function TopBar({
             style={{ height: 26, padding: "4px 8px", borderRadius: 4, flexShrink: 0,
                      minWidth: 80, border: `1px solid ${theme.border}`, background: theme.surface,
                      fontSize: 12, color: theme.text, outline: "none", cursor: "pointer" }}>
-            <option value="dateDesc">Newest</option>
-            <option value="dateAsc">Oldest</option>
-            <option value="compHigh">Pay ↓</option>
-            <option value="compLow">Pay ↑</option>
-            <option value="yoeLow">Exp ↑</option>
-            <option value="yoeHigh">Exp ↓</option>
-            <option value="atsScore">ATS Sort</option>
+            {/* From the shared contract, not a second literal list. This copy had already drifted
+                from the board's own sort select on LABELS — "Pay ↓" here against "Pay high to low"
+                there, for the identical value — which is the mild form of the same defect that
+                'mid level' vs 'mid' is the severe form of. */}
+            {SORTS.options.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
           {profiles.length > 0 && (
             <ProfileSelectorDropdown

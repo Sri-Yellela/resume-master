@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { SORTS } from "../shared/jobFilterOptions.js";
 
 // The four theme.jsx token assertions that stood here named light AND dark rgba values for
 // --bg-menu plus light/dark --popover pairs. Both are gone: there is one theme now
@@ -188,12 +189,15 @@ test("tool access is plan-owned and local match UI is removed", () => {
   assert.doesNotMatch(topBar, /Best match|bestMatch/);
   assert.doesNotMatch(scrollDock, /Best match|bestMatch/);
   assert.doesNotMatch(jobsPanel, /Best Match|bestMatch|\/api\/jobs\/best-match|atsLocal/);
-  // ATS Sort moved with the rest of the sort options to App.jsx's SORT_OPTIONS (the sort icon
-  // beside IMPORT) and to the collapsed pill. It must still be OFFERED — that is the invariant
-  // this line has always guarded; only the file it lives in changed.
-  const appSrc = fs.readFileSync("client/src/App.jsx", "utf8");
-  assert.match(appSrc, /\{ v: "atsScore", l: "ATS Sort"\s*\}/);
-  assert.match(topBar, /value="atsScore">ATS Sort/);
+  // ATS Sort must still be OFFERED — that is the invariant this line has always guarded. Only
+  // WHERE it is declared has changed: first out of JobsPanel's control row into App.jsx's
+  // SORT_OPTIONS and the collapsed pill, and now (X1) out of both of those literal lists into
+  // shared/jobFilterOptions.js, which is the one definition both surfaces render from. Asserting
+  // the contract rather than either copy is the point — it is what makes the two agree.
+  assert.ok(SORTS.options.some(o => o.value === "atsScore" && o.label === "ATS Sort"),
+    "ATS Sort is no longer offered as a board sort");
+  assert.match(fs.readFileSync("client/src/App.jsx", "utf8"), /const SORT_OPTIONS = SORTS\.options\.map/);
+  assert.match(topBar, /\{SORTS\.options\.map/);
 });
 
 test("critical UI copy has no mojibake literals", () => {

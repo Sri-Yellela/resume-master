@@ -25,12 +25,16 @@ import crypto from 'crypto';
 import { recordPipelineRun } from './pipelineRunLog.js';
 import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
 import { callModel, SYSTEM_USER_ID } from '../modelCall.js';
+import { EXPERIENCE_LEVELS, WORK_MODELS, valueSet } from '../../shared/jobFilterOptions.js';
 
 // Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
 const MODEL_ID = MODEL_HAIKU;
 
-const VALID_EXPERIENCE_LEVELS = new Set(['intern', 'entry', 'mid', 'senior', 'lead', 'executive']);
-const VALID_WORKPLACE_TYPES   = new Set(['remote', 'hybrid', 'onsite']);
+// Same two enums schema.js coerces against, from the same shared table — this was the second of
+// four copies of the experience-level vocabulary. shared/jobFilterOptions.js explains why that
+// mattered: nothing checked the copies against each other.
+const VALID_EXPERIENCE_LEVELS = valueSet(EXPERIENCE_LEVELS);
+const VALID_WORKPLACE_TYPES   = valueSet(WORK_MODELS);
 const VALID_SALARY_PERIODS    = new Set(['annual', 'hourly', 'monthly']);
 
 // Cost/time bounds per background pass — this is a nice-to-have signal, never something the
