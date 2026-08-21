@@ -10,6 +10,8 @@
  * this dimension," so a profile with no signals at all produces `{}` and changes nothing.
  */
 
+import { EXPERIENCE_LEVEL_ORDER } from '../../shared/jobFilterOptions.js';
+
 // Explicit, documented years-of-experience -> experience_level enum bucket table
 // (schema.js's VALID_EXPERIENCE_LEVELS: intern|entry|mid|senior|lead|executive).
 // `intern` is deliberately never derived here — a low years-of-experience count means
@@ -22,7 +24,11 @@ const EXPERIENCE_LEVEL_THRESHOLDS = [
   { maxYears: Infinity, level: 'executive' },
 ];
 
-const LEVEL_ORDER = ['intern', 'entry', 'mid', 'senior', 'lead', 'executive'];
+// The fourth copy of the experience-level vocabulary, and the one where ORDER is load-bearing:
+// widenOneLevelUp below walks it by index. It is the shared contract's own order now, so a level
+// added to the board's controls is one this bridge can widen into rather than an index it cannot
+// find.
+const LEVEL_ORDER = EXPERIENCE_LEVEL_ORDER;
 
 const MAX_DERIVED_Q_TERMS = 8;
 const MAX_DERIVED_SKILLS  = 6;

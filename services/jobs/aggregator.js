@@ -24,6 +24,7 @@ import recruiteePlugin from './sources/recruitee.js';
 // Jobo is a feed-sync source, not a per-query search plugin — it is intentionally NOT added
 // to SOURCES below. cacheJoboFeed() (bottom of this file) imports it directly.
 import joboSource from './sources/jobo.js';
+import { SOURCES as SOURCES_DIMENSION, labelMap } from '../../shared/jobFilterOptions.js';
 // import theMuse   from './sources/themusejobs.js';  // add when ready
 // import usaJobs   from './sources/usajobs.js';      // add when ready
 // import indeed    from './sources/indeed.js';        // add when approved
@@ -41,20 +42,15 @@ const SOURCES = [
 ];
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SOURCE_LABELS = {
-  adzuna:             'Adzuna',
-  greenhouse:         'Greenhouse',
-  lever:              'Lever',
-  ashby:              'Ashby',
-  workday:            'Workday',
-  smartrecruiters:    'SmartRecruiters',
-  workable:           'Workable',
-  recruitee:          'Recruitee',
-  jobo:               'Jobo',
-  import:             'Imported',
-  serpapi:            'Google Jobs',
-  linkedin_extension: 'LinkedIn (Saved)',
-};
+// Provider display names, DERIVED from the shared filter option contract rather than restated.
+//
+// This map and the filters drawer's provider list were the two sides of one contract, and they did
+// not meet: the drawer offered `LinkedIn` where this map (and every writer) says
+// `linkedin_extension`, and it omitted workday / smartrecruiters / workable / recruitee entirely.
+// So a provider could be labelled here, written by a registered plugin, and unfilterable on the
+// board — and `LinkedIn` was an option that could never match a row, which is the same defect
+// 'mid level' and 'ai ml' were. One table now, in shared/jobFilterOptions.js.
+export const SOURCE_LABELS = labelMap(SOURCES_DIMENSION);
 
 // Validate all registered plugins at startup
 SOURCES.forEach(validatePlugin);

@@ -7,11 +7,17 @@
  * Optional fields: everything else — use null if unavailable
  */
 
+import { EXPERIENCE_LEVELS, WORK_MODELS, valueSet } from '../../shared/jobFilterOptions.js';
+
 const JOB_SCHEMA_VERSION = '1.1';
 
 // ── Enum helpers ──────────────────────────────────────────────────────────────
 
-const VALID_EXPERIENCE_LEVELS = new Set(['intern','entry','mid','senior','lead','executive']);
+// The enum comes from the shared filter option contract, so what this WRITER is allowed to store
+// and what the board's controls OFFER are one definition. There were four copies of this list
+// (here, enrichJob.js, profileFilterBridge.js's LEVEL_ORDER, and the UI) and nothing checked them
+// against each other — see shared/jobFilterOptions.js.
+const VALID_EXPERIENCE_LEVELS = valueSet(EXPERIENCE_LEVELS);
 
 function normalizeExperienceLevel(explicit, title) {
   if (explicit && VALID_EXPERIENCE_LEVELS.has(explicit)) return explicit;
@@ -26,7 +32,7 @@ function normalizeExperienceLevel(explicit, title) {
   return 'mid';
 }
 
-const VALID_WORKPLACE_TYPES = new Set(['remote','hybrid','onsite']);
+const VALID_WORKPLACE_TYPES = valueSet(WORK_MODELS);
 
 function normalizeWorkplaceType(explicit, remoteBool, title, location) {
   if (explicit) {

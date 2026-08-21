@@ -38,10 +38,13 @@
 
 import { detectPlatformFromUrl } from "../platformDetector.js";
 import { DIRECT_ATS_SOURCES } from "./directApplyFilter.js";
+import { AUTOMATION_TIERS as AUTOMATION_TIER_OPTIONS, values } from '../../shared/jobFilterOptions.js';
 
 // The vocabulary, in decreasing order of what we can promise. Exported so the SQL filter and the
 // recompute script validate against the same list rather than re-typing the strings.
-const AUTOMATION_TIERS = ["direct", "guest", "account", "gated", "unknown"];
+// Derived from the shared filter option contract, in the same decreasing-confidence order the
+// filters drawer renders. The tier list and the control that filters by it were two literals.
+const AUTOMATION_TIERS = values(AUTOMATION_TIER_OPTIONS);
 
 /**
  * Platform → tier. Keys are platformDetector.js's own platform names (URL_ATS_MAP /
