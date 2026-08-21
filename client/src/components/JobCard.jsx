@@ -163,6 +163,22 @@ function NewPill() {
   );
 }
 
+// ── Closed pill — a saved job whose listing has expired ──────────
+// Only ever rendered on the Saved tab, because that is the only board that returns is_active = 0
+// rows. runExpiredJobsCleanup used to hard-DELETE an expired starred job seven days on, taking the
+// user's own star with it, so a saved posting simply ceased to exist. It is now retired instead
+// (is_active = 0) and kept — and a kept row has to SAY it is closed, or the list quietly promises
+// the user they can still apply.
+function ClosedPill() {
+  return (
+    <span title="This listing was not seen again for 7 days, so it is probably filled or withdrawn. Kept here because you saved it."
+          style={{ fontSize:9, fontWeight:800, color:"#b45309", background:"#fef3c733",
+                   padding:"1px 6px", borderRadius:999, whiteSpace:"nowrap", letterSpacing:"0.03em" }}>
+      NO LONGER LISTED
+    </span>
+  );
+}
+
 // ── Skill chips (FE-1) — expanded/detail surfaces only ───────────
 function SkillChips({ skills, max = 5 }) {
   if (!skills?.length) return null;
@@ -574,7 +590,13 @@ export default function JobCard({
             </div>
             <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
               <WorkBadge t={job.workType} theme={theme}/>
-              {isNewJob(job.discoveredAt) && <NewPill/>}
+              {/* Explicit `=== false`: isActive is absent on live-search results, and absent must
+                  not read as closed. Ahead of the NEW pill because "closed" outranks "recent". */}
+              {job.isActive === false && <ClosedPill/>}
+              {/* A closed listing is never new, whatever discoveredAt says — the two pills side by
+                  side ("NO LONGER LISTED" + "NEW") is a contradiction the user has to resolve, and
+                  the closed state is the one that changes what they can do about it. */}
+              {job.isActive !== false && isNewJob(job.discoveredAt) && <NewPill/>}
               <VisaBadge isH1bSponsor={job.isH1bSponsor} requiresWorkAuth={job.requiresWorkAuth}/>
               <TierChip tier={job.automationTier}/>
               <span style={{ display:"flex", alignItems:"center", gap:4 }}>
