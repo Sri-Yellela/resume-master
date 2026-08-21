@@ -2169,7 +2169,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     const { query = "", location = "", experience = "", domain = "", status = "" } = barFilters || {};
     setLocalSearch(query);
     setLocationFilter(location);
-    setExperienceLevels(experience ? [experience] : []);
+    // Identity-preserving, and it has to be. A bare `experience ? [experience] : []` allocates a
+    // FRESH array on every apply, so even when the Experience select has not been touched React
+    // sees a new value, and `experienceLevels` is in the refetch effect's dep array — which fired a
+    // second, redundant /api/jobs alongside the debounced one the keyword search already sends.
+    // Measured: one click on Search produced two identical requests for
+    // `localSearch=software+engineer`. Returning `prev` unchanged collapses that back to one.
+    setExperienceLevels(prev => {
+      const next = experience ? [experience] : [];
+      const same = prev.length === next.length && prev.every((v, i) => v === next[i]);
+      return same ? prev : next;
+    });
     setDomainFilter(domain);
     setBoardTab(status === "starred" ? "saved" : "all");
     setAgeFilter(status === "new" ? "1d" : "");

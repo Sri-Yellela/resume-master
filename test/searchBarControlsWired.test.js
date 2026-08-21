@@ -144,3 +144,21 @@ test("the two params the bar newly needs are honoured by the server", () => {
   assert.match(server, /\$\{appliedSql\}/, "appliedSql is built but never spliced into the WHERE clause");
   assert.ok(!/appliedArgs/.test(server), "appliedSql must stay parameterless or baseArgs ordering shifts");
 });
+
+test("applying the bar's filters does not fire a redundant second request", () => {
+  // `setExperienceLevels(experience ? [experience] : [])` allocated a FRESH array on every apply,
+  // so even with the Experience select untouched React saw a new value — and `experienceLevels` is
+  // in the refetch effect's dep array, which fired a second /api/jobs alongside the debounced one
+  // the keyword search already sends. Measured on the real board: one click on Search produced two
+  // identical requests for `localSearch=software+engineer`.
+  //
+  // The array is the only value in this effect that can change identity without changing meaning;
+  // every other setter takes a string. So the guard belongs on it specifically.
+  const a = panel.indexOf('const { query = "", location = "", experience = "", domain = "", status = "" } = barFilters');
+  assert.notEqual(a, -1, "the bar-filter mapping effect moved");
+  const effect = panel.slice(a, a + 1600);
+  assert.ok(!/setExperienceLevels\(experience \? \[experience\] : \[\]\)/.test(effect),
+    "the fresh-array assignment is back — every bar search sends two requests");
+  assert.match(effect, /setExperienceLevels\(prev => \{/);
+  assert.match(effect, /return same \? prev : next;/);
+});
