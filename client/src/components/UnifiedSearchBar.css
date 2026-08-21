@@ -125,17 +125,82 @@
   min-width: 0;
 }
 .usb__input::placeholder { color: var(--color-text-faint, #5a5957); }
+/* .usb__sel is now a <button> (components/UsbSelect.jsx), not a native <select>. The closed
+   control is deliberately unchanged to the pixel — same font size, same text colour, same
+   transparent background on the glass bar — because only the OPEN list was ever wrong. See the
+   note at the top of UsbSelect.jsx for why the native option list could not be styled instead. */
 .usb__sel {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
   border: none;
   background: transparent;
+  font-family: inherit;
   font-size: .875rem;
   color: var(--color-text, #cdccca);
   appearance: none;
   -webkit-appearance: none;
   cursor: pointer;
   outline: none;
-  padding-right: 1rem;
+  padding: 0;
   white-space: nowrap;
+  border-radius: 6px;
+}
+.usb__sel-label { white-space: nowrap; }
+
+/* Hover and open both read as "this control is live" without moving anything: a tint of the
+   accent, never the OS highlight. */
+.usb__sel--btn:hover    { color: var(--color-primary, #4f98a3); }
+.usb__sel--open         { color: var(--color-primary, #4f98a3); }
+.usb__sel--btn:hover .usb__chev,
+.usb__sel--open .usb__chev { color: var(--color-primary, #4f98a3); }
+.usb__sel--open .usb__chev { transform: rotate(180deg); }
+.usb__chev { transition: transform 150ms ease, color 150ms ease; }
+
+/* Keyboard focus must be visible — the native select had a UA focus ring and this replaces it.
+   :focus-visible only, so a mouse user does not get a ring they did not ask for. */
+.usb__sel--btn:focus-visible {
+  outline: 2px solid var(--color-primary, #4f98a3);
+  outline-offset: 3px;
+}
+
+/* ── The open list ──────────────────────────────────────────────────────────
+   Surface, border and shadow come from DockPortal (given the same tokens the FILTERS drawer
+   uses); these are the rows inside it. */
+.usb__opts { display: flex; flex-direction: column; gap: 1px; }
+.usb__opt {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: .8125rem;
+  /* Muted by default, full-strength when selected — the same emphasis ladder the drawer uses, and
+     the reason this is legible: the row now paints its OWN surface, so the text colour is chosen
+     against a background we control rather than against whatever the OS drew. */
+  color: var(--color-text-muted, #c0c0c0);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+/* One highlight, driven by the same class whether it was reached by mouse or by arrow key, so the
+   pointer and the keyboard cursor can never disagree and show two. */
+.usb__opt--active {
+  background: color-mix(in srgb, var(--color-primary, #4f98a3) 16%, transparent);
+  color: var(--color-text, #f5f5f5);
+}
+.usb__opt--selected { color: var(--color-text, #f5f5f5); font-weight: 600; }
+.usb__opt-check {
+  width: 12px;
+  flex-shrink: 0;
+  font-size: .75rem;
+  color: var(--color-primary, #4f98a3);
+}
+.usb__opt-label { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .usb__chev { transition: none; }
 }
 .usb__clear {
   background: var(--color-surface-offset, #1d1c1a);
