@@ -36,21 +36,17 @@ export default function UnifiedSearchBar({
                          // 'inline'   = app dashboard (position:sticky, in flow, no overlap)
   onSearch,
   onLocalFilter,
-  tabs,
-  activeTab,
-  onTabChange,
-  actions,   // optional ReactNode rendered right-aligned in the tabs row (see below)
-  // `hidden` hides this bar WITHOUT removing it from the layout. The caller owns exactly one search
-  // surface at a time (hooks/useSearchSurface.js), and it used to express that by unmounting this
-  // component — which took its reserved space with it, changed the document height by 386px above
-  // the fold, and let Chrome's scroll anchoring drag the scroll offset back across the very
-  // threshold that had just been crossed. `visibility` keeps the space, paints nothing, and takes
-  // the whole subtree out of the tab order, so the hidden surface is unreachable by keyboard too.
-  //
-  // It is applied HERE rather than by a wrapper for the same reason `actions` is a slot: .usb is
-  // position:sticky with auto margins, and an intermediate box would become its containing block
-  // and leave it nothing to stick to.
-  hidden = false,
+  // `tabs`, `activeTab` and `onTabChange` are GONE (Y4). The app's primary navigation was a slot on
+  // the search bar, which made the tab row appear and disappear with a control that is only
+  // meaningful on the Jobs board. It lives in TopBar now. `actions` stays — those really are board
+  // controls and really do belong beside the board's search.
+  actions,   // optional ReactNode rendered right-aligned in the actions row (see below)
+  // `hidden` is GONE with the pill. It hid this bar without removing it from the layout, because
+  // the caller owned exactly one of two search surfaces and unmounting this one took 386px of
+  // above-the-fold layout with it, which Chrome's scroll anchoring then subtracted from the scroll
+  // offset — dragging it back across the very threshold that had just been crossed. There is one
+  // search surface now, so the caller simply renders it or does not, and the reason for the
+  // visibility trick is gone with the threshold that needed it.
 }) {
   const [q,       setQ]       = useState('');
   const [loc,     setLoc]     = useState('');
@@ -116,46 +112,33 @@ export default function UnifiedSearchBar({
   return (
     <div className={'usb' + (isDock ? ' usb--dock' : ' usb--hero') + (variant === 'inline' ? ' usb--inline' : '')}
          role="search" aria-label="Job search"
-         aria-hidden={hidden || undefined}
-         style={hidden ? { visibility: 'hidden' } : undefined}>
+         >
 
       {/* `actions` is an optional trailing slot in this row. It lives INSIDE .usb rather than
           being wrapped around the component by the caller because .usb is position:sticky with
           auto margins — wrapping it would change the containing block and break the docking
           transition. Rendered only when supplied, so the marketing landing page (which passes
           neither tabs nor actions) is unaffected. */}
-      {/* Vertical rhythm (W6). Measured before this at 1440x900: 21px of space ABOVE the tab row
-          and 0px between it and the search field — the tabs were pressed against the input with
-          all the air on the wrong side. The row's own padding was "8px 12px 0", i.e. it added to
-          the space above and contributed nothing below.
+      {/* THE ACTIONS ROW. This was the TAB row with an actions slot on the end; the tabs moved into
+          TopBar (Y4) and what is left is the board's own controls — the All/Saved/Pending tabs, the
+          filter and sort icons, and IMPORT.
 
-          Now: nothing above (the card's own 20px padding is the frame, and it matches the 20px on
-          the left and right), 10px between the tabs and the divider, and 10px between the divider
-          and the search field. That 10 is the same module as the row's 12px horizontal padding
-          and the tab buttons' 14px, so the spacing reads as one rhythm rather than two. */}
-      {((tabs && tabs.length > 0) || actions) && (
+          The vertical rhythm is the one W6 established and is deliberately unchanged: nothing above
+          (the card's own 20px padding is the frame, matching the 20px left and right), 10px between
+          the row and the divider, 10px between the divider and the search field. Before W6 there
+          was 21px above and 0px below — all the air on the wrong side.
+
+          The row is space-between rather than right-aligned: with the tabs gone, pushing everything
+          right left the whole left half of a 920px card empty. The caller supplies two groups — the
+          board's view tabs on the left, its actions on the right — which keeps the same reading
+          order the tab row had. */}
+      {actions && (
         <div style={{
-          display: "flex", gap: 4, padding: "0 12px 10px", marginBottom: 10, alignItems: "center",
+          display: "flex", gap: 4, padding: "0 12px 10px", marginBottom: 10,
+          alignItems: "center", justifyContent: "space-between",
           borderBottom: "1px solid var(--border-glass)",
         }}>
-          {(tabs || []).map(t => (
-            <button key={t.id} onClick={() => onTabChange?.(t.id)}
-              style={{
-                padding: "8px 14px",
-                background: activeTab === t.id ? "rgba(255,255,255,0.06)" : "transparent",
-                border: activeTab === t.id ? "1px solid var(--color-primary)" : "1px solid transparent",
-                borderRadius: 999,
-                color: activeTab === t.id ? "var(--color-text)" : "var(--color-text-muted)",
-                fontSize: 12, fontWeight: 600, cursor: "pointer",
-                textTransform: "uppercase", letterSpacing: "0.08em",
-              }}>{t.label}</button>
-          ))}
-          {actions && (
-            <>
-              <div style={{ flex: 1 }} />
-              <div style={{ display: "flex", alignItems: "center", paddingBottom: 4 }}>{actions}</div>
-            </>
-          )}
+          {actions}
         </div>
       )}
 

@@ -17,9 +17,15 @@ const context = read("client/src/contexts/JobBoardContext.jsx");
 test("the filter and sort triggers sit beside IMPORT, in the search bar's actions slot", () => {
   assert.match(app, /function BoardControlIcons\(\)/);
   // In the actions slot, next to the Import button — one row, not a new one.
-  const actions = app.slice(app.indexOf("actions={activeTab === \"console\""), app.indexOf("</main>"));
+  //
+  // The slice used to start at `actions={activeTab === "console"` — the ternary that decided whether
+  // to pass actions at all. Y4 removed that ternary because the WHOLE search bar now renders only on
+  // Jobs, so there is nothing left to gate: if the bar is on screen, its actions belong to it.
+  const actions = app.slice(app.indexOf("actions={"), app.indexOf("</main>"));
   assert.match(actions, /<BoardControlIcons \/>/);
   assert.match(actions, /Import\s*\n?\s*<\/button>/);
+  // And the board's view tabs, which moved here off the retired pill.
+  assert.match(actions, /<BoardTabs \/>/);
   // And inside the provider, for the same reason BoardSearchBar is: AppDashboard renders
   // JobBoardProvider and cannot read it.
   assert.match(app, /function BoardControlIcons\(\) \{\s*\n\s*const \{[^}]*\} = useJobBoard\(\);/);
@@ -70,10 +76,15 @@ test("NEW IN 24H and Save Search moved INTO the filters panel, and still exist",
 
 test("the two redundant controls are removed, and both are still reachable elsewhere", () => {
   // "Filter loaded jobs" wrote localSearch — the same state the main search bar's keyword field
-  // now writes. The pill keeps its own, for when the bar has scrolled away.
+  // writes. Removing the board's copy was safe because there were two others; the pill was one of
+  // them and is now retired, so this points at the surviving one. That the reachability claim had to
+  // be RE-POINTED rather than simply passing is the reason it is asserted at all.
   assert.ok(!/placeholder="Filter loaded jobs/.test(panel));
-  assert.match(topBar, /placeholder="Filter jobs/);
-  // The profile selector here was the third on screen.
+  assert.match(read("client/src/components/UnifiedSearchBar.jsx"),
+    /placeholder="Job title or keywords"/,
+    "nothing writes localSearch any more — the board's own input was removed as redundant to it");
+  // The profile selector here was the third on screen. Of the two that remained, the pill's went
+  // with the pill, leaving TopBar's avatar menu as the one place it lives.
   assert.ok(!/<ProfileSelectorDropdown/.test(panel));
   assert.match(topBar, /<ProfileSelectorDropdown/);
 });
@@ -136,17 +147,28 @@ test("the filters drawer is on the named tiers and inset clear of the nav", () =
   // The clearance is padding on the SCRIM, so the dim still covers the whole viewport while the
   // panel inside it starts below the nav — a scrim that stopped at the nav would leave an
   // undimmed strip across the top of a modal surface.
-  assert.match(panel, /padding:`\$\{FILTER_DRAWER_TOP\}px 0 \$\{FILTER_DRAWER_BOTTOM\}px`/);
+  // No `px` after FILTER_DRAWER_TOP: it is a calc() string now, tracking the measured chrome, not a
+  // number. FILTER_DRAWER_BOTTOM stays a number — there is nothing to measure it against.
+  assert.match(panel, /padding:`\$\{FILTER_DRAWER_TOP\} 0 \$\{FILTER_DRAWER_BOTTOM\}px`/);
   assert.match(panel, /alignItems:"stretch"/);
 
-  // 80 / 16 are PanelShell's PanelDock values, so the two drawers share a top edge rather than
-  // being two nearly-aligned surfaces. Read from PanelShell so they cannot drift apart silently.
+  // The insets are PanelShell's own EXPORTED CONSTANTS now, not two literals that had to agree.
+  // This test used to parse `top: (\d+)` out of PanelDock's geometry and check the drawer restated
+  // the same number — which caught a drift but could not prevent one. Importing the constant makes
+  // "the two drawers share a top edge" true by construction, so what is asserted is that both read
+  // it rather than that two numbers happen to match.
   const shell = read("client/src/components/PanelShell.jsx");
-  const dock = shell.match(/\{ right: EDGE_GAP, top: (\d+), bottom: (\d+),/);
-  assert.ok(dock, "PanelDock's wide geometry moved — re-check the filters drawer against it");
-  assert.match(panel, new RegExp(`const FILTER_DRAWER_TOP = ${dock[1]};`),
-    `the filters drawer no longer shares PanelDock's top inset (${dock[1]})`);
-  assert.match(panel, new RegExp(`const FILTER_DRAWER_BOTTOM = ${dock[2]};`));
+  assert.match(shell, /export const PANEL_TOP_INSET = "calc\(var\(--app-chrome-height, 46px\) \+ 34px\)";/,
+    "PanelDock's top inset is back to a literal, or no longer tracks the measured chrome");
+  assert.match(shell, /export const PANEL_BOTTOM_INSET = 16;/);
+  assert.match(shell, /\{ right: EDGE_GAP, top: PANEL_TOP_INSET, bottom: PANEL_BOTTOM_INSET,/,
+    "PanelDock stopped using its own exported inset");
+  assert.match(panel, /const FILTER_DRAWER_TOP = PANEL_TOP_INSET;/,
+    "the filters drawer restates PanelDock's inset instead of importing it");
+  assert.match(panel, /const FILTER_DRAWER_BOTTOM = PANEL_BOTTOM_INSET;/);
+  assert.match(panel, /import \{ PanelScrim, PanelDock, PANEL_TOP_INSET, PANEL_BOTTOM_INSET \}/);
+  // 46 + 34 is the 80 both surfaces used before, so today's geometry is preserved exactly. The
+  // difference is that the 46 is now the bar's MEASURED height rather than a number that was right.
 });
 
 test("the drawer's close control is a real hit target with a real name", () => {

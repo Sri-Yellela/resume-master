@@ -50,6 +50,23 @@ const MIN_WIDTH = PANEL_MIN_WIDTH;
 const DEFAULT_WIDTH = PANEL_DEFAULT_WIDTH;
 const EDGE_GAP = PANEL_EDGE_GAP;
 
+// ── The clearance below the FIXED chrome ───────────────────────────────────────────────────────
+//
+// Was the literal 80, in two places: here and JobsPanel's FILTER_DRAWER_TOP, which copied it so the
+// two drawers would share a top edge. Y4 asks for the panels to stack below the chrome measured
+// rather than hardcoded, because the chrome's height now varies by tab.
+//
+// Only the FIXED part of the chrome matters to a fixed overlay — the hero and the search bar are
+// in-flow and scroll away underneath it, which is what an overlay is for. So this is the measured
+// bar height plus a gap, and --app-chrome-height is published from the one measurement in
+// hooks/useChromeHeight.js. 46 + 34 is the 80 it was, exactly: this preserves today's geometry and
+// removes the way it could stop being right.
+//
+// ONE CONSTANT, exported, rather than two numbers that read each other. That is what makes "the two
+// drawers share a top edge" true by construction instead of true by a test noticing.
+export const PANEL_TOP_INSET = "calc(var(--app-chrome-height, 46px) + 34px)";
+export const PANEL_BOTTOM_INSET = 16;
+
 // One scrim for the whole group. Rendered once by the host rather than once per panel, because two
 // stacked 45% scrims compound to ~70% and the board stops being visible behind them — which would
 // break property 2 precisely when a second panel opens.
@@ -89,7 +106,8 @@ export function PanelDock({ width, fullScreen = false, children }) {
     // inset (8px) and still rounded, so it reads as the same object rather than becoming a
     // different component below a breakpoint.
     ? { left: 8, right: 8, top: 64, bottom: 8 }
-    : { right: EDGE_GAP, top: 80, bottom: 16, width: `min(${Math.round(width)}px, calc(100vw - ${EDGE_GAP * 2}px))` };
+    : { right: EDGE_GAP, top: PANEL_TOP_INSET, bottom: PANEL_BOTTOM_INSET,
+        width: `min(${Math.round(width)}px, calc(100vw - ${EDGE_GAP * 2}px))` };
 
   return createPortal(
     <div

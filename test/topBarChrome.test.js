@@ -155,12 +155,59 @@ test("the app mark and the marketing mark are the same mark", () => {
   assert.match(logo, /border: "2\.5px solid #0f0f0f"/);
 });
 
-test("the tab row's vertical rhythm matches the bar's horizontal spacing", () => {
-  // Measured before at 1440x900: 21px above the tab text and 0px between it and the search field —
-  // the tabs were pressed against the input with all the air on the wrong side. The row's own
-  // padding was "8px 12px 0", which added above and contributed nothing below.
-  // After: 21px above, 21px below, against 20px card padding on the left and right.
+test("the actions row's vertical rhythm matches the bar's horizontal spacing", () => {
+  // Measured before W6 at 1440x900: 21px above the row and 0px between it and the search field —
+  // pressed against the input with all the air on the wrong side. The row's own padding was
+  // "8px 12px 0", which added above and contributed nothing below. After: 21px above, 21px below,
+  // against 20px card padding on the left and right.
+  //
+  // Y4 emptied this row of TABS — they are in the top bar now — but the row itself survives as the
+  // board's ACTIONS row, and the rhythm is a property of the row, not of what is in it. It is also
+  // now `justify-content: space-between`, because with the tabs gone, right-aligning everything left
+  // the whole left half of a 920px card empty.
   assert.ok(!/padding: "8px 12px 0", alignItems: "center"/.test(usb),
-    "the tab row is top-heavy again");
-  assert.match(usb, /padding: "0 12px 10px", marginBottom: 10, alignItems: "center"/);
+    "the row is top-heavy again");
+  assert.match(usb, /padding: "0 12px 10px", marginBottom: 10,/);
+  assert.match(usb, /justifyContent: "space-between",/);
+});
+
+test("the tab row moved into the top bar, whole, and from appTabs", () => {
+  // Y4. The app's primary navigation was a slot on the search bar, so it appeared and disappeared
+  // with a control that is only meaningful on the Jobs board.
+  const app = read("client/src/App.jsx");
+
+  // Rendered in the bar, in a real <nav>, from the tabs it is GIVEN — not from a list of its own.
+  assert.match(topBarCode, /<nav aria-label="Main"/);
+  assert.match(topBarCode, /\(tabs \|\| \[\]\)\.map\(t =>/);
+  assert.match(topBarCode, /aria-current=\{activeTab === t\.id \? "page" : undefined\}/);
+  assert.ok(!/id: "console"|id: "auto-apply"|id: "database"/.test(topBarCode),
+    "TopBar grew its own tab list — that is the fourth copy, and the previous three all drifted");
+  assert.match(app, /tabs=\{appTabs\}/, "the bar is no longer fed from appTabs");
+
+  // The styling is UnifiedSearchBar's verbatim, because this is a MOVE.
+  for (const kept of [/borderRadius: 999,/, /textTransform: "uppercase", letterSpacing: "0\.08em"/,
+                      /fontSize: 12, fontWeight: 600, cursor: "pointer"/]) {
+    assert.match(topBarCode, kept, `the tab styling changed on the way across (${kept})`);
+  }
+
+  // ...and the search bar no longer renders tabs at all, so there is exactly one tab row.
+  assert.ok(!/onTabChange\?\.\(t\.id\)/.test(usb), "the search bar still renders a tab row");
+  assert.ok(!/tabs,\s*\n\s*activeTab,\s*\n\s*onTabChange,/.test(usb),
+    "the search bar still takes tab props");
+});
+
+test("the AUTO APPLY needs-review count survived the move", () => {
+  // Y4's requirement 2. The count is the ONLY thing the apply pipeline renders outside its own
+  // panel, and a review queue nobody sees is worse than a cluttered bar. It rode on the tab row, so
+  // it had to travel with it.
+  const app = read("client/src/App.jsx");
+  assert.match(app, /function AppTopBar\(\{ tabs, \.\.\.props \}\)/);
+  assert.match(app, /const \{ needsAttentionCount = 0 \} = useAutoApply\(\);/);
+  assert.match(app, /t\.id === "auto-apply" && needsAttentionCount > 0/);
+  assert.match(app, /need\$\{needsAttentionCount === 1 \? "s" : ""\} your attention/);
+  // It is a ReactNode substituted for the tab's LABEL, which is why TopBar renders {t.label} rather
+  // than a string — the badge could not travel any other way without the bar knowing about it.
+  assert.match(app, /label: \(/);
+  assert.match(topBarCode, /\}\}>\{t\.label\}<\/button>/);
+  assert.match(app, /<AppTopBar/, "the decorator is defined but never rendered");
 });

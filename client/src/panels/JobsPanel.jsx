@@ -12,7 +12,7 @@ import JobCard from "../components/JobCard.jsx";
 import JobDetailPanel from "../components/JobDetailPanel.jsx";
 import SandboxPanel from "./SandboxPanel.jsx";
 import AtsReportPanel from "./AtsReportPanel.jsx";
-import { PanelScrim, PanelDock } from "../components/PanelShell.jsx";
+import { PanelScrim, PanelDock, PANEL_TOP_INSET, PANEL_BOTTOM_INSET } from "../components/PanelShell.jsx";
 import { usePanelHost } from "../hooks/usePanelHost.js";
 import { useBoardLock } from "../hooks/useBoardLock.js";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
@@ -412,11 +412,13 @@ function defaultFilterSnapshot() {
 // below this drawer, so it cannot occlude the close control whatever the geometry. The inset stays
 // for the independent reason it was chosen: PanelShell parity.
 //
-// 80 / 16 are PanelShell's PanelDock values verbatim (its wide geometry is `top: 80, bottom: 16`),
-// so the filters drawer and the JD/PDF/ATS dock share a top edge instead of being two
-// nearly-aligned surfaces. The nav is 46px tall, so 80 clears it with 34px to spare.
-const FILTER_DRAWER_TOP = 80;
-const FILTER_DRAWER_BOTTOM = 16;
+// The insets are PanelShell's OWN CONSTANTS now, imported rather than copied. They were the
+// literals 80 and 16 here and 80 and 16 there — two numbers that had to agree, with a test reading
+// one out of the other's source to check. Importing them makes "the filters drawer and the
+// JD/PDF/ATS dock share a top edge" true by construction. And the top one is no longer a number at
+// all: it is `calc(var(--app-chrome-height) + 34px)`, so it tracks the bar's measured height (Y4).
+const FILTER_DRAWER_TOP = PANEL_TOP_INSET;
+const FILTER_DRAWER_BOTTOM = PANEL_BOTTOM_INSET;
 
 function FiltersPanel({
   open, onClose, onApply,
@@ -518,7 +520,7 @@ function FiltersPanel({
       // The nav clearance lives on the SCRIM as padding, so the dim still covers the full viewport
       // — including behind the top bar — while the panel inside it starts below the nav. A scrim
       // that stopped at the nav would leave an undimmed strip across the top of a modal surface.
-      padding:`${FILTER_DRAWER_TOP}px 0 ${FILTER_DRAWER_BOTTOM}px`,
+      padding:`${FILTER_DRAWER_TOP} 0 ${FILTER_DRAWER_BOTTOM}px`,
       background:"rgba(0,0,0,0.42)",
       isolation:"isolate",
     }}

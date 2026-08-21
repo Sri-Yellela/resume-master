@@ -1,164 +1,137 @@
-// U2: one search surface at a time, and a search surface that genuinely floats above panel content.
+// THE Z-INDEX SCALE, THE CLIPPING, AND THE PILL'S RETIREMENT.
 //
-// TWO BUGS, and each had a measured cause rather than a guessed one.
+// This file was "U2: one search surface at a time, and a search surface that genuinely floats above
+// panel content" — two bugs, each with a measured cause rather than a guessed one:
 //
 // (i) BOTH SURFACES VISIBLE. Visibility was decided in two places from two unrelated scroll sources:
 //     AppDashboard ran setUiMode(window.scrollY > 80 ? "dock" : "hero"), while TopBar's collapsed
-//     filter pill keyed off useAppScroll().progress >= 0.5, which is fed by the job board's INNER
-//     scroll container via PullToRefresh. Two independent booleans, so "both showing" was reachable.
-//     It was also the permanent state, because on the dashboard
-//     document.documentElement.scrollHeight === window.innerHeight — the window does not scroll at
-//     all, so the main bar's condition could never fire and it could never yield.
+//     filter pill keyed off useAppScroll().progress >= 0.5, fed by the job board's INNER scroll
+//     container. Two independent booleans, so "both showing" was reachable, and was in fact normal.
 //
 // (ii) THE SEARCH SURFACE UNDERLAPPED PANEL CONTENT. .usb--inline was z-index 50, below several
-//      panel-internal values (DatabasePanel's date popover at 300, its detail modal at 1000), and the
-//      job-detail drawer was at 30/40 — i.e. UNDER the search bar, which is the one relationship the
-//      panel spec needs inverted. Separately, that date popover is position:absolute inside a sheet
-//      whose root is `flex:1; overflow:hidden`, so it was CLIPPED by its ancestor. No z-index can fix
-//      clipping; only leaving the clipping ancestor can.
+//      panel-internal values (DatabasePanel's date popover at 300, its detail modal at 1000), and
+//      the job-detail drawer was at 30/40 — i.e. UNDER the search bar, which is the one relationship
+//      the panel spec needs inverted. Separately, that date popover is position:absolute inside a
+//      sheet whose root is `flex:1; overflow:hidden`, so it was CLIPPED by its ancestor. No z-index
+//      fixes clipping; only leaving the clipping ancestor can.
+//
+// HALF OF (i) IS RETIRED WITH THE PILL (Y4). There is one search surface now, so there is no
+// crossing to stabilise: no threshold, no hysteresis pair, no sentinel, no crossfade. The eight
+// tests that pinned that machinery went with it — the pixels-not-intersectionRatio reading, the
+// two-guarded-transitions hysteresis, the "cannot move the geometry it is decided from" feedback
+// loop, the transform-only keyframe that closed the dead frame at the swap, the short-page guard and
+// the first-paint seed. That is Y4's instruction: retire the pill's tests rather than leave them
+// asserting a removed surface. It was a real suite over a real defect, verified over 132 samples
+// across the threshold; it is not being disowned, it is being retired with the thing it guarded.
+//
+// WHAT DID NOT GO WITH IT, deliberately, because it covers behaviour that still exists:
+//   - that there is no SECOND scroll source in the dashboard. A window.scrollY listener here
+//     re-rendered the whole dashboard on every scroll event, which is how a trivial scroll reset the
+//     job board. Kept below.
+//   - the double-click local -> live search pattern, and its two handlers being real rather than
+//     no-ops. Kept below.
+//   - all of (ii). It is Y2's guard and has nothing to do with the pill.
+//
+// What REPLACES the retired half is a test that the machinery is gone — Y4's requirement to
+// grep-prove each mechanism has no remaining caller, asserted rather than done once by hand — plus
+// one that every control the pill carried is still reachable.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const read = (p) => fs.readFileSync(p, "utf8");
-// Some assertions here are "this mechanism is GONE", and this file's own explanatory notes quote the
-// very strings being asserted absent ("window.scrollY", "onClick={onClose}"). Read stripped source
-// for those, or a comment describing a removed mechanism reads as the mechanism still being present.
+// Some assertions here are "this mechanism is GONE", and both this file's notes and the source
+// files' own notes about what they removed quote the very strings being asserted absent. Read
+// STRIPPED source for those, or a comment describing a removed mechanism reads as the mechanism
+// still being present.
 const code = (p) => read(p)
+  .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
   .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^\s*\/\/.*$/gm, "");
+  .replace(/^\s*(?:\/\/|\*).*$/gm, "");
 const app        = read("client/src/App.jsx");
 const topbar     = read("client/src/components/TopBar.jsx");
-const hook       = read("client/src/hooks/useSearchSurface.js");
 const zLayers    = read("client/src/styles/zLayers.js");
 const usbCss     = read("client/src/components/UnifiedSearchBar.css");
-const usb        = read("client/src/components/UnifiedSearchBar.jsx");
 const jdPanel    = read("client/src/components/JobDetailPanel.jsx");
 const dockPortal = read("client/src/components/DockPortal.jsx");
 const dbPanel    = read("client/src/panels/DatabasePanel.jsx");
 
-// ── (i) One source of truth ────────────────────────────────────────────────────────────────────
+// ── The pill, and every mechanism that existed only to drive it ────────────────────────────────
 
-test("the two surfaces are chosen by ONE derived value, not two booleans", () => {
-  assert.match(app, /const \{ surface: searchSurface, sentinelRef \} = useSearchSurface\(\)/);
-  // The bar is VISIBLE for only one value of it. It is no longer unmounted for the other: doing
-  // that removed 386px of above-the-fold layout at the threshold (scrollHeight 1763 -> 1377), and
-  // Chrome's scroll anchoring compensated by pulling scrollY back across the same threshold. One
-  // value still decides, but it now decides paint, not existence.
-  assert.match(app, /hidden=\{searchSurface !== "bar"\}/);
-  assert.match(app, /visibility: searchSurface === "bar" \? "visible" : "hidden"/);
-  assert.match(usb, /style=\{hidden \? \{ visibility: 'hidden' \} : undefined\}/);
-  // ...and TopBar is TOLD which surface is showing rather than deciding again.
-  assert.match(app, /searchSurface=\{searchSurface\}/);
-  assert.match(topbar, /searchSurface = "bar",/);
-  assert.match(topbar, /const pillIsTheSearchSurface = searchSurface === "pill";/);
-  // The pill's contents are BOARD controls — All/★/⏳, the sort, the profile switcher,
-  // "Filter jobs…" — so it is additionally gated on the board being the panel on screen. Without
-  // that it floated over Database, Recruiter, Job Profiles and Auto Apply, offering controls for a
-  // board that is not there. Measured before the gate: every tab EXCEPT Jobs opened with the pill
-  // showing at scrollY 0, because only Jobs renders the hero and so only Jobs has a document taller
-  // than the viewport.
-  assert.match(topbar, /\{pillIsTheSearchSurface && boardIsActive && boardTab !== undefined && \(/);
-  assert.match(app, /boardIsActive=\{activeTab === "console"\}/);
-});
-
-test("the second, unrelated scroll source is gone", () => {
-  // uiMode + its window.scrollY listener were the other half of the pair. Neither may come back:
-  // window.scrollY is permanently 0 on this layout, so anything keyed to it is dead code that also
-  // re-rendered the whole dashboard on every scroll event.
+test("THE FLOATING PILL IS GONE, AND SO IS EVERYTHING THAT ONLY DROVE IT", () => {
   const appCode = code("client/src/App.jsx");
-  assert.ok(!/\buiMode\b/.test(appCode),
-    "uiMode is back — visibility is being decided in a second place again");
-  assert.ok(!/DOCK_THRESHOLD/.test(appCode), "the scroll threshold is back");
-  assert.ok(!/window\.scrollY/.test(appCode), "window.scrollY does not change on this layout");
-});
+  const barCode = code("client/src/components/TopBar.jsx");
+  const usbCode = code("client/src/components/UnifiedSearchBar.jsx");
 
-test("hover is not resurrected as a second input to pill visibility", () => {
-  // The pill's old gate was `scrolled && hovered && ...`. Both extra inputs are independent booleans;
-  // requirement was a single source, so neither may gate whether the pill EXISTS.
-  const gate = topbar.slice(topbar.indexOf("{pillIsTheSearchSurface"), topbar.indexOf("{pillIsTheSearchSurface") + 120);
-  assert.ok(!/hovered/.test(gate), "hover is gating pill existence again");
-  assert.ok(!/\bscrolled\b/.test(gate), "a local scroll boolean is gating pill existence again");
-});
+  // The container itself.
+  assert.ok(!/pillIsTheSearchSurface/.test(barCode), "the pill's gate is back");
+  assert.ok(!/Filter jobs/.test(barCode), "the pill's local search input is back in the top bar");
+  assert.ok(!/pill2Bg/.test(barCode), "the pill's glass gradient is back");
+  assert.ok(!/searchSurface/.test(barCode + appCode), "the two-surface switch is back");
+  assert.ok(!/boardIsActive/.test(barCode + appCode), "the pill's board gate is back");
 
-// ── (i) The observed condition ─────────────────────────────────────────────────────────────────
+  // The threshold, the hysteresis pair, and the rAF-coalesced scroll handler that fed them. The
+  // whole hook is DELETED, not merely unused — an unused hook is one caller away from being used.
+  assert.ok(!fs.existsSync("client/src/hooks/useSearchSurface.js"),
+    "hooks/useSearchSurface.js is back; it existed only to choose between two surfaces");
+  assert.ok(!/useSearchSurface|HIDE_ABOVE|SHOW_BELOW/.test(appCode),
+    "the threshold pair is back in App.jsx");
+  assert.ok(!/sentinelRef/.test(appCode), "the sentinel the threshold was measured from is back");
 
-test("the condition is read from a sentinel, in pixels, with real hysteresis", () => {
-  // A sentinel, not the bar: the bar is `position: sticky` and never leaves the viewport, so it
-  // cannot be its own condition. The sentinel holds the bar's SLOT and does leave.
-  assert.match(app, /<div ref=\{sentinelRef\} aria-hidden="true" style=\{\{ height: 0 \}\}\/>/);
+  // The crossfade. Transform-only was the fix for a frame showing neither surface; with one surface
+  // there is no crossing, so the keyframe goes with it.
+  assert.ok(!/slideDown/.test(barCode), "the pill's entrance keyframe is back");
+  assert.ok(!/injectKeyframes/.test(barCode), "the keyframe injector is back");
 
-  // PIXELS, not intersectionRatio. The sentinel is zero-height, and IntersectionObserver reports a
-  // zero-area target as ratio 1 when intersecting and 0 when not — never anything between.
-  // Instrumenting the real observer across a full scroll returned exactly two distinct ratios,
-  // [1, 0], so the two ratio thresholds tested the same instant and the hysteresis was inert.
-  assert.ok(!/intersectionRatio/.test(hook), "the ratio test is back; on a zero-height target it cannot have two thresholds");
-  assert.match(hook, /const HIDE_ABOVE = 40;/);
-  assert.match(hook, /const SHOW_BELOW = 120;/);
-  assert.ok(/prev === "bar"\s+&& top <= HIDE_ABOVE/.test(hook), "missing bar -> pill transition guard");
-  assert.ok(/prev === "pill" && top >= SHOW_BELOW/.test(hook), "missing pill -> bar transition guard");
-  assert.ok(HIDE_BAND_IS_WIDE(), "the two thresholds must be meaningfully apart, not adjacent");
-  function HIDE_BAND_IS_WIDE() {
-    const hide = Number(/const HIDE_ABOVE = (\d+);/.exec(hook)[1]);
-    const show = Number(/const SHOW_BELOW = (\d+);/.exec(hook)[1]);
-    return show - hide >= 40;
+  // The hover machinery. `hovered` was WRITE-ONLY: two handlers set it and nothing ever read it.
+  for (const dead of ["hovered", "setHovered", "hoverTimerRef", "handleMouseEnter",
+                      "handleMouseLeave", "searchFocused"]) {
+    assert.ok(!new RegExp("\\b" + dead + "\\b").test(barCode),
+      `${dead} is back — it belonged to the pill's hover grace period`);
   }
 
-  // rAF-coalesced, and listening in the capture phase so a scroll inside a nested container counts.
-  assert.match(hook, /frame = requestAnimationFrame\(measure\)/);
-  assert.match(hook, /"scroll", schedule, \{ capture: true, passive: true \}/);
+  // The `hidden` prop, which existed so the caller could keep ONE of two surfaces in the layout
+  // while paying nothing for the other. There is nothing to hide from any more.
+  assert.ok(!/hidden = false/.test(usbCode), "UnifiedSearchBar's `hidden` prop is back");
+  assert.ok(!/visibility: 'hidden'/.test(usbCode), "the visibility swap is back");
 });
 
-test("the surface cannot move the geometry it is decided from", () => {
-  // The loop that produced the flicker: the sentinel sat below the hero, the hero rendered only
-  // while the surface was "bar", so flipping unmounted it and the scroll offset followed. Both the
-  // hero and the bar now keep their space whichever surface is showing, so the sentinel's position
-  // is a function of the scroll offset alone.
-  assert.match(app, /\{activeTab === "console" && \(/);
-  assert.ok(!/activeTab === "console" && searchSurface === "bar" && \(/.test(app),
-    "the hero is being unmounted by the surface again — that is the feedback loop");
-});
-
-test("first paint shows exactly one surface, and never zero", () => {
-  // Seeded to "bar", which is the correct answer at rest, so there is no frame with no surface.
-  assert.match(hook, /useState\("bar"\)/);
-  // And measured once immediately, so a page restored mid-scroll corrects within a frame rather
-  // than showing the wrong surface until the user scrolls.
-  // `\r?` because the working tree is checked out CRLF on Windows (core.autocrlf=true) while git
-  // stores LF — an assertion anchored to a bare \n passes or fails depending on how the file was
-  // last written, which is not a property of the code under test.
-  assert.match(hook, /\n\s*measure\(\);\r?\n/);
-});
-
-test("a page that cannot scroll is always the bar, checked before the thresholds", () => {
-  // The collapsed pill exists for one reason: the bar scrolled away and its controls need somewhere
-  // to live. On a page with nothing to scroll the bar has not gone anywhere — and the thresholds
-  // handed over anyway, because a short page's sentinel sits at top 0, which is under HIDE_ABOVE
-  // from the first frame. Measured at 1440x900, only the Jobs tab renders the hero:
+test("EVERY CONTROL THE PILL CARRIED IS STILL REACHABLE", () => {
+  // Y4's requirement 2: a control that lived only on the pill MOVES onto the Jobs chrome; it is not
+  // deleted with the container. Inventoried off the running pill before the removal:
   //
-  //   tab           docH   winH   sentinelTop at scrollY 0   surface
-  //   jobs          3228   900    245                        bar    <- correct
-  //   auto-apply     900   900      0                        pill   <- wrong
-  //   database       900   900      0                        pill   <- wrong
-  assert.match(hook, /const canScroll = doc\.scrollHeight - window\.innerHeight > 2;/);
-  assert.match(hook, /if \(!canScroll\) \{ setSurface\("bar"\); return; \}/);
-  // Switching tabs changes the document height with no scroll and no resize event, so the
-  // measurement has to re-run on layout change or the surface keeps the previous tab's answer
-  // until the user happens to scroll — the same wrong-surface bug by another route.
-  assert.match(hook, /new ResizeObserver\(schedule\)/);
-  assert.match(hook, /ro\?\.disconnect\(\)/);
+  //   the pill carried             where it is now
+  //   All / star / hourglass tabs  App.jsx's BoardTabs, in the Jobs search bar's actions row.
+  //                                THE ONLY ONE THAT HAD TO MOVE — JobsPanel's own boardTabs strip
+  //                                is behind `{false && ...}`, so the pill was the only place these
+  //                                three existed. Measured on the running app: 0 occurrences of
+  //                                each as a button anywhere outside the pill.
+  //   sort select                  already on the Jobs chrome, as BoardControlIcons' UsbSelect
+  //   profile switcher             already in TopBar's avatar menu (ProfileSelectorDropdown)
+  //   "Filter jobs…" input         already the main search bar's keyword field — both write the
+  //                                same `localSearch`, which is why the board's third copy went in W4
+  assert.match(app, /function BoardTabs\(\)/, "the board's All/Saved/Pending tabs are gone");
+  assert.match(app, /const \{ boardTab, setBoardTab \} = useJobBoard\(\);/,
+    "BoardTabs no longer writes the board's own state");
+  for (const id of ['"all"', '"saved"', '"pending"']) {
+    assert.ok(app.includes(id), `the ${id} board view is gone`);
+  }
+  assert.match(app, /<BoardTabs \/>/, "BoardTabs is defined but never rendered");
+  // ...and the three that did NOT need moving are still where they were.
+  assert.match(app, /<BoardControlIcons \/>/);
+  assert.match(app, /ariaLabel="Sort"/);
+  assert.match(topbar, /<ProfileSelectorDropdown/, "the profile switcher left the avatar menu");
+  assert.match(read("client/src/components/UnifiedSearchBar.jsx"),
+    /placeholder="Job title or keywords"/);
 });
 
-test("there is no dead frame at the swap: the incoming surface never fades in", () => {
-  // The bar disappears synchronously. An incoming pill that animated opacity 0 -> 1 therefore left a
-  // window with neither surface visible — captured at the crossing as
-  // `bar: null, pill: { opacity: 0 }`, which is the reported gap. The pill still slides in, but on
-  // transform only, at full opacity from its first frame.
-  const kf = topbar.slice(topbar.indexOf("@keyframes slideDown"), topbar.indexOf("@keyframes slideDown") + 220);
-  assert.ok(!/opacity/.test(kf), "the pill fades in again — that is the gap between the two surfaces");
-  assert.match(kf, /transform: translateX\(-50%\) translateY\(-8px\)/);
-  // And the motion itself is optional.
-  assert.match(topbar, /@media \(prefers-reduced-motion: reduce\) \{\s*@keyframes slideDown/);
+test("the second, unrelated scroll source is still gone", () => {
+  // uiMode + its window.scrollY listener were the other half of the two-boolean pair. Neither may
+  // come back: a window.scrollY listener here re-rendered the whole dashboard on every scroll event.
+  const appCode = code("client/src/App.jsx");
+  assert.ok(!/\buiMode\b/.test(appCode), "uiMode is back — a second place deciding chrome visibility");
+  assert.ok(!/DOCK_THRESHOLD/.test(appCode), "the scroll threshold is back");
+  assert.ok(!/window\.scrollY/.test(appCode), "a window.scrollY listener is back in the dashboard");
 });
 
 // ── (ii) The z-index scale ─────────────────────────────────────────────────────────────────────
