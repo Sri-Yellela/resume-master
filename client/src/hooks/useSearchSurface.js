@@ -69,6 +69,32 @@ export function useSearchSurface() {
       frame = 0;
       const node = sentinelRef.current;
       if (!node) return;
+      // A PAGE THAT CANNOT SCROLL IS ALWAYS THE BAR, checked before the thresholds.
+      //
+      // The collapsed pill exists for one reason: the bar has scrolled away and its controls need
+      // somewhere to live. On a page with nothing to scroll, the bar has not gone anywhere and
+      // never will, so handing over is meaningless — and the thresholds do it anyway, because the
+      // sentinel on a short page sits at top 0, which is under HIDE_ABOVE from the first frame.
+      //
+      // Measured on the running app at 1440x900. Only the Jobs tab renders the hero, so it is the
+      // only tab whose document is taller than the viewport:
+      //
+      //   tab           docH   winH   sentinelTop at scrollY 0   surface
+      //   jobs          3228   900    245                        bar    <- correct
+      //   auto-apply     900   900      0                        pill   <- wrong
+      //   database       900   900      0                        pill   <- wrong
+      //
+      // So every tab except the board opened showing the collapsed pill at the very top of the
+      // page — which is the reported "the pill appears even at the top". Worse than cosmetic: the
+      // pill carries BOARD controls (All / ★ / ⏳, sort, profile, "Filter jobs…") and it was
+      // floating over Database, Recruiter and Job Profiles, which have no board for them to act on.
+      //
+      // An epsilon because a document is routinely a fraction of a pixel taller than the viewport
+      // on fractional device pixel ratios, and that must not read as "scrollable".
+      const doc = document.documentElement;
+      const canScroll = doc.scrollHeight - window.innerHeight > 2;
+      if (!canScroll) { setSurface("bar"); return; }
+
       const top = node.getBoundingClientRect().top;
       // Two guarded transitions, never `top < x ? a : b`. The band between the thresholds leaves
       // the current surface untouched — that gap IS the hysteresis, and collapsing this to one
@@ -88,8 +114,16 @@ export function useSearchSurface() {
     // whichever ancestor did the scrolling, and this is what keeps the reading source-agnostic.
     window.addEventListener("scroll", schedule, { capture: true, passive: true });
     window.addEventListener("resize", schedule, { passive: true });
+    // Switching tabs changes the document height without any scroll or resize event — the board is
+    // 3228px, every other panel fits the viewport. Without this the surface would keep whatever
+    // answer it had from the previous tab until the user happened to scroll, which is the same
+    // wrong-surface bug arriving by a different route. ResizeObserver on the document element sees
+    // exactly that class of change.
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(schedule) : null;
+    ro?.observe(document.documentElement);
     return () => {
       if (frame) cancelAnimationFrame(frame);
+      ro?.disconnect();
       window.removeEventListener("scroll", schedule, { capture: true });
       window.removeEventListener("resize", schedule);
     };

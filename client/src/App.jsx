@@ -350,6 +350,8 @@ function AppDashboard({ authUser, setAuthUser }) {
           <TopBar
             user={authUser}
             searchSurface={searchSurface}
+            // The pill's contents are board controls; it must not float over a panel with no board.
+            boardIsActive={activeTab === "console"}
             onTabChange={handlePanelChange}
             onLogout={handleLogout}
             onUserChange={setAuthUser}

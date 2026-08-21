@@ -144,9 +144,18 @@ export default function UnifiedSearchBar({
           auto margins — wrapping it would change the containing block and break the docking
           transition. Rendered only when supplied, so the marketing landing page (which passes
           neither tabs nor actions) is unaffected. */}
+      {/* Vertical rhythm (W6). Measured before this at 1440x900: 21px of space ABOVE the tab row
+          and 0px between it and the search field — the tabs were pressed against the input with
+          all the air on the wrong side. The row's own padding was "8px 12px 0", i.e. it added to
+          the space above and contributed nothing below.
+
+          Now: nothing above (the card's own 20px padding is the frame, and it matches the 20px on
+          the left and right), 10px between the tabs and the divider, and 10px between the divider
+          and the search field. That 10 is the same module as the row's 12px horizontal padding
+          and the tab buttons' 14px, so the spacing reads as one rhythm rather than two. */}
       {((tabs && tabs.length > 0) || actions) && (
         <div style={{
-          display: "flex", gap: 4, padding: "8px 12px 0", alignItems: "center",
+          display: "flex", gap: 4, padding: "0 12px 10px", marginBottom: 10, alignItems: "center",
           borderBottom: "1px solid var(--border-glass)",
         }}>
           {(tabs || []).map(t => (
