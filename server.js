@@ -5306,6 +5306,8 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       visited        = '',
       localSearch    = '',
       starred        = '',
+      domain         = '',
+      applied        = '',
     } = req.query;
 
     // NOTE: bare `q` is not consumed here — no existing caller sends it (checked: the
@@ -5384,6 +5386,21 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     const catSql  = category ? `AND (sj.category IS NULL OR sj.category = ?)` : '';
     const catArgs = category ? [category]                                    : [];
 
+    // Domain — sj.bucket_domain, written by classifyJob's detectDomain. This is the column the
+    // Category note above already named as "a domain filter worth having": sj.category is dead
+    // (nothing writes it, and /api/categories' marketing taxonomy never matched its vocabulary
+    // even in principle), while bucket_domain carries real values on every row — measured on this
+    // database: general 714, fintech 439, edtech 43, ai_ml 25, saas 12, devtools 10, healthtech 9,
+    // ecommerce 1, and zero NULLs across all 1,253 rows.
+    //
+    // It exists because the search bar's "Any Domain" select has always rendered exactly this
+    // vocabulary and been wired to nothing at all. Soft-null, the same call as work_type /
+    // employment_type / category beside it: bucket_domain has no NULLs today, but the rule this
+    // codebase applies is that a row is never hidden purely because we have not classified it —
+    // only on an explicit mismatch once we have.
+    const domSql  = domain ? `AND (sj.bucket_domain IS NULL OR sj.bucket_domain = ?)` : '';
+    const domArgs = domain ? [domain]                                                 : [];
+
     // source stays a HARD match, deliberately, for the reason jobQuery.js's sources_include comment
     // already records: every scraped_jobs writer sets `source`, so there is no "not classified yet"
     // state to protect, and a soft-null escape would make the filter unable to exclude anything the
@@ -5398,6 +5415,13 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     // LEFT JOINed per (user, profile) below, so this reads that user's own flag and nobody else's.
     // Any value other than '1' emits nothing, so the default board querystring is unchanged.
     const starredSql = savedTab ? `AND uj.starred = 1` : '';
+
+    // Applied — the search bar's Status > "Applied". Reads uj.applied, the per-(user, profile) flag
+    // on the LEFT JOIN already in place, for the same reason starredSql reads uj.starred and not
+    // sj.*: it is one user's own record of what they did, and must never surface another's.
+    // Parameterless, so like starredSql it can sit anywhere in the WHERE clause without shifting
+    // baseArgs.
+    const appliedSql = applied === '1' ? `AND uj.applied = 1` : '';
 
     // Applicant count cap (opt-in)
     const maxAppVal = maxApplicants !== null && maxApplicants !== '' ? parseInt(maxApplicants, 10) : null;
@@ -5591,10 +5615,12 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
           ${wtFilter}
           ${etFilter}
           ${catSql}
+          ${domSql}
           ${srcSql}
           ${maxAppSql}
           ${visitedSql}
           ${starredSql}
+          ${appliedSql}
           ${ageSql}
           ${yoeSql}
           ${minYoeSql}
@@ -5606,7 +5632,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         ...(savedTab ? [] : [roleKey]),
         req.user.id, sessionActiveProfile.id,
         ...keyArgs, ...locArgs, ...titleFilter.params,
-        ...wtArgs, ...etArgs, ...catArgs, ...srcArgs,
+        ...wtArgs, ...etArgs, ...catArgs, ...domArgs, ...srcArgs,
         ...maxAppArgs, ...ageArgs, ...yoeArgs, ...minYoeArgs,
         ...rich.params,
       ];
@@ -5759,8 +5785,16 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
     const _leverCompanies = atsCos.filter(r => r.ats_type === 'lever');
     const _ashbyCompanies = atsCos.filter(r => r.ats_type === 'ashby');
 
+    // `domain` and `experience` arrive as the UI's ENUM values (bucket_domain /
+    // experience_level), and this endpoint folds them into a free-text aggregator query rather
+    // than filtering on them — so they have to be humanised first. Without this, the search bar's
+    // AI / ML option contributes the literal token `ai_ml`, which matches nothing any job board
+    // has ever written. Underscores become spaces and nothing else; every other value in both
+    // vocabularies is already an ordinary word.
+    const asKeywords = (v) => String(v || '').replace(/_/g, ' ').trim();
+
     const result = await searchJobs({
-      query: [query.trim(), domain, experience].filter(Boolean).join(' '),
+      query: [query.trim(), asKeywords(domain), asKeywords(experience)].filter(Boolean).join(' '),
       location, contractType, remote, page, pageSize,
       sort: 'dateDesc',
       _ghCompanies, _leverCompanies, _ashbyCompanies,

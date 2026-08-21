@@ -13,7 +13,7 @@ import TopBar                    from "./components/TopBar.jsx";
 import AppShell                  from "./components/AppShell.jsx";
 import { useSearchSurface }      from "./hooks/useSearchSurface.js";
 import { AppScrollProvider } from "./contexts/AppScrollContext.jsx";
-import { JobBoardProvider }     from "./contexts/JobBoardContext.jsx";
+import { JobBoardProvider, useJobBoard } from "./contexts/JobBoardContext.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { JobProfilesPanel }      from "./panels/JobProfilesPanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
@@ -84,6 +84,28 @@ function PublicLoginRoute({ authStatus, authUser, children, admin = false }) {
   }
   return children;
 }
+// The board's search bar. A separate component purely because AppDashboard RENDERS
+// <JobBoardProvider> and therefore sits outside it — useJobBoard() called up there would read a
+// null context. This is the smallest thing that can live inside the provider and still hand
+// UnifiedSearchBar its two handlers.
+//
+// The double-click local->live pattern is the bar's own and is untouched here: it calls
+// onLocalFilter on the first click and onSearch on the second, and both arrive at the same
+// applyBarFilters — the only difference being the `live` flag, which is what JobsPanel watches to
+// decide whether to also go out to the aggregator. Committing the filters on BOTH is deliberate:
+// the live half is a superset of the local half, and skipping the commit there would make the
+// second click widen the board back out to unfiltered before searching.
+function BoardSearchBar(props) {
+  const { applyBarFilters } = useJobBoard();
+  return (
+    <UnifiedSearchBar
+      {...props}
+      onLocalFilter={params => applyBarFilters(params)}
+      onSearch={params => applyBarFilters(params, { live: true })}
+    />
+  );
+}
+
 function AppDashboard({ authUser, setAuthUser }) {
   const { theme } = useTheme();
   const location = useLocation();
@@ -243,15 +265,13 @@ function AppDashboard({ authUser, setAuthUser }) {
               `position: sticky` and reserves its own space, so removing it moved everything below
               it; and it cannot be wrapped in a hiding container either, because an intermediate box
               would become sticky's containing block and there would be no room left to stick to. */}
-          <UnifiedSearchBar
+          <BoardSearchBar
             hidden={searchSurface !== "bar"}
             mode="hero"
             variant="inline"
             tabs={appTabs}
             activeTab={activeTab}
             onTabChange={handlePanelChange}
-            onSearch={() => {}}
-            onLocalFilter={() => {}}
             // Jobs tab only: importing a job is a board action, so it would be meaningless
             // sitting above Job Profiles, Database or Recruiter.
             actions={activeTab === "console" ? (

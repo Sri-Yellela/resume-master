@@ -1134,6 +1134,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
     activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
     selectedJob, setSelectedJob, setSelectedJobMeta,
+    barFilters, liveSearchTick,
   } = useJobBoard();
 
   // Open / close sandbox — panel size rebalancing handled by useEffect below.
@@ -1383,6 +1384,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [maxApplicants, setMaxApplicants] = useState("");
   const [visitedFilter, setVisitedFilter] = useState("");
   const [ageFilter,     setAgeFilter]     = useState("");
+  // Both are reached only from the search bar's Domain and Status selects. They are ordinary
+  // committed filter state like every neighbour here — they feed buildParams and appear in the
+  // refetch effect's dep array, so test/jobsBoardParamContract.test.js covers them the same way it
+  // covers the rest, by derivation rather than by being listed anywhere.
+  const [domainFilter,  setDomainFilter]  = useState("");
+  const [appliedFilter, setAppliedFilter] = useState("");
   // FE-2: Task-4 filter vocabulary + the profile-bridge visa preference override.
   const [salaryMin,      setSalaryMin]      = useState("");
   const [salaryMax,      setSalaryMax]      = useState("");
@@ -1408,6 +1415,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const searchIntentResolveRef = useRef(null);
   // Stable ref so startPollLoop (empty deps) can always call the latest fetchJobs
   const fetchJobsRef = useRef(null);
+  // Same device, same reason, for the live half of the search bar's double-click: that effect is
+  // declared above handleSearch and is keyed on a click counter, so it cannot close over the
+  // function directly without capturing whichever render happened to be current when the tick last
+  // changed — the stale-closure bug documented on the debounced-search effect.
+  const handleSearchRef = useRef(null);
 
   const activeFilterSnapshot = useCallback(() => ({
     roleFilter,
@@ -1788,6 +1800,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     if (maxApplicants !== "") p.set("maxApplicants", maxApplicants);
     if (effectiveVisited)     p.set("visited",       effectiveVisited);
     if (ageFilter)            p.set("ageFilter",     ageFilter);
+    // sj.bucket_domain (the search bar's Domain select). Not sj.category, which nothing writes —
+    // see the note where the drawer's Category control was removed.
+    if (domainFilter)         p.set("domain",        domainFilter);
+    // uj.applied (the search bar's Status > Applied). Only ever "1"; cleared back to "" otherwise,
+    // so the default querystring is unchanged.
+    if (appliedFilter)        p.set("applied",       appliedFilter);
     if (overrideStarred === "1" || boardTab === "saved") p.set("starred","1");
     if (localSearch.trim())   p.set("localSearch",   localSearch.trim().toLowerCase());
     // FE-2: Task-4 filter vocabulary (services/jobs/jobQuery.js) — additive, legacy params
@@ -1823,7 +1841,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     }
     return p.toString();
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
-      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, localSearch,
+      minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, domainFilter, appliedFilter,
+      boardTab, localSearch,
       salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
       sourcesInclude, sourcesExclude, tiersInclude, tiersExclude, curateOff]);
 
@@ -2029,6 +2048,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, refreshKey,
       profileSwitchKey, activeProfileKey,
+      // Fifth time, and added in the same commit that introduces them — see the note below.
+      domainFilter, appliedFilter,
       // FE-2's Task-4 params (salaryMin/Max, workModels, experienceLevels, skillsInclude,
       // sponsorFriendly) feed the SAME buildParams()/fetchJobs() call as the legacy filters
       // above — they were missing from this list, so changing ONLY one of them (leaving every
@@ -2045,6 +2066,62 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       // never send it, and the control would look dead.
       curateOff,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -- The search bar's params land here ------------------------------------------------------
+  //
+  // UnifiedSearchBar publishes { query, location, experience, domain, status }; this maps that onto
+  // the board's ALREADY-EXISTING committed filter state, so the bar reaches /api/jobs through
+  // buildParams like every other control and adds no second param builder. Each of the five is set
+  // unconditionally, including back to its empty value — clearing a control in the bar has to clear
+  // the board, and a truthy-only assignment would strand the previous value.
+  //
+  // Mapping, and why each target:
+  //   query      -> localSearch     the server ORs it across title/company/description. It is the
+  //                                 same state the collapsed pill's "Filter jobs…" input and the
+  //                                 board's own "Filter loaded jobs" box already write, so all
+  //                                 three search inputs are one filter rather than three.
+  //   location   -> locationFilter  LIKE sj.location.
+  //   experience -> experienceLevels  the array the FILTERS drawer's own pills write. Shared state,
+  //                                 so the bar and the drawer cannot disagree about what "Senior"
+  //                                 means, and whichever was touched last is what is on screen.
+  //   domain     -> domainFilter    sj.bucket_domain.
+  //   status     -> boardTab / ageFilter / appliedFilter, below.
+  //
+  // `status` is the one that fans out, because it is three unrelated dimensions in one select:
+  //   "starred" is the Saved tab (boardTab), "new" is the same 24h window the NEW IN 24H pill sets
+  //   (ageFilter), and "applied" is uj.applied. Each is reset when status moves off it, so
+  //   switching from Starred to New leaves the board on New alone and not on both.
+  //
+  // NOT in the dep array: every setter, and boardTab. The setters are stable; boardTab is written
+  // here, and including it would make this effect re-run on a tab change made from the pill or the
+  // board and stamp the bar's stale status back over it.
+  useEffect(() => {
+    const { query = "", location = "", experience = "", domain = "", status = "" } = barFilters || {};
+    setLocalSearch(query);
+    setLocationFilter(location);
+    setExperienceLevels(experience ? [experience] : []);
+    setDomainFilter(domain);
+    setBoardTab(status === "starred" ? "saved" : "all");
+    setAgeFilter(status === "new" ? "1d" : "");
+    setAppliedFilter(status === "applied" ? "1" : "");
+  }, [barFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The LIVE half of the bar's double-click. The first click only commits the filters above (a
+  // re-query of what we already hold); the second additionally goes out through handleSearch, which
+  // is the same path CHECK FOR NEW JOBS uses — including its "create a profile" / "upload a base
+  // resume" guards, so an unconfigured account gets the existing message rather than a silent no-op.
+  //
+  // Keyed on a counter, not on barFilters, so searching the same terms twice runs twice. The mount
+  // skip is the same hazard the debounced-search effect documents below: at tick 0 nobody has
+  // clicked anything, and firing a live aggregator search on every board mount is exactly the
+  // unrequested request that effect exists to avoid.
+  const liveSearchReady = useRef(false);
+  useEffect(() => {
+    if (!liveSearchReady.current) { liveSearchReady.current = true; return; }
+    const q = (barFilters?.query || "").trim();
+    if (!q) return;
+    handleSearchRef.current?.(q);
+  }, [liveSearchTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setSearchPhase("idle");
@@ -2619,6 +2696,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     // Fetch from aggregator — results come back directly, no scraping needed
     await fetchJobs(1, false, { overrides: { role: immediateRoleQ } });
   }, [activeDomainProfile, resumeText, searchInput, fetchJobs, ensureSearchProfileAlignment]); // eslint-disable-line react-hooks/exhaustive-deps
+  handleSearchRef.current = handleSearch;
 
   // -- Pull / Check-for-new: DB-first, then scrape if quota unmet -
   // Merges new jobs into the board; removes visited entries.

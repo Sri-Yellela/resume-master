@@ -2,26 +2,41 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, Briefcase, Building2, Tag, ChevronDown, X } from 'lucide-react';
 import './UnifiedSearchBar.css';
 
+// These VALUES are the scraped_jobs.experience_level vocabulary, which is also what the FILTERS
+// drawer's Experience Level pills emit and what jobQuery.js's experience_levels filter compares
+// against. They did not used to be: the values were 'entry level' / 'mid level' / 'staff' /
+// 'director', none of which is a value any writer produces (the column holds mid, lead, senior,
+// entry, intern, executive), so every option here was unmatchable on its face. That was masked for
+// as long as the select was wired to nothing at all; the moment it is wired, the vocabulary has to
+// be real. One control vocabulary shared with the drawer, not a second one — picking Senior here
+// and Senior there must mean the same thing.
 const EXP_OPTIONS = [
-  { v: '',            l: 'Any Level'   },
-  { v: 'intern',      l: 'Intern'      },
-  { v: 'entry level', l: 'Entry Level' },
-  { v: 'mid level',   l: 'Mid Level'   },
-  { v: 'senior',      l: 'Senior'      },
-  { v: 'staff',       l: 'Staff / Lead'},
-  { v: 'director',    l: 'Director'    },
+  { v: '',          l: 'Any Level' },
+  { v: 'intern',    l: 'Intern'    },
+  { v: 'entry',     l: 'Entry'     },
+  { v: 'mid',       l: 'Mid'       },
+  { v: 'senior',    l: 'Senior'    },
+  { v: 'lead',      l: 'Lead'      },
+  { v: 'executive', l: 'Executive' },
 ];
 
+// Values are the scraped_jobs.bucket_domain vocabulary — classifyJob.js's DOMAIN_PATTERNS, which is
+// what GET /api/jobs now filters on. One correction was needed to make the list truthful: the
+// classifier spells it `ai_ml`, so the old 'ai ml' could never match a row. Every other option here
+// is a domain DOMAIN_PATTERNS can actually emit, `climate` included — it has no rows on this
+// database today, but it is a real bucket and an empty result for it is a fact about the data, not
+// a dead control. 'general' is deliberately NOT offered: it is detectDomain's fallback for "matched
+// nothing" (714 of 1,253 rows here), not a domain anyone would choose.
 const DOMAIN_OPTIONS = [
-  { v: '',           l: 'Any Domain'  },
-  { v: 'saas',       l: 'Tech / SaaS' },
-  { v: 'fintech',    l: 'Fintech'     },
-  { v: 'healthtech', l: 'Healthtech'  },
-  { v: 'ai ml',      l: 'AI / ML'     },
-  { v: 'ecommerce',  l: 'E-commerce'  },
+  { v: '',           l: 'Any Domain'   },
+  { v: 'saas',       l: 'Tech / SaaS'  },
+  { v: 'fintech',    l: 'Fintech'      },
+  { v: 'healthtech', l: 'Healthtech'   },
+  { v: 'ai_ml',      l: 'AI / ML'      },
+  { v: 'ecommerce',  l: 'E-commerce'   },
   { v: 'climate',    l: 'Climate Tech' },
-  { v: 'devtools',   l: 'Dev Tools'   },
-  { v: 'edtech',     l: 'EdTech'      },
+  { v: 'devtools',   l: 'Dev Tools'    },
+  { v: 'edtech',     l: 'EdTech'       },
 ];
 
 const STATUS_OPTIONS = [
