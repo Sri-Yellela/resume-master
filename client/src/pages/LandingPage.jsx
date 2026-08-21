@@ -3,6 +3,19 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import UnifiedSearchBar from "../components/UnifiedSearchBar.jsx";
+
+// experience_level (what UnifiedSearchBar's Experience select emits, and what the logged-in board
+// filters on) -> bucket_seniority (what GET /api/jobs/generic actually returns for this page).
+// 'lead' and 'executive' both land on 'manager', which is detectSeniority's bucket for
+// manager/director/head of/VP/chief.
+const SENIORITY_FOR_LEVEL = {
+  intern:    "intern",
+  entry:     "entry",
+  mid:       "mid",
+  senior:    "senior",
+  lead:      "manager",
+  executive: "manager",
+};
 import BelowFoldContent from "../components/BelowFoldContent.jsx";
 import { PosterBanner } from "../components/PosterBanner.jsx";
 import { StampLogo } from "../components/StampLogo.jsx";
@@ -84,7 +97,13 @@ export default function LandingPage({ authUser }) {
       const t = `${j.title} ${j.company} ${j.location || ""} ${j.description || ""}`.toLowerCase();
       if (query      && !t.includes(query.toLowerCase()))                          return false;
       if (location   && !(j.location || "").toLowerCase().includes(location.toLowerCase())) return false;
-      if (experience && j.bucket_seniority !== experience)                         return false;
+      // The bar's Experience values are the scraped_jobs.experience_level enum (intern / entry /
+      // mid / senior / lead / executive), but the public feed carries bucket_seniority instead —
+      // classifyJob's coarser four-way split, which has no 'lead' or 'executive' and folds both
+      // into 'manager'. Comparing the two directly made 'lead' and 'executive' match nothing.
+      // (Before the bar's values were corrected, NONE of the six matched: they were 'entry level',
+      // 'mid level', 'staff' and 'director', which detectSeniority cannot emit at all.)
+      if (experience && j.bucket_seniority !== SENIORITY_FOR_LEVEL[experience]) return false;
       if (domain     && j.bucket_domain !== domain)                                return false;
       if (status === "starred" && !j._user?.starred)                              return false;
       if (status === "applied" && j._user?.status !== "applied")                  return false;

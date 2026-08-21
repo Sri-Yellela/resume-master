@@ -213,7 +213,18 @@ test("the double-click local -> live search pattern is untouched", () => {
   assert.match(usb, /if \(clicks\.current === 1\) \{/);
   assert.match(usb, /onLocalFilter\?\.\(params\)/);
   assert.match(usb, /onSearch\?\.\(params\)/);
-  // U2 is visibility and layering only: the bar still receives the same handlers from App.
-  assert.match(app, /onSearch=\{\(\) => \{\}\}/);
-  assert.match(app, /onLocalFilter=\{\(\) => \{\}\}/);
+
+  // The two assertions that used to stand here pinned `onSearch={() => {}}` and
+  // `onLocalFilter={() => {}}` in App.jsx, on the correct reasoning at the time that U2 was
+  // visibility and layering only and must not disturb the handlers. What that froze, though, was a
+  // pair of NO-OPS: measured on the real board, typing a keyword, both Search clicks and all three
+  // selects produced zero /api/jobs requests between them. So the shape is now asserted the other
+  // way round — the handlers must be real, and must both route through the one channel the board
+  // reads (applyBarFilters), with `live` distinguishing the second click from the first.
+  assert.ok(!/onSearch=\{\(\) => \{\}\}/.test(app),
+    "the search bar's onSearch is a no-op again — every control on the bar is inert");
+  assert.ok(!/onLocalFilter=\{\(\) => \{\}\}/.test(app),
+    "the search bar's onLocalFilter is a no-op again — every control on the bar is inert");
+  assert.match(app, /onLocalFilter=\{params => applyBarFilters\(params\)\}/);
+  assert.match(app, /onSearch=\{params => applyBarFilters\(params, \{ live: true \}\)\}/);
 });
