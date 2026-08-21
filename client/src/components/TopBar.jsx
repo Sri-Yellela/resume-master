@@ -50,7 +50,24 @@ function hexToRgb(hex) {
 }
 
 // ── Animated logo — "R" persists, "esume Master" collapses ───
-function AnimatedLucyLogo({ theme, progress: p }) {
+//
+// THE MARK IS WHITE. W6 made it translucent — `rgba(255,255,255,0.06)` behind a
+// `--border-glass` hairline with muted text — on the reasoning that a solid stamp was "the one
+// element on the surface that did not belong to it". That was a regression, not an improvement:
+// the top bar is fully transparent at rest (see pillBg below), so a 6%-white fill on a dark
+// starfield left the mark with almost no edge of its own. It is white again, and matched to
+// components/StampLogo.jsx VERBATIM — same #ffffff fill, same 2.5px #0f0f0f border, same
+// borderRadius 2, same #0f0f0f italic text — because that is the marketing rendering of the same
+// mark and the two must not be two different logos.
+//
+// Two things W6 added are gone with the translucency, and neither is a feature being dropped:
+// `backdropFilter: blur(8px)`, which has nothing to blur behind an opaque fill; and
+// `transition: "background 0.15s, border-color 0.15s"`, which was for a hover lift that was never
+// wired — there is no mouse handler on this element, so the transition could not fire.
+//
+// NOTHING ELSE ABOUT THIS MARK CHANGES. The rotation, the size, the placement, the collapse
+// animation and its timings are the mark's character and are deliberately untouched.
+function AnimatedLucyLogo({ progress: p }) {
   const pc = Math.min(Math.max(p, 0), 1);
   const textMaxW = Math.round((1 - pc) * 130);
   const textOpacity = Math.max(0, 1 - pc * 1.8);
@@ -59,35 +76,34 @@ function AnimatedLucyLogo({ theme, progress: p }) {
       position: "relative", display: "inline-flex", alignItems: "center",
       justifyContent: "center", flexShrink: 0, height: 36, minWidth: 50,
     }}>
-      {/* Translucent, not a solid stamp (W6). This was an opaque white block with a 2.5px black
-          border and black italic text — a high-contrast rectangle sitting on a dark translucent
-          glass bar, the one element on the surface that did not belong to it. It is now the same
-          material as everything around it: a faint fill, the shared --border-glass hairline, and
-          muted text that lifts to full strength on hover. The rotation is kept, because that is
-          the mark's character and nothing about it was the problem.
+      {/* NO `overflow: hidden` HERE — that is the clipping, and it was measurable. A/B'd on the
+          running app at 1440x900, deviceScaleFactor 6, by forcing this one property to `visible`
+          and differencing the two screenshots: 33 device pixels changed. The box is
+          `transform: rotate(-2deg)` with a border radius, so clipping to its own padding box
+          shaves the mark's own corner and the italic glyph bearings, which sit flush against the
+          content edge (the trailing "R" of MASTER has 0.12px of slack).
 
-          The MARKETING mark (components/StampLogo.jsx, used by NavBar and the landing hero) is
-          deliberately untouched: it sits on photography rather than on the app's glass, and the
-          solid stamp is doing a job there that it was not doing here. */}
+          It is also redundant, which is why removing it is safe rather than a trade: the ONLY
+          thing that needs clipping is the collapsing "esume Master" span, and that span carries
+          its own `overflow: hidden` below — the same split StampLogo.jsx already uses, where the
+          clip lives on `collapseStyle` and not on the box. So the collapse animation is
+          unaffected and the mark is no longer cropped by its own container. */}
       <div style={{
         position: "relative", zIndex: 1, padding: "3px 10px",
-        background: "rgba(255,255,255,0.06)",
-        border: "1px solid var(--border-glass, rgba(255,255,255,0.12))",
-        backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
-        transform: "rotate(-2deg)", borderRadius: 3,
-        display: "flex", alignItems: "center", overflow: "hidden",
-        transition: "background 0.15s, border-color 0.15s",
+        background: "#ffffff", border: "2.5px solid #0f0f0f",
+        transform: "rotate(-2deg)", borderRadius: 2,
+        display: "flex", alignItems: "center",
       }}>
         <span style={{
           fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
           fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
-          textTransform: "uppercase", color: theme.text, fontStyle: "italic",
+          textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
           lineHeight: 1, whiteSpace: "nowrap",
         }}>R</span>
         <span style={{
           fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
           fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
-          textTransform: "uppercase", color: theme.textMuted, fontStyle: "italic",
+          textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
           lineHeight: 1, whiteSpace: "nowrap",
           display: "inline-block",
           maxWidth: textMaxW + "px",
@@ -610,7 +626,7 @@ export default function TopBar({
           fontFamily: "'DM Sans',system-ui,sans-serif",
         }}>
         {/* Logo — "R" always visible, "esume Master" collapses */}
-        <AnimatedLucyLogo theme={theme} progress={p}/>
+        <AnimatedLucyLogo progress={p}/>
 
         {/* Right: utility icons */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>

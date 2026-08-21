@@ -73,24 +73,86 @@ test("the profile menu kept everything it already had", () => {
   }
 });
 
-test("the app logo is glass, and the marketing mark is left alone", () => {
-  // It was an opaque white block with a 2.5px black border and black italic text — the one element
-  // on a dark translucent bar that did not belong to it.
-  const logo = topBar.slice(topBar.indexOf("function AnimatedLucyLogo"), topBar.indexOf("// ── Dock divider"));
-  assert.ok(!/background: "#ffffff"/.test(logo), "the solid white stamp is back in the app bar");
-  assert.ok(!/2\.5px solid #0f0f0f/.test(logo), "the heavy black border is back");
-  assert.ok(!/color: "#0f0f0f"/.test(logo), "the logo text is black again, on a dark bar");
-  assert.match(logo, /background: "rgba\(255,255,255,0\.06\)"/);
-  assert.match(logo, /border: "1px solid var\(--border-glass/);
-  assert.match(logo, /backdropFilter: "blur\(8px\)"/);
-  // The rotation is the mark's character and was never the problem.
-  assert.match(logo, /transform: "rotate\(-2deg\)"/);
+// THE LOGO IS WHITE, AND THIS TEST USED TO ASSERT THE OPPOSITE.
+//
+// W6 made the app mark translucent — `rgba(255,255,255,0.06)` behind a `--border-glass` hairline,
+// with `theme.text` / `theme.textMuted` glyphs — and locked that in here with three negative
+// assertions ("the solid white stamp is back in the app bar"). Those assertions were the reason
+// the regression was safe to keep: the mark had no edge of its own on a top bar that is fully
+// transparent at rest, and the guard said that was correct.
+//
+// Read from `topBarCode`, not `topBar`: the component now carries a comment quoting the very
+// literals under test, and matching a comment instead of code is how a source-string test passes
+// while the code says something else.
+const logoOf = (src) => {
+  const start = src.indexOf("function AnimatedLucyLogo");
+  const end = src.indexOf("function Divider", start);
+  assert.ok(start >= 0 && end > start, "AnimatedLucyLogo / Divider boundary moved");
+  return src.slice(start, end);
+};
 
-  // StampLogo is the MARKETING mark (NavBar + landing hero). It sits on photography rather than on
-  // the app's glass, where the solid stamp is doing a job it was not doing here, so it is
-  // deliberately untouched.
-  const stamp = read("client/src/components/StampLogo.jsx");
-  assert.match(stamp, /background: '#ffffff'/);
+test("the app logo is the WHITE stamp, matching the marketing mark", () => {
+  const logo = logoOf(topBarCode);
+
+  // The mark itself.
+  assert.match(logo, /background: "#ffffff"/, "the app mark is not white");
+  assert.match(logo, /border: "2\.5px solid #0f0f0f"/, "the stamp border is not the mark's border");
+  assert.match(logo, /borderRadius: 2\b/, "the stamp corner radius is not the mark's");
+  // BOTH glyph spans are the stamp's black — the leading "R" and the collapsing remainder. W6 split
+  // them into text/textMuted, which is what made the mark read as two-tone.
+  assert.equal((logo.match(/color: "#0f0f0f"/g) || []).length, 2,
+    "both logo spans should carry the stamp's black");
+
+  // The glass treatment is gone, including the two things that came with it: a backdrop blur with
+  // nothing to blur behind an opaque fill, and a hover transition that was never wired to a
+  // mouse handler.
+  assert.ok(!/rgba\(255,255,255,0\.06\)/.test(logo), "the translucent fill is back");
+  assert.ok(!/--border-glass/.test(logo), "the glass hairline is back on the app mark");
+  assert.ok(!/backdropFilter/.test(logo), "the backdrop blur is back behind an opaque fill");
+  assert.ok(!/transition: "background/.test(logo), "the unwired hover transition is back");
+
+  // The rotation is the mark's character and is untouched in either direction.
+  assert.match(logo, /transform: "rotate\(-2deg\)"/);
+});
+
+test("the logo's own container does not clip it", () => {
+  // Measured on the running app at 1440x900 dSF 6, by forcing this one property to `visible` and
+  // differencing the screenshots: 33 device pixels changed. The box is rotated and rounded, so
+  // clipping to its own padding box shaves the mark's corner and the italic glyph bearings — the
+  // trailing "R" of MASTER sits 0.12px inside the content edge.
+  const logo = logoOf(topBarCode);
+
+  // The BOX must not clip. Its `display: flex, alignItems: center` line is where the clip lived.
+  // Slice from the fill to the END of that same style object — searching for "}}>" from index 0
+  // would find the OUTER wrapper div's, which closes before the fill even appears, and an empty
+  // slice makes the negative assertion below pass without testing anything.
+  const fillAt = logo.indexOf('background: "#ffffff"');
+  assert.ok(fillAt > 0, "the stamp's fill declaration moved");
+  const box = logo.slice(fillAt, logo.indexOf("}}>", fillAt));
+  assert.ok(box.length > 40, "the stamp's style object could not be isolated");
+  assert.ok(!/overflow/.test(box), "the stamp box clips the mark again");
+
+  // The COLLAPSING SPAN must still clip — that is the one thing that legitimately needs it, and
+  // removing it would let "esume Master" spill out of a zero max-width instead of collapsing.
+  assert.match(logo, /maxWidth: textMaxW \+ "px",\s*\n\s*overflow: "hidden"/,
+    "the collapsing span lost the clip that makes the collapse a collapse");
+});
+
+test("the app mark and the marketing mark are the same mark", () => {
+  // StampLogo is the MARKETING rendering (NavBar + the landing hero) and ScrollDock carries a third.
+  // All three are the same logo, so the fill and border must agree across them — the app copy
+  // drifting away from the other two is exactly what W6 did, and a per-file assertion would not
+  // have caught it. Quote styles differ (JSX attr conventions per file), the values must not.
+  const logo  = logoOf(topBarCode);
+  const stamp = stripComments(read("client/src/components/StampLogo.jsx"));
+  const dock  = stripComments(read("client/src/components/ScrollDock.jsx"));
+
+  for (const [name, src] of [["StampLogo", stamp], ["ScrollDock", dock]]) {
+    assert.match(src, /background: ['"]#ffffff['"]/, `${name} lost the white fill`);
+    assert.match(src, /border: ['"]2\.5px solid #0f0f0f['"]/, `${name} lost the stamp border`);
+  }
+  assert.match(logo, /background: "#ffffff"/);
+  assert.match(logo, /border: "2\.5px solid #0f0f0f"/);
 });
 
 test("the tab row's vertical rhythm matches the bar's horizontal spacing", () => {
