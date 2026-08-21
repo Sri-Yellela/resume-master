@@ -100,9 +100,14 @@ test("Tab is not swallowed, and Escape does not alter the value", () => {
 });
 
 test("an open list closes on scroll instead of floating away from its anchor", () => {
-  // The bar is position:fixed and swaps with the collapsed pill on scroll (see useSearchSurface).
-  // DockPortal positions from a rect captured at open time and does not follow anything, so a list
-  // left open across that swap would be anchored to an element that is no longer showing.
+  // DockPortal positions from a rect captured at OPEN TIME and does not follow anything, so a list
+  // left open while its anchor moves ends up detached from it.
+  //
+  // The original reason was the bar swapping with the collapsed pill on scroll — a list left open
+  // across the swap was anchored to an element that had stopped showing. Y4 retired the pill, and
+  // the reason survives it: the bar is `position: sticky`, so on the Jobs board it MOVES as the page
+  // scrolls (measured: top 245 at rest, pinning at 46 by scrollY 300) while the portalled list stays
+  // where it was opened. Closing on scroll is still the right behaviour, for a plainer reason.
   assert.match(select, /window\.addEventListener\("scroll", onScroll, true\)/);
   assert.match(select, /window\.removeEventListener\("scroll", onScroll, true\)/);
 });

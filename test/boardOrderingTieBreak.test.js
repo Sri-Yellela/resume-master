@@ -157,15 +157,19 @@ test("every sort value the client can send has its own case", () => {
   // that the two agreed, "because two lists is exactly the situation where one drifts". They HAD
   // drifted, on labels: "Pay high to low" in one and "Pay ↓" in the other for the same value. X1
   // made SORTS in shared/jobFilterOptions.js the single definition, so agreement is now structural
-  // rather than something to check. What replaces the comparison is an assertion that BOTH surfaces
-  // render from that definition — which is the same guarantee, one step earlier.
+  // rather than something to check.
+  //
+  // AND THEN Y4 REMOVED THE SECOND SURFACE ENTIRELY. The pill is retired, so there is one sort
+  // control again — the icon beside IMPORT on the Jobs chrome. Two surfaces was the situation that
+  // needed guarding, one definition made it safe, and now there is one of each. The assertion that
+  // the pill also rendered from the contract goes with the pill.
   const app    = fs.readFileSync("client/src/App.jsx", "utf8");
   const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
 
   assert.match(app, /const SORT_OPTIONS = SORTS\.options\.map/,
     "the sort icon holds its own list again — it can drift from the server's cases");
-  assert.match(topBar, /\{SORTS\.options\.map/,
-    "the collapsed pill holds its own list again");
+  assert.ok(!/SORTS/.test(topBar),
+    "a second sort control is back in the top bar — that is the two-lists situation again");
 
   const options = SORTS.options.map(o => o.value);
   assert.ok(options.includes("dateAsc"), "precondition: the sort control really offers Oldest");

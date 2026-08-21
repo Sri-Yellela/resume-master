@@ -30,7 +30,11 @@ test("1. right-anchored overlay, inset from the viewport edges, with rounded cor
   // the fix: three independently viewport-anchored panels were not a group, so one could be pushed
   // off the screen by its neighbour growing.
   assert.match(shell, /position: "fixed"/);
-  assert.match(shell, /\{ right: EDGE_GAP, top: 80, bottom: 16, width:/);   // inset on all four sides
+  // The insets are named constants now, not literals, and the top one tracks the measured chrome
+  // height (Y4) so the dock cannot stop clearing a bar whose size changed. 46 + 34 is the 80 it was.
+  assert.match(shell, /\{ right: EDGE_GAP, top: PANEL_TOP_INSET, bottom: PANEL_BOTTOM_INSET,/);
+  assert.match(shell, /export const PANEL_TOP_INSET = "calc\(var\(--app-chrome-height, 46px\) \+ 34px\)";/);
+  assert.match(shell, /export const PANEL_BOTTOM_INSET = 16;/);
   assert.match(shell, /borderRadius: 16,/);
   // Not full-height, not flush, and not in the layout flow: the dock is portalled to body.
   assert.match(shell, /document\.body\s*\)/);
@@ -251,31 +255,38 @@ test("keyboard scrolling targets the focused panel, not the page", () => {
 
 // ── The corrective pass: two things the panels' CONTAINER was right about and the app was not ──
 
-test("the collapsed search surface is in the SEARCH tier, so the scrim and the tiles cover it", () => {
-  // The one defect behind "the search bar renders above the panel bodies". The search surface has
-  // two renderings — UnifiedSearchBar (expanded) and TopBar's collapsed filter pill — and the pill
-  // carried Z.NAV while the bar carried Z.SEARCH. One surface, two tiers, chosen by nothing but the
-  // scroll offset, and they landed on opposite sides of MODAL_SCRIM.
+test("there is ONE search surface, so it cannot be in two tiers", () => {
+  // THE DEFECT THIS GUARDED, AND WHY THE GUARD CHANGED SHAPE. "The search bar renders above the
+  // panel bodies" had one cause: the search surface had TWO renderings — UnifiedSearchBar (expanded)
+  // and TopBar's collapsed filter pill — and the pill carried Z.NAV while the bar carried Z.SEARCH.
+  // One surface in two tiers, chosen by nothing but the scroll offset, landing on opposite sides of
+  // MODAL_SCRIM.
   //
   // Measured at 1280x800 with the page scrolled 500 and the PDF + ATS tiles open: the pill painted
   // at z 1500 over a scrim at 800 and tiles at 850, overlapping BOTH tiles' headers by 10px, at full
-  // brightness while the board beneath it was dimmed. And because useBoardLock spares every shell
-  // child at or above Z.NAV — correctly, so the nav stays reachable — the board's tab buttons, sort
-  // select, profile switcher and filter input stayed clickable and tab-reachable through the modal.
-  // That is also why STATE A looked right and STATE B looked wrong: at scroll 0 the surface is the
-  // BAR, which was always below the scrim.
+  // brightness while the board beneath it was dimmed — and still clickable and tab-reachable through
+  // the modal, because useBoardLock spared everything at or above Z.NAV. That is also why the
+  // unscrolled state looked right and the scrolled state looked wrong.
+  //
+  // The fix at the time was to put the pill in the SEARCH tier so both renderings agreed. Y4 removes
+  // the second rendering instead, which is the stronger form of the same fix: two tiers for one
+  // surface is unreachable when there is one surface. So this no longer asserts the pill's tier — it
+  // asserts that there is nothing to give a tier to.
   const topbar = read("client/src/components/TopBar.jsx");
-  const pillAt = topbar.indexOf("{pillIsTheSearchSurface");
-  assert.ok(pillAt > 0, "the collapsed search surface is gone");
-  const pill = topbar.slice(pillAt, pillAt + 1600);
-  assert.match(pill, /zIndex: Z\.SEARCH,/);
-  assert.ok(!/zIndex: Z\.NAV,/.test(pill),
-    "the collapsed search surface is back in the NAV tier, above the scrim and above the tiles");
-  // Pill 1 — the nav bar itself — DOES stay at NAV. It is real nav chrome and is meant to remain
-  // live over an open panel; inerting it would leave a control that looks clickable and is not.
-  assert.match(topbar.slice(0, pillAt), /zIndex: Z\.NAV,/);
-  // And the CSS half of the same surface declares the tier once, on the base rule, so the three
-  // layouts cannot disagree: .usb--dock was inheriting a bare 200, i.e. below PANEL_POPOVER.
+  const barCode = topbar
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*(?:\/\/|\*).*$/gm, "");
+  assert.ok(!/pillIsTheSearchSurface/.test(barCode),
+    "the collapsed search surface is back — one surface in two tiers is reachable again");
+  assert.ok(!/zIndex: Z\.SEARCH/.test(barCode),
+    "the top bar renders something in the SEARCH tier again; the search surface is not its to own");
+  // The bar itself is the only thing left here, and it is NAV. Y2 lowered that tier so it can no
+  // longer occlude an overlay, which is asserted in searchSurfaceLayering.
+  assert.equal((barCode.match(/zIndex: Z\.NAV,/g) || []).length, 1,
+    "the top bar should declare exactly one z tier, its own");
+
+  // And the CSS half declares the tier once, on the base rule, so the layouts cannot disagree:
+  // .usb--dock was inheriting a bare 200, i.e. below PANEL_POPOVER.
   const usbCss = read("client/src/components/UnifiedSearchBar.css");
   assert.ok(!/z-index: 200;/.test(usbCss), "the search surface is back below panel popovers");
   assert.equal((usbCss.match(/z-index:/g) || []).length, 1,

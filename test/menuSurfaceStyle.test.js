@@ -84,8 +84,18 @@ test("jobs surface has compact profile selector and profile menu supports deleti
     "the board re-grew its own profile selector; TopBar and the pill already have one");
   assert.doesNotMatch(jobsPanel, /placeholder="Filter loaded jobs/,
     "the redundant second search input is back — the main search bar already writes localSearch");
-  assert.match(topBar, /<ProfileSelectorDropdown/, "the pill must still switch profiles");
-  assert.match(topBar, /placeholder="Filter jobs/, "the pill must still filter, for when scrolled");
+  // The AVATAR MENU must still switch profiles. This used to say "the pill must still switch
+  // profiles" and there were two ProfileSelectorDropdowns in this file — the menu's and the pill's.
+  // Y4 retired the pill, so the menu is the one place it lives, which is what makes this assertion
+  // load-bearing rather than one of a pair.
+  assert.match(topBar, /<ProfileSelectorDropdown/, "the avatar menu must still switch profiles");
+  // The pill's "Filter jobs…" input went with the pill. It wrote `localSearch`, which the main
+  // search bar's keyword field also writes — so the state still has an input, and this file's own
+  // assertion above (that JobsPanel must NOT re-grow a third one) is what keeps that from doubling.
+  assert.doesNotMatch(topBar, /placeholder="Filter jobs/,
+    "the retired pill's local search input is back in the top bar");
+  assert.match(fs.readFileSync("client/src/components/UnifiedSearchBar.jsx", "utf8"),
+    /placeholder="Job title or keywords"/, "nothing writes localSearch any more");
   assert.match(topBar, /method: "DELETE"/);
   assert.doesNotMatch(topBar, />\s*Delete\s*<\/button>/);
   assert.match(profileSelector, /onDelete\?\.\(profile\.id\)/);
@@ -121,7 +131,13 @@ test("profile menus use viewport scrolling and dropdown actions", () => {
   // actually renders the scrollable menu surface. These two assertions previously duplicated it
   // onto ScrollDock, which no longer hosts a menu at all.
   assert.match(topBar, /const activeProfile = profiles\?\.find/);
-  assert.match(topBar, /title="Switch profile"/);
+  // `title="Switch profile"` was the PILL's ProfileSelectorDropdown — a compact, icon-sized copy
+  // that needed a tooltip because it had no visible label. It went with the pill (Y4). The avatar
+  // menu's copy sits under a "Job Profile" heading and shows the active profile's name, so it names
+  // itself; asserting a tooltip it never had would be asserting the pill's version.
+  assert.doesNotMatch(topBar, /title="Switch profile"/,
+    "the pill's compact profile switcher is back");
+  assert.match(topBar, /Job Profile/, "the profile switcher lost the heading that names it");
   assert.doesNotMatch(topBar, /display:\s+"none"/);
 });
 
@@ -203,7 +219,9 @@ test("tool access is plan-owned and local match UI is removed", () => {
   assert.ok(SORTS.options.some(o => o.value === "atsScore" && o.label === "ATS Sort"),
     "ATS Sort is no longer offered as a board sort");
   assert.match(fs.readFileSync("client/src/App.jsx", "utf8"), /const SORT_OPTIONS = SORTS\.options\.map/);
-  assert.match(topBar, /\{SORTS\.options\.map/);
+  // The second assertion here pinned the COLLAPSED PILL's sort select. Y4 retired the pill, so there
+  // is one sort control again — the icon beside IMPORT — and the bar renders none.
+  assert.ok(!/SORTS/.test(topBar), "a second sort control is back in the top bar");
 });
 
 test("critical UI copy has no mojibake literals", () => {

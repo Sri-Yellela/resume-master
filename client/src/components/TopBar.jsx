@@ -11,35 +11,15 @@ import { api } from "../lib/api.js";
 import { DockPortal } from "./DockPortal.jsx";
 import ProfileSelectorDropdown from "./ProfileSelectorDropdown.jsx";
 import { Z } from "../styles/zLayers.js";
-import { SORTS } from "../../../shared/jobFilterOptions.js";
 
-// ── Inject slideDown keyframe once ────────────────────────────
-function injectKeyframes() {
-  if (document.getElementById("topbar-kf")) return;
-  const s = document.createElement("style");
-  s.id = "topbar-kf";
-  s.textContent = `
-    /* TRANSFORM ONLY — deliberately not opacity.
-       The collapsed pill is the incoming half of a swap whose outgoing half (the main search bar)
-       disappears synchronously. Fading in from opacity 0 therefore opened a window in which the bar
-       was already gone and the pill was not yet visible: captured at the crossing as
-       \`bar: null, pill: { opacity: 0 }\`, which is the reported gap between the two surfaces. The
-       pill is now at full opacity on its first frame and only slides into place, so there is no
-       point at which neither surface is on screen. */
-    @keyframes slideDown {
-      from { transform: translateX(-50%) translateY(-8px); }
-      to   { transform: translateX(-50%) translateY(0); }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      @keyframes slideDown {
-        from { transform: translateX(-50%) translateY(0); }
-        to   { transform: translateX(-50%) translateY(0); }
-      }
-    }
-  `;
-  document.head.appendChild(s);
-}
-
+// The slideDown keyframes and injectKeyframes() were removed with the pill (Y4).
+//
+// They existed for one thing: the collapsed pill's entrance. The keyframe carried a comment
+// explaining, at length, why it animated TRANSFORM ONLY and never opacity — fading in from opacity 0
+// opened a window in which the outgoing bar was already gone and the incoming pill was not yet
+// visible, captured at the crossing as `bar: null, pill: { opacity: 0 }`. That reasoning was correct
+// and is now moot: there is no crossing, because there is one search surface.
+//
 // ── Parse hex → [r,g,b] ──────────────────────────────────────
 function hexToRgb(hex) {
   if (!hex || hex.length < 7) return [168, 216, 234];
@@ -436,54 +416,38 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
 // ═══════════════════════════════════════════════════════════════
 export default function TopBar({
   user, onTabChange, onLogout, onUserChange, onProfileActivate,
-  // "bar" | "pill" — which search surface AppDashboard has decided is showing. Defaults to "bar"
-  // so any caller that does not pass it (none today) gets the collapsed pill hidden rather than
-  // a second surface appearing alongside the main one.
-  searchSurface = "bar",
-  // Whether the BOARD is the panel on screen. The collapsed pill carries board controls — the
-  // All/★/⏳ tabs, the sort, the profile switcher, "Filter jobs…" — and every one of them acts on a
-  // job board. Rendering them over Database, Recruiter, Job Profiles or Auto Apply offers controls
-  // for something that is not there. Defaults to true so a caller that does not pass it behaves as
-  // before rather than losing the pill silently.
-  boardIsActive = true,
+  // THE TAB ROW LIVES HERE NOW (Y4). It used to sit in UnifiedSearchBar, which meant the app's
+  // primary navigation was a slot on the search bar — so it appeared and disappeared with a control
+  // that is only meaningful on the Jobs board.
+  //
+  // `tabs` is passed in rather than derived here, and comes from AppDashboard's appTabs — the single
+  // source established when three hardcoded copies of the tab list were found, two of which had
+  // never heard of "Auto Apply". This component does NOT own a list.
+  //
+  // `onTabChange` is NOT declared again below: it is already a prop above, because the profile menu
+  // has always used it to reach Profile / Job Profiles / Plans / Integrations. The tab row and the
+  // menu route through the same handler, which is AppDashboard's handlePanelChange — so the row
+  // cannot navigate to somewhere the menu cannot, and neither can drift onto its own list.
+  tabs = [],
+  activeTab,
 }) {
   const { theme } = useTheme();
   const { progress: rawProgress, pinned } = useAppScroll();
-  // The collapsed pill's VISIBILITY is not decided here any more — it comes from the one derived
-  // search-surface value in AppDashboard (hooks/useSearchSurface.js). This component used to answer
-  // the same question independently from the board's inner scroll container while the main bar
-  // answered it from window.scrollY, which is exactly how both ended up on screen together.
-  // `scrolled` below still drives this bar's own GEOMETRY (the nav collapse animation), which is a
-  // different question and stays local.
-  const pillIsTheSearchSurface = searchSurface === "pill";
   // pinned (pagination click) holds dock fully collapsed
   const p = pinned ? 1 : rawProgress;
   const scrolled = p >= 0.5;
 
-  const [hovered,       setHovered]       = useState(false);
-  const [searchFocused, setSearchFocused] = useState(false);
-  const hoverTimerRef = useRef(null);
+  // GONE WITH THE PILL (Y4): `searchSurface` / `boardIsActive` props, `pillIsTheSearchSurface`,
+  // `hovered` + `setHovered` + `hoverTimerRef` + handleMouseEnter/handleMouseLeave (a 100ms grace
+  // period for the gap between two pills that no longer exists — and `hovered` was write-only: two
+  // handlers set it and nothing ever read it), `searchFocused` (read only by the pill's input
+  // width), the effect that cleared both on un-scroll, and injectKeyframes' slideDown.
+  //
+  // `p` and `scrolled` STAY. They are not pill machinery: `p` is this bar's own collapse geometry
+  // and feeds AnimatedLucyLogo's `progress`, which Y1 forbids altering. See the note at the bottom
+  // of this file about `p` being provably stuck at 0.
 
-  // Clear hover + search state when un-scrolled
-  useEffect(() => { if (!scrolled) { setHovered(false); setSearchFocused(false); } }, [scrolled]);
-
-  // Inject slideDown keyframe
-  useEffect(() => { injectKeyframes(); }, []);
-
-  // Hover handlers with 100ms grace period so gap between pills doesn't dismiss row 2
-  const handleMouseEnter = useCallback(() => {
-    clearTimeout(hoverTimerRef.current);
-    if (scrolled) setHovered(true);
-  }, [scrolled]);
-
-  const handleMouseLeave = useCallback(() => {
-    if (scrolled) hoverTimerRef.current = setTimeout(() => setHovered(false), 100);
-  }, [scrolled]);
-
-  const {
-    boardTab, setBoardTab, localSearch, setLocalSearch, sortBy, setSortBy,
-    setActiveProfileId, deleteProfileCache,
-  } = useJobBoard() || {};
+  const { setActiveProfileId, deleteProfileCache } = useJobBoard() || {};
 
   const [vw, setVw] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
   useEffect(() => {
@@ -594,21 +558,18 @@ export default function TopBar({
     ? `0 ${Math.round(p * 4)}px ${Math.round(p * 24)}px rgba(0,0,0,${(p * 0.10).toFixed(2)}), inset 0 1px 0 rgba(255,255,255,${(p * 0.35).toFixed(2)})`
     : "none";
 
-  // Pill 2 styling (fully-collapsed glassy pill, same accent)
-  const pill2Bg = `linear-gradient(135deg, rgba(${ar},${ag},${ab},0.18) 0%, rgba(${ar},${ag},${ab},0.08) 40%, rgba(255,255,255,0.12) 100%), ${theme.surfaceBase}88`;
+  // `pill2Bg` was here — the collapsed pill's glass gradient. Removed with the pill (Y4).
 
+  // ONE ELEMENT NOW, not a fragment of two. The second was the collapsed search pill.
+  //
+  // data-app-chrome marks the element whose HEIGHT the in-flow column has to reserve. The bar is
+  // position:fixed, so it reserves nothing itself, and nothing below it reserved anything for it
+  // either — see hooks/useChromeHeight.js for the 32px overlap that produced on every tab but Jobs.
+  // Measured off this element rather than declared as a constant, because the height moves with
+  // font loading, zoom and which tab is showing.
   return (
-    <>
-      {/* ── Pill 1: main nav bar — always visible ── */}
-      {/* data-app-chrome marks the element whose HEIGHT the in-flow column has to reserve. The bar
-          is position:fixed, so it reserves nothing itself, and nothing below it reserved anything
-          for it either — see hooks/useChromeHeight.js for the 32px overlap that produced on every
-          tab but Jobs. Measured off this element rather than declared as a constant, because the
-          height moves with font loading, zoom and (after Y4) which tab is showing. */}
       <div
         data-app-chrome=""
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
         style={{
           position: "fixed",
           top: topOffset,
@@ -632,8 +593,45 @@ export default function TopBar({
           zIndex: Z.NAV,
           fontFamily: "'DM Sans',system-ui,sans-serif",
         }}>
-        {/* Logo — "R" always visible, "esume Master" collapses */}
-        <AnimatedLucyLogo progress={p}/>
+        {/* Left group: the mark, then the app's primary navigation.
+            logo | JOBS | AUTO APPLY | JOB PROFILES | DATABASE | RECRUITER */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          {/* Logo — "R" always visible, "esume Master" collapses */}
+          <AnimatedLucyLogo progress={p}/>
+
+          {/* THE TAB ROW. Moved here from UnifiedSearchBar (Y4), where the app's primary navigation
+              was a slot on a control that is only meaningful on the Jobs board.
+
+              The button styling is UnifiedSearchBar's verbatim — same padding, radius, border,
+              colours, uppercase 12px/0.08em type, same active treatment — because this is a MOVE.
+              `t.label` is a ReactNode, not a string: that is what carries the AUTO APPLY
+              needs-review count, which AppDashboard decorates onto the tab before passing it down
+              (see AppTopBar there). A review queue nobody sees is worse than a cluttered bar.
+
+              `overflowX: auto` with a hidden scrollbar rather than wrapping: the bar is a fixed
+              46px tall and five tabs plus the mark plus the avatar do not fit below about 700px of
+              viewport. Scrolling keeps every tab REACHABLE at any width, where wrapping would push
+              the second row outside the bar's height and clip it. */}
+          <nav aria-label="Main" style={{
+            display: "flex", gap: 4, alignItems: "center", minWidth: 0,
+            overflowX: "auto", scrollbarWidth: "none", msOverflowStyle: "none",
+          }}>
+            {(tabs || []).map(t => (
+              <button key={t.id} onClick={() => onTabChange?.(t.id)}
+                aria-current={activeTab === t.id ? "page" : undefined}
+                style={{
+                  padding: "8px 14px",
+                  background: activeTab === t.id ? "rgba(255,255,255,0.06)" : "transparent",
+                  border: activeTab === t.id ? "1px solid var(--color-primary)" : "1px solid transparent",
+                  borderRadius: 999,
+                  color: activeTab === t.id ? "var(--color-text)" : "var(--color-text-muted)",
+                  fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  textTransform: "uppercase", letterSpacing: "0.08em",
+                  whiteSpace: "nowrap", flexShrink: 0,
+                }}>{t.label}</button>
+            ))}
+          </nav>
+        </div>
 
         {/* Right: utility icons */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -653,125 +651,5 @@ export default function TopBar({
           )}
         </div>
       </div>
-
-      {/* ── Pill 2: the COLLAPSED SEARCH SURFACE ── */}
-      {/* Gated on the SHARED surface value plus the presence of board controls to render — not on a
-          second scroll boolean of its own. `hovered` is deliberately NOT part of this condition:
-          it was an independent input, and requirement was one source of truth, so hover no longer
-          decides whether the pill exists.
-
-          IT LIVES IN THE SEARCH TIER, NOT THE NAV TIER — and that one value was the whole defect.
-          This element and UnifiedSearchBar are two renderings of ONE surface: whichever is showing,
-          it is the app's search surface. The bar was at Z.SEARCH (400) and this was at Z.NAV (1500),
-          so the same surface sat in two different tiers depending only on the scroll offset, and the
-          two halves ended up on opposite sides of the modal scrim.
-
-          Measured, at 1280x800, page scrolled 500, PDF + ATS open: this pill painted at z 1500 over
-          a scrim at 800 and tiles at 850, overlapping both tiles' headers by 10px, undimmed while
-          the board behind it was dimmed. useBoardLock then spared it as well — it skips every shell
-          child at or above Z.NAV, on the correct reasoning that nav chrome must stay reachable — so
-          the board's tab / star / pending buttons, its sort select, its profile switcher and its
-          filter input all remained clickable and tab-reachable through an open modal. That is why
-          the panels looked wrong only sometimes: at scroll 0 the surface is the BAR, correctly below
-          the scrim, and everything looked right; scrolled, the surface became this pill, above it.
-
-          At Z.SEARCH the pill is dimmed by the scrim, covered by the tiles and inerted with the rest
-          of the board, exactly as the bar already was. Pill 1 above keeps Z.NAV: it is genuinely nav
-          chrome and is meant to stay live over a panel. */}
-      {pillIsTheSearchSurface && boardIsActive && boardTab !== undefined && (
-        <div
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
-          style={{
-            position: "fixed",
-            top: topOffset + 46 + 8,
-            left: dockCenter,
-            transform: "translateX(-50%)",
-            maxWidth: Math.max(180, vw - 40),
-            height: 36,
-            borderRadius: 9999,
-            background: pill2Bg,
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-            border: `1px solid rgba(${ar},${ag},${ab},0.25)`,
-            boxShadow: `0 4px 24px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.35)`,
-            display: "inline-flex",
-            alignItems: "center",
-            padding: "0 14px",
-            gap: 6,
-            opacity: pillWidth <= 0 ? 0 : 1,
-            pointerEvents: pillWidth <= 0 ? "none" : "auto",
-            // The SEARCH tier — the same one UnifiedSearchBar uses. See the note above the gate.
-            zIndex: Z.SEARCH,
-            fontFamily: "'DM Sans',system-ui,sans-serif",
-            animation: "slideDown 200ms ease",
-            whiteSpace: "nowrap",
-          }}>
-          {/* Board tab pills */}
-          {[["all","All"],["saved","★"],["pending","⏳"]].map(([id, lbl]) => (
-            <button key={id} onClick={() => setBoardTab?.(id)}
-              style={{
-                padding: "0 10px", height: 26, border: "none", cursor: "pointer",
-                fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
-                fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase",
-                borderRadius: 9999, flexShrink: 0,
-                background: boardTab === id ? theme.accent : `${theme.accent}18`,
-                color: boardTab === id ? "#0f0f0f" : theme.textMuted,
-                transition: "background 0.15s, color 0.15s",
-              }}>
-              {lbl}
-            </button>
-          ))}
-          <Divider theme={theme}/>
-          {/* Sort */}
-          <select value={sortBy || "dateDesc"} onChange={e => setSortBy?.(e.target.value)}
-            style={{ height: 26, padding: "4px 8px", borderRadius: 4, flexShrink: 0,
-                     minWidth: 80, border: `1px solid ${theme.border}`, background: theme.surface,
-                     fontSize: 12, color: theme.text, outline: "none", cursor: "pointer" }}>
-            {/* From the shared contract, not a second literal list. This copy had already drifted
-                from the board's own sort select on LABELS — "Pay ↓" here against "Pay high to low"
-                there, for the identical value — which is the mild form of the same defect that
-                'mid level' vs 'mid' is the severe form of. */}
-            {SORTS.options.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          {profiles.length > 0 && (
-            <ProfileSelectorDropdown
-              theme={theme}
-              profiles={profiles}
-              activeProfile={profiles.find(p => p.is_active) || profiles[0]}
-              onActivate={activateProfile}
-              onDelete={deleteProfile}
-              onAdd={() => onTabChange?.("job-profiles")}
-              compact
-              title="Switch profile"
-            />
-          )}
-          {/* Local search — expands on focus */}
-          <input
-            value={localSearch || ""}
-            onChange={e => setLocalSearch?.(e.target.value)}
-            onKeyDown={e => e.key === "Escape" && setLocalSearch?.("")}
-            onFocus={() => setSearchFocused(true)}
-            onBlur={() => setSearchFocused(false)}
-            placeholder="Filter jobs…"
-            style={{
-              height: 26, padding: "4px 10px", borderRadius: 4,
-              border: `1px solid ${theme.border}`, background: theme.surface,
-              color: theme.text, fontSize: 12, outline: "none",
-              width: searchFocused ? 150 : 96,
-              transition: "width 0.2s ease",
-            }}/>
-          {localSearch && (
-            <button onClick={() => setLocalSearch?.("")}
-              style={{ background: "none", border: "none", color: theme.textDim,
-                       cursor: "pointer", fontSize: 13, padding: "0 2px", flexShrink: 0 }}>
-              ✕
-            </button>
-          )}
-        </div>
-      )}
-    </>
   );
 }

@@ -303,7 +303,9 @@ test("NO UI SITE HOLDS A LITERAL OPTION LIST ANY MORE", () => {
       /VISITED\.options\.map/,
     ],
     "client/src/App.jsx": [/const SORT_OPTIONS\s*=\s*SORTS\.options\.map/],
-    "client/src/components/TopBar.jsx": [/\{SORTS\.options\.map/],
+    // TopBar was here, for the collapsed pill's own sort <select>. Y4 retired the pill, so there is
+    // one sort control again; the bar rendering from the contract is not a property it can have when
+    // it renders no sort at all. Asserted the other way round below instead.
   };
   for (const [file, patterns] of Object.entries(sites)) {
     const src = read(file);
@@ -330,8 +332,12 @@ test("NO UI SITE HOLDS A LITERAL OPTION LIST ANY MORE", () => {
                        'value="1w"', 'value="full-time"']) {
     assert.ok(!panel.includes(dead), `JobsPanel still holds the literal ${dead}`);
   }
+  // TopBar renders NO sort control at all now — Y4 retired the pill that held one. Both directions
+  // are asserted: no literal, and no reference to the contract either, because a second sort surface
+  // in the chrome is the two-lists situation regardless of where its values come from.
   const topbar = strip(read("client/src/components/TopBar.jsx"));
   assert.ok(!topbar.includes('value="dateDesc"'), "TopBar still holds its own sort literals");
+  assert.ok(!/SORTS/.test(topbar), "a second sort control is back in the top bar");
   const app = strip(read("client/src/App.jsx"));
   assert.ok(!app.includes('v: "dateDesc"'), "App.jsx still holds its own sort literals");
 });

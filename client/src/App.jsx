@@ -11,8 +11,8 @@ import AdminLoginPage            from "./pages/AdminLoginPage.jsx";
 import DBInspector               from "./pages/admin/DBInspector.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import AppShell                  from "./components/AppShell.jsx";
-import { useSearchSurface }      from "./hooks/useSearchSurface.js";
 import { useChromeHeight }       from "./hooks/useChromeHeight.js";
+import { useCollapsibleHeight }  from "./hooks/useCollapsibleHeight.js";
 import { AppScrollProvider } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider, useJobBoard } from "./contexts/JobBoardContext.jsx";
 import { AutoApplyProvider, useAutoApply } from "./contexts/AutoApplyContext.jsx";
@@ -100,14 +100,30 @@ function PublicLoginRoute({ authStatus, authUser, children, admin = false }) {
 // decide whether to also go out to the aggregator. Committing the filters on BOTH is deliberate:
 // the live half is a superset of the local half, and skipping the commit there would make the
 // second click widen the board back out to unfiltered before searching.
-function BoardSearchBar({ tabs, ...props }) {
+function BoardSearchBar(props) {
   const { applyBarFilters } = useJobBoard();
+  return (
+    <UnifiedSearchBar
+      {...props}
+      onLocalFilter={params => applyBarFilters(params)}
+      onSearch={params => applyBarFilters(params, { live: true })}
+    />
+  );
+}
+
+// The top bar, with the AUTO APPLY needs-review count decorated onto its tab.
+//
+// This wrapper exists for the same reason BoardSearchBar does: AppDashboard RENDERS
+// AutoApplyProvider, so it cannot read the count itself. The decoration used to live on
+// BoardSearchBar, because the tab row lived on the search bar; the row moved into the top bar in Y4
+// and the badge moved with it, because a review queue nobody sees is worse than a cluttered bar.
+function AppTopBar({ tabs, ...props }) {
   const { needsAttentionCount = 0 } = useAutoApply();
 
   // The board keeps a MINIMAL indicator and only when something is actually waiting on a human: a
   // count on the tab, not a strip above the postings. This is the requirement that "3 need review"
-  // stays discoverable from the board — a review queue nobody sees is worse than a cluttered
-  // board — and it is the ONLY thing the pipeline still renders outside its own panel.
+  // stays discoverable from the board, and it is the ONLY thing the pipeline still renders outside
+  // its own panel.
   const decorated = (tabs || []).map(t =>
     t.id === "auto-apply" && needsAttentionCount > 0
       ? {
@@ -130,13 +146,49 @@ function BoardSearchBar({ tabs, ...props }) {
       : t,
   );
 
+  return <TopBar {...props} tabs={decorated} />;
+}
+
+// The board's All / ★ Saved / ⏳ Pending tabs.
+//
+// THE ONE CONTROL THE RETIRED PILL UNIQUELY CARRIED. JobsPanel has its own boardTabs strip, but it
+// is behind `{false && ...}` and has been for some time, so the pill was the only place these three
+// existed — measured on the running app before the move: 0 occurrences of "All", "★" or "⏳" as a
+// button anywhere outside the pill. Retiring the container without moving them would have removed
+// the Saved and Pending tabs from the product.
+//
+// Labels and values are the pill's verbatim, including the glyphs, so a user who knew where ★ was
+// still recognises it. Titles are added because a glyph alone has no accessible name — the pill's
+// did not either, which was a defect it is not worth preserving.
+const BOARD_TABS = [
+  ["all",     "ALL",  "All jobs on your board"],
+  ["saved",   "★",    "Saved jobs"],
+  ["pending", "⏳",   "Pending apply"],
+];
+
+function BoardTabs() {
+  const { boardTab, setBoardTab } = useJobBoard();
   return (
-    <UnifiedSearchBar
-      {...props}
-      tabs={decorated}
-      onLocalFilter={params => applyBarFilters(params)}
-      onSearch={params => applyBarFilters(params, { live: true })}
-    />
+    <div role="group" aria-label="Board view" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      {BOARD_TABS.map(([id, label, title]) => {
+        const on = boardTab === id;
+        return (
+          <button key={id} type="button" onClick={() => setBoardTab?.(id)}
+            title={title} aria-label={title} aria-pressed={on}
+            style={{
+              padding: "0 10px", height: 26, border: "none", cursor: "pointer",
+              fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
+              fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase",
+              borderRadius: 9999, flexShrink: 0,
+              background: on ? "var(--color-primary)" : "rgba(255,255,255,0.06)",
+              color: on ? "var(--color-on-primary, #0f0f0f)" : "var(--color-text-muted)",
+              transition: "background 0.15s, color 0.15s",
+            }}>
+            {label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -207,12 +259,9 @@ function AppDashboard({ authUser, setAuthUser }) {
   const navigate = useNavigate();
   const [jobBoardRefreshKey, setJobBoardRefreshKey] = useState(0);
   const [importOpen, setImportOpen] = useState(false);
-  // ONE derived value decides which search surface renders — see hooks/useSearchSurface.js. It
-  // replaces a `uiMode` state driven by window.scrollY, which on this layout never changed
-  // (documentElement.scrollHeight === innerHeight: the window does not scroll), so the main bar
-  // could never yield to the pill while TopBar's pill was being decided independently from the
-  // board's inner scroll container. That pair of unrelated booleans is why both were visible.
-  const { surface: searchSurface, sentinelRef } = useSearchSurface();
+  // THE PILL IS RETIRED (Y4), so there is no longer a SURFACE to choose between — there is one
+  // search bar and it renders on Jobs. hooks/useSearchSurface.js is deleted; what replaces it is
+  // not another threshold but the absence of one.
   // The FIXED chrome's real height, measured off the bar itself (hooks/useChromeHeight.js). The
   // in-flow column reserves exactly this below, which is what stops content starting underneath it.
   const chromeHeight = useChromeHeight();
@@ -224,12 +273,18 @@ function AppDashboard({ authUser, setAuthUser }) {
     { id: "console",      label: "Jobs" },
     // The auto-apply pipeline is a peer of the board now, not a strip above it (W5). It sits in
     // this row for the same reason the others do — it is a place you go, not a thing that happens
-    // on the board. BoardSearchBar decorates it with the needs-attention count.
+    // on the board. AppTopBar decorates it with the needs-attention count.
     { id: "auto-apply",   label: "Auto Apply" },
     { id: "job-profiles", label: "Job Profiles" },
     { id: "database",     label: "Database" },
     { id: "recruiter",    label: "Recruiter" },
   ];
+
+  // The Jobs-only chrome's height, animated in and out. Its `open` input is simply "is Jobs the
+  // tab", so switching between two NON-Jobs tabs never animates anything — the wrapper is already 0
+  // on both sides, which is Y4's "switching between non-Jobs tabs behaves as it does now".
+  // Declared after activeTab, which it reads.
+  const jobsChrome = useCollapsibleHeight(activeTab === "console");
 
   // The console is handled by its own branch above (it has a legacy-route alias and a refresh key),
   // so it is excluded here. The three extras are reachable from the profile menu rather than the
@@ -360,95 +415,99 @@ function AppDashboard({ authUser, setAuthUser }) {
                       paddingTop: chromeHeight,
                       color:theme.text }}>
 
-          <TopBar
+          {/* The tab row moved INTO the bar (Y4). AppTopBar is the decorator that puts the
+              needs-review count on the AUTO APPLY tab — it has to live inside AutoApplyProvider,
+              which AppDashboard renders, so AppDashboard cannot read the count itself. Same reason
+              BoardSearchBar is a wrapper. */}
+          <AppTopBar
             user={authUser}
-            searchSurface={searchSurface}
-            // The pill's contents are board controls; it must not float over a panel with no board.
-            boardIsActive={activeTab === "console"}
+            tabs={appTabs}
+            activeTab={activeTab}
             onTabChange={handlePanelChange}
             onLogout={handleLogout}
             onUserChange={setAuthUser}
             onProfileActivate={handleProfileActivate}
           />
 
-          {/* The hero and the search bar below it stay MOUNTED whichever surface is showing, and are
-              hidden with `visibility` rather than removed. Unmounting them took 386px out of the
-              document (measured: scrollHeight 1763 -> 1377), all of it above the fold, and Chrome's
-              scroll anchoring compensates for that by subtracting it from the scroll offset —
-              scrollY fell 250 -> 0, which put the sentinel back on screen and flipped the surface
-              straight back. The threshold was moving itself. Keeping the space reserved costs
-              nothing on screen, because at the moment of the flip both are scrolled out of view by
-              definition. `visibility: hidden` also takes them out of the tab order, so the hidden
-              surface cannot be reached by keyboard. */}
-          {/* The hero's top padding below is 34px, not the 80px it was: the shell now RESERVES the
-              chrome's height above this, so 34 + a 46px bar is the same 80px from the top of the
-              viewport the hero has always had. Expressed that way it is a distance BELOW THE
-              CHROME, which is what it was always meant to be — an 80px absolute offset cleared the
-              bar only by coincidence, and would stop clearing it the moment the bar grew. */}
-          {activeTab === "console" && (
-            <div aria-hidden={searchSurface !== "bar"}
-                 style={{ textAlign:"center", padding:"34px 20px 40px",
-                          animation:"fadeUp 0.6s ease both",
-                          visibility: searchSurface === "bar" ? "visible" : "hidden" }}>
-              <div style={{
-                fontFamily:"var(--font-display, 'Instrument Serif', serif)",
-                fontSize:"clamp(2rem, 5vw, 4rem)", fontWeight:400,
-                color:"var(--color-text)", letterSpacing:"-0.025em", marginBottom:8,
-              }}>
-                {authUser?.first_name ? `Welcome back, ${authUser.first_name}.` : "Your jobs."}
-              </div>
-              <div style={{ fontSize:14, color:"var(--color-text-muted)", maxWidth:520, margin:"0 auto" }}>
-                Pick up where you left off.
-              </div>
+          {/* ── The JOBS-ONLY chrome ──────────────────────────────────────────────────────────
+              The hero and the search bar, and nothing else, in a wrapper whose height animates
+              between 0 and its measured content (hooks/useCollapsibleHeight.js). Switching to or
+              from Jobs changes the in-flow chrome's height by 539px at 1440x900, and Y4 asks for
+              that to move smoothly rather than jump. Switching between two NON-Jobs tabs is
+              unaffected: the wrapper is already 0 on both sides, so nothing animates.
+
+              THE PILL IS GONE, and with it the reason this block used to stay mounted and hide
+              itself with `visibility`. That trick existed because unmounting took 386px out of the
+              document above the fold, Chrome's scroll anchoring subtracted it from the scroll
+              offset, and the sentinel the pill's threshold was measured from moved back across that
+              threshold — the observer's condition was a function of the state the observer set.
+              With one search surface there is no threshold and no sentinel, so a conditional render
+              is simply a conditional render again. */}
+          <div ref={jobsChrome.outerRef} style={jobsChrome.outerStyle}>
+            <div ref={jobsChrome.innerRef} style={jobsChrome.innerStyle}>
+              {jobsChrome.mounted && (
+                <>
+                {/* The hero's top padding is 34px, not the 80px it was: the shell RESERVES the
+                    chrome's height above this (Y3), so 34 + a 46px bar is the same 80px from the top
+                    of the viewport the hero has always had. Expressed that way it is a distance
+                    BELOW THE CHROME rather than an absolute offset that cleared it by coincidence. */}
+                <div style={{ textAlign:"center", padding:"34px 20px 40px",
+                              animation:"fadeUp 0.6s ease both" }}>
+                  <div style={{
+                    fontFamily:"var(--font-display, 'Instrument Serif', serif)",
+                    fontSize:"clamp(2rem, 5vw, 4rem)", fontWeight:400,
+                    color:"var(--color-text)", letterSpacing:"-0.025em", marginBottom:8,
+                  }}>
+                    {authUser?.first_name ? `Welcome back, ${authUser.first_name}.` : "Your jobs."}
+                  </div>
+                  <div style={{ fontSize:14, color:"var(--color-text-muted)", maxWidth:520, margin:"0 auto" }}>
+                    Pick up where you left off.
+                  </div>
+                </div>
+
+                {/* The search bar, on Jobs and nowhere else. It no longer carries `tabs` — those are
+                    in the top bar now — so it renders its action row and its fields only. Every
+                    control in `actions` is the one that was there before, in the same order. */}
+                <BoardSearchBar
+                  mode="hero"
+                  variant="inline"
+                  actions={
+                    <>
+                    {/* All / Saved / Pending. THESE ARE THE ONE CONTROL THAT ONLY THE PILL HAD —
+                        JobsPanel's own boardTabs strip is behind `{false && ...}`, so retiring the
+                        pill without moving these would have deleted the Saved and Pending tabs from
+                        the app. Measured before the move: 0 occurrences of each anywhere but the
+                        pill. */}
+                    <BoardTabs />
+
+                    {/* RIGHT: the board's actions, in the order and with the behaviour they had. */}
+                    <div style={{ display: "flex", alignItems: "center", paddingBottom: 4 }}>
+                      <BoardControlIcons />
+                      <div style={{ width: 1, height: 20, background: "var(--border-glass)", margin: "0 8px" }} />
+                      <button
+                        type="button"
+                        onClick={() => setImportOpen(true)}
+                        title="Import a job from a link or pasted text"
+                        style={{
+                          display: "flex", alignItems: "center", gap: 6,
+                          padding: "6px 12px", borderRadius: 999,
+                          background: "transparent",
+                          border: "1px solid var(--color-primary)",
+                          color: "var(--color-text)",
+                          fontSize: 12, fontWeight: 600, cursor: "pointer",
+                          textTransform: "uppercase", letterSpacing: "0.08em",
+                          whiteSpace: "nowrap",
+                        }}>
+                        <Plus size={13} /> Import
+                      </button>
+                    </div>
+                    </>
+                  }
+                />
+                </>
+              )}
             </div>
-          )}
-
-          {/* Sentinel: holds the main bar's PLACE in the layout and stays mounted whichever surface
-              is showing, so the observed condition remains observable in both states. Observing the
-              bar itself would unmount the observer's target the instant the pill took over, and the
-              pill could never hand back. Zero height, so it cannot affect layout. */}
-          <div ref={sentinelRef} aria-hidden="true" style={{ height: 0 }}/>
-
-          {/* Exactly one search surface, from one value. Never zero, never two — by construction,
-              not by two components agreeing. The pill branch lives in TopBar (its collapsed filter
-              row), which receives the same value rather than deciding for itself.
-
-              `hidden` rather than a conditional render, for the layout reason above. The bar is
-              `position: sticky` and reserves its own space, so removing it moved everything below
-              it; and it cannot be wrapped in a hiding container either, because an intermediate box
-              would become sticky's containing block and there would be no room left to stick to. */}
-          <BoardSearchBar
-            hidden={searchSurface !== "bar"}
-            mode="hero"
-            variant="inline"
-            tabs={appTabs}
-            activeTab={activeTab}
-            onTabChange={handlePanelChange}
-            // Jobs tab only: these are board actions, so they would be meaningless sitting above
-            // Job Profiles, Database or Recruiter.
-            actions={activeTab === "console" ? (
-              <>
-              <BoardControlIcons />
-              <div style={{ width: 1, height: 20, background: "var(--border-glass)", margin: "0 8px" }} />
-              <button
-                type="button"
-                onClick={() => setImportOpen(true)}
-                title="Import a job from a link or pasted text"
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "6px 12px", borderRadius: 999,
-                  background: "transparent",
-                  border: "1px solid var(--color-primary)",
-                  color: "var(--color-text)",
-                  fontSize: 12, fontWeight: 600, cursor: "pointer",
-                  textTransform: "uppercase", letterSpacing: "0.08em",
-                  whiteSpace: "nowrap",
-                }}>
-                <Plus size={13} /> Import
-              </button>
-              </>
-            ) : null}
-          />
+          </div>
 
           <main style={{ flex:1, paddingTop: 24 }}>
             {activeTab === "console" && (

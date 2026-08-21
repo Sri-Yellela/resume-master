@@ -73,7 +73,14 @@ test("the bar's wrapper sits inside JobBoardProvider, not above it", () => {
   // null context and throws on destructure. The handlers therefore have to come from a component
   // rendered inside the provider — that is the only reason BoardSearchBar exists, and inlining it
   // back into AppDashboard would crash the dashboard.
-  assert.match(app, /function BoardSearchBar\(\{ tabs, \.\.\.props \}\) \{\s+const \{ applyBarFilters \} = useJobBoard\(\);/);
+  // `{ tabs, ...props }` was the signature while this wrapper also DECORATED the tab row with the
+  // Auto Apply needs-review count. Y4 moved the tab row into the top bar, so the decoration moved
+  // with it to AppTopBar — which exists for exactly the same reason, one provider down. This wrapper
+  // is now only about applyBarFilters.
+  assert.match(app, /function BoardSearchBar\(props\) \{\s+const \{ applyBarFilters \} = useJobBoard\(\);/);
+  // The SAME constraint applies to the count, and it is the reason there are two wrappers rather
+  // than one: AppDashboard renders AutoApplyProvider too, so it cannot read that context either.
+  assert.match(app, /function AppTopBar\(\{ tabs, \.\.\.props \}\) \{\s+const \{ needsAttentionCount = 0 \} = useAutoApply\(\);/);
   const dashboard = app.slice(app.indexOf("function AppDashboard"));
   assert.ok(
     !/const \{[^}]*\} = useJobBoard\(\)/.test(dashboard.slice(0, dashboard.indexOf("<JobBoardProvider>"))),
