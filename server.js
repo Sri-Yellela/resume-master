@@ -5465,13 +5465,36 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       // interleaves employers as a side effect because posting dates vary. NULLs sort last instead
       // of counting as epoch 0 and hiding real postings beneath undated ones. job_id is the final
       // key: it is the primary key, so the order is total and paging is reproducible.
-      const RECENCY = 'sj.scraped_at DESC, (sj.posted_at IS NULL) ASC, sj.posted_at DESC, sj.job_id';
+      //
+      // The leading key is discovered_at (first seen), NOT scraped_at (last touched by a writer).
+      // These are different facts and the column names say so: upsertCanonicalJob writes
+      // `scraped_at: now` on EVERY write, while deliberately preserving `discovered_at` as
+      // first-seen. So the nightly 04:00 crawl rewrites scraped_at on all ~1,250 crawled rows, and
+      // any job that did not arrive in that batch sinks below all of them — regardless of how new
+      // it actually is.
+      //
+      // A user-imported job is exactly that job. Measured on the reproduction board: an import made
+      // minutes earlier ranked LAST, page 34 of 34, under 1,252 crawled rows the crawl had merely
+      // re-touched. "Newest" was sorting by when we last looked at a posting, which is a fact about
+      // our crawler, not about the posting — and it buried the one row the user had personally put
+      // there. discovered_at is what the label already claims to mean, and it is the same column the
+      // NEW<24h pill and the discovered_after filter already trust.
+      //
+      // COALESCE onto scraped_at because rows CAN lack discovered_at (production carries 10 adzuna
+      // orphans from the pre-pivot architecture), matching what the discovered_after filter does
+      // rather than dropping those rows to the bottom forever.
+      //
+      // Deliberate consequence: a re-crawled posting no longer jumps to the top just because the
+      // crawler touched it again. That was never information the user asked to be ranked by.
+      const RECENCY = 'COALESCE(sj.discovered_at, sj.scraped_at) DESC, (sj.posted_at IS NULL) ASC, sj.posted_at DESC, sj.job_id';
       // "Oldest" is a real option in the sort <select> (value "dateAsc") that had no case here, so
       // it fell through to the default and rendered identically to "Newest" — the same silent
       // fall-through that compHigh/compLow suffered before, fixed there and missed here. Undated
       // postings stay last in BOTH directions: they have no date, so leading the "oldest" list with
       // them would be an ordering by absence rather than by age.
-      const OLDEST = 'sj.scraped_at ASC, (sj.posted_at IS NULL) ASC, sj.posted_at ASC, sj.job_id';
+      // Mirrors RECENCY's leading key for the same reason — "Oldest" must mean the posting we have
+      // known about longest, not the one our crawler happened to touch least recently.
+      const OLDEST = 'COALESCE(sj.discovered_at, sj.scraped_at) ASC, (sj.posted_at IS NULL) ASC, sj.posted_at ASC, sj.job_id';
       // NULLs last on every keyed sort, matching what the salary sorts already did. Without it a
       // column that is only partly populated ranks its unscored rows among the scored ones, and a
       // column that is entirely NULL makes the sort a silent no-op that looks like a broken control.
@@ -5910,9 +5933,13 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
       AND sj.scraped_at >= ?
       AND (uj.disliked  IS NULL OR uj.disliked  = 0)
       AND (uj.applied   IS NULL OR uj.applied   = 0)
-    -- Same tie-break as the board (see /api/jobs): a crawl writes its batch within a second or two,
-    -- so scraped_at alone leaves these 50 slots to whichever employer was inserted first.
-    ORDER BY sj.scraped_at DESC, (sj.posted_at IS NULL) ASC, sj.posted_at DESC, sj.job_id
+    -- Same ordering as the board (see /api/jobs' RECENCY): a crawl writes its batch within a second
+    -- or two, so scraped_at alone leaves these 50 slots to whichever employer was inserted first —
+    -- and it ranks by when we last TOUCHED a row rather than when we first saw it, which buries
+    -- anything that did not arrive in the newest crawl batch. The WHERE clause above still gates on
+    -- scraped_at, which is correct there: "changed since you last polled" is genuinely a
+    -- last-touched question. Only the ORDER BY changes.
+    ORDER BY COALESCE(sj.discovered_at, sj.scraped_at) DESC, (sj.posted_at IS NULL) ASC, sj.posted_at DESC, sj.job_id
     LIMIT 50
   `).all(roleKey, userId, activeProfile.id, qRaw, ...pollProfileTitleFilter.params, pollMaxYoe, pollMaxYoe, sinceSeconds);
 
