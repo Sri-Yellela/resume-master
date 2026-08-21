@@ -600,7 +600,13 @@ export default function TopBar({
   return (
     <>
       {/* ── Pill 1: main nav bar — always visible ── */}
+      {/* data-app-chrome marks the element whose HEIGHT the in-flow column has to reserve. The bar
+          is position:fixed, so it reserves nothing itself, and nothing below it reserved anything
+          for it either — see hooks/useChromeHeight.js for the 32px overlap that produced on every
+          tab but Jobs. Measured off this element rather than declared as a constant, because the
+          height moves with font loading, zoom and (after Y4) which tab is showing. */}
       <div
+        data-app-chrome=""
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         style={{
