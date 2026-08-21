@@ -58,6 +58,12 @@ function mapJobRow(j) {
     // migration 078 and has not been recomputed yet — the client must read that exactly the way it
     // reads 'unknown' (no promise in either direction), never as 'direct'.
     automationTier:      j.automation_tier       ?? j.automationTier ?? null,
+    // Whether the LISTING is still live, not whether the row exists. Only the Saved tab can return
+    // is_active = 0 rows (see server.js): runExpiredJobsCleanup retires an expired starred job
+    // rather than deleting it, so its owner keeps it — and needs to be told it has closed instead of
+    // being sent to apply for something that is gone. Absent column (a live-search result, which has
+    // no is_active at all) reads as live, which is what a just-fetched posting is.
+    isActive:            j.is_active == null ? true : !!j.is_active,
     discoveredAt:        j.discovered_at         ?? null,
     summary:             j.summary               ?? null,
     validThrough:        j.valid_through         ?? null,

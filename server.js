@@ -3380,13 +3380,48 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
 // and also scheduled daily.
 function runExpiredJobsCleanup() {
   const cutoff = Math.floor(Date.now()/1000) - 7*24*60*60;
+
+  // STARRED ROWS ARE RETIRED, NEVER REMOVED.
+  //
+  // This DELETE exempted `applied = 1` and nothing else, so a job the user had explicitly saved —
+  // or imported, since importJob.js stars every import for its importer — was hard-deleted seven
+  // days later, and the cascade below then took its user_jobs star with it. The row did not become
+  // inactive, it stopped existing: no is_active flag to inspect, no record that it had ever been
+  // there, and nothing for the Saved tab to show. Observed on the local board (cleanup_log id 34):
+  // 35 jobs and 35 user_jobs rows gone in one pass.
+  //
+  // "I saved this" is at least as strong a statement of intent as "I applied to this", and the whole
+  // point of saving a posting is that it is still there tomorrow. So a starred row expires as a
+  // LISTING — is_active = 0, out of discovery, which is true, it has not been re-seen in seven days
+  // — while the row itself survives.
+  //
+  // Deliberately NOT extended to the un-starred majority: that stays a hard DELETE. Retiring
+  // everything would grow scraped_jobs without bound for no one's benefit, and the reason to keep a
+  // row is that somebody asked for it.
+  //
+  // Applied rows are untouched by BOTH statements, exactly as before — they stay active and present.
+  const retiredStarred = db.prepare(`
+    UPDATE scraped_jobs SET is_active = 0
+    WHERE scraped_at < ? AND is_active = 1
+      AND job_id IN     (SELECT DISTINCT job_id FROM user_jobs WHERE starred = 1)
+      AND job_id NOT IN (SELECT DISTINCT job_id FROM user_jobs WHERE applied = 1)
+  `).run(cutoff);
+
   // Delete jobs older than 7 days based on when they entered our DB.
-  // Applied jobs are permanently exempt from expiry.
+  // Applied and starred jobs are exempt — see above.
+  //
+  // The cascades below key off `job_id NOT IN (SELECT job_id FROM scraped_jobs)`, i.e. on the row
+  // having actually gone. A retired-but-present row therefore keeps its job_role_map entry, its
+  // star, its views and its resumes with no extra guard needed — which is the reason to retire it
+  // rather than delete it.
   const deletedJobs = db.prepare(`
     DELETE FROM scraped_jobs
     WHERE scraped_at < ?
     AND job_id NOT IN (
       SELECT DISTINCT job_id FROM user_jobs WHERE applied = 1
+    )
+    AND job_id NOT IN (
+      SELECT DISTINCT job_id FROM user_jobs WHERE starred = 1
     )
   `).run(cutoff);
 
@@ -3422,12 +3457,16 @@ function runExpiredJobsCleanup() {
     resumeVersions: deletedVersions.changes,
     userJobs: deletedUserJobs.changes,
     userJobViews: deletedViews.changes,
+    // Counted separately from jobs_deleted on purpose: these rows are still here. Folding them into
+    // the delete count would report a removal that did not happen, and this log is the only record
+    // of what a cleanup pass did.
+    starredRetired: retiredStarred.changes,
   });
   db.prepare(
     "INSERT INTO cleanup_log (jobs_deleted, orphans_cleaned, details) VALUES (?,?,?)"
   ).run(deletedJobs.changes, orphans, details);
 
-  console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by DB age), pruned ${orphans} orphaned rows`);
+  console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by DB age), retired ${retiredStarred.changes} starred jobs (kept, is_active=0), pruned ${orphans} orphaned rows`);
 }
 
 // â”€â”€ Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 â”€â”€
@@ -5534,8 +5573,18 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       // Parameterised over the rich-filter fragment alone so the curated and uncurated counts are
       // guaranteed to differ in nothing else — a hand-copied second WHERE would drift the first time
       // any clause above changes.
+      // `is_active = 1` is a DISCOVERY predicate — "this listing is still live" — and on every other
+      // board it stays. The Saved tab relaxes it for the same reason it drops the role join: these
+      // are the user's own picks, and a saved posting that has since closed must be shown as closed,
+      // not quietly removed from the list they built.
+      //
+      // This is the half that makes runExpiredJobsCleanup's retirement mean anything. That pass now
+      // sets is_active = 0 on an expired starred row instead of deleting it — but with a hard
+      // `is_active = 1` here the row would have been preserved in the database and still invisible to
+      // its owner, which is the same disappearance with extra steps. mapJobRow exposes isActive so
+      // the card can label it.
       const whereClauseFor = (rich) => `
-        WHERE sj.is_active = 1
+        WHERE ${savedTab ? '1 = 1' : 'sj.is_active = 1'}
           ${keyFilter}
           ${locFilter}
           AND ${titleFilter.sql}
