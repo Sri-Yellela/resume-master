@@ -100,6 +100,7 @@ import { mapJobRow } from "./services/jobs/mapJobRow.js";
 import { deriveAutomationTier } from "./services/jobs/automationTier.js";
 import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
+import { suggest } from "./services/jobs/searchSuggestions.js";
 import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
 
@@ -5282,6 +5283,43 @@ app.get("/api/jobs/facets", requireAuth, (req, res) => {
     : null;
 
   res.json({ workType, employmentType: empType, category, postedAge, salaryRange, total: rows.length });
+});
+
+
+// ── /api/jobs/suggest — typeahead for the search bar ──────────────
+// Titles and locations DERIVED FROM scraped_jobs, scoped to the caller's active role and ranked by
+// how often each actually occurs. There is no hand-maintained list of roles behind this: if a title
+// is not on the board it is not offered, and when the board changes the suggestions change with it.
+//
+// Additive. Nothing else calls it, no existing response shape changes, and search BEHAVIOUR is
+// untouched — this only proposes text for the input; the double-click local->live pattern still
+// decides what actually happens with it.
+//
+// Cached in services/jobs/searchSuggestions.js: one query per role scope per TTL, then in-memory
+// filtering. That is the requirement that this must not become a query per keystroke against the
+// jobs table — with the client's debounce on top, a fast typist costs zero additional queries.
+app.get("/api/jobs/suggest", requireAuth, (req, res) => {
+  try {
+    const field = req.query.field === "location" ? "location" : "title";
+    const q     = String(req.query.q || "").slice(0, 100);
+    const limit = Math.min(10, Math.max(1, parseInt(req.query.limit, 10) || 8));
+
+    const profile = getOrRepairActiveProfile(req.user.id);
+    // No profile is not an error here. The board itself reports needsProfileSetup and says so
+    // properly; a typeahead has nothing useful to add and must not put an error under the input.
+    if (!profile) return res.json({ suggestions: [] });
+
+    const suggestions = suggest(db, {
+      roleKey: roleKeyForProfile(profile),
+      field, q, limit,
+    });
+    // An empty array is a normal result, not a failure — the client renders nothing for it.
+    res.json({ suggestions });
+  } catch (err) {
+    console.error('[GET /api/jobs/suggest]', err.message);
+    // Degrade to "no suggestions" rather than surfacing a failure on a purely additive convenience.
+    res.json({ suggestions: [] });
+  }
 });
 
 // JOBS â€” shared pool with pagination, filters, sort
