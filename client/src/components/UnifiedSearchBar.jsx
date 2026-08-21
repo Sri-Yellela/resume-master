@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, MapPin, Briefcase, Building2, Tag, X } from 'lucide-react';
 import UsbSelect from './UsbSelect.jsx';
+import UsbSuggest from './UsbSuggest.jsx';
 import './UnifiedSearchBar.css';
 
 // These VALUES are the scraped_jobs.experience_level vocabulary, which is also what the FILTERS
@@ -174,15 +175,21 @@ export default function UnifiedSearchBar({
         {/* Keyword */}
         <div className="usb__field usb__field--main">
           <Search size={15} className="usb__icon" />
-          <input
-            type="text"
-            placeholder="Job title or keywords"
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleClick()}
-            className="usb__input"
-            aria-label="Job title"
-          />
+          {/* Suggestions are proposed here and nowhere else — accepting one only fills the box.
+              The Enter handler below is unchanged and still runs the search; UsbSuggest only
+              intercepts Enter when the user has actually highlighted a row. */}
+          <UsbSuggest field="title" value={q} onChange={setQ}>
+            {sugg => (
+              <input
+                {...sugg}
+                type="text"
+                placeholder="Job title or keywords"
+                onKeyDown={e => { sugg.onKeyDown(e); if (!e.defaultPrevented && e.key === 'Enter') handleClick(); }}
+                className="usb__input"
+                aria-label="Job title"
+              />
+            )}
+          </UsbSuggest>
           {q && (
             <button className="usb__clear" onClick={() => setQ('')} aria-label="Clear">
               <X size={11} />
@@ -195,14 +202,17 @@ export default function UnifiedSearchBar({
         {/* Location */}
         <div className="usb__field usb__field--loc">
           <MapPin size={13} className="usb__icon" />
-          <input
-            type="text"
-            placeholder="Location or Remote"
-            value={loc}
-            onChange={e => setLoc(e.target.value)}
-            className="usb__input"
-            aria-label="Location"
-          />
+          <UsbSuggest field="location" value={loc} onChange={setLoc}>
+            {sugg => (
+              <input
+                {...sugg}
+                type="text"
+                placeholder="Location or Remote"
+                className="usb__input"
+                aria-label="Location"
+              />
+            )}
+          </UsbSuggest>
         </div>
 
         <div className="usb__div" />
