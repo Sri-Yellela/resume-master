@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, MapPin, Briefcase, Building2, Tag, ChevronDown, X } from 'lucide-react';
+import { Search, MapPin, Briefcase, Building2, Tag, X } from 'lucide-react';
+import UsbSelect from './UsbSelect.jsx';
 import './UnifiedSearchBar.css';
 
 // These VALUES are the scraped_jobs.experience_level vocabulary, which is also what the FILTERS
@@ -206,38 +207,28 @@ export default function UnifiedSearchBar({
 
         <div className="usb__div" />
 
-        {/* Experience */}
+        {/* Experience / Domain / Status. These were native <select>s, whose option list is painted
+            by the OS and cannot be themed — see the note at the top of UsbSelect.jsx. The icon and
+            the chevron moved INSIDE the control so the whole thing is one hit target and one focus
+            stop, which is what a native select was; the field wrapper keeps the same class and so
+            the same flex sizing. */}
         <div className="usb__field usb__field--sel">
-          <Briefcase size={13} className="usb__icon" />
-          <select value={exp} onChange={e => setExp(e.target.value)}
-                  className="usb__sel" aria-label="Experience">
-            {EXP_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-          </select>
-          <ChevronDown size={11} className="usb__chev" />
+          <UsbSelect value={exp} onChange={setExp} options={EXP_OPTIONS}
+                     ariaLabel="Experience" icon={Briefcase} />
         </div>
 
         <div className="usb__div" />
 
-        {/* Domain */}
         <div className="usb__field usb__field--sel">
-          <Building2 size={13} className="usb__icon" />
-          <select value={domain} onChange={e => setDomain(e.target.value)}
-                  className="usb__sel" aria-label="Domain">
-            {DOMAIN_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-          </select>
-          <ChevronDown size={11} className="usb__chev" />
+          <UsbSelect value={domain} onChange={setDomain} options={DOMAIN_OPTIONS}
+                     ariaLabel="Domain" icon={Building2} />
         </div>
 
         <div className="usb__div" />
 
-        {/* Status */}
         <div className="usb__field usb__field--sel">
-          <Tag size={13} className="usb__icon" />
-          <select value={status} onChange={e => setStatus(e.target.value)}
-                  className="usb__sel" aria-label="Status">
-            {STATUS_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-          </select>
-          <ChevronDown size={11} className="usb__chev" />
+          <UsbSelect value={status} onChange={setStatus} options={STATUS_OPTIONS}
+                     ariaLabel="Status" icon={Tag} />
         </div>
 
         {/* Search button */}
