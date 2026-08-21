@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef, useId, useCallback } from "react";
 import { getAuthContext } from "../lib/api.js";
 import { DockPortal } from "./DockPortal.jsx";
+import { Z } from "../styles/zLayers.js";
 
 // Same portal, same tokens, as the bar's dropdowns (UsbSelect) — one popup style, not two.
 //
@@ -201,6 +202,9 @@ export default function UsbSuggest({
           anchorRect={rect}
           theme={PORTAL_THEME}
           onClose={dismiss}
+          // Same tier as UsbSelect's listbox, and for the same reason — see the note there. One
+          // search surface, one dropdown tier.
+          tier={Z.SEARCH_DROPDOWN}
           style={{ minWidth: Math.max(240, Math.round(rect.width)), maxWidth: 360, padding: 6 }}
         >
           <ul className="usb__suggest-list" id={listId} role="listbox" aria-label={

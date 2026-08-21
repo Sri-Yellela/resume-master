@@ -109,7 +109,13 @@ test("profile menus use viewport scrolling and dropdown actions", () => {
   // (Z.POPOVER === 10000), because twelve components each owning a literal is how the ordering
   // between any two surfaces became an accident. Pinning the literal here would mean this test fails
   // whenever the scale is renumbered, without anything having actually broken.
-  assert.match(dockPortal, /zIndex: Z\.POPOVER,/);
+  // The MENU tier is still POPOVER — that is what this test is about, and Y2 keeps it there
+  // explicitly: the profile menu is a dropdown FROM the top bar and belongs to the overlay tier when
+  // open, not to the bar's own (now much lower) level. What changed is that the tier is the
+  // PARAMETER DEFAULT rather than a hard-coded literal, so the search bar's dropdowns — which belong
+  // to a surface a drawer covers — can sit at Z.SEARCH_DROPDOWN instead.
+  assert.match(dockPortal, /tier = Z\.POPOVER/, "the default menu tier is no longer POPOVER");
+  assert.match(dockPortal, /zIndex: tier,/);
   assert.match(dockPortal, /import \{ Z \} from "\.\.\/styles\/zLayers\.js";/);
   // The maxHeight/overflowY pair belongs to DockPortal, asserted above — it is the component that
   // actually renders the scrollable menu surface. These two assertions previously duplicated it

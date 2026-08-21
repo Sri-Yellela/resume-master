@@ -6,6 +6,7 @@ import { useTheme } from "../styles/theme.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import JobCard      from "../components/JobCard.jsx";
 import { DockPortal } from "../components/DockPortal.jsx";
+import { Z } from "../styles/zLayers.js";
 
 // ── Calendar component ────────────────────────────────────────
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -228,7 +229,10 @@ function DetailModal({ modal, onClose, theme }) {
   return (
     <div onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{
-        position:"fixed", inset:0, zIndex:1000,
+        // Named tier rather than the literal 1000 it carried, which sat between MODAL (850) and
+        // the old NAV (1500) and belonged to neither. Same class as the other two panel-local
+        // takeovers.
+        position:"fixed", inset:0, zIndex:Z.MODAL_SCRIM,
         background:"rgba(0,0,0,0.55)",
         display:"flex", alignItems:"center", justifyContent:"center",
         padding:24,

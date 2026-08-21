@@ -35,6 +35,7 @@
 import { useRef, useState, useEffect, useId } from "react";
 import { ChevronDown } from "lucide-react";
 import { DockPortal } from "./DockPortal.jsx";
+import { Z } from "../styles/zLayers.js";
 
 // DockPortal takes a theme OBJECT (it predates this surface and its other three callers pass the
 // JS theme from useTheme). CSS custom properties are valid inline style values, so handing it the
@@ -148,6 +149,11 @@ export default function UsbSelect({
           anchorRect={rect}
           theme={PORTAL_THEME}
           onClose={() => close({ refocus: false })}
+          // Y2's SEARCH_DROPDOWN tier, not DockPortal's default POPOVER. This listbox belongs to a
+          // control on the search bar, and the filters drawer and the JD/PDF/ATS panels both COVER
+          // that bar — so at the top tier it was a dropdown from a covered control painting over the
+          // thing covering it. Directly above SEARCH is where it belongs.
+          tier={Z.SEARCH_DROPDOWN}
           style={{ minWidth: Math.max(176, Math.round(rect.width) + 48), padding: 6 }}
         >
           <div id={listId} role="listbox" aria-label={ariaLabel} className="usb__opts">

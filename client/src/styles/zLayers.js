@@ -18,18 +18,67 @@
 //      size will help, because clipping happens before stacking is considered. That case needs a
 //      portal out of the clipping ancestor (see PANEL_POPOVER's note).
 //
-// The chosen integers deliberately preserve the existing relationships that were already correct,
-// so surfaces not yet migrated keep behaving exactly as they do today. Anything above NAV in the
-// app (the 9000-series full-screen modals in CompanyViewModal / CoverLetterModal / ImportJobModal,
-// and ScrollDock's marketing-only 9998 hamburger) is intentionally left alone: they are full-screen
-// takeovers with no ordering dispute against these tiers, and renumbering them would be churn with
-// no defect behind it.
+// WHAT IS DELIBERATELY NOT ON THIS SCALE, and why. This used to read "anything above NAV", which
+// stopped being a usable description the moment Y2 moved NAV from 1500 to 250. The list, stated as
+// surfaces rather than as a number:
+//
+//   9000-series full-screen modals   CompanyViewModal, CoverLetterModal, ImportJobModal, and
+//                                    ScrollDock's marketing-only 9998 hamburger. Full-screen
+//                                    takeovers: nothing else is on screen to dispute an order with.
+//   DomainProfileWizard (1000/1001)  Same — a full-screen wizard.
+//   AdminPanel's overlay (1100)      A different route with none of these surfaces in it.
+//   InlineLoginPopover (1000)        Marketing chrome; no app panel exists on those pages.
+//   MarketingNav / AdminLayout (100) Sticky headers on routes that have no overlay tier. Both are
+//                                    below NAV's 250, which is the relationship they already had.
+//   ScrollDock's dock (200)          Marketing/tools chrome. Also below NAV, as before.
+//
+// THREE THAT WERE MIGRATED IN Y2, because they DID have a dispute: JobsPanel's resume-enhance modal
+// was the literal 600, which is Y2's DRAWER_SCRIM — the same z as the filters drawer's scrim, with
+// render order deciding which won. AutoApplyPanel's apply-runs modal (700) and DatabasePanel's
+// resume viewer (1000) are the same class of panel-local takeover, and fixing one of three while
+// leaving its siblings on raw numbers is how this recurs. All three now read MODAL_SCRIM.
+// ── Y2: THE TOP BAR MOVED TO THE BOTTOM OF THE OVERLAY STACK ─────────────────────────────────
+//
+// NAV was 1500 — above everything except POPOVER — on the reasoning recorded in its old note: "the
+// drawers are inset from the top of the viewport specifically so the nav stays visible and reachable
+// while one is open". That reasoning produced a bar that OCCLUDES overlay surfaces. Measured at
+// 1440x900 with the filters drawer open, before this change: the drawer's own close control sat
+// under the bar and `document.elementFromPoint` at the button's centre returned a nav <div>. The
+// previous pass fixed that by raising the drawer. THIS REVISES THAT DECISION: the drawer was not too
+// low, the bar was too high, and raising each surface the bar covers in turn is an arms race with
+// one loser per round.
+//
+// The ordering is now, top of the stack last:
+//
+//     page content  <  TOP BAR  <  panel popovers  <  search surface  <  search dropdown
+//                   <  filters drawer  <  panel scrim  <  panels  <  menus
+//
+// The bar sits ABOVE page content, so it stays usable while the board scrolls, and BELOW every
+// overlay, so it can never cover one. The consequence is deliberate and is the point: with a panel
+// or the filters drawer open, the top bar is dimmed by that surface's scrim and inerted with the
+// rest of the app (see useBoardLock, whose threshold moved from NAV to MODAL_SCRIM for exactly this
+// reason). A bar that is dimmed AND inert is coherent; the old bar was undimmed and live over a
+// modal, which is the state the scrim exists to prevent.
 export const Z = {
   // In-flow application content: the board, the Applications table, panel bodies.
   CONTENT: 0,
 
+  // FIXED APPLICATION CHROME (TopBar). Above CONTENT so it stays usable while the board scrolls;
+  // below every overlay tier below, so it cannot occlude a popup, dropdown, drawer, scrim or panel.
+  //
+  // 250 rather than something smaller because three surfaces outside this scale sit between 0 and
+  // 250 and their order must not invert: LandingPage.css's hero at 1, MarketingNav and AdminLayout's
+  // sticky headers at 100, and ScrollDock's marketing/tools dock at 200. The nav was above all three
+  // at 1500 and is still above all three at 250.
+  //
+  // The PROFILE MENU is not at this tier. It is a dropdown FROM the bar, and a dropdown belongs to
+  // whatever the user just clicked — it portals to POPOVER via DockPortal, which is where every menu
+  // in the app lives. Only the bar itself is here; the menu it opens is in the overlay tier.
+  NAV: 250,
+
   // Popovers OWNED BY panel content — a date picker in a table cell, an inline autocomplete.
-  // Below SEARCH on purpose: panel chrome must not cover the search surface.
+  // Below SEARCH on purpose: panel chrome must not cover the search surface. Above NAV, because the
+  // rule is that the bar never covers a popover, whoever owns it.
   //
   // NOTE, and this is the trap: several of these are absolutely-positioned inside a panel whose
   // root is `overflow:hidden` (DatabasePanel's sheet is `flex:1; overflow:hidden`). Such a popover
@@ -38,19 +87,32 @@ export const Z = {
   // popovers that are genuinely not clipped.
   PANEL_POPOVER: 300,
 
-  // The search surface: the main bar OR the collapsed pill, never both (see useSearchSurface).
-  // Above CONTENT and above PANEL_POPOVER, so it floats cleanly over panel content instead of
-  // being underlapped by it. Below MODAL, because a drawer is a focused task that should cover it.
+  // The search surface: UnifiedSearchBar (client/src/components/UnifiedSearchBar.css). Above
+  // CONTENT and above PANEL_POPOVER, so it floats cleanly over panel content instead of being
+  // underlapped by it. Below MODAL, because a drawer is a focused task that should cover it.
   //
-  // BOTH RENDERINGS OF THAT SURFACE BELONG HERE. There are two: UnifiedSearchBar (the expanded bar,
-  // client/src/components/UnifiedSearchBar.css) and TopBar's collapsed filter pill. The pill used to
-  // carry NAV instead, which put ONE surface in two tiers depending only on the scroll offset — and
-  // on opposite sides of MODAL_SCRIM. Measured with the page scrolled and two panels open: the pill
-  // painted at 1500 over a scrim at 800 and tiles at 850, cutting 10px across both tiles' headers,
-  // undimmed, and — because useBoardLock deliberately spares everything at or above NAV — still
-  // clickable and tab-reachable through the modal. Anything that renders the search surface reads
-  // SEARCH; NAV is for the nav bar itself, which is meant to stay live over a panel.
+  // This tier used to have TWO renderings — the expanded bar and TopBar's collapsed pill — and the
+  // note here recorded why both had to be in one tier: the pill carried NAV, which put ONE surface
+  // in two tiers depending only on the scroll offset, on opposite sides of MODAL_SCRIM. The pill is
+  // retired, so there is one rendering again; the rule survives it. Anything that renders the
+  // search surface reads SEARCH.
   SEARCH: 400,
+
+  // The search surface's OWN dropdowns: UsbSelect's listbox and UsbSuggest's suggestion list, both
+  // portalled through DockPortal. Directly above SEARCH — a dropdown must cover the control that
+  // opened it — and below the drawer and the panels, because those cover the search bar itself, so
+  // a dropdown belonging to a covered control has no business painting over them.
+  //
+  // Distinct from POPOVER, which is where MENUS live. The difference is ownership: a menu is invoked
+  // from chrome that stays live over a modal, a search dropdown belongs to a surface that does not.
+  SEARCH_DROPDOWN: 500,
+
+  // The filters drawer and its scrim. Its own tier, between the search surface and the panels:
+  // opening it must cover the search bar and the top bar, and opening a JD/PDF/ATS panel on top of
+  // it must cover IT. Before this it shared MODAL_SCRIM/MODAL with the panels, which left the
+  // relative order of two different drawers an accident of render order.
+  DRAWER_SCRIM: 600,
+  DRAWER: 650,
 
   // Modal drawers — the job-detail panel and its peers (PDF, ATS). The scrim dims the app without
   // hiding it, so it sits directly beneath the drawer it belongs to, and ABOVE SEARCH: opening a
@@ -59,15 +121,10 @@ export const Z = {
   MODAL_SCRIM: 800,
   MODAL: 850,
 
-  // Fixed application chrome (TopBar). Above MODAL, matching today's behaviour: the drawers are
-  // inset from the top of the viewport specifically so the nav stays visible and reachable while
-  // one is open. Changing that is a design decision, not a layering fix, so it is preserved.
-  NAV: 1500,
-
-  // Transient, user-invoked overlays: dropdown menus, portalled popovers, command surfaces.
-  // Above everything else by design. A dropdown belongs to whatever the user just clicked, so it
-  // must never be clipped or underlapped — including by a modal drawer, since a drawer can itself
-  // contain a menu. This is the tier that lets a portalled popover escape a clipping ancestor.
+  // Transient, user-invoked MENUS: the profile menu, the profile switcher, portalled popovers.
+  // Above everything else by design. A menu belongs to whatever the user just clicked, so it must
+  // never be clipped or underlapped — including by a modal drawer, since a drawer can itself contain
+  // a menu. This is the tier that lets a portalled popover escape a clipping ancestor.
   POPOVER: 10000,
 };
 

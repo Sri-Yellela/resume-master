@@ -165,12 +165,55 @@ test("there is no dead frame at the swap: the incoming surface never fades in", 
 
 test("the scale is named constants in one file, ordered as the panel spec requires", async () => {
   const { Z } = await import("../client/src/styles/zLayers.js");
-  assert.ok(Z.CONTENT < Z.PANEL_POPOVER, "panel popovers must sit above in-flow content");
-  assert.ok(Z.PANEL_POPOVER < Z.SEARCH, "the search surface must float above panel content");
+
+  // Y2 REVISED THE TOP OF THIS ORDER. The assertion here used to be `Z.MODAL < Z.NAV`, with the
+  // reason "nav chrome stays reachable while a drawer is open, as today". That is precisely the
+  // arrangement that made the top bar occlude the overlays it floated over — the filters drawer's
+  // only close control sat under it, and a hit-test at the button's centre returned a nav <div>.
+  // The bar is now at the BOTTOM of the overlay stack, one step above page content.
+  //
+  // The required order, asserted as a chain so a single reordered tier fails rather than being
+  // absorbed by a looser pairwise check:
+  const order = [
+    ["CONTENT",         Z.CONTENT],
+    ["NAV",             Z.NAV],
+    ["PANEL_POPOVER",   Z.PANEL_POPOVER],
+    ["SEARCH",          Z.SEARCH],
+    ["SEARCH_DROPDOWN", Z.SEARCH_DROPDOWN],
+    ["DRAWER_SCRIM",    Z.DRAWER_SCRIM],
+    ["DRAWER",          Z.DRAWER],
+    ["MODAL_SCRIM",     Z.MODAL_SCRIM],
+    ["MODAL",           Z.MODAL],
+    ["POPOVER",         Z.POPOVER],
+  ];
+  for (let i = 1; i < order.length; i++) {
+    const [prevName, prev] = order[i - 1];
+    const [name, cur] = order[i];
+    assert.ok(Number.isFinite(cur), `${name} is missing from the scale`);
+    assert.ok(prev < cur, `${prevName} (${prev}) must sit below ${name} (${cur})`);
+  }
+
+  // The relationships that carry a defect behind them, named individually so a failure says which
+  // bug came back rather than only that the chain broke.
+  assert.ok(Z.CONTENT < Z.NAV,
+    "the top bar must stay above page content — it has to remain usable while the board scrolls");
+  assert.ok(Z.NAV < Z.PANEL_POPOVER && Z.NAV < Z.SEARCH && Z.NAV < Z.DRAWER &&
+            Z.NAV < Z.MODAL_SCRIM && Z.NAV < Z.MODAL && Z.NAV < Z.POPOVER,
+    "the top bar is occluding an overlay surface again — that is the Y2 defect");
+  assert.ok(Z.SEARCH < Z.SEARCH_DROPDOWN,
+    "a dropdown must cover the control that opened it");
+  assert.ok(Z.SEARCH_DROPDOWN < Z.DRAWER,
+    "the filters drawer covers the search bar, so a dropdown from that bar must not paint over it");
+  assert.ok(Z.DRAWER < Z.MODAL_SCRIM,
+    "opening a JD/PDF/ATS panel must cover the filters drawer, not race it on render order");
   assert.ok(Z.SEARCH < Z.MODAL_SCRIM && Z.MODAL_SCRIM < Z.MODAL,
     "a drawer and its scrim must cover the search surface — the old 40-vs-50 had this inverted");
-  assert.ok(Z.MODAL < Z.NAV, "nav chrome stays reachable while a drawer is open, as today");
-  assert.ok(Z.NAV < Z.POPOVER, "a transient dropdown must never be underlapped, even by a drawer");
+
+  // No two tiers may share a number: equal z means DOM order decides, which is the accident the
+  // scale exists to remove. This is what caught JobsPanel's resume-enhance modal sitting on the
+  // literal 600, the same value as DRAWER_SCRIM.
+  const nums = order.map(([, v]) => v);
+  assert.equal(new Set(nums).size, nums.length, "two tiers share a z value");
 });
 
 test("no surface on the scale carries a literal any more", () => {
@@ -197,7 +240,30 @@ test("no surface on the scale carries a literal any more", () => {
   assert.ok(!/position:"fixed", inset:0, zIndex:/.test(jdPanel),
     "JobDetailPanel is hand-rolling its own scrim again instead of using the shared primitive");
   assert.match(topbar, /zIndex: Z\.NAV/);
-  assert.match(dockPortal, /zIndex: Z\.POPOVER/);
+  // DockPortal takes its tier from the CALLER now, defaulting to POPOVER. One portal serves two
+  // kinds of surface with different ownership: a MENU is invoked from chrome that stays live over a
+  // modal, and the search bar's dropdowns belong to a surface a drawer covers. Hard-coding POPOVER
+  // put a dropdown from a covered control above the thing covering it.
+  assert.match(dockPortal, /tier = Z\.POPOVER/, "DockPortal's default tier is no longer POPOVER");
+  assert.match(dockPortal, /zIndex: tier,/, "DockPortal ignores its caller's tier again");
+  for (const f of ["client/src/components/UsbSelect.jsx", "client/src/components/UsbSuggest.jsx"]) {
+    assert.match(read(f), /tier=\{Z\.SEARCH_DROPDOWN\}/,
+      `${f} is back at the menu tier — it belongs to the search surface`);
+  }
+  // The MENUS keep the default, which is the tier Y2 explicitly assigns them: the profile menu is a
+  // dropdown FROM the bar and belongs to the overlay tier when open, not to the bar's own level.
+  for (const f of ["client/src/components/TopBar.jsx", "client/src/components/ProfileSelectorDropdown.jsx"]) {
+    assert.ok(!/tier=\{/.test(read(f)), `${f} should take DockPortal's default menu tier`);
+  }
+  // And no surface on the scale may carry a raw number that collides with a tier.
+  const NUMS = new Set([250, 300, 400, 500, 600, 650, 800, 850]);
+  for (const f of ["client/src/panels/JobsPanel.jsx", "client/src/panels/AutoApplyPanel.jsx",
+                   "client/src/panels/DatabasePanel.jsx", "client/src/components/PanelShell.jsx"]) {
+    for (const m of code(f).matchAll(/zIndex:\s*(\d+)/g)) {
+      assert.ok(!NUMS.has(Number(m[1])),
+        `${f} carries the raw z-index ${m[1]}, which collides with a named tier`);
+    }
+  }
 });
 
 // ── (ii) The clipping, and the click ──────────────────────────────────────────────────────────

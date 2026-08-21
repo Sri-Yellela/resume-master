@@ -400,10 +400,17 @@ function defaultFilterSnapshot() {
 // control was not merely cramped: it was unclickable across its upper half.
 //
 // The fix is the one client/src/styles/zLayers.js prescribes, not a bigger number. Its rule 2 says
-// "a raw bump is not a fix — the question is which TIER it belongs to", and Z.NAV's own note says
-// the drawers are "inset from the top of the viewport specifically so the nav stays visible and
-// reachable while one is open". This is a scrimmed modal drawer, so it reads MODAL_SCRIM / MODAL
-// like its peers, and it now takes the same top inset they do.
+// "a raw bump is not a fix — the question is which TIER it belongs to", and 500 belonged to no tier.
+//
+// Y2 REVISED WHICH TIER. The first fix put this drawer on MODAL_SCRIM / MODAL — the panels' own
+// tiers — which cleared the nav but left the relative order of TWO different drawers an accident of
+// render order: open a JD panel while the filters drawer is up and which one won was undefined.
+// It now has its own tier, DRAWER_SCRIM / DRAWER, between the search surface and the panels: it
+// covers the search bar and the top bar, and a JD/PDF/ATS panel covers it.
+//
+// The nav clearance itself is no longer LOAD-BEARING for reachability — the bar is at Z.NAV (250),
+// below this drawer, so it cannot occlude the close control whatever the geometry. The inset stays
+// for the independent reason it was chosen: PanelShell parity.
 //
 // 80 / 16 are PanelShell's PanelDock values verbatim (its wide geometry is `top: 80, bottom: 16`),
 // so the filters drawer and the JD/PDF/ATS dock share a top edge instead of being two
@@ -504,7 +511,7 @@ function FiltersPanel({
                         textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 };
   return (
     <div style={{
-      position:"fixed", inset:0, zIndex:Z.MODAL_SCRIM,
+      position:"fixed", inset:0, zIndex:Z.DRAWER_SCRIM,
       // `stretch`, not `flex-start`: the panel's height now comes from this container's padding
       // (see FILTER_DRAWER_TOP below), so it must fill the padded box rather than hug its content.
       display:"flex", alignItems:"stretch", justifyContent:"flex-end",
@@ -520,7 +527,7 @@ function FiltersPanel({
         initial={{ x:360 }} animate={{ x:0 }} exit={{ x:360 }}
         transition={{ type:"tween", duration:0.22 }}
         style={{
-          width:320, height:"100%", zIndex:Z.MODAL,
+          width:320, height:"100%", zIndex:Z.DRAWER,
           background:theme.modalSurface || "#111827",
           borderLeft:`3px solid ${theme.accent}`,
           padding:"24px 20px", overflowY:"auto",
@@ -3135,9 +3142,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         onChange={handleFile} style={{ display:"none" }}/>
 
       {/* â"€â"€ Resume Enhance modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+      {/* Z.MODAL_SCRIM below, not the literal 600 this modal carried. 600 is Y2's DRAWER_SCRIM, so
+          this modal and the filters drawer's scrim were at the SAME z and their order was decided by
+          render order — the exact accident the named scale exists to remove. A resume-enhance modal
+          is a focused takeover and belongs above the drawer, which is what MODAL_SCRIM gives it. */}
       {enhanceModalOpen && enhanceResult && (
         <div style={{
-          position:"fixed", inset:0, zIndex:600,
+          position:"fixed", inset:0, zIndex:Z.MODAL_SCRIM,
           background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center",
         }}>
           <div style={{

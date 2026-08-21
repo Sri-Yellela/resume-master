@@ -332,11 +332,16 @@ function AppDashboard({ authUser, setAuthUser }) {
         {/* data-app-shell marks the element whose children are the app's own surfaces, so the panel
             host can make the BOARD inert while a panel is open without hunting for it by class or
             position. It does not need to know WHICH child is the board: useBoardLock inerts every
-            child that renders BELOW the scrim and leaves alone every child at or above Z.NAV. That
-            rule is the reason TopBar stays interactive — it paints above the scrim and is therefore
-            undimmed and visibly clickable, and a control that looks live but is inert is worse than
-            one that works. Keying on the z-tier rather than a marker prop also means TopBar's second
-            pill is covered without either component knowing about the other. */}
+            child that renders BELOW the scrim and leaves alone every child at or above
+            Z.MODAL_SCRIM.
+
+            Y2 CHANGED WHICH SIDE OF THAT LINE THE TOP BAR IS ON. It used to paint at Z.NAV (1500),
+            above the scrim, so it stayed undimmed and live over an open panel — and the note here
+            defended that, on the grounds that a control which looks live but is inert is worse than
+            one that works. The bar is now at Z.NAV (250), BELOW every overlay, so the scrim covers
+            it and useBoardLock inerts it with everything else. That pairing is still coherent, in
+            the other direction: dimmed AND inert. What the old arrangement actually produced was a
+            bar that occluded the surfaces it was floating over. */}
         <div data-app-shell
              style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
                       minHeight:"100vh", display:"flex", flexDirection:"column",
@@ -444,7 +449,8 @@ function AppDashboard({ authUser, setAuthUser }) {
           {/* JobDetailPanel moved into JobsPanel, which is where the PDF and ATS panels live and
               where the shared panel host runs — three peers cannot tile side by side from two
               different parents. One visible consequence, stated rather than hidden: switching tabs
-              from the TopBar (which sits above the scrim at Z.NAV) now hides the drawer with the
+              from the TopBar (which used to sit above the scrim at Z.NAV; since Y2 it sits below,
+              and is inert while a panel is open) hides the drawer with the
               board it belongs to instead of leaving it floating over the Database panel. The
               selection itself lives in JobBoardContext, above the tab switch, so returning to Jobs
               restores the same open drawer. */}

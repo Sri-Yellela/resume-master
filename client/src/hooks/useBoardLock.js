@@ -26,11 +26,24 @@ import { Z } from "../styles/zLayers.js";
 // width at the instant a panel opens. That gutter is measured BEFORE locking and paid back as
 // padding, so the board does not move.
 //
-// WHAT STAYS ALIVE. Every child of [data-app-shell] is inerted EXCEPT those painting at or above
-// Z.NAV. The nav renders above the scrim and is therefore undimmed and visibly clickable; inerting
-// it would leave a control that looks live and is not. This is the same relationship the z-scale
-// already declares (NAV > MODAL > MODAL_SCRIM), read at runtime instead of restated as a list of
-// component names.
+// WHAT STAYS ALIVE. Every child of [data-app-shell] is inerted EXCEPT those painting AT OR ABOVE
+// THE SCRIM. The rule is unchanged in intent — "anything the scrim does not cover stays live, and
+// anything it covers goes inert, so nothing ever looks live while being inert" — but the threshold
+// it is expressed against had to move.
+//
+// It used to read `z >= Z.NAV`, which was the same line as "at or above the scrim" only because
+// NAV was 1500 and the scrim was 800. Y2 lowered NAV to 250: the top bar now sits BELOW every
+// overlay so it can never occlude one. Left as `>= Z.NAV`, this loop would have started sparing
+// every child at 250 or more — including the search surface at Z.SEARCH (400), which is exactly the
+// defect 7f687bd fixed: a live, tab-reachable search surface underneath an open modal.
+//
+// So the threshold is now the scrim itself, which is what it always meant. Reading Z.MODAL_SCRIM
+// instead of Z.NAV also makes it immune to the next renumbering of the chrome, because the question
+// is about the scrim and never was about the nav.
+//
+// The consequence, stated rather than discovered: the top bar is now inerted with the board while a
+// panel is open, and dimmed by the scrim that covers it. That is the coherent pairing. The panel's
+// own close control and a click on the scrim both still dismiss it.
 export function useBoardLock(active) {
   useEffect(() => {
     if (!active) return undefined;
@@ -69,7 +82,7 @@ export function useBoardLock(active) {
     if (shell) {
       for (const child of Array.from(shell.children)) {
         const z = parseInt(getComputedStyle(child).zIndex, 10);
-        if (Number.isFinite(z) && z >= Z.NAV) continue;   // paints above the scrim — stays live
+        if (Number.isFinite(z) && z >= Z.MODAL_SCRIM) continue;  // at or above the scrim — stays live
         if (child.hasAttribute("inert")) continue;        // someone else owns it; don't fight them
         child.setAttribute("inert", "");
         inerted.push(child);

@@ -16,7 +16,17 @@ function getPortalPosition(anchorRect, panelWidth) {
   return { top, left };
 }
 
-export function DockPortal({ children, anchorRect, theme, onClose, style = {} }) {
+/**
+ * `tier` — which z tier this portal paints at. Defaults to Z.POPOVER, which is right for a MENU:
+ * a menu is invoked from chrome that stays live over a modal, so it must never be underlapped.
+ *
+ * The search bar's own dropdowns are the exception, and they pass Z.SEARCH_DROPDOWN. They belong to
+ * a surface that a drawer or a panel COVERS, so painting them at the top tier put a dropdown from a
+ * covered control over the thing covering it. Y2's scale places them directly above SEARCH and below
+ * the drawer instead. The portal itself is unchanged either way — the whole reason this component
+ * exists is escaping a clipping ancestor, and that is orthogonal to which tier it lands in.
+ */
+export function DockPortal({ children, anchorRect, theme, onClose, style = {}, tier = Z.POPOVER }) {
   const panelRef = useRef(null);
 
   // ── Outside click: dismiss WITHOUT consuming the click ──────────────────────────────────────
@@ -64,9 +74,9 @@ export function DockPortal({ children, anchorRect, theme, onClose, style = {} })
       position: "fixed",
       top: pos.top,
       left: pos.left,
-      // POPOVER tier (client/src/styles/zLayers.js). Portalled to document.body so no panel's
-      // overflow:hidden or transform can clip it, and at the top tier so nothing underlaps it.
-      zIndex: Z.POPOVER,
+      // The caller's tier (client/src/styles/zLayers.js), POPOVER by default. Portalled to
+      // document.body either way, so no ancestor's overflow:hidden or transform can clip it.
+      zIndex: tier,
       background: theme?.menuSurface || theme?.surface || "rgba(20,20,20,0.98)",
       border: `1px solid ${theme?.border || "rgba(255,255,255,0.1)"}`,
       borderRadius: 8,
