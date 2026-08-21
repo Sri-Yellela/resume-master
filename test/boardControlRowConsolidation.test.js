@@ -108,3 +108,42 @@ test("opening the panel still stages the committed filters and fetches facets", 
     "a second open path is back — staging must have exactly one");
   assert.match(panel, /const filtersOpen = filterPanelOpen;/);
 });
+
+test("the filters drawer is on the named tiers and inset clear of the nav", () => {
+  // It was `position: fixed; inset: 0; zIndex: 500` — a raw number belonging to no tier in
+  // client/src/styles/zLayers.js, and full-height under a TopBar at Z.NAV (1500). Measured at
+  // 1440x900 with the drawer open: panel 0 -> 900, header 24 -> 54, close button a 9x27 box at
+  // x 1411-1420 / y 26-53 overlapping the avatar at 1389-1419 / y 8-38 — and a hit-test at the
+  // close button's own centre returned a nav <div>, not the button. Unclickable, not just cramped.
+  //
+  // zLayers' rule 2 is explicit that a raw bump is not the fix ("the question is which TIER it
+  // belongs to"), and Z.NAV's note records the design: drawers are inset from the top so the nav
+  // stays visible and reachable while one is open.
+  assert.ok(!/position:"fixed", inset:0, zIndex:500/.test(panel),
+    "the drawer is back on a raw z-index outside the scale");
+  assert.match(panel, /position:"fixed", inset:0, zIndex:Z\.MODAL_SCRIM/);
+  assert.match(panel, /width:320, height:"100%", zIndex:Z\.MODAL/);
+  assert.match(panel, /import \{ Z \} from "\.\.\/styles\/zLayers\.js"/);
+
+  // The clearance is padding on the SCRIM, so the dim still covers the whole viewport while the
+  // panel inside it starts below the nav — a scrim that stopped at the nav would leave an
+  // undimmed strip across the top of a modal surface.
+  assert.match(panel, /padding:`\$\{FILTER_DRAWER_TOP\}px 0 \$\{FILTER_DRAWER_BOTTOM\}px`/);
+  assert.match(panel, /alignItems:"stretch"/);
+
+  // 80 / 16 are PanelShell's PanelDock values, so the two drawers share a top edge rather than
+  // being two nearly-aligned surfaces. Read from PanelShell so they cannot drift apart silently.
+  const shell = read("client/src/components/PanelShell.jsx");
+  const dock = shell.match(/\{ right: EDGE_GAP, top: (\d+), bottom: (\d+),/);
+  assert.ok(dock, "PanelDock's wide geometry moved — re-check the filters drawer against it");
+  assert.match(panel, new RegExp(`const FILTER_DRAWER_TOP = ${dock[1]};`),
+    `the filters drawer no longer shares PanelDock's top inset (${dock[1]})`);
+  assert.match(panel, new RegExp(`const FILTER_DRAWER_BOTTOM = ${dock[2]};`));
+});
+
+test("the drawer's close control is a real hit target with a real name", () => {
+  // 9x27 was the width of the glyph alone, under the 24x24 minimum, and "x" is not an accessible
+  // name.
+  assert.match(panel, /aria-label="Close filters"/);
+  assert.match(panel, /width:28, height:28, flexShrink:0, borderRadius:6/);
+});

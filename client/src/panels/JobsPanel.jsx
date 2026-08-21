@@ -20,6 +20,7 @@ import ProfileSelectorDropdown from "../components/ProfileSelectorDropdown.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { useAppScroll } from "../contexts/AppScrollContext.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
+import { Z } from "../styles/zLayers.js";
 import { toast } from "../hooks/use-toast.js";
 import ROLE_ALIAS_MAP from "../../../data/ROLE_ALIAS_MAP.json";
 
@@ -406,6 +407,27 @@ function defaultFilterSnapshot() {
 }
 
 // â"€â"€ Filters panel (collapsible) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// The filters drawer's nav clearance.
+//
+// It used to be `position: fixed; inset: 0; zIndex: 500` — a raw number belonging to no tier, and
+// full-height. TopBar is Z.NAV (1500), so the top 46px of the drawer sat UNDER it. Measured at
+// 1440x900 with the drawer open: the panel ran 0 -> 900, its header 24 -> 54, and its close button
+// was a 9px-wide box at x 1411-1420, y 26-53 — overlapping the avatar at 1389-1419, y 8-38. A
+// hit-test at the close button's own centre (1416, 40) returned a nav <div>, not the button. So the
+// control was not merely cramped: it was unclickable across its upper half.
+//
+// The fix is the one client/src/styles/zLayers.js prescribes, not a bigger number. Its rule 2 says
+// "a raw bump is not a fix — the question is which TIER it belongs to", and Z.NAV's own note says
+// the drawers are "inset from the top of the viewport specifically so the nav stays visible and
+// reachable while one is open". This is a scrimmed modal drawer, so it reads MODAL_SCRIM / MODAL
+// like its peers, and it now takes the same top inset they do.
+//
+// 80 / 16 are PanelShell's PanelDock values verbatim (its wide geometry is `top: 80, bottom: 16`),
+// so the filters drawer and the JD/PDF/ATS dock share a top edge instead of being two
+// nearly-aligned surfaces. The nav is 46px tall, so 80 clears it with 34px to spare.
+const FILTER_DRAWER_TOP = 80;
+const FILTER_DRAWER_BOTTOM = 16;
+
 function FiltersPanel({
   open, onClose, onApply,
   categories,
@@ -499,8 +521,14 @@ function FiltersPanel({
                         textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 };
   return (
     <div style={{
-      position:"fixed", inset:0, zIndex:500,
-      display:"flex", alignItems:"flex-start", justifyContent:"flex-end",
+      position:"fixed", inset:0, zIndex:Z.MODAL_SCRIM,
+      // `stretch`, not `flex-start`: the panel's height now comes from this container's padding
+      // (see FILTER_DRAWER_TOP below), so it must fill the padded box rather than hug its content.
+      display:"flex", alignItems:"stretch", justifyContent:"flex-end",
+      // The nav clearance lives on the SCRIM as padding, so the dim still covers the full viewport
+      // — including behind the top bar — while the panel inside it starts below the nav. A scrim
+      // that stopped at the nav would leave an undimmed strip across the top of a modal surface.
+      padding:`${FILTER_DRAWER_TOP}px 0 ${FILTER_DRAWER_BOTTOM}px`,
       background:"rgba(0,0,0,0.42)",
       isolation:"isolate",
     }}
@@ -509,7 +537,8 @@ function FiltersPanel({
         initial={{ x:360 }} animate={{ x:0 }} exit={{ x:360 }}
         transition={{ type:"tween", duration:0.22 }}
         style={{
-          width:320, height:"100%", background:theme.modalSurface || "#111827",
+          width:320, height:"100%", zIndex:Z.MODAL,
+          background:theme.modalSurface || "#111827",
           borderLeft:`3px solid ${theme.accent}`,
           padding:"24px 20px", overflowY:"auto",
           display:"flex", flexDirection:"column", gap:16,
@@ -520,8 +549,20 @@ function FiltersPanel({
                           fontSize:20, letterSpacing:"0.06em", textTransform:"uppercase" }}>
             Filters
           </span>
-          <button onClick={onClose} style={{ background:"none", border:"none",
-                                             cursor:"pointer", fontSize:18, color:theme.textMuted }}>x</button>
+          {/* A real hit target. With no padding this was the width of the glyph alone — measured at
+              9x27px, under the 24x24 minimum, and easy to miss even once it stopped being covered
+              by the nav. Square, centred, and the same 6px radius the drawer's other controls use.
+              `aria-label` because "x" is not a name. */}
+          <button onClick={onClose} aria-label="Close filters" title="Close filters"
+            style={{ width:28, height:28, flexShrink:0, borderRadius:6,
+                     display:"flex", alignItems:"center", justifyContent:"center",
+                     background:"none", border:"none",
+                     cursor:"pointer", fontSize:18, lineHeight:1, color:theme.textMuted,
+                     transition:"background 0.15s, color 0.15s" }}
+            onMouseEnter={e => { e.currentTarget.style.background = theme.surfaceHigh || "rgba(255,255,255,0.08)";
+                                 e.currentTarget.style.color = theme.text; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "none";
+                                 e.currentTarget.style.color = theme.textMuted; }}>x</button>
         </div>
 
         {/* ── Quick filters and saved searches ──────────────────────────────────────────
