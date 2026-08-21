@@ -10,7 +10,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const panel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+// The tier FILTERS are still the board's, but the apply QUEUE's tier warning moved to
+// panels/AutoApplyPanel.jsx with the rest of the pipeline (W5). Both are read so each
+// assertion keeps covering the thing it was written for.
+const panel = [
+  "client/src/panels/JobsPanel.jsx",
+  "client/src/panels/AutoApplyPanel.jsx",
+].map(f => fs.readFileSync(f, "utf8")).join("\n");
 const card  = fs.readFileSync("client/src/components/JobCard.jsx", "utf8");
 
 const NEW_FIELDS = ["sourcesInclude", "sourcesExclude", "tiersInclude", "tiersExclude"];

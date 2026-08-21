@@ -72,7 +72,7 @@ test("the bar's wrapper sits inside JobBoardProvider, not above it", () => {
   // null context and throws on destructure. The handlers therefore have to come from a component
   // rendered inside the provider — that is the only reason BoardSearchBar exists, and inlining it
   // back into AppDashboard would crash the dashboard.
-  assert.match(app, /function BoardSearchBar\(props\) \{\s*const \{ applyBarFilters \} = useJobBoard\(\);/);
+  assert.match(app, /function BoardSearchBar\(\{ tabs, \.\.\.props \}\) \{\s+const \{ applyBarFilters \} = useJobBoard\(\);/);
   const dashboard = app.slice(app.indexOf("function AppDashboard"));
   assert.ok(
     !/const \{[^}]*\} = useJobBoard\(\)/.test(dashboard.slice(0, dashboard.indexOf("<JobBoardProvider>"))),
