@@ -60,13 +60,28 @@
    placement used on the marketing landing would overlap that content — which is
    the "embossing upon content" bug. The inline variant keeps the bar in normal
    document flow and uses position:sticky so it reserves its own space (no
-   overlap) and still pins under the 56px TopBar when the page scrolls.
+   overlap) and still pins under the TopBar when the page scrolls.
    These rules override the fixed-float positioning above via higher specificity
-   (two classes) so the landing-page behavior is untouched. */
+   (two classes) so the landing-page behavior is untouched.
+
+   `top` IS THE MEASURED CHROME HEIGHT, NOT 56px. Two things were wrong with the
+   literal. First it was the wrong number: the comment said "pins under the 56px
+   TopBar", but the app's top bar is 46px — 56 is the MARKETING NavBar's height,
+   copied onto app chrome of a different size. Second, and worse, on every tab
+   except Jobs this element's STATIC position is 0, so a sticky threshold above
+   it displaced the painted box 56px down from the space it reserves, straight
+   over the panel content below. Measured at 1440x900: reserves 0->153, paints
+   56->209, first content at 177, so 32px of the Applications table sat under
+   the bar.
+   --app-chrome-height is published by hooks/useChromeHeight.js from the same
+   measurement the shell uses to RESERVE that height, so the threshold and the
+   static position are equal by construction and the displacement is zero. The
+   fallback matches today's bar only so an unstyled first frame is close; the
+   real value always arrives from the measurement. */
 .usb--inline.usb--hero,
 .usb--inline.usb--dock {
   position: sticky;
-  top: 56px;
+  top: var(--app-chrome-height, 46px);
   left: auto;
   right: auto;
   transform: none;

@@ -12,6 +12,7 @@ import DBInspector               from "./pages/admin/DBInspector.jsx";
 import TopBar                    from "./components/TopBar.jsx";
 import AppShell                  from "./components/AppShell.jsx";
 import { useSearchSurface }      from "./hooks/useSearchSurface.js";
+import { useChromeHeight }       from "./hooks/useChromeHeight.js";
 import { AppScrollProvider } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider, useJobBoard } from "./contexts/JobBoardContext.jsx";
 import { AutoApplyProvider, useAutoApply } from "./contexts/AutoApplyContext.jsx";
@@ -212,6 +213,9 @@ function AppDashboard({ authUser, setAuthUser }) {
   // could never yield to the pill while TopBar's pill was being decided independently from the
   // board's inner scroll container. That pair of unrelated booleans is why both were visible.
   const { surface: searchSurface, sentinelRef } = useSearchSurface();
+  // The FIXED chrome's real height, measured off the bar itself (hooks/useChromeHeight.js). The
+  // in-flow column reserves exactly this below, which is what stops content starting underneath it.
+  const chromeHeight = useChromeHeight();
   const consolePath = `/app/${CONSOLE_ROUTE}`;
   const routeKey = location.pathname.replace(/^\/app\/?/, "") || "";
   const activeTab = routeKey === CONSOLE_ROUTE || LEGACY_CONSOLE_ROUTES.has(routeKey) || routeKey === ""
@@ -342,9 +346,18 @@ function AppDashboard({ authUser, setAuthUser }) {
             it and useBoardLock inerts it with everything else. That pairing is still coherent, in
             the other direction: dimmed AND inert. What the old arrangement actually produced was a
             bar that occluded the surfaces it was floating over. */}
+        {/* paddingTop RESERVES THE FIXED CHROME'S HEIGHT for everything in flow below it. TopBar is
+            position:fixed and so reserves nothing; before this, two unrelated things absorbed it by
+            accident — the hero's 80px top padding on Jobs, and the search bar's own reserved box on
+            the other tabs — and the second one got it wrong by 56px. Measured, not 46: see
+            hooks/useChromeHeight.js.
+
+            box-sizing is border-box globally (index.css), so the padding comes out of the 100vh
+            rather than adding to it and the shell does not grow a scrollbar of its own. */}
         <div data-app-shell
              style={{ fontFamily:"'DM Sans',system-ui,sans-serif", fontSize:13,
                       minHeight:"100vh", display:"flex", flexDirection:"column",
+                      paddingTop: chromeHeight,
                       color:theme.text }}>
 
           <TopBar
@@ -367,9 +380,14 @@ function AppDashboard({ authUser, setAuthUser }) {
               nothing on screen, because at the moment of the flip both are scrolled out of view by
               definition. `visibility: hidden` also takes them out of the tab order, so the hidden
               surface cannot be reached by keyboard. */}
+          {/* The hero's top padding below is 34px, not the 80px it was: the shell now RESERVES the
+              chrome's height above this, so 34 + a 46px bar is the same 80px from the top of the
+              viewport the hero has always had. Expressed that way it is a distance BELOW THE
+              CHROME, which is what it was always meant to be — an 80px absolute offset cleared the
+              bar only by coincidence, and would stop clearing it the moment the bar grew. */}
           {activeTab === "console" && (
             <div aria-hidden={searchSurface !== "bar"}
-                 style={{ textAlign:"center", padding:"80px 20px 40px",
+                 style={{ textAlign:"center", padding:"34px 20px 40px",
                           animation:"fadeUp 0.6s ease both",
                           visibility: searchSurface === "bar" ? "visible" : "hidden" }}>
               <div style={{
