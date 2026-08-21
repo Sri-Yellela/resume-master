@@ -59,23 +59,35 @@ function AnimatedLucyLogo({ theme, progress: p }) {
       position: "relative", display: "inline-flex", alignItems: "center",
       justifyContent: "center", flexShrink: 0, height: 36, minWidth: 50,
     }}>
-      {/* Outer accent rect removed — inner white stamp is sufficient */}
+      {/* Translucent, not a solid stamp (W6). This was an opaque white block with a 2.5px black
+          border and black italic text — a high-contrast rectangle sitting on a dark translucent
+          glass bar, the one element on the surface that did not belong to it. It is now the same
+          material as everything around it: a faint fill, the shared --border-glass hairline, and
+          muted text that lifts to full strength on hover. The rotation is kept, because that is
+          the mark's character and nothing about it was the problem.
+
+          The MARKETING mark (components/StampLogo.jsx, used by NavBar and the landing hero) is
+          deliberately untouched: it sits on photography rather than on the app's glass, and the
+          solid stamp is doing a job there that it was not doing here. */}
       <div style={{
         position: "relative", zIndex: 1, padding: "3px 10px",
-        background: "#ffffff", border: "2.5px solid #0f0f0f",
-        transform: "rotate(-2deg)", borderRadius: 2,
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid var(--border-glass, rgba(255,255,255,0.12))",
+        backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+        transform: "rotate(-2deg)", borderRadius: 3,
         display: "flex", alignItems: "center", overflow: "hidden",
+        transition: "background 0.15s, border-color 0.15s",
       }}>
         <span style={{
           fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
           fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
-          textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
+          textTransform: "uppercase", color: theme.text, fontStyle: "italic",
           lineHeight: 1, whiteSpace: "nowrap",
         }}>R</span>
         <span style={{
           fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
           fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
-          textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
+          textTransform: "uppercase", color: theme.textMuted, fontStyle: "italic",
           lineHeight: 1, whiteSpace: "nowrap",
           display: "inline-block",
           maxWidth: textMaxW + "px",
@@ -97,13 +109,19 @@ function Divider({ theme }) {
   );
 }
 
-// ── Notification bell ─────────────────────────────────────────
-function NotificationsBell({ theme }) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState(null);
+// ── Notifications ─────────────────────────────────────────────
+//
+// These used to be a bell of their own in the top bar, beside a quick-actions button. Both are
+// gone from the bar (W6): quick actions entirely, and the bell INTO the profile menu.
+//
+// The one thing that could not move with it is the unread count. A notification nobody can see is
+// not a notification, and burying the count behind a menu you have to open first would make unread
+// items invisible — so the badge stays in the bar, on the avatar, and only the LIST moved. That
+// split is why this is a hook plus a section rather than one component: the badge and the list are
+// two renderings of one piece of state, in two places, and they must not be able to disagree.
+function useNotifications() {
   const [notifs, setNotifs] = useState([]);
   const [unread, setUnread] = useState(0);
-  const triggerRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -121,85 +139,66 @@ function NotificationsBell({ theme }) {
     resume_generated: () => setUnread(n => n + 1),
   });
 
-  const markAll = async () => {
+  const markAll = useCallback(async () => {
     try { await api("/api/notifications/read-all", { method: "PATCH" }); } catch {}
     setNotifs(n => n.map(x => ({ ...x, read: 1 })));
     setUnread(0);
-  };
+  }, []);
 
-  const timeAgo = (ts) => {
-    const s = Math.floor(Date.now() / 1000 - ts);
-    if (s < 60)    return "just now";
-    if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-    return `${Math.floor(s / 86400)}d ago`;
-  };
+  return { notifs, unread, load, markAll };
+}
 
-  const TYPE_ICONS = {
-    scrape_complete: "🔍", resume_generated: "✦", ats_scored: "🎯",
-    enhance_ready: "✨", best_match: "⚡", apply_complete: "✅",
-  };
+const NOTIF_TYPE_ICONS = {
+  scrape_complete: "🔍", resume_generated: "✦", ats_scored: "🎯",
+  enhance_ready: "✨", best_match: "⚡", apply_complete: "✅",
+};
 
+function notifTimeAgo(ts) {
+  const s = Math.floor(Date.now() / 1000 - ts);
+  if (s < 60)    return "just now";
+  if (s < 3600)  return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+// The list, rendered inside the profile menu. Every row, the mark-all-read action, the per-item
+// unread dot, the icons and the relative timestamps are the bell's, unchanged — this is where they
+// live now, not a reduced version of them. Scrolls within itself so a long list cannot push the
+// rest of the menu off screen.
+function NotificationsSection({ theme, notifs, unread, markAll }) {
   return (
-    <div style={{ position: "relative" }}>
-      <button
-        ref={triggerRef}
-        onClick={() => {
-          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
-          setOpen(o => { if (!o) load(); return !o; });
-        }}
-        title="Notifications"
-        style={{
-          background: "transparent", border: "none", cursor: "pointer",
-          width: 32, height: 32, borderRadius: 6, position: "relative", flexShrink: 0,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: theme.textMuted, fontSize: 15,
-          transition: "color 0.15s, background 0.15s",
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.color = theme.accent; }}
-        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.textMuted; }}>
-        🔔
+    <div style={{ borderBottom: `1px solid ${theme.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "10px 16px 8px" }}>
+        <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                       letterSpacing: "0.08em", color: theme.textDim }}>
+          Notifications{unread > 0 ? ` (${unread})` : ""}
+        </span>
         {unread > 0 && (
-          <span style={{
-            position: "absolute", top: 0, right: 2,
-            background: theme.accent, color: "#0f0f0f",
-            borderRadius: "50%", width: 16, height: 16,
-            fontSize: 9, fontWeight: 800, lineHeight: "16px", textAlign: "center",
-          }}>
-            {unread > 9 ? "9+" : unread}
-          </span>
+          <button onClick={markAll}
+            style={{ background: "none", border: "none", cursor: "pointer",
+                     fontSize: 10, color: theme.accentText, fontWeight: 700, padding: 0 }}>
+            Mark all read
+          </button>
         )}
-      </button>
-
-      {open && rect && (
-        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
-          style={{ minWidth: 300 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "6px 14px 10px", borderBottom: `1px solid ${theme.border}` }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: theme.text }}>Notifications</span>
-            {unread > 0 && (
-              <button onClick={markAll}
-                style={{ background: "none", border: "none", cursor: "pointer",
-                         fontSize: 10, color: theme.accentText, fontWeight: 700, padding: 0 }}>
-                Mark all read
-              </button>
-            )}
-          </div>
-          {notifs.length === 0 ? (
-            <div style={{ padding: "20px 14px", textAlign: "center", fontSize: 12, color: theme.textDim }}>
-              No notifications yet
-            </div>
-          ) : notifs.slice(0, 20).map(n => (
+      </div>
+      {notifs.length === 0 ? (
+        <div style={{ padding: "8px 16px 14px", fontSize: 12, color: theme.textDim }}>
+          No notifications yet
+        </div>
+      ) : (
+        <div style={{ maxHeight: 220, overflowY: "auto", paddingBottom: 6 }}>
+          {notifs.slice(0, 20).map(n => (
             <div key={n.id} style={{
-              padding: "8px 14px", display: "flex", alignItems: "flex-start", gap: 10,
+              padding: "8px 16px", display: "flex", alignItems: "flex-start", gap: 10,
               background: !n.read ? `${theme.accent}0d` : "transparent",
             }}>
               <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>
-                {TYPE_ICONS[n.type] || "ℹ"}
+                {NOTIF_TYPE_ICONS[n.type] || "ℹ"}
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, color: theme.text, lineHeight: 1.4 }}>{n.message}</div>
-                <div style={{ fontSize: 10, color: theme.textDim, marginTop: 2 }}>{timeAgo(n.created_at)}</div>
+                <div style={{ fontSize: 10, color: theme.textDim, marginTop: 2 }}>{notifTimeAgo(n.created_at)}</div>
               </div>
               {!n.read && (
                 <div style={{ width: 6, height: 6, borderRadius: "50%",
@@ -207,75 +206,25 @@ function NotificationsBell({ theme }) {
               )}
             </div>
           ))}
-        </DockPortal>
+        </div>
       )}
     </div>
   );
 }
 
-// ── Quick actions ─────────────────────────────────────────────
-function QuickActions({ theme, onTabChange }) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState(null);
-  const triggerRef = useRef(null);
-
-  const actions = [
-    { icon: "🔍", label: "Search new role", action: () => { onTabChange?.("jobs"); setOpen(false); } },
-    { icon: "⚡", label: "ATS sort",       action: () => { onTabChange?.("jobs"); setOpen(false); } },
-    { icon: "📄", label: "Export PDF",       action: () => { window.print(); setOpen(false); } },
-  ];
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        ref={triggerRef}
-        onClick={() => {
-          if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
-          setOpen(o => !o);
-        }}
-        title="Quick actions"
-        style={{
-          background: "transparent", border: "none", cursor: "pointer",
-          width: 32, height: 32, borderRadius: 6, flexShrink: 0,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: theme.textMuted, fontSize: 15,
-          transition: "color 0.15s, background 0.15s",
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; e.currentTarget.style.color = theme.accent; }}
-        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = theme.textMuted; }}>
-        ⚡
-      </button>
-
-      {open && rect && (
-        <DockPortal anchorRect={rect} theme={theme} onClose={() => setOpen(false)}
-          style={{ minWidth: 200 }}>
-          <div style={{ padding: "6px 14px 8px", fontSize: 10, fontWeight: 700,
-                         textTransform: "uppercase", letterSpacing: "0.08em", color: theme.textDim }}>
-            Quick Actions
-          </div>
-          {actions.map(a => (
-            <button key={a.label} onClick={a.action}
-              onMouseEnter={e => e.currentTarget.style.background = theme.overlay}
-              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-              style={{
-                display: "flex", alignItems: "center", gap: 10, width: "100%",
-                background: "transparent", border: "none", padding: "9px 14px",
-                cursor: "pointer", fontSize: 13, color: theme.text, textAlign: "left",
-              }}>
-              <span>{a.icon}</span>
-              <span>{a.label}</span>
-            </button>
-          ))}
-        </DockPortal>
-      )}
-    </div>
-  );
-}
+// Quick actions removed (W6). The control was a ⚡ button opening three items: "Search new role"
+// and "ATS sort", which both did nothing but navigate to the jobs tab — the same thing the JOBS tab
+// beside them already does, and neither actually searched or sorted anything — and "Export PDF",
+// which called window.print() on the whole application chrome. Nothing here is preserved elsewhere
+// because there was no behaviour to preserve.
 
 function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, profiles, onActivateProfile, onDeleteProfile }) {
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
   const triggerRef = useRef(null);
+  // Notifications moved in here from their own bell in the bar. The COUNT stays outside, on the
+  // avatar — see the badge below.
+  const { notifs, unread, load: loadNotifs, markAll } = useNotifications();
   const { accentId, setAccentId, ACCENT_OPTIONS, themeId, setThemeId, availableThemes } = useTheme();
   const planTier = user?.planTier || "BASIC";
   const planLabel = planTier === "PRO" ? "Pro" : planTier === "PLUS" ? "Plus" : "Basic";
@@ -296,19 +245,43 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
         ref={triggerRef}
         onClick={() => {
           if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
-          setOpen(o => !o);
+          setOpen(o => { if (!o) loadNotifs(); return !o; });
         }}
-        title={user?.username}
+        title={unread > 0
+          ? `${user?.username || "Account"} — ${unread} unread notification${unread === 1 ? "" : "s"}`
+          : user?.username}
+        aria-label={unread > 0
+          ? `Account menu, ${unread} unread notification${unread === 1 ? "" : "s"}`
+          : "Account menu"}
         style={{
           width: 30, height: 30, borderRadius: "50%", border: "none", cursor: "pointer",
           background: theme.accent, color: "#0f0f0f",
-          fontWeight: 800, fontSize: 12,
+          fontWeight: 800, fontSize: 12, position: "relative",
           display: "flex", alignItems: "center", justifyContent: "center",
           outline: open ? `2px solid ${theme.accent}` : "none",
           outlineOffset: 2, transition: "outline 0.15s",
           fontFamily: "'DM Sans',system-ui,sans-serif",
         }}>
         {(user?.username || "U")[0].toUpperCase()}
+        {/* The unread count, kept OUTSIDE the menu on purpose. Moving notifications into the
+            profile menu is only safe if the fact that there ARE unread ones survives the move —
+            otherwise they become invisible until someone happens to open a menu. Same "9+" cap and
+            the same badge the bell carried, now on the avatar. Bordered against the avatar's own
+            accent fill so it reads as a separate mark rather than part of the initial. */}
+        {unread > 0 && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute", top: -3, right: -3,
+              minWidth: 16, height: 16, padding: "0 3px",
+              background: theme.warning || "#dc2626", color: "#fff",
+              border: `2px solid ${theme.surfaceBase || theme.surface}`,
+              borderRadius: 999,
+              fontSize: 9, fontWeight: 800, lineHeight: "12px", textAlign: "center",
+            }}>
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
       </button>
 
       {open && rect && (
@@ -333,6 +306,8 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
               {user?.username} - {user?.isAdmin ? "Administrator" : "Member"}
             </div>
           </div>
+
+          <NotificationsSection theme={theme} notifs={notifs} unread={unread} markAll={markAll}/>
 
           <div style={{ padding: "10px 16px 10px", borderBottom: `1px solid ${theme.border}` }}>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
@@ -448,6 +423,12 @@ export default function TopBar({
   // so any caller that does not pass it (none today) gets the collapsed pill hidden rather than
   // a second surface appearing alongside the main one.
   searchSurface = "bar",
+  // Whether the BOARD is the panel on screen. The collapsed pill carries board controls — the
+  // All/★/⏳ tabs, the sort, the profile switcher, "Filter jobs…" — and every one of them acts on a
+  // job board. Rendering them over Database, Recruiter, Job Profiles or Auto Apply offers controls
+  // for something that is not there. Defaults to true so a caller that does not pass it behaves as
+  // before rather than losing the pill silently.
+  boardIsActive = true,
 }) {
   const { theme } = useTheme();
   const { progress: rawProgress, pinned } = useAppScroll();
@@ -634,8 +615,9 @@ export default function TopBar({
         {/* Right: utility icons */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           {scrolled && <Divider theme={theme}/>}
-          {user && <NotificationsBell theme={theme}/>}
-          {user && <QuickActions theme={theme} onTabChange={onTabChange}/>}
+          {/* The bell and the quick-actions button are gone from the bar (W6). Notifications live
+              in the profile menu below; their unread count rides on the avatar so it is still
+              visible without opening anything. */}
           {scrolled && <Divider theme={theme}/>}
           {user && (
             <UserAvatarMenu
@@ -673,7 +655,7 @@ export default function TopBar({
           At Z.SEARCH the pill is dimmed by the scrim, covered by the tiles and inerted with the rest
           of the board, exactly as the bar already was. Pill 1 above keeps Z.NAV: it is genuinely nav
           chrome and is meant to stay live over a panel. */}
-      {pillIsTheSearchSurface && boardTab !== undefined && (
+      {pillIsTheSearchSurface && boardIsActive && boardTab !== undefined && (
         <div
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}

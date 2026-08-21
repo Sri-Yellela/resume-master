@@ -52,7 +52,14 @@ test("the two surfaces are chosen by ONE derived value, not two booleans", () =>
   assert.match(app, /searchSurface=\{searchSurface\}/);
   assert.match(topbar, /searchSurface = "bar",/);
   assert.match(topbar, /const pillIsTheSearchSurface = searchSurface === "pill";/);
-  assert.match(topbar, /\{pillIsTheSearchSurface && boardTab !== undefined && \(/);
+  // The pill's contents are BOARD controls — All/★/⏳, the sort, the profile switcher,
+  // "Filter jobs…" — so it is additionally gated on the board being the panel on screen. Without
+  // that it floated over Database, Recruiter, Job Profiles and Auto Apply, offering controls for a
+  // board that is not there. Measured before the gate: every tab EXCEPT Jobs opened with the pill
+  // showing at scrollY 0, because only Jobs renders the hero and so only Jobs has a document taller
+  // than the viewport.
+  assert.match(topbar, /\{pillIsTheSearchSurface && boardIsActive && boardTab !== undefined && \(/);
+  assert.match(app, /boardIsActive=\{activeTab === "console"\}/);
 });
 
 test("the second, unrelated scroll source is gone", () => {
@@ -117,7 +124,29 @@ test("first paint shows exactly one surface, and never zero", () => {
   assert.match(hook, /useState\("bar"\)/);
   // And measured once immediately, so a page restored mid-scroll corrects within a frame rather
   // than showing the wrong surface until the user scrolls.
-  assert.match(hook, /\n    measure\(\);\n/);
+  // `\r?` because the working tree is checked out CRLF on Windows (core.autocrlf=true) while git
+  // stores LF — an assertion anchored to a bare \n passes or fails depending on how the file was
+  // last written, which is not a property of the code under test.
+  assert.match(hook, /\n\s*measure\(\);\r?\n/);
+});
+
+test("a page that cannot scroll is always the bar, checked before the thresholds", () => {
+  // The collapsed pill exists for one reason: the bar scrolled away and its controls need somewhere
+  // to live. On a page with nothing to scroll the bar has not gone anywhere — and the thresholds
+  // handed over anyway, because a short page's sentinel sits at top 0, which is under HIDE_ABOVE
+  // from the first frame. Measured at 1440x900, only the Jobs tab renders the hero:
+  //
+  //   tab           docH   winH   sentinelTop at scrollY 0   surface
+  //   jobs          3228   900    245                        bar    <- correct
+  //   auto-apply     900   900      0                        pill   <- wrong
+  //   database       900   900      0                        pill   <- wrong
+  assert.match(hook, /const canScroll = doc\.scrollHeight - window\.innerHeight > 2;/);
+  assert.match(hook, /if \(!canScroll\) \{ setSurface\("bar"\); return; \}/);
+  // Switching tabs changes the document height with no scroll and no resize event, so the
+  // measurement has to re-run on layout change or the surface keeps the previous tab's answer
+  // until the user happens to scroll — the same wrong-surface bug by another route.
+  assert.match(hook, /new ResizeObserver\(schedule\)/);
+  assert.match(hook, /ro\?\.disconnect\(\)/);
 });
 
 test("there is no dead frame at the swap: the incoming surface never fades in", () => {
