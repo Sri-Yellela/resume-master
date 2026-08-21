@@ -120,12 +120,17 @@ test("the filters drawer is on the named tiers and inset clear of the nav", () =
   // close button's own centre returned a nav <div>, not the button. Unclickable, not just cramped.
   //
   // zLayers' rule 2 is explicit that a raw bump is not the fix ("the question is which TIER it
-  // belongs to"), and Z.NAV's note records the design: drawers are inset from the top so the nav
-  // stays visible and reachable while one is open.
+  // belongs to").
+  //
+  // Y2 REVISED WHICH TIER, and the revision matters for a reason the first fix did not address.
+  // Putting this drawer on MODAL_SCRIM / MODAL — the JD/PDF/ATS panels' own tiers — cleared the nav
+  // but left TWO drawers on one tier, so opening a JD panel while the filters drawer was up left
+  // which one won to render order. It has its own tier now, between the search surface and the
+  // panels.
   assert.ok(!/position:"fixed", inset:0, zIndex:500/.test(panel),
     "the drawer is back on a raw z-index outside the scale");
-  assert.match(panel, /position:"fixed", inset:0, zIndex:Z\.MODAL_SCRIM/);
-  assert.match(panel, /width:320, height:"100%", zIndex:Z\.MODAL/);
+  assert.match(panel, /position:"fixed", inset:0, zIndex:Z\.DRAWER_SCRIM/);
+  assert.match(panel, /width:320, height:"100%", zIndex:Z\.DRAWER/);
   assert.match(panel, /import \{ Z \} from "\.\.\/styles\/zLayers\.js"/);
 
   // The clearance is padding on the SCRIM, so the dim still covers the whole viewport while the

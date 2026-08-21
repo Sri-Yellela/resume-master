@@ -1,5 +1,6 @@
 import { useTheme } from "../styles/theme.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
+import { Z } from "../styles/zLayers.js";
 
 // ============================================================
 // AutoApplyPanel — the auto-apply pipeline, on its own tab
@@ -190,7 +191,9 @@ export function AutoApplyPanel() {
         <div
           onClick={e => { if (e.target === e.currentTarget) { setApplyRunDetailOpen(false); setApplyRunDetail(null); } }}
           style={{
-            position:"fixed", inset:0, zIndex:700,
+            // Named tier rather than the literal 700 it carried. Same class as JobsPanel's
+            // resume-enhance modal: a focused takeover over the app, above the filters drawer.
+            position:"fixed", inset:0, zIndex:Z.MODAL_SCRIM,
             background:"rgba(0,0,0,0.55)", display:"flex",
             alignItems:"flex-start", justifyContent:"center",
             paddingTop:48, overflowY:"auto",

@@ -11,6 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { Z as Z_SCALE } from "../client/src/styles/zLayers.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const shell   = read("client/src/components/PanelShell.jsx");
@@ -195,11 +196,33 @@ test("the board is inert and frozen while any panel is open", () => {
   // once.
   assert.match(lock, /child\.setAttribute\("inert", ""\)/);
   assert.match(lock, /for \(const el of inerted\) el\.removeAttribute\("inert"\)/);
-  // What stays alive is read from the z-scale, not from a list of component names: anything
-  // painting at or above NAV is above the scrim, therefore undimmed and visibly clickable, and a
-  // control that looks live but is inert is worse than one that works.
-  assert.match(lock, /if \(Number\.isFinite\(z\) && z >= Z\.NAV\) continue;/);
+  // What stays alive is read from the z-scale, not from a list of component names: anything the
+  // scrim does not cover stays live, and anything it covers goes inert, so nothing ever looks live
+  // while being inert.
+  //
+  // THE THRESHOLD IS THE SCRIM, NOT THE NAV. It used to read `z >= Z.NAV`, which was the same line
+  // only because NAV was 1500 and the scrim 800. Y2 lowered NAV to 250 so the top bar can never
+  // occlude an overlay; left as `>= Z.NAV`, this loop would then have spared every child at 250 or
+  // more — INCLUDING the search surface at Z.SEARCH (400), which is exactly the defect the test
+  // below this one was written for: a live, tab-reachable search surface underneath an open modal.
+  assert.match(lock, /if \(Number\.isFinite\(z\) && z >= Z\.MODAL_SCRIM\) continue;/);
+  // Stripped source for the negative: the hook's own note explains the old threshold by quoting it,
+  // and matching a comment is how a source-string test passes while the code says something else.
+  const lockCode = lock.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert.ok(!/z >= Z\.NAV/.test(lockCode),
+    "the lock spares everything above the top bar again, which now includes the search surface");
   assert.match(app, /data-app-shell/);
+
+  // Proven against the real scale rather than by reading the source: every tier at or above the
+  // scrim must be spared, and every tier below it must be inerted. The top bar is BELOW now, and
+  // that is the intended consequence — dimmed and inert together.
+  const spared = (z) => z >= Z_SCALE.MODAL_SCRIM;
+  for (const t of ["MODAL_SCRIM", "MODAL", "POPOVER"]) {
+    assert.ok(spared(Z_SCALE[t]), `${t} must stay live — the scrim does not cover it`);
+  }
+  for (const t of ["CONTENT", "NAV", "PANEL_POPOVER", "SEARCH", "SEARCH_DROPDOWN", "DRAWER"]) {
+    assert.ok(!spared(Z_SCALE[t]), `${t} is under the scrim and must be inerted`);
+  }
 
   // SCROLL, and the scroll POSITION. `overflow: hidden` on body is the lock that loses it — the
   // document stops being scrollable, the browser clamps scrollTop, and closing the panel drops the
