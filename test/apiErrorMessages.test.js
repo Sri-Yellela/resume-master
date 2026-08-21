@@ -42,7 +42,9 @@ test("the payload is still attached, so structured fields stay reachable", () =>
   // JobsPanel reads e.payload.missingPrerequisites; changing the message must not drop the payload.
   const attaches = apiSrc.match(/\{ status: [^}]*payload \}/g) || [];
   assert.ok(attaches.length >= 3, `payload must remain attached to the thrown error (${attaches.length})`);
-  const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+  // startApplyRun, and with it the missingPrerequisites read, moved into
+  // contexts/AutoApplyContext.jsx when the pipeline got its own tab (W5).
+  const jobsPanel = fs.readFileSync("client/src/contexts/AutoApplyContext.jsx", "utf8");
   assert.match(jobsPanel, /e\.payload\?\.missingPrerequisites/);
 });
 

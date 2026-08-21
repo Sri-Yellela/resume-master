@@ -9,7 +9,17 @@ const readiness = fs.readFileSync("services/integrationReadiness.js", "utf8");
 const app = fs.readFileSync("client/src/App.jsx", "utf8");
 const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
 const integrations = fs.readFileSync("client/src/panels/IntegrationsPanel.jsx", "utf8");
-const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+// The auto-apply surface moved OUT of JobsPanel (W5): its markup is now panels/AutoApplyPanel.jsx
+// and its state and requests are contexts/AutoApplyContext.jsx, both reached from the AUTO APPLY
+// tab. The assertions below are about the apply UI, not about which file holds it, so this reads
+// all three. JobsPanel stays in the list because the board still owns the queue button that feeds
+// the pipeline — and because an assertion that silently stopped covering anything would be worse
+// than one that fails.
+const jobsPanel = [
+  "client/src/panels/JobsPanel.jsx",
+  "client/src/panels/AutoApplyPanel.jsx",
+  "client/src/contexts/AutoApplyContext.jsx",
+].map(f => fs.readFileSync(f, "utf8")).join("\n");
 
 test("integrations backend centralizes connector status and storage", () => {
   assert.match(server, /CREATE TABLE IF NOT EXISTS user_integrations/);

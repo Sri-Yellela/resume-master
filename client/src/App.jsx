@@ -1,5 +1,5 @@
 // REVAMP v1 — App.jsx
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { api, setAuthContext }   from "./lib/api.js";
 import { useTheme }              from "./styles/theme.jsx";
@@ -14,6 +14,8 @@ import AppShell                  from "./components/AppShell.jsx";
 import { useSearchSurface }      from "./hooks/useSearchSurface.js";
 import { AppScrollProvider } from "./contexts/AppScrollContext.jsx";
 import { JobBoardProvider, useJobBoard } from "./contexts/JobBoardContext.jsx";
+import { AutoApplyProvider, useAutoApply } from "./contexts/AutoApplyContext.jsx";
+import { AutoApplyPanel }        from "./panels/AutoApplyPanel.jsx";
 import { ProfilePanel }          from "./panels/ProfilePanel.jsx";
 import { JobProfilesPanel }      from "./panels/JobProfilesPanel.jsx";
 import { DatabasePanel }         from "./panels/DatabasePanel.jsx";
@@ -96,11 +98,40 @@ function PublicLoginRoute({ authStatus, authUser, children, admin = false }) {
 // decide whether to also go out to the aggregator. Committing the filters on BOTH is deliberate:
 // the live half is a superset of the local half, and skipping the commit there would make the
 // second click widen the board back out to unfiltered before searching.
-function BoardSearchBar(props) {
+function BoardSearchBar({ tabs, ...props }) {
   const { applyBarFilters } = useJobBoard();
+  const { needsAttentionCount = 0 } = useAutoApply();
+
+  // The board keeps a MINIMAL indicator and only when something is actually waiting on a human: a
+  // count on the tab, not a strip above the postings. This is the requirement that "3 need review"
+  // stays discoverable from the board — a review queue nobody sees is worse than a cluttered
+  // board — and it is the ONLY thing the pipeline still renders outside its own panel.
+  const decorated = (tabs || []).map(t =>
+    t.id === "auto-apply" && needsAttentionCount > 0
+      ? {
+          ...t,
+          label: (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {t.label}
+              <span
+                title={`${needsAttentionCount} need${needsAttentionCount === 1 ? "s" : ""} your attention`}
+                style={{
+                  minWidth: 16, height: 16, padding: "0 4px", borderRadius: 999,
+                  background: "var(--color-primary)", color: "var(--color-on-primary, #0f0f0f)",
+                  fontSize: 10, fontWeight: 800, lineHeight: "16px", textAlign: "center",
+                }}>
+                {needsAttentionCount}
+              </span>
+            </span>
+          ),
+        }
+      : t,
+  );
+
   return (
     <UnifiedSearchBar
       {...props}
+      tabs={decorated}
       onLocalFilter={params => applyBarFilters(params)}
       onSearch={params => applyBarFilters(params, { live: true })}
     />
@@ -192,10 +223,24 @@ function AppDashboard({ authUser, setAuthUser }) {
     ? "console" : routeKey;
   const appTabs = [
     { id: "console",      label: "Jobs" },
+    // The auto-apply pipeline is a peer of the board now, not a strip above it (W5). It sits in
+    // this row for the same reason the others do — it is a place you go, not a thing that happens
+    // on the board. BoardSearchBar decorates it with the needs-attention count.
+    { id: "auto-apply",   label: "Auto Apply" },
     { id: "job-profiles", label: "Job Profiles" },
     { id: "database",     label: "Database" },
     { id: "recruiter",    label: "Recruiter" },
   ];
+
+  // The console is handled by its own branch above (it has a legacy-route alias and a refresh key),
+  // so it is excluded here. The three extras are reachable from the profile menu rather than the
+  // tab row, and have always been navigable.
+  const NAVIGABLE_TABS = useMemo(
+    () => new Set([...appTabs.map(t => t.id).filter(id => id !== "console"),
+                   "plans", "profile", "integrations"]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const handleLogout = useCallback(async () => {
     try { await api("/api/auth/logout", { method:"POST" }); } catch {}
@@ -209,10 +254,16 @@ function AppDashboard({ authUser, setAuthUser }) {
       navigate(consolePath);
       return;
     }
-    if (["database","plans","profile","job-profiles","integrations","recruiter"].includes(tab)) {
+    // Derived from the tab row plus the routes reachable only from elsewhere (the profile menu,
+    // billing), rather than a hand-written list. It WAS a hand-written list, and adding "Auto Apply"
+    // to appTabs was not enough: the tab rendered, was clickable, and navigated nowhere, because
+    // this array had never heard of it. A tab that silently does nothing is the same defect class as
+    // a filter wired to a no-op — so the row itself is now the source of truth and a tab added
+    // tomorrow routes without anyone remembering this line.
+    if (NAVIGABLE_TABS.has(tab)) {
       navigate(`/app/${tab}`);
     }
-  }, [activeTab, consolePath, navigate]);
+  }, [activeTab, consolePath, navigate, NAVIGABLE_TABS]);
 
   const handleProfileActivate = useCallback(() => {
     setJobBoardRefreshKey(k => k + 1);
@@ -239,10 +290,15 @@ function AppDashboard({ authUser, setAuthUser }) {
       navigate(consolePath, { replace:true });
       return;
     }
-    if (routeKey !== CONSOLE_ROUTE && !["database","plans","profile","job-profiles","integrations","recruiter"].includes(routeKey)) {
+    // The SAME set handlePanelChange navigates with, so a tab cannot be routable in one direction
+    // and bounced in the other. This was the second hardcoded copy of the tab list, and adding
+    // "Auto Apply" to appTabs was not enough for either of them: the tab rendered and did nothing
+    // because handlePanelChange had never heard of it, and typing /app/auto-apply bounced straight
+    // back to the board because THIS guard had not either. Two lists, both silent when wrong.
+    if (routeKey !== CONSOLE_ROUTE && !NAVIGABLE_TABS.has(routeKey)) {
       navigate(consolePath, { replace:true });
     }
-  }, [routeKey, consolePath, navigate]);
+  }, [routeKey, consolePath, navigate, NAVIGABLE_TABS]);
 
   useEffect(() => {
     const handleVisibility = async () => {
@@ -269,6 +325,14 @@ function AppDashboard({ authUser, setAuthUser }) {
 
   return (
     <JobBoardProvider>
+    {/* The apply pipeline's state sits ABOVE the board and above the tab switch, deliberately.
+        Its loading and polling effects have to keep running while the user is on another tab —
+        otherwise a run started from the board would stop reporting the moment you navigated to
+        Auto Apply to watch it, which is the one place you would go to watch it. It is also what
+        lets the tab carry a needs-attention count while the board is showing. */}
+    <AutoApplyProvider
+      user={authUser}
+      canUseAPlusResume={String(authUser?.planTier || "BASIC").toUpperCase() === "PRO"}>
       <AppScrollProvider>
         {/* data-app-shell marks the element whose children are the app's own surfaces, so the panel
             host can make the BOARD inert while a panel is open without hunting for it by class or
@@ -371,6 +435,7 @@ function AppDashboard({ authUser, setAuthUser }) {
               <JobsConsole user={authUser} onUserChange={setAuthUser}
                 refreshKey={jobBoardRefreshKey} isActive={activeTab === "console"}/>
             )}
+            {activeTab === "auto-apply"   && <AutoApplyPanel/>}
             {activeTab === "database"     && <DatabasePanel user={authUser}/>}
             {activeTab === "integrations" && <IntegrationsPanel/>}
             {activeTab === "plans"        && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
@@ -395,6 +460,7 @@ function AppDashboard({ authUser, setAuthUser }) {
           )}
         </div>
       </AppScrollProvider>
+    </AutoApplyProvider>
     </JobBoardProvider>
   );
 }

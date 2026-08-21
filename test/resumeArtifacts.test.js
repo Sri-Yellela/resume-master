@@ -9,7 +9,12 @@ test("Generate and A+ artifacts are tracked independently in the sandbox", () =>
   const jobCard = fs.readFileSync("client/src/components/JobCard.jsx", "utf8");
   const detail = fs.readFileSync("client/src/components/JobDetailPanel.jsx", "utf8");
 
-  assert.match(jobsPanel, /const TOOL_LABELS = \{ \[GENERATE_TOOL\]: "Generate", \[A_PLUS_TOOL\]: "A\+ Resume" \}/);
+  // The tool constants moved to client/src/lib/applyTools.js so AutoApplyContext could build the
+  // same apply-run request from the same values instead of keeping a second copy of them (W5).
+  // The invariant is unchanged: two tools, these two labels, declared exactly once.
+  const applyTools = fs.readFileSync("client/src/lib/applyTools.js", "utf8");
+  assert.match(applyTools, /export const TOOL_LABELS\s+= \{ \[GENERATE_TOOL\]: "Generate", \[A_PLUS_TOOL\]: "A\+ Resume" \}/);
+  assert.match(jobsPanel, /import \{ GENERATE_TOOL, A_PLUS_TOOL, TOOL_LABELS, normalizeTool \} from "\.\.\/lib\/applyTools\.js"/);
   assert.match(jobsPanel, /function mergeArtifact/);
   assert.match(jobsPanel, /variants\[tool\]/);
   assert.match(sandbox, /variantKeys\.length > 1/);

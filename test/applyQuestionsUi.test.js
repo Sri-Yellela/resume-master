@@ -6,7 +6,17 @@ import Database from "better-sqlite3";
 import applyRoutes from "../routes/apply.js";
 import { buildOpenQuestions } from "../services/applyAutomation.js";
 
-const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
+// The auto-apply surface moved OUT of JobsPanel (W5): its markup is now panels/AutoApplyPanel.jsx
+// and its state and requests are contexts/AutoApplyContext.jsx, both reached from the AUTO APPLY
+// tab. The assertions below are about the apply UI, not about which file holds it, so this reads
+// all three. JobsPanel stays in the list because the board still owns the queue button that feeds
+// the pipeline — and because an assertion that silently stopped covering anything would be worse
+// than one that fails.
+const jobsPanel = [
+  "client/src/panels/JobsPanel.jsx",
+  "client/src/panels/AutoApplyPanel.jsx",
+  "client/src/contexts/AutoApplyContext.jsx",
+].map(f => fs.readFileSync(f, "utf8")).join("\n");
 
 // The question-prompt UI. These are CONTRACT tests: every field the panel reads off a question must
 // exist in the payload the server really sends. That pairing is where this session's worst bugs lived
