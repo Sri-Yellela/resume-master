@@ -5253,7 +5253,6 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       q              = '',
       role           = '',
       location       = '',
-      country        = 'us',
       page           = '1',
       pageSize       = '10',
       sort           = '',
@@ -5295,8 +5294,26 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
 
     const roleKey = roleKeyForProfile(sessionActiveProfile);
 
-    // profileTitleSql: additive narrowing within the already role-correct board
-    const titleFilter = profileTitleSql("sj.title", sessionActiveProfile);
+    // The Saved ★ tab is a record of what the user already chose, not a discovery surface — so none
+    // of the DISCOVERY narrowing applies to it: not the job_role_map role_key join, not
+    // profileTitleSql, not the profile bridge. Their own explicit filters still do; those are
+    // deliberate acts too.
+    //
+    // Measured before this: user 14 had starred three imports (a Quora req, a Figma AE req, a
+    // RemoteOK posting) and the Saved tab returned ONE. The other two were bucketed 'sales' and
+    // 'general' by the classifier, and this board joins job_role_map with an INNER JOIN on the ACTIVE
+    // PROFILE's role_key — so a job the user explicitly saved was hidden from the tab whose entire
+    // meaning is "the jobs I picked", on the strength of a classifier guess they never saw and
+    // cannot change. For an imported job that is the reported bug all over again: the import
+    // succeeds, the row is starred, and it is nowhere. ROLE_KEY_FALLBACK ('general') makes an
+    // unclassifiable import reachable in principle, but only to a profile whose own role_key is
+    // 'general' — which is nobody's.
+    const savedTab = starred === '1';
+
+    // profileTitleSql: additive narrowing within the already role-correct board. Skipped on the
+    // Saved tab (see above) — a saved job must not have to match the profile's target titles.
+    const titleFilter = savedTab ? { sql: "1 = 1", params: [] }
+                                 : profileTitleSql("sj.title", sessionActiveProfile);
 
     // Keyword + location (opt-in)
     const keyFilter = rawQuery ? `AND (sj.title LIKE ? OR sj.company LIKE ? OR sj.description LIKE ?)` : '';
@@ -5341,7 +5358,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     // this fix: starred=1 returned 27 of 27 rows for a user with zero starred rows. `uj` is already
     // LEFT JOINed per (user, profile) below, so this reads that user's own flag and nobody else's.
     // Any value other than '1' emits nothing, so the default board querystring is unchanged.
-    const starredSql = starred === '1' ? `AND uj.starred = 1` : '';
+    const starredSql = savedTab ? `AND uj.starred = 1` : '';
 
     // Applicant count cap (opt-in)
     const maxAppVal = maxApplicants !== null && maxApplicants !== '' ? parseInt(maxApplicants, 10) : null;
@@ -5383,16 +5400,33 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     // explicit query param for the same dimension always wins (checked per-key below);
     // ?curate=off skips derivation entirely, reproducing pre-bridge behavior exactly.
     const baseFilterParams = { q, ...req.query };
-    const derivedFilters = req.query.curate === 'off'
+    const derivedFilters = (req.query.curate === 'off' || savedTab)
       ? {}
       : deriveProfileFilters(sessionActiveProfile, signals);
     const filterParams = { ...baseFilterParams };
+    // Which derived keys ACTUALLY took effect (an explicit query param for the same dimension wins,
+    // so a derived key can be computed and then not used). Only these are reported to the client,
+    // and only these are removed to compute the uncurated total below — reporting the ones that
+    // lost to an explicit value would blame the profile for the user's own filter.
+    const appliedDerivedKeys = [];
     for (const key of Object.keys(derivedFilters)) {
       const explicitVal = baseFilterParams[key];
       const isExplicit  = explicitVal !== undefined && explicitVal !== null && explicitVal !== '';
-      if (!isExplicit) filterParams[key] = derivedFilters[key];
+      if (!isExplicit) { filterParams[key] = derivedFilters[key]; appliedDerivedKeys.push(key); }
     }
     const richFilters = buildJobFilters(filterParams);
+    // Same board, same everything else, minus ONLY the profile-derived defaults — i.e. exactly what
+    // ?curate=off returns. Built here so the response can say how much the bridge is hiding.
+    //
+    // Why this exists: the bridge narrows by DEFAULT and said nothing, so a row it excluded was
+    // indistinguishable from a row that does not exist. That is how a user-imported Quora posting
+    // stayed "missing" through two rounds of fixes — the row was present, active, correctly bucketed
+    // and correctly returned by ?curate=off, while the default board dropped it because the posting
+    // is a New Grad req (experience_level='entry') and a candidate with 3 years' experience derives
+    // experience_levels=['mid','senior'] via widenOneLevelUp, which only ever widens UPWARD.
+    // Curation itself is not weakened here (that is a product decision, and one-level-up relevance
+    // is deliberate) — it is only made VISIBLE, with a way to see the rest.
+    const uncuratedFilters = appliedDerivedKeys.length ? buildJobFilters(baseFilterParams) : null;
     const selectCols  = buildSelectColumns(req.query.include_fields);
     const facetDims   = resolveFacetDimensions(req.query.include_facets);
 
@@ -5464,13 +5498,20 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
                     :                             RECENCY;
       const offset  = (pg - 1) * ps;
 
+      // The role_key join is what makes this board profile-scoped, and it is an INNER JOIN — so it
+      // is also what can make a row unreachable. On the Saved tab it is dropped entirely (see
+      // savedTab above): the user's own star already answers "does this belong on your board?", and
+      // no classifier bucket may overrule it. Everywhere else it stays exactly as it was.
       const joinClause = `
         FROM scraped_jobs sj
-        JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?
+        ${savedTab ? '' : 'JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?'}
         LEFT JOIN user_jobs uj
           ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
       `;
-      const whereClause = `
+      // Parameterised over the rich-filter fragment alone so the curated and uncurated counts are
+      // guaranteed to differ in nothing else — a hand-copied second WHERE would drift the first time
+      // any clause above changes.
+      const whereClauseFor = (rich) => `
         WHERE sj.is_active = 1
           ${keyFilter}
           ${locFilter}
@@ -5485,16 +5526,20 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
           ${ageSql}
           ${yoeSql}
           ${minYoeSql}
-          ${richFilters.sql}
+          ${rich.sql}
           AND (uj.disliked IS NULL OR uj.disliked = 0)
       `;
-      const baseArgs = [
-        roleKey, req.user.id, sessionActiveProfile.id,
+      const argsFor = (rich) => [
+        // Must track joinClause exactly: no role_key placeholder on the Saved tab, so no roleKey arg.
+        ...(savedTab ? [] : [roleKey]),
+        req.user.id, sessionActiveProfile.id,
         ...keyArgs, ...locArgs, ...titleFilter.params,
         ...wtArgs, ...etArgs, ...catArgs, ...srcArgs,
         ...maxAppArgs, ...ageArgs, ...yoeArgs, ...minYoeArgs,
-        ...richFilters.params,
+        ...rich.params,
       ];
+      const whereClause = whereClauseFor(richFilters);
+      const baseArgs    = argsFor(richFilters);
 
       const rows  = db.prepare(`SELECT ${selectCols}, uj.visited, uj.applied, uj.starred, uj.disliked ${joinClause} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...baseArgs, ps, offset);
       const total = db.prepare(`SELECT COUNT(*) as n ${joinClause} ${whereClause}`).get(...baseArgs)?.n || 0;
@@ -5511,6 +5556,25 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         sources:    ['scraped_jobs'],
         fromCache:  true,
       };
+
+      // Curation disclosure. Emitted ONLY when the bridge actually narrowed something, so a profile
+      // with no signals (the common case for a new account) gets a byte-identical response to before.
+      // The client turns this into "Showing N of M matching your profile" plus a control that re-runs
+      // the same board with ?curate=off. One extra COUNT, and only on the curated path.
+      if (uncuratedFilters) {
+        const uncuratedTotal = db.prepare(
+          `SELECT COUNT(*) as n ${joinClause} ${whereClauseFor(uncuratedFilters)}`
+        ).get(...argsFor(uncuratedFilters))?.n || 0;
+        if (uncuratedTotal > total) {
+          responseBody.curation = {
+            applied:     true,
+            derivedKeys: appliedDerivedKeys,
+            total,
+            uncuratedTotal,
+            hidden:      uncuratedTotal - total,
+          };
+        }
+      }
 
       // include_facets (optional, default-off): facet counts over the SAME filtered result
       // set, using the identical joinClause/whereClause/baseArgs as the main query.
@@ -5536,30 +5600,36 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       return res.json(responseBody);
     }
 
-    // --- Fallback: live search via aggregator (empty cache) ---
-    const sanitized = {
-      query:          rawQuery,
-      location:       String(location).slice(0, 200).trim(),
-      country:        String(country).slice(0, 2).toLowerCase() || 'us',
-      page:           pg,
-      pageSize:       ps,
-      maxResults:     150,  // paginate Adzuna up to 150 results on the live path
-      sort:           ['dateDesc','dateAsc','salaryDesc','salaryAsc','relevance'].includes(sort) ? sort : undefined,
-      employmentType: employmentType ? String(employmentType).slice(0, 100) : undefined,
-      remote:         workType === 'Remote' ? true : undefined,
-    };
-
-    const result = await searchJobs(sanitized);
-
-    res.json({
-      success:     true,
-      jobs:        result.jobs,
-      total:       result.total,
-      page:        result.page,
-      pageSize:    result.pageSize,
-      totalPages:  Math.ceil((result.total || 0) / ps),
-      sources:     result.sources,
-      attribution: result.attribution,
+    // --- Empty cache: an explained empty board, NOT a live aggregator feed ---
+    //
+    // This used to fall through to searchJobs() — an unauthenticated-shaped, global Adzuna/SerpAPI
+    // query. Everything that makes this endpoint "your board" was skipped on that path: the
+    // job_role_map role_key scoping, profileTitleSql, the profile bridge, every key in
+    // buildJobFilters, the Saved (starred) tab, visited, and the disliked exclusion. `sanitized`
+    // forwarded exactly five of them (query/location/country/employmentType/remote) and dropped the
+    // rest silently.
+    //
+    // Measured on a real run with an empty cache and an ENGINEERING profile: the default board, the
+    // Saved tab, tiers_include=gated, experience_levels=executive and sources_include=ashby all
+    // returned the SAME 6,213,918-row result led by "Occupational Therapist" — which is precisely
+    // the reported "the same set of listings renders regardless of search or filters". A Saved tab
+    // showing 6.2M jobs the user never saved is the read-side twin of the write-side defect this
+    // codebase keeps hitting: a surface reporting something it did not do.
+    //
+    // Live search is still available and is unaffected — it has its own endpoint (POST
+    // /api/jobs/search), which the client already calls, plus the public GET /api/jobs/generic.
+    // What is removed is the silent substitution of a global feed for a profile-scoped board.
+    console.warn(`[jobs] cache empty — returning explained empty board for profile ${sessionActiveProfile.id}`);
+    return res.json({
+      success:    true,
+      jobs:       [],
+      total:      0,
+      page:       pg,
+      pageSize:   ps,
+      totalPages: 0,
+      sources:    ['scraped_jobs'],
+      fromCache:  true,
+      reason:     'cache_empty',
     });
   } catch (err) {
     console.error('[GET /api/jobs] Error:', err.message);

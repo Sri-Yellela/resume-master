@@ -1102,6 +1102,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [totalJobs,   setTotalJobs]   = useState(0);
   const [totalPages,  setTotalPages]  = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  // Profile→Board Bridge disclosure. `curation` is the server's { total, uncuratedTotal, hidden,
+  // derivedKeys } block, present ONLY when the bridge actually hid something; `curateOff` is the
+  // user's "show me the rest" escape, which sends ?curate=off and turns the bridge off for that
+  // request. A board narrowed by the profile used to look exactly like a board with nothing else in
+  // it, which is how an imported job that WAS present read as missing.
+  const [curation,    setCuration]    = useState(null);
+  const [curateOff,   setCurateOff]   = useState(false);
+  // The server's own word for WHY a board came back empty ('cache_empty' today). Without it the
+  // client has to guess, and it guessed wrong: an empty pool rendered as "nothing matches your
+  // profile's role", sending the user to change a profile that was never the problem.
+  const [boardReason, setBoardReason] = useState(null);
 
   // UI state
   const [scraping,    setScraping]    = useState(false);  // Apify live scrape
@@ -1508,6 +1519,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setCurrentPage(1);
   }, [applyFilterSnapshot, setLocalSearch]);
 
+  // "Show all N" / "Use my profile" — the way out of, and back into, profile curation. Only
+  // curateOff is set here: it is in the refetch effect's dep array, so flipping it re-runs the board
+  // by itself. Page 1 because the uncurated board is a different, longer result set and holding the
+  // old offset would land the user in the middle of it.
+  const toggleCuration = useCallback(() => {
+    setCurateOff(prev => !prev);
+    setCurrentPage(1);
+  }, []);
+
   // Spreads activeFilterSnapshot() rather than re-listing the filters: this snapshot is what gets
   // persisted (writeProfileUiCache) and restored, so a filter missing here is a filter that does not
   // survive a reload or a profile switch. It listed only the 11 legacy ones, which is why applying a
@@ -1781,6 +1801,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     // soft, null-preserving filter; OFF emits nothing at all (falls back to whatever the
     // active profile already derives by default — see services/jobs/profileFilterBridge.js).
     if (sponsorFriendly)         p.set("sponsorship_friendly", "1");
+    // "Show everything in my role" — turns off the profile-derived defaults for this request only
+    // (server.js's ?curate=off). Emitted solely when the user has asked for it, so the default
+    // querystring is unchanged.
+    if (curateOff)               p.set("curate", "off");
     // Provider + automation tier (services/jobs/jobQuery.js). Each is emitted ONLY when the user
     // has actually picked something, so with the drawer untouched none of these four keys appear
     // and the default querystring is byte-for-byte what it was before this change — the same
@@ -1801,7 +1825,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   }, [sortBy, roleFilter, locationFilter, workType, employmentTypePrefs, catFilter, srcFilter,
       minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter, boardTab, localSearch,
       salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
-      sourcesInclude, sourcesExclude, tiersInclude, tiersExclude]);
+      sourcesInclude, sourcesExclude, tiersInclude, tiersExclude, curateOff]);
 
   // FE-2: opt-in facet counts for the panel currently being edited — requested against the
   // CURRENTLY-COMMITTED filters (buildParams(1)), not the still-being-staged pendingFilters, so
@@ -1891,6 +1915,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       setTotalJobs(d.total || 0);
       setTotalPages(d.totalPages || 0);
       setCurrentPage(page);
+      // Absent whenever the bridge hid nothing (and on ?curate=off), so this clears itself as soon
+      // as the board stops being narrowed — the notice can never outlive the condition it describes.
+      setCuration(d.curation || null);
+      setBoardReason(d.reason || null);
       console.log(`[board] profile:${requestProfileKey} sort:${buildParams(page).match(/sort=([^&]+)/)?.[1]||"?"} page:${page} total:${d.total||0} returned:${incoming.length} source:${mergeMode?"merge":"replace"}`);
       setProfileCache?.(requestProfileKey, makeProfileSnapshot({
         jobs: mergeMode
@@ -2012,11 +2040,22 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       // commit that introduces them precisely so there is no fourth time. Verified by changing
       // only a provider pill and watching a request fire.
       sourcesInclude, sourcesExclude, tiersInclude, tiersExclude,
+      // Fourth time. curateOff feeds buildParams (?curate=off), so it belongs here for exactly the
+      // reason the four above do — without it, "Show all N" would build the right querystring and
+      // never send it, and the control would look dead.
+      curateOff,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setSearchPhase("idle");
   }, [activeProfileKey, searchInput]);
+
+  // Curation is a property of the ACTIVE profile, so opting out of one profile's curation must not
+  // silently carry into the next — that would be a hidden filter state surviving the thing it was
+  // scoped to, which is the failure mode this whole notice exists to remove.
+  useEffect(() => {
+    setCurateOff(false);
+  }, [activeProfileKey]);
 
   // Debounced backend search — fires 300ms after user stops typing.
   //
@@ -4058,6 +4097,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               onClearFilters={clearAllFilters}
               searchActive={!!localSearch.trim()}
               profileName={activeDomainProfile?.profile_name || null}
+              curation={curation}
+              curateOff={curateOff}
+              onToggleCurate={toggleCuration}
+              boardReason={boardReason}
               cardTier={1}
             />
             {/* The mobile "editor" pane is gone: the PDF sandbox is a popup panel now and renders
@@ -4133,6 +4176,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
               onClearFilters={clearAllFilters}
               searchActive={!!localSearch.trim()}
               profileName={activeDomainProfile?.profile_name || null}
+              curation={curation}
+              curateOff={curateOff}
+              onToggleCurate={toggleCuration}
+              boardReason={boardReason}
               cardTier={effectiveTier}
               containerRef={jobsPanelElementRef}
             />
@@ -4246,6 +4293,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       compact, selectedJobId, onJobSelect,
                       activeFilterCount = 0, onClearFilters,
                       searchActive = false, profileName = null,
+                      curation = null, curateOff = false, onToggleCurate, boardReason = null,
                       cardTier = 1, containerRef }) {
   const [pageInput, setPageInput] = useState("");
   const shouldShowEmptyState = jobs.length === 0 && !scraping;
@@ -4262,8 +4310,15 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
   // button agree.
   const narrowingCount      = activeFilterCount + (searchActive ? 1 : 0);
   const emptyBecauseFiltered = shouldShowEmptyState && narrowingCount > 0;
+  // Fourth case, and it has to be checked FIRST: the shared pool itself is empty, so no profile,
+  // role or filter is responsible. The server says so explicitly (reason:'cache_empty'). Before it
+  // did, this fell through to RoleScopedEmptyState and told the user nothing matched their
+  // profile's role — advice to go and edit a profile that was never the cause. Worse, this is the
+  // case that used to silently serve a global Adzuna feed instead (see server.js), so an empty pool
+  // has a history of showing the user anything except the truth.
+  const emptyBecauseNoPool   = shouldShowEmptyState && boardReason === "cache_empty";
   // Third case: nothing is narrowing the board and it is still empty. See RoleScopedEmptyState.
-  const emptyBecauseRole     = shouldShowEmptyState && narrowingCount === 0 && !!profileName;
+  const emptyBecauseRole     = shouldShowEmptyState && !emptyBecauseNoPool && narrowingCount === 0 && !!profileName;
   const visiblePages = buildVisiblePageItems(currentPage, totalPages);
   useEffect(() => {
     setPageInput(String(currentPage || ""));
@@ -4279,12 +4334,18 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
   return (
     <div ref={containerRef} style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
                   background: `linear-gradient(160deg, ${theme.accentMuted}55 0%, ${theme.bg} 55%)` }}>
+      {/* Rendered OUTSIDE the empty/non-empty branch on purpose: the bridge can narrow a board to a
+          short list or to nothing at all, and both need to say so. Left inside the non-empty branch
+          it would go silent in the very case where the user has least to go on. */}
+      <CurationNotice theme={theme} curation={curation} curateOff={curateOff} onToggleCurate={onToggleCurate}/>
       {shouldShowEmptyState ? (
-        emptyBecauseFiltered
-          ? <FilteredEmptyState theme={theme} count={narrowingCount} onClearFilters={onClearFilters}/>
-          : emptyBecauseRole
-            ? <RoleScopedEmptyState theme={theme} profileName={profileName}/>
-            : <EmptyState theme={theme}/>
+        emptyBecauseNoPool
+          ? <NoPoolEmptyState theme={theme}/>
+          : emptyBecauseFiltered
+            ? <FilteredEmptyState theme={theme} count={narrowingCount} onClearFilters={onClearFilters}/>
+            : emptyBecauseRole
+              ? <RoleScopedEmptyState theme={theme} profileName={profileName}/>
+              : <EmptyState theme={theme}/>
       ) : (
         <PullToRefresh onRefresh={onPullRefresh} refreshing={scraping} theme={theme}>
 
@@ -4452,6 +4513,64 @@ function buildVisiblePageItems(currentPage, totalPages) {
 // whose extension-side content script was deleted in v1.2.0. Clicking either only ever opened an
 // "install the extension" modal that no install could satisfy. The LIST below stays — it is fed
 // by the single-job capture path (/api/extension/save-job), which is live.
+// ── Curation disclosure ─────────────────────────────────────────────────────────────────────
+// The board is narrowed BY DEFAULT from the active profile (services/jobs/profileFilterBridge.js
+// derives q, skills_include, experience_levels and sponsorship_friendly for any dimension the user
+// did not set explicitly). That narrowing is good — and it was completely invisible, which is not.
+//
+// A row the bridge excluded was indistinguishable from a row that did not exist, so the honest
+// diagnosis ("your profile is hiding it") was unavailable to the user and, for two rounds of fixes,
+// to us: an imported Quora posting was present, active, correctly bucketed and returned by
+// ?curate=off the whole time, while the default board dropped it for being a New Grad req
+// (experience_level='entry') against a 3-years-experience profile whose derived window is
+// ['mid','senior'] — widenOneLevelUp only ever widens upward.
+//
+// So: say the number, name the reason, and give one control that shows the rest. Curation is not
+// weakened; it is disclosed.
+const CURATION_KEY_LABELS = {
+  q:                    "role keywords",
+  skills_include:       "skills",
+  experience_levels:    "experience level",
+  sponsorship_friendly: "sponsorship",
+};
+
+function CurationNotice({ theme, curation, curateOff, onToggleCurate }) {
+  const { theme: t } = useTheme();
+  const th = theme || t;
+  // Nothing to disclose unless the bridge actually hid rows. When the user has switched curation
+  // off we keep a way back on, so the state is never a one-way door they cannot see they are in.
+  if (!curation && !curateOff) return null;
+
+  const reasons = (curation?.derivedKeys || [])
+    .map(k => CURATION_KEY_LABELS[k] || k)
+    .join(", ");
+
+  return (
+    <div style={{ margin:"8px 16px 0", padding:"8px 12px", borderRadius:4,
+                  background:`${th.accentMuted}66`, border:`1px solid ${th.accentMuted}`,
+                  display:"flex", alignItems:"center", justifyContent:"space-between", gap:12,
+                  flexWrap:"wrap" }}>
+      <span style={{ fontSize:11.5, color:th.text, lineHeight:1.6 }}>
+        {curateOff ? (
+          <>Showing <strong>everything in your role</strong> — your profile&rsquo;s own filters are off.</>
+        ) : (
+          <>
+            Showing <strong>{curation.total}</strong> of <strong>{curation.uncuratedTotal}</strong> jobs
+            matching your profile
+            {reasons ? <> ({reasons})</> : null}.
+          </>
+        )}
+      </span>
+      <button type="button" onClick={onToggleCurate}
+        style={{ border:`1px solid ${th.text}`, borderRadius:4, padding:"3px 10px",
+                 background:"transparent", color:th.text, fontWeight:700, fontSize:11,
+                 cursor:"pointer", whiteSpace:"nowrap" }}>
+        {curateOff ? "Use my profile" : `Show all ${curation.uncuratedTotal}`}
+      </button>
+    </div>
+  );
+}
+
 function EmptyState({ theme }) {
   const { theme: t } = useTheme();
   const th = theme || t;
@@ -4496,6 +4615,37 @@ function FilteredEmptyState({ theme, count, onClearFilters }) {
           Clear all filters
         </button>
       )}
+    </div>
+  );
+}
+
+// ── Empty state, empty-pool variant ─────────────────────────────────────────────────────────
+// The FOURTH reason a board can be empty, and the one that used to be answered with a lie.
+//
+// When scraped_jobs holds no active rows, /api/jobs used to fall through to a live global
+// aggregator query — not profile-scoped, not filtered, not even the user's own Saved tab. On a real
+// run with an empty cache and an ENGINEERING profile, the default board, the Saved tab, and every
+// filter all returned the same 6,213,918-row feed led by "Occupational Therapist". That is the
+// reported "the same set of listings renders regardless of search or filters".
+//
+// The server now says `cache_empty` instead. This states it plainly and points at the one thing
+// that actually resolves it — nothing the user can fix by editing a profile or clearing a filter.
+function NoPoolEmptyState({ theme }) {
+  const { theme: t } = useTheme();
+  const th = theme || t;
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center",
+                  justifyContent:"center", gap:14, padding:40, color:th.textDim }}>
+      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
+                    fontSize:22, letterSpacing:"0.06em", textTransform:"uppercase", color:th.text,
+                    textAlign:"center" }}>
+        No jobs have been collected yet
+      </div>
+      <div style={{ fontSize:12, textAlign:"center", color:th.textDim, maxWidth:380, lineHeight:1.8 }}>
+        This is not your profile and not your filters — the shared job pool itself is empty, so there
+        is nothing for any board to show. It refills on the next scheduled crawl. You can also add a
+        posting yourself with <strong>Import</strong>.
+      </div>
     </div>
   );
 }

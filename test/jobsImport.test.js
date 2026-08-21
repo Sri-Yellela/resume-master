@@ -197,3 +197,59 @@ test("an anonymous import still succeeds and simply records no attachment", asyn
   assert.equal(res.job.id, "greenhouse::1");
   assert.equal(db.prepare("SELECT COUNT(*) n FROM user_jobs").get().n, 0);
 });
+
+test("a LinkedIn URL is refused with needsClientCapture and NO outbound request is made", async () => {
+  // The point of the login-walled branch is not just its return value — it is that the server never
+  // touches linkedin.com. Asserting the response alone would keep passing if someone moved the check
+  // below the fetch, so this proves the network was not used at all: every outbound path in this
+  // module goes through axios (fetchGenericPosting, and each ATS source's fetchCompanyJobs), and
+  // DNS resolution happens in assertFetchable before any socket is opened.
+  const db = importDb();
+  const axios = (await import("axios")).default;
+  const dns = await import("dns/promises");
+  const realGet = axios.get;
+  const realLookup = dns.default.lookup;
+  const calls = [];
+  axios.get = (...args) => { calls.push(args[0]); throw new Error(`outbound fetch attempted: ${args[0]}`); };
+  dns.default.lookup = (...args) => { calls.push(`dns:${args[0]}`); throw new Error(`dns lookup attempted: ${args[0]}`); };
+  try {
+    const res = await importJob(
+      { url: "https://www.linkedin.com/jobs/view/4141234567" },
+      { db, anthropic: null, userId: 1 }
+    );
+    assert.equal(res.needsClientCapture, true);
+    assert.equal(res.reason, "login_walled");
+    assert.ok(res.message.includes("extension"), "the message must name the way forward");
+    assert.deepEqual(calls, [], "nothing may be requested for a login-walled host");
+    // And it must not have written anything either — a refusal is not a partial import.
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM scraped_jobs").get().n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM user_jobs").get().n, 0);
+  } finally {
+    axios.get = realGet;
+    dns.default.lookup = realLookup;
+  }
+});
+
+test("a LinkedIn URL WITH pasted text is imported from that text, still without fetching", async () => {
+  // The fallback the refusal message describes. Same no-network guarantee: the text is already here.
+  const db = importDb();
+  const axios = (await import("axios")).default;
+  const realGet = axios.get;
+  const calls = [];
+  axios.get = (...args) => { calls.push(args[0]); throw new Error(`outbound fetch attempted: ${args[0]}`); };
+  try {
+    const anthropic = {}; // callModel is never reached: extraction is stubbed out by the throw below
+    await assert.rejects(
+      () => importJob(
+        { url: "https://www.linkedin.com/jobs/view/4141234567", text: "Senior Engineer at Acme" },
+        { db, anthropic: null, userId: 1 }
+      ),
+      /AI client/,
+      "with text present it takes the extraction path (which needs a model), not the refusal path"
+    );
+    assert.deepEqual(calls, [], "still nothing fetched from linkedin.com");
+    void anthropic;
+  } finally {
+    axios.get = realGet;
+  }
+});
