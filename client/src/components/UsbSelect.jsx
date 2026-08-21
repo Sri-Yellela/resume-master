@@ -47,7 +47,14 @@ const PORTAL_THEME = {
   shadowLg:    "0 12px 40px rgba(0,0,0,0.45), 0 0 0 1px var(--border-glass, rgba(255,255,255,0.08))",
 };
 
-export default function UsbSelect({ value, onChange, options, ariaLabel, icon: Icon }) {
+export default function UsbSelect({
+  value, onChange, options, ariaLabel, icon: Icon,
+  // Icon-only trigger: the control shows just its icon, with the current selection available to
+  // assistive tech through the label rather than as visible text. Used by the board's sort control
+  // (W4), which is an icon beside IMPORT — reusing this component rather than writing a second
+  // dropdown is the point, so the sort menu and the bar's dropdowns cannot drift apart.
+  iconOnly = false,
+}) {
   const [open, setOpen]   = useState(false);
   const [rect, setRect]   = useState(null);
   // The keyboard cursor. Distinct from `value`: moving through the list with the arrows must not
@@ -124,13 +131,16 @@ export default function UsbSelect({ value, onChange, options, ariaLabel, icon: I
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-activedescendant={open && active >= 0 ? `${listId}-${active}` : undefined}
-        aria-label={ariaLabel}
+        // With no visible text the label has to carry the current value, or a screen-reader user
+        // hears "Sort" and is told nothing about what it is sorted BY.
+        aria-label={iconOnly && selected?.l ? `${ariaLabel}: ${selected.l}` : ariaLabel}
+        title={iconOnly && selected?.l ? `${ariaLabel}: ${selected.l}` : undefined}
         onClick={() => (open ? close() : openList())}
         onKeyDown={onKeyDown}
       >
-        {Icon && <Icon size={13} className="usb__icon" aria-hidden="true" />}
-        <span className="usb__sel-label">{selected?.l}</span>
-        <ChevronDown size={11} className="usb__chev" aria-hidden="true" />
+        {Icon && <Icon size={iconOnly ? 15 : 13} className="usb__icon" aria-hidden="true" />}
+        {!iconOnly && <span className="usb__sel-label">{selected?.l}</span>}
+        {!iconOnly && <ChevronDown size={11} className="usb__chev" aria-hidden="true" />}
       </button>
 
       {open && rect && (

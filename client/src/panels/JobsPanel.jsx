@@ -435,6 +435,10 @@ function FiltersPanel({
   tiersExclude, setTiersExclude,
   facetCounts,
   onReset,
+  // Moved in from the control row (W4). Neither is new and neither changed: "New in 24h" is still
+  // the same ageFilter toggle, and the tracked-search trio is still saveTrackedSearch /
+  // applyTrackedSearch / clearTrackedSearch.
+  onSaveSearch, onApplySearch, onClearSearch, trackedSearch, canSaveSearch,
 }) {
   const { theme } = useTheme();
   const [skillDraft, setSkillDraft] = useState("");
@@ -521,6 +525,67 @@ function FiltersPanel({
           </span>
           <button onClick={onClose} style={{ background:"none", border:"none",
                                              cursor:"pointer", fontSize:18, color:theme.textMuted }}>x</button>
+        </div>
+
+        {/* ── Quick filters and saved searches ──────────────────────────────────────────
+            Both moved here from the control row that W4 removes. "New in 24h" toggles the STAGED
+            ageFilter, like every other control in this panel, so it now takes effect on Apply
+            rather than instantly — that is the panel's staging model, not a change to the filter.
+            The saved-search trio keeps its own semantics exactly: Save captures the currently
+            COMMITTED filter set (buildParams' querystring), which is what is on screen, not the
+            edits being staged above it. */}
+        <div>
+          <div style={labelStyle}>Quick</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            <button type="button"
+              onClick={() => setAgeFilter(ageFilter === "1d" ? "" : "1d")}
+              title="Show only jobs posted in the last 24 hours"
+              style={{
+                padding:"6px 12px", borderRadius:999, fontSize:11, fontWeight:700, cursor:"pointer",
+                border:`1px solid ${ageFilter === "1d" ? theme.accent : theme.border}`,
+                background: ageFilter === "1d" ? theme.accentMuted : "transparent",
+                color: ageFilter === "1d" ? (theme.accentText || theme.text) : theme.textMuted,
+                textTransform:"uppercase", letterSpacing:"0.06em",
+              }}>
+              New in 24h
+            </button>
+            <button type="button"
+              onClick={onSaveSearch}
+              disabled={!canSaveSearch}
+              title="Save the filter set currently applied to the board"
+              style={{
+                padding:"6px 12px", borderRadius:999, fontSize:11, fontWeight:700,
+                border:`1px solid ${theme.border}`, background:"transparent",
+                color: canSaveSearch ? theme.text : theme.textDim,
+                cursor: canSaveSearch ? "pointer" : "not-allowed",
+                opacity: canSaveSearch ? 1 : 0.5,
+              }}>
+              Save Search
+            </button>
+          </div>
+          {trackedSearch && (
+            <div style={{ display:"flex", alignItems:"center", gap:4, marginTop:6 }}>
+              <button type="button" onClick={onApplySearch}
+                title={trackedSearch.name || "Apply saved search"}
+                style={{
+                  flex:1, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                  padding:"5px 12px", borderRadius:999, fontSize:11, fontWeight:700, cursor:"pointer",
+                  border:`1px solid ${theme.accent}`, background:theme.accentMuted || theme.surface,
+                  color:theme.accentText || theme.text,
+                }}>
+                {trackedSearch.name || "Saved Search"}
+              </button>
+              <button type="button" onClick={onClearSearch} title="Remove saved search"
+                aria-label="Remove saved search"
+                style={{
+                  width:22, height:22, borderRadius:"50%", border:`1px solid ${theme.border}`,
+                  background:"transparent", color:theme.textMuted, cursor:"pointer",
+                  fontSize:12, lineHeight:1, flexShrink:0,
+                }}>
+                x
+              </button>
+            </div>
+          )}
         </div>
 
         <div>
@@ -1135,6 +1200,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
     selectedJob, setSelectedJob, setSelectedJobMeta,
     barFilters, liveSearchTick,
+    filterPanelOpen, setFilterPanelOpen, setActiveFilterCount,
   } = useJobBoard();
 
   // Open / close sandbox — panel size rebalancing handled by useEffect below.
@@ -1353,7 +1419,12 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [enhanceModalOpen, setEnhanceModalOpen] = useState(false);
 
   // Filter panel
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  // The filters panel's open state lives in JobBoardContext, because the control that opens it is
+  // now the icon beside IMPORT (App.jsx's BoardControlIcons), which is rendered above this panel.
+  // Only the TRIGGER moved: the panel, its staged pendingFilters, its facet counts and its
+  // apply/reset flow are all still here and unchanged.
+  const filtersOpen = filterPanelOpen;
+  const setFiltersOpen = setFilterPanelOpen;
 
   // Employment type preferences — persisted in localStorage
   const [employmentTypePrefs, setEmploymentTypePrefsRaw] = useState(() => {
@@ -1515,8 +1586,15 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       const a = current[k], b = base[k];
       if (Array.isArray(b)) return JSON.stringify(a ?? []) !== JSON.stringify(b);
       return (a ?? "") !== (b ?? "");
-    }).length;
-  }, [activeFilterSnapshot]);
+    }).length
+    // Plus the two committed filters the DRAWER does not own, and which are therefore not in its
+    // snapshot: the search bar's Domain and Status > Applied controls. They narrow the board just
+    // as much as anything above, and since this number is now also the icon's badge — the only
+    // at-a-glance explanation for a narrow board — leaving them out would let the board be
+    // filtered while the badge said it was not.
+    + (domainFilter ? 1 : 0)
+    + (appliedFilter ? 1 : 0);
+  }, [activeFilterSnapshot, domainFilter, appliedFilter]);
 
   // Clears every committed filter AND the staged copy, so the drawer does not reopen still
   // showing the filters the user just cleared from the empty-board notice.
@@ -1861,11 +1939,25 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     }
   }, [buildParams]);
 
-  const openFilterPanel = useCallback(() => {
+  // Staging on open. This used to be openFilterPanel(), called by the FILTERS button that W4
+  // removes — the icon that replaced it only flips the shared flag, because App.jsx has no access
+  // to pendingFilters or the facet fetch and should not. So the work moved to an effect on the
+  // flag, which means it runs however the panel was opened and cannot be bypassed by a second
+  // trigger added later.
+  //
+  // Keyed on the transition into `true`, not on every render while open, or restaging would wipe
+  // the edits being made in the panel on any unrelated re-render.
+  useEffect(() => {
+    if (!filtersOpen) return;
     setPendingFilters(activeFilterSnapshot());
-    setFiltersOpen(true);
     fetchFacets();
-  }, [activeFilterSnapshot, fetchFacets]);
+  }, [filtersOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Publish the count upward so the filter icon (App.jsx's BoardControlIcons, above this panel)
+  // can show its badge. JobsPanel is the only place that can count it — the committed filter set
+  // lives here — and it is the SAME activeFilterCount the empty-board notice already uses, so the
+  // badge and the notice can never disagree about how narrow the board is.
+  useEffect(() => { setActiveFilterCount(activeFilterCount); }, [activeFilterCount, setActiveFilterCount]);
 
   // openLinkedInExtensionPopup / closeLinkedInImportTab / startLinkedInImport removed in cleanup
   // 5.3. They drove the LinkedIn bulk saved-jobs import, and every one of them called
@@ -2310,6 +2402,8 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setMaxApplicants(p.get("maxApplicants") || "");
     setVisitedFilter(p.get("visited") || "");
     setAgeFilter(p.get("ageFilter") || "");
+    setDomainFilter(p.get("domain") || "");
+    setAppliedFilter(p.get("applied") || "");
     setLocalSearch(p.get("localSearch") || "");
     if (p.get("sort")) setSortBy(p.get("sort"));
     setSalaryMin(p.get("salary_min_usd") || "");
@@ -3106,7 +3200,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       <AnimatePresence>
         {filtersOpen && (
           <FiltersPanel
-            open={filtersOpen} onClose={() => setFiltersOpen(false)} onApply={applyPendingFilters}
+            open={filtersOpen} onClose={() => setFilterPanelOpen(false)} onApply={applyPendingFilters}
             categories={categories}
             role={pendingFilters.roleFilter}         setRole={value => stageFilter("roleFilter", value)}
             location={pendingFilters.locationFilter} setLocation={value => stageFilter("locationFilter", value)}
@@ -3131,6 +3225,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             tiersExclude={pendingFilters.tiersExclude || []}   setTiersExclude={value => stageFilter("tiersExclude", value)}
             facetCounts={facetCounts}
             onReset={resetPendingFilters}
+            onSaveSearch={saveTrackedSearch}
+            onApplySearch={applyTrackedSearch}
+            onClearSearch={clearTrackedSearch}
+            trackedSearch={activeDomainProfile?.tracked_search || null}
+            canSaveSearch={!!activeDomainProfile}
           />
         )}
       </AnimatePresence>
@@ -3165,126 +3264,35 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
           ))}
         </div>
         )}
-        {/* Filters button â€" always visible, bold outline */}
-        <button
-          onClick={() => filtersOpen ? setFiltersOpen(false) : openFilterPanel()}
-          style={{
-            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
-            background: filtersOpen ? theme.accent : theme.surface,
-            border: `2px solid ${theme.borderStrong}`,
-            borderRadius:2, padding:"6px 16px",
-            fontFamily:"'Barlow Condensed',sans-serif",
-            fontWeight:800, fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
-            cursor:"pointer", color: filtersOpen ? "#0f0f0f" : theme.text,
-            transition:"background 0.15s",
-          }}>
-          Filters
-        </button>
+        {/* ── The control ROW is gone (W4). Nothing in it was deleted; every control MOVED. ──
+            FILTERS, NEW IN 24H, Save Search and the saved-search chip -> the filters panel, opened
+              by the icon beside IMPORT (App.jsx's BoardControlIcons).
+            Sort ("Newest") -> the sort icon beside it, same seven options, same values.
+            "Filter loaded jobs" -> REMOVED as redundant: it wrote `localSearch`, which is the
+              same state the main search bar's keyword field now writes, so it was a second input
+              for one filter. It is still reachable from the collapsed pill when scrolled.
+            Profile selector -> REMOVED as redundant here: TopBar's own profile menu and the
+              collapsed pill both already carry one, and this was the third.
+            What stays visible is the result count and the active-filter indicator, because with
+            the filters behind an icon those are the only things that can explain a narrow board. */}
 
-        {/* FE-3: "New in 24h" — reuses ageFilter (buildParams already derives posted_after
-            from it; server.js's legacy ageSql AND jobQuery.js's richFilters both key off the
-            same value), so this is a pure UI toggle with no new query path. */}
-        <button
-          onClick={() => setAgeFilter(ageFilter === "1d" ? "" : "1d")}
-          title="Show only jobs posted in the last 24 hours"
-          style={{
-            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
-            background: ageFilter === "1d" ? theme.accent : theme.surface,
-            border: `2px solid ${theme.borderStrong}`,
-            borderRadius:2, padding:"6px 16px",
-            fontFamily:"'Barlow Condensed',sans-serif",
-            fontWeight:800, fontSize:13, letterSpacing:"0.08em", textTransform:"uppercase",
-            cursor:"pointer", color: ageFilter === "1d" ? "#0f0f0f" : theme.text,
-            transition:"background 0.15s",
-          }}>
-          New in 24h
-        </button>
-
-        {/* FE-3: tracked search — save the profile's current committed filter set, or
-            apply/clear whatever's already saved for the active profile. */}
-        <button
-          onClick={saveTrackedSearch}
-          disabled={!activeDomainProfile}
-          title="Save this filter set to the active profile"
-          style={{
-            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
-            background: theme.surface,
-            border: `1px solid ${theme.border}`,
-            borderRadius:2, padding:"6px 14px",
-            fontFamily:"'DM Sans',system-ui",
-            fontWeight:700, fontSize:12,
-            cursor: activeDomainProfile ? "pointer" : "not-allowed",
-            color: activeDomainProfile ? theme.text : theme.textDim,
-            opacity: activeDomainProfile ? 1 : 0.5,
-          }}>
-          Save Search
-        </button>
-        {activeDomainProfile?.tracked_search && (
-          <div style={{ display:"inline-flex", alignItems:"center", gap:4, flexShrink:0 }}>
-            <button
-              onClick={applyTrackedSearch}
-              title={activeDomainProfile.tracked_search.name || "Apply saved search"}
-              style={{
-                display:"inline-flex", alignItems:"center", gap:6,
-                background: theme.accentMuted || theme.surface,
-                border: `1px solid ${theme.accent}`,
-                borderRadius: 999, padding:"5px 12px",
-                fontFamily:"'DM Sans',system-ui",
-                fontWeight:700, fontSize:11,
-                cursor:"pointer", color: theme.accentText || theme.text,
-              }}>
-              {activeDomainProfile.tracked_search.name || "Saved Search"}
-            </button>
-            <button
-              onClick={clearTrackedSearch}
-              title="Remove saved search"
-              style={{
-                width:22, height:22, borderRadius:"50%", border:`1px solid ${theme.border}`,
-                background:"transparent", color:theme.textMuted, cursor:"pointer",
-                fontSize:12, lineHeight:1, flexShrink:0,
-              }}>
-              x
-            </button>
-          </div>
-        )}
-
-        {/* Sort */}
-        <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-          style={{ height:34, padding:"0 10px", borderRadius:2, flexShrink:0,
-                   border:`2px solid ${theme.borderStrong}`, background:theme.surface,
-                   fontSize:13, color:theme.text, outline:"none",
-                   fontFamily:"'DM Sans',system-ui", cursor:"pointer" }}>
-          <option value="dateDesc">Newest</option>
-          <option value="dateAsc">Oldest</option>
-          <option value="compHigh">Pay high to low</option>
-          <option value="compLow">Pay low to high</option>
-          <option value="yoeLow">Exp low to high</option>
-          <option value="yoeHigh">Exp high to low</option>
-          <option value="atsScore">ATS Sort</option>
-        </select>
-
-        <ProfileSelectorDropdown
-          theme={theme}
-          profiles={domainProfiles}
-          activeProfile={activeDomainProfile}
-          onActivate={activateProfileForSearch}
-          onDelete={deleteDomainProfile}
-          onAdd={() => setProfileWizardOpen(true)}
-          title="Switch profile"
-        />
-
-        {/* Local search â€" live client-side, every keystroke */}
-        <input value={localSearch} onChange={e => setLocalSearch(e.target.value)}
-          onKeyDown={e => { if (e.key === "Escape") setLocalSearch(""); }}
-          placeholder="Filter loaded jobs..."
-          style={{ flex:"0 1 220px", minWidth:120, height:34, padding:"0 12px",
-                   borderRadius:2, border:`1px solid ${theme.border}`,
-                   background:theme.surface, color:theme.text,
-                   fontFamily:"'DM Sans',system-ui", fontSize:13, outline:"none" }}/>
-        {localSearch && (
-          <button onClick={() => setLocalSearch("")}
-            style={{ background:"none", border:"none", color:theme.textDim,
-                     cursor:"pointer", fontSize:14, padding:"0 2px", flexShrink:0 }}>x</button>
+        {/* Active-filter indicator. The count badge on the icon is the at-a-glance signal; this is
+            the same fact in words, and it stays visible when the bar has collapsed to the pill and
+            the badge has scrolled away with it. */}
+        {activeFilterCount > 0 && (
+          <button
+            onClick={() => setFiltersOpen(true)}
+            title="Open filters"
+            style={{
+              display:"inline-flex", alignItems:"center", gap:6, flexShrink:0,
+              background: theme.accentMuted || theme.surface,
+              border:`1px solid ${theme.accent}`, borderRadius:999,
+              padding:"4px 12px", cursor:"pointer",
+              fontFamily:"'DM Sans',system-ui", fontWeight:700, fontSize:11,
+              color: theme.accentText || theme.text,
+            }}>
+            {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active
+          </button>
         )}
 
         {/* Background loading indicator + job count */}

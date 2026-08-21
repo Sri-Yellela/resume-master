@@ -37,6 +37,20 @@ export function JobBoardProvider({ children }) {
   // run — a boolean would latch and the second would be a no-op.
   const [liveSearchTick, setLiveSearchTick] = useState(0);
 
+  // -- The consolidated control row (W4) --------------------------------------------------
+  //
+  // The filter and sort triggers moved up beside IMPORT, which is rendered by App.jsx in
+  // UnifiedSearchBar's `actions` slot — above the board, exactly like the search bar was. So the
+  // same problem and the same answer: the trigger lives up there, the PANEL and all its staging
+  // logic stay in JobsPanel where they already are, and these two values are the wire between them.
+  // Nothing about the filter drawer moves; only what opens it.
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  // Published UPWARD by JobsPanel, which is the only thing that can count them. With the filters
+  // behind an icon a user has to be able to see at a glance that some are on — otherwise
+  // "0 jobs matched" becomes unexplainable, which is the whole reason the badge is a requirement
+  // and not a decoration.
+  const [activeFilterCount, setActiveFilterCount] = useState(0);
+
   const applyBarFilters = useCallback((params, { live = false } = {}) => {
     setBarFilters({ ...EMPTY_BAR_FILTERS, ...(params || {}) });
     if (live) setLiveSearchTick(t => t + 1);
@@ -68,6 +82,7 @@ export function JobBoardProvider({ children }) {
       activeProfileId, setActiveProfileId, getProfileCache, setProfileCache, deleteProfileCache,
       selectedJob, setSelectedJob, selectedJobMeta, setSelectedJobMeta,
       barFilters, applyBarFilters, liveSearchTick,
+      filterPanelOpen, setFilterPanelOpen, activeFilterCount, setActiveFilterCount,
     }}>
       {children}
     </JobBoardContext.Provider>

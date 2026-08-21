@@ -71,8 +71,20 @@ test("jobs surface has compact profile selector and profile menu supports deleti
 
   assert.doesNotMatch(jobsPanel, /Profile:/);
   assert.doesNotMatch(jobsPanel, /Profile switcher bar/);
-  assert.match(jobsPanel, /<ProfileSelectorDropdown/);
-  assert.match(jobsPanel, /flex:"0 1 220px"/);
+  // The board's own copies of the profile selector and the "Filter loaded jobs" input are GONE —
+  // W4 removed both from the control row as redundant, not as a regression:
+  //   - the profile selector was the THIRD on screen (TopBar's avatar menu and the collapsed pill
+  //     both carry one), and
+  //   - "Filter loaded jobs" wrote `localSearch`, which is the same state the main search bar's
+  //     keyword field now writes, so it was a second input for one filter.
+  // What must remain true is that both are still REACHABLE, which is what the two assertions
+  // below check on the surfaces that kept them.
+  assert.doesNotMatch(jobsPanel, /<ProfileSelectorDropdown/,
+    "the board re-grew its own profile selector; TopBar and the pill already have one");
+  assert.doesNotMatch(jobsPanel, /placeholder="Filter loaded jobs/,
+    "the redundant second search input is back — the main search bar already writes localSearch");
+  assert.match(topBar, /<ProfileSelectorDropdown/, "the pill must still switch profiles");
+  assert.match(topBar, /placeholder="Filter jobs/, "the pill must still filter, for when scrolled");
   assert.match(topBar, /method: "DELETE"/);
   assert.doesNotMatch(topBar, />\s*Delete\s*<\/button>/);
   assert.match(profileSelector, /onDelete\?\.\(profile\.id\)/);
@@ -176,7 +188,12 @@ test("tool access is plan-owned and local match UI is removed", () => {
   assert.doesNotMatch(topBar, /Best match|bestMatch/);
   assert.doesNotMatch(scrollDock, /Best match|bestMatch/);
   assert.doesNotMatch(jobsPanel, /Best Match|bestMatch|\/api\/jobs\/best-match|atsLocal/);
-  assert.match(jobsPanel, /value="atsScore">ATS Sort/);
+  // ATS Sort moved with the rest of the sort options to App.jsx's SORT_OPTIONS (the sort icon
+  // beside IMPORT) and to the collapsed pill. It must still be OFFERED — that is the invariant
+  // this line has always guarded; only the file it lives in changed.
+  const appSrc = fs.readFileSync("client/src/App.jsx", "utf8");
+  assert.match(appSrc, /\{ v: "atsScore", l: "ATS Sort"\s*\}/);
+  assert.match(topBar, /value="atsScore">ATS Sort/);
 });
 
 test("critical UI copy has no mojibake literals", () => {

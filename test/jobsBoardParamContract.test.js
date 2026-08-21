@@ -197,3 +197,45 @@ test("an empty board always says which kind of empty it is", () => {
   // A board emptied only by the search box must land on the filtered message, not on "search above".
   assert.match(panel, /const narrowingCount\s+= activeFilterCount \+ \(searchActive \? 1 : 0\);/);
 });
+
+// ── The third end of the same contract: a saved search must restore what it saved ─────────────
+//
+// A tracked search stores buildParams' raw querystring. So a param buildParams emits and
+// applyTrackedSearch never reads is silently dropped on apply, and the saved search comes back
+// SUBTLY WIDER than the one that was saved — a filter the user set, saved, and then lost, with
+// nothing anywhere reporting it. That comment is already in applyTrackedSearch for the four
+// provider/tier params it happened to bite. This derives the check instead of listing it, for the
+// same reason the two tests above do.
+const TRACKED_SEARCH_EXEMPT = new Map([
+  // Pagination, not a filter. A saved search restores a filter SET and always starts at page 1
+  // (applyTrackedSearch sets currentPage itself).
+  ["page", "pagination"],
+  ["pageSize", "pagination"],
+  // Derived from ageFilter, which IS restored — buildParams recomputes it from the same value, so
+  // restoring it separately would be a second source of truth for one control.
+  ["posted_after", "derived from ageFilter, which is restored"],
+  // The Saved ★ tab is a VIEW, not a filter: it comes from boardTab. Applying a saved search must
+  // not silently move the user to a different tab than the one they are looking at.
+  ["starred", "boardTab is a view, not part of the filter set"],
+  // A per-request opt-out of profile curation that is deliberately reset on every profile switch
+  // (see the effect that clears it). Persisting it into a saved search would make it survive the
+  // thing it is scoped to.
+  ["curate", "per-request, and reset on profile switch by design"],
+]);
+
+test("every filter buildParams emits is restored by applyTrackedSearch (derived, not listed)", () => {
+  const a = panel.indexOf("const applyTrackedSearch = useCallback");
+  assert.notEqual(a, -1, "applyTrackedSearch moved");
+  const body = stripComments(panel.slice(a, panel.indexOf("}, [activeDomainProfile]);", a)));
+  const readKeys = new Set([
+    ...[...body.matchAll(/p\.get\("([^"]+)"\)/g)].map((m) => m[1]),
+    ...[...body.matchAll(/csv\("([^"]+)"\)/g)].map((m) => m[1]),
+  ]);
+
+  const dropped = emittedParams().filter((k) => !readKeys.has(k) && !TRACKED_SEARCH_EXEMPT.has(k));
+  assert.deepEqual(
+    dropped, [],
+    `buildParams emits these and applyTrackedSearch does not restore them, so a saved search comes ` +
+    `back wider than the one that was saved: ` + dropped.join(", "),
+  );
+});

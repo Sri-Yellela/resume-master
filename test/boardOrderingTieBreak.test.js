@@ -148,13 +148,33 @@ test("the live-scrape poll uses the same ordering as the board", () => {
 
 test("every sort value the client can send has its own case", () => {
   // "Oldest" (dateAsc) had no case and fell through to the default, so it rendered identically to
-  // "Newest" — a control that visibly does nothing. Read the option values out of the panel rather
-  // than hardcoding them, so adding an <option> without a server case fails here.
-  const panel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
-  const selectStart = panel.indexOf('<option value="dateDesc"');
-  const options = [...panel.slice(selectStart, selectStart + 900).matchAll(/<option value="([a-zA-Z]+)"/g)]
+  // "Newest" — a control that visibly does nothing. Read the offered values out of the UI rather
+  // than hardcoding them, so adding a sort option without a server case fails here.
+  //
+  // There are now TWO places a sort can be offered, and both are collected: App.jsx's SORT_OPTIONS
+  // (the sort icon beside IMPORT, which replaced the control row's "Newest" select) and TopBar's
+  // collapsed pill, which keeps its own select for when the bar has scrolled away. Reading both is
+  // the point — a value offered on one surface and not handled by the server is just as dead as
+  // one offered on the other, and two lists is exactly the situation where one drifts.
+  const app    = fs.readFileSync("client/src/App.jsx", "utf8");
+  const topBar = fs.readFileSync("client/src/components/TopBar.jsx", "utf8");
+
+  const sortStart = app.indexOf("const SORT_OPTIONS = [");
+  assert.notEqual(sortStart, -1, "App.jsx no longer declares SORT_OPTIONS");
+  const fromIcon = [...app.slice(sortStart, app.indexOf("];", sortStart)).matchAll(/\{ v: "([a-zA-Z]+)"/g)]
     .map(m => m[1]);
-  assert.ok(options.includes("dateAsc"), "precondition: the panel really offers Oldest");
+
+  const pillStart = topBar.indexOf('<option value="dateDesc"');
+  assert.notEqual(pillStart, -1, "the collapsed pill no longer offers a sort");
+  const fromPill = [...topBar.slice(pillStart, pillStart + 900).matchAll(/<option value="([a-zA-Z]+)"/g)]
+    .map(m => m[1]);
+
+  const options = [...new Set([...fromIcon, ...fromPill])];
+  assert.ok(fromIcon.includes("dateAsc"), "precondition: the sort icon really offers Oldest");
+  assert.ok(fromPill.includes("dateAsc"), "precondition: the pill really offers Oldest");
+  // The two surfaces are one control in two places and must offer the same thing.
+  assert.deepEqual([...fromIcon].sort(), [...fromPill].sort(),
+    "the sort icon and the collapsed pill offer different sorts — one of them will surprise someone");
 
   const block = serverSrc.slice(serverSrc.indexOf("const RECENCY ="),
                                serverSrc.indexOf("const offset  = (pg - 1) * ps;"));

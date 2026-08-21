@@ -23,7 +23,8 @@ import { RecruiterPanel }        from "./panels/RecruiterPanel.jsx";
 import { JobsConsole }            from "./consoles/PlanConsoles.jsx";
 import UnifiedSearchBar          from "./components/UnifiedSearchBar.jsx";
 import ImportJobModal            from "./components/ImportJobModal.jsx";
-import { Plus }                  from "lucide-react";
+import { Plus, SlidersHorizontal, ArrowUpDown } from "lucide-react";
+import UsbSelect                 from "./components/UsbSelect.jsx";
 import { ATSToolPage }           from "./pages/tools/ATSToolPage.jsx";
 import { GenerateToolPage }      from "./pages/tools/GenerateToolPage.jsx";
 import { ApplyToolPage }         from "./pages/tools/ApplyToolPage.jsx";
@@ -103,6 +104,73 @@ function BoardSearchBar(props) {
       onLocalFilter={params => applyBarFilters(params)}
       onSearch={params => applyBarFilters(params, { live: true })}
     />
+  );
+}
+
+// The board's sort options. Same list, same values, that the removed "Newest" select in the
+// control row held — this is a MOVE, not a redesign, so nothing is added or dropped here.
+const SORT_OPTIONS = [
+  { v: "dateDesc", l: "Newest"          },
+  { v: "dateAsc",  l: "Oldest"          },
+  { v: "compHigh", l: "Pay high to low" },
+  { v: "compLow",  l: "Pay low to high" },
+  { v: "yoeLow",   l: "Exp low to high" },
+  { v: "yoeHigh",  l: "Exp high to low" },
+  { v: "atsScore", l: "ATS Sort"        },
+];
+
+// The consolidated control row (W4): a filter icon and a sort icon, beside IMPORT.
+//
+// Inside JobBoardProvider for the same reason BoardSearchBar is — AppDashboard renders the
+// provider and so cannot read it. The filter icon only TOGGLES; the panel itself, and every piece
+// of staging logic behind it, stays in JobsPanel untouched. The sort icon reuses UsbSelect, the
+// same dropdown the search bar uses, so the board has one dropdown implementation rather than one
+// per surface.
+function BoardControlIcons() {
+  const { filterPanelOpen, setFilterPanelOpen, activeFilterCount, sortBy, setSortBy } = useJobBoard();
+  const on = activeFilterCount > 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <button
+        type="button"
+        onClick={() => setFilterPanelOpen(o => !o)}
+        aria-expanded={filterPanelOpen}
+        aria-label={on ? `Filters (${activeFilterCount} active)` : "Filters"}
+        title={on ? `${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"} active` : "Filters"}
+        style={{
+          position: "relative", display: "flex", alignItems: "center", gap: 6,
+          padding: "6px 10px", borderRadius: 999,
+          background: filterPanelOpen ? "rgba(255,255,255,0.06)" : "transparent",
+          border: `1px solid ${on || filterPanelOpen ? "var(--color-primary)" : "var(--border-glass)"}`,
+          color: on || filterPanelOpen ? "var(--color-primary)" : "var(--color-text-muted)",
+          cursor: "pointer",
+        }}>
+        <SlidersHorizontal size={15} />
+        {/* The badge is load-bearing, not decoration: with the filters behind an icon it is the
+            only thing that explains an unexpectedly narrow board. It carries the COUNT rather than
+            being a dot, so "why is this empty" has a number attached to it. */}
+        {on && (
+          <span
+            aria-hidden="true"
+            style={{
+              minWidth: 16, height: 16, padding: "0 4px", borderRadius: 999,
+              background: "var(--color-primary)", color: "var(--color-on-primary, #0f0f0f)",
+              fontSize: 10, fontWeight: 800, lineHeight: "16px", textAlign: "center",
+            }}>
+            {activeFilterCount}
+          </span>
+        )}
+      </button>
+
+      <UsbSelect
+        iconOnly
+        icon={ArrowUpDown}
+        ariaLabel="Sort"
+        value={sortBy || "dateDesc"}
+        onChange={setSortBy}
+        options={SORT_OPTIONS}
+      />
+    </div>
   );
 }
 
@@ -272,9 +340,12 @@ function AppDashboard({ authUser, setAuthUser }) {
             tabs={appTabs}
             activeTab={activeTab}
             onTabChange={handlePanelChange}
-            // Jobs tab only: importing a job is a board action, so it would be meaningless
-            // sitting above Job Profiles, Database or Recruiter.
+            // Jobs tab only: these are board actions, so they would be meaningless sitting above
+            // Job Profiles, Database or Recruiter.
             actions={activeTab === "console" ? (
+              <>
+              <BoardControlIcons />
+              <div style={{ width: 1, height: 20, background: "var(--border-glass)", margin: "0 8px" }} />
               <button
                 type="button"
                 onClick={() => setImportOpen(true)}
@@ -291,6 +362,7 @@ function AppDashboard({ authUser, setAuthUser }) {
                 }}>
                 <Plus size={13} /> Import
               </button>
+              </>
             ) : null}
           />
 
