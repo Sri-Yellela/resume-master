@@ -143,9 +143,17 @@ function buildJobFilters(params = {}) {
     args.push(...workModels);
   }
 
+  // Soft-null, same class as work_models above and for the same reason — but reached by a route
+  // worth naming: server.js's OWN clause for this exact column (its `employmentType` query key)
+  // was already soft-null, and this one was not. The same column therefore had two filters that
+  // disagreed, so whether a NULL employment_type survived depended on which query key the caller
+  // happened to use. employment_type is written only by sources that parse one (normalizeEmploymentType
+  // maps unrecognised values to NULL), so "not established" is the normal state for an import and for
+  // any source that does not state it — the imported Quora row carries NULL here and a bare IN dropped
+  // it. Excluded only on an explicit mismatch, never on absence.
   const employmentTypes = toArray(params.employment_types);
   if (employmentTypes.length) {
-    clauses.push(`sj.employment_type IN (${employmentTypes.map(() => '?').join(',')})`);
+    clauses.push(`(sj.employment_type IS NULL OR sj.employment_type IN (${employmentTypes.map(() => '?').join(',')}))`);
     args.push(...employmentTypes);
   }
 
@@ -179,9 +187,26 @@ function buildJobFilters(params = {}) {
   // posted_after / discovered_after: unix epoch seconds, matching this codebase's other
   // epoch-based filters (ageFilter etc). posted_at is a free-text/ISO string per source, so
   // it's parsed the same way the rest of server.js already does (strftime on it).
+  // COALESCE onto scraped_at, for exactly the reason discovered_after already does it below (read
+  // the two together). This is NOT the soft-null escape — a recency filter must not admit rows of
+  // unknown age, and it does not have to: scraped_at is written on every upsert, so a row with no
+  // posted_at still has a real "when we first saw it" timestamp, which beats dropping the row.
+  //
+  // The old hard `posted_at IS NOT NULL AND ...` made the SAME UI control contradict itself. The
+  // client's one "Past week" pill emits BOTH `ageFilter` and `posted_after` from the same state
+  // (see JobsPanel's buildParams), and server.js's ageFilter clause is `sj.scraped_at >= ?` — so
+  // ageFilter kept an undated posting and posted_after, applied in the same query, threw it away.
+  // Plenty of rows are undated: Ashby only sets publishedDate when the employer does, and the
+  // imported Quora posting came through with posted_at NULL, so every date-filtered board dropped it.
   const postedAfter = toInt(params.posted_after);
   if (postedAfter != null) {
-    clauses.push(`sj.posted_at IS NOT NULL AND sj.posted_at != '' AND CAST(strftime('%s', sj.posted_at) AS INTEGER) >= ?`);
+    clauses.push(
+      `COALESCE(
+         CASE WHEN sj.posted_at IS NOT NULL AND sj.posted_at != ''
+              THEN CAST(strftime('%s', sj.posted_at) AS INTEGER) END,
+         sj.scraped_at
+       ) >= ?`
+    );
     args.push(postedAfter);
   }
   // COALESCE onto scraped_at rather than hard-excluding NULL. Note this is NOT the soft-null

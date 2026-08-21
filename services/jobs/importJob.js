@@ -490,7 +490,41 @@ async function importJob({ url, text, html } = {}, { db, anthropic, userId = nul
       .catch(e => console.warn('[importJob] Background enrichment failed:', e.message));
   });
 
+  // Read back BEFORE reporting success, and say so out loud if the row is not there.
+  //
+  // This endpoint's whole contract is "your job is now in the pool". Every branch above assumes its
+  // write landed: insert_canonical trusts upsertCanonicalJob, and the fold branch trusts that
+  // dedup.intoJobId still names a live row. Neither is checked, and without this the failure mode is
+  // a TypeError deep inside mapJobRow that the route turns into a generic 502 — indistinguishable
+  // from a network problem, and no clue in the log that a write silently did nothing. That is the
+  // defect class this codebase has been bitten by repeatedly (Jobo logging "sync complete — 0 jobs
+  // cached" while unconfigured; enrichment stamping rows complete while writing nothing), so the
+  // import must not be the next one. A missing row is an internal failure, not bad user input —
+  // hence Error, which the route maps to 502, and not ImportInputError.
   const row = db.prepare('SELECT * FROM scraped_jobs WHERE job_id = ?').get(finalJobId);
+  if (!row) {
+    console.error(
+      `[importJob] WRITE DID NOT PERSIST — no scraped_jobs row for job_id=${finalJobId} ` +
+      `(action=${dedup.action}, source=${normalizedJob.source}, url=${normalizedJob.url}). ` +
+      `Reporting failure rather than returning success for a write that did not happen.`
+    );
+    throw new Error(`Import wrote no row for job_id ${finalJobId}`);
+  }
+
+  // An import that persists but is unreachable on the importer's own board is the SAME lie in a
+  // quieter form — it is exactly what happened to the reported Quora posting, twice. job_role_map is
+  // the binding constraint: /api/jobs joins it with an INNER JOIN on the profile's role_key, so a row
+  // with no bucket is invisible to every board under every filter, ?curate=off included. Cheap to
+  // check, and it turns a silent disappearance into a logged one.
+  const hasBucket = db.prepare('SELECT 1 FROM job_role_map WHERE job_id = ? LIMIT 1').get(finalJobId);
+  if (!hasBucket) {
+    console.error(
+      `[importJob] UNREACHABLE IMPORT — job_id=${finalJobId} persisted with no job_role_map row, ` +
+      `so it cannot appear on any board. upsertCanonicalJob's ROLE_KEY_FALLBACK should make this ` +
+      `impossible; if it is logged, that guard has regressed.`
+    );
+  }
+
   return { job: mapJobRow(row) };
 }
 

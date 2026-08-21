@@ -117,7 +117,11 @@ test("every param buildParams emits is actually read by the server (the `starred
 test("the Saved tab's starred param is bound to the requesting user's own flag", () => {
   // Specifically: it must read uj.starred (the per-user, per-profile LEFT JOIN), never sj.*, or the
   // Saved tab would show rows starred by somebody else.
-  assert.match(server, /const starredSql = starred === '1' \? `AND uj\.starred = 1` : '';/);
+  // `starred === '1'` now reads through the named `savedTab` flag, because the same condition also
+  // exempts the tab from the role_key join, profileTitleSql and the profile bridge — one name, so
+  // the four cannot drift apart. The invariant asserted here is unchanged: uj.starred, not sj.*.
+  assert.match(server, /const savedTab = starred === '1';/);
+  assert.match(server, /const starredSql = savedTab \? `AND uj\.starred = 1` : '';/);
   assert.match(server, /\$\{starredSql\}/, "starredSql is built but never spliced into the WHERE clause");
   // It binds no parameter, which is why it can sit anywhere in the clause without shifting baseArgs.
   assert.ok(!/starredArgs/.test(server), "starredSql must stay parameterless or baseArgs ordering shifts");

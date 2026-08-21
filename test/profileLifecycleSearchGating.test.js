@@ -29,9 +29,30 @@ test("job grouping requires selected profile title predicates in addition to rol
   // scrapeProfileTitleFilter went with the retired scrape route. The three query paths that
   // still exist must each apply it — that is the invariant this test is for (wrong-profile jobs
   // must not leak into any of them), and it holds.
-  assert.match(server, /const titleFilter = profileTitleSql\("sj\.title", sessionActiveProfile\)/);
+  //
+  // ONE deliberate exemption, added with the Saved-tab fix: the board's own path applies the title
+  // filter unless `savedTab`. The Saved ★ tab lists jobs the user explicitly starred, so narrowing it
+  // by the profile's target titles hid the user's own saved jobs from them — measured at 1 of 3.
+  // The exemption is asserted here, rather than the test simply being relaxed, so that it stays a
+  // named exception to a live invariant instead of quietly becoming the rule.
+  assert.match(server, /const titleFilter = savedTab \? \{ sql: "1 = 1", params: \[\] \}\s*\n\s*: profileTitleSql\("sj\.title", sessionActiveProfile\)/);
+  assert.match(server, /const savedTab = starred === '1'/,
+    "the exemption must be keyed off the Saved tab alone, not off any broader condition");
   assert.match(server, /const pollProfileTitleFilter = profileTitleSql\("sj\.title", activeProfile\)/);
   assert.match(server, /const pendingProfileTitleFilter = profileTitleSql\("sj\.title", activeProfile\)/);
+});
+
+test("the Saved tab is exempt from discovery narrowing, and only the Saved tab is", () => {
+  // The three narrowings the Saved tab drops — role_key join, profileTitleSql, profile bridge — and
+  // the proof that each drop is conditional on savedTab rather than removed outright. A regression
+  // here is invisible in behaviour until someone stars a job the classifier bucketed elsewhere.
+  assert.match(server, /\$\{savedTab \? '' : 'JOIN job_role_map jrm ON jrm\.job_id = sj\.job_id AND jrm\.role_key = \?'\}/,
+    "the role_key INNER JOIN must still be present for every non-Saved board");
+  assert.match(server, /const derivedFilters = \(req\.query\.curate === 'off' \|\| savedTab\)/,
+    "the profile bridge must not curate the user's own saved jobs");
+  // The args list has to track the join, or every bound parameter after it shifts by one.
+  assert.match(server, /\.\.\.\(savedTab \? \[\] : \[roleKey\]\)/,
+    "no role_key placeholder on the Saved tab means no roleKey argument either");
 });
 
 test("domain profile API repairs zero-active profile state and marks empty profile setup incomplete", () => {
