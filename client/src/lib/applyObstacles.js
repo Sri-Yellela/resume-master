@@ -188,6 +188,106 @@ export function describeApplication(job = {}) {
   };
 }
 
+// ── WHICH WAY TO GROUP ───────────────────────────────────────────────────────────────────────
+//
+// The panel had ONE grouping rule — by obstacle — and applied it everywhere. That is right for a
+// portal sign-in and wrong for everything else, and the failure was visible: NEEDS YOU showed the
+// same OpenAI application THREE TIMES, once per problem —
+//
+//     "the portal is behind a CAPTCHA"          1 APPLICATION
+//     "the form asked something only you can answer"   1 APPLICATION
+//     "held for you to look at"                 1 APPLICATION
+//
+// — three cards, one application, and each card claiming to be one application so the counts looked
+// right while the panel was lying about how much work there was. It happens because the server
+// returns one row per RUN-JOB: a job held, re-run, and held again for a different reason is three
+// rows, and grouping those by their obstacle sentence scatters one application across three cards.
+//
+// THE RULE, and it has two halves because both cases are real:
+//
+//   group by OBSTACLE      when ONE action unblocks MANY applications
+//                          → "Sign in to Workday once → 4 applications ready". A ten-second job
+//                            priced as one. Shown as four rows it is priced as four.
+//
+//   group by APPLICATION   when MANY obstacles block ONE application
+//                          → "OpenAI — Staff Engineer · 3 things to resolve". One card, one job,
+//                            everything in its way listed inside it.
+//
+// The portal batching lives on the server (GET /api/apply/gate-packets groups gate-crossing packets
+// by origin, which is the unit an activeTab grant is scoped to). This is the other half.
+
+/**
+ * Collapse held run-job rows into ONE entry per application, carrying every reason that blocks it.
+ *
+ * Ordered by how recently something happened to each application, so the thing the user just
+ * watched hold is at the top. Within an application the reasons are newest-first for the same
+ * reason, and deduplicated by obstacle: two attempts that hit the same wall are one thing to
+ * resolve, not two.
+ *
+ * @param {Array} jobs run-job rows as GET /api/apply/runs returns them
+ * @returns {Array<{jobId, id, company, title, applyUrl, when, attempts, rows, reasons, protective,
+ *   primary, postingGone}>}
+ */
+export function groupByApplication(jobs = []) {
+  const when = (j) => j.finishedAt || j.startedAt || j.createdAt || 0;
+  const byJob = new Map();
+
+  for (const job of jobs) {
+    // jobId is the application's identity. A row with neither is its own island rather than being
+    // merged into a bucket keyed `undefined` — which would collapse every unidentifiable row into
+    // one card claiming to be one application.
+    const key = job.jobId != null ? `job:${job.jobId}` : `row:${job.id}`;
+    if (!byJob.has(key)) byJob.set(key, { key, rows: [] });
+    byJob.get(key).rows.push(job);
+  }
+
+  return [...byJob.values()].map(({ key, rows }) => {
+    const ordered = [...rows].sort((a, b) => when(b) - when(a));
+    const newest = ordered[0];
+
+    // Every distinct thing in this application's way. Deduplicated by the obstacle SENTENCE rather
+    // than the reason code: two codes that render the same sentence are one thing to a reader, and
+    // showing it twice is the per-problem duplication this function exists to end.
+    const seen = new Set();
+    const reasons = [];
+    for (const row of ordered) {
+      const d = describeApplication(row);
+      if (seen.has(d.obstacle)) continue;
+      seen.add(d.obstacle);
+      reasons.push({ ...d, row });
+    }
+
+    // Company and role come from ANY row that has them: the newest attempt may post-date the
+    // 7-day posting cleanup and carry nulls, while an earlier one still names the job. Falling
+    // back to the newest row alone is what produced "One application — Held for you to look at",
+    // which names neither the company nor the role, so the user cannot tell which job it is.
+    const named = ordered.find(r => r.company || r.title) || newest;
+
+    return {
+      key,
+      jobId: newest.jobId ?? null,
+      id: newest.id,
+      runId: newest.runId ?? null,
+      company: named.company ?? null,
+      title: named.title ?? null,
+      applyUrl: ordered.find(r => r.applyUrl)?.applyUrl ?? null,
+      atsScore: ordered.find(r => r.atsScore != null)?.atsScore ?? null,
+      when: when(newest),
+      // Attempts across every run, not the newest row's own counter: the user's question is "how
+      // many times has this been tried", and that spans runs.
+      attempts: ordered.reduce((n, r) => n + (r.attemptCount || 1), 0),
+      rows: ordered,
+      reasons,
+      // One broken reason is enough to stop calling the whole thing deliberate.
+      protective: reasons.every(r => r.protective),
+      // What to lead with. The newest is the current state of the application, and it is the one
+      // whose row carries the artifacts worth linking.
+      primary: reasons[0],
+      postingGone: !ordered.some(r => r.title),
+    };
+  }).sort((a, b) => b.when - a.when);
+}
+
 /**
  * The board's own chip: a short state for a job the user has queued or applied to.
  * Returns null when the job has no application, so the card renders nothing extra.

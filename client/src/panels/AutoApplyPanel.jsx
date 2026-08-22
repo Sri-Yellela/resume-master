@@ -2,9 +2,9 @@ import { useNavigate } from "react-router-dom";
 import { useTheme } from "../styles/theme.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { Z } from "../styles/zLayers.js";
-import { describeApplication } from "../lib/applyObstacles.js";
+import { describeApplication, groupByApplication } from "../lib/applyObstacles.js";
 import {
-  SectionHeading, ObstacleCard, ApplicationRow, PrerequisiteCards,
+  SectionHeading, ObstacleCard, ApplicationRow, PrerequisiteCards, ApplicationObstacleCard,
 } from "./AutoApplyPanelSections.jsx";
 
 // ============================================================
@@ -73,18 +73,25 @@ export function AutoApplyPanel() {
   const attestQuestions  = applyQuestions.filter(q => q.eligibility);
   const otherQuestions   = applyQuestions.filter(q => q.reason !== "low_confidence" && !q.eligibility);
 
-  // Held applications that are NOT already represented by a portal group, a question or an approval.
-  // Grouped by the obstacle sentence so five jobs stuck on the same thing read as one item.
-  const heldByObstacle = new Map();
-  for (const job of applyReviewJobs) {
-    const d = describeApplication(job);
-    if (!heldByObstacle.has(d.obstacle)) heldByObstacle.set(d.obstacle, { d, jobs: [] });
-    heldByObstacle.get(d.obstacle).jobs.push(job);
-  }
+  // ── AB2: ONE CARD PER APPLICATION ───────────────────────────────────────────────────────────
+  //
+  // This used to be `heldByObstacle`, a Map keyed on the obstacle SENTENCE. The server returns one
+  // row per RUN-JOB, so a job held, re-run and held again for a different reason is three rows — and
+  // keying on the sentence scattered that one application across three cards, each reporting
+  // "1 APPLICATION". Three cards, one job, and counts that looked correct while the panel overstated
+  // the work by 3x.
+  //
+  // The obstacle grouping is NOT gone; it moved to where it is true. See the rule in
+  // applyObstacles.js: group by obstacle when one action unblocks many (the portal batches below,
+  // which are the most differentiated thing in the product and are untouched), and by application
+  // when many obstacles block one (this).
+  const heldApplications = groupByApplication(applyReviewJobs);
 
   const needsYouCount =
     applyGatePortals.reduce((n, p) => n + (p.count || 0), 0) +
-    applyQuestions.length + applyPending.length + applyReviewJobs.length +
+    // APPLICATIONS, not rows. The old sum counted every held run-job, so one application held three
+    // times added 3 to the number on the tab and in this heading.
+    applyQuestions.length + applyPending.length + heldApplications.length +
     applyPrereqMissing.length;
 
   const openReview = () => { setApplyRunDetail(null); setApplyRunDetailOpen(true); };
@@ -305,53 +312,25 @@ export function AutoApplyPanel() {
             />
           )}
 
-          {/* Everything else that is held, grouped by its obstacle so N jobs stuck on one thing read
-              as one item rather than N rows. */}
-          {[...heldByObstacle.entries()].map(([obstacle, { d, jobs }]) => {
-            // ── AB1: A HELD REVIEW IS RESUMABLE ────────────────────────────────────────────────
-            // The action on a held card used to open the review modal, whose only route onward was
-            // a screenshot of a form in a browser that had already closed. There was no path from
-            // held to submitted at all. When a packet exists, the action is the HANDOFF: the real
-            // apply URL in the user's own browser, filled by the extension from the same answers.
-            //
-            // Single-application cards can offer it directly. A card standing for several
-            // applications cannot — they are different postings on different origins — so it keeps
-            // the list as its action and each row offers its own handoff.
-            const only = jobs.length === 1 ? jobs[0] : null;
-            const packet = only ? handoffPacketFor?.(only) : null;
-            const gone = packet?.postingGone || (only && !only.title && !packet);
-            const stale = packet?.stale;
-            const resumable = only && packet && !gone && !stale;
+          {/* ONE CARD PER APPLICATION, listing everything in its way (AB2). The action is AB1's
+              handoff: the real apply URL in the user's own browser, filled from the same answers. */}
+          {heldApplications.map(app => {
+            const packet = handoffPacketFor?.(app.primary.row) || handoffPacketFor?.(app);
+            const resumable = !!packet && !packet.postingGone && !packet.stale && !app.postingGone;
             return (
-              <ObstacleCard
-                key={obstacle}
+              <ApplicationObstacleCard
+                key={app.key}
+                app={app}
                 theme={theme}
-                tone={gone ? "#6b7280" : d.protective ? "#d97706" : "#dc2626"}
-                kicker={gone ? "the posting is gone"
-                  : stale ? "prepared too long ago"
-                  : d.protective ? "held on purpose" : "did not complete"}
-                // NOT lowercased: `obstacle.toLowerCase()` turned "ATS threshold" into "ats threshold".
-                // The sentences are written to read correctly after a colon as they are.
-                headline={jobs.length === 1
-                  ? `${jobs[0].company || jobs[0].title || "One application"} — ${obstacle}`
-                  : `${jobs.length} applications — ${obstacle}`}
-                detail={gone
-                  ? "This posting is no longer on the board, so there is no form left to finish. The record of the attempt stays here."
-                  : stale
-                    ? "The answers we prepared have gone off. Run it again rather than filling stale ones into a form that may have changed."
-                    : resumable
-                      ? `${d.action} — Open picks up where we stopped: the form fills with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved, in your own browser, for you to check and send.`
-                      : d.action}
-                count={jobs.length}
-                countLabel={jobs.length === 1 ? "application" : "applications"}
-                actionLabel={gone ? null : stale ? "Run it again" : resumable ? "Open & fill" : "Open"}
-                onAction={gone ? undefined
-                  : stale ? () => rerunJob(only)
-                  : resumable ? () => openHandoff(packet, only)
-                  : openReview}
-                // Evidence stays reachable, as evidence. It is no longer the route.
-                secondaryLabel={resumable ? "See what we filled" : null}
-                onSecondary={resumable ? openReview : undefined}
+                artifactUrl={artifactUrl}
+                packet={packet}
+                onRerun={rerunJob}
+                onResolve={resumable ? () => openHandoff(packet, app) : openReview}
+                resolveLabel={resumable ? "Open & fill" : "Open"}
+                resolveTitle={resumable
+                  ? `Opens the application in your own browser and fills it with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved. You review and submit.`
+                  : "Open this application's review"}
+                onDetails={() => openReview()}
               />
             );
           })}
@@ -880,12 +859,20 @@ export function AutoApplyPanel() {
                     {/* reason + ATS score */}
                     {(job.reasonCode || job.atsScore != null) && (
                       <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-                        {job.reasonCode && (
-                          <span style={{ fontSize:11, color:statusColor, fontWeight:600 }}>
-                            {job.reasonCode.replace(/_/g, " ")}
-                            {job.reasonDetail ? ` — ${job.reasonDetail}` : ""}
-                          </span>
-                        )}
+                        {/* The obstacle SENTENCE, from the shared vocabulary. This line used to be
+                            `job.reasonCode.replace(/_/g, " ")` — a raw code with its underscores
+                            swapped for spaces, so the modal said "ats below threshold" while the
+                            panel behind it said "Resume scored below your ATS threshold" for the
+                            same row. applyObstacles.js exists precisely so the two cannot disagree. */}
+                        {job.reasonCode && (() => {
+                          const d = describeApplication(job);
+                          return (
+                            <span style={{ fontSize:11, color:statusColor, fontWeight:600 }}>
+                              {d.obstacle}
+                              {d.detail && d.detail !== d.obstacle ? ` — ${d.detail}` : ""}
+                            </span>
+                          );
+                        })()}
                         {job.atsScore != null && (
                           <span style={{
                             fontSize:10, fontWeight:700, padding:"1px 6px", borderRadius:999,

@@ -340,9 +340,12 @@ test("the client refuses the two unresumable states BEFORE opening a tab that ca
 // ── Requirement 2 & 4: the route is the handoff, the screenshot is evidence ──────────────────
 
 test("the held card's action is the HANDOFF, not the review modal", () => {
-  assert.match(panel, /onAction=\{gone \? undefined/);
-  assert.match(panel, /openHandoff\(packet, only\)/);
-  assert.match(panel, /actionLabel=\{gone \? null : stale \? "Run it again" : resumable \? "Open & fill" : "Open"\}/);
+  // AB2 replaced the obstacle-keyed card with a per-application one; the action is unchanged in
+  // substance — resume via the handoff when a packet exists, re-run when it has gone off.
+  assert.match(panel, /onResolve=\{resumable \? \(\) => openHandoff\(packet, app\) : openReview\}/);
+  assert.match(panel, /resolveLabel=\{resumable \? "Open & fill" : "Open"\}/);
+  assert.match(panel, /const resumable = !!packet && !packet\.postingGone && !packet\.stale && !app\.postingGone/);
+  assert.match(panel, /onRerun=\{rerunJob\}/);
   // The handoff lands the user on the REAL apply URL, in their own browser.
   assert.match(ctx, /window\.open\(packet\.applyUrl, "_blank", "noopener,noreferrer"\)/);
   // And says what happens next, because the fill happens in another tab by another process.

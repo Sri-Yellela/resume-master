@@ -101,6 +101,166 @@ export function ObstacleCard({
 }
 
 /**
+ * ONE APPLICATION, with every obstacle blocking it listed inside (TASK AB2).
+ *
+ * The counterpart to ObstacleCard, and the other half of the grouping rule in applyObstacles.js:
+ * ObstacleCard is for one action that unblocks MANY applications, this is for many obstacles
+ * blocking ONE. The panel previously had only the first, and used it for both — so an application
+ * with three problems became three cards, each claiming to be "1 APPLICATION".
+ *
+ * Company and role are the headline, never "One application". A card that names neither leaves the
+ * user unable to tell which job it is about, which is the one thing they need to know first.
+ */
+export function ApplicationObstacleCard({
+  app, theme, artifactUrl, onResolve, resolveLabel, resolveTitle, onDetails, onRerun, packet,
+}) {
+  const many = app.reasons.length > 1;
+  const tone = app.postingGone ? "#6b7280" : app.protective ? "#d97706" : "#dc2626";
+  const stale = packet?.stale;
+
+  return (
+    // The data-* hooks are for scripts/abPanelUi.mjs, which counts cards in a real browser. AB2 is a
+    // defect of how many cards one application produces, so the check has to be able to say WHICH
+    // application a card belongs to — and matching on an inline-style substring to find the card
+    // boundary is the kind of assertion that silently stops covering anything.
+    <div data-rm-card="application"
+         data-rm-job={app.jobId || ""}
+         data-rm-company={app.company || ""}
+         data-rm-obstacles={app.reasons.length}
+         style={{ border: `1px solid ${theme.border}`, borderLeft: `3px solid ${tone}`,
+                  borderRadius: 8, padding: "12px 14px", background: theme.surfaceHigh,
+                  display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.08em",
+                        textTransform: "uppercase", color: tone, marginBottom: 3 }}>
+            {app.postingGone ? "the posting is gone"
+              : stale ? "prepared too long ago"
+              : app.protective ? "held on purpose" : "did not complete"}
+          </div>
+          {/* THE APPLICATION, named. */}
+          <div style={{ fontSize: 14, fontWeight: 800, color: theme.text, lineHeight: 1.35 }}>
+            {app.company || "Unknown company"}
+            {app.title && <span style={{ color: theme.textMuted, fontWeight: 600 }}> — {app.title}</span>}
+            {!app.title && app.jobId && (
+              <span style={{ fontSize: 10, color: theme.textDim, fontWeight: 600 }}> · {app.jobId}</span>
+            )}
+          </div>
+          {/* "1 application, 3 things to resolve" — the honest count. Three cards each saying
+              "1 APPLICATION" made three jobs' worth of work out of one. */}
+          <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>
+            One application · {app.reasons.length} thing{many ? "s" : ""} to resolve
+            {app.attempts > 1 && ` · ${app.attempts} attempts`}
+            {app.when ? ` · ${new Date(app.when).toLocaleDateString()}` : ""}
+          </div>
+        </div>
+        {/* The count is of OBSTACLES here, not applications: this card IS one application, and a
+            big "1" beside it was the number that made three cards look like three jobs. */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                      minWidth: 46, flexShrink: 0 }}>
+          <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
+                         fontSize: 28, lineHeight: 1, color: tone }}>{app.reasons.length}</span>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.06em",
+                         textTransform: "uppercase", color: theme.textDim, textAlign: "center" }}>
+            to resolve
+          </span>
+        </div>
+      </div>
+
+      {/* EVERY obstacle, inside the one card. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5,
+                    borderTop: `1px solid ${theme.border}`, paddingTop: 7 }}>
+        {app.reasons.map((r, i) => (
+          <div key={`${r.code}-${i}`} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", marginTop: 6, flexShrink: 0,
+                           background: r.protective ? "#d97706" : "#dc2626" }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11.5, color: theme.text, lineHeight: 1.45 }}>
+                {r.obstacle}
+                {r.detail && r.detail !== r.obstacle && (
+                  <span style={{ color: theme.textMuted }}> — {r.detail}</span>
+                )}
+              </div>
+              {r.action && (
+                <div style={{ fontSize: 10.5, color: theme.textMuted }}>→ {r.action}</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {app.primary?.row?.resumeAvailable && (
+          <a href={artifactUrl(app.primary.row.id, "resume")} target="_blank" rel="noreferrer"
+            style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                     border: `1px solid ${theme.border}`, background: theme.surface,
+                     color: theme.text, textDecoration: "none", whiteSpace: "nowrap" }}>
+            Resume PDF ↗
+          </a>
+        )}
+        {app.primary?.row?.screenshotAvailable && (
+          <a href={artifactUrl(app.primary.row.id, "screenshot")} target="_blank" rel="noreferrer"
+            title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
+            style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                     border: `1px solid ${theme.border}`, background: theme.surface,
+                     color: theme.textMuted, textDecoration: "none", whiteSpace: "nowrap" }}>
+            What we filled ↗
+          </a>
+        )}
+        {app.atsScore != null && (
+          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                         background: app.atsScore >= 80 ? "#dcfce7" : app.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
+                         color: app.atsScore >= 80 ? "#166534" : app.atsScore >= 60 ? "#854d0e" : "#991b1b" }}>
+            ATS {app.atsScore}
+          </span>
+        )}
+        {app.applyUrl && (
+          <a href={app.applyUrl} target="_blank" rel="noreferrer"
+            style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                     border: `1px solid ${theme.border}`, background: theme.surface,
+                     color: theme.text, textDecoration: "none", whiteSpace: "nowrap" }}>
+            The posting ↗
+          </a>
+        )}
+
+        <span style={{ flex: 1 }} />
+
+        {/* A posting that no longer exists gets no action, and says why. There is no form to open
+            and no run that would find one. */}
+        {app.postingGone ? (
+          <span style={{ fontSize: 10, color: theme.textDim }}>
+            posting gone — cannot be resumed
+          </span>
+        ) : stale && onRerun ? (
+          <button onClick={() => onRerun(app)}
+            title="These answers were prepared too long ago to fill safely. A fresh run prepares new ones."
+            style={{ border: `1px solid ${theme.border}`, borderRadius: 6, padding: "6px 12px",
+                     background: theme.surface, color: theme.text, fontWeight: 700, fontSize: 11.5,
+                     cursor: "pointer", whiteSpace: "nowrap" }}>
+            Run it again
+          </button>
+        ) : onResolve ? (
+          <button onClick={() => onResolve(app)} title={resolveTitle}
+            style={{ border: "none", borderRadius: 6, padding: "7px 13px", background: tone,
+                     color: "#ffffff", fontWeight: 800, fontSize: 11.5, cursor: "pointer",
+                     whiteSpace: "nowrap" }}>
+            {resolveLabel || "Open"}
+          </button>
+        ) : null}
+        {onDetails && (
+          <button onClick={() => onDetails(app)}
+            style={{ border: `1px solid ${theme.border}`, borderRadius: 6, padding: "6px 11px",
+                     background: theme.surface, color: theme.text, fontWeight: 700, fontSize: 11.5,
+                     cursor: "pointer", whiteSpace: "nowrap" }}>
+            Details
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * One application, described by its obstacle rather than its status.
  *
  * `variant` picks how much evidence to show: SUBMITTED needs the date, the resume that went out and

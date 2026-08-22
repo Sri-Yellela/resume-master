@@ -17,7 +17,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  describeApplication, sectionFor, boardApplicationChip, SECTION, PREREQUISITE_LABELS,
+  describeApplication, sectionFor, boardApplicationChip, groupByApplication, SECTION, PREREQUISITE_LABELS,
 } from "../client/src/lib/applyObstacles.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
@@ -168,10 +168,85 @@ test("the portal gate is ONE action with a count, not N rows", () => {
   assert.match(panel, /gateReasons\?\.includes\("captcha_required"\)/);
 });
 
-test("held applications are grouped BY OBSTACLE, so N jobs stuck on one thing read as one item", () => {
-  assert.match(panel, /const heldByObstacle = new Map\(\)/);
-  assert.match(panel, /heldByObstacle\.get\(d\.obstacle\)\.jobs\.push\(job\)/);
-  assert.match(panel, /\$\{jobs\.length\} applications — \$\{obstacle\}/);
+test("the grouping has TWO halves, and each is used where it is true (AB2)", () => {
+  // This test used to assert that held applications were grouped BY OBSTACLE — one rule, applied
+  // everywhere. That rule is right for a portal sign-in and wrong for everything else, and it was
+  // showing the same application three times, once per problem, each card claiming "1 APPLICATION".
+  //
+  //   group by OBSTACLE      when ONE action unblocks MANY applications  (the portal batches above)
+  //   group by APPLICATION   when MANY obstacles block ONE application   (held reviews)
+  //
+  // Both halves are asserted here so neither can be quietly dropped in favour of the other again.
+  assert.match(panel, /const heldApplications = groupByApplication\(applyReviewJobs\)/);
+  assert.ok(!/const heldByObstacle = new Map\(\)/.test(panel),
+    "held applications are grouped by obstacle again — one application with three problems is three cards");
+  // The obstacle half survives, untouched, where it genuinely amortises.
+  assert.match(panel, /applyGatePortals\.map/);
+  assert.match(panel, /Sign in to \$\{p\.host\} once → \$\{p\.count\} application/);
+});
+
+test("one application with several obstacles is ONE entry, carrying all of them", () => {
+  // The exact observed defect: the same OpenAI application three times, once per problem. The server
+  // returns one row per RUN-JOB, so a job held / re-run / held again is three rows.
+  const rows = [
+    { id: 3, jobId: "j1", company: "OpenAI", title: "Staff Engineer", status: "held_review",
+      reasonCode: "captcha_required", finishedAt: 3000 },
+    { id: 2, jobId: "j1", company: "OpenAI", title: "Staff Engineer", status: "held_review",
+      reasonCode: "manual_review", finishedAt: 2000 },
+    { id: 1, jobId: "j1", company: null, title: null, status: "held_review",
+      reasonCode: null, finishedAt: 1000 },
+  ];
+  const grouped = groupByApplication(rows);
+  assert.equal(grouped.length, 1, "three problems on one application produced three cards again");
+  assert.equal(grouped[0].reasons.length, 3, "the obstacles were collapsed away with the rows");
+  // Company and role must be present: "One application — Held for you to look at" names neither.
+  assert.equal(grouped[0].company, "OpenAI");
+  assert.equal(grouped[0].title, "Staff Engineer");
+  // Newest first, so the current state of the application leads.
+  assert.equal(grouped[0].primary.code, "captcha_required");
+  assert.equal(grouped[0].attempts, 3);
+});
+
+test("two DIFFERENT applications stay two cards, and identical walls collapse", () => {
+  const two = groupByApplication([
+    { id: 1, jobId: "a", company: "OpenAI", title: "A", status: "held_review", reasonCode: "manual_review", finishedAt: 1 },
+    { id: 2, jobId: "b", company: "Anthropic", title: "B", status: "held_review", reasonCode: "manual_review", finishedAt: 2 },
+  ]);
+  assert.equal(two.length, 2, "grouping by application must not merge different applications");
+  assert.equal(two[0].company, "Anthropic", "most recent application first");
+
+  // Two attempts against the SAME wall are one thing to resolve, not two.
+  const dup = groupByApplication([
+    { id: 1, jobId: "a", company: "OpenAI", status: "held_review", reasonCode: "manual_review", finishedAt: 1 },
+    { id: 2, jobId: "a", company: "OpenAI", status: "held_review", reasonCode: "manual_review", finishedAt: 2 },
+  ]);
+  assert.equal(dup.length, 1);
+  assert.equal(dup[0].reasons.length, 1, "the same obstacle twice is one thing to resolve");
+  assert.equal(dup[0].attempts, 2, "but both attempts are still counted");
+});
+
+test("a row with no job id is its own card, never merged into an `undefined` bucket", () => {
+  // Merging them would produce one card claiming to be one application while standing for several.
+  const g = groupByApplication([
+    { id: 1, status: "held_review", reasonCode: "manual_review", finishedAt: 1 },
+    { id: 2, status: "held_review", reasonCode: "incomplete_form", finishedAt: 2 },
+  ]);
+  assert.equal(g.length, 2);
+});
+
+test("the card names the application, and counts OBSTACLES rather than applications", () => {
+  // A big "1" beside three separate cards is what made one job look like three.
+  assert.match(sections, /export function ApplicationObstacleCard/);
+  assert.match(sections, /One application · \{app\.reasons\.length\} thing\{many \? "s" : ""\} to resolve/);
+  assert.match(sections, /\{app\.company \|\| "Unknown company"\}/);
+  assert.match(sections, /to resolve\s*\n\s*<\/span>/);
+  // Every obstacle is listed INSIDE the card.
+  assert.match(sections, /\{app\.reasons\.map\(\(r, i\) =>/);
+});
+
+test("the needs-you count is in APPLICATIONS, not run-job rows", () => {
+  // One application held three times used to add 3 to the heading and to the tab badge.
+  assert.match(panel, /applyQuestions\.length \+ applyPending\.length \+ heldApplications\.length/);
 });
 
 test("prerequisites are surfaced BEFORE queueing, as one blocking item with a fix", () => {
@@ -233,7 +308,9 @@ test("every capability of the old strip survived the reorganisation", () => {
 test("the obstacle vocabulary is the only place these sentences live", () => {
   // If the panel started writing its own copy for a reason code, the board's chip and the panel
   // would drift — which is the class of bug the shared registry work has been closing all along.
-  assert.match(panel, /import \{ describeApplication \} from "\.\.\/lib\/applyObstacles\.js"/);
+  // The member list is not the point — that the panel READS the shared vocabulary is. Pinning the
+  // exact list made this fail the moment the panel legitimately needed a second symbol from it.
+  assert.match(panel, /import \{[^}]*describeApplication[^}]*\} from "\.\.\/lib\/applyObstacles\.js"/);
   assert.match(sections, /import \{ describeApplication, PREREQUISITE_LABELS \}/);
   assert.ok(!/reasonCode === "/.test(panel),
     "the panel is branching on a reason code again — that belongs in applyObstacles.js");
