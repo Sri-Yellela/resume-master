@@ -63,8 +63,8 @@ export default function CompanyViewModal({ company, onClose }) {
           )}
           {!loading && !error && profile?.hasData && (
             <>
-              <StackSection stack={profile.stack} theme={theme} />
-              <OrgSection orgUnits={profile.orgUnits} theme={theme} />
+              <StackSection stack={profile.stack} postings={profile.stackPostings} theme={theme} />
+              <OrgSection orgUnits={profile.orgUnits} total={profile.orgUnitsTotal} theme={theme} />
               <HiringSection signal={profile.hiringSignal} theme={theme} />
             </>
           )}

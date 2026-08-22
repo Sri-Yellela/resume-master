@@ -42,3 +42,19 @@ test("similarity takes the higher of the two signals", () => {
   assert.ok(typo > 0.4 && typo < 1);
   assert.ok(unrelated < 0.4);
 });
+
+// Regression: the pair above happens to score low, which hid the real failure mode. These two
+// phrases share NO word, yet whole-phrase Levenshtein alone rates them 0.409 — over the 0.4
+// suggest_fix bar — so against Stripe's real 271-unit KB an invented team was reported as "may be
+// an imprecise reference to" Growth Marketing. Character similarity must only count as evidence
+// when it is high enough to mean "typo".
+test("similarity ignores coincidental character overlap between phrases sharing no word", () => {
+  assert.equal(jaccardOverlap("quantum basket weaving", "growth marketing"), 0);
+  assert.ok(levenshteinSimilarity("quantum basket weaving", "growth marketing") > 0.4);
+  assert.equal(similarity("quantum basket weaving", "growth marketing"), 0);
+});
+
+test("similarity still credits a real typo above the suggest_fix bar", () => {
+  assert.ok(similarity("platform sale", "platform sales") > 0.9);
+  assert.ok(similarity("payment platfrom", "payments platform") > 0.8);
+});
