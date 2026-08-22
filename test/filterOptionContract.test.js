@@ -241,8 +241,11 @@ test("automation tier: the control and automationTier.js are one list, in one or
 
 test("sort: every option is an ordering the handler implements", () => {
   const server = read("server.js");
-  const chain = server.slice(server.indexOf("const orderBy = sort ==="),
-                             server.indexOf("const offset  = (pg - 1) * ps;"));
+  // The chain is `chosenSort` now, not `orderBy`: X2 put a profile-relevance prefix in front of it
+  // for the default sort only, so the user's chosen ordering had to become a named thing the prefix
+  // could be composed with. The chain itself is unchanged, and this test still reads it whole.
+  const chain = server.slice(server.indexOf("const chosenSort = sort ==="),
+                             server.indexOf("      // Profile relevance leads the DEFAULT order"));
   assert.ok(chain.length > 100, "the ORDER BY chain moved");
   const implemented = new Set([...chain.matchAll(/sort === '([A-Za-z]+)'/g)].map(m => m[1]));
   // dateDesc is the chain's FALL-THROUGH default, not a branch, so it is implemented without
@@ -362,7 +365,9 @@ test("GET /api/jobs validates every enumerated dimension, under every param it a
   // It must be called BEFORE the query is built, and it must 400.
   const handler = server.slice(server.indexOf('app.get("/api/jobs", requireAuth'));
   const guardAt = handler.indexOf("rejectInvalidFilterValues(req.query)");
-  const buildAt = handler.indexOf("buildJobFilters(filterParams)");
+  // buildJobFilters takes the provenance of each key as a second argument now (X2), so match the
+  // call by its opening rather than by a closing paren that has moved.
+  const buildAt = handler.indexOf("buildJobFilters(filterParams,");
   assert.ok(guardAt > 0 && buildAt > guardAt,
     "the filter guard does not run before the query is built");
   assert.match(handler.slice(guardAt, guardAt + 400), /res\.status\(400\)/,
