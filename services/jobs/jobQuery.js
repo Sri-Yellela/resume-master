@@ -123,7 +123,12 @@ function buildQSql(q) {
  * Order is relevance precedence, coarsest first: is this the kind of job you asked for, at your
  * level, using your skills, that you could actually accept.
  */
-const DERIVED_RANK_ORDER = ['q', 'experience_levels', 'skills_include', 'sponsorship_friendly'];
+// company_sponsorship sits LAST, after sponsorship_friendly: the posting's own visa signal, thin as
+// it is, is a statement about the actual role, and company-level LCA evidence is a statement about
+// the employer. When the two disagree the more specific one should lead.
+const DERIVED_RANK_ORDER = [
+  'q', 'experience_levels', 'skills_include', 'sponsorship_friendly', 'company_sponsorship',
+];
 
 // Every rank expression is three-valued and sorts ASC, so the three states mean the same thing on
 // every dimension and the disclosure can count "demoted" once, uniformly:
@@ -359,6 +364,49 @@ function buildJobFilters(params = {}, opts = {}) {
     } else {
       clauses.push(`(sj.requires_work_auth IS NULL OR sj.requires_work_auth != 1)`);
       clauses.push(`(sj.is_h1b_sponsor IS NULL OR sj.is_h1b_sponsor != 0)`);
+    }
+  }
+
+  // ── Company-level H-1B evidence (TASK X3) ────────────────────────────────────────────────────
+  //
+  // A SEPARATE DIMENSION from sponsorship_friendly above, not a replacement for it and not a
+  // backfill of it. That one reads what a POSTING said (sj.is_h1b_sponsor / requires_work_auth, and
+  // its soft-null rule is untouched by everything here). This one reads what the EMPLOYER filed with
+  // the Department of Labor. Two different claims, two different columns, two different tables, and
+  // nothing in this block writes to or reads from either posting column.
+  //
+  // THE ASYMMETRY IS THE POINT, and it is deliberate:
+  //   ranking a row UP needs confidence >= 0.60 — a tier-C brand-prefix match saying "this employer
+  //     filed" only changes the ORDER of a board, so a lower bar is affordable;
+  //   pushing a row DOWN, or excluding it, needs >= 0.80 — that costs the user a job they might have
+  //     wanted, so it takes a registered-name or d/b/a match, never a name prefix.
+  // 'ambiguous' and 'unmatched' companies rank as NOT ESTABLISHED and are never excluded: four
+  // unrelated `Mercury *` employers file every quarter and one of them files for "Senior Software
+  // Engineer", so "we could not tell which company this is" must cost a candidate nothing.
+  //
+  // Note certified_total = 0 at high confidence is a real, usable finding — we searched N quarters
+  // of DOL data under a name we are sure of and found nothing — which is why it is the ONLY state
+  // the explicit filter excludes on.
+  const LCA_RANK_MIN = 0.60, LCA_DEMOTE_MIN = 0.80;
+  const lcaHasFilings = `EXISTS (SELECT 1 FROM company_lca_sponsorship cl
+      WHERE cl.company = sj.company AND cl.match_status = 'matched'
+        AND cl.match_confidence >= ${LCA_RANK_MIN} AND cl.certified_total > 0)`;
+  const lcaNoFilings = `EXISTS (SELECT 1 FROM company_lca_sponsorship cl
+      WHERE cl.company = sj.company AND cl.match_status = 'matched'
+        AND cl.match_confidence >= ${LCA_DEMOTE_MIN} AND cl.certified_total = 0)`;
+  if (params.company_sponsorship) {
+    if (isDerived('company_sponsorship')) {
+      ranks.company_sponsorship = {
+        sql: `CASE WHEN ${lcaHasFilings} THEN ${RANK_MATCH}
+                   WHEN ${lcaNoFilings} THEN ${RANK_MISS}
+                   ELSE ${RANK_UNKNOWN} END`,
+        params: [],
+      };
+    } else {
+      // The opt-in filter, and the narrowest one that could be called a filter: it removes only
+      // companies we are confident we identified and that filed nothing in the window searched.
+      // Unmatched and ambiguous companies survive it, by construction.
+      clauses.push(`NOT ${lcaNoFilings}`);
     }
   }
 

@@ -2636,6 +2636,112 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE users ADD COLUMN form_schema_capture INTEGER NOT NULL DEFAULT 0;
       `,
     },
+    {
+      // H-1B sponsorship as a COMPANY fact, from DOL/OFLC LCA disclosure data (TASK X3).
+      //
+      // WHY THIS IS NOT ON scraped_jobs. The posting-level is_h1b_sponsor experiment is over and it
+      // failed on the evidence: of 1,261 postings, 0 mention "H-1B", 36 mention sponsorship at all,
+      // and the LLM backfill produced 3 non-null values, all false. The signal is not in the source
+      // material. Every H-1B-sponsoring employer, by contrast, MUST file a Labor Condition
+      // Application, and those filings are public and quarterly. So this is a fact the company emits
+      // about itself, and it belongs beside company_technographics and company_org_units.
+      //
+      // is_h1b_sponsor SURVIVES UNCHANGED and is not populated from here. Two different claims:
+      // "this employer filed 47 petitions last quarter" is not "this role sponsors". Nothing in this
+      // migration touches scraped_jobs, by design and by test
+      // (test/lcaPostingFlagUntouched.test.js).
+      //
+      // THREE TABLES, because they answer to three different owners:
+      //
+      //   lca_source_files     — the import ledger. One row per quarterly file, so a re-import
+      //                          RECONCILES (delete-then-insert that period) instead of doubling
+      //                          the counts, same discipline as the job pipeline's req_uid.
+      //   lca_employer_periods — LCA employers as filed, one row per (employer, FEIN, quarter).
+      //                          Keeping the whole employer universe rather than only the companies
+      //                          we happen to know today is what lets a company added tomorrow be
+      //                          matched without re-downloading ~2 GB of spreadsheets.
+      //   company_lca_sponsorship — the derived KB fact for one of OUR company strings, carrying
+      //                          the match tier and confidence, provenance and last_seen like every
+      //                          other KB store.
+      //
+      // fein is NOT NULL with a '' sentinel rather than nullable: it is in a PRIMARY KEY, and SQLite
+      // permits NULLs in a non-INTEGER primary key, which would silently stop de-duplicating the
+      // rows this table exists to de-duplicate.
+      //
+      // match_status is the integrity mechanism, not decoration. 'ambiguous' means two or more
+      // distinct FEINs answer to the same brand name (measured: 2.3% of reachable brands — Mercury
+      // Insurance vs Mercury Technologies, and Mercury Insurance also files for "Senior Software
+      // Engineer", so no title heuristic can separate them). An 'ambiguous' row renders NOTHING —
+      // not a zero, not "no data" — because a wrong sponsor claim is worse than a missing one.
+      //
+      // periods_covered vs periods_with_filings is how staleness stays honest. Quora filed 1
+      // certified LCA in FY2025 Q4 and 0 in FY2026 Q1; a single-quarter snapshot cannot tell "does
+      // not sponsor" from "did not file last quarter", so the store records how many quarters were
+      // SEARCHED alongside how many had filings, and latest_period carries the recency the UI
+      // decays against.
+      id: "082_company_lca_sponsorship",
+      sql: `
+        CREATE TABLE IF NOT EXISTS lca_source_files (
+          file_name       TEXT    NOT NULL PRIMARY KEY,
+          fiscal_period   TEXT    NOT NULL,
+          fiscal_year     INTEGER NOT NULL,
+          fiscal_quarter  INTEGER NOT NULL,
+          period_start    INTEGER,
+          period_end      INTEGER,
+          sheet_rows      INTEGER NOT NULL DEFAULT 0,
+          case_rows       INTEGER NOT NULL DEFAULT 0,
+          employer_rows   INTEGER NOT NULL DEFAULT 0,
+          byte_size       INTEGER,
+          source_url      TEXT,
+          ingested_at     INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS lca_employer_periods (
+          employer_key    TEXT    NOT NULL,
+          fein            TEXT    NOT NULL,
+          fiscal_period   TEXT    NOT NULL,
+          employer_name   TEXT    NOT NULL,
+          dba_keys_json   TEXT,
+          state           TEXT,
+          certified       INTEGER NOT NULL DEFAULT 0,
+          denied          INTEGER NOT NULL DEFAULT 0,
+          withdrawn       INTEGER NOT NULL DEFAULT 0,
+          positions       INTEGER NOT NULL DEFAULT 0,
+          top_titles_json TEXT,
+          last_decision   INTEGER,
+          PRIMARY KEY (employer_key, fein, fiscal_period)
+        );
+        CREATE INDEX IF NOT EXISTS idx_lca_employer_periods_key
+          ON lca_employer_periods(employer_key);
+        CREATE INDEX IF NOT EXISTS idx_lca_employer_periods_period
+          ON lca_employer_periods(fiscal_period);
+        CREATE TABLE IF NOT EXISTS company_lca_sponsorship (
+          company              TEXT    NOT NULL PRIMARY KEY,
+          match_status         TEXT    NOT NULL,
+          match_tier           TEXT,
+          match_confidence     REAL    NOT NULL DEFAULT 0,
+          match_key            TEXT,
+          match_reason         TEXT,
+          matched_entities_json TEXT,
+          candidate_count      INTEGER NOT NULL DEFAULT 0,
+          certified_total      INTEGER NOT NULL DEFAULT 0,
+          denied_total         INTEGER NOT NULL DEFAULT 0,
+          positions_total      INTEGER NOT NULL DEFAULT 0,
+          by_period_json       TEXT,
+          by_fiscal_year_json  TEXT,
+          top_titles_json      TEXT,
+          latest_period        TEXT,
+          latest_filing_at     INTEGER,
+          periods_covered      INTEGER NOT NULL DEFAULT 0,
+          periods_with_filings INTEGER NOT NULL DEFAULT 0,
+          source               TEXT    NOT NULL DEFAULT 'dol_oflc_lca',
+          provenance_json      TEXT,
+          first_seen           INTEGER NOT NULL,
+          last_seen            INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_company_lca_sponsorship_status
+          ON company_lca_sponsorship(match_status, certified_total);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

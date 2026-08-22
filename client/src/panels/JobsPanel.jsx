@@ -381,6 +381,7 @@ function defaultFilterSnapshot() {
     experienceLevels: [],
     skillsInclude: [],
     sponsorFriendly: false,
+    companySponsors: false,
     // Provider + automation-tier include/exclude. Empty arrays are the default-off state: buildParams
     // emits nothing at all for them, which is what keeps the default querystring byte-identical.
     sourcesInclude: [],
@@ -441,6 +442,7 @@ function FiltersPanel({
   experienceLevels, setExperienceLevels,
   skillsInclude, setSkillsInclude,
   sponsorFriendly, setSponsorFriendly,
+  companySponsors, setCompanySponsors,
   sourcesInclude, setSourcesInclude,
   sourcesExclude, setSourcesExclude,
   tiersInclude, setTiersInclude,
@@ -885,6 +887,37 @@ function FiltersPanel({
             }}/>
             <span style={{ fontSize:12, fontWeight:600 }}>Sponsor-friendly only</span>
           </button>
+        </div>
+
+        {/* X3: the COMPANY-level filter, deliberately a second control rather than a mode of the one
+            above. That one reads what the POSTING said about work authorisation; this reads what the
+            EMPLOYER filed with the Department of Labor. Two claims from two sources, and collapsing
+            them into one tickbox would make it impossible to say which one hid a job.
+
+            The label says what it DOES — hides companies with no filings — not "sponsors only". The
+            filter cannot confirm that a company sponsors, and a label promising that would be the
+            exact overclaim the company view's copy is written to avoid. */}
+        <div>
+          <button type="button" onClick={() => setCompanySponsors(!companySponsors)}
+            style={{
+              display:"flex", alignItems:"center", gap:8, width:"100%",
+              padding:"8px 10px", borderRadius:4, cursor:"pointer",
+              border:`1px solid ${companySponsors ? theme.accent : theme.border}`,
+              background: companySponsors ? theme.accentMuted : "transparent",
+              color: companySponsors ? theme.accentText : theme.text,
+            }}>
+            <span style={{
+              width:16, height:16, borderRadius:3, flexShrink:0,
+              border:`1px solid ${companySponsors ? theme.accent : theme.border}`,
+              background: companySponsors ? theme.accent : "transparent",
+            }}/>
+            <span style={{ fontSize:12, fontWeight:600 }}>Hide employers with no H-1B filings</span>
+          </button>
+          <div style={{ fontSize:10, color:theme.textMuted, marginTop:5, lineHeight:1.45 }}>
+            From US Department of Labor LCA disclosure data. Removes only employers we matched
+            confidently and that filed nothing in the quarters we hold — a company we could not
+            identify stays on the board.
+          </div>
         </div>
 
         <div style={{ display:"flex", gap:8, paddingTop:8 }}>
@@ -1495,6 +1528,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [experienceLevels,setExperienceLevels]= useState([]);
   const [skillsInclude,  setSkillsInclude]  = useState([]);
   const [sponsorFriendly,setSponsorFriendly]= useState(false);
+  // X3: the COMPANY-level H-1B filter, separate from the posting-level toggle above because it is
+  // a different claim from a different source. Default off — see the drawer copy for what it does.
+  const [companySponsors,setCompanySponsors]= useState(false);
   // Provider + automation-tier include/exclude. Default [] on all four — buildParams emits nothing
   // for an empty array, so the default querystring is unchanged.
   const [sourcesInclude, setSourcesInclude] = useState([]);
@@ -1539,6 +1575,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     experienceLevels,
     skillsInclude,
     sponsorFriendly,
+    companySponsors,
     sourcesInclude,
     sourcesExclude,
     tiersInclude,
@@ -1547,7 +1584,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     roleFilter, locationFilter, workType, employmentTypePrefs,
     catFilter, srcFilter, minYoe, maxYoe, maxApplicants, visitedFilter, ageFilter,
     salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
-    sourcesInclude, sourcesExclude, tiersInclude, tiersExclude,
+    companySponsors, sourcesInclude, sourcesExclude, tiersInclude, tiersExclude,
   ]);
 
   const stageFilter = useCallback((key, value) => {
@@ -1588,6 +1625,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setExperienceLevels(Array.isArray(next.experienceLevels) ? next.experienceLevels : []);
     setSkillsInclude(Array.isArray(next.skillsInclude) ? next.skillsInclude : []);
     setSponsorFriendly(!!next.sponsorFriendly);
+    setCompanySponsors(!!next.companySponsors);
     setSourcesInclude(Array.isArray(next.sourcesInclude) ? next.sourcesInclude : []);
     setSourcesExclude(Array.isArray(next.sourcesExclude) ? next.sourcesExclude : []);
     setTiersInclude(Array.isArray(next.tiersInclude) ? next.tiersInclude : []);
@@ -1924,6 +1962,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     // soft, null-preserving filter; OFF emits nothing at all (falls back to whatever the
     // active profile already derives by default — see services/jobs/profileFilterBridge.js).
     if (sponsorFriendly)         p.set("sponsorship_friendly", "1");
+    // X3: company-level H-1B evidence, and the narrowest filter on the board — it removes only
+    // companies whose employer name we matched with high confidence and that filed nothing in the
+    // quarters of DOL data we hold. Unmatched and ambiguous companies survive it by construction.
+    if (companySponsors)         p.set("company_sponsorship", "1");
     // "Show everything in my role" — turns off the profile-derived defaults for this request only
     // (server.js's ?curate=off). Emitted solely when the user has asked for it, so the default
     // querystring is unchanged.
@@ -2174,6 +2216,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       // above — they were missing from this list, so changing ONLY one of them (leaving every
       // legacy filter untouched) would build the right querystring but never actually refetch.
       salaryMin, salaryMax, workModels, experienceLevels, skillsInclude, sponsorFriendly,
+      companySponsors,
       // Same failure, third time this file has been at risk of it: a new filter that feeds
       // buildParams but is missing HERE builds a correct querystring that is never sent, so the
       // control looks dead. FE-3 fixed it for FE-2's params; these four are added in the same
@@ -2449,6 +2492,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     setExperienceLevels(p.get("experience_levels") ? p.get("experience_levels").split(",") : []);
     setSkillsInclude(p.get("skills_include") ? p.get("skills_include").split(",") : []);
     setSponsorFriendly(p.get("sponsorship_friendly") === "1");
+    setCompanySponsors(p.get("company_sponsorship") === "1");
     // A saved search stores buildParams' raw querystring, so a param buildParams emits but this
     // function never reads is silently dropped on apply — the saved search would come back
     // subtly wider than the one that was saved. These four round-trip through the same
@@ -3018,6 +3062,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             experienceLevels={pendingFilters.experienceLevels} setExperienceLevels={value => stageFilter("experienceLevels", value)}
             skillsInclude={pendingFilters.skillsInclude} setSkillsInclude={value => stageFilter("skillsInclude", value)}
             sponsorFriendly={pendingFilters.sponsorFriendly} setSponsorFriendly={value => stageFilter("sponsorFriendly", value)}
+            companySponsors={pendingFilters.companySponsors} setCompanySponsors={value => stageFilter("companySponsors", value)}
             sourcesInclude={pendingFilters.sourcesInclude || []} setSourcesInclude={value => stageFilter("sourcesInclude", value)}
             sourcesExclude={pendingFilters.sourcesExclude || []} setSourcesExclude={value => stageFilter("sourcesExclude", value)}
             tiersInclude={pendingFilters.tiersInclude || []}   setTiersInclude={value => stageFilter("tiersInclude", value)}
@@ -3740,6 +3785,7 @@ const CURATION_KEY_LABELS = {
   skills_include:       "skills",
   experience_levels:    "experience level",
   sponsorship_friendly: "sponsorship",
+  company_sponsorship:  "company H-1B filings",
 };
 
 function CurationNotice({ theme, curation, curateOff, onToggleCurate }) {

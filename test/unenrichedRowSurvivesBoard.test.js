@@ -40,6 +40,13 @@ function db0() {
       is_h1b_sponsor INTEGER, requires_work_auth INTEGER, is_clearance_required INTEGER,
       posted_at TEXT, discovered_at INTEGER, scraped_at INTEGER, is_active INTEGER DEFAULT 1
     );
+    -- X3's company-level LCA store, which the company_sponsorship rank reads through a correlated
+    -- subquery. Empty, which is this file's whole subject in another form: a company we have no
+    -- evidence about must be NOT ESTABLISHED, never demoted and never dropped.
+    CREATE TABLE company_lca_sponsorship (
+      company TEXT PRIMARY KEY, match_status TEXT NOT NULL,
+      match_confidence REAL NOT NULL DEFAULT 0, certified_total INTEGER NOT NULL DEFAULT 0
+    );
   `);
   return db;
 }

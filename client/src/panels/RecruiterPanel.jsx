@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
-import { StackSection, OrgSection, HiringSection } from "../components/CompanyKbSections.jsx";
+import { StackSection, OrgSection, HiringSection, SponsorshipSection } from "../components/CompanyKbSections.jsx";
 
 const STATUS_COPY = {
   consistent: { label: "Consistent", color: "#16a34a", bg: "#dcfce7" },
@@ -48,6 +48,7 @@ function CompanyKbCard({ company, theme }) {
           <StackSection stack={profile.stack} postings={profile.stackPostings} theme={theme} />
           <OrgSection orgUnits={profile.orgUnits} total={profile.orgUnitsTotal} theme={theme} />
           <HiringSection signal={profile.hiringSignal} theme={theme} />
+          <SponsorshipSection lca={profile.lca} theme={theme} />
         </>
       )}
     </section>
