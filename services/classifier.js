@@ -21,6 +21,15 @@
 
 import { MODEL_HAIKU } from "../shared/anthropicModels.js";
 import { callModel, SYSTEM_USER_ID } from "./modelCall.js";
+import { PROFILE_SENIORITY, values } from "../shared/jobFilterOptions.js";
+
+// The seniority enum this prompt asks Haiku for is the vocabulary of domain_profiles.seniority, and
+// this was its third literal copy — the other two were DomainProfileWizard's options and a dead
+// <select> in ProfilePanel. Built from the registry so the model can never be asked for a value the
+// UI cannot display, or vice versa. Note this is PROFILE_SENIORITY (four values, prose) and NOT
+// EXPERIENCE_LEVELS (six values, SQL); shared/jobFilterOptions.js explains why they are not the
+// same dimension.
+const SENIORITY_ENUM = values(PROFILE_SENIORITY).join(" | ");
 
 // Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
 const MODEL_ID = MODEL_HAIKU;
@@ -54,7 +63,7 @@ Reply ONLY with valid JSON matching this exact schema. No markdown fences, no ex
 {
   "roleFamily": "<one of: engineering | pm | finance | hr | design | data | legal | operations | general>",
   "domain": "<one of: it_digital | construction | pmo | healthcare | fintech | marketing | media | education | real_estate | manufacturing | general>",
-  "seniority": "<one of: junior | mid | senior | executive>",
+  "seniority": "<one of: ${SENIORITY_ENUM}>",
   "qualification": "<normalised degree key or null — e.g. bs_cs, ms_cs, mba, jd, md, phd, be_civil, ms_construction_mgmt, ms_finance, cpa, null>",
   "qualificationRaw": "<exact degree string from resume or null>",
   "topTools": ["<most searchable tool 1>", "<most searchable tool 2>"],
