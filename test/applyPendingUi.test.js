@@ -199,7 +199,14 @@ test("bulk approval takes two deliberate steps", () => {
 });
 
 test("the pending surface gets its own CTA rather than hiding behind 'need review'", () => {
-  assert.match(jobsPanel, /awaiting your approval/);
+  // The wording moved from "N awaiting your approval" to a dedicated obstacle card when the panel
+  // was reorganised around obstacles. The property is unchanged and is asserted more directly now:
+  // pending approvals get their OWN card, with their own count and their own single action, rather
+  // than being one of several buttons in a strip.
+  assert.match(jobsPanel, /waiting for your approval/);
+  assert.match(jobsPanel, /kicker="filled, checked, and not sent"/);
+  assert.match(jobsPanel, /actionLabel="Review & approve"/);
+  assert.match(jobsPanel, /countLabel="to approve"/);
 });
 
 // ── the artifact links must actually authenticate ────────────────────────────

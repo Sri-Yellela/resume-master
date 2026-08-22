@@ -1,0 +1,243 @@
+// THE AUTO APPLY PANEL IS ORGANISED AROUND OBSTACLES, NOT RUNS.
+//
+// It used to be a strip of run badges — "0✓ 1 review ↗" three times — plus a modal. "Run 47" is not
+// a thing a user thinks about; they think about a job they want and what is stopping them. Worse,
+// the strip flattened a rich terminal vocabulary into two words, "review" or "failed", losing the
+// distinction that matters most:
+//
+//     WE DELIBERATELY HELD THIS TO PROTECT YOU        vs        THIS BROKE
+//
+// A resume below your ATS floor, a question we refused to guess, and an application filled and
+// waiting for approval are the system working. A missing browser binary is not. Both said "failed".
+//
+// These tests pin the four surfaces, the total partition that guarantees no application can fall
+// out of all of them, and the rule that every row names an obstacle and an action rather than a
+// status code.
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import {
+  describeApplication, sectionFor, boardApplicationChip, SECTION, PREREQUISITE_LABELS,
+} from "../client/src/lib/applyObstacles.js";
+
+const read = (p) => fs.readFileSync(p, "utf8");
+const panel = read("client/src/panels/AutoApplyPanel.jsx");
+const sections = read("client/src/panels/AutoApplyPanelSections.jsx");
+const obstacles = read("client/src/lib/applyObstacles.js");
+const card = read("client/src/components/JobCard.jsx");
+const ctx = read("client/src/contexts/AutoApplyContext.jsx");
+const applyRoute = read("routes/apply.js");
+
+// ── The four surfaces ────────────────────────────────────────────────────────────────────────
+
+test("the panel renders the four sections the restructure is built on", () => {
+  for (const heading of ["Needs you", "In flight", "Submitted", "Stopped"]) {
+    assert.ok(panel.includes(`>\n            ${heading}\n          </SectionHeading>`)
+      || panel.includes(`>${heading}</SectionHeading>`)
+      || new RegExp(`SectionHeading[^>]*>\\s*${heading}\\s*<`).test(panel),
+      `the "${heading}" section is missing from the panel`);
+  }
+});
+
+test("the server serves the four surfaces as a TOTAL partition", () => {
+  // stopped is defined by EXCLUSION, so a status added later cannot fall through every bucket and
+  // vanish — which is exactly what happened to held_gate when it was split out of held_review.
+  assert.match(applyRoute, /const IN_FLIGHT\s+= \['queued', 'running'\]/);
+  assert.match(applyRoute, /const NEEDS_YOU\s+= \['held_review', 'held_gate'\]/);
+  assert.match(applyRoute, /rj\.status NOT IN \(\$\{\[\.\.\.IN_FLIGHT, \.\.\.NEEDS_YOU\]/);
+  assert.match(applyRoute, /inFlight: inFlight\.map\(publicRunJob\)/);
+  assert.match(applyRoute, /submitted: submitted\.map\(publicRunJob\)/);
+  assert.match(applyRoute, /stopped: stopped\.map\(publicRunJob\)/);
+  // The counts that let a caller prove the partition is total.
+  assert.match(applyRoute, /statusCounts/);
+});
+
+test("sectionFor is total — every status lands in exactly one section", () => {
+  const statuses = ["queued", "running", "held_review", "held_gate", "submitted",
+                    "failed", "rejected", "manual_review", "expired", "", "something_new"];
+  const valid = new Set(Object.values(SECTION));
+  for (const s of statuses) {
+    const sec = sectionFor(s);
+    assert.ok(valid.has(sec), `status "${s}" produced a section outside the four: ${sec}`);
+  }
+  assert.equal(sectionFor("queued"), SECTION.IN_FLIGHT);
+  assert.equal(sectionFor("held_gate"), SECTION.NEEDS_YOU);
+  assert.equal(sectionFor("submitted"), SECTION.SUBMITTED);
+  // The catch-all, which is the property that matters: an unknown status is still SOMEWHERE.
+  assert.equal(sectionFor("a_status_invented_next_year"), SECTION.STOPPED);
+});
+
+// ── Every row names an obstacle and an action, never a status code ───────────────────────────
+
+test("every reason code the server can write has a plain-language presentation", () => {
+  // Read the vocabulary off the SERVER rather than a hand-kept list, so teaching the pipeline a new
+  // reason code fails here until someone writes the sentence for it.
+  const emitted = new Set(
+    [...applyRoute.matchAll(/reasonCode:\s*"([a-z_]+)"/g)].map(m => m[1])
+      .concat([...applyRoute.matchAll(/\?\s*"([a-z_]+)"\s*$/gm)].map(m => m[1]))
+  );
+  // The ones this restructure is specifically about, named explicitly so the regex above drifting
+  // cannot make this test vacuous.
+  for (const c of ["ats_below_threshold", "awaiting_approval", "manual_review", "no_submit_button",
+                   "resume_unavailable", "internal_error", "login_required", "captcha_required",
+                   "incomplete_form", "low_confidence_answers", "no_fields_discovered"]) {
+    emitted.add(c);
+  }
+  for (const code of emitted) {
+    const d = describeApplication({ status: "held_review", reasonCode: code });
+    assert.ok(d.obstacle && d.obstacle.length > 8,
+      `reason code "${code}" has no obstacle sentence`);
+    assert.ok(!/_/.test(d.obstacle),
+      `reason code "${code}" renders as a code, not a sentence: "${d.obstacle}"`);
+  }
+});
+
+test("the distinct terminal outcomes get DISTINCT sentences — none collapses into another", () => {
+  const codes = ["ats_below_threshold", "awaiting_approval", "manual_review", "no_submit_button",
+                 "submit_unverified", "no_fields_discovered", "resume_unavailable",
+                 "internal_error", "browser_binary_not_found", "login_required", "captcha_required"];
+  const seen = new Map();
+  for (const c of codes) {
+    const { obstacle } = describeApplication({ status: "held_review", reasonCode: c });
+    assert.ok(!seen.has(obstacle),
+      `"${c}" and "${seen.get(obstacle)}" render the SAME sentence — that is the flattening this ` +
+      `restructure exists to undo`);
+    seen.set(obstacle, c);
+  }
+  assert.equal(seen.size, codes.length);
+});
+
+test("held-on-purpose is distinguished from broken, which is the distinction the old UI lost", () => {
+  const protective = ["ats_below_threshold", "awaiting_approval", "manual_review",
+                      "login_required", "no_submit_button"];
+  const broken = ["internal_error", "resume_unavailable", "browser_binary_not_found"];
+  for (const c of protective) {
+    assert.equal(describeApplication({ status: "held_review", reasonCode: c }).protective, true,
+      `"${c}" is the system working as designed and must not read as a failure`);
+  }
+  for (const c of broken) {
+    assert.equal(describeApplication({ status: "failed", reasonCode: c }).protective, false,
+      `"${c}" is a real failure and must not read as a deliberate hold`);
+  }
+  // And the panel colours on it rather than on the status.
+  assert.match(sections, /d\.protective \? "#6b7280" : "#dc2626"/);
+});
+
+test("retry is offered ONLY where retrying can work", () => {
+  // "A 404 model ID and a login wall need different affordances" — offering Retry on something
+  // permanent is a lie, so the row says so instead.
+  assert.equal(describeApplication({ status: "failed", reasonCode: "internal_error" }).retryable, true);
+  assert.equal(describeApplication({ status: "failed", reasonCode: "resume_unavailable" }).retryable, true);
+  assert.equal(describeApplication({ status: "failed", reasonCode: "browser_binary_not_found" }).retryable, false);
+  assert.equal(describeApplication({ status: "held_review", reasonCode: "no_submit_button" }).retryable, false);
+  assert.equal(describeApplication({ status: "rejected" }).retryable, false);
+
+  assert.match(sections, /variant === "stopped" && d\.retryable && onRetry/);
+  assert.match(sections, /retrying will not change this/);
+});
+
+test("an unknown REASON on a known status inherits that status, and still reads as a sentence", () => {
+  // held_review means the pipeline CHOSE to hold, whatever the reason turns out to be, so falling
+  // back to the status is right and `protective` stays true. What must never happen is the raw code
+  // reaching the screen.
+  const d = describeApplication({ status: "held_review", reasonCode: "some_new_thing" });
+  assert.ok(!/_/.test(d.obstacle), `an unmapped code leaked through as a code: "${d.obstacle}"`);
+  assert.equal(d.protective, true, "a hold is deliberate even when its reason is new");
+  assert.ok(d.action, "even an unknown outcome must offer the user something to do");
+  assert.equal(d.code, "some_new_thing", "the raw code is kept for logs, just never rendered");
+});
+
+test("an unknown STATUS is filed as broken, never claimed as deliberate", () => {
+  // This is the half that matters for honesty: an outcome nobody has described cannot be presented
+  // as something the system did on purpose, and it lands in STOPPED rather than disappearing.
+  const d = describeApplication({ status: "invented_next_year", reasonCode: "" });
+  assert.equal(d.section, SECTION.STOPPED);
+  assert.equal(d.protective, false);
+  assert.ok(!/_/.test(d.obstacle), `an unmapped status leaked through as a code: "${d.obstacle}"`);
+  assert.ok(d.action);
+});
+
+// ── The obstacle is grouped, and priced by what clearing it unblocks ─────────────────────────
+
+test("the portal gate is ONE action with a count, not N rows", () => {
+  // G5's amortisation, which the requirement calls the most differentiated thing in the product.
+  assert.match(panel, /Sign in to \$\{p\.host\} once → \$\{p\.count\} application/);
+  assert.match(panel, /applyGatePortals\.map/);
+  assert.match(panel, /countLabel=\{p\.count === 1 \? "application" : "applications"\}/);
+  // A CAPTCHA portal is NOT offered a sign-in — it is named as the user's own job.
+  assert.match(panel, /gateReasons\?\.includes\("captcha_required"\)/);
+});
+
+test("held applications are grouped BY OBSTACLE, so N jobs stuck on one thing read as one item", () => {
+  assert.match(panel, /const heldByObstacle = new Map\(\)/);
+  assert.match(panel, /heldByObstacle\.get\(d\.obstacle\)\.jobs\.push\(job\)/);
+  assert.match(panel, /\$\{jobs\.length\} applications — \$\{obstacle\}/);
+});
+
+test("prerequisites are surfaced BEFORE queueing, as one blocking item with a fix", () => {
+  // The gate already computed this and only spoke as a 409 after the user tried to start a run.
+  assert.match(ctx, /api\("\/api\/integrations\/status"\)/);
+  assert.match(ctx, /setApplyPrereqMissing/);
+  assert.match(panel, /<PrerequisiteCards missing=\{applyPrereqMissing\}/);
+  // The count is what it unblocks, and must include already-dispatched jobs, not just the basket.
+  assert.match(panel, /queuedCount=\{applyQueue\.length \+ applyInFlight\.length\}/);
+  for (const key of ["base_resume", "active_profile", "profile_email", "profile_name"]) {
+    assert.ok(PREREQUISITE_LABELS[key], `no plain-language label for prerequisite "${key}"`);
+    assert.ok(!/_/.test(PREREQUISITE_LABELS[key].obstacle));
+  }
+});
+
+// ── The board and the pipeline stop being separate worlds ────────────────────────────────────
+
+test("the board card shows its application state, from the SAME vocabulary", () => {
+  assert.match(card, /import \{ boardApplicationChip \} from "\.\.\/lib\/applyObstacles\.js"/);
+  assert.match(card, /<ApplyStateChip jobId=\{job\.jobId \|\| job\.id\}\/>/);
+  assert.match(ctx, /applyStateByJobId/);
+
+  // A job with no application adds nothing to the card — the board must not grow a column of blanks.
+  assert.equal(boardApplicationChip(null), null);
+  assert.equal(boardApplicationChip({}), null);
+  assert.equal(boardApplicationChip({ status: "submitted" }).label, "Applied");
+  assert.equal(boardApplicationChip({ status: "held_gate" }).label, "Needs you");
+  assert.equal(boardApplicationChip({ status: "running" }).label, "Applying now");
+  // Broken vs held-on-purpose survives onto the board too.
+  assert.equal(boardApplicationChip({ status: "failed", reasonCode: "internal_error" }).label, "Didn't send");
+  assert.equal(boardApplicationChip({ status: "rejected" }).label, "Stopped");
+});
+
+test("the needs-review count is still reachable from the board", () => {
+  // Y4 put a badge on the AUTO APPLY tab; the restructure must not have cost it.
+  assert.match(ctx, /needsAttentionCount: applyPending\.length \+ applyReviewJobs\.length \+ applyQuestions\.length/);
+});
+
+// ── Nothing was dropped ──────────────────────────────────────────────────────────────────────
+
+test("every capability of the old strip survived the reorganisation", () => {
+  for (const [what, needle] of [
+    ["the run control",         /Autofill for Review/],
+    ["the readiness gate",      /applyReadiness && !applyReadiness\.available/],
+    ["the queue's tier notice", /automationTier === "account"/],
+    ["the CAPTCHA warning",     /automationTier === "gated"/],
+    ["queue removal",           /removeFromApplyQueue\(job\.jobId\)/],
+    ["per-run detail",          /loadApplyRunDetail\(run\.id\)/],
+    ["run history",             /Run history/],
+    ["the approvals surface",   /waiting for your approval/],
+    ["the questions surface",   /Answer \{applyQuestions\.length\}/],
+    ["bulk approve guard",      /confirmApproveAll/],
+    ["artifact links",          /artifactUrl/],
+  ]) {
+    assert.match(panel, needle, `${what} did not survive the restructure`);
+  }
+});
+
+test("the obstacle vocabulary is the only place these sentences live", () => {
+  // If the panel started writing its own copy for a reason code, the board's chip and the panel
+  // would drift — which is the class of bug the shared registry work has been closing all along.
+  assert.match(panel, /import \{ describeApplication \} from "\.\.\/lib\/applyObstacles\.js"/);
+  assert.match(sections, /import \{ describeApplication, PREREQUISITE_LABELS \}/);
+  assert.ok(!/reasonCode === "/.test(panel),
+    "the panel is branching on a reason code again — that belongs in applyObstacles.js");
+  assert.ok(!/status === "held_review"/.test(sections),
+    "the row component is branching on a status again — it must ask describeApplication");
+  assert.match(obstacles, /export function describeApplication/);
+});

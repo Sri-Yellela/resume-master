@@ -1,6 +1,11 @@
+import { useNavigate } from "react-router-dom";
 import { useTheme } from "../styles/theme.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { Z } from "../styles/zLayers.js";
+import { describeApplication } from "../lib/applyObstacles.js";
+import {
+  SectionHeading, ObstacleCard, ApplicationRow, PrerequisiteCards,
+} from "./AutoApplyPanelSections.jsx";
 
 // ============================================================
 // AutoApplyPanel — the auto-apply pipeline, on its own tab
@@ -24,9 +29,12 @@ import { Z } from "../styles/zLayers.js";
 // ============================================================
 export function AutoApplyPanel() {
   const { theme } = useTheme();
+  const navigate = useNavigate();
   const {
     applyQueue = [], applyQueueMsg,
     applyRuns = [], applyReviewJobs = [], applyGatePortals = [],
+    applyInFlight = [], applySubmitted = [], applyStopped = [],
+    applyPrereqMissing = [],
     applyRunDetailOpen, setApplyRunDetailOpen,
     applyRunDetail, setApplyRunDetail,
     applyReadiness,
@@ -35,18 +43,57 @@ export function AutoApplyPanel() {
     answersSaving, answersMsg,
     applyPending = [], pendingDetail, pendingBusy, pendingMsg,
     confirmApproveAll, setConfirmApproveAll,
-    removeFromApplyQueue, loadApplyRunDetail,
+    addToApplyQueue, removeFromApplyQueue, loadApplyRunDetail,
     submitApplyAnswers, openPendingDetail, decidePending,
     artifactUrl, startApplyRun,
   } = useAutoApply();
 
   const nothingYet =
     !applyQueue.length && !applyQueueMsg && !applyRuns.length &&
-    !applyReviewJobs.length && !applyPending.length && !applyQuestions.length;
+    !applyReviewJobs.length && !applyPending.length && !applyQuestions.length &&
+    // The four cross-run feeds count too: a user whose only applications are SUBMITTED used to be
+    // told "Nothing queued" over the top of their own sent applications.
+    !applyInFlight.length && !applySubmitted.length && !applyStopped.length &&
+    !applyPrereqMissing.length;
+
+  // ── Grouping ────────────────────────────────────────────────────────────────────────────────
+  //
+  // The panel is organised by OBSTACLE, so the first job here is to turn flat lists of applications
+  // into a small number of things a human can act on. Two questions are being answered per obstacle:
+  // what is in the way, and how many applications does clearing it release.
+  //
+  // Questions split by REASON rather than being one queue: "confirm a guess" and "make a statement
+  // to an employer" are different acts with different stakes, and the second is an attestation the
+  // system will never answer on the user's behalf.
+  const confirmQuestions = applyQuestions.filter(q => q.reason === "low_confidence" && !q.eligibility);
+  const attestQuestions  = applyQuestions.filter(q => q.eligibility);
+  const otherQuestions   = applyQuestions.filter(q => q.reason !== "low_confidence" && !q.eligibility);
+
+  // Held applications that are NOT already represented by a portal group, a question or an approval.
+  // Grouped by the obstacle sentence so five jobs stuck on the same thing read as one item.
+  const heldByObstacle = new Map();
+  for (const job of applyReviewJobs) {
+    const d = describeApplication(job);
+    if (!heldByObstacle.has(d.obstacle)) heldByObstacle.set(d.obstacle, { d, jobs: [] });
+    heldByObstacle.get(d.obstacle).jobs.push(job);
+  }
+
+  const needsYouCount =
+    applyGatePortals.reduce((n, p) => n + (p.count || 0), 0) +
+    applyQuestions.length + applyPending.length + applyReviewJobs.length +
+    applyPrereqMissing.length;
+
+  const openReview = () => { setApplyRunDetail(null); setApplyRunDetailOpen(true); };
+  // No per-job retry endpoint exists — the only way to try again is a new run — so "Retry" puts the
+  // job back on the queue and says so, rather than pretending to re-dispatch it.
+  const retryJob = (job) => {
+    addToApplyQueue({ jobId: job.jobId, company: job.company, title: job.title });
+    setApplyQueueMsg(`${job.company || "Job"} is back on the queue — press Autofill for Review to try again.`);
+  };
 
   return (
     <div style={{ padding: "24px 20px", maxWidth: 1100, margin: "0 auto",
-                  display: "flex", flexDirection: "column", gap: 16 }}>
+                  display: "flex", flexDirection: "column", gap: 14 }}>
       <div>
         <h2 style={{ margin: 0, fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
                      fontSize: 26, letterSpacing: "0.06em", textTransform: "uppercase",
@@ -67,46 +114,49 @@ export function AutoApplyPanel() {
         </div>
       )}
 
-          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap",
-                        padding:"8px 10px", border:`1px solid ${theme.border}`,
-                        background:theme.surfaceHigh, borderRadius:6 }}>
-            <strong style={{ fontSize:12, color:theme.text }}>Auto Apply</strong>
+      {/* ── READY TO START ───────────────────────────────────────────────────────────────────
+          The client-side queue: jobs picked on the board that have not been dispatched yet. This is
+          the old strip's first half, unchanged in behaviour — same single action posting the same
+          mode:"auto" with no approvalMode, which the server treats as approval-required. */}
+      {applyQueue.length > 0 && (
+        <>
+          <SectionHeading theme={theme} count={applyQueue.length} note="picked on the board, not started yet">
+            Ready to start
+          </SectionHeading>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                        padding: "10px 12px", border: `1px solid ${theme.border}`,
+                        background: theme.surfaceHigh, borderRadius: 8 }}>
             {applyQueue.map(job => (
-              <span key={job.jobId} style={{ display:"inline-flex", alignItems:"center", gap:5,
-                                             padding:"3px 7px", borderRadius:4,
-                                             background:theme.surface, color:theme.text, fontSize:11 }}>
+              <span key={job.jobId} style={{ display: "inline-flex", alignItems: "center", gap: 5,
+                                             padding: "3px 7px", borderRadius: 4,
+                                             background: theme.surface, color: theme.text, fontSize: 11 }}>
                 {job.company || job.title}
                 <button onClick={() => removeFromApplyQueue(job.jobId)}
-                  style={{ border:"none", background:"transparent", color:theme.textDim, cursor:"pointer", padding:0 }}>x</button>
+                  style={{ border: "none", background: "transparent", color: theme.textDim,
+                           cursor: "pointer", padding: 0 }}>x</button>
               </span>
             ))}
-            {/* Automation tier, applied to the queue BEFORE the run starts.
-                Requirement: full-auto must never be offered for `account` or `gated`. It is not —
-                and not because of a check added here. The only action on this bar posts
-                mode:"auto" with no approvalMode, which the server treats as approval-required, so
-                every job in every queue already takes the fill-then-hold-for-a-human path. That
-                IS the semi hand-off: the human authenticates once, the resolver fills the form,
-                nothing is submitted without approval. There is no full-auto control to withhold.
-                `gated` additionally cannot be completed at all — a CAPTCHA or identity check is
-                not something to defeat, so it is named as the user's own job rather than
-                attempted. What was missing was telling the user any of this before they queued,
-                which is what this line does. */}
+            {/* Automation tier, applied to the queue BEFORE the run starts. Requirement: full-auto is
+                never offered for `account` or `gated`, and it is not — the only action here posts
+                mode:"auto" with no approvalMode, so every job takes the fill-then-hold path. `gated`
+                additionally cannot be completed at all; a CAPTCHA is named as the user's own job
+                rather than attempted. Said BEFORE queueing, which is what was missing. */}
             {(() => {
               const needsAuth = applyQueue.filter(j => j.automationTier === "account");
               const cannotAuto = applyQueue.filter(j => j.automationTier === "gated");
               if (!needsAuth.length && !cannotAuto.length) return null;
               return (
-                <span style={{ flexBasis:"100%", fontSize:11, color:theme.textMuted, lineHeight:1.6 }}>
+                <span style={{ flexBasis: "100%", fontSize: 11, color: theme.textMuted, lineHeight: 1.6 }}>
                   {needsAuth.length > 0 && (
                     <>
-                      <strong style={{ color:"#854d0e" }}>{needsAuth.length}</strong> of these need
-                      you to sign in to the employer's account first — autofill fills the form once
+                      <strong style={{ color: "#854d0e" }}>{needsAuth.length}</strong> of these need
+                      you to sign in to the employer&rsquo;s account first — autofill fills the form once
                       you have.{" "}
                     </>
                   )}
                   {cannotAuto.length > 0 && (
                     <>
-                      <strong style={{ color:"#991b1b" }}>{cannotAuto.length}</strong> sit behind a
+                      <strong style={{ color: "#991b1b" }}>{cannotAuto.length}</strong> sit behind a
                       CAPTCHA or identity check and cannot be automated at all; you will need to
                       apply to {cannotAuto.length === 1 ? "that one" : "those"} yourself.
                     </>
@@ -114,77 +164,235 @@ export function AutoApplyPanel() {
                 </span>
               );
             })()}
-            {applyQueue.length > 0 && (
-              <>
-                {/* One action, because there is one behaviour. "Run Auto Apply" sat here alongside
-                    this and posted the same request — mode:"auto" with no approvalMode, which the
-                    server treats as approval-required — so it did not auto-apply, and a button that
-                    claims applications were sent when they are waiting for you is worse than no
-                    button. Full-auto is still reachable per run via approvalMode:"auto"; nothing in
-                    this UI sends it, deliberately. */}
-                <button onClick={() => startApplyRun("review")}
-                  disabled={applyReadiness !== null && !applyReadiness.available}
-                  title={applyReadiness && !applyReadiness.available
-                    ? `Autofill unavailable: ${applyReadiness.reason}`
-                    : "Fills each application and holds it for your approval. Nothing is submitted until you approve it."}
-                  style={{ border:"none", borderRadius:6, padding:"6px 10px",
-                           background: applyReadiness && !applyReadiness.available ? (theme.surfaceHigh || "#555") : theme.accent,
-                           color:"#0f0f0f", fontWeight:800,
-                           cursor: applyReadiness && !applyReadiness.available ? "not-allowed" : "pointer",
-                           fontSize:12, opacity: applyReadiness && !applyReadiness.available ? 0.5 : 1 }}>
-                  Autofill for Review
-                </button>
-                {applyReadiness && !applyReadiness.available && (
-                  <span style={{ fontSize:11, color: theme.textDim || theme.textMuted }}>
-                    Browser unavailable: {applyReadiness.reason}
-                  </span>
-                )}
-              </>
-            )}
-            {applyQueueMsg && <span style={{ fontSize:11, color:theme.accentText }}>{applyQueueMsg}</span>}
-            {/* Run status summary badges */}
-            {applyRuns.slice(0, 3).map(run => (
-              <button key={run.id} onClick={() => loadApplyRunDetail(run.id)}
-                style={{ display:"inline-flex", alignItems:"center", gap:5, border:`1px solid ${theme.border}`,
-                         borderRadius:4, padding:"3px 8px", background:theme.surface,
-                         color:theme.text, cursor:"pointer", fontSize:11 }}>
-                <span style={{ width:6, height:6, borderRadius:"50%", flexShrink:0, background:
-                  run.status === "completed" ? "#16a34a" :
-                  run.status === "running"  ? theme.accent :
-                  run.status === "queued"   ? "#d97706" : "#6b7280" }}/>
-                {run.submittedCount}✓
-                {run.heldCount > 0 && <span style={{ color:"#d97706" }}> {run.heldCount} review</span>}
-                {run.failedCount > 0 && <span style={{ color:"#dc2626" }}> {run.failedCount} failed</span>}
-                <span style={{ color:theme.textDim }}>↗</span>
-              </button>
-            ))}
-            {applyReviewJobs.length > 0 && !applyQueue.length && (
-              <button onClick={() => setApplyRunDetailOpen(true)}
-                style={{ border:`1px solid #d97706`, borderRadius:4, padding:"3px 8px",
-                         background:"#fef3c7", color:"#92400e", cursor:"pointer", fontSize:11, fontWeight:700 }}>
-                {applyReviewJobs.length} need review ↗
-              </button>
-            )}
-            {/* Awaiting approval is the highest-stakes thing on this bar — these applications are
-                filled and one click from a real employer — so it gets its own CTA and does not hide
-                behind "need review". */}
-            {applyPending.length > 0 && !applyQueue.length && (
-              <button onClick={() => { setApplyRunDetail(null); setApplyRunDetailOpen(true); }}
-                style={{ border:`1px solid #2563eb`, borderRadius:4, padding:"3px 8px",
-                         background:"#dbeafe", color:"#1e3a8a", cursor:"pointer", fontSize:11, fontWeight:800 }}>
-                {applyPending.length} awaiting your approval ↗
-              </button>
-            )}
-            {/* Answering is the actionable thing, so it gets its own CTA rather than hiding behind
-                "need review". Accented because a hold only clears once these are answered. */}
-            {applyQuestions.length > 0 && !applyQueue.length && (
-              <button onClick={() => { setApplyRunDetail(null); setApplyRunDetailOpen(true); }}
-                style={{ border:`1px solid ${theme.accent}`, borderRadius:4, padding:"3px 8px",
-                         background:theme.accent, color:"#0f0f0f", cursor:"pointer", fontSize:11, fontWeight:800 }}>
-                Answer {applyQuestions.length} question{applyQuestions.length === 1 ? "" : "s"} ↗
-              </button>
+            <span style={{ flex: 1 }} />
+            <button onClick={() => startApplyRun("review")}
+              disabled={applyReadiness !== null && !applyReadiness.available}
+              title={applyReadiness && !applyReadiness.available
+                ? `Autofill unavailable: ${applyReadiness.reason}`
+                : "Fills each application and holds it for your approval. Nothing is submitted until you approve it."}
+              style={{ border: "none", borderRadius: 6, padding: "8px 14px",
+                       background: applyReadiness && !applyReadiness.available ? (theme.surfaceHigh || "#555") : theme.accent,
+                       color: "#0f0f0f", fontWeight: 800,
+                       cursor: applyReadiness && !applyReadiness.available ? "not-allowed" : "pointer",
+                       fontSize: 12, opacity: applyReadiness && !applyReadiness.available ? 0.5 : 1 }}>
+              Autofill for Review
+            </button>
+            {applyReadiness && !applyReadiness.available && (
+              <span style={{ fontSize: 11, color: theme.textDim || theme.textMuted }}>
+                Browser unavailable: {applyReadiness.reason}
+              </span>
             )}
           </div>
+        </>
+      )}
+      {applyQueueMsg && (
+        <span style={{ fontSize: 11.5, color: theme.accentText }}>{applyQueueMsg}</span>
+      )}
+
+      {/* ── 1. NEEDS YOU ─────────────────────────────────────────────────────────────────────
+          Grouped by obstacle, each with ONE action and a count of what it unblocks. This is the
+          hero of the panel: it is the only section where anything is waiting on a human. */}
+      {needsYouCount > 0 && (
+        <>
+          <SectionHeading theme={theme} count={needsYouCount} note="each of these is one action">
+            Needs you
+          </SectionHeading>
+
+          {/* Prerequisites first: they block EVERY application, so clearing anything else is wasted
+              effort until they are done. */}
+          {/* The count is what the jobs are blocked FROM, so it has to include applications already
+              dispatched and sitting queued — not just the client-side basket. With only
+              applyQueue.length the card read "Your profile has no email address" with no number
+              beside six jobs that were blocked on exactly that. */}
+          <PrerequisiteCards missing={applyPrereqMissing}
+            queuedCount={applyQueue.length + applyInFlight.length}
+            theme={theme} onGo={(tab) => navigate(`/app/${tab}`)} />
+
+          {/* THE PORTAL AMORTISATION, and the most differentiated thing in the product: one sign-in
+              releases every application queued behind that portal. Rendered as the hero because
+              "sign in once -> 4 ready" is a ten-second job priced as one, where the same thing shown
+              as four held rows is priced as four. */}
+          {applyGatePortals.map(p => {
+            const isCaptcha = p.gateReasons?.includes("captcha_required");
+            return (
+              <ObstacleCard
+                key={p.origin}
+                theme={theme}
+                hero={!isCaptcha}
+                tone={isCaptcha ? "#dc2626" : "#2563eb"}
+                kicker={isCaptcha ? "cannot be automated" : "one sign-in clears all of these"}
+                headline={isCaptcha
+                  ? `${p.host} is behind a CAPTCHA or identity check`
+                  : `Sign in to ${p.host} once → ${p.count} application${p.count === 1 ? "" : "s"} ready`}
+                detail={isCaptcha
+                  ? "We do not defeat identity checks. Open these and apply yourself."
+                  : "Everything queued behind this portal continues as soon as you are signed in. Each one is still reviewed by you before it is sent."}
+                count={p.count}
+                countLabel={p.count === 1 ? "application" : "applications"}
+                actionLabel={isCaptcha ? "Open them" : "Sign in"}
+                onAction={openReview}
+              />
+            );
+          })}
+
+          {/* Low-confidence answers: the resolver HAS a value and would not send it. */}
+          {confirmQuestions.length > 0 && (
+            <ObstacleCard
+              theme={theme} tone="#d97706"
+              kicker="we guessed, and would not send a guess"
+              headline={`${confirmQuestions.length} answer${confirmQuestions.length === 1 ? "" : "s"} need${confirmQuestions.length === 1 ? "s" : ""} confirmation`}
+              detail={applyQuestionMeta.blockedJobs > 0
+                ? `Confirming them unblocks ${applyQuestionMeta.blockedJobs} application${applyQuestionMeta.blockedJobs === 1 ? "" : "s"}. Each one is pre-filled with our guess — accepting it is the answer.`
+                : "Each one is pre-filled with our guess — accepting it is the answer."}
+              count={confirmQuestions.length}
+              countLabel="to confirm"
+              actionLabel="Confirm answers"
+              onAction={openReview}
+            />
+          )}
+
+          {/* Attestations are a different act: a statement the user makes to an employer. Never
+              inferred from the profile, so never grouped with the guesses above. */}
+          {attestQuestions.length > 0 && (
+            <ObstacleCard
+              theme={theme} tone="#dc2626"
+              kicker="only you can state these"
+              headline={`${attestQuestions.length} question${attestQuestions.length === 1 ? "" : "s"} you must answer yourself`}
+              detail="These are statements to the employer — work authorisation, sponsorship, disability status. We never answer them from your profile."
+              count={attestQuestions.length}
+              countLabel="attestations"
+              actionLabel="Answer"
+              onAction={openReview}
+            />
+          )}
+
+          {otherQuestions.length > 0 && (
+            <ObstacleCard
+              theme={theme} tone="#d97706"
+              kicker="the form asked for something we do not have"
+              headline={`${otherQuestions.length} field${otherQuestions.length === 1 ? "" : "s"} we would not fill without you`}
+              detail="Answering these turns the hold into a completed application. Saved answers are reused verbatim, never re-inferred."
+              count={otherQuestions.length}
+              countLabel="to answer"
+              actionLabel="Answer"
+              onAction={openReview}
+            />
+          )}
+
+          {/* Filled and one click from a real employer — the highest-stakes item on the panel. */}
+          {applyPending.length > 0 && (
+            <ObstacleCard
+              theme={theme} tone="#2563eb" hero
+              kicker="filled, checked, and not sent"
+              headline={`${applyPending.length} application${applyPending.length === 1 ? "" : "s"} waiting for your approval`}
+              detail="Read one before you approve it — approving submits it to the employer and cannot be undone."
+              count={applyPending.length}
+              countLabel="to approve"
+              actionLabel="Review & approve"
+              onAction={openReview}
+            />
+          )}
+
+          {/* Everything else that is held, grouped by its obstacle so N jobs stuck on one thing read
+              as one item rather than N rows. */}
+          {[...heldByObstacle.entries()].map(([obstacle, { d, jobs }]) => (
+            <ObstacleCard
+              key={obstacle}
+              theme={theme}
+              tone={d.protective ? "#d97706" : "#dc2626"}
+              kicker={d.protective ? "held on purpose" : "did not complete"}
+              // NOT lowercased: `obstacle.toLowerCase()` turned "ATS threshold" into "ats threshold".
+              // The sentences are written to read correctly after a colon as they are.
+              headline={jobs.length === 1
+                ? `${jobs[0].company || jobs[0].title || "One application"} — ${obstacle}`
+                : `${jobs.length} applications — ${obstacle}`}
+              detail={d.action}
+              count={jobs.length}
+              countLabel={jobs.length === 1 ? "application" : "applications"}
+              actionLabel="Open"
+              onAction={openReview}
+            />
+          ))}
+        </>
+      )}
+
+      {/* ── 2. IN FLIGHT ─────────────────────────────────────────────────────────────────────
+          Small and self-clearing: nothing here needs a decision, so it says what is happening and
+          gets out of the way. */}
+      {applyInFlight.length > 0 && (
+        <>
+          <SectionHeading theme={theme} count={applyInFlight.length} note="nothing to do — these clear themselves">
+            In flight
+          </SectionHeading>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {applyInFlight.map(job => (
+              <ApplicationRow key={job.id} job={job} theme={theme} variant="inFlight"
+                artifactUrl={artifactUrl} onOpenRun={loadApplyRunDetail} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── 3. SUBMITTED ─────────────────────────────────────────────────────────────────────
+          With the evidence a user actually reaches for when an interview lands: the date, the exact
+          resume that went out, and the screenshot of the form as submitted. */}
+      {applySubmitted.length > 0 && (
+        <>
+          <SectionHeading theme={theme} count={applySubmitted.length} note="what went out, and the proof">
+            Submitted
+          </SectionHeading>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {applySubmitted.map(job => (
+              <ApplicationRow key={job.id} job={job} theme={theme} variant="submitted"
+                artifactUrl={artifactUrl} onOpenRun={loadApplyRunDetail} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── 4. STOPPED ───────────────────────────────────────────────────────────────────────
+          The reason in plain language, and retry ONLY where retrying can work. */}
+      {applyStopped.length > 0 && (
+        <>
+          <SectionHeading theme={theme} count={applyStopped.length} note="why, in plain language">
+            Stopped
+          </SectionHeading>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {applyStopped.map(job => (
+              <ApplicationRow key={job.id} job={job} theme={theme} variant="stopped"
+                artifactUrl={artifactUrl} onRetry={retryJob} onOpenRun={loadApplyRunDetail} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Run history stays REACHABLE but stops being the organising idea. A run is how the work was
+          dispatched, which matters when something looks wrong and never otherwise. */}
+      {applyRuns.length > 0 && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 11, fontWeight: 700, cursor: "pointer", color: theme.textMuted,
+                            textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Run history ({applyRuns.length})
+          </summary>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 8 }}>
+            {applyRuns.map(run => (
+              <button key={run.id} onClick={() => loadApplyRunDetail(run.id)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 5,
+                         border: `1px solid ${theme.border}`, borderRadius: 4, padding: "3px 8px",
+                         background: theme.surface, color: theme.text, cursor: "pointer", fontSize: 11 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background:
+                  run.status === "completed" ? "#16a34a" :
+                  run.status === "running" ? theme.accent :
+                  run.status === "queued" ? "#d97706" : "#6b7280" }} />
+                {run.startedAt ? new Date(run.startedAt).toLocaleDateString() : `Run ${run.id}`}
+                <span style={{ color: theme.textDim }}>
+                  {run.submittedCount}✓ {run.heldCount ? `${run.heldCount} held` : ""} {run.failedCount ? `${run.failedCount} stopped` : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
 
       {/* ── Apply Runs Review Modal ──────────────────────────────────── */}
       {applyRunDetailOpen && (
