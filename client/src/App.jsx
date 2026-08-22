@@ -48,6 +48,7 @@ import { ContactPage }     from "./pages/marketing/ContactPage.jsx";
 import { FAQPage }         from "./pages/marketing/FAQPage.jsx";
 import { PrivacyPage }     from "./pages/marketing/PrivacyPage.jsx";
 import { TermsPage }       from "./pages/marketing/TermsPage.jsx";
+import { Toaster }         from "./components/ui/toaster.jsx";
 
 const CONSOLE_ROUTE = "jobs";
 const LEGACY_CONSOLE_ROUTES = new Set(["simple-apply", "tailored", "custom-sampler"]);
@@ -539,6 +540,18 @@ function AppDashboard({ authUser, setAuthUser }) {
             />
           )}
         </div>
+
+        {/* TOASTS. Mounted here, OUTSIDE [data-app-shell], and that placement is the point.
+            useBoardLock inerts the shell's children while a panel or the filters drawer is open; a
+            toast reporting the result of an action taken INSIDE that panel must not be inerted along
+            with the board behind it — a toast with an inert action button is worse than no toast.
+            Being a sibling of the shell rather than a child keeps it out of that loop entirely, the
+            same reason PanelScrim, PanelDock and now the filters drawer are portalled to body.
+
+            This is the first mount. `toast()` and `useToast()` have existed all along and nothing
+            called them, and nothing rendered <Toaster/>, so its z-[100] — below the top bar — was
+            never observable. It reads Z.TOAST now (client/src/styles/zLayers.js). */}
+        <Toaster />
       </AppScrollProvider>
     </AutoApplyProvider>
     </JobBoardProvider>
