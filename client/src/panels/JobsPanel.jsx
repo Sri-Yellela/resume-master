@@ -1,6 +1,7 @@
 ﻿// client/src/panels/JobsPanel.jsx â€" Lucy Brand, shared job pool
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { api, printResume, dislikeJob, authHeaders, authContextQuery } from "../lib/api.js";
@@ -511,8 +512,16 @@ function FiltersPanel({
   };
   const labelStyle = { fontSize:11, fontWeight:700, color:theme.textMuted,
                         textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 };
-  return (
-    <div style={{
+  // PORTALLED TO document.body, which is what makes the drawer inertable — see the note on
+  // FILTER_DRAWER_TOP above and useBoardLock. This drawer rendered inside JobsPanel, i.e. inside
+  // <main>, i.e. inside [data-app-shell]. useBoardLock inerts the shell's CHILDREN, so inerting the
+  // app to protect the drawer would have inerted the drawer along with it — the subtree it was
+  // supposed to be the exception to. PanelScrim and PanelDock are portalled for the neighbouring
+  // reason (a fixed element is still clipped by an ancestor transform and still confined to an
+  // ancestor's stacking context); this one adds a third: a modal surface must not be a descendant of
+  // the thing it makes inert.
+  return createPortal(
+    <div data-filters-drawer="" style={{
       position:"fixed", inset:0, zIndex:Z.DRAWER_SCRIM,
       // `stretch`, not `flex-start`: the panel's height now comes from this container's padding
       // (see FILTER_DRAWER_TOP below), so it must fill the padded box rather than hug its content.
@@ -887,7 +896,8 @@ function FiltersPanel({
           </LucyBtn>
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1301,10 +1311,18 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     };
   }, [visiblePanels, focusPanel, beginResize, resizeBy, endResize]);
 
-  // While any panel is open the board is inert and the page is frozen at its current scroll offset,
-  // which is restored exactly on close. See hooks/useBoardLock.js — a scrim alone stopped neither
-  // the Tab key nor the wheel.
-  useBoardLock(openPanelCount > 0);
+  // While any panel OR THE FILTERS DRAWER is open the board is inert and the page is frozen at its
+  // current scroll offset, which is restored exactly on close. See hooks/useBoardLock.js — a scrim
+  // alone stopped neither the Tab key nor the wheel.
+  //
+  // The drawer was missing from this condition, and a scrim was all it ever had. Measured with only
+  // the drawer open: the top bar behind it was dimmed and pointer-unreachable (the scrim covers it,
+  // Z.DRAWER_SCRIM 600 over Z.NAV 250) and still fully TAB-REACHABLE, so focus walked out of the
+  // open drawer into controls the user could not see. pointer-events is not a focus trap; `inert`
+  // is, and it is the same mechanism the panels have always used.
+  // filterPanelOpen, not the `filtersOpen` alias — the alias is declared ~130 lines below this call
+  // and reading it here would be a temporal-dead-zone ReferenceError on every render.
+  useBoardLock(openPanelCount > 0 || filterPanelOpen);
 
   const closeAtsPanel = useCallback(() => {
     setRightPanelOpen(false);
