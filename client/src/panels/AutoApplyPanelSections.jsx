@@ -173,8 +173,13 @@ export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOp
           : variant === "submitted"
             ? chip(`${theme.border}55`, theme.textDim, "no resume recorded")
             : null}
+        {/* EVIDENCE (AB1 requirement 4). For a SUBMITTED application this is proof of what went out.
+            For a held one it is a picture of a form in a browser that has since closed — so it is
+            named as evidence rather than as a link that looks like it reopens the application. It
+            never was that, and presenting it as that is what made a hold look finishable when the
+            only way onward was to redo the whole thing by hand. */}
         {job.screenshotAvailable && link(artifactUrl(job.id, "screenshot"),
-          variant === "submitted" ? "Screenshot of the form ↗" : "Filled form ↗")}
+          variant === "submitted" ? "Screenshot of the form ↗" : "What we filled ↗")}
         {job.atsScore != null && chip(
           job.atsScore >= 80 ? "#dcfce7" : job.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
           job.atsScore >= 80 ? "#166534" : job.atsScore >= 60 ? "#854d0e" : "#991b1b",

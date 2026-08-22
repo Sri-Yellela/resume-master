@@ -29,6 +29,15 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   // Gated jobs, grouped by the portal you have to sign in to. One crossing releases the whole group,
   // which is a different offer from N separate reviews — see TASK G5.
   const [applyGatePortals, setApplyGatePortals] = useState([]);
+  // ── The prepared packets themselves, per application (TASK AB1) ─────────────────────────────
+  // Only the portal GROUPING was ever read. The individual packets were fetched and thrown away,
+  // which was survivable while the only packets were gate crossings — a batch is all you need to
+  // act on those. It stopped being survivable when held reviews started carrying packets too: a
+  // held review is one application's obstacle, and the thing that resumes it is its OWN packet.
+  const [applyHandoffPackets, setApplyHandoffPackets] = useState([]);
+  // What the user is told after a handoff is started. The fill happens in ANOTHER TAB, by the
+  // extension, so without this the click looks like it did nothing.
+  const [handoffMsg, setHandoffMsg] = useState(null); // { kind, text }
   const [applyQueueMsg, setApplyQueueMsg] = useState("");
   const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
   const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
@@ -94,7 +103,8 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
     try {
       const gates = await api("/api/apply/gate-packets");
       setApplyGatePortals(Array.isArray(gates.portals) ? gates.portals : []);
-    } catch { setApplyGatePortals([]); }
+      setApplyHandoffPackets(Array.isArray(gates.packets) ? gates.packets : []);
+    } catch { setApplyGatePortals([]); setApplyHandoffPackets([]); }
   }, []);
 
   const loadApplyRunDetail = useCallback(async (runId) => {
@@ -239,6 +249,62 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
     }
   }, [loadApplyPending, loadApplyRuns]);
 
+  // ── The held-review handoff (TASK AB1) ──────────────────────────────────────────────────────
+  //
+  // A held application's packet, found by run-job first and by job second. Two keys because they
+  // answer different questions: a row in the panel IS a run-job, so that is the exact match; but a
+  // job re-run after a hold produces a new run-job, and the packet prepared for the previous attempt
+  // is still the one that can be resumed.
+  const handoffPacketFor = useCallback((job) => {
+    if (!job) return null;
+    const fresh = (a, b) => (b.createdAt || 0) - (a.createdAt || 0);
+    const byRunJob = applyHandoffPackets.filter(p => p.runJobId != null && p.runJobId === job.id);
+    if (byRunJob.length) return byRunJob.sort(fresh)[0];
+    const byJob = applyHandoffPackets.filter(p => String(p.jobId) === String(job.jobId));
+    return byJob.length ? byJob.sort(fresh)[0] : null;
+  }, [applyHandoffPackets]);
+
+  /**
+   * Resume a held application in the user's OWN browser.
+   *
+   * This is the whole of AB1's fix on the client, and it is deliberately not a link to a screenshot.
+   * The filled DOM died with the Puppeteer context that produced it, so there is nothing to reopen;
+   * what survives is the PACKET, and the extension can replay it into a live form under an activeTab
+   * grant. So: open the real apply URL, and say what happens next — because the fill happens in
+   * another tab, in another process, and a click that appears to do nothing reads as a broken button.
+   *
+   * The two states that cannot be resumed are refused HERE rather than opening a tab that will fail:
+   *   postingGone  there is nothing to open. Requirement 6.
+   *   stale        the answers have gone off. The server refuses the mint too (410 packet_stale);
+   *                this is the same refusal said before the user has walked to another tab for it.
+   */
+  const openHandoff = useCallback((packet, job) => {
+    const label = [job?.company, job?.title].filter(Boolean).join(" — ") || "This application";
+    if (!packet) {
+      setHandoffMsg({ kind: "no_packet", text:
+        `${label} has no prepared answers to resume — it was held before the form was reached. Run it again to prepare them.` });
+      return;
+    }
+    if (packet.postingGone) {
+      setHandoffMsg({ kind: "gone", text:
+        `The posting for ${label} is no longer on the board, so there is no form left to open. Nothing was lost — the record of the attempt stays here.` });
+      return;
+    }
+    if (packet.stale) {
+      const days = Math.floor((packet.ageMs || 0) / 86400000);
+      setHandoffMsg({ kind: "stale", text:
+        `${label} was prepared ${days} day${days === 1 ? "" : "s"} ago and the posting may have changed since. Run it again to prepare fresh answers rather than filling old ones.` });
+      return;
+    }
+    let host = packet.expectedOrigin;
+    try { host = new URL(packet.expectedOrigin).host; } catch {}
+    window.open(packet.applyUrl, "_blank", "noopener,noreferrer");
+    setHandoffMsg({ kind: "open", text:
+      `Opened ${host} in a new tab. Click the Resume Master extension there and the form fills with the ` +
+      `${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we prepared, each labelled with where it came from. ` +
+      `You review it and you submit it — we never submit on that page.` });
+  }, []);
+
   // The resume and screenshot are served as files, so they cannot carry the auth header api() adds.
   // authContextQuery is the query-param form of the same token, which requireAuth also honours
   // (server.js: `req.query?.authContext`) — the mechanism useSyncEvents already relies on for SSE.
@@ -326,6 +392,7 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
     <AutoApplyContext.Provider value={{
       applyQueue, setApplyQueue,
       applyRuns, applyReviewJobs, applyGatePortals,
+      applyHandoffPackets, handoffPacketFor, openHandoff, handoffMsg, setHandoffMsg,
       applyInFlight, applySubmitted, applyStopped, applyGatedJobs,
       applyPrereqMissing,
       // ── The board's own view of the pipeline ────────────────────────────────────────────────

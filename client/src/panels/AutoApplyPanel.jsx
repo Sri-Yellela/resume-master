@@ -31,8 +31,12 @@ export function AutoApplyPanel() {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const {
-    applyQueue = [], applyQueueMsg,
+    // setApplyQueueMsg was USED by retryJob below and never destructured, so every Retry click threw
+    // a ReferenceError before it reached the queue — the same "handler wired to nothing" class as
+    // W1's no-op callbacks. The context has exported it all along.
+    applyQueue = [], applyQueueMsg, setApplyQueueMsg,
     applyRuns = [], applyReviewJobs = [], applyGatePortals = [],
+    handoffPacketFor, openHandoff, handoffMsg, setHandoffMsg,
     applyInFlight = [], applySubmitted = [], applyStopped = [],
     applyPrereqMissing = [],
     applyRunDetailOpen, setApplyRunDetailOpen,
@@ -89,6 +93,14 @@ export function AutoApplyPanel() {
   const retryJob = (job) => {
     addToApplyQueue({ jobId: job.jobId, company: job.company, title: job.title });
     setApplyQueueMsg(`${job.company || "Job"} is back on the queue — press Autofill for Review to try again.`);
+  };
+  // The remedy for a STALE or unpreparable handoff (AB1 requirement 5): a fresh run, which produces
+  // a fresh packet. Same mechanism as retryJob — there is no per-job re-dispatch endpoint, so it
+  // says what it actually did rather than implying the application resumed by itself.
+  const rerunJob = (job) => {
+    addToApplyQueue({ jobId: job.jobId, company: job.company, title: job.title });
+    setHandoffMsg(null);
+    setApplyQueueMsg(`${job.company || "Job"} is queued for a fresh run — press Autofill for Review to prepare new answers.`);
   };
 
   return (
@@ -295,24 +307,71 @@ export function AutoApplyPanel() {
 
           {/* Everything else that is held, grouped by its obstacle so N jobs stuck on one thing read
               as one item rather than N rows. */}
-          {[...heldByObstacle.entries()].map(([obstacle, { d, jobs }]) => (
-            <ObstacleCard
-              key={obstacle}
-              theme={theme}
-              tone={d.protective ? "#d97706" : "#dc2626"}
-              kicker={d.protective ? "held on purpose" : "did not complete"}
-              // NOT lowercased: `obstacle.toLowerCase()` turned "ATS threshold" into "ats threshold".
-              // The sentences are written to read correctly after a colon as they are.
-              headline={jobs.length === 1
-                ? `${jobs[0].company || jobs[0].title || "One application"} — ${obstacle}`
-                : `${jobs.length} applications — ${obstacle}`}
-              detail={d.action}
-              count={jobs.length}
-              countLabel={jobs.length === 1 ? "application" : "applications"}
-              actionLabel="Open"
-              onAction={openReview}
-            />
-          ))}
+          {[...heldByObstacle.entries()].map(([obstacle, { d, jobs }]) => {
+            // ── AB1: A HELD REVIEW IS RESUMABLE ────────────────────────────────────────────────
+            // The action on a held card used to open the review modal, whose only route onward was
+            // a screenshot of a form in a browser that had already closed. There was no path from
+            // held to submitted at all. When a packet exists, the action is the HANDOFF: the real
+            // apply URL in the user's own browser, filled by the extension from the same answers.
+            //
+            // Single-application cards can offer it directly. A card standing for several
+            // applications cannot — they are different postings on different origins — so it keeps
+            // the list as its action and each row offers its own handoff.
+            const only = jobs.length === 1 ? jobs[0] : null;
+            const packet = only ? handoffPacketFor?.(only) : null;
+            const gone = packet?.postingGone || (only && !only.title && !packet);
+            const stale = packet?.stale;
+            const resumable = only && packet && !gone && !stale;
+            return (
+              <ObstacleCard
+                key={obstacle}
+                theme={theme}
+                tone={gone ? "#6b7280" : d.protective ? "#d97706" : "#dc2626"}
+                kicker={gone ? "the posting is gone"
+                  : stale ? "prepared too long ago"
+                  : d.protective ? "held on purpose" : "did not complete"}
+                // NOT lowercased: `obstacle.toLowerCase()` turned "ATS threshold" into "ats threshold".
+                // The sentences are written to read correctly after a colon as they are.
+                headline={jobs.length === 1
+                  ? `${jobs[0].company || jobs[0].title || "One application"} — ${obstacle}`
+                  : `${jobs.length} applications — ${obstacle}`}
+                detail={gone
+                  ? "This posting is no longer on the board, so there is no form left to finish. The record of the attempt stays here."
+                  : stale
+                    ? "The answers we prepared have gone off. Run it again rather than filling stale ones into a form that may have changed."
+                    : resumable
+                      ? `${d.action} — Open picks up where we stopped: the form fills with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved, in your own browser, for you to check and send.`
+                      : d.action}
+                count={jobs.length}
+                countLabel={jobs.length === 1 ? "application" : "applications"}
+                actionLabel={gone ? null : stale ? "Run it again" : resumable ? "Open & fill" : "Open"}
+                onAction={gone ? undefined
+                  : stale ? () => rerunJob(only)
+                  : resumable ? () => openHandoff(packet, only)
+                  : openReview}
+                // Evidence stays reachable, as evidence. It is no longer the route.
+                secondaryLabel={resumable ? "See what we filled" : null}
+                onSecondary={resumable ? openReview : undefined}
+              />
+            );
+          })}
+
+          {/* The handoff happens in ANOTHER TAB, so the panel has to say what to expect there. A
+              refusal (stale answers, a posting that is gone) is reported in the same place, because
+              the alternative is a click that appears to do nothing. */}
+          {handoffMsg && (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10,
+                          border: `1px solid ${handoffMsg.kind === "open" ? "#2563eb" : theme.border}`,
+                          borderLeft: `3px solid ${handoffMsg.kind === "open" ? "#2563eb" : "#d97706"}`,
+                          borderRadius: 8, padding: "10px 14px", background: theme.surfaceHigh }}>
+              <span style={{ fontSize: 11.5, color: theme.text, lineHeight: 1.6, flex: 1 }}>
+                {handoffMsg.text}
+              </span>
+              <button onClick={() => setHandoffMsg(null)}
+                style={{ border: "none", background: "transparent", color: theme.textDim,
+                         cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 2px" }}>×</button>
+            </div>
+          )}
         </>
       )}
 
@@ -514,10 +573,14 @@ export function AutoApplyPanel() {
                               Resume PDF ↗
                             </a>
                           )}
+                          {/* Evidence, not a route. This application's way forward is Approve & send
+                              below — the server submits it — so the screenshot is here to be read
+                              before deciding, never to be submitted from. */}
                           {p.screenshotAvailable && (
                             <a href={artifactUrl(p.runJobId, "screenshot")} target="_blank" rel="noreferrer"
-                              style={{ ...btn(theme.surface, theme.text, theme.border), textDecoration:"none" }}>
-                              Filled form ↗
+                              title="A picture of the form as we filled it. Read it before you approve."
+                              style={{ ...btn(theme.surface, theme.textMuted, theme.border), textDecoration:"none" }}>
+                              What we filled ↗
                             </a>
                           )}
                           <span style={{ flex:1 }}/>
@@ -862,15 +925,58 @@ export function AutoApplyPanel() {
                           no resume generated
                         </span>
                       )}
+                      {/* EVIDENCE, NOT THE ROUTE (AB1 requirement 4). This is a screenshot of a form
+                          in a browser that closed when the run ended — it shows what we filled and
+                          it cannot be submitted. It used to be the only thing offered for a held
+                          application, which is why a hold was a dead end. Labelled for what it is,
+                          and the resume action below is what actually continues the application. */}
                       {job.screenshotAvailable && (
                         <a href={artifactUrl(job.id, "screenshot")} target="_blank" rel="noreferrer"
                           onClick={e => e.stopPropagation()}
+                          title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
                           style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
                                    border:`1px solid ${theme.border}`, background:theme.surface,
-                                   color:theme.text, textDecoration:"none", whiteSpace:"nowrap" }}>
-                          Filled form ↗
+                                   color:theme.textMuted, textDecoration:"none", whiteSpace:"nowrap" }}>
+                          What we filled ↗
                         </a>
                       )}
+                      {/* THE ROUTE. Present on every held row that has a prepared packet, so the
+                          list is not just readable but finishable. */}
+                      {(() => {
+                        if (!["held_review", "held_gate"].includes(job.status)) return null;
+                        const packet = handoffPacketFor?.(job);
+                        if (!packet) return null;
+                        // A posting that no longer exists is a STATE, not a disabled button
+                        // (requirement 6). There is no form to open and no run that would find one,
+                        // so nothing is offered — saying so is the whole affordance.
+                        if (packet.postingGone) {
+                          return (
+                            <span title="This posting was removed from the board. There is no application left to finish; the record of the attempt stays here."
+                              style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
+                                       background:`${theme.border}55`, color:theme.textDim, whiteSpace:"nowrap" }}>
+                              posting gone — cannot be resumed
+                            </span>
+                          );
+                        }
+                        const stale = packet.stale;
+                        return (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              if (stale) rerunJob(job); else openHandoff(packet, job);
+                            }}
+                            title={stale
+                              ? "These answers were prepared too long ago to fill safely. A fresh run prepares new ones."
+                              : "Opens the real application in your own browser and fills it with the answers we prepared. You review and submit."}
+                            style={{ fontSize:10, fontWeight:800, padding:"2px 8px", borderRadius:999,
+                                     border: stale ? `1px solid ${theme.border}` : "none",
+                                     background: stale ? theme.surface : "#2563eb",
+                                     color: stale ? theme.text : "#fff", cursor:"pointer",
+                                     whiteSpace:"nowrap" }}>
+                            {stale ? "Run it again" : "Open & fill ↗"}
+                          </button>
+                        );
+                      })()}
                       {job.status === "submitted" && (
                         <span title={job.submitEvidence || ""}
                           style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,

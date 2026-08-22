@@ -7,6 +7,7 @@ import { autoApply } from "../services/applyAutomation.js";
 import {
   buildGatePacket, mintPacketToken, verifyPacketToken, hashToken, originOf,
   DEFAULT_TOKEN_TTL_MS,
+  handoffKind, shouldBuildPacket, packetFreshness, PACKET_STALE_MS, HANDOFF_STATUSES,
 } from "../services/applyGatePacket.js";
 import {
   recordFormSchema, formSchemaSummary, hostOf,
@@ -333,10 +334,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   // meaning "no outstanding token" until /token is called.
   const GATE_PACKET_NO_TOKEN = () => `unminted:${crypto.randomUUID()}`;
 
-  function createGatePacket({ runId, runJobId, userId, jobId, result, autofillPayload, resumeArtifactId }) {
-    // jobUrl is where the run STARTED; a gated portal usually redirects to a sign-in on the way, and
-    // the URL the gate was actually observed at is where the human has to go.
-    const applyUrl = result.gate?.applyUrl || result.gate?.startedFrom || null;
+  function createGatePacket({ runId, runJobId, userId, jobId, result, autofillPayload, resumeArtifactId,
+                             reasonCode, jobUrl }) {
+    // Where the human has to go, most-specific first:
+    //   gate.applyUrl   the URL a gate was observed at — a gated portal redirects to a sign-in on
+    //                   the way, so this is not what the run was queued with.
+    //   landedUrl       AB1: the URL a HELD form was actually on. A held review had neither of the
+    //                   two above, which is precisely why it never got a packet and so had no route
+    //                   to submission.
+    //   jobUrl          the posting's own apply link, as a floor.
+    const applyUrl = result.gate?.applyUrl || result.landedUrl || result.gate?.startedFrom || jobUrl || null;
     let packet;
     try {
       packet = buildGatePacket({
@@ -345,7 +352,11 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         applyUrl,
         jobId, runId, runJobId,
         resumeArtifactId,
-        gateReason: result.reasonCode || "login_required",
+        // The row's OWN reason, not a default of "login_required": the reason is what tells the
+        // panel whether this packet amortises across a portal or belongs to one application, and
+        // mislabelling a held review as a login wall would put it in the wrong group and promise
+        // that a sign-in clears it.
+        gateReason: reasonCode || result.reasonCode || "login_required",
       });
     } catch (e) {
       // An unparseable apply URL is the one case buildGatePacket refuses, because a packet with no
@@ -434,6 +445,38 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       const jobUrl = job.apply_url || job.url;
       if (!jobUrl) { setJobStatus("failed", "no_job_url", "Job has no apply URL"); return; }
 
+      /**
+       * Park a handoff for a hold that RETURNS EARLY, before the browser ever runs (AB1).
+       *
+       * Six holds below never reach the main terminal path: the provider is out of v1 scope, the
+       * kill switch is on, the daily cap is spent, the resume scored under the floor, generation
+       * failed. Every one of them is a held_review whose intended route is the human — and every one
+       * of them used to leave the candidate a row with nothing on it but a reason, because the
+       * packet was built only at the end of a browser run they never got.
+       *
+       * A profile-only packet is exactly the case buildGatePacket was designed for: no form was
+       * reached, so it resolves the canonical question set against the profile and reports what it
+       * could not answer, rather than inventing provenance. That is the same thing a login wall
+       * produces, and it is enough to fill a name, an address and eligibility answers in the
+       * candidate's own browser.
+       *
+       * Never allowed to change the outcome: the hold has already been written, and a packet failure
+       * is a degraded handoff rather than a lost application.
+       */
+      const parkEarlyHandoff = (reasonCode) => {
+        try {
+          db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(userId);
+          const p = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(userId);
+          createGatePacket({
+            runId, runJobId, userId, jobId,
+            result: {}, autofillPayload: buildAutofillPayload(p, "APPLY"),
+            resumeArtifactId: usedArtifactId, reasonCode, jobUrl,
+          });
+        } catch (e) {
+          console.warn("[applyRoutes] early handoff packet failed:", e.message);
+        }
+      };
+
       // v1 provider scope: only greenhouse/lever/ashby get full-auto; others fall to held_review.
       // Re-checked per job, not just at admission: a run can cross the daily cap mid-flight, and
       // the kill switch can be flipped while a run is in progress. Both HOLD the job with a
@@ -443,6 +486,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           "Full-auto submission is disabled; holding for manual review");
         setJobStatus("held_review", "full_auto_disabled", "Automatic submission is currently disabled");
         db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+        parkEarlyHandoff("full_auto_disabled");
         return;
       }
       if (mode === "auto") {
@@ -452,6 +496,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
             `Daily cap reached: ${usedToday} of ${APPLY_DAILY_CAP} in the last 24h`, { submittedLast24h: usedToday, limit: APPLY_DAILY_CAP });
           setJobStatus("held_review", "daily_cap_reached", `Daily application cap (${APPLY_DAILY_CAP}) reached`);
           db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+          parkEarlyHandoff("daily_cap_reached");
           return;
         }
       }
@@ -465,6 +510,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           setJobStatus("held_review", "provider_review_only",
             `Provider ${detectedProvider || "unknown"} not supported for full-auto in v1`);
           db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+          parkEarlyHandoff("provider_review_only");
           return;
         }
       }
@@ -490,6 +536,9 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           logEvent(runId, runJobId, userId, jobId, "ats_review", `ATS score ${atsScore} below threshold`, { atsScore });
           db.prepare(`UPDATE apply_run_jobs SET status='held_review', reason_code='ats_below_threshold', finished_at=unixepoch() WHERE id=?`).run(runJobId);
           db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+          // Held on the score before the browser ran. The candidate may well decide to send it
+          // anyway, so they get a handoff rather than a dead row.
+          parkEarlyHandoff("ats_below_threshold");
           return;
         }
         // Cover letter generation runs in parallel with PDF conversion
@@ -603,6 +652,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
             columnsWritten: semiAudit.written,
           });
         db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
+        // The manual-review branch returns here, so it never reached the packet built at the end of
+        // the main path — the one hold most obviously meant to be finished by a human was the one
+        // with no route to finishing it. Unlike the early holds above this DID reach the form, so it
+        // hands off the real resolved answers and the URL the form was actually on, not the
+        // canonical profile set.
+        if (shouldBuildPacket({ status: "held_review", reasonCode: "manual_review" })) {
+          createGatePacket({
+            runId, runJobId, userId, jobId, result, autofillPayload,
+            resumeArtifactId: usedArtifactId, reasonCode: "manual_review", jobUrl,
+          });
+        }
         return;
 
       } else {
@@ -755,12 +815,23 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           ...(audit.error ? { persistError: audit.error } : {}),
         });
 
-      // Gated portal: park the prepared packet for the handoff. After the audit on purpose — the
-      // audit row is the record of the attempt and must not depend on the packet succeeding.
-      if (finalStatus === "held_gate") {
+      // Park the prepared packet for the handoff. After the audit on purpose — the audit row is the
+      // record of the attempt and must not depend on the packet succeeding.
+      //
+      // AB1: this used to read `finalStatus === "held_gate"`, and that one condition is why the
+      // pipeline could not complete. A held review ended here with a screenshot and nothing else:
+      // the filled DOM lives in a Puppeteer context that has already closed, so "Filled form ↗" was
+      // a static picture and the apply URL beside it opened a brand-new empty application. There was
+      // no route from held to submitted at all — the candidate had to redo by hand everything the
+      // system had already done.
+      //
+      // The gated handoff is exactly the mechanism for this, so held reviews are routed through it
+      // rather than given one of their own. shouldBuildPacket decides which held rows qualify.
+      if (shouldBuildPacket({ status: finalStatus, reasonCode })) {
         createGatePacket({
           runId, runJobId, userId, jobId, result, autofillPayload,
           resumeArtifactId: usedArtifactId,
+          reasonCode, jobUrl,
         });
       }
 
@@ -1377,7 +1448,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // Grouped here rather than in the client because G0 established the unit that matters is the
     // ORIGIN — the grant survives every same-origin navigation and dies when it leaves — and the
     // origin is a stored fact on the packet, not something a UI should be re-deriving from a URL.
-    const portals = [...rows.reduce((m, r) => {
+    //
+    // ONLY GATE-CROSSING PACKETS ARE GROUPED THIS WAY (AB1/AB2). Once held reviews also carry
+    // packets, grouping every packet by origin would report "sign in to boards.greenhouse.io once →
+    // 4 applications ready" over four applications that each need a different answer from the
+    // candidate — a promise the sign-in cannot keep. The rule the panel is built on:
+    //
+    //   group by OBSTACLE    when one action unblocks MANY applications  (a portal sign-in)
+    //   group by APPLICATION when many obstacles block ONE application   (a held review)
+    //
+    // Both cases are real, so both are served: portals below, per-application packets in `packets`.
+    const portals = [...rows.filter(r => handoffKind(r.gate_reason) === "gate").reduce((m, r) => {
       const g = m.get(r.expected_origin) || {
         origin: r.expected_origin,
         host: (() => { try { return new URL(r.expected_origin).host; } catch { return r.expected_origin; } })(),
@@ -1398,6 +1479,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       portals,
       packets: rows.map(r => {
         const body = parseJson(r.answers_json, {});
+        const createdAt = toMs(r.created_at);
+        const { ageMs, stale } = packetFreshness(createdAt);
         return {
           packetId:       r.id,
           jobId:          r.job_id,
@@ -1408,7 +1491,20 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           applyUrl:       r.apply_url,
           expectedOrigin: r.expected_origin,
           gateReason:     r.gate_reason,
-          createdAt:      toMs(r.created_at),
+          createdAt,
+          // Whether crossing this releases a batch or finishes one application. The panel groups on
+          // it, so it is stated by the server rather than re-derived from the reason string twice.
+          kind:           handoffKind(r.gate_reason),
+          // AB1 requirement 5. A packet is a snapshot of a decision and the world moves; an old one
+          // must SAY it is old rather than quietly filling three-day-old answers into a live form.
+          ageMs,
+          stale,
+          staleAfterMs:   PACKET_STALE_MS,
+          // AB1 requirement 6. The LEFT JOIN on scraped_jobs misses when the 7-day cleanup has
+          // removed the posting, which is what produced rows reading "4369183334 (posting no longer
+          // on the board)". A held review for a posting that no longer exists cannot be resumed at
+          // all — there is nothing to open — so it is its OWN state, not a row with a broken link.
+          postingGone:    r.title == null && r.company == null,
           // COUNTS ONLY on the list. The values are behind the token exchange, so opening the queue
           // does not spray a home address across every row of a list response.
           answerCount:      Array.isArray(body.answers) ? body.answers.length : 0,
@@ -1439,6 +1535,29 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       return res.status(409).json({
         error: "packet_consumed",
         message: "This handoff was already completed. Re-queue the job to prepare a new one.",
+      });
+    }
+
+    // STALE PACKETS ARE REFUSED HERE, before a token exists (AB1 requirement 5).
+    //
+    // Refused at the MINT rather than filtered out of the list on purpose: a packet that has gone
+    // off must be able to say so. Dropping it from the list would make it vanish, which is the
+    // "silently fill nothing" failure the requirement names — the candidate would click Open, watch
+    // an empty form, and have no way to learn that the answers had expired. A 410 with a sentence
+    // and a re-run is the honest version.
+    const { ageMs, stale } = packetFreshness(toMs(row.created_at));
+    if (stale) {
+      const days = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+      logEvent(row.run_id, row.run_job_id, req.user.id, row.job_id, "gate_packet_stale",
+        "Handoff refused: the prepared answers are too old to fill", { packetId, ageMs });
+      return res.status(410).json({
+        error: "packet_stale",
+        message: `This application was prepared ${days} day${days === 1 ? "" : "s"} ago and the posting may have changed. Run it again to prepare fresh answers.`,
+        ageMs,
+        staleAfterMs: PACKET_STALE_MS,
+        // What clears it. The panel turns this into a button rather than leaving the user stuck.
+        remedy: "rerun",
+        jobId: row.job_id,
       });
     }
 
@@ -1579,8 +1698,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
   /** Whether this account has turned capture on. Read by the extension before it captures. */
   app.get("/api/apply/form-schema/consent", requireAuth, (req, res) => {
-    const row = db.prepare("SELECT form_schema_capture FROM users WHERE id=?").get(req.user.id);
-    res.json({ enabled: row?.form_schema_capture === 1 });
+    try {
+      const row = db.prepare("SELECT form_schema_capture FROM users WHERE id=?").get(req.user.id);
+      res.json({ enabled: row?.form_schema_capture === 1 });
+    } catch {
+      // Same posture as the POST below, which has always guarded this: an un-migrated deployment has
+      // no column. Unguarded, this threw a 500 on EVERY handoff — the extension asks about consent
+      // on its way through, so one missing migration turned a working fill into a server error in
+      // the log for every single application. Not consenting is the safe answer, and capture is
+      // opt-in and default off anyway.
+      res.json({ enabled: false });
+    }
   });
 
   app.post("/api/apply/form-schema/consent", requireAuth, (req, res) => {
@@ -1686,8 +1814,11 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         message: "This application was already opened and reviewed. Finish it in the tab you started.",
       });
     }
-    if (rj && rj.status !== "held_gate") {
-      return res.status(409).json({ error: "not_held", message: `This job is ${rj.status}, not waiting at a gate.` });
+    // Both handoff statuses, not just held_gate: once a held review carries a packet, reopening one
+    // after an abandoned session is the same operation. Keying on held_gate alone would have made
+    // every held review permanently unresumable the moment its first session was abandoned.
+    if (rj && !HANDOFF_STATUSES.has(rj.status)) {
+      return res.status(409).json({ error: "not_held", message: `This job is ${rj.status}, not waiting for you.` });
     }
 
     const ins = db.prepare(`

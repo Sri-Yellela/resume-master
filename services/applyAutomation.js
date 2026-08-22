@@ -1410,6 +1410,17 @@ export async function detectGate(page) {
   return null;
 }
 
+// ── landedUrl: WHERE THE FORM ACTUALLY WAS ────────────────────────────────────────────────────
+// Every terminal return above/below carries `landedUrl: page.url()`, read while the page is still
+// open. A gate hold already recorded this as `gate.applyUrl`; the HELD returns did not, and that is
+// what made a held review unresumable — routes/apply.js could only build a handoff packet for a
+// result that carried a URL, so only gates got one.
+//
+// It is not the same value as the job's apply_url. A posting's link is frequently a redirector, and
+// a multi-step ATS moves the URL as you advance. The packet's expected_origin is target-matched
+// against the tab the candidate opens before ANY answer is released, so it has to be the origin the
+// browser actually reached, not the one we set off towards. Using apply_url here would make the
+// extension correctly refuse to fill a form it had prepared.
 /**
  * The result of meeting a gate. Shared by the pre-fill check and the post-fill classification so the
  * two cannot drift into producing different shapes for the same outcome.
@@ -1945,6 +1956,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         readiness,
         platform:         detected,
         pageTitle,
+        landedUrl:        page.url(),
         screenshotBase64: ss.base64,
         screenshotPath:   ss.path,
       };
@@ -2015,6 +2027,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         policyEscalation: { step: escalation.step, reason: escalation.reason },
         platform:         detected,
         pageTitle:        pageTitleE,
+        landedUrl:        page.url(),
         screenshotBase64: ssE.base64,
         screenshotPath:   ssE.path,
       };
@@ -2033,6 +2046,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         fieldsFilled:     totalFilled,
         platform:         detected,
         pageTitle,
+        landedUrl:        page.url(),
         screenshotBase64: ss.base64,
         screenshotPath:   ss.path,
       };
@@ -2073,6 +2087,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         fieldsFilled:     totalFilled,
         platform:         detected,
         pageTitle,
+        landedUrl:        page.url(),
         screenshotBase64: ss.base64,
         screenshotPath:   ss.path,
       };
@@ -2117,6 +2132,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
           answers:          resolvedAnswers,
           platform:         detected,
           pageTitle:        pageTitle2,
+          landedUrl:        page.url(),
           screenshotBase64: ss2.base64,
           screenshotPath:   ss2.path,
         };
@@ -2152,6 +2168,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
           answers:          resolvedAnswers,
           platform:         detected,
           pageTitle:        pageTitle3,
+          landedUrl:        page.url(),
           screenshotBase64: ss3.base64,
           screenshotPath:   ss3.path,
         };
@@ -2178,6 +2195,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
             answers:      resolvedAnswers,
             platform:     detected,
             pageTitle:    pageTitleD,
+            landedUrl:    page.url(),
             screenshotBase64: ssD.base64,
             screenshotPath:   ssD.path,
           };
@@ -2203,6 +2221,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
           })),
           platform:     detected,
           pageTitle:    pageTitleP,
+          landedUrl:    page.url(),
           screenshotBase64: ssP.base64,
           screenshotPath:   ssP.path,
         };
@@ -2354,6 +2373,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       submitEvidence,
       ...(submitReasonCode ? { reasonCode: submitReasonCode } : {}),
       pageTitle,
+      landedUrl:        page.url(),
       screenshotBase64: ss.base64,
       screenshotPath:   ss.path,
     };

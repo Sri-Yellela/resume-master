@@ -203,6 +203,97 @@ export function originOf(url) {
   try { return new URL(String(url)).origin; } catch { return null; }
 }
 
+// ── What a packet is FOR ─────────────────────────────────────────────────────────────────────
+//
+// A packet was built for one situation — a login wall or a CAPTCHA — and the whole handoff was
+// shaped around it: a prepared answer set, a short-lived token, an activeTab grant, a provenance
+// overlay, and a target match before anything is released. A HELD REVIEW is the same situation. A
+// form needs a human, in the human's own browser. It was simply never routed here, so a held
+// application had no route to submission at all: the filled DOM lives in a Puppeteer context that
+// has already closed, and only the screenshot survived it.
+//
+// The two kinds differ in ONE way, and it is a presentation fact rather than a security one:
+//
+//   GATE CROSSING   one action (a sign-in) unblocks EVERY application queued behind that origin,
+//                   so these amortise and are grouped by PORTAL.
+//   HELD REVIEW     the obstacle belongs to one application — a question only the candidate can
+//                   answer, a form we would not complete on a guess — so it groups by APPLICATION.
+//
+// Grouping the second kind by portal would report "sign in to boards.greenhouse.io once → 4
+// applications ready" over four applications that need four different answers, which is a promise
+// the sign-in cannot keep.
+
+/** Reasons where crossing the obstacle ONCE releases every application on that origin. */
+export const GATE_CROSSING_REASONS = Object.freeze(new Set(["login_required", "captcha_required"]));
+
+/**
+ * Held terminal reasons that are RESUMABLE: the form was reached, answers were resolved, and a
+ * human standing on the page can finish it. Each gets a packet exactly as a gate hold does.
+ *
+ * `awaiting_approval` is deliberately ABSENT. That application is complete and the decision is a
+ * click in this product, not a form in someone else's browser — the approval flow submits it
+ * server-side, and handing it off would offer a second, divergent copy of an application already
+ * queued to send.
+ */
+export const RESUMABLE_HELD_REASONS = Object.freeze(new Set([
+  "manual_review",                  // the form asked something only the candidate can answer
+  "low_confidence_answers",         // we had a guess and would not send a guess
+  "incomplete_form",                // required fields we would not fill
+  "answers_changed_since_approval", // the form moved after approval; the candidate re-reads it
+  "no_submit_button",               // filled, and nothing we could find would send it
+  "submit_unverified",              // submit was clicked and the page never confirmed
+  "ats_below_threshold",            // held on the score; the candidate may send it anyway
+  "resume_unavailable",             // nothing to attach — resumable once that is fixed
+  "full_auto_disabled",             // policy held it; the human is the intended route
+  "provider_review_only",           // this provider is never submitted unattended
+  "daily_cap_reached",              // the cap is ours, not the employer's
+]));
+
+/**
+ * Statuses whose terminal rows are handed off. `held_gate` is the original G1 case; `held_review` is
+ * AB1's. Both mean "a form needs a human", which is the only precondition the handoff has.
+ */
+export const HANDOFF_STATUSES = Object.freeze(new Set(["held_gate", "held_review"]));
+
+/** Which kind of handoff a stored packet is, from its reason alone. */
+export function handoffKind(gateReason) {
+  return GATE_CROSSING_REASONS.has(String(gateReason)) ? "gate" : "review";
+}
+
+/**
+ * Should a terminal run-job get a packet?
+ *
+ * Gates always do. A held review does when its reason is one a human can actually finish — holding
+ * out `awaiting_approval` (which has its own surface) and anything we have not described, because a
+ * packet nobody can act on is a row in a queue that never empties.
+ */
+export function shouldBuildPacket({ status, reasonCode }) {
+  if (!HANDOFF_STATUSES.has(String(status))) return false;
+  if (String(status) === "held_gate") return true;
+  return RESUMABLE_HELD_REASONS.has(String(reasonCode));
+}
+
+// ── Staleness ────────────────────────────────────────────────────────────────────────────────
+//
+// AB1 requirement 5. A packet is a snapshot of a decision, and the world moves: a posting closes, a
+// form is re-versioned, salary expectations change. Filling a three-day-old answer set into a form
+// silently is worse than refusing, because the candidate cannot tell it happened.
+//
+// This is NOT the token TTL, and the two must not be confused. The token's ten minutes protect a
+// home address in flight between mint and release. This protects the ANSWERS' relevance, and is
+// measured in days because that is the timescale on which a prepared application goes off.
+export const PACKET_STALE_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * How old a packet is and whether it may still be filled.
+ * @param {number} createdAtMs  epoch ms
+ * @returns {{ ageMs: number, stale: boolean }}
+ */
+export function packetFreshness(createdAtMs, now = Date.now()) {
+  const ageMs = Math.max(0, now - Number(createdAtMs || 0));
+  return { ageMs, stale: ageMs > PACKET_STALE_MS };
+}
+
 // ── Token ────────────────────────────────────────────────────────────────────────────────────
 // HMAC over a compact payload, not a random opaque id, so the binding to (user, job, packet) travels
 // WITH the token and is checked before the database is touched. A random id would have to be looked

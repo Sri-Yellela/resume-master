@@ -308,19 +308,32 @@ export async function clearBatchForTab(tabId) {
   await chrome.storage.session.remove(batchKey(tabId));
 }
 
-/** What else is waiting on this portal, newest first, excluding one already in hand. */
+/**
+ * What else is waiting at this origin, newest first, excluding one already in hand.
+ *
+ * "READY" HAS TO MEAN READY. A stale packet cannot be released — the server refuses to mint for it —
+ * so counting one here would offer the candidate "3 more ready" and then refuse the third. Now that
+ * held reviews carry packets too, several packets routinely share one origin and that overcount
+ * stopped being hypothetical.
+ *
+ * `gateCrossing` reports whether any of them is a sign-in or CAPTCHA. It exists because the offer
+ * reads differently for the two kinds: crossing a gate once genuinely releases the whole batch, so
+ * "you are already signed in" is the point. For held reviews the batch is just proximity — you are
+ * on the site, so the next one is cheap — and claiming a sign-in cleared them would be untrue.
+ */
 export async function portalQueueFor(serverUrl, origin, excludePacketId = null) {
   try {
     const res = await api(serverUrl, '/api/apply/gate-packets');
-    if (!res.ok) return { remaining: 0, next: null, packets: [] };
+    if (!res.ok) return { remaining: 0, next: null, packets: [], gateCrossing: false };
     const body = await res.json();
     const mine = (body.packets || [])
-      .filter(p => p.expectedOrigin === origin && p.packetId !== excludePacketId)
+      .filter(p => p.expectedOrigin === origin && p.packetId !== excludePacketId && !p.stale)
       .sort((a, b) => b.createdAt - a.createdAt);
     const portal = (body.portals || []).find(g => g.origin === origin) || null;
     return {
       remaining: mine.length,
       host: portal?.host || origin,
+      gateCrossing: mine.some(p => p.kind === 'gate'),
       next: mine[0] ? {
         packetId: mine[0].packetId, applyUrl: mine[0].applyUrl,
         title: mine[0].title, company: mine[0].company,
@@ -328,7 +341,7 @@ export async function portalQueueFor(serverUrl, origin, excludePacketId = null) 
       packets: mine,
     };
   } catch {
-    return { remaining: 0, next: null, packets: [] };
+    return { remaining: 0, next: null, packets: [], gateCrossing: false };
   }
 }
 
@@ -381,16 +394,33 @@ export async function runGatedHandoff({ serverUrl, tab }) {
 
   // TARGET MATCH, first half. The server nominated an origin for each packet; this page has to be one
   // of them. Nothing has been fetched but counts at this point.
-  const candidates = (list.packets || []).filter(p => p.expectedOrigin === origin);
-  if (candidates.length === 0) {
+  const forOrigin = (list.packets || []).filter(p => p.expectedOrigin === origin);
+  if (forOrigin.length === 0) {
     return {
       ok: false, reason: 'origin_mismatch',
       message: `Nothing is prepared for ${origin}. Open the application from your Resume Master queue.`,
     };
   }
-  // Newest first. G5 turns several packets on one portal into a batch; here the most recent wins and
-  // the count is reported so the behaviour is visible rather than arbitrary.
-  const chosen = candidates.sort((a, b) => b.createdAt - a.createdAt)[0];
+
+  // A STALE PACKET CANNOT BE RELEASED, so it must not be chosen.
+  //
+  // The server refuses to mint one (410 packet_stale), which is correct — three-day-old answers must
+  // not be filled into a form that may have moved on. But this list is sorted by recency, and once
+  // held reviews carry packets too, MANY packets share one origin: an employer with several roles,
+  // or the same role attempted twice. Picking the newest without checking would fail an entire
+  // handoff on an expired packet while a perfectly usable one sat directly behind it.
+  const fresh = forOrigin.filter(p => !p.stale);
+  if (fresh.length === 0) {
+    return {
+      ok: false, reason: 'packet_stale',
+      message: 'The answers prepared for this page have expired. Run it again in Resume Master to prepare fresh ones.',
+    };
+  }
+  // Newest first, but a packet whose POSTING is gone goes last. It is deprioritised rather than
+  // excluded: our record of the listing being cleaned up says nothing about the form the candidate
+  // is actually standing on, so it stays usable — just never in preference to a live one.
+  const chosen = fresh.sort((a, b) =>
+    (a.postingGone ? 1 : 0) - (b.postingGone ? 1 : 0) || b.createdAt - a.createdAt)[0];
 
   // TARGET MATCH, second half: a form has to be here. Read-only, isolated world.
   let shape;

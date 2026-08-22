@@ -254,8 +254,12 @@ export function renderOverlay(bands, meta) {
       <div class="rm-s" style="margin-top:6px">Submit the form yourself when you are happy with it.</div>
       ${meta.portal && meta.portal.remaining > 0 ? `
         <div class="rm-next">
-          <div><b>${meta.portal.remaining}</b> more ready at ${esc(meta.portal.host)} —
-            you are already signed in.</div>
+          <div><b>${meta.portal.remaining}</b> more ready at ${esc(meta.portal.host)}${
+            // The sign-in reassurance belongs to a GATE crossing, where crossing once really did
+            // release the batch. Held reviews also queue up per origin, and telling the candidate a
+            // sign-in cleared them would be a claim about work nobody did.
+            meta.portal.gateCrossing ? ' — you are already signed in.' : ', prepared and waiting.'
+          }</div>
           ${meta.portal.next ? `<div class="rm-s" style="margin-top:2px">Next:
             ${esc(meta.portal.next.title || meta.portal.next.company || 'application')}</div>` : ''}
           <button class="rm-btn" data-role="next" style="margin-top:7px">Submit this one first, then go to the next</button>
