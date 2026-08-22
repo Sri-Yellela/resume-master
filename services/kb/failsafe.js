@@ -101,12 +101,23 @@ function levenshteinSimilarity(a, b) {
   return 1 - levenshteinDistance(a, b) / maxLen;
 }
 
+// A typo is a HIGH character-similarity event. Below this, a character-level score between two
+// phrases that share no word at all is coincidence of length and alphabet, not a garbled
+// articulation of anything: against Stripe's real KB, "Quantum Basket Weaving" scored 0.409 on
+// characters alone (Jaccard 0) against "Growth Marketing" and cleared SUGGEST_FIX_MIN_OVERLAP,
+// so an invented team was reported to a recruiter as "may be an imprecise reference to" a real
+// one. The more units a company has, the more likely some pair collides by chance — which is why
+// this only surfaced once the KB held 271 units for Stripe instead of none.
+const TYPO_MIN_CHAR_SIMILARITY = 0.8;
+
 // Combined similarity: word-set overlap catches phrase-level differences (reordering, a
 // subset/superset of words); character-level similarity catches typo-level differences within
 // otherwise-matching words. A real "garbled articulation" of a KB unit can be either kind, so
-// the claim is compared against each candidate both ways and the higher score wins.
+// the claim is compared against each candidate both ways and the higher score wins — but the
+// character-level signal only counts when it is strong enough to actually mean "typo".
 function similarity(a, b) {
-  return Math.max(jaccardOverlap(a, b), levenshteinSimilarity(a, b));
+  const chars = levenshteinSimilarity(a, b);
+  return Math.max(jaccardOverlap(a, b), chars >= TYPO_MIN_CHAR_SIMILARITY ? chars : 0);
 }
 
 // Stack claims NEVER produce a standalone finding (see the plan's design decision #3) — only
