@@ -1,10 +1,13 @@
 // SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
-// client/src/components/TopBar.jsx — single animated nav (Lucy Brand)
-// position:fixed, converges from full-width bar → centered glassy pill on scroll.
-// Consumes AppScrollContext progress/pinned set by PullToRefresh in JobsPanel.
+// client/src/components/TopBar.jsx — the app's single fixed nav (Lucy Brand)
+//
+// This header said "converges from full-width bar -> centered glassy pill on scroll" for as long as
+// the file existed, and it never did. The convergence read AppScrollContext's `progress`, whose only
+// writer listened on a container that never scrolls, so the value was permanently 0 and the bar was
+// permanently the full-width end of the interpolation. The machinery is removed; the description is
+// corrected to what it always rendered. position:fixed, full width, transparent, no elevation.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "../styles/theme.jsx";
-import { useAppScroll } from "../contexts/AppScrollContext.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { api } from "../lib/api.js";
@@ -21,21 +24,13 @@ import { Z } from "../styles/zLayers.js";
 // and is now moot: there is no crossing, because there is one search surface.
 //
 // ── Parse hex → [r,g,b] ──────────────────────────────────────
-function hexToRgb(hex) {
-  if (!hex || hex.length < 7) return [168, 216, 234];
-  return [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16),
-  ];
-}
 
 // ── Animated logo — "R" persists, "esume Master" collapses ───
 //
 // THE MARK IS WHITE. W6 made it translucent — `rgba(255,255,255,0.06)` behind a
 // `--border-glass` hairline with muted text — on the reasoning that a solid stamp was "the one
 // element on the surface that did not belong to it". That was a regression, not an improvement:
-// the top bar is fully transparent at rest (see pillBg below), so a 6%-white fill on a dark
+// the top bar is fully transparent (see the Geometry note below), so a 6%-white fill on a dark
 // starfield left the mark with almost no edge of its own. It is white again, and matched to
 // components/StampLogo.jsx VERBATIM — same #ffffff fill, same 2.5px #0f0f0f border, same
 // borderRadius 2, same #0f0f0f italic text — because that is the marketing rendering of the same
@@ -48,10 +43,21 @@ function hexToRgb(hex) {
 //
 // NOTHING ELSE ABOUT THIS MARK CHANGES. The rotation, the size, the placement, the collapse
 // animation and its timings are the mark's character and are deliberately untouched.
-function AnimatedLucyLogo({ progress: p }) {
-  const pc = Math.min(Math.max(p, 0), 1);
-  const textMaxW = Math.round((1 - pc) * 130);
-  const textOpacity = Math.max(0, 1 - pc * 1.8);
+// THE COLLAPSE IS GONE, and with it this component's only prop.
+//
+// It took `progress` from AppScrollContext and interpolated "esume Master" to zero width and zero
+// opacity. That progress value was permanently 0 — its only writer is JobsPanel's PullToRefresh
+// onScroll, on a container that never scrolls (the WINDOW is what scrolls) — so the collapse never
+// ran once, in any session, and `textMaxW` was always 130 against a natural width of 93px and
+// `textOpacity` always 1. Removing it changes no pixel; verified by diffing screenshots before and
+// after.
+//
+// Y1 forbade altering the logo and this changes its signature, so it was confirmed with the owner
+// before removal rather than assumed. The reason it is a removal and not a repair: the collapse
+// targets a 400px bar, and Y4 moved the app's primary navigation INTO the bar — the tab row alone
+// measures 498px, plus this mark at ~183px and the avatar. There is no collapsed layout for the
+// contents to collapse into.
+function AnimatedLucyLogo() {
   return (
     <div style={{
       position: "relative", display: "inline-flex", alignItems: "center",
@@ -87,10 +93,6 @@ function AnimatedLucyLogo({ progress: p }) {
           textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
           lineHeight: 1, whiteSpace: "nowrap",
           display: "inline-block",
-          maxWidth: textMaxW + "px",
-          overflow: "hidden",
-          opacity: textOpacity,
-          transition: "max-width 0.075s linear, opacity 0.075s linear",
           verticalAlign: "bottom",
         }}>esume Master</span>
       </div>
@@ -98,13 +100,6 @@ function AnimatedLucyLogo({ progress: p }) {
   );
 }
 
-// ── Dock divider ─────────────────────────────────────────────
-function Divider({ theme }) {
-  return (
-    <div style={{ width: 1, height: 18, background: `${theme.accent}33`,
-                  flexShrink: 0, margin: "0 4px" }}/>
-  );
-}
 
 // ── Notifications ─────────────────────────────────────────────
 //
@@ -432,10 +427,6 @@ export default function TopBar({
   activeTab,
 }) {
   const { theme } = useTheme();
-  const { progress: rawProgress, pinned } = useAppScroll();
-  // pinned (pagination click) holds dock fully collapsed
-  const p = pinned ? 1 : rawProgress;
-  const scrolled = p >= 0.5;
 
   // GONE WITH THE PILL (Y4): `searchSurface` / `boardIsActive` props, `pillIsTheSearchSurface`,
   // `hovered` + `setHovered` + `hoverTimerRef` + handleMouseEnter/handleMouseLeave (a 100ms grace
@@ -443,9 +434,9 @@ export default function TopBar({
   // handlers set it and nothing ever read it), `searchFocused` (read only by the pill's input
   // width), the effect that cleared both on un-scroll, and injectKeyframes' slideDown.
   //
-  // `p` and `scrolled` STAY. They are not pill machinery: `p` is this bar's own collapse geometry
-  // and feeds AnimatedLucyLogo's `progress`, which Y1 forbids altering. See the note at the bottom
-  // of this file about `p` being provably stuck at 0.
+  // `p` and `scrolled` ARE GONE NOW. Y4 kept them, correctly for its own scope: they were not pill
+  // machinery, and removing them meant changing the logo's signature, which Y1 forbade. Y4 reported
+  // them as provably dead instead and recommended this pass. Confirmed with the owner, then removed.
 
   const { setActiveProfileId, deleteProfileCache } = useJobBoard() || {};
 
@@ -512,51 +503,27 @@ export default function TopBar({
     }
   };
 
-  // ── Geometry interpolation ──
-  const [ar, ag, ab] = hexToRgb(theme.accent);
-
-  const pillWidth = Math.round(vw - p * (vw - 400));
-  // The dock spans the full interpolated pill width and is centred on the VIEWPORT.
+  // ── Geometry ──
   //
-  // It was once constrained to the jobs panel's measured rect, broadcast via an
-  // "rm:jobs-panel-zone" CustomEvent. That publisher/consumer pair and its geometry
-  // (dockMaxWidth, the clamp, dockScale) were removed deliberately in Step 7b of the cinematic
-  // redesign — see .cinematic/STATE.md, "TopBar flatten + ScrollDock split". Viewport centring
-  // is the intended end state, not a regression: the board's content column is itself centred,
-  // so the two coincide (measured at vw=1600: search bar spans 340..1260, centre 800 = vw/2).
+  // WAS an interpolation over AppScrollContext's `progress`, which was permanently 0. Every value
+  // below is the p=0 end of that interpolation, i.e. what the bar has always actually rendered:
   //
-  // A `constrainedPillWidth = pillWidth` alias survived that removal and read as though a clamp
-  // were still in force, which is misleading enough that it was filed as a suspected regression
-  // before the history was checked. Removed — pillWidth is used directly below.
+  //     pillWidth      vw - p * (vw - 400)      -> vw            (full-bleed, never a pill)
+  //     radius         p * 9999                 -> 0
+  //     topOffset      p * 10                   -> 0
+  //     blur           12 + p * 8               -> unused; effectiveBlur was `p < 0.02 ? 0 : blur`
+  //     pillBg         gradient over p           -> "transparent" (the p < 0.02 branch)
+  //     borderColor    rgba(accent, p * 0.25)   -> "transparent" (the p < 0.02 branch)
+  //     shadow         elevation over p          -> "none"        (the p <= 0.05 branch)
+  //
+  // hexToRgb(theme.accent) went with them: `ar`/`ag`/`ab` existed only to build the two accent
+  // values above, and the function had no other caller.
+  //
+  // The bar is still centred on the viewport rather than left-anchored, which is why dockCenter and
+  // the translateX(-50%) survive a full-width bar: the board's content column is centred too, so the
+  // two coincide (measured at vw=1600: search bar spans 340..1260, centre 800 = vw/2).
   const dockCenter = vw / 2;
-  const radius     = Math.round(p * 9999);
-  const blur       = Math.round(12 + p * 8);
-  const topOffset  = Math.round(p * 10);
   const padH       = 20;
-
-  // Background: 100% translucent — the bar reads as "nothing is there", only the
-  // logo + utility icons float over the page. The faint glass treatment is kept
-  // ONLY for the collapsed pill state (scrolled), where a subtle surface helps
-  // legibility of the floating controls; at rest (p≈0) it is fully transparent.
-  const a1 = (p * 0.18).toFixed(3);
-  const a2 = (p * 0.08).toFixed(3);
-  const a3 = (p * 0.12).toFixed(3);
-  const pillBg = p < 0.02
-    ? "transparent"
-    : `linear-gradient(135deg, rgba(${ar},${ag},${ab},${a1}) 0%, rgba(${ar},${ag},${ab},${a2}) 40%, rgba(255,255,255,${a3}) 100%), ${theme.surfaceBase}${Math.round(p * 0.55 * 255).toString(16).padStart(2, "0")}`;
-
-  // Border: none at rest (fully translucent) → accent pill border when collapsed
-  const borderColor = p < 0.02
-    ? "transparent"
-    : `rgba(${ar},${ag},${ab},${(p * 0.25).toFixed(3)})`;
-
-  // Backdrop blur only once the pill begins to form; none at rest
-  const effectiveBlur = p < 0.02 ? 0 : blur;
-
-  // Shadow: elevation + glassy inset highlight
-  const shadow = p > 0.05
-    ? `0 ${Math.round(p * 4)}px ${Math.round(p * 24)}px rgba(0,0,0,${(p * 0.10).toFixed(2)}), inset 0 1px 0 rgba(255,255,255,${(p * 0.35).toFixed(2)})`
-    : "none";
 
   // `pill2Bg` was here — the collapsed pill's glass gradient. Removed with the pill (Y4).
 
@@ -572,24 +539,20 @@ export default function TopBar({
         data-app-chrome=""
         style={{
           position: "fixed",
-          top: topOffset,
+          top: 0,
           left: dockCenter,
           transform: "translateX(-50%)",
-          width: pillWidth,
+          width: vw,
           height: 46,
-          borderRadius: radius,
-          background: pillBg,
-          backdropFilter: `blur(${effectiveBlur}px)`,
-          WebkitBackdropFilter: `blur(${effectiveBlur}px)`,
-          border: `1px solid ${borderColor}`,
-          boxShadow: shadow,
+          borderRadius: 0,
+          background: "transparent",
+          border: "1px solid transparent",
+          boxShadow: "none",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           padding: `0 ${padH}px`,
           overflow: "visible",
-          opacity: pillWidth <= 0 ? 0 : 1,
-          pointerEvents: pillWidth <= 0 ? "none" : "auto",
           zIndex: Z.NAV,
           fontFamily: "'DM Sans',system-ui,sans-serif",
         }}>
@@ -597,7 +560,7 @@ export default function TopBar({
             logo | JOBS | AUTO APPLY | JOB PROFILES | DATABASE | RECRUITER */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           {/* Logo — "R" always visible, "esume Master" collapses */}
-          <AnimatedLucyLogo progress={p}/>
+          <AnimatedLucyLogo/>
 
           {/* THE TAB ROW. Moved here from UnifiedSearchBar (Y4), where the app's primary navigation
               was a slot on a control that is only meaningful on the Jobs board.
@@ -635,11 +598,9 @@ export default function TopBar({
 
         {/* Right: utility icons */}
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          {scrolled && <Divider theme={theme}/>}
           {/* The bell and the quick-actions button are gone from the bar (W6). Notifications live
               in the profile menu below; their unread count rides on the avatar so it is still
               visible without opening anything. */}
-          {scrolled && <Divider theme={theme}/>}
           {user && (
             <UserAvatarMenu
               theme={theme} user={user} onLogout={onLogout}

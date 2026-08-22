@@ -1042,7 +1042,7 @@ function detectSearchProfileIntent(query, profiles, activeProfile) {
 // -- Pull-to-refresh -------------------------------------------
 function PullToRefresh({ onRefresh, refreshing, theme, children }) {
   const scrollRef = useRef(null);
-  const { update: updateScroll, scrollToTopRef } = useAppScroll();
+  const { scrollToTopRef } = useAppScroll();
   const [pullY,   setPullY]   = useState(0);
   const [ready,   setReady]   = useState(false);
   const startY = useRef(null);
@@ -1126,7 +1126,6 @@ function PullToRefresh({ onRefresh, refreshing, theme, children }) {
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        onScroll={(e) => updateScroll(e.currentTarget.scrollTop / 90)}
         style={{ flex:1, overflowY:"auto", paddingTop:4, paddingBottom:8 }}>
         {children}
       </div>
@@ -1185,7 +1184,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const { theme } = useTheme();
   const { mode: vpMode, w: vpWidth } = useViewport();
   const navigate = useNavigate();
-  const { pin: pinDock, scrollToTopRef, progress: scrollProgress } = useAppScroll();
+  const { scrollToTopRef } = useAppScroll();
   const isWide     = vpMode === "wide";
   const isMobile   = vpMode === "mobile" || vpMode === "tablet";
   const isPortrait = vpMode === "portrait" || vpMode === "laptop";
@@ -2878,7 +2877,9 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   // -- Pagination --------------------------------------------
   const goPage = async (p) => {
-    pinDock();                       // collapse dock immediately
+    // pinDock() was here. It set AppScrollContext's `pinned`, whose only reader was the top bar's
+    // collapse — which never ran, because the progress it interpolated was permanently 0. With that
+    // reader gone the flag was write-only, so the whole pin/unpin trio went with it.
     scrollToTopRef.current?.();      // scroll job list to top (not window)
     await fetchJobs(p);
   };
@@ -3032,10 +3033,13 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         )}
       </AnimatePresence>
 
-      {/* â"€â"€ Unified toolbar â€" hidden when dock is active (scrollProgress â‰¥ 0.5) â"€â"€ */}
+      {/* Unified toolbar. The `scrollProgress < 0.5` guard that used to wrap this is gone: it
+          hid the toolbar once the top bar collapsed into a pill, and the progress it read was
+          permanently 0 — so the condition was always true and the toolbar was always shown.
+          Rendering it unconditionally is what has always happened. */}
       {/* Row A: tabs | filters | sort | local-search | job count */}
       {/* Row B (wraps): search input | Search | resume upload */}
-      {scrollProgress < 0.5 && <div style={{
+      <div style={{
         background:theme.surface, borderBottom:`1px solid ${theme.border}`,
         padding:"10px 20px", display:"flex", alignItems:"center", gap:8,
         flexShrink:0, flexWrap:"wrap",
@@ -3156,7 +3160,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             startLinkedInImport's NOT_AUTHED branch, which was unreachable past the always-false
             install guard, and its action button called the no-op extension bridge. */}
 
-      </div>}
+      </div>
       {/* Hidden file input â€" always mounted so TopBar resume upload button works even when toolbar is hidden */}
       <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
         onChange={handleFile} style={{ display:"none" }}/>

@@ -84,10 +84,14 @@ test("the profile menu kept everything it already had", () => {
 // Read from `topBarCode`, not `topBar`: the component now carries a comment quoting the very
 // literals under test, and matching a comment instead of code is how a source-string test passes
 // while the code says something else.
+// The end landmark was `function Divider`, which is gone: both dividers rendered behind
+// `{scrolled && ...}`, and `scrolled` came from a scroll progress that was permanently 0, so neither
+// ever appeared. The next function is the boundary now — and it has to BE a function, because these
+// tests read comment-stripped source, so a `// ── section` header is not there to find.
 const logoOf = (src) => {
   const start = src.indexOf("function AnimatedLucyLogo");
-  const end = src.indexOf("function Divider", start);
-  assert.ok(start >= 0 && end > start, "AnimatedLucyLogo / Divider boundary moved");
+  const end = src.indexOf("function useNotifications", start);
+  assert.ok(start >= 0 && end > start, "AnimatedLucyLogo / useNotifications boundary moved");
   return src.slice(start, end);
 };
 
@@ -132,10 +136,20 @@ test("the logo's own container does not clip it", () => {
   assert.ok(box.length > 40, "the stamp's style object could not be isolated");
   assert.ok(!/overflow/.test(box), "the stamp box clips the mark again");
 
-  // The COLLAPSING SPAN must still clip — that is the one thing that legitimately needs it, and
-  // removing it would let "esume Master" spill out of a zero max-width instead of collapsing.
-  assert.match(logo, /maxWidth: textMaxW \+ "px",\s*\n\s*overflow: "hidden"/,
-    "the collapsing span lost the clip that makes the collapse a collapse");
+  // THE SECOND HALF OF THIS TEST IS RETIRED WITH THE THING IT GUARDED. It required the collapsing
+  // span to keep `overflow: hidden` next to its interpolated `maxWidth`, because a zero max-width
+  // without a clip would let "esume Master" spill instead of collapsing. There is no collapse now:
+  // it was driven by AppScrollContext's `progress`, which was permanently 0, so the animation never
+  // ran in any session and `textMaxW` was always 130 against a natural width of 93px. The prop, the
+  // two interpolated values and the transition are gone (confirmed with the owner, since Y1 forbade
+  // altering the logo).
+  //
+  // Asserted as an ABSENCE rather than deleted, so the machinery cannot quietly return without the
+  // writer that would make it mean something.
+  assert.ok(!/textMaxW|textOpacity/.test(logo),
+    "the collapse interpolation is back — it needs a live scroll progress first, or it is dead again");
+  assert.ok(!/transition: "max-width/.test(logo), "the collapse transition is back");
+  assert.match(logo, /esume Master/, "the wordmark itself must still render, in full");
 });
 
 test("the app mark and the marketing mark are the same mark", () => {

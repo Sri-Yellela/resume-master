@@ -49,7 +49,14 @@ test("top-right account controls are consolidated into avatar menu", () => {
   assert.match(topBar, /onActivateProfile/);
   assert.match(profileSelector, /\+ Add Profile/);
   assert.match(topBar, /Accent Color/);
-  assert.match(topBar, /Background/);
+  // `assert.match(topBar, /Background/)` WAS HERE, and it never verified anything. There is no
+  // Background control in TopBar and there never was — `git log -S` finds no quoted "Background" in
+  // this file's history, and styles/theme.jsx exports `THEMES = { dark: cinematicBase }`, one theme,
+  // so there is nothing for such a control to switch. The assertion was satisfied by the word
+  // appearing in a COMMENT about the bar's own translucency ("Background: 100% translucent"), and it
+  // failed the moment that comment was deleted with the collapse it described. Removed rather than
+  // repointed: a menu item that does not exist cannot be asserted, and inventing one is a product
+  // decision, not a test fix.
   assert.match(topBar, /Integrations/);
   assert.match(topBar, /onTabChange\?\.\("profile"\)/);
   assert.doesNotMatch(topBar, /function SettingsGear|<SettingsGear|function ProfileSwitcher|<ProfileSwitcher/);
