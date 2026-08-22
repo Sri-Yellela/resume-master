@@ -274,6 +274,43 @@ export const VISITED = {
  * Every dimension, by name. The reconciliation test iterates THIS — so a dimension added below
  * without being registered here is itself caught, rather than being silently unguarded.
  */
+// ── Profile seniority — domain_profiles.seniority ──────────────────────────────────────────────
+//
+// THE FIFTH LATENT DIVERGENCE, and the one that is NOT a board filter. It is registered here anyway,
+// because rule 2 above says no literal option value lives anywhere else, and this vocabulary had
+// three separate copies: a dead <select> in ProfilePanel (now deleted), DomainProfileWizard's live
+// SENIORITY_OPTIONS, and the enum in services/classifier.js's LLM prompt.
+//
+// IT IS DELIBERATELY NOT EXPERIENCE_LEVELS, and that is the finding rather than the bug. The two
+// look like the same dimension and are not:
+//
+//   EXPERIENCE_LEVELS   scraped_jobs.experience_level   six values, consumed by SQL — a wrong value
+//                                                       matches zero rows and empties a board.
+//   PROFILE_SENIORITY   domain_profiles.seniority       four values, consumed by PROSE. Its only
+//                                                       reader is server.js's resume-generation
+//                                                       prompt ("**Target seniority:** ${...}") and
+//                                                       it is written by services/classifier.js from
+//                                                       an LLM that is asked for these four names.
+//
+// So `junior` is not a typo for `entry`. Nothing joins these two columns, no query compares them,
+// and normalising this one onto the board's six would silently change the text an LLM reads when it
+// writes someone's resume — a product change, not a de-duplication. Unifying them would mean
+// migrating the column, re-wording the classifier prompt, and deciding what "intern" and "lead" mean
+// to a resume. Named and single-sourced here instead; that is what stops the copies from drifting,
+// which is all this file ever claimed to do.
+export const PROFILE_SENIORITY = {
+  param: null,                       // not a board filter: no query param, nothing validates it
+  column: "domain_profiles.seniority",
+  multi: false,
+  options: [
+    { value: "junior",    label: "Entry Level",          sub: "0–2 years"  },
+    { value: "mid",       label: "Mid Level",            sub: "3–5 years"  },
+    { value: "senior",    label: "Senior",               sub: "6–10 years" },
+    { value: "executive", label: "Executive / Director",  sub: "10+ years"  },
+  ],
+  dbOnly: [],
+};
+
 export const FILTER_DIMENSIONS = {
   experienceLevel: EXPERIENCE_LEVELS,
   domain:          DOMAINS,

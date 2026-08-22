@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { mergeUniqueSignalLabels } from "../../../shared/profileSignals.js";
+import { PROFILE_SENIORITY } from "../../../shared/jobFilterOptions.js";
 
 const STEPS = ["Domain", "Level", "Titles", "Keywords", "Save"];
 
@@ -272,12 +273,14 @@ export default function DomainProfileWizard({
     return true;
   };
 
-  const SENIORITY_OPTIONS = [
-    { id: "junior",    label: "Entry Level",       sub: "0–2 years" },
-    { id: "mid",       label: "Mid Level",          sub: "3–5 years" },
-    { id: "senior",    label: "Senior",             sub: "6–10 years" },
-    { id: "executive", label: "Executive / Director", sub: "10+ years" },
-  ];
+  // Derived from shared/jobFilterOptions.js's PROFILE_SENIORITY — the same four values, from the
+  // one place that now defines them. This array WAS the definition, and there were two other copies
+  // of it: a dead <select> in ProfilePanel (deleted) and the enum in services/classifier.js's LLM
+  // prompt, which writes this column. `id` is kept as the local field name so nothing downstream in
+  // this wizard changes.
+  const SENIORITY_OPTIONS = PROFILE_SENIORITY.options.map(o => ({
+    id: o.value, label: o.label, sub: o.sub,
+  }));
 
   return (
     /* OVERLAY — covers viewport, centres modal, never clips children */
@@ -652,9 +655,10 @@ export default function DomainProfileWizard({
                 )}
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
                   <strong style={{ color: theme.text }}>Seniority:</strong>{" "}
-                  {["junior","mid","senior","executive"].includes(seniority)
-                    ? { junior: "Entry Level", mid: "Mid Level", senior: "Senior", executive: "Executive / Director" }[seniority]
-                    : seniority}
+                  {/* The SECOND copy of the vocabulary in this file: a membership list and a
+                      label map, both literal. Derived from the registry now, so a value added
+                      there cannot fall through to showing the raw column value here. */}
+                  {SENIORITY_OPTIONS.find(o => o.id === seniority)?.label ?? seniority}
                 </div>
                 <div style={{ fontSize: 12, color: theme.textMuted }}>
                   <strong style={{ color: theme.text }}>Titles:</strong>{" "}

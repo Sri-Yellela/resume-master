@@ -924,15 +924,15 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
                   <input className="rm-input" value={profileForm.profile_name}
                     onChange={e => setProfileForm(f => ({ ...f, profile_name: e.target.value }))}/>
                 </PRow>
-                <PRow label="Seniority" theme={theme}>
-                  <select style={selStyle} value={profileForm.seniority}
-                    onChange={e => setProfileForm(f => ({ ...f, seniority: e.target.value }))}>
-                    <option value="junior">Entry Level</option>
-                    <option value="mid">Mid Level</option>
-                    <option value="senior">Senior</option>
-                    <option value="executive">Executive / Director</option>
-                  </select>
-                </PRow>
+                {/* THE SENIORITY SELECT IS DELETED, not repointed at the registry.
+                    It was four hardcoded <option> values inside a `{false && ...}` block — dead
+                    code carrying its own copy of a vocabulary, which is exactly how the four
+                    earlier divergences hid. Deriving it from shared/jobFilterOptions.js's
+                    PROFILE_SENIORITY was the alternative and is ceremony: this form does not
+                    render, and a control nobody can reach does not need correct options, it needs
+                    to not exist. The vocabulary is single-sourced where it is LIVE — see
+                    DomainProfileWizard, which reads PROFILE_SENIORITY now. If this editor is ever
+                    revived, it derives from there too. */}
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
                 <PRow label="Role Family" theme={theme}>
