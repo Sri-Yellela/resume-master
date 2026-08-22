@@ -10,6 +10,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import Database from "better-sqlite3";
 import { selectRetained } from "../scripts/backup.js";
 
 const MB = 1024 * 1024;
@@ -108,6 +111,79 @@ test("restoreBackup records the pre-restore copy in the manifest", () => {
   const at = BACKUP_SRC.indexOf('label: "pre-restore"');
   assert.ok(BACKUP_SRC.slice(at).includes("saveManifest(keep)"),
     "and the manifest must actually be written after adding it");
+});
+
+// ── The WAL, which is why a file copy was not a backup ───────────────────────────────────────
+
+test("copying only the main file loses committed data; a TRUNCATE checkpoint recovers it", () => {
+  // THE PROPERTY, demonstrated on a throwaway database rather than asserted about ours. Measured on
+  // the real one first: two backups nine hours apart and the live DB all shared one md5, because the
+  // main file had not changed while a 41 MB WAL accumulated. A backup taken then read
+  // periods_with_filings = 18 against the live 21 — three hours behind, and it restored cleanly.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "walcheck-"));
+  const dbPath = path.join(dir, "t.db");
+  // Windows holds a lock for every OPEN sqlite handle, so rmSync fails with EPERM unless all of
+  // them are closed first — including the read-only ones, and including the case where an assertion
+  // threw before the close. Hence a list closed in `finally` rather than closes inline.
+  const open = [];
+  const openDb = (p, opts) => { const d = new Database(p, opts); open.push(d); return d; };
+  try {
+    const db = openDb(dbPath);
+    db.pragma("journal_mode = WAL");
+    db.exec("CREATE TABLE t (v INTEGER)");
+    db.prepare("INSERT INTO t (v) VALUES (1)").run();
+    db.pragma("wal_checkpoint(TRUNCATE)");           // baseline: row 1 is in the main file
+
+    // A committed write that stays in the WAL, exactly like the server's.
+    db.prepare("INSERT INTO t (v) VALUES (2)").run();
+    assert.ok(fs.existsSync(`${dbPath}-wal`) && fs.statSync(`${dbPath}-wal`).size > 0,
+      "the WAL must actually hold something for this test to mean anything");
+
+    // What the OLD createBackup did: copy the main file only.
+    const naive = path.join(dir, "naive.db");
+    fs.copyFileSync(dbPath, naive);
+    assert.equal(openDb(naive, { readonly: true }).prepare("SELECT count(*) c FROM t").get().c, 1,
+      "a main-file-only copy is missing the committed row — the bug");
+
+    // What it does now.
+    const [row] = db.pragma("wal_checkpoint(TRUNCATE)", { simple: false });
+    assert.equal(row.busy, 0, "checkpoint should not be busy against a single connection");
+    const checked = path.join(dir, "checked.db");
+    fs.copyFileSync(dbPath, checked);
+    assert.equal(openDb(checked, { readonly: true }).prepare("SELECT count(*) c FROM t").get().c, 2,
+      "after the checkpoint the main file is the whole database");
+  } finally {
+    for (const d of open) { try { d.close(); } catch {} }
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("the checkpoint runs BEFORE the copy, and its result is recorded rather than assumed", () => {
+  const cpAt = BACKUP_SRC.indexOf("const cp = checkpointWal();");
+  const copyAt = BACKUP_SRC.indexOf("fs.copyFileSync(DB_PATH, dest);");
+  assert.ok(cpAt > 0 && copyAt > cpAt, "checkpointWal() must run before the file copy");
+  assert.match(BACKUP_SRC, /wal_checkpoint\(TRUNCATE\)/,
+    "PASSIVE is the automatic behaviour that already failed to keep up; FULL leaves the log in place");
+  // A backup it cannot vouch for must say so, in the manifest and on stdout.
+  assert.match(BACKUP_SRC, /walCheckpointed: cp\.ok/);
+  assert.match(BACKUP_SRC, /WAL checkpoint incomplete/);
+  // ...and fall back to carrying the sidecar rather than shipping a possibly-stale copy.
+  assert.match(BACKUP_SRC, /fs\.copyFileSync\(`\$\{DB_PATH\}-wal`, `\$\{dest\}-wal`\)/);
+  // A carried sidecar is part of what the backup costs, so it has to count against the budget or
+  // retention would under-estimate the directory it is meant to bound.
+  assert.match(BACKUP_SRC, /const size = fs\.statSync\(dest\)\.size \+ \(walCopied/);
+});
+
+test("restore clears the live sidecars, so a restored file is not merged with the old log", () => {
+  // Copying the main file while resume_master.db-wal still holds the PREVIOUS database's pages
+  // leaves SQLite reconciling a restored file with a log belonging to something else.
+  const restoreAt = BACKUP_SRC.indexOf("export function restoreBackup");
+  const body = BACKUP_SRC.slice(restoreAt);
+  const copyAt = body.indexOf("fs.copyFileSync(src, DB_PATH);");
+  const unlinkAt = body.indexOf('for (const side of ["-wal", "-shm"])');
+  assert.ok(copyAt > 0 && unlinkAt > copyAt, "sidecars must be cleared after the main file lands");
+  // And a backup that carried its own WAL gets it back.
+  assert.match(body, /if \(fs\.existsSync\(`\$\{src\}-wal`\)\)/);
 });
 
 // ── Housekeeping ─────────────────────────────────────────────────────────────────────────────

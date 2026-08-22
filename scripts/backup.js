@@ -2,6 +2,10 @@
 // Run directly:  node scripts/backup.js [list|restore <filename>]
 // Or via npm:    npm run backup / npm run restore
 //
+// A BACKUP IS CHECKPOINTED BEFORE IT IS COPIED — see checkpointWal, and read that comment before
+// changing the copy. Without it a running server leaves committed data in the WAL and the copy is a
+// valid but STALE database.
+//
 // RETENTION IS SIZE-AWARE, not just count-capped, and the reason is worth stating: this directory
 // reached 442 MB across 30 backups. `manifest.slice(0, 30)` was written when the DB was 1.3 MB, so
 // thirty copies cost 40 MB. Migration 082's LCA tables took the DB to 116 MB, and the same rule
@@ -11,6 +15,7 @@
 // See selectRetained() for the rules. They protect the newest backup and the newest of each LABEL
 // before spending the budget on depth, so a tight budget loses HISTORY rather than losing the
 // distinct kinds of restore point.
+import Database from "better-sqlite3";
 import fs       from "fs";
 import path     from "path";
 import { fileURLToPath } from "url";
@@ -119,6 +124,43 @@ function sweepOrphanSidecars() {
 
 const mb = (n) => `${(n / 1048576).toFixed(0)} MB`;
 
+/**
+ * Folds the write-ahead log into the main database file, so that copying that ONE file yields a
+ * complete backup.
+ *
+ * WITHOUT THIS, EVERY BACKUP TAKEN WHILE THE SERVER RUNS CAN BE SILENTLY STALE. The database is in
+ * WAL mode, so committed transactions live in `resume_master.db-wal` until something checkpoints
+ * them; `fs.copyFileSync(DB_PATH, dest)` copies only the main file and leaves them behind. Measured
+ * on this repo: two backups taken nine hours apart, and the live DB, all had the SAME md5 — the main
+ * file had not changed at all while a 42 MB WAL accumulated. Opening one of those backups showed
+ * Stripe with `periods_with_filings = 18` against the live DB's 21. The backup was three hours
+ * behind and restored perfectly cleanly, which is the dangerous kind of wrong.
+ *
+ * TRUNCATE rather than PASSIVE or FULL: PASSIVE is the automatic behaviour that had already failed
+ * to keep up, and FULL merges the WAL without resetting the file, so the next copy would face the
+ * same race. TRUNCATE merges AND zeroes the log, which is the only outcome that makes "the main file
+ * is the whole database" true at the moment of the copy.
+ *
+ * This WRITES to the live database, which is why it is worth being explicit about: it is the same
+ * write SQLite performs on its own during normal operation, and a second writer is legal in WAL
+ * mode, so it does not disturb the server's connection. It can still report `busy` if another
+ * connection is mid-read — so the result is returned rather than assumed, and the caller falls back
+ * to copying the sidecar instead of shipping a backup it cannot vouch for.
+ */
+function checkpointWal() {
+  let db = null;
+  try {
+    db = new Database(DB_PATH);
+    const [row = {}] = db.pragma("wal_checkpoint(TRUNCATE)", { simple: false });
+    // busy = 1 means the log could not be fully reclaimed, so the copy may still miss pages.
+    return { ok: row.busy === 0, busy: row.busy, log: row.log, checkpointed: row.checkpointed };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  } finally {
+    try { db?.close(); } catch {}
+  }
+}
+
 export function createBackup(label = "manual") {
   if (!fs.existsSync(DB_PATH)) {
     console.warn("[backup] No DB found at", DB_PATH);
@@ -128,16 +170,40 @@ export function createBackup(label = "manual") {
   const filename = `resume_master_${ts}_${label}.db`;
   const dest     = path.join(BAK_DIR, filename);
 
+  // Merge the WAL first — see checkpointWal. The copy is only a complete database afterwards.
+  const cp = checkpointWal();
+
   // fs.copyFileSync is safe, synchronous, and works regardless of connection state.
-  // Do NOT use db.backup() here — it conflicts with the server's open connection.
+  // db.backup() is NOT used here: it is SQLite's online-backup API and would be defensible, but a
+  // checkpoint plus a file copy keeps the restore path a single plain file, which is what makes
+  // `restore` auditable by hand.
   fs.copyFileSync(DB_PATH, dest);
-  console.log(`[backup] Saved: ${dest} (${mb(fs.statSync(dest).size)})`);
+
+  // Fallback for the case the checkpoint could not fully drain. A two-file backup is inelegant; a
+  // backup missing the last few hours is worse, and restoreBackup puts the sidecar back.
+  let walCopied = false;
+  if (!cp.ok && fs.existsSync(`${DB_PATH}-wal`)) {
+    fs.copyFileSync(`${DB_PATH}-wal`, `${dest}-wal`);
+    walCopied = true;
+  }
+  if (!cp.ok) {
+    console.warn(`[backup] WAL checkpoint incomplete (${cp.error ?? `busy=${cp.busy}`})` +
+                 `${walCopied ? " — copied the -wal sidecar alongside" : " — BACKUP MAY BE STALE"}`);
+  }
+
+  const size = fs.statSync(dest).size + (walCopied ? fs.statSync(`${dest}-wal`).size : 0);
+  console.log(`[backup] Saved: ${dest} (${mb(size)})`);
 
   const manifest = loadManifest();
   manifest.unshift({
     filename, label,
     created: new Date().toISOString(),
-    size: fs.statSync(dest).size,
+    // Sidecar included, so the retention budget accounts for what this backup actually costs.
+    size,
+    // Recorded, not assumed. A backup whose WAL could not be drained AND could not be copied is one
+    // a future reader has to be able to distrust.
+    walCheckpointed: cp.ok,
+    ...(walCopied ? { walSidecar: true } : {}),
   });
 
   const { keep, drop, keptBytes } = selectRetained(manifest);
@@ -183,6 +249,23 @@ export function restoreBackup(filename) {
   }
 
   fs.copyFileSync(src, DB_PATH);
+
+  // THE LIVE SIDECARS MUST GO, and this is not housekeeping. Copying the main file while
+  // `resume_master.db-wal` still holds the PREVIOUS database's committed pages leaves SQLite to
+  // reconcile a restored file with a log that belongs to something else. It usually detects the
+  // mismatch and discards the log — but "usually" is the wrong standard for the one operation whose
+  // entire job is to put the database into a known state. Removing them makes the restored file the
+  // whole truth, which is the same property checkpointWal() buys on the way in.
+  for (const side of ["-wal", "-shm"]) {
+    try { fs.unlinkSync(`${DB_PATH}${side}`); } catch {}
+  }
+  // ...unless the backup carried its own WAL because its checkpoint could not drain. Then that log
+  // is part of the backup and belongs beside the file it came from.
+  if (fs.existsSync(`${src}-wal`)) {
+    fs.copyFileSync(`${src}-wal`, `${DB_PATH}-wal`);
+    console.log(`[restore] Restored the backup's -wal sidecar alongside it`);
+  }
+
   console.log(`[restore] ✓ Restored from ${filename}`);
   return { ok: true, restored: filename };
 }
