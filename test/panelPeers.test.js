@@ -192,7 +192,16 @@ test("Escape closes only the focused panel", () => {
 
 test("the board is inert and frozen while any panel is open", () => {
   const lock = read("client/src/hooks/useBoardLock.js");
-  assert.match(jobs, /useBoardLock\(openPanelCount > 0\)/);
+  // THE FILTERS DRAWER IS IN THIS CONDITION NOW. It was not, and a scrim was all it ever had:
+  // measured with only the drawer open, the top bar behind it was dimmed and pointer-unreachable and
+  // still fully tab-reachable, so focus walked out of the open drawer into controls the user could
+  // not see. Same defect this test was written for, on a surface it did not cover.
+  assert.match(jobs, /useBoardLock\(openPanelCount > 0 \|\| filterPanelOpen\)/);
+  // And the drawer must be PORTALLED, or inerting the app to protect it would inert it too — it
+  // rendered inside <main>, i.e. inside the subtree this hook makes inert.
+  assert.match(jobs, /return createPortal\(/);
+  assert.match(jobs, /<div data-filters-drawer=""/);
+  assert.match(jobs, /document\.body/);
 
   // FOCUS. `pointer-events: none` stops the mouse and nothing else — Tab walked into the board's
   // controls behind the scrim and put the focus ring on an element the user could not see. `inert`
