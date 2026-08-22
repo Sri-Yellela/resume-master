@@ -12,6 +12,21 @@
  * re-charges a row that already completed. Reuses the classifier.js Anthropic-client
  * pattern (client passed in, not constructed here) and its Haiku model.
  *
+ * COVERAGE REALITY, measured after a full backfill of all 1261 active rows (2026-08-22, 0 failed):
+ *
+ *     skills_json       100 -> 1259    org_unit_raw      52 -> 1091    workplace_type  542 -> 859
+ *     salary_min_usd    572 ->  594    enriched_at      101 -> 1261
+ *     is_h1b_sponsor      0 ->    3 non-null, and ALL THREE ARE FALSE
+ *
+ * The visa columns are near-empty because the POSTINGS DO NOT SAY, not because this pass fails: of
+ * 1261 descriptions (avg 4.3-5.0k chars, none missing), 0 contain "H-1B"/"H1B" and 36 mention
+ * sponsorship/visa/work-authorization at all. The prompt below is deliberately strict — null unless
+ * the posting explicitly states a policy — so silence yields null, correctly, 1258 times.
+ *
+ * Consequence, so it is not rediscovered by re-running this: "Sponsors H-1B" can never render from
+ * crawled JD text on this pool. That badge needs a different SOURCE (an employer H-1B filing dataset
+ * keyed by company), not another LLM pass over the same words. See test/visaSignalCoverage.test.js.
+ *
  * ADDITIVE ONLY. Every column is written via COALESCE(@new, existing), because ingestion has
  * already populated several of these from the source feed and the prompt deliberately tells the
  * model to answer null when a posting is silent. Combining those two facts with a plain
