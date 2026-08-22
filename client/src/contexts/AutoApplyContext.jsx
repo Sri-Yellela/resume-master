@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { api, authContextQuery } from "../lib/api.js";
 import { A_PLUS_TOOL, GENERATE_TOOL } from "../lib/applyTools.js";
 
@@ -48,6 +48,19 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   const [pendingBusy, setPendingBusy] = useState(false);
   const [pendingMsg, setPendingMsg] = useState("");
   const [confirmApproveAll, setConfirmApproveAll] = useState(false);
+  // ── The cross-run feeds the obstacle-first panel is built on ────────────────────────────────
+  // A run is an implementation detail, so the panel cannot be organised around one. These are every
+  // application in flight / sent / stopped, whichever run produced it. `gated` was already returned
+  // by GET /api/apply/runs and NOTHING read it — the individual gated jobs were invisible, only
+  // their portal grouping was shown.
+  const [applyInFlight, setApplyInFlight] = useState([]);
+  const [applySubmitted, setApplySubmitted] = useState([]);
+  const [applyStopped, setApplyStopped] = useState([]);
+  const [applyGatedJobs, setApplyGatedJobs] = useState([]);
+  // Missing apply prerequisites, read BEFORE queueing rather than discovered as a 409 afterwards.
+  // The server has computed this all along (getMissingApplyPrerequisites) and the only way to see it
+  // was to try to start a run and fail.
+  const [applyPrereqMissing, setApplyPrereqMissing] = useState([]);
 
   const addToApplyQueue = useCallback((job) => {
     if (!job?.jobId) return;
@@ -65,7 +78,17 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       const data = await api("/api/apply/runs");
       setApplyRuns(Array.isArray(data.runs) ? data.runs : []);
       setApplyReviewJobs(Array.isArray(data.review) ? data.review : []);
+      setApplyGatedJobs(Array.isArray(data.gated) ? data.gated : []);
+      setApplyInFlight(Array.isArray(data.inFlight) ? data.inFlight : []);
+      setApplySubmitted(Array.isArray(data.submitted) ? data.submitted : []);
+      setApplyStopped(Array.isArray(data.stopped) ? data.stopped : []);
     } catch {}
+    // Prerequisites, so "add your email address -> unblocks N applications" can be shown BEFORE the
+    // user queues anything. Its own try: a failure here must not blank the pipeline.
+    try {
+      const st = await api("/api/integrations/status");
+      setApplyPrereqMissing(Array.isArray(st?.apply?.missing) ? st.apply.missing : []);
+    } catch { setApplyPrereqMissing([]); }
     // Separate call: the grouping lives with the packets, and a failure here must not blank the runs
     // list that the rest of this panel is built on.
     try {
@@ -289,10 +312,29 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
     }
   }, [applyQueue, canUseAPlusResume, loadApplyRuns]);
 
+  // Ordered least-to-most current: a job that was stopped and has been re-queued should read as
+  // queued, not stopped.
+  const applyStateByJobId = useMemo(() => {
+    const map = {};
+    for (const list of [applyStopped, applySubmitted, applyReviewJobs, applyGatedJobs, applyInFlight]) {
+      for (const j of list) if (j?.jobId) map[j.jobId] = { status: j.status, reasonCode: j.reasonCode };
+    }
+    return map;
+  }, [applyStopped, applySubmitted, applyReviewJobs, applyGatedJobs, applyInFlight]);
+
   return (
     <AutoApplyContext.Provider value={{
       applyQueue, setApplyQueue,
       applyRuns, applyReviewJobs, applyGatePortals,
+      applyInFlight, applySubmitted, applyStopped, applyGatedJobs,
+      applyPrereqMissing,
+      // ── The board's own view of the pipeline ────────────────────────────────────────────────
+      // The board and the pipeline were separate worlds: a card gave no hint that you had already
+      // applied to it, queued it, or that it was stuck waiting on you. This is the join, done here
+      // from feeds already loaded rather than by widening GET /api/jobs — so it costs no request.
+      // Later feeds win, which is the right precedence: what a job is DOING now outranks what it
+      // last finished as.
+      applyStateByJobId,
       applyQueueMsg, setApplyQueueMsg,
       applyRunDetailOpen, setApplyRunDetailOpen,
       applyRunDetail, setApplyRunDetail,

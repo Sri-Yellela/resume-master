@@ -40,7 +40,10 @@ test("every piece of the surface arrived in the panel — nothing dropped in the
     ["the review queue",       /need review/],
     ["held-gate batches",      /applyGatePortals\.map/],
     ["the question queue",     /Answer \{applyQuestions\.length\}/],
-    ["pending approvals",      /awaiting your approval/],
+    // Copy changed with the obstacle restructure ("awaiting" -> "waiting for"), so this matches the
+    // COUNT-plus-noun shape rather than one adjective. The capability is stronger than it was: the
+    // pending queue now has its own obstacle card with its own action, not a CTA among others.
+    ["pending approvals",      /application\$\{applyPending\.length === 1 \? "" : "s"\} waiting for your approval/],
     ["per-run detail",         /loadApplyRunDetail\(run\.id\)/],
     ["the queue's tier notice",/automationTier === "account"/],
     ["the readiness gate",     /applyReadiness && !applyReadiness\.available/],

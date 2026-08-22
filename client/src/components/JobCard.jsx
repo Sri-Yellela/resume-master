@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../styles/theme.jsx";
 import CompanyViewModal from "./CompanyViewModal.jsx";
+import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
+import { boardApplicationChip } from "../lib/applyObstacles.js";
 
 // ── Helpers ─────────────────────────────────────────────────────
 // Compute elapsed time since posting.
@@ -106,6 +108,23 @@ function VisaBadge({ isH1bSponsor, requiresWorkAuth }) {
     );
   }
   return null;
+}
+
+// ── Application-state chip (board <-> pipeline) ───────────────────
+// Renders nothing for a job with no application, which is almost all of them — the board must not
+// grow a column of empty chips. Reads the join AutoApplyContext already computes from feeds it has
+// loaded, so this costs no extra request and cannot disagree with the Auto Apply panel.
+function ApplyStateChip({ jobId }) {
+  const { applyStateByJobId } = useAutoApply();
+  const chip = boardApplicationChip(applyStateByJobId?.[jobId]);
+  if (!chip) return null;
+  return (
+    <span title={chip.title}
+      style={{ background: `${chip.color}22`, color: chip.color, padding: "2px 8px",
+               borderRadius: 999, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+      {chip.label}
+    </span>
+  );
 }
 
 // ── Automation tier chip ─────────────────────────────────────────
@@ -598,6 +617,12 @@ export default function JobCard({
                   the closed state is the one that changes what they can do about it. */}
               {job.isActive !== false && isNewJob(job.discoveredAt) && <NewPill/>}
               <VisaBadge isH1bSponsor={job.isH1bSponsor} requiresWorkAuth={job.requiresWorkAuth}/>
+              {/* THE BOARD AND THE PIPELINE STOP BEING SEPARATE WORLDS. A card gave no hint that
+                  you had already applied to it, that it was queued, or that it was stuck waiting on
+                  you — so the only way to know was to open the other tab and read a list of runs.
+                  The label comes from lib/applyObstacles.js, the same vocabulary the Auto Apply
+                  panel uses, so the two cannot describe one application differently. */}
+              <ApplyStateChip jobId={job.jobId || job.id}/>
               <TierChip tier={job.automationTier}/>
               <span style={{ display:"flex", alignItems:"center", gap:4 }}>
                 <PlatformLogo platform={job.sourcePlatform || job.source} size={16} theme={theme}/>

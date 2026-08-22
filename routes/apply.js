@@ -1120,7 +1120,55 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       WHERE rj.user_id=? AND rj.status='held_gate'
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id);
-    res.json({ runs: runs.map(publicRun), review: review.map(publicRunJob), gated: gated.map(publicRunJob) });
+    // ── The four surfaces the panel is organised around, as a TOTAL PARTITION ──────────────────
+    //
+    // The panel used to be organised around RUNS, and a run is an implementation detail — "run 47"
+    // is not a thing anyone thinks about. It is organised around what the user can DO now, which
+    // needs cross-run feeds: every application in flight, every one submitted, every one stopped,
+    // regardless of which run produced it. Only `review` and `gated` existed, so submitted and
+    // stopped applications were reachable only by opening a specific run.
+    //
+    // PARTITIONED BY EXCLUSION, deliberately. `stopped` is "not any of the others" rather than a
+    // list of failure statuses, so a status added later cannot fall through every bucket and vanish
+    // from the UI — which is exactly what happened to held_gate when it was split out of
+    // held_review. The partition is asserted total by statusCounts below.
+    const IN_FLIGHT   = ['queued', 'running'];
+    const NEEDS_YOU   = ['held_review', 'held_gate'];
+    const inFlight = db.prepare(`
+      ${RUN_JOB_SELECT}
+      WHERE rj.user_id=? AND rj.status IN (${IN_FLIGHT.map(() => '?').join(',')})
+      ORDER BY rj.created_at DESC LIMIT 50
+    `).all(req.user.id, ...IN_FLIGHT);
+    const submitted = db.prepare(`
+      ${RUN_JOB_SELECT}
+      WHERE rj.user_id=? AND rj.status='submitted'
+      ORDER BY COALESCE(rj.finished_at, rj.created_at) DESC LIMIT 50
+    `).all(req.user.id);
+    const stopped = db.prepare(`
+      ${RUN_JOB_SELECT}
+      WHERE rj.user_id=?
+        AND rj.status NOT IN (${[...IN_FLIGHT, ...NEEDS_YOU].map(() => '?').join(',')})
+        AND rj.status != 'submitted'
+      ORDER BY COALESCE(rj.finished_at, rj.created_at) DESC LIMIT 50
+    `).all(req.user.id, ...IN_FLIGHT, ...NEEDS_YOU);
+
+    // Every status this user actually has, with its count. The client asserts nothing against it;
+    // it exists so "which bucket did this land in?" is answerable from the response alone, and so
+    // test/applyObstacleSurfaces.test.js can prove the four buckets sum to the total.
+    const statusCounts = Object.fromEntries(
+      db.prepare(`SELECT status, COUNT(*) n FROM apply_run_jobs WHERE user_id=? GROUP BY status`)
+        .all(req.user.id).map(r => [r.status, r.n])
+    );
+
+    res.json({
+      runs: runs.map(publicRun),
+      review: review.map(publicRunJob),
+      gated: gated.map(publicRunJob),
+      inFlight: inFlight.map(publicRunJob),
+      submitted: submitted.map(publicRunJob),
+      stopped: stopped.map(publicRunJob),
+      statusCounts,
+    });
   });
 
   app.get("/api/apply/runs/:runId", requireAuth, (req, res) => {
