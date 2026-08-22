@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
-import { StackSection, OrgSection, HiringSection } from "./CompanyKbSections.jsx";
+import { StackSection, OrgSection, HiringSection, SponsorshipSection } from "./CompanyKbSections.jsx";
 
 export default function CompanyViewModal({ company, onClose }) {
   const { theme } = useTheme();
@@ -66,6 +66,7 @@ export default function CompanyViewModal({ company, onClose }) {
               <StackSection stack={profile.stack} postings={profile.stackPostings} theme={theme} />
               <OrgSection orgUnits={profile.orgUnits} total={profile.orgUnitsTotal} theme={theme} />
               <HiringSection signal={profile.hiringSignal} theme={theme} />
+              <SponsorshipSection lca={profile.lca} theme={theme} />
             </>
           )}
         </div>

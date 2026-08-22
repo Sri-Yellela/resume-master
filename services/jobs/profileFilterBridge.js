@@ -110,7 +110,7 @@ function collectQTerms(activeProfile, simpleApplyProfile) {
  *   ({ titles, keywords, skills, searchTerms, yearsExperience, structuredFacts }) or null
  * @param {{ sponsorshipFriendly?: boolean }} [opts] - rarely-needed explicit overrides
  * @returns {{ q?: string, skills_include?: string[], experience_levels?: string[],
- *   sponsorship_friendly?: true }}
+ *   sponsorship_friendly?: true, company_sponsorship?: true }}
  */
 function deriveProfileFilters(activeProfile, simpleApplyProfile, opts = {}) {
   const derived = {};
@@ -127,6 +127,13 @@ function deriveProfileFilters(activeProfile, simpleApplyProfile, opts = {}) {
   const sponsorshipFriendly = opts.sponsorshipFriendly ??
     !!simpleApplyProfile?.structuredFacts?.requiresSponsorship;
   if (sponsorshipFriendly) derived.sponsorship_friendly = true;
+  // The same stored fact drives the company-level dimension (TASK X3), because it answers the same
+  // question with better evidence: 0 of 1,261 postings mention H-1B, whereas every sponsoring
+  // employer has to file an LCA. Emitted as a SEPARATE key rather than folded into
+  // sponsorship_friendly so the two rank independently — the posting's own signal still leads, and
+  // neither can overwrite the other's meaning. Derived, so it RANKS; the board's own tickbox is
+  // what turns it into a filter.
+  if (sponsorshipFriendly) derived.company_sponsorship = true;
 
   return derived;
 }

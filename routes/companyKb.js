@@ -2,6 +2,7 @@ import { Router } from "express";
 import { confirmOrgUnit, mapOrgUnitRow } from "../services/kb/orgLayer.js";
 import { mapFormSchemaRow } from "../services/kb/formSchemaLayer.js";
 import { getHiringSignals } from "../services/jobs/hiringSignals.js";
+import { getCompanyLca } from "../services/kb/lcaLayer.js";
 
 // Read surface for the two Company KB layers (Task 9.5 org units, Task 9.7 hiring signals).
 // No UI in either task — API only, FE later. `requireAdmin` is passed in from server.js's
@@ -38,6 +39,17 @@ export function createCompanyKbRouter(db, requireAdmin) {
       `SELECT * FROM company_form_schemas WHERE company = ? ORDER BY last_seen DESC`
     ).all(company);
     res.json({ company, formSchemas: rows.map(mapFormSchemaRow) });
+  });
+
+  // H-1B sponsorship evidence from DOL LCA filings (TASK X3). Returned WHOLE, including a match we
+  // refuse to present — `presentable: false` with the reason is the answer to "why does the company
+  // view say nothing about sponsorship for Mercury?", and hiding the row would make that
+  // unanswerable. The client renders on `presentable`; this endpoint explains.
+  router.get("/:company/lca", (req, res) => {
+    const { company } = req.params;
+    const lca = getCompanyLca(db, company);
+    if (!lca) return res.json({ company, lca: null, reason: "not reconciled against LCA data yet" });
+    res.json({ company, lca });
   });
 
   router.get("/:company/hiring-signals", (req, res) => {

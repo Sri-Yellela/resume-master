@@ -41,6 +41,14 @@ function db0() {
       is_h1b_sponsor INTEGER, requires_work_auth INTEGER,
       posted_at TEXT, scraped_at INTEGER, is_active INTEGER DEFAULT 1
     );
+    -- The board's second table (X3): company_sponsorship ranks through a correlated subquery on
+    -- it, so the schema has to exist for the rank expression to prepare. Left EMPTY on purpose —
+    -- an unranked, unmatched company is the state every row in this file is in, and the headline
+    -- guarantee below (no bucket loses a row) has to hold for exactly that case.
+    CREATE TABLE company_lca_sponsorship (
+      company TEXT PRIMARY KEY, match_status TEXT NOT NULL,
+      match_confidence REAL NOT NULL DEFAULT 0, certified_total INTEGER NOT NULL DEFAULT 0
+    );
   `);
   const add = db.prepare(
     `INSERT INTO scraped_jobs (job_id,title,company,source,experience_level,scraped_at,is_active)

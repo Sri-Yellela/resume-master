@@ -1,12 +1,14 @@
 /**
- * Company view (FE-4): aggregates the three read-only KB layers — technographics (Task 5),
- * org units (9.5), hiring signals (9.7) — into one payload for the company-view UI. Read-only,
- * writes nothing, camel-cased to match the rest of the client-facing contract (mapJobRow).
+ * Company view (FE-4): aggregates the four read-only KB layers — technographics (Task 5),
+ * org units (9.5), hiring signals (9.7), H-1B sponsorship evidence (X3) — into one payload for the
+ * company-view UI. Read-only, writes nothing, camel-cased to match the rest of the client-facing
+ * contract (mapJobRow).
  */
 
 import { decayedWeight } from '../jobs/enrichJob.js';
 import { mapOrgUnitRow } from './orgLayer.js';
 import { getHiringSignals } from '../jobs/hiringSignals.js';
+import { getCompanyLca } from './lcaLayer.js';
 
 const MAX_STACK_SKILLS = 12;
 // Stripe has 271 org units, 258 of them single-corroboration 'proposed' guesses. Rendering all of
@@ -75,6 +77,10 @@ function getCompanyProfile(db, company) {
   const stack = getStack(db, company);
   const org = getOrgUnits(db, company);
   const hiringSignal = mapHiringSignal(getHiringSignals(db, company, { history: false }));
+  // H-1B sponsorship evidence from DOL LCA filings (TASK X3). The ONLY one of these four layers
+  // that is not mined from postings — which is the point: 0 of 1,261 postings mention H-1B, so the
+  // posting-derived version of this signal does not exist.
+  const lca = getCompanyLca(db, company);
   return {
     company,
     stack: stack.skills,
@@ -86,7 +92,13 @@ function getCompanyProfile(db, company) {
     // instead of implying eight is all there is.
     orgUnitsTotal: org.total,
     hiringSignal,
-    hasData: stack.skills.length > 0 || org.total > 0 || !!hiringSignal,
+    // Sent whole, including a non-presentable match, so the client never has to re-derive the
+    // integrity rule — but `presentable: false` is the UI's instruction to render nothing.
+    lca,
+    // A non-presentable LCA row does NOT count as data. An ambiguous or unmatched company has
+    // nothing to show, and letting it flip hasData would replace "Not enough data on X yet" with
+    // an empty panel that looks broken.
+    hasData: stack.skills.length > 0 || org.total > 0 || !!hiringSignal || !!lca?.presentable,
   };
 }
 
