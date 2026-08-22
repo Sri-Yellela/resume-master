@@ -39,6 +39,11 @@ function db0() {
       fiscal_quarter INTEGER NOT NULL, period_start INTEGER, period_end INTEGER,
       sheet_rows INTEGER NOT NULL DEFAULT 0, case_rows INTEGER NOT NULL DEFAULT 0,
       employer_rows INTEGER NOT NULL DEFAULT 0, byte_size INTEGER, source_url TEXT,
+      -- Migrations 083 and 084. The DOL layout changed twice under this feature: the pre-FY2024
+      -- files carry no EMPLOYER_FEIN, and some quarters are fiscal-year cumulative rather than
+      -- per-quarter. Both facts are recorded per file, so the read path can count QUARTERS rather
+      -- than files and can tell how finely employers could be distinguished in each period.
+      has_employer_fein INTEGER, quarters_covered INTEGER,
       ingested_at INTEGER NOT NULL
     );
     CREATE TABLE lca_employer_periods (
@@ -61,10 +66,21 @@ function db0() {
       first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL
     );
   `);
+  // period_start/period_end are real so getCorpusCoverage can report the window as dates, and
+  // quarters_covered is 1 because these five fixtures are all per-quarter files.
   const f = db.prepare(`INSERT INTO lca_source_files
-    (file_name, fiscal_period, fiscal_year, fiscal_quarter, case_rows, ingested_at)
-    VALUES (?,?,?,?,?,1787000000)`);
-  PERIODS.forEach(p => f.run(`LCA_${p}.xlsx`, p, Number(p.slice(2, 6)), Number(p.slice(-1)), 1000));
+    (file_name, fiscal_period, fiscal_year, fiscal_quarter, case_rows, period_start, period_end,
+     has_employer_fein, quarters_covered, ingested_at)
+    VALUES (?,?,?,?,?,?,?,1,1,1787000000)`);
+  const Q_START = { 1: '-10-01', 2: '-01-01', 3: '-04-01', 4: '-07-01' };
+  const Q_END = { 1: '-12-31', 2: '-03-31', 3: '-06-30', 4: '-09-30' };
+  PERIODS.forEach(p => {
+    const fy = Number(p.slice(2, 6)), q = Number(p.slice(-1));
+    const cal = q === 1 ? fy - 1 : fy;
+    f.run(`LCA_${p}.xlsx`, p, fy, q, 1000,
+      Math.floor(Date.parse(cal + Q_START[q] + 'T00:00:00Z') / 1000),
+      Math.floor(Date.parse((q === 1 ? fy - 1 : fy) + Q_END[q] + 'T00:00:00Z') / 1000));
+  });
   return db;
 }
 
@@ -93,10 +109,15 @@ function fixture() {
   // THIN AND STALE: 2 certified, and nothing since FY2025 Q2 — three quarters behind the corpus.
   addEmployer(db, "PowerLattice Technologies Inc.", "88-1234567",
     { FY2025Q1: 1, FY2025Q2: 1 });
-  // BRAND-PREFIX (tier C) with the insurer sitting right beside it, on a different FEIN.
+  // TIER C: brand + a holdco token, no exact registered-name match, and — the condition that
+  // makes it safe — nothing else in the fixture is called "Notion <line of business>".
+  addEmployer(db, "Notion Labs, Inc.", "45-5580473", { FY2025Q3: 20, FY2025Q4: 18, FY2026Q1: 10 });
+  // AMBIGUOUS, reason 1: the brand token is a word other businesses use. Only Mercury Technologies
+  // has an all-holdco name, so the candidate set is unambiguous — and it is still declined, because
+  // an insurer filing under the same first word is evidence the word is not a name.
   addEmployer(db, "Mercury Technologies, Inc.", "82-2557284", { FY2025Q4: 6, FY2026Q1: 2 });
   addEmployer(db, "Mercury Insurance Services, LLC", "95-4831771", { FY2025Q4: 7, FY2026Q1: 7 });
-  // AMBIGUOUS: two holdco candidates, two FEINs, no way to choose.
+  // AMBIGUOUS, reason 2: two holdco candidates on two FEINs, so there is no single answer to pick.
   addEmployer(db, "Apex Technologies, Inc.", "11-1111111", { FY2026Q1: 12 });
   addEmployer(db, "Apex Systems, LLC", "22-2222222", { FY2026Q1: 40 });
   // D/B/A only.
@@ -104,7 +125,7 @@ function fixture() {
     { FY2025Q4: 30, FY2026Q1: 9 }, ["rippling"]);
 
   const summary = reconcileCompanyLca(db, {
-    companies: ["Stripe", "PowerLattice Technologies", "Mercury", "Apex", "Rippling", "Linear"],
+    companies: ["Stripe", "PowerLattice Technologies", "Notion", "Mercury", "Apex", "Rippling", "Linear"],
     now: 1787000000,
   });
   return { db, summary };
@@ -167,7 +188,14 @@ test("staleness is part of the claim: three quarters of silence is labelled, not
 
 test("an AMBIGUOUS name renders nothing — not a zero, not 'no data'", () => {
   const { db, summary } = fixture();
-  assert.equal(summary.ambiguous, 1);
+  // Two, for two different reasons — see the fixture. Both render nothing.
+  assert.equal(summary.ambiguous, 2);
+  const mercury = getCompanyLca(db, "Mercury");
+  assert.equal(mercury.matchStatus, "ambiguous");
+  assert.equal(mercury.presentable, false);
+  assert.match(mercury.matchReason, /not a distinctive name/);
+  assert.equal(mercury.certifiedTotal, 0,
+    "it must carry neither the insurer's filings nor the fintech's");
   const apex = getCompanyLca(db, "Apex");
   assert.equal(apex.matchStatus, "ambiguous");
   assert.equal(apex.matchConfidence, 0);
@@ -181,14 +209,13 @@ test("an AMBIGUOUS name renders nothing — not a zero, not 'no data'", () => {
 
 test("a tier-C match renders, but only ever with the entity named and the basis stated", () => {
   const { db } = fixture();
-  const mercury = getCompanyLca(db, "Mercury");
-  assert.equal(mercury.matchTier, "C");
-  assert.equal(mercury.matchConfidence, 0.6);
-  assert.equal(mercury.presentable, true, "0.60 renders");
-  assert.equal(mercury.highConfidence, false, "but never as a bare number");
-  // And it carries only the technology company's 8, never the insurer's 14.
-  assert.equal(mercury.certifiedTotal, 8);
-  assert.deepEqual(mercury.matchedEntities.map(e => e.name), ["Mercury Technologies, Inc."]);
+  const notion = getCompanyLca(db, "Notion");
+  assert.equal(notion.matchTier, "C");
+  assert.equal(notion.matchConfidence, 0.6);
+  assert.equal(notion.presentable, true, "0.60 renders");
+  assert.equal(notion.highConfidence, false, "but never as a bare number");
+  assert.equal(notion.certifiedTotal, 48);
+  assert.deepEqual(notion.matchedEntities.map(e => e.name), ["Notion Labs, Inc."]);
 
   // The UI's own gate: !highConfidence must reach the reader as a qualifier on the match.
   assert.match(SECTIONS_SRC, /nameMatched = !lca\.highConfidence/);
@@ -272,8 +299,9 @@ function boardDb() {
   const add = db.prepare(`INSERT INTO scraped_jobs (job_id,title,company,source,scraped_at,is_active)
     VALUES (?,?,?,'ashby',1787000000,1)`);
   add.run("j-stripe", "Engineer", "Stripe");   // matched 0.95, 331 filings
-  add.run("j-mercury", "Engineer", "Mercury"); // matched 0.60, 8 filings
-  add.run("j-apex", "Engineer", "Apex");       // ambiguous
+  add.run("j-notion", "Engineer", "Notion");   // matched 0.60 (tier C), 48 filings
+  add.run("j-mercury", "Engineer", "Mercury"); // ambiguous — brand token is not distinctive
+  add.run("j-apex", "Engineer", "Apex");       // ambiguous — two candidates
   add.run("j-linear", "Engineer", "Linear");   // unmatched
   add.run("j-nobody", "Engineer", "Nobody");   // never reconciled at all
   return db;
@@ -299,8 +327,8 @@ test("derived: evidence reorders the board and removes nothing, not even the amb
   const ranked = run(db, { company_sponsorship: true }, { derivedKeys: ["company_sponsorship"] });
   assert.equal(ranked.length, all.length, `ranking dropped ${all.length - ranked.length} rows`);
   // Companies with filings lead; everything we cannot establish sits in the middle band, never last.
-  assert.deepEqual(ranked.slice(0, 2).sort(), ["j-mercury", "j-stripe"]);
-  for (const id of ["j-apex", "j-linear", "j-nobody"]) {
+  assert.deepEqual(ranked.slice(0, 2).sort(), ["j-notion", "j-stripe"]);
+  for (const id of ["j-apex", "j-linear", "j-nobody", "j-mercury"]) {
     assert.ok(ranked.includes(id), `${id} must survive a derived rank`);
   }
 });
@@ -318,19 +346,20 @@ test("a 0.60 match can rank UP but can never push anything DOWN", () => {
   const MATCH = 0, UNKNOWN = 1, MISS = 2;
 
   const before = rankOf();
-  assert.equal(before["j-mercury"], MATCH, "0.60 with filings is enough to rank UP");
+  assert.equal(before["j-notion"], MATCH, "0.60 with filings is enough to rank UP");
   assert.equal(before["j-stripe"], MATCH);
   assert.equal(before["j-linear"], UNKNOWN);
   assert.equal(before["j-nobody"], UNKNOWN, "a company never reconciled is unknown, not a miss");
   assert.equal(before["j-apex"], UNKNOWN, "ambiguous is unknown — never a miss");
+  assert.equal(before["j-mercury"], UNKNOWN, "and so is a non-distinctive brand name");
 
-  // Strip Mercury's filings. 0.60 is below the 0.80 demote bar, so it falls to UNKNOWN, not MISS.
-  db.prepare(`UPDATE company_lca_sponsorship SET certified_total = 0 WHERE company = 'Mercury'`).run();
-  assert.equal(rankOf()["j-mercury"], UNKNOWN,
+  // Strip Notion's filings. 0.60 is below the 0.80 demote bar, so it falls to UNKNOWN, not MISS.
+  db.prepare(`UPDATE company_lca_sponsorship SET certified_total = 0 WHERE company = 'Notion'`).run();
+  assert.equal(rankOf()["j-notion"], UNKNOWN,
     "a 0.60 match with zero filings must not be demoted — pushing a row down takes 0.80");
-  assert.notEqual(rankOf()["j-mercury"], MISS);
+  assert.notEqual(rankOf()["j-notion"], MISS);
   // And the explicit filter agrees with the rank: it does not exclude it either.
-  assert.ok(run(db, { company_sponsorship: true }, { derivedKeys: [] }).includes("j-mercury"));
+  assert.ok(run(db, { company_sponsorship: true }, { derivedKeys: [] }).includes("j-notion"));
 
   // Whereas Stripe at 0.95 with zero filings IS a miss — the one state that demotes.
   db.prepare(`UPDATE company_lca_sponsorship SET certified_total = 0 WHERE company = 'Stripe'`).run();
@@ -340,13 +369,13 @@ test("a 0.60 match can rank UP but can never push anything DOWN", () => {
 test("explicit: the filter excludes ONLY a high-confidence zero, and nothing else", () => {
   const db = boardDb();
   const before = run(db, { company_sponsorship: true }, { derivedKeys: [] });
-  assert.equal(before.length, 5, "with everything matched-and-filing, the filter removes nothing");
+  assert.equal(before.length, 6, "with nothing scoring a confident zero, the filter removes nothing");
 
   // Make Stripe a confident non-filer: resolved at 0.95, five quarters searched, zero found.
   db.prepare(`UPDATE company_lca_sponsorship SET certified_total = 0 WHERE company = 'Stripe'`).run();
   const after = run(db, { company_sponsorship: true }, { derivedKeys: [] });
   assert.ok(!after.includes("j-stripe"), "a 0.95 match with zero filings is what the user ticked to hide");
-  for (const id of ["j-apex", "j-linear", "j-nobody", "j-mercury"]) {
+  for (const id of ["j-apex", "j-linear", "j-nobody", "j-mercury", "j-notion"]) {
     assert.ok(after.includes(id),
       `${id} must survive the opt-in filter — unmatched and ambiguous companies are never excluded`);
   }
@@ -361,11 +390,11 @@ test("reconciling twice changes nothing but last_seen — the pass is idempotent
     FROM company_lca_sponsorship ORDER BY company`).all();
   const first = snap();
   reconcileCompanyLca(db, {
-    companies: ["Stripe", "PowerLattice Technologies", "Mercury", "Apex", "Rippling", "Linear"],
+    companies: ["Stripe", "PowerLattice Technologies", "Notion", "Mercury", "Apex", "Rippling", "Linear"],
     now: 1787009999,
   });
   assert.deepEqual(snap(), first, "a second reconcile must not change a single derived value");
-  assert.equal(db.prepare("SELECT count(*) c FROM company_lca_sponsorship").get().c, 6,
+  assert.equal(db.prepare("SELECT count(*) c FROM company_lca_sponsorship").get().c, 7,
     "and must not duplicate a company");
 });
 

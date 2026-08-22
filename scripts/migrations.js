@@ -2401,4 +2401,56 @@ export const MIGRATIONS = [
           ON company_lca_sponsorship(match_status, certified_total);
       `,
     },
+    {
+      // The OFLC record layout CHANGED, and the corpus has to be able to say where (TASK X3).
+      //
+      // EMPLOYER_FEIN does not exist in the FY2021, FY2022 or FY2023 disclosure files. Those sheets
+      // are 96 columns with no employer tax ID anywhere in them; FY2024 Q1 onward is 98 columns with
+      // it. That matters because FEIN is what services/kb/lcaMatch.js counts to decide whether a
+      // brand-prefix (tier C) match is unambiguous — and counting FEINs over a file that has none
+      // returns zero, which would have read as "one employer" and switched the ambiguity guard OFF
+      // for twelve of the twenty-one available quarters. countDistinctEntities() falls back to
+      // counting distinct legal names instead, which is strictly more cautious.
+      //
+      // Stored rather than derived. It IS derivable ("do all this period's rows have fein = ''?"),
+      // but a derived answer cannot distinguish a file that had no FEIN column from a file whose
+      // FEIN column happened to be empty, and the second would be a parser bug we would want to see
+      // rather than absorb. One column in the import ledger, written from the header row itself.
+      //
+      // Nullable with no default: rows written before this migration predate the check and must not
+      // claim either answer. Re-running the ingester for those periods fills them in.
+      id: "083_lca_source_fein_presence",
+      sql: `
+        ALTER TABLE lca_source_files ADD COLUMN has_employer_fein INTEGER;
+      `,
+    },
+    {
+      // OFLC CHANGED WHAT A QUARTERLY FILE MEANS, and the corpus has to survive both conventions
+      // (TASK X3). Measured from the decision dates in the files themselves:
+      //
+      //   FY2021 Q1   2020-10-01 → 2020-12-31     one quarter
+      //   FY2021 Q2   2020-10-01 → 2021-03-31     TWO quarters — contains Q1
+      //   FY2021 Q3   2020-10-01 → 2021-06-30     THREE quarters — contains Q2
+      //   FY2025 Q1   2024-10-01 → 2024-12-31     one quarter
+      //   FY2025 Q2   2025-01-01 → 2025-03-31     one quarter — disjoint from Q1
+      //
+      // The old files are FISCAL-YEAR CUMULATIVE; the new ones are per-quarter. Migration 082's
+      // ingester summed across periods on the strength of the FY2025/FY2026 evidence, which is
+      // correct there and TRIPLE-COUNTS FY2021 Q1. Nothing about the filename says which convention
+      // a file follows, so the ingester now derives each file's true window from its own decision
+      // dates and drops any period whose window is contained in another's.
+      //
+      // quarters_covered is that window expressed in quarters, and it is stored because two things
+      // need it and neither can recompute it: periods_covered ("how long did we look?") must count
+      // QUARTERS rather than files, or a four-year corpus reports as nine; and the per-period chips
+      // must not label a full fiscal year "FY2021 Q4", which would claim a year's filings happened
+      // in one quarter.
+      //
+      // Nullable: rows written before this migration have not had their window measured, and
+      // guessing 1 would silently reassert the bug this exists to fix.
+      id: "084_lca_period_span",
+      sql: `
+        ALTER TABLE lca_source_files ADD COLUMN quarters_covered INTEGER;
+      `,
+    },
   ];

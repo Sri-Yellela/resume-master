@@ -12,6 +12,7 @@ import Database from "better-sqlite3";
 import { MIGRATIONS } from "../scripts/migrations.js";
 
 const ID = "082_company_lca_sponsorship";
+const FEIN_ID = "083_lca_source_fein_presence";
 
 test("migration 082 is byte-identical in server.js and scripts/migrations.js", () => {
   const server = fs.readFileSync("server.js", "utf8");
@@ -34,7 +35,38 @@ test("migration 082 is additive, and touches scraped_jobs not at all", () => {
   // altered scraped_jobs would be the first step toward one overwriting the other.
   assert.doesNotMatch(m.sql, /scraped_jobs/i,
     "company-level LCA evidence must not touch scraped_jobs — is_h1b_sponsor is a different claim");
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 1].id, ID, "new migrations append, never insert");
+  const ids = MIGRATIONS.map(x => x.id);
+  assert.ok(ids.indexOf(ID) < ids.indexOf(FEIN_ID), "new migrations append, never insert");
+});
+
+// ── 083: the record layout changed under us ──────────────────────────────────
+
+test("migration 083 is byte-identical in both paths, and records a layout fact not a guess", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const script = fs.readFileSync("scripts/migrations.js", "utf8");
+  const block = (src) => {
+    const i = src.indexOf(`id: "${FEIN_ID}"`);
+    assert.ok(i > 0, `migration ${FEIN_ID} must exist`);
+    return src.slice(i, src.indexOf("\n    },", i));
+  };
+  assert.equal(block(server), block(script));
+
+  const m = MIGRATIONS.find(x => x.id === FEIN_ID);
+  assert.doesNotMatch(m.sql, /DROP\s+TABLE|DROP\s+COLUMN/i, "additive only");
+  // NULLABLE with no default, and that is the point: a row written before this check ran must not
+  // claim either answer. A DEFAULT 0 would assert "this file had no FEIN column" about every
+  // period ingested earlier, which is exactly the false certainty the column exists to remove.
+  assert.doesNotMatch(m.sql, /has_employer_fein\s+INTEGER\s+NOT NULL|has_employer_fein\s+INTEGER\s+DEFAULT/i,
+    "has_employer_fein must be nullable with no default — NULL means 'not checked'");
+
+  const db = new Database(":memory:");
+  db.exec(MIGRATIONS.find(x => x.id === ID).sql);
+  db.exec(m.sql);
+  const col = db.prepare(`SELECT name, "notnull", dflt_value FROM pragma_table_info('lca_source_files')`)
+    .all().find(c => c.name === "has_employer_fein");
+  assert.ok(col, "lca_source_files must carry has_employer_fein");
+  assert.equal(col.notnull, 0);
+  assert.equal(col.dflt_value, null);
 });
 
 test("the three tables come up clean, and the keys are the ones idempotency depends on", () => {
