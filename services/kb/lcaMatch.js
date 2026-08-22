@@ -7,13 +7,26 @@
  * sponsors because a similarly-named OTHER company filed is the "confident wrong answer" failure
  * this codebase keeps producing, so every rule below is written to fail closed.
  *
- * MEASURED, 2026-08-22, against FY2025 Q4 + FY2026 Q1 (18,279 / 24,887 distinct employer names) for
- * all 20 distinct company strings this DB knows:
+ * MEASURED against the full ingested corpus — FY2021 Q1 to FY2026 Q1, 21 quarters, 2.9M certified
+ * determinations, 144,584 distinct employers — for all 20 company strings this DB knows:
  *
  *   naive normalise + legal-suffix strip, exact          9/20 = 45%   <- fails the ~60% bar
- *   tiers A+B+C below                                   15/20 = 75%
- *   ...of the 5 misses, ALL FIVE are true negatives (no such employer files under any spelling),
- *      so recall against companies that actually filed is 15/15.
+ *   tiers A+B+C below                                   14/20 = 70% matched, 3 ambiguous, 3 unmatched
+ *
+ * WIDENING THE WINDOW MADE THE MATCHER STRICTER, NOT LOOSER, and that is the headline result. Over 2
+ * quarters this file matched 15 of 20 and looked better. Over 21 the extra history brought in
+ * companies that share our brands' names — "LINEAR SIGNS, INC.", "Mercury Systems Inc.",
+ * "Ramp Systems, Inc." — and every one of them turned a confident match into a declined one:
+ *
+ *   Linear   5 quarters: unmatched  ->  21 quarters: AMBIGUOUS (8 other employers use "linear")
+ *   Mercury  5 quarters: matched C  ->  21 quarters: AMBIGUOUS (37 others use "mercury")
+ *   Ramp     5 quarters: matched C  ->  21 quarters: AMBIGUOUS (Ramp Systems, Inc. is not Ramp)
+ *
+ * The Linear row is the one that matters. At 21 quarters the data contains "Linear Labs LLC", an
+ * electric-motor company, and it was the SOLE all-holdco candidate — so the old candidate-set
+ * ambiguity check passed it and reported that Linear.app sponsors H-1Bs. It has never filed one.
+ * brandFamily() exists because of that: a guard that only asks whether the candidates disagree with
+ * each other never asks whether the single candidate is plausible.
  *
  * THE TIERS. Confidence is not a vibe; each number is the measured ambiguity of its rule.
  *
@@ -24,21 +37,24 @@
  *            Not an enhancement — Rippling is reachable ONLY this way ("People Center, Inc. d/b/a
  *            Rippling", 30 certified in FY2025 Q4). Ranked below A because a DBA is a claim about a
  *            trading name rather than the registered entity.
- *   C  0.60  brand + a remainder drawn ENTIRELY from HOLDCO_TOKENS, and exactly one FEIN in the
- *            candidate set. Recovers OpenAI OpCo LLC, Notion Labs Inc, Ramp Business Corporation.
+ *   C  0.60  brand + a remainder drawn ENTIRELY from HOLDCO_TOKENS, and exactly one distinct
+ *            employer in the candidate set — by FEIN where the source file carries one, by legal
+ *            name where it does not (see countDistinctEntities; the pre-FY2024 files have no FEIN
+ *            column at all) — AND the brand token must be distinctive (see brandFamily).
  *
  * WHAT IS DELIBERATELY NOT A TIER: substring / token-containment matching. It is not tuned down,
  * it is absent. Measured, it produces `Linear -> Thomson Linear LLC` and
  * `Retool -> GLOBAL RETOOL GROUP AMERICA, LLC`. There is no threshold at which that is useful.
  *
  * WHY HOLDCO_TOKENS IS A CLOSED LIST AND NOT A SUFFIX HEURISTIC — the Mercury case, which is the
- * reason this file is shaped like this. Four unrelated `Mercury *` employers file every quarter.
- * The fintech is `Mercury Technologies, Inc.` (2-6 certified); `Mercury Insurance Services, LLC`
- * files 7. And Mercury Insurance's LCAs are for *Senior Software Engineer, Staff Software Engineer,
- * Senior Site Reliability Engineer* — so NAICS code and job title DO NOT disambiguate them. The
- * obvious "pick the software-looking one" heuristic picks the wrong Mercury, confidently. Only an
- * allowlist of tokens that carry no line-of-business meaning ("Technologies", "OpCo", "Labs") can
- * be crossed safely, and even then only when it leaves exactly one FEIN standing.
+ * reason this file is shaped like this. THIRTY-EIGHT distinct employers whose name starts with
+ * "Mercury" appear in 21 quarters. The fintech is `Mercury Technologies, Inc.`; `Mercury Insurance
+ * Services, LLC` files more, and the insurer's LCAs are for *Senior Software Engineer, Staff
+ * Software Engineer, Senior Site Reliability Engineer* — so NAICS code and job title DO NOT
+ * disambiguate them. The obvious "pick the software-looking one" heuristic picks the wrong Mercury,
+ * confidently. Only an allowlist of tokens that carry no line-of-business meaning ("Technologies",
+ * "OpCo", "Labs") can be crossed safely, and even then only when it leaves exactly one employer
+ * standing AND nobody else uses the brand word at all.
  *
  * Pure and dependency-free on purpose: the ingester, the reconciler and the tests all call the same
  * functions, so "what does this match" has one answer.
@@ -93,6 +109,12 @@ function normalizeEmployerName(raw) {
     .split('|')[0]
     .replace(/\([^)]*\)/g, ' ')
     .replace(/&/g, ' and ')
+    // DOTTED ACRONYMS FIRST, before punctuation becomes whitespace. "OpenAI, L.L.C." otherwise
+    // tokenises to `openai l l c`, whose tail is three single letters that stripLegalSuffix has no
+    // entry for — so it survives as a distinct "employer" and made OpenAI look like a brand token
+    // shared with two unrelated businesses. Deliberately narrow: it only collapses runs of
+    // single-letter-plus-dot, so `L.L.C.` -> `llc` and `L.P.` -> `lp` while `Amazon.com` is left alone.
+    .replace(/\b(?:[a-z]\.){2,}/g, m => m.replace(/\./g, ''))
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
@@ -144,6 +166,67 @@ function isHoldcoExtension(brandKey, entityKey) {
 }
 
 /**
+ * Everything in the LCA data whose legal name STARTS with this brand, split three ways.
+ *
+ * This is the measurement that makes the brand-prefix rules safe, and it exists because widening
+ * the corpus from 5 quarters to 21 broke both of them in opposite directions:
+ *
+ *   `foreign` — entities that begin with the brand token and then say what they DO:
+ *      "LINEAR SIGNS, INC.", "Linear Financial Technologies LLC", "Mercury Insurance Services".
+ *      A non-empty foreign set is direct evidence that the brand token is a WORD other businesses
+ *      use, not a distinctive name. Over 21 quarters "linear" picks up three such companies, and
+ *      tier C — seeing exactly one all-holdco candidate, "Linear Labs LLC" — happily matched it.
+ *      Linear.app has never filed an LCA. That is a confidently wrong answer produced by a guard
+ *      that only ever checked for ambiguity AMONG candidates, never whether the one candidate was
+ *      plausible at all.
+ *
+ *   `holdco` — brand + tokens that carry no line of business ("OpenAI OpCo, LLC",
+ *      "AIRBNB PAYMENTS, INC.", "Notion Labs, Inc.").
+ *
+ *   `exact` — the registered name is the brand.
+ *
+ * A brand with an empty foreign set is DISTINCTIVE: nobody else in ~500k employer-quarters uses the
+ * word, so its holdco siblings are the same company and can be counted together. That is what fixes
+ * the other break — OpenAI files as "OpenAI, LP" (11 certified) AND "OpenAI OpCo, LLC" (179), and a
+ * tier A that stopped at the exact match reported 9 for a company with ~193.
+ */
+function brandFamily(brandKey, entities) {
+  const exact = [], holdco = [], foreign = [];
+  for (const e of entities) {
+    if (e.legalKey === brandKey) { exact.push(e); continue; }
+    if (!e.legalKey.startsWith(brandKey + ' ')) continue;
+    (isHoldcoExtension(brandKey, e.legalKey) ? holdco : foreign).push(e);
+  }
+  return { exact, holdco, foreign, distinctive: foreign.length === 0 };
+}
+
+/**
+ * How many DISTINCT employers a candidate set contains, and by what measure.
+ *
+ * FEIN is the right answer and the reason tier C is safe at all — it is the employer's tax ID, so
+ * two candidates sharing one FEIN are one company wearing two names, and two FEINs are two
+ * companies. But **the OFLC disclosure files did not carry EMPLOYER_FEIN before FY2024 Q1**: FY2021
+ * through FY2023 are 96 columns with no employer tax ID anywhere in them. Counting FEINs over those
+ * rows yields zero, and `0 <= 1` would have quietly turned the ambiguity guard OFF for twelve of the
+ * twenty-one quarters — the exact false attribution the tier exists to prevent, arriving silently as
+ * a side effect of widening the window.
+ *
+ * So the basis DEGRADES rather than disappearing: if every candidate has a FEIN, count FEINs; if any
+ * candidate does not, fall back to counting distinct normalised legal names. The fallback is
+ * strictly more cautious — it declines a genuine roll-up of two holdco entities under one FEIN
+ * ("Foo Labs" + "Foo Platforms", same tax ID) that the FEIN basis would have accepted. That is the
+ * correct direction to be wrong in: a missed match costs a candidate a chip on a company page, a
+ * wrong one tells them a company sponsors when it does not.
+ */
+function countDistinctEntities(candidates) {
+  const feins = candidates.map(e => e.fein).filter(Boolean);
+  if (feins.length === candidates.length) {
+    return { count: new Set(feins).size, basis: 'FEIN' };
+  }
+  return { count: new Set(candidates.map(e => e.legalKey)).size, basis: 'legal name' };
+}
+
+/**
  * Resolves one company string against an LCA entity index.
  *
  * @param {string} company
@@ -160,14 +243,25 @@ function matchCompanyToEntities(company, entities) {
   const base = { key, tier: null, confidence: 0, entities: [], candidateCount: 0 };
   if (!key) return { ...base, status: 'unmatched', reason: 'empty company name' };
 
-  // Tier A — exact on the registered name. Multiple entities here are the SAME brand's legal
-  // family (AIRBNB, INC. and its siblings), which is a roll-up and not an ambiguity, so this tier
-  // never returns 'ambiguous'. The entity list is stored so the UI can disclose what it summed.
-  const tierA = entities.filter(e => e.legalKey === key);
-  if (tierA.length) {
+  const family = brandFamily(key, entities);
+
+  // Tier A — the registered name IS the brand. Holdco siblings join it only when the brand token is
+  // distinctive, i.e. no other business in the corpus uses the word. That condition is what lets
+  // "OpenAI, LP" and "OpenAI OpCo, LLC" be counted as one company (they are) without licensing the
+  // same move for a brand like "Mercury", where the token is shared with an insurer and a defence
+  // contractor. Never 'ambiguous': an exact registered-name match plus a distinctive token is not a
+  // guess. The entity list travels with the match so the UI names everything it summed.
+  if (family.exact.length) {
+    const rolled = family.distinctive ? [...family.exact, ...family.holdco] : family.exact;
+    const extra = rolled.length - family.exact.length;
     return { ...base, status: 'matched', tier: 'A', confidence: TIER_CONFIDENCE.A,
-      entities: tierA, candidateCount: tierA.length,
-      reason: `exact legal-name match on "${key}"` };
+      entities: rolled, candidateCount: rolled.length,
+      reason: `exact legal-name match on "${key}"` +
+        (extra ? `, plus ${extra} holding-company sibling${extra === 1 ? '' : 's'} ` +
+                 `(${family.holdco.map(e => e.employerName).join(', ')})` : '') +
+        (family.foreign.length
+          ? `; ${family.foreign.length} unrelated employer(s) share the name and were excluded`
+          : '') };
   }
 
   // Tier B — exact on a parsed trading name.
@@ -178,19 +272,28 @@ function matchCompanyToEntities(company, entities) {
       reason: `d/b/a trading-name match on "${key}"` };
   }
 
-  // Tier C — brand + holdco tokens only, and it must leave exactly one FEIN standing. Two FEINs
-  // means two companies as far as this rule can tell, and it declines rather than guessing.
-  const tierC = entities.filter(e => isHoldcoExtension(key, e.legalKey));
-  if (tierC.length) {
-    const feins = new Set(tierC.map(e => e.fein).filter(Boolean));
-    if (feins.size <= 1) {
-      return { ...base, status: 'matched', tier: 'C', confidence: TIER_CONFIDENCE.C,
-        entities: tierC, candidateCount: tierC.length,
-        reason: `brand-prefix match: ${tierC.map(e => e.employerName).join(', ')}` };
+  // Tier C — no registered name matches the brand, only brand-plus-holdco names do. TWO conditions,
+  // and the second one is the lesson from Linear: the candidate set must be unambiguous AND the brand
+  // token must not be a word other businesses use. Checking only the first matched Linear.app to
+  // "Linear Labs LLC", an unrelated motor company, because it was the sole all-holdco candidate.
+  if (family.holdco.length) {
+    if (!family.distinctive) {
+      return { ...base, status: 'ambiguous', candidateCount: family.holdco.length,
+        entities: family.holdco,
+        reason: `"${key}" is not a distinctive name — ${family.foreign.length} other employer(s) ` +
+                `use it (${family.foreign.slice(0, 3).map(e => e.employerName).join(', ')}), so ` +
+                `${family.holdco.map(e => e.employerName).join(', ')} cannot be attributed safely` };
     }
-    return { ...base, status: 'ambiguous', candidateCount: tierC.length, entities: tierC,
-      reason: `${feins.size} distinct employers share the name "${key}": ` +
-              `${tierC.map(e => e.employerName).join(', ')}` };
+    const { count, basis } = countDistinctEntities(family.holdco);
+    if (count <= 1) {
+      return { ...base, status: 'matched', tier: 'C', confidence: TIER_CONFIDENCE.C,
+        entities: family.holdco, candidateCount: family.holdco.length,
+        reason: `brand-prefix match: ${family.holdco.map(e => e.employerName).join(', ')}` };
+    }
+    return { ...base, status: 'ambiguous', candidateCount: family.holdco.length,
+      entities: family.holdco,
+      reason: `${count} distinct employers (by ${basis}) share the name "${key}": ` +
+              `${family.holdco.map(e => e.employerName).join(', ')}` };
   }
 
   return { ...base, status: 'unmatched', reason: `no LCA employer matches "${key}"` };
@@ -200,15 +303,29 @@ function matchCompanyToEntities(company, entities) {
  * Builds the entity index matchCompanyToEntities() consumes, from rows of lca_employer_periods
  * (or from a freshly parsed file, which is why it takes plain objects and not a DB handle).
  * Collapses the per-period rows into one entry per (employer_name, FEIN).
+ *
+ * `legalKey` IS ALWAYS RECOMPUTED from the employer name, never read from the row — and that is the
+ * point of this comment. `lca_employer_periods.employer_key` was written by whatever version of
+ * companyMatchKey() was current when the file was parsed, so it goes stale the moment normalisation
+ * improves. It did: adding dotted-acronym handling left 280 of OpenAI's 308 filings behind a
+ * `openai l l c` key that no longer matches anything the matcher produces, and because that stale
+ * key parses as a non-holdco remainder it read as an UNRELATED employer — which switched off the
+ * brand's distinctiveness and silently blocked the roll-up. The company rendered 28 instead of 308.
+ *
+ * `storedKey` is kept beside it because the database lookup has to use the value actually on disk
+ * (it is part of the primary key). Two rows whose stale keys differ but whose recomputed keys agree
+ * become two entities with the same legalKey, which is exactly right: they are one company filing
+ * under several spellings, and each still resolves to its own rows.
  */
 function buildEntityIndex(rows) {
   const byId = new Map();
   for (const r of rows) {
-    const legalKey = r.employer_key || companyMatchKey(r.employer_name);
-    const id = `${r.fein || ''}|${legalKey}|${r.employer_name}`;
+    const legalKey = companyMatchKey(r.employer_name) || r.employer_key || '';
+    const id = `${r.fein || ''}|${r.employer_key || legalKey}|${r.employer_name}`;
     if (!byId.has(id)) {
       byId.set(id, {
         legalKey,
+        storedKey: r.employer_key || legalKey,
         dbaKeys: [],
         fein: r.fein || '',
         employerName: r.employer_name,
@@ -235,6 +352,8 @@ export {
   stripLegalSuffix,
   companyMatchKey,
   isHoldcoExtension,
+  brandFamily,
+  countDistinctEntities,
   matchCompanyToEntities,
   buildEntityIndex,
 };

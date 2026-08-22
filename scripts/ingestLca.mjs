@@ -5,22 +5,37 @@
 // the signal is not in posting text. But every H-1B-sponsoring employer MUST file a Labor Condition
 // Application, and OFLC publishes every determination quarterly, keyed by employer.
 //
-// THE FILES ARE PER-QUARTER, NOT CUMULATIVE, and this matters enough to state twice. OFLC's own
-// release notes read as if each file were fiscal-year-to-date ("all determinations issued during
-// October 1 2025 through June 30 2026"); that describes the SET of files published so far. The
-// FY2026 Q1 record layout says "Reporting Period: October 1, 2025 through December 31, 2025", and
-// the decision dates agree (FY2026 Q1 = Oct 1-Dec 31 2025, FY2025 Q4 = Jul 1-Sep 30 2025, disjoint).
-// So quarters SUM. Treating the newest file as a year-to-date total would undercount every sponsor
-// roughly fourfold.
+// WHAT A "QUARTERLY FILE" MEANS CHANGED PART-WAY THROUGH THE HISTORY, and nothing in the filename
+// or the record layout tells you which convention you are holding. Measured from the decision dates
+// inside the files:
 //
-// MOST SHEETS CARRY PHANTOM BLANK ROWS, and the ratio is wildly inconsistent between files, which
-// is why both counts are recorded rather than trusted. Measured over the five quarters ingested:
-//   FY2026Q1    83,120 cases of 1,042,437 sheet rows   (12.5x)
-//   FY2025Q1   107,414 cases of 1,042,871 sheet rows    (9.7x)
-//   FY2025Q3   238,425 cases of   683,534 sheet rows    (2.9x)
-//   FY2025Q2   132,133 cases of   132,133 sheet rows    (1.0x — none at all)
-// The parser filters on EMPLOYER_NAME and stores both numbers in lca_source_files, so a regression
-// in that filter shows up as a row count rather than as a silently multiplied corpus.
+//   FY2021 Q1   2020-10-01 → 2020-12-31   1 quarter
+//   FY2021 Q2   2020-10-01 → 2021-03-31   2 quarters — CONTAINS Q1
+//   FY2021 Q3   2020-10-01 → 2021-06-30   3 quarters — CONTAINS Q2
+//   FY2025 Q1   2024-10-01 → 2024-12-31   1 quarter
+//   FY2025 Q2   2025-01-01 → 2025-03-31   1 quarter — disjoint from Q1
+//
+// The older files are FISCAL-YEAR CUMULATIVE; the newer ones are per-quarter. Both are labelled
+// identically. Reading the FY2025 pair and generalising "the files are per-quarter, so sum them"
+// is correct for those and TRIPLE-COUNTS FY2021 Q1 — which is what the first version of this
+// script did. OFLC's own release notes do not settle it either: "all determinations issued during
+// October 1 2025 through June 30 2026" describes the SET of files published to date, not one file.
+//
+// So the window is never assumed. Each file's true span is derived from its own decision dates, and
+// planWindow() drops any period whose span is contained in another's. A cumulative fiscal year
+// collapses to ONE period row holding the whole year; per-quarter years keep all four. No list of
+// which years were cumulative appears anywhere, because such a list would be wrong the next time
+// OFLC changes its mind.
+//
+// MANY SHEETS CARRY PHANTOM BLANK ROWS, and the ratio is wildly inconsistent — not by year, not by
+// size, not by anything predictable — which is why both counts are recorded rather than trusted.
+// Measured across all 18 ingested files, sheet-rows / real-cases:
+//   FY2026Q1  12.5x        FY2025Q1   9.7x        FY2024Q4   5.0x        FY2023Q4   4.9x
+//   FY2025Q4   4.8x        FY2023Q2   4.5x        FY2023Q3   3.7x        FY2024Q3   3.2x
+//   FY2025Q3   2.9x        every FY2021 and FY2022 file, plus FY2024 Q1-Q2 and FY2025 Q2:  1.0x
+// So a third of the files are clean and one is 12x padding. The parser filters on EMPLOYER_NAME and
+// stores both numbers in lca_source_files, so a regression in that filter shows up as a row count
+// rather than as a silently multiplied corpus.
 //
 // IDEMPOTENT BY RECONCILIATION, not by hoping. Re-importing a quarter deletes that quarter's rows
 // and reinserts them inside one transaction, so a re-run — or a re-issued file with corrections —
@@ -59,11 +74,31 @@ const fileNameFor = (year, quarter) => `LCA_Disclosure_Data_FY${year}_Q${quarter
 // from the same public path — this only identifies the client in a form the CDN recognises.
 const FETCH_HEADERS = { "User-Agent": "curl/8.0 (resume-master lca-ingest)" };
 
-// Columns read from the sheet. An ALLOWLIST — see the PII note above.
+// Columns read from the sheet. An ALLOWLIST — see the PII note above. A missing REQUIRED column is
+// fatal: the layout has changed and guessing would be worse than stopping.
 const COLUMNS = [
   "CASE_STATUS", "DECISION_DATE", "JOB_TITLE", "TOTAL_WORKER_POSITIONS",
-  "EMPLOYER_NAME", "TRADE_NAME_DBA", "EMPLOYER_STATE", "EMPLOYER_FEIN",
+  "EMPLOYER_NAME", "TRADE_NAME_DBA", "EMPLOYER_STATE",
 ];
+// THE LAYOUT CHANGED IN FY2024. EMPLOYER_FEIN does not exist in FY2021 through FY2023 — those are
+// 96 columns with no employer tax ID anywhere in them, and FY2024 Q1 onward is 98 with it. Measured,
+// not assumed: FY2023 Q4 parses NO-FEIN and FY2024 Q1 parses FEIN. It is optional rather than
+// required because refusing twelve of the twenty-one available quarters over one absent column would
+// throw away three years of history, and because the matcher degrades honestly without
+// it: countDistinctEntities() falls back to counting distinct legal names, which is STRICTER than
+// counting FEINs, so the tier-C ambiguity guard gets more cautious over old data rather than
+// silently switching off. `has_employer_fein` records which files carried it, so the limitation is
+// a column in the ledger and not something a future reader has to rediscover.
+//
+// One knock-on that is deliberately NOT worked around: with no FEIN, two employers whose normalised
+// names collide ("Apex Technologies, Inc." and "Apex Technologies LLC" both key to "apex
+// technologies") merge into one row per quarter with their counts summed. That sounds worse than it
+// is — tier A already sums across every FEIN sharing a key, on purpose, because one brand's legal
+// family is one employer for this question, so the TOTAL is what tier A would have produced anyway.
+// What is genuinely lost is the entity list: a merged pre-FY2024 row can name only one of them.
+// Measured at 1.0% of keys spanning more than one FEIN in the quarters that have FEINs, nearly all
+// of those being real subsidiaries, so this buys nothing worth a second identity scheme.
+const OPTIONAL_COLUMNS = ["EMPLOYER_FEIN"];
 const DEFAULT_QUARTERS = 5;
 // Job titles are stored only for employers with at least this many certified cases in the quarter.
 // A titles blob on all ~18k employers per quarter is most of the disk this table costs, and a
@@ -162,7 +197,7 @@ async function parseQuarter(file) {
     sharedStrings: "cache", worksheets: "emit", entries: "emit",
   });
   const employers = new Map();
-  let idx = null, sheetRows = 0, caseRows = 0, minDate = null, maxDate = null;
+  let idx = null, sheetRows = 0, caseRows = 0, minDate = null, maxDate = null, hasFein = false;
 
   for await (const ws of wb) {
     for await (const row of ws) {
@@ -175,6 +210,11 @@ async function parseQuarter(file) {
           if (at < 0) throw new Error(`column ${c} missing from ${path.basename(file)}`);
           idx[c] = at;
         }
+        for (const c of OPTIONAL_COLUMNS) {
+          const at = header.indexOf(c);
+          idx[c] = at < 0 ? null : at;
+        }
+        hasFein = idx.EMPLOYER_FEIN != null;
         continue;
       }
       sheetRows++;
@@ -182,7 +222,10 @@ async function parseQuarter(file) {
       if (!name) continue; // phantom blank row
       caseRows++;
 
-      const fein = cellText(v[idx.EMPLOYER_FEIN]) || "";
+      // '' when the file has no FEIN column at all, which is the pre-FY2024 case. It is a
+      // sentinel and not a value: the primary key needs NOT NULL, and countDistinctEntities()
+      // reads the emptiness as "cannot distinguish entities this way here".
+      const fein = (idx.EMPLOYER_FEIN == null ? null : cellText(v[idx.EMPLOYER_FEIN])) || "";
       const key = companyMatchKey(name);
       const id = `${key}|${fein}`;
       let e = employers.get(id);
@@ -229,15 +272,61 @@ async function parseQuarter(file) {
     }
     break; // one sheet per file
   }
-  return { employers: [...employers.values()], sheetRows, caseRows, minDate, maxDate };
+  return { employers: [...employers.values()], sheetRows, caseRows, minDate, maxDate, hasFein };
+}
+
+const SECONDS_PER_QUARTER = 91.3125 * 86400;
+
+/** A file's true reporting window, in quarters. 1 for a per-quarter file, up to 4 for a cumulative one. */
+function quartersInWindow(minDate, maxDate) {
+  if (minDate == null || maxDate == null) return null;
+  return Math.max(1, Math.min(4, Math.round((maxDate - minDate) / SECONDS_PER_QUARTER)));
+}
+
+/**
+ * Which already-ingested periods this file's window swallows, and whether an existing one swallows
+ * IT — the de-overlap decision.
+ *
+ * Necessary because OFLC changed conventions mid-history: the FY2021-FY2022 files are fiscal-year
+ * CUMULATIVE (FY2021 Q3 covers 2020-10-01 to 2021-06-30, i.e. Q1+Q2+Q3) while FY2025 onward are
+ * per-quarter and disjoint. Summing across periods is right for the new files and triple-counts the
+ * old ones, and the filename gives no hint which you have. So the window is measured from the
+ * decision dates in the file and compared against what is already stored: a strict superset
+ * supersedes what it contains, a strict subset is skipped, and disjoint windows coexist. The end
+ * state for a cumulative fiscal year is ONE period row holding the whole year, reached without
+ * anyone hard-coding which years were cumulative.
+ */
+function planWindow(db, { period, minDate, maxDate }) {
+  if (minDate == null || maxDate == null) return { supersedes: [], supersededBy: null };
+  const rows = db.prepare(
+    `SELECT fiscal_period, period_start, period_end FROM lca_source_files
+      WHERE fiscal_period != ? AND period_start IS NOT NULL AND period_end IS NOT NULL`
+  ).all(period);
+  const supersedes = [];
+  let supersededBy = null;
+  for (const r of rows) {
+    const containsIt = minDate <= r.period_start && maxDate >= r.period_end;
+    const containedBy = r.period_start <= minDate && r.period_end >= maxDate;
+    // Equal windows would satisfy both; treat that as "already have it" and skip, since two files
+    // reporting the identical window are the same data under two labels.
+    if (containedBy && !(containsIt && (minDate !== r.period_start || maxDate !== r.period_end))) {
+      supersededBy = r.fiscal_period;
+      break;
+    }
+    if (containsIt) supersedes.push(r.fiscal_period);
+  }
+  return { supersedes, supersededBy };
 }
 
 /**
  * Delete-then-insert for the period, in one transaction. This is what makes a re-import reconcile
  * rather than double: an employer that disappears from a re-issued file has to disappear from the
  * table too, which an upsert alone would never do.
+ *
+ * `supersedes` names periods whose window this file fully contains — their rows go in the same
+ * transaction, so the store is never briefly double-counted.
  */
-function writeQuarter(db, { period, year, quarter, fileName, byteSize, parsed }) {
+function writeQuarter(db, { period, year, quarter, fileName, byteSize, parsed, supersedes = [] }) {
   const now = Math.floor(Date.now() / 1000);
   const del = db.prepare(`DELETE FROM lca_employer_periods WHERE fiscal_period = ?`);
   const ins = db.prepare(`
@@ -257,20 +346,27 @@ function writeQuarter(db, { period, year, quarter, fileName, byteSize, parsed })
   const insFile = db.prepare(`
     INSERT INTO lca_source_files (
       file_name, fiscal_period, fiscal_year, fiscal_quarter, period_start, period_end,
-      sheet_rows, case_rows, employer_rows, byte_size, source_url, ingested_at
+      sheet_rows, case_rows, employer_rows, byte_size, source_url, has_employer_fein,
+      quarters_covered, ingested_at
     ) VALUES (
       @file_name, @fiscal_period, @fiscal_year, @fiscal_quarter, @period_start, @period_end,
-      @sheet_rows, @case_rows, @employer_rows, @byte_size, @source_url, @ingested_at
+      @sheet_rows, @case_rows, @employer_rows, @byte_size, @source_url, @has_employer_fein,
+      @quarters_covered, @ingested_at
     )
     ON CONFLICT(file_name) DO UPDATE SET
       fiscal_period = @fiscal_period, period_start = @period_start, period_end = @period_end,
       sheet_rows = @sheet_rows, case_rows = @case_rows, employer_rows = @employer_rows,
-      byte_size = @byte_size, ingested_at = @ingested_at
+      byte_size = @byte_size, has_employer_fein = @has_employer_fein,
+      quarters_covered = @quarters_covered, ingested_at = @ingested_at
   `);
 
   // Employers with no certified, denied or withdrawn case contribute nothing a reader could use.
   const rows = parsed.employers.filter(e => e.certified || e.denied || e.withdrawn);
+  const delLedger = db.prepare(`DELETE FROM lca_source_files WHERE fiscal_period = ?`);
   const run = db.transaction(() => {
+    // Superseded periods go in the SAME transaction as the replacement, so the store is never
+    // momentarily holding both a cumulative file and the quarters it contains.
+    for (const stale of supersedes) { del.run(stale); delLedger.run(stale); }
     del.run(period);
     for (const e of rows) {
       const titles = e.certified >= TITLES_MIN_CERTIFIED
@@ -291,7 +387,9 @@ function writeQuarter(db, { period, year, quarter, fileName, byteSize, parsed })
       file_name: fileName, fiscal_period: period, fiscal_year: year, fiscal_quarter: quarter,
       period_start: parsed.minDate, period_end: parsed.maxDate,
       sheet_rows: parsed.sheetRows, case_rows: parsed.caseRows, employer_rows: rows.length,
-      byte_size: byteSize, source_url: `${BASE_URL}/${fileName}`, ingested_at: now,
+      byte_size: byteSize, source_url: `${BASE_URL}/${fileName}`,
+      has_employer_fein: parsed.hasFein ? 1 : 0,
+      quarters_covered: quartersInWindow(parsed.minDate, parsed.maxDate), ingested_at: now,
     });
   });
   run();
@@ -341,14 +439,25 @@ async function main() {
     const file = await download(w.year, w.quarter);
     const started = Date.now();
     const parsed = await parseQuarter(file);
+    const range = [parsed.minDate, parsed.maxDate]
+      .map(t => (t ? new Date(t * 1000).toISOString().slice(0, 10) : "?")).join(" → ");
+    const quarters = quartersInWindow(parsed.minDate, parsed.maxDate);
+    const plan = planWindow(db, { period: w.period, minDate: parsed.minDate, maxDate: parsed.maxDate });
+    if (plan.supersededBy) {
+      log(`${w.period}: ${range} (${quarters}q) is already covered by ${plan.supersededBy} — SKIPPED`);
+      if (!KEEP) fs.unlinkSync(file);
+      continue;
+    }
     const employerRows = writeQuarter(db, {
       period: w.period, year: w.year, quarter: w.quarter,
       fileName: path.basename(file), byteSize: fs.statSync(file).size, parsed,
+      supersedes: plan.supersedes,
     });
-    const range = [parsed.minDate, parsed.maxDate]
-      .map(t => (t ? new Date(t * 1000).toISOString().slice(0, 10) : "?")).join(" → ");
     log(`${w.period}: ${parsed.caseRows} cases of ${parsed.sheetRows} sheet rows, ` +
-        `${employerRows} employers, ${range}, ${((Date.now() - started) / 1000).toFixed(0)}s`);
+        `${employerRows} employers, ${range} (${quarters}q), ` +
+        `${parsed.hasFein ? "FEIN" : "NO-FEIN"}` +
+        `${plan.supersedes.length ? `, supersedes ${plan.supersedes.join("+")}` : ""}, ` +
+        `${((Date.now() - started) / 1000).toFixed(0)}s`);
     if (!KEEP) fs.unlinkSync(file);
   }
 

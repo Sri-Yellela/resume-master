@@ -112,9 +112,30 @@ export function OrgSection({ orgUnits, total, theme }) {
 
 // 'FY2026Q1' -> 'FY2026 Q1'. The store's key format is compact because it sorts; this is the only
 // place it becomes prose.
+//
+// Three shapes, because one period no longer always means one quarter: the pre-FY2023 DOL files are
+// fiscal-year cumulative, so services/kb/lcaLayer.js labels a full-year period 'FY2021' and a
+// partial run 'FY2021Q1-Q3'. Passing those through unchanged would be fine; spacing them keeps the
+// chips reading like the quarter chips beside them.
 export function formatPeriod(period) {
-  const m = /^FY(\d{4})Q([1-4])$/.exec(String(period || ""));
-  return m ? `FY${m[1]} Q${m[2]}` : String(period || "");
+  const s = String(period || "");
+  const q = /^FY(\d{4})Q([1-4])$/.exec(s);
+  if (q) return `FY${q[1]} Q${q[2]}`;
+  const range = /^FY(\d{4})Q1-Q([1-4])$/.exec(s);
+  if (range) return `FY${range[1]} Q1–Q${range[2]}`;
+  const year = /^FY(\d{4})$/.exec(s);
+  if (year) return `FY${year[1]}`;
+  return s;
+}
+
+// "Oct 2020 – Dec 2025" from the corpus's real first and last decision dates. Dates rather than
+// fiscal labels: once a period can mean a whole year, "FY2021 Q1–FY2026 Q1" is ambiguous about
+// where the window actually starts, and a reader weighing "no filings found" deserves the real span.
+function formatWindow(startEpoch, endEpoch) {
+  if (!startEpoch || !endEpoch) return "";
+  const fmt = (t) => new Date(t * 1000).toLocaleDateString("en-US",
+    { month: "short", year: "numeric", timeZone: "UTC" });
+  return ` (${fmt(startEpoch)} – ${fmt(endEpoch)})`;
 }
 
 /**
@@ -149,6 +170,9 @@ export function SponsorshipSection({ lca, theme }) {
     .sort((a, b) => String(b[0]).localeCompare(String(a[0])));
   const searched = lca.periodsCovered;
   const hasFilings = lca.certifiedTotal > 0;
+  // Name the window, don't just count it. "Nothing found in 21 quarters" is a far stronger negative
+  // than "nothing found in 2" and the reader cannot tell those apart from a bare number.
+  const span = formatWindow(lca.corpusWindowStart, lca.corpusWindowEnd);
   // Tier C (0.60): matched by brand prefix, not by the registered name. It renders, but only ever
   // with the legal entity named and the basis of the match stated.
   const nameMatched = !lca.highConfidence;
@@ -161,13 +185,13 @@ export function SponsorshipSection({ lca, theme }) {
         <div style={{ fontSize: 12, color: theme.text, marginBottom: 4 }}>
           <strong>{entityNames}</strong> had <strong>{lca.certifiedTotal}</strong> H-1B labor
           condition application{lca.certifiedTotal === 1 ? "" : "s"} certified by the US Department
-          of Labor across {searched} quarter{searched === 1 ? "" : "s"}
+          of Labor across {searched} quarter{searched === 1 ? "" : "s"}{span}
           {lca.latestPeriod ? `, most recently ${formatPeriod(lca.latestPeriod)}` : ""}.
         </div>
       ) : (
         <div style={{ fontSize: 12, color: theme.text, marginBottom: 4 }}>
-          No H-1B filings found for <strong>{entityNames}</strong> in the {searched} quarter
-          {searched === 1 ? "" : "s"} of DOL disclosure data searched.
+          No H-1B filings found for <strong>{entityNames}</strong> in {searched} quarter
+          {searched === 1 ? "" : "s"} of DOL disclosure data{span}.
         </div>
       )}
       {/* The caveat, immediately under the claim it qualifies — never at the foot of the panel. */}

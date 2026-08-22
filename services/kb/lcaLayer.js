@@ -60,20 +60,65 @@ function formatFiscalPeriod(year, quarter) {
   return `FY${year}Q${quarter}`;
 }
 
-/** The newest quarter we have actually ingested, and how many quarters were searched. */
+/**
+ * The window we have actually ingested: oldest quarter, newest quarter, and how many.
+ *
+ * Both ends matter now that the corpus spans years rather than one fiscal year. "Nothing found in
+ * 21 quarters" is a far stronger negative than "nothing found in 2", and a reader cannot tell which
+ * they are being given from a count alone — 21 quarters could be a five-year run or a mislabelled
+ * gap. The UI names the span, so the strength of the claim is visible instead of implied.
+ *
+ * `feinPeriods` is the subset whose source file carried EMPLOYER_FEIN at all (migration 083): the
+ * pre-FY2024 layout has no employer tax ID, so the tier-C ambiguity guard falls back to legal names
+ * over those quarters. Exposed rather than hidden because it is a real limit on how finely two
+ * employers can be told apart in the older half of the window.
+ */
 function getCorpusCoverage(db) {
   const rows = db.prepare(
-    `SELECT fiscal_period, file_name, period_start, period_end FROM lca_source_files`
+    `SELECT fiscal_period, file_name, period_start, period_end, has_employer_fein, quarters_covered
+       FROM lca_source_files`
   ).all();
-  if (!rows.length) return { latestPeriod: null, periods: [], files: [], periodsCovered: 0 };
+  if (!rows.length) {
+    return { latestPeriod: null, earliestPeriod: null, periods: [], files: [], spanByPeriod: {},
+      periodsCovered: 0, feinPeriods: 0, windowStart: null, windowEnd: null };
+  }
   const periods = [...new Set(rows.map(r => r.fiscal_period))]
     .sort((a, b) => periodOrdinal(a) - periodOrdinal(b));
+  const spanByPeriod = {};
+  for (const r of rows) spanByPeriod[r.fiscal_period] = r.quarters_covered || 1;
+  const starts = rows.map(r => r.period_start).filter(t => t != null);
+  const ends = rows.map(r => r.period_end).filter(t => t != null);
   return {
     latestPeriod: periods[periods.length - 1],
+    earliestPeriod: periods[0],
     periods,
     files: rows.map(r => r.file_name).sort(),
-    periodsCovered: periods.length,
+    // How many quarters this period spans, per period. A cumulative fiscal-year file spans 4.
+    spanByPeriod,
+    // QUARTERS SEARCHED, not files ingested. After de-overlap a four-year corpus is nine period
+    // rows covering twenty-one quarters, and "we looked at 9 quarters" would understate it by more
+    // than half. Falls back to counting rows for periods ingested before migration 084 measured them.
+    periodsCovered: rows.reduce((n, r) => n + (r.quarters_covered || 1), 0),
+    feinPeriods: rows.filter(r => r.has_employer_fein === 1).length,
+    // The window as DATES, which is unambiguous in a way a fiscal-quarter label is not once one
+    // period can mean a whole year.
+    windowStart: starts.length ? Math.min(...starts) : null,
+    windowEnd: ends.length ? Math.max(...ends) : null,
   };
+}
+
+/**
+ * How a period should be NAMED on screen, given how many quarters it actually spans.
+ *
+ * A cumulative FY2021 file holds a full year's filings under the label "FY2021Q3". Rendering that
+ * as "FY2021 Q3" would claim a year of sponsorship happened in one quarter — a four-fold overstate
+ * on the one number the reader is most likely to quote.
+ */
+function periodDisplayLabel(fiscalPeriod, quartersCovered) {
+  const p = parseFiscalPeriod(fiscalPeriod);
+  if (!p || !quartersCovered || quartersCovered <= 1) return fiscalPeriod;
+  if (quartersCovered >= 4) return `FY${p.year}`;
+  return `FY${p.year}Q1-Q${p.quarter}`;
 }
 
 /**
@@ -108,12 +153,29 @@ function parseJson(value, fallback) {
 }
 
 /**
+ * One display row per employer NAME, preferring the entry that carries a FEIN. See the call site:
+ * a company that filed both before and after the FY2023 layout change appears twice in the entity
+ * index, and only the aggregation wants both. (Pre-FY2024 files have no FEIN column, so the same
+ * company legitimately appears once with a tax ID and once with the '' sentinel.)
+ */
+function dedupeEntitiesByName(entities) {
+  const byName = new Map();
+  for (const e of entities) {
+    const existing = byName.get(e.employerName);
+    if (!existing || (!existing.fein && e.fein)) {
+      byName.set(e.employerName, { name: e.employerName, fein: e.fein || null, state: e.state || null });
+    }
+  }
+  return [...byName.values()];
+}
+
+/**
  * Rolls the matched entities' per-quarter rows into the totals company_lca_sponsorship stores.
  * Sums across quarters because the DOL files are per-quarter and disjoint — verified from the
  * record layout's own reporting-period line and from the decision-date ranges, NOT assumed. Taking
  * the newest file as a year-to-date total would undercount every sponsor by ~4x.
  */
-function aggregateEntityPeriods(db, entities) {
+function aggregateEntityPeriods(db, entities, spanByPeriod = {}) {
   const totals = {
     certified: 0, denied: 0, withdrawn: 0, positions: 0,
     byPeriod: {}, byFiscalYear: {}, titles: new Map(),
@@ -121,7 +183,11 @@ function aggregateEntityPeriods(db, entities) {
   };
   if (!entities.length) return totals;
 
-  const pairs = entities.map(e => ({ key: e.legalKey, fein: e.fein || '' }));
+  // storedKey, not legalKey: employer_key is part of this table's primary key, so the lookup has to
+  // use the value on disk even when the current normaliser would derive a different one. See
+  // buildEntityIndex — recomputing for MATCHING and preserving for LOOKUP is what keeps a
+  // normalisation change from orphaning rows.
+  const pairs = entities.map(e => ({ key: e.storedKey ?? e.legalKey, fein: e.fein || '' }));
   const where = pairs.map(() => '(employer_key = ? AND fein = ?)').join(' OR ');
   const args = pairs.flatMap(p => [p.key, p.fein]);
   const rows = db.prepare(
@@ -129,6 +195,8 @@ function aggregateEntityPeriods(db, entities) {
        FROM lca_employer_periods WHERE ${where}`
   ).all(...args);
 
+  // Quarters, not period rows — see periodsWithFilings below.
+  const quartersWithFilings = new Set();
   for (const r of rows) {
     totals.certified += r.certified || 0;
     totals.denied += r.denied || 0;
@@ -136,7 +204,10 @@ function aggregateEntityPeriods(db, entities) {
     totals.positions += r.positions || 0;
     const fy = parseFiscalPeriod(r.fiscal_period);
     if (r.certified > 0) {
-      totals.byPeriod[r.fiscal_period] = (totals.byPeriod[r.fiscal_period] || 0) + r.certified;
+      quartersWithFilings.add(r.fiscal_period);
+      // Keyed by DISPLAY label, so a cumulative year reads "FY2021" rather than "FY2021Q3".
+      const label = periodDisplayLabel(r.fiscal_period, spanByPeriod[r.fiscal_period]);
+      totals.byPeriod[label] = (totals.byPeriod[label] || 0) + r.certified;
       if (fy) totals.byFiscalYear[fy.year] = (totals.byFiscalYear[fy.year] || 0) + r.certified;
       const ord = periodOrdinal(r.fiscal_period);
       if (ord != null && (totals.latestPeriod == null || ord > periodOrdinal(totals.latestPeriod))) {
@@ -150,7 +221,13 @@ function aggregateEntityPeriods(db, entities) {
       totals.titles.set(title, (totals.titles.get(title) || 0) + n);
     }
   }
-  totals.periodsWithFilings = Object.keys(totals.byPeriod).length;
+  // QUARTERS with filings, weighted by each period's span — so it is comparable with
+  // periods_covered, which also counts quarters. Counting period ROWS instead put Stripe at "18 of
+  // 21" when it filed in every quarter of the corpus: 18 is the number of FILES after de-overlap,
+  // and three of those files each cover more than one quarter. Two numbers side by side that count
+  // different things is the kind of ratio a reader trusts and should not.
+  totals.periodsWithFilings = [...quartersWithFilings]
+    .reduce((n, p) => n + (spanByPeriod[p] || 1), 0);
   return totals;
 }
 
@@ -208,8 +285,9 @@ function reconcileCompanyLca(db, opts = {}) {
   const run = db.transaction(() => {
     for (const company of companies) {
       const m = matchCompanyToEntities(company, index);
-      const totals = m.status === 'matched' ? aggregateEntityPeriods(db, m.entities)
-                                            : aggregateEntityPeriods(db, []);
+      const totals = m.status === 'matched'
+        ? aggregateEntityPeriods(db, m.entities, coverage.spanByPeriod)
+        : aggregateEntityPeriods(db, [], coverage.spanByPeriod);
       const topTitles = [...totals.titles.entries()]
         .sort((a, b) => b[1] - a[1]).slice(0, MAX_TOP_TITLES)
         .map(([title, n]) => ({ title, count: n }));
@@ -222,9 +300,14 @@ function reconcileCompanyLca(db, opts = {}) {
         match_reason: m.reason,
         // Stored for every status, including 'ambiguous': the whole point of declining a match is
         // being able to show WHICH employers were confused, if anyone ever asks why we said nothing.
-        matched_entities_json: JSON.stringify(m.entities.map(e => ({
-          name: e.employerName, fein: e.fein || null, state: e.state || null,
-        }))),
+        //
+        // DE-DUPLICATED BY NAME, because the pre-FY2024 files carry no FEIN and the FY2024+ ones
+        // do — so one company arrives as two index entries, `Stripe, Inc.` with a tax ID and
+        // `Stripe, Inc.` with the '' sentinel. Both are needed for aggregation (each keys a
+        // different set of lca_employer_periods rows) and only one belongs on screen, or the UI
+        // renders "Stripe, Inc. + Stripe, Inc." and looks like it is double-counting. The
+        // FEIN-bearing entry wins so the displayed row is the one that can be looked up.
+        matched_entities_json: JSON.stringify(dedupeEntitiesByName(m.entities)),
         candidate_count: m.candidateCount,
         certified_total: totals.certified,
         denied_total: totals.denied,
@@ -251,10 +334,20 @@ function reconcileCompanyLca(db, opts = {}) {
 
 /**
  * Turns a company_lca_sponsorship row into the client-facing shape. camelCase to match
- * mapJobRow/mapOrgUnitRow. `latestCorpusPeriod` is what recency is measured against.
+ * mapJobRow/mapOrgUnitRow.
+ *
+ * @param {object} row
+ * @param {ReturnType<typeof getCorpusCoverage>|string|null} coverage - the ingested window. Recency
+ *   is measured against its NEWEST quarter, not against wall-clock time: the most recent DOL file
+ *   is up to four months old the day it is published, so decaying from `now` would mark fresh data
+ *   stale. A bare string is accepted as that newest quarter for callers that only have the one value.
  */
-function mapLcaRow(row, latestCorpusPeriod) {
+function mapLcaRow(row, coverage) {
   if (!row) return null;
+  const cov = typeof coverage === 'string' || coverage == null
+    ? { latestPeriod: coverage || null, earliestPeriod: null, periodsCovered: null, feinPeriods: null }
+    : coverage;
+  const latestCorpusPeriod = cov.latestPeriod;
   const corpusOrd = periodOrdinal(latestCorpusPeriod);
   const rowOrd = periodOrdinal(row.latest_period);
   const lag = corpusOrd != null && rowOrd != null ? Math.max(0, corpusOrd - rowOrd) : null;
@@ -279,6 +372,12 @@ function mapLcaRow(row, latestCorpusPeriod) {
     periodsCovered: row.periods_covered,
     periodsWithFilings: row.periods_with_filings,
     latestCorpusPeriod: latestCorpusPeriod || null,
+    earliestCorpusPeriod: cov.earliestPeriod || null,
+    corpusWindowStart: cov.windowStart ?? null,
+    corpusWindowEnd: cov.windowEnd ?? null,
+    // How many of the searched quarters could distinguish employers by tax ID at all. Below
+    // periodsCovered means the older files had no FEIN column and the match leaned on legal names.
+    corpusFeinPeriods: cov.feinPeriods,
     // How many quarters behind the newest data this company's last filing is, and the decay that
     // implies. null lag = never filed in the window searched, which is NOT the same as stale.
     quartersSinceFiling: lag,
@@ -307,7 +406,7 @@ function getCompanyLca(db, company) {
     row = db.prepare(`SELECT * FROM company_lca_sponsorship WHERE company = ?`).get(company);
   } catch { return null; } // pre-migration DB — the company view must still render
   if (!row) return null;
-  return mapLcaRow(row, getCorpusCoverage(db).latestPeriod);
+  return mapLcaRow(row, getCorpusCoverage(db));
 }
 
 export {
@@ -317,6 +416,7 @@ export {
   parseFiscalPeriod,
   periodOrdinal,
   formatFiscalPeriod,
+  periodDisplayLabel,
   getCorpusCoverage,
   knownCompanies,
   reconcileCompanyLca,
