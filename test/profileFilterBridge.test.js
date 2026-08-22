@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  deriveProfileFilters, bucketYearsExperience, widenOneLevelUp, EXPERIENCE_LEVEL_THRESHOLDS,
+  deriveProfileFilters, bucketYearsExperience, relevanceBand, EXPERIENCE_LEVEL_THRESHOLDS,
 } from "../services/jobs/profileFilterBridge.js";
 
 test("bucketYearsExperience follows the documented threshold table", () => {
@@ -26,10 +26,24 @@ test("bucketYearsExperience never derives intern and returns null for missing/in
   assert.equal(bucketYearsExperience(NaN), null);
 });
 
-test("widenOneLevelUp includes the next bucket, or just itself at the top of the scale", () => {
-  assert.deepEqual(widenOneLevelUp("mid"), ["mid", "senior"]);
-  assert.deepEqual(widenOneLevelUp("executive"), ["executive"]);
-  assert.deepEqual(widenOneLevelUp("unknown-level"), ["unknown-level"]);
+// REBALANCED (X2 requirement 3): widenOneLevelUp -> relevanceBand, one level either way.
+// The old asymmetry existed because these levels EXCLUDED, so widening was a candidate's only
+// reach; under ranking nothing is excluded and the list decides sort order alone, where
+// upward-only was backwards against a bottom-heavy inventory (mid 175 of 241 in reach).
+test("relevanceBand spans one level either way, clamped at both ends of the scale", () => {
+  assert.deepEqual(relevanceBand("mid"), ["entry", "mid", "senior"]);
+  assert.deepEqual(relevanceBand("senior"), ["mid", "senior", "lead"]);
+  // Clamped, not wrapped, at each end.
+  assert.deepEqual(relevanceBand("intern"), ["intern", "entry"]);
+  assert.deepEqual(relevanceBand("executive"), ["lead", "executive"]);
+  // An unknown level is not in LEVEL_ORDER, so there is no neighbour to name.
+  assert.deepEqual(relevanceBand("unknown-level"), ["unknown-level"]);
+});
+
+test("the band always contains its own centre — a candidate's own level can never sort last", () => {
+  for (const level of ["intern", "entry", "mid", "senior", "lead", "executive"]) {
+    assert.ok(relevanceBand(level).includes(level), `${level} must be in its own band`);
+  }
 });
 
 test("deriveProfileFilters returns {} for a profile with no signals", () => {
@@ -61,9 +75,10 @@ test("deriveProfileFilters maps skills (capped) to skills_include", () => {
   assert.deepEqual(result.skills_include, ["python", "react", "sql", "aws", "docker", "kubernetes"]);
 });
 
-test("deriveProfileFilters maps yearsExperience to a 2-bucket experience_levels window", () => {
+test("deriveProfileFilters maps yearsExperience to the relevance band around its bucket", () => {
   const result = deriveProfileFilters(null, { yearsExperience: 6 });
-  assert.deepEqual(result.experience_levels, ["senior", "lead"]);
+  // 6 years -> 'senior', banded one either way. Was ["senior","lead"] while these levels excluded.
+  assert.deepEqual(result.experience_levels, ["mid", "senior", "lead"]);
 });
 
 test("deriveProfileFilters omits experience_levels when yearsExperience is absent", () => {

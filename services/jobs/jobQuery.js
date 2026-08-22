@@ -104,6 +104,36 @@ function buildQSql(q) {
 }
 
 /**
+ * The dimensions the Profile→Board Bridge derives, in the order they rank.
+ *
+ * X2's rule: A FILTER THE USER SET EXCLUDES ROWS. A FILTER DERIVED ON THEIR BEHALF RANKS ROWS —
+ * IT NEVER REMOVES THEM. A value the user typed or picked is a statement of intent and is obeyed
+ * literally; a value inferred from their profile is a guess about relevance, and a guess must not
+ * be able to empty the board. Measured before this changed, it could: on the reference board an
+ * executive profile kept 0 of 241 rows, and a lead kept 10, because the inventory is bottom-heavy
+ * (mid 175, senior 45, lead 12, intern 5, entry 4) and the derived window only ever widened UPWARD
+ * into levels that barely exist.
+ *
+ * Membership here is what makes the rule general rather than a special case for experience: every
+ * key deriveProfileFilters() can emit is in this list, so the bridge has no way to exclude anything.
+ * The board's SCOPE is still hard, and deliberately so — but scope is not the bridge's. It is the
+ * job_role_map role_key join and profileTitleSql, both applied by the caller from the profile's own
+ * declared role and target titles, i.e. things the user set when they created the profile.
+ *
+ * Order is relevance precedence, coarsest first: is this the kind of job you asked for, at your
+ * level, using your skills, that you could actually accept.
+ */
+const DERIVED_RANK_ORDER = ['q', 'experience_levels', 'skills_include', 'sponsorship_friendly'];
+
+// Every rank expression is three-valued and sorts ASC, so the three states mean the same thing on
+// every dimension and the disclosure can count "demoted" once, uniformly:
+//   0 = matches the derived window
+//   1 = NOT ESTABLISHED (the enrichment-owned column is NULL) — ranks between, never at the bottom,
+//       because "we have not looked at this yet" is not the same claim as "this does not match"
+//   2 = explicitly outside the window
+const RANK_MATCH = 0, RANK_UNKNOWN = 1, RANK_MISS = 2;
+
+/**
  * Builds an additive WHERE-clause fragment (leading "AND ...", or '' if nothing was passed)
  * plus its bound params, from the rich filter vocabulary. Caller splices this into its own
  * WHERE clause (already scoped to `WHERE sj.is_active = 1` and whatever else it needs).
@@ -112,13 +142,43 @@ function buildQSql(q) {
  * experience_levels, salary_min_usd, salary_max_usd, posted_after, discovered_after,
  * skills_include, skills_exclude, companies_include, companies_exclude,
  * sources_include, sources_exclude, tiers_include, tiers_exclude.
+ *
+ * @param {object} params - filter values, whatever their provenance
+ * @param {{ derivedKeys?: string[] }} [opts] - which of `params`' keys came from the profile
+ *   bridge rather than from the user. THE CALLER MUST PASS THIS; it is the merge point (server.js's
+ *   appliedDerivedKeys) that knows, and re-deriving the answer here would be a second opinion that
+ *   could disagree. Any key named here AND listed in DERIVED_RANK_ORDER moves out of the WHERE
+ *   clause and into `rank` instead.
+ * @returns {{ sql: string, params: any[],
+ *   rank: { sql: string, params: any[], demotedSql: string, demotedParams: any[] },
+ *   rankedKeys: string[] }}
+ *   `rank.sql` is a comma-separated ORDER BY key list (no trailing comma, '' when nothing ranks).
+ *   `rank.demotedSql` is a boolean matching rows that are explicitly outside at least one derived
+ *   window — what the disclosure counts, and what would have been HIDDEN before this change.
  */
-function buildJobFilters(params = {}) {
+function buildJobFilters(params = {}, opts = {}) {
   const clauses = [];
   const args = [];
+  // key -> { sql, params }; assembled into DERIVED_RANK_ORDER at the end so the ORDER BY key order
+  // is this module's documented decision and not the order the caller happened to build params in.
+  const ranks = {};
+  const derivedKeys = new Set(toArray(opts.derivedKeys));
+  const isDerived = (key) => derivedKeys.has(key) && DERIVED_RANK_ORDER.includes(key);
 
   const qSql = buildQSql(params.q);
-  if (qSql.clause) { clauses.push(qSql.clause); args.push(...qSql.params); }
+  if (qSql.clause) {
+    if (isDerived('q')) {
+      // Two-valued in substance — a title either matches the derived terms or it does not, there is
+      // no "not yet established" state for sj.title — but written with RANK_MISS so every rank
+      // expression shares one vocabulary and demotedSql can test all of them the same way.
+      ranks.q = {
+        sql: `CASE WHEN ${qSql.clause} THEN ${RANK_MATCH} ELSE ${RANK_MISS} END`,
+        params: qSql.params,
+      };
+    } else {
+      clauses.push(qSql.clause); args.push(...qSql.params);
+    }
+  }
 
   const locations = toArray(params.locations);
   if (locations.length) {
@@ -157,17 +217,31 @@ function buildJobFilters(params = {}) {
     args.push(...employmentTypes);
   }
 
-  // Soft-null, same class as skills_include above: experience_level is written by
-  // enrichJob.js's background LLM pass, so an unenriched row has it NULL and
-  // `NULL IN (...)` is NULL -> excluded. This filter is applied BY DEFAULT via
-  // profileFilterBridge (any profile with yearsExperience set), so without this guard a
-  // lagging enrichment queue silently zeroes the board for the common case — the exact
-  // production failure skills_include caused. Widening the bucket one level up (see the
-  // bridge) does NOT help here: widening only moves the IN-list, and NULL matches no list.
+  // EXPLICIT -> excludes (soft-null). DERIVED -> ranks. See DERIVED_RANK_ORDER.
+  //
+  // The soft-null escape below is kept for the explicit path and is still load-bearing there:
+  // experience_level is enrichJob.js-populated, `NULL IN (...)` is NULL, and a lagging enrichment
+  // queue would otherwise zero a board the user narrowed by hand.
+  //
+  // But it never protected the DERIVED path from the failure that mattered, and the reference board
+  // shows why in one number: 0 of 241 in-reach rows have experience_level NULL. Every row is
+  // classified, so `IS NULL OR` rescues nothing, and the IN-list is a hard window. An executive
+  // profile derives ['executive'], the board holds one executive row in total, and the result is an
+  // empty board. Ranking is the fix; the soft-null guard is orthogonal to it and stays.
   const experienceLevels = toArray(params.experience_levels);
   if (experienceLevels.length) {
-    clauses.push(`(sj.experience_level IS NULL OR sj.experience_level IN (${experienceLevels.map(() => '?').join(',')}))`);
-    args.push(...experienceLevels);
+    const inList = experienceLevels.map(() => '?').join(',');
+    if (isDerived('experience_levels')) {
+      ranks.experience_levels = {
+        sql: `CASE WHEN sj.experience_level IS NULL THEN ${RANK_UNKNOWN}
+                   WHEN sj.experience_level IN (${inList}) THEN ${RANK_MATCH}
+                   ELSE ${RANK_MISS} END`,
+        params: [...experienceLevels],
+      };
+    } else {
+      clauses.push(`(sj.experience_level IS NULL OR sj.experience_level IN (${inList}))`);
+      args.push(...experienceLevels);
+    }
   }
 
   // Salary range-overlap: a job's [salary_min_usd, salary_max_usd] range overlaps the
@@ -234,10 +308,26 @@ function buildJobFilters(params = {}) {
   // profileFilterBridge.js, silently zeroing the entire board for that user. A row must never
   // be hidden purely because we haven't enriched it yet — only excluded on an explicit
   // mismatch once it has been.
+  //
+  // EXPLICIT -> excludes (soft-null, as described above). DERIVED -> ranks: this key was 100% of the
+  // bridge's remaining narrowing on the reference board (227 of 241 kept by skills alone), and a
+  // skill list inferred from a resume is a guess about what someone is good at, not an instruction
+  // to hide everything else.
   const skillsInclude = toArray(params.skills_include);
   if (skillsInclude.length) {
-    clauses.push(`(sj.skills_json IS NULL OR (${skillsInclude.map(() => 'sj.skills_json LIKE ?').join(' OR ')}))`);
-    skillsInclude.forEach(s => args.push(`%"${s}"%`));
+    const likeList = skillsInclude.map(() => 'sj.skills_json LIKE ?').join(' OR ');
+    const likeArgs = skillsInclude.map(s => `%"${s}"%`);
+    if (isDerived('skills_include')) {
+      ranks.skills_include = {
+        sql: `CASE WHEN sj.skills_json IS NULL THEN ${RANK_UNKNOWN}
+                   WHEN (${likeList}) THEN ${RANK_MATCH}
+                   ELSE ${RANK_MISS} END`,
+        params: likeArgs,
+      };
+    } else {
+      clauses.push(`(sj.skills_json IS NULL OR (${likeList}))`);
+      args.push(...likeArgs);
+    }
   }
   const skillsExclude = toArray(params.skills_exclude);
   skillsExclude.forEach(s => {
@@ -251,9 +341,25 @@ function buildJobFilters(params = {}) {
   // given time; a sponsorship-needing user must still see those, not have them all hidden.
   // Same "confidence-weighted, never hard-fail" principle as server.js's
   // evaluateProfileFactEligibility() (a complementary text-regex check used at scrape/poll time).
+  //
+  // EXPLICIT (the user ticked "sponsor-friendly") -> excludes. DERIVED (inferred from their stored
+  // structured facts) -> ranks, for the same reason as the two above and for one specific to this
+  // dimension: both columns are NULL on every active row today, so the derived filter currently
+  // excludes nothing and the change is a no-op — but the moment enrichment backfills them it would
+  // start hiding jobs on a guess about someone's immigration status. Ranking now means that
+  // backfill improves the ORDER of the board instead of silently shrinking it.
   if (params.sponsorship_friendly) {
-    clauses.push(`(sj.requires_work_auth IS NULL OR sj.requires_work_auth != 1)`);
-    clauses.push(`(sj.is_h1b_sponsor IS NULL OR sj.is_h1b_sponsor != 0)`);
+    if (isDerived('sponsorship_friendly')) {
+      ranks.sponsorship_friendly = {
+        sql: `CASE WHEN sj.requires_work_auth = 1 OR sj.is_h1b_sponsor = 0 THEN ${RANK_MISS}
+                   WHEN sj.requires_work_auth IS NULL AND sj.is_h1b_sponsor IS NULL THEN ${RANK_UNKNOWN}
+                   ELSE ${RANK_MATCH} END`,
+        params: [],
+      };
+    } else {
+      clauses.push(`(sj.requires_work_auth IS NULL OR sj.requires_work_auth != 1)`);
+      clauses.push(`(sj.is_h1b_sponsor IS NULL OR sj.is_h1b_sponsor != 0)`);
+    }
   }
 
   // ── Provider (source) include/exclude ────────────────────────────────────────────────────
@@ -323,7 +429,32 @@ function buildJobFilters(params = {}) {
     args.push(...companiesExclude);
   }
 
-  return { sql: clauses.length ? `AND ${clauses.join(' AND ')}` : '', params: args };
+  // Assembled in DERIVED_RANK_ORDER, not in the order the dimensions happen to be built above, so
+  // relevance precedence is one declared list rather than an accident of this function's layout.
+  const rankSqls = [], rankParams = [], rankedKeys = [];
+  for (const key of DERIVED_RANK_ORDER) {
+    if (!ranks[key]) continue;
+    rankSqls.push(ranks[key].sql);
+    rankParams.push(...ranks[key].params);
+    rankedKeys.push(key);
+  }
+
+  return {
+    sql: clauses.length ? `AND ${clauses.join(' AND ')}` : '',
+    params: args,
+    rank: {
+      // ORDER BY keys. Every one sorts ASC (RANK_MATCH=0 first) — spelled out rather than left to
+      // SQLite's default so that reordering or wrapping this fragment cannot silently invert it.
+      sql: rankSqls.map(s => `(${s}) ASC`).join(', '),
+      params: rankParams,
+      // "Explicitly outside at least one derived window" — the rows the bridge USED to delete. The
+      // disclosure counts these so it can say what was demoted instead of claiming a hidden total.
+      // RANK_UNKNOWN is deliberately not counted: a row we have not enriched has not been judged.
+      demotedSql: rankSqls.length ? `(${rankSqls.map(s => `(${s}) = ${RANK_MISS}`).join(' OR ')})` : '',
+      demotedParams: rankSqls.length ? [...rankParams] : [],
+    },
+    rankedKeys,
+  };
 }
 
 // include_fields is an ALLOWLIST projection of scraped_jobs columns for lightweight list
@@ -373,5 +504,6 @@ export {
   computeSkillsFacet,
   FACET_DIMENSIONS,
   ALLOWED_FIELDS,
+  DERIVED_RANK_ORDER,
   toArray,
 };

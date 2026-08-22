@@ -25,7 +25,7 @@ const EXPERIENCE_LEVEL_THRESHOLDS = [
 ];
 
 // The fourth copy of the experience-level vocabulary, and the one where ORDER is load-bearing:
-// widenOneLevelUp below walks it by index. It is the shared contract's own order now, so a level
+// relevanceBand below walks it by index. It is the shared contract's own order now, so a level
 // added to the board's controls is one this bridge can widen into rather than an index it cannot
 // find.
 const LEVEL_ORDER = EXPERIENCE_LEVEL_ORDER;
@@ -39,18 +39,34 @@ function bucketYearsExperience(years) {
   return hit ? hit.level : null;
 }
 
-// jobQuery.js's experience_levels filter is now null-safe (sj.experience_level IS NULL OR
-// IN (...)), because enrichment lag is the NORMAL state, not an edge case: a production
-// board went to zero when 0 of 178 active rows had been enriched. The earlier note here
-// claimed only the visa filter needed null-safety — that was wrong, and it applies to every
-// filter over an enrichJob.js-populated column. Widening below is a RELEVANCE nicety (a
-// borderline candidate should see one level up), NOT null protection; it never was, since
-// NULL matches no IN-list however wide.
-function widenOneLevelUp(level) {
+/**
+ * REBALANCED, from one-level-UP to one level either way — X2 requirement 3.
+ *
+ * This used to be widenOneLevelUp, and under the old regime the asymmetry had a rationale: the
+ * derived levels EXCLUDED, so widening was the only way a borderline candidate could reach a job
+ * outside their bucket, and reaching upward is what an ambitious candidate wants. Downward was
+ * pointless because nobody needs help finding jobs beneath them.
+ *
+ * Under ranking that rationale is gone in both halves. Nothing is excluded any more, so "reach" is
+ * free — every level is already on the board. What this list decides now is only which rows sort
+ * FIRST, i.e. it is a relevance band, not a window. And as a relevance band, upward-only was
+ * backwards against this inventory:
+ *
+ *     in reach for the reference profile: mid 175, senior 45, lead 12, intern 5, entry 4
+ *
+ * A senior widening to [senior, lead] puts 57 rows in band and sorts the 175 mid roles — which a
+ * senior engineer is entirely employable in, and which are 73% of the board — below them. Widening
+ * DOWN as well as up is what matches how people actually apply: one level below is a job you can
+ * certainly do, one level above is a stretch, and both beat a level two steps away.
+ *
+ * The band is wide by construction (a mid gets entry+mid+senior = 224 of 241). That is correct for
+ * a band whose only job is to sink the clearly-wrong rows — for a mid the 17 lead/intern rows go
+ * last — and it is safe precisely because being out of band no longer means being gone.
+ */
+function relevanceBand(level) {
   const idx = LEVEL_ORDER.indexOf(level);
   if (idx === -1) return [level];
-  const next = LEVEL_ORDER[idx + 1];
-  return next ? [level, next] : [level];
+  return [LEVEL_ORDER[idx - 1], level, LEVEL_ORDER[idx + 1]].filter(Boolean);
 }
 
 function cleanStringList(list, max) {
@@ -106,7 +122,7 @@ function deriveProfileFilters(activeProfile, simpleApplyProfile, opts = {}) {
   if (skills.length) derived.skills_include = skills;
 
   const bucket = bucketYearsExperience(simpleApplyProfile?.yearsExperience);
-  if (bucket) derived.experience_levels = widenOneLevelUp(bucket);
+  if (bucket) derived.experience_levels = relevanceBand(bucket);
 
   const sponsorshipFriendly = opts.sponsorshipFriendly ??
     !!simpleApplyProfile?.structuredFacts?.requiresSponsorship;
@@ -118,6 +134,6 @@ function deriveProfileFilters(activeProfile, simpleApplyProfile, opts = {}) {
 export {
   deriveProfileFilters,
   bucketYearsExperience,
-  widenOneLevelUp,
+  relevanceBand,
   EXPERIENCE_LEVEL_THRESHOLDS,
 };

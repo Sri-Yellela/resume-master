@@ -1196,11 +1196,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const [totalJobs,   setTotalJobs]   = useState(0);
   const [totalPages,  setTotalPages]  = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  // Profile→Board Bridge disclosure. `curation` is the server's { total, uncuratedTotal, hidden,
-  // derivedKeys } block, present ONLY when the bridge actually hid something; `curateOff` is the
-  // user's "show me the rest" escape, which sends ?curate=off and turns the bridge off for that
-  // request. A board narrowed by the profile used to look exactly like a board with nothing else in
-  // it, which is how an imported job that WAS present read as missing.
+  // Profile→Board Bridge disclosure. `curation` is the server's { total, demoted, rankedKeys }
+  // block, present ONLY when the bridge actually demoted something; `curateOff` is the user's
+  // escape, which sends ?curate=off and turns the ranking off for that request. The bridge used to
+  // EXCLUDE on these dimensions, which is how an imported job that WAS present read as missing; it
+  // ranks now, so the disclosure is about position rather than about a withheld remainder.
   const [curation,    setCuration]    = useState(null);
   const [curateOff,   setCurateOff]   = useState(false);
   // The server's own word for WHY a board came back empty ('cache_empty' today). Without it the
@@ -3700,19 +3700,19 @@ function buildVisiblePageItems(currentPage, totalPages) {
 // "install the extension" modal that no install could satisfy. The LIST below stays — it is fed
 // by the single-job capture path (/api/extension/save-job), which is live.
 // ── Curation disclosure ─────────────────────────────────────────────────────────────────────
-// The board is narrowed BY DEFAULT from the active profile (services/jobs/profileFilterBridge.js
+// The board is ORDERED by default from the active profile (services/jobs/profileFilterBridge.js
 // derives q, skills_include, experience_levels and sponsorship_friendly for any dimension the user
-// did not set explicitly). That narrowing is good — and it was completely invisible, which is not.
+// did not set explicitly). It used to be NARROWED by them, and this banner used to say so.
 //
-// A row the bridge excluded was indistinguishable from a row that did not exist, so the honest
-// diagnosis ("your profile is hiding it") was unavailable to the user and, for two rounds of fixes,
-// to us: an imported Quora posting was present, active, correctly bucketed and returned by
-// ?curate=off the whole time, while the default board dropped it for being a New Grad req
-// (experience_level='entry') against a 3-years-experience profile whose derived window is
-// ['mid','senior'] — widenOneLevelUp only ever widens upward.
+// That is the wording change X2 requires. A derived filter now ranks instead of excluding, so
+// "Showing 210 of 241" became false in the one way that matters — all 241 are on the board, and a
+// user told 31 were missing would go looking somewhere else for rows that are simply further down.
+// The banner reports `demoted` now: how many rows sorted below the ones matching the profile.
 //
-// So: say the number, name the reason, and give one control that shows the rest. Curation is not
-// weakened; it is disclosed.
+// The reason it exists at all is unchanged. Ordering applied silently is still ordering the user
+// cannot account for, and the same imported Quora posting that read as missing under the old regime
+// (a New Grad req against a 3-years profile) would now read as inexplicably buried. Say the number,
+// name the dimensions, and keep one control that turns the whole thing off.
 const CURATION_KEY_LABELS = {
   q:                    "role keywords",
   skills_include:       "skills",
@@ -3723,11 +3723,14 @@ const CURATION_KEY_LABELS = {
 function CurationNotice({ theme, curation, curateOff, onToggleCurate }) {
   const { theme: t } = useTheme();
   const th = theme || t;
-  // Nothing to disclose unless the bridge actually hid rows. When the user has switched curation
+  // Nothing to disclose unless the bridge actually demoted rows. When the user has switched curation
   // off we keep a way back on, so the state is never a one-way door they cannot see they are in.
   if (!curation && !curateOff) return null;
 
-  const reasons = (curation?.derivedKeys || [])
+  // `rankedKeys` is the current field; `derivedKeys` was its name while these dimensions still
+  // excluded. Both are read so a client and server that ship out of step still name the reason
+  // instead of silently rendering a bare number.
+  const reasons = (curation?.rankedKeys || curation?.derivedKeys || [])
     .map(k => CURATION_KEY_LABELS[k] || k)
     .join(", ");
 
@@ -3738,12 +3741,12 @@ function CurationNotice({ theme, curation, curateOff, onToggleCurate }) {
                   flexWrap:"wrap" }}>
       <span style={{ fontSize:11.5, color:th.text, lineHeight:1.6 }}>
         {curateOff ? (
-          <>Showing <strong>everything in your role</strong> — your profile&rsquo;s own filters are off.</>
+          <>Showing <strong>everything in your role</strong>, unsorted — your profile is not ordering these.</>
         ) : (
           <>
-            Showing <strong>{curation.total}</strong> of <strong>{curation.uncuratedTotal}</strong> jobs
-            matching your profile
-            {reasons ? <> ({reasons})</> : null}.
+            Sorted for your profile
+            {reasons ? <> ({reasons})</> : null} — all <strong>{curation.total}</strong> jobs are here,
+            with <strong>{curation.demoted}</strong> further down.
           </>
         )}
       </span>
@@ -3751,7 +3754,10 @@ function CurationNotice({ theme, curation, curateOff, onToggleCurate }) {
         style={{ border:`1px solid ${th.text}`, borderRadius:4, padding:"3px 10px",
                  background:"transparent", color:th.text, fontWeight:700, fontSize:11,
                  cursor:"pointer", whiteSpace:"nowrap" }}>
-        {curateOff ? "Use my profile" : `Show all ${curation.uncuratedTotal}`}
+        {/* "Show all N" was the way past a filter that hid rows. Nothing is hidden now, so the
+            control is about the ORDER: keep it, because a user who disagrees with the ranking still
+            needs a way out, but stop promising rows that were never withheld. */}
+        {curateOff ? "Use my profile" : "Don't sort for me"}
       </button>
     </div>
   );

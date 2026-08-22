@@ -5570,19 +5570,27 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       const isExplicit  = explicitVal !== undefined && explicitVal !== null && explicitVal !== '';
       if (!isExplicit) { filterParams[key] = derivedFilters[key]; appliedDerivedKeys.push(key); }
     }
-    const richFilters = buildJobFilters(filterParams);
-    // Same board, same everything else, minus ONLY the profile-derived defaults — i.e. exactly what
-    // ?curate=off returns. Built here so the response can say how much the bridge is hiding.
+    // PROVENANCE, carried rather than re-derived. buildJobFilters cannot tell a value the user typed
+    // from one this bridge inferred — the merged object looks identical either way — and X2's rule
+    // turns entirely on that distinction: a filter the USER SET excludes rows, a filter DERIVED on
+    // their behalf ranks them. appliedDerivedKeys is already the authoritative answer, computed by
+    // the merge loop directly above from the only place that knows. Passing it down is what makes
+    // the rule structural; having the query builder guess again would be a second opinion that can
+    // disagree with this one.
+    const richFilters = buildJobFilters(filterParams, { derivedKeys: appliedDerivedKeys });
+    // THE UNCURATED SECOND QUERY IS GONE, because the quantity it measured no longer exists.
     //
-    // Why this exists: the bridge narrows by DEFAULT and said nothing, so a row it excluded was
-    // indistinguishable from a row that does not exist. That is how a user-imported Quora posting
-    // stayed "missing" through two rounds of fixes — the row was present, active, correctly bucketed
-    // and correctly returned by ?curate=off, while the default board dropped it because the posting
-    // is a New Grad req (experience_level='entry') and a candidate with 3 years' experience derives
-    // experience_levels=['mid','senior'] via widenOneLevelUp, which only ever widens UPWARD.
-    // Curation itself is not weakened here (that is a product decision, and one-level-up relevance
-    // is deliberate) — it is only made VISIBLE, with a way to see the rest.
-    const uncuratedFilters = appliedDerivedKeys.length ? buildJobFilters(baseFilterParams) : null;
+    // It used to build the same board minus the profile-derived defaults, so the response could say
+    // how many rows the bridge was HIDING — disclosure being the previous pass's answer to a bridge
+    // that narrowed silently. Every key the bridge derives now ranks instead of excluding, so the
+    // curated and uncurated row SETS are identical by construction and that count is always zero.
+    // Keeping the query would be paying for a COUNT to learn a constant.
+    //
+    // What is worth disclosing changed with it: not "N are hidden" but "N are further down". That is
+    // richFilters.rank.demotedSql — rows explicitly outside at least one derived window, i.e.
+    // precisely the rows this endpoint used to delete from the answer. Counted below, and only when
+    // something actually ranks.
+    const rankApplied = !!richFilters.rank.sql;
     const selectCols  = buildSelectColumns(req.query.include_fields);
     const facetDims   = resolveFacetDimensions(req.query.include_facets);
 
@@ -5667,7 +5675,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         `(sj.min_years_exp IS NULL) ASC, sj.min_years_exp ${dir}, ` +
         `((${LEVEL_RANK}) IS NULL) ASC, (${LEVEL_RANK}) ${dir}, ${RECENCY}`;
 
-      const orderBy = sort === 'atsScore'       ? `(sj.ats_score IS NULL) ASC, sj.ats_score DESC, ${RECENCY}`
+      const chosenSort = sort === 'atsScore'       ? `(sj.ats_score IS NULL) ASC, sj.ats_score DESC, ${RECENCY}`
                     : sort === 'applicantCount'  ? `(sj.applicant_count IS NULL) ASC, sj.applicant_count ASC, ${RECENCY}`
                     : sort === 'compHigh'        ? `(sj.salary_max IS NULL) ASC, sj.salary_max DESC, ${RECENCY}`
                     : sort === 'compLow'         ? `(sj.salary_min IS NULL) ASC, sj.salary_min ASC, ${RECENCY}`
@@ -5675,6 +5683,27 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
                     : sort === 'yoeHigh'         ? EXP('DESC')
                     : sort === 'dateAsc'         ? OLDEST
                     :                             RECENCY;
+
+      // Profile relevance leads the DEFAULT order only — the same user-set-vs-derived rule the
+      // filters now follow, applied to ordering.
+      //
+      // Picking "Pay high to low" is a user-set instruction about ORDER, so it wins outright: a
+      // derived relevance key in front of it would put an in-band $80k role above an out-of-band
+      // $300k one and read as a broken control, which is exactly the complaint the compHigh/compLow
+      // fix above existed to settle. Leaving the sort alone is not an instruction, so the derived
+      // ranking may lead there.
+      //
+      // 'dateDesc' counts as "left alone": the client always sends a sort (JobsPanel's buildParams
+      // does `p.set("sort", sortBy)`) and its initial value is 'dateDesc', which is also the value
+      // that falls through this ternary to RECENCY. So absence and 'dateDesc' are the same state and
+      // both have to be treated as the default, or relevance would never apply to anyone.
+      const sortIsDefault = !sort || sort === 'dateDesc';
+      const rankPrefix = (sortIsDefault && richFilters.rank.sql) ? `${richFilters.rank.sql}, ` : '';
+      const orderBy = `${rankPrefix}${chosenSort}`;
+      // Bound to ORDER BY, so they sit after every WHERE param and before LIMIT/OFFSET — placeholder
+      // binding is positional in SQL text order, and the COUNT/facet queries below carry no ORDER BY
+      // and therefore must NOT receive these.
+      const orderArgs = rankPrefix ? richFilters.rank.params : [];
       const offset  = (pg - 1) * ps;
 
       // The role_key join is what makes this board profile-scoped, and it is an INNER JOIN — so it
@@ -5732,7 +5761,7 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       const whereClause = whereClauseFor(richFilters);
       const baseArgs    = argsFor(richFilters);
 
-      const rows  = db.prepare(`SELECT ${selectCols}, uj.visited, uj.applied, uj.starred, uj.disliked ${joinClause} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...baseArgs, ps, offset);
+      const rows  = db.prepare(`SELECT ${selectCols}, uj.visited, uj.applied, uj.starred, uj.disliked ${joinClause} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...baseArgs, ...orderArgs, ps, offset);
       const total = db.prepare(`SELECT COUNT(*) as n ${joinClause} ${whereClause}`).get(...baseArgs)?.n || 0;
 
       console.log(JSON.stringify({ msg: '[jobs]', profile: sessionActiveProfile.profile_name, sort, total, returned: rows.length }));
@@ -5748,21 +5777,29 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         fromCache:  true,
       };
 
-      // Curation disclosure. Emitted ONLY when the bridge actually narrowed something, so a profile
-      // with no signals (the common case for a new account) gets a byte-identical response to before.
-      // The client turns this into "Showing N of M matching your profile" plus a control that re-runs
-      // the same board with ?curate=off. One extra COUNT, and only on the curated path.
-      if (uncuratedFilters) {
-        const uncuratedTotal = db.prepare(
-          `SELECT COUNT(*) as n ${joinClause} ${whereClauseFor(uncuratedFilters)}`
-        ).get(...argsFor(uncuratedFilters))?.n || 0;
-        if (uncuratedTotal > total) {
+      // Curation disclosure — now a statement about ORDER, not about a withheld remainder.
+      //
+      // The old shape (total / uncuratedTotal / hidden) said "Showing 210 of 241". Under ranking that
+      // sentence would be a lie in the only way that matters: all 241 are on the board, and claiming
+      // otherwise would send users to hunt for rows that are two screens down rather than missing.
+      // `demoted` replaces `hidden` and counts the rows explicitly outside a derived window — the
+      // same rows the old `hidden` counted, now described by where they went instead of by their
+      // absence. `applied` is unchanged so a client that has not been updated still renders something
+      // truthful rather than throwing.
+      //
+      // Only emitted when something actually ranked AND something is actually demoted, so a profile
+      // with no signals still gets a byte-identical response to before.
+      if (rankApplied) {
+        const demotedRows = db.prepare(
+          `SELECT COUNT(*) as n ${joinClause} ${whereClause} AND ${richFilters.rank.demotedSql}`
+        ).get(...baseArgs, ...richFilters.rank.demotedParams)?.n || 0;
+        if (demotedRows > 0) {
           responseBody.curation = {
-            applied:     true,
-            derivedKeys: appliedDerivedKeys,
+            applied:    true,
+            ranked:     true,
+            rankedKeys: richFilters.rankedKeys,
             total,
-            uncuratedTotal,
-            hidden:      uncuratedTotal - total,
+            demoted:    demotedRows,
           };
         }
       }

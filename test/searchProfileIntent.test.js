@@ -17,8 +17,9 @@ test("external scraping stays retired", () => {
   assert.doesNotMatch(server, /app\.post\("\/api\/jobs\/scrape"/,
     "the per-user scrape route must not return");
   // The board is served from the stored pool via buildJobFilters, not an outbound crawl.
-  assert.match(server, /buildJobFilters\(filterParams\)/,
-    "/api/jobs must still compose its filters through buildJobFilters");
+  assert.match(server, /buildJobFilters\(filterParams, \{ derivedKeys: appliedDerivedKeys \}\)/,
+    "/api/jobs must still compose its filters through buildJobFilters — and must hand it the " +
+    "provenance of each key, which is what makes derived values rank instead of exclude");
 });
 
 test("frontend detects strong cross-profile search intent before scrape", () => {
