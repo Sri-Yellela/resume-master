@@ -46,25 +46,48 @@ class FakeEventSource {
   emit(obj) { this.onmessage?.({ data: JSON.stringify(obj) }); }
 }
 globalThis.EventSource = FakeEventSource;
-// The hook reads the auth token out of sessionStorage via lib/api.js.
-globalThis.sessionStorage = { getItem: () => "", setItem() {}, removeItem() {} };
+// The hook reads the auth token out of sessionStorage via lib/api.js. It is read on every call, so
+// changing this between subscribes is how a second tab is made to look like a different user.
+let authToken = "";
+globalThis.sessionStorage = { getItem: () => authToken, setItem() {}, removeItem() {} };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+
+const HOOK = new URL("../client/src/hooks/useSyncEvents.js", import.meta.url).href;
 
 const {
   subscribeSyncEvents, syncEventsState, __resetSyncEvents,
-} = await import("../client/src/hooks/useSyncEvents.js");
+} = await import(HOOK);
+
+/**
+ * ANOTHER TAB. Each import specifier is a separate module instance with its own subscriber set and
+ * its own stream, while the Web Lock manager and the BroadcastChannel bus are process-wide — which
+ * is exactly the relationship two browser tabs have. Node ships both APIs, so the cross-tab path
+ * under test here is the real one, not a stub of it.
+ */
+let tabSeq = 0;
+const openTab = () => import(`${HOOK}?tab=${++tabSeq}`);
 
 const ref = (handlers) => ({ current: handlers });
+
+/**
+ * Leadership is granted asynchronously, so the stream opens a turn of the event loop after the
+ * first subscribe rather than during it. Relayed events cross the BroadcastChannel asynchronously
+ * too. Everything that used to be observable synchronously now needs this first.
+ */
+const settle = () => new Promise(r => setTimeout(r, 20));
+
 const reset = () => {
+  authToken = "";
   __resetSyncEvents();
   FakeEventSource.live = [];
   FakeEventSource.opened = 0;
 };
 
-test("five subscribers open ONE connection, not five", () => {
+test("five subscribers open ONE connection, not five", async () => {
   reset();
   const offs = [];
   for (let i = 0; i < 5; i++) offs.push(subscribeSyncEvents(ref({ job_flag: () => {} })));
+  await settle();
   assert.equal(FakeEventSource.opened, 1,
     `${FakeEventSource.opened} connections for 5 subscribers — this is the bug that emptied the board`);
   assert.equal(syncEventsState().subscribers, 5);
@@ -72,20 +95,22 @@ test("five subscribers open ONE connection, not five", () => {
   offs.forEach(off => off());
 });
 
-test("every subscriber receives every event — sharing must not cost delivery", () => {
+test("every subscriber receives every event — sharing must not cost delivery", async () => {
   reset();
   const seen = [0, 0, 0, 0];
   const offs = seen.map((_, i) => subscribeSyncEvents(ref({ job_flag: () => { seen[i]++; } })));
+  await settle();
   FakeEventSource.live[0].emit({ type: "job_flag", jobId: "j1", starred: true });
   assert.deepEqual(seen, [1, 1, 1, 1], "an event reached only some of the subscribers");
   offs.forEach(off => off());
 });
 
-test("handlers are read through the ref, so a re-render needs no reconnect", () => {
+test("handlers are read through the ref, so a re-render needs no reconnect", async () => {
   reset();
   let got = null;
   const r = ref({ job_flag: () => { got = "first"; } });
   const off = subscribeSyncEvents(r);
+  await settle();
   r.current = { job_flag: () => { got = "second"; } };      // a re-render replaces the handler map
   FakeEventSource.live[0].emit({ type: "job_flag" });
   assert.equal(got, "second", "the stale handler ran — the ref is not being read at dispatch time");
@@ -93,23 +118,25 @@ test("handlers are read through the ref, so a re-render needs no reconnect", () 
   off();
 });
 
-test("heartbeats and the connect frame are not dispatched to handlers", () => {
+test("heartbeats and the connect frame are not dispatched to handlers", async () => {
   reset();
   let calls = 0;
   const off = subscribeSyncEvents(ref({ heartbeat: () => { calls++; }, connected: () => { calls++; } }));
+  await settle();
   FakeEventSource.live[0].emit({ type: "heartbeat" });
   FakeEventSource.live[0].emit({ type: "connected" });
   assert.equal(calls, 0);
   off();
 });
 
-test("one throwing handler does not stop its siblings, and malformed data is ignored", () => {
+test("one throwing handler does not stop its siblings, and malformed data is ignored", async () => {
   reset();
   let reached = 0;
   const offs = [
     subscribeSyncEvents(ref({ job_flag: () => { throw new Error("boom"); } })),
     subscribeSyncEvents(ref({ job_flag: () => { reached++; } })),
   ];
+  await settle();
   FakeEventSource.live[0].emit({ type: "job_flag" });
   assert.equal(reached, 1, "a throwing subscriber swallowed the event for the others");
   assert.doesNotThrow(() => FakeEventSource.live[0].onmessage({ data: "not json" }));
@@ -120,6 +147,7 @@ test("the connection closes only when the LAST subscriber leaves", async () => {
   reset();
   const a = subscribeSyncEvents(ref({}));
   const b = subscribeSyncEvents(ref({}));
+  await settle();
   a();
   await new Promise(r => setTimeout(r, 400));
   assert.equal(syncEventsState().connected, true, "the connection closed while a subscriber remained");
@@ -138,6 +166,130 @@ test("a StrictMode-style unmount+remount reuses the connection instead of churni
   assert.equal(FakeEventSource.opened, 1, "the connection was torn down and reopened");
   assert.equal(syncEventsState().connected, true, "the deferred close fired despite a live subscriber");
   off2();
+});
+
+test("a grant that lands while the last subscriber is away still ends with a live stream", async () => {
+  // The StrictMode remount, but with the lock granted DURING the gap. The grant is handed straight
+  // back because nobody is listening, so the tab holds a channel and no lock and is not queued for
+  // one. Guarding that state on `channel` alone left the tab permanently deaf.
+  reset();
+  const off = subscribeSyncEvents(ref({}));
+  off();                       // unmounted before leadership was granted
+  await settle();              // ...the grant lands here, with no subscribers, and is given back
+  const off2 = subscribeSyncEvents(ref({}));   // remounts, still inside the 250ms grace window
+  await settle();
+  assert.equal(syncEventsState().connected, true,
+    "the tab kept its channel but never queued for the lock again — it would never see another event");
+  off2();
+});
+
+// ── ONE STREAM PER ORIGIN: the second scope, measured across TABS ─────────────────────────────
+
+test("a second TAB opens no connection of its own — one stream per ORIGIN, not per tab", async () => {
+  reset();
+  const A = await openTab(), B = await openTab();
+  const offA = A.subscribeSyncEvents(ref({}));
+  await settle();
+  const offB = B.subscribeSyncEvents(ref({}));
+  await settle();
+
+  assert.equal(FakeEventSource.opened, 1,
+    `${FakeEventSource.opened} streams for 2 tabs — at six tabs this empties the board again`);
+  assert.equal(A.syncEventsState().leading, true, "the first tab did not take the stream");
+  assert.equal(B.syncEventsState().leading, false, "both tabs think they lead");
+  assert.equal(B.syncEventsState().connected, false, "the follower opened a socket of its own");
+  assert.equal(B.syncEventsState().relaying, true, "the follower is not listening to the relay");
+
+  offA(); offB(); A.__resetSyncEvents(); B.__resetSyncEvents();
+});
+
+test("an event on the leader's stream reaches the OTHER tab's subscribers", async () => {
+  // Sharing one socket must not cost a follower tab its events — that would trade a visible bug
+  // for an invisible one, which is the whole reason this relays instead of disconnecting.
+  reset();
+  const A = await openTab(), B = await openTab();
+  let seenB = null;
+  const offA = A.subscribeSyncEvents(ref({ job_flag: () => {} }));
+  await settle();
+  const offB = B.subscribeSyncEvents(ref({ job_flag: p => { seenB = p; } }));
+  await settle();
+
+  FakeEventSource.live[0].emit({ type: "job_flag", jobId: "j9", starred: true });
+  await settle();
+  assert.deepEqual(seenB, { jobId: "j9", starred: true },
+    "the follower tab never saw the event — the relay is not delivering");
+
+  offA(); offB(); A.__resetSyncEvents(); B.__resetSyncEvents();
+});
+
+test("when the tab holding the stream leaves, another tab takes it over", async () => {
+  reset();
+  const A = await openTab(), B = await openTab();
+  const offA = A.subscribeSyncEvents(ref({}));
+  await settle();
+  const offB = B.subscribeSyncEvents(ref({}));
+  await settle();
+  assert.equal(A.syncEventsState().leading, true);
+  assert.equal(B.syncEventsState().connected, false);
+
+  offA();                                        // the tab holding the stream goes away
+  await new Promise(r => setTimeout(r, 400));    // past the deferred teardown
+
+  assert.equal(B.syncEventsState().leading, true,
+    "leadership never moved — with the leader gone every remaining tab is deaf");
+  assert.equal(B.syncEventsState().connected, true, "the new leader never opened the stream");
+  assert.equal(FakeEventSource.live.length, 1, "more than one stream is open at once");
+
+  offB(); A.__resetSyncEvents(); B.__resetSyncEvents();
+});
+
+test("tabs signed in as DIFFERENT users do not share a stream", async () => {
+  // sessionStorage is per-tab, so this is reachable: sign in as someone else in a second tab and
+  // an unkeyed relay would deliver one user's board events into the other's.
+  reset();
+  const A = await openTab(), B = await openTab();
+  let seenA = null;
+
+  authToken = "user-one";
+  const offA = A.subscribeSyncEvents(ref({ job_flag: p => { seenA = p; } }));
+  await settle();
+  authToken = "user-two";
+  const offB = B.subscribeSyncEvents(ref({ job_flag: () => {} }));
+  await settle();
+
+  assert.equal(FakeEventSource.opened, 2,
+    "two identities shared one stream — one user's events would land on the other's board");
+  assert.equal(A.syncEventsState().leading, true);
+  assert.equal(B.syncEventsState().leading, true);
+
+  // And the other user's stream must not reach across.
+  const bStream = FakeEventSource.live.find(s => s.url.includes("user-two"));
+  bStream.emit({ type: "job_flag", jobId: "not-yours" });
+  await settle();
+  assert.equal(seenA, null, "an event crossed between two signed-in identities");
+
+  offA(); offB(); A.__resetSyncEvents(); B.__resetSyncEvents();
+});
+
+test("without the cross-tab APIs it falls back to one stream per tab, and still delivers", async () => {
+  // Web Locks and BroadcastChannel are the mechanism, not the contract. Where either is missing the
+  // hook must still work — one stream per tab, which is what it did before this change.
+  reset();
+  const saved = globalThis.BroadcastChannel;
+  globalThis.BroadcastChannel = undefined;
+  try {
+    const C = await openTab();
+    let got = null;
+    const off = C.subscribeSyncEvents(ref({ job_flag: p => { got = p; } }));
+    assert.equal(C.syncEventsState().connected, true,
+      "the fallback path opened no stream at all — this tab would be deaf on an older browser");
+    assert.equal(C.syncEventsState().relaying, false, "it should not have joined a relay it cannot use");
+    FakeEventSource.live[0].emit({ type: "job_flag", jobId: "j1" });
+    assert.deepEqual(got, { jobId: "j1" });
+    off(); C.__resetSyncEvents();
+  } finally {
+    globalThis.BroadcastChannel = saved;
+  }
 });
 
 // ── The property, stated against the call sites ──────────────────────────────────────────────
