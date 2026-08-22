@@ -1,5 +1,5 @@
 // scripts/backup.js
-// Run directly:  node scripts/backup.js [list|restore <filename>]
+// Run directly:  node scripts/backup.js [list|verify|restore <filename>]
 // Or via npm:    npm run backup / npm run restore
 //
 // A BACKUP IS CHECKPOINTED BEFORE IT IS COPIED — see checkpointWal, and read that comment before
@@ -222,6 +222,67 @@ export function listBackups() {
   return loadManifest();
 }
 
+/**
+ * Re-reads every backup on disk and records what is checkable NOW. Repeatable, not a one-off
+ * backfill script, because the question it answers ("is this file still readable?") goes stale.
+ *
+ * WHAT IT CAN ESTABLISH: that the file is a valid, self-consistent database (integrity_check) and
+ * which schema era it belongs to (its last applied migration — the thing you actually want to know
+ * when choosing what to restore).
+ *
+ * WHAT IT CANNOT: whether a backup taken before checkpointing existed was missing WAL data at the
+ * moment it was copied. That information is gone, and `integrity_check = ok` does NOT recover it —
+ * a database copied mid-WAL is perfectly valid, just older. This is exactly how the stale backup
+ * that started all this passed every check while being three hours behind.
+ *
+ * So `walCheckpointed` is backfilled as FALSE rather than left absent, and that is a literal
+ * statement about the PROCESS: no checkpoint was performed for those copies. It deliberately does
+ * NOT distinguish "not attempted" from "attempted and reported busy", because the consequence for a
+ * reader is identical — this copy may be missing whatever was in the WAL — and a boolean that is
+ * present on every entry is one a caller can rely on. `walNote` keeps the distinction for anyone who
+ * needs it, so nothing is asserted that was not measured.
+ */
+export function verifyBackups() {
+  const verified = loadManifest().map(e => {
+    const entry = { ...e };
+    const p = path.join(BAK_DIR, e.filename);
+    if (!fs.existsSync(p)) {
+      entry.integrity = "missing";
+      return entry;
+    }
+    // Opening a WAL database creates -wal and -shm beside it EVEN READ-ONLY. Verifying five backups
+    // silently produced ten files the first time this was run by hand, and a sidecar next to an
+    // existing .db is invisible to sweepOrphanSidecars. Record what was there first, so this check
+    // removes only what it created and never a backup's own carried WAL.
+    const pre = { wal: fs.existsSync(`${p}-wal`), shm: fs.existsSync(`${p}-shm`) };
+    let db = null;
+    try {
+      db = new Database(p, { readonly: true });
+      entry.integrity = db.pragma("integrity_check", { simple: true });
+      try {
+        entry.schema = db.prepare(
+          "SELECT id FROM schema_migrations ORDER BY rowid DESC LIMIT 1").get()?.id ?? null;
+      } catch { entry.schema = null; } // predates schema_migrations
+    } catch (err) {
+      entry.integrity = `unreadable: ${err.message}`;
+    } finally {
+      try { db?.close(); } catch {}
+    }
+    if (!pre.wal) { try { fs.unlinkSync(`${p}-wal`); } catch {} }
+    if (!pre.shm) { try { fs.unlinkSync(`${p}-shm`); } catch {} }
+
+    if (entry.walCheckpointed === undefined) {
+      entry.walCheckpointed = false;
+      entry.walNote = "no checkpoint was performed for this copy (predates the checkpoint step) — " +
+                      "it may be missing data that was in the WAL when it was taken";
+    }
+    entry.verifiedAt = new Date().toISOString();
+    return entry;
+  });
+  saveManifest(verified);
+  return verified;
+}
+
 export function restoreBackup(filename) {
   const src = path.join(BAK_DIR, filename);
   if (!fs.existsSync(src)) throw new Error(`Backup not found: ${filename}`);
@@ -281,11 +342,23 @@ const isEntryPoint = process.argv[1] &&
 
 if (isEntryPoint) {
   const args = process.argv.slice(2);
+  // The checkpoint state is shown, not buried in the manifest: a backup that may be missing WAL data
+  // restores just as cleanly as a complete one, so the only place a reader can be warned is here.
+  const flag = (e) => e.walCheckpointed === true ? "complete"
+    : e.walCheckpointed === false ? "UNVERIFIED-WAL" : "unknown-wal";
   if (args[0] === "list") {
     const entries = listBackups();
     if (!entries.length) { console.log("No backups found."); }
     else entries.forEach((e, i) => console.log(
-      `${i+1}. ${e.filename}  (${e.label})  ${e.created}  ${mb(e.size || 0)}`));
+      `${i+1}. ${e.filename}  (${e.label})  ${e.created}  ${mb(e.size || 0)}  ` +
+      `${flag(e)}${e.integrity && e.integrity !== "ok" ? `  integrity=${e.integrity}` : ""}` +
+      `${e.schema ? `  schema=${e.schema}` : ""}`));
+  } else if (args[0] === "verify") {
+    const entries = verifyBackups();
+    entries.forEach((e, i) => console.log(
+      `${i+1}. ${e.filename}  integrity=${e.integrity}  ${flag(e)}` +
+      `${e.schema ? `  schema=${e.schema}` : ""}`));
+    console.log(`[verify] ${entries.length} backup(s) checked; manifest updated`);
   } else if (args[0] === "restore") {
     if (!args[1]) { console.error("Usage: node scripts/backup.js restore <filename>"); process.exit(1); }
     restoreBackup(args[1]);

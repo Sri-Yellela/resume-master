@@ -186,6 +186,82 @@ test("restore clears the live sidecars, so a restored file is not merged with th
   assert.match(body, /if \(fs\.existsSync\(`\$\{src\}-wal`\)\)/);
 });
 
+// ── verify: backfilling only what is actually knowable ───────────────────────────────────────
+
+test("verify backfills walCheckpointed as false, and says so about the PROCESS not the data", () => {
+  // The honest reading: for a copy taken before the checkpoint existed, "was the WAL checkpointed?"
+  // is literally false — none was performed. What is NOT knowable is whether the WAL held anything
+  // at that moment, and integrity_check cannot recover it: a database copied mid-WAL is perfectly
+  // valid, just older. That is precisely how the stale backup passed every check while being three
+  // hours behind, so the note has to carry the caveat the boolean cannot.
+  assert.match(BACKUP_SRC, /entry\.walCheckpointed = false;/);
+  assert.match(BACKUP_SRC, /walNote =[\s\S]{0,120}predates the checkpoint step/);
+  assert.match(BACKUP_SRC, /may be missing data that was in the WAL/);
+  // Only filled when ABSENT — a real `false` from a busy checkpoint, or a real `true`, must survive.
+  assert.match(BACKUP_SRC, /if \(entry\.walCheckpointed === undefined\) \{/);
+});
+
+test("verify cannot downgrade a checkpoint that really happened", () => {
+  // The failure this guards: re-running verify stamping `false` over a genuine `true` would turn a
+  // complete backup into one the operator distrusts, and the `list` output is the only place that
+  // distinction ever reaches a human.
+  const at = BACKUP_SRC.indexOf("entry.walCheckpointed = false;");
+  const guardAt = BACKUP_SRC.lastIndexOf("if (entry.walCheckpointed === undefined) {", at);
+  assert.ok(guardAt > 0 && guardAt < at,
+    "the backfill must sit inside an `=== undefined` guard so it is never an overwrite");
+});
+
+test("verifying a WAL database creates sidecars, so verify has to clean up after itself", () => {
+  // Not hypothetical: opening the five real backups read-only produced TEN files, and a sidecar
+  // beside an EXISTING .db is invisible to sweepOrphanSidecars, which only looks for orphans. This
+  // is where the two mystery -shm/-wal files in data/backups came from.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sidecar-"));
+  const dbPath = path.join(dir, "t.db");
+  const open = [];
+  try {
+    const db = new Database(dbPath);
+    open.push(db);
+    db.pragma("journal_mode = WAL");
+    db.exec("CREATE TABLE t (v INTEGER)");
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    db.close();
+    for (const side of ["-wal", "-shm"]) { try { fs.unlinkSync(`${dbPath}${side}`); } catch {} }
+    assert.ok(!fs.existsSync(`${dbPath}-wal`), "clean starting point");
+
+    // READ-ONLY is enough to recreate them.
+    const ro = new Database(dbPath, { readonly: true });
+    open.push(ro);
+    ro.pragma("integrity_check", { simple: true });
+    assert.ok(fs.existsSync(`${dbPath}-shm`),
+      "a read-only open recreates the sidecars — the reason verify records what existed first");
+  } finally {
+    for (const d of open) { try { d.close(); } catch {} }
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+
+  // And the implementation has to note pre-existing sidecars so it removes only its own, never a
+  // backup's carried WAL from the busy-checkpoint path.
+  assert.match(BACKUP_SRC, /const pre = \{ wal: fs\.existsSync\(`\$\{p\}-wal`\), shm: fs\.existsSync\(`\$\{p\}-shm`\) \}/);
+  assert.match(BACKUP_SRC, /if \(!pre\.wal\) \{ try \{ fs\.unlinkSync\(`\$\{p\}-wal`\)/);
+});
+
+test("verify records the schema era, which is the question you ask before restoring", () => {
+  assert.match(BACKUP_SRC, /FROM schema_migrations ORDER BY rowid DESC LIMIT 1/);
+  // An ancient backup may predate the table entirely; that must be null, not a crash.
+  assert.match(BACKUP_SRC, /catch \{ entry\.schema = null; \}/);
+  // A file that has gone missing is reported, not thrown over.
+  assert.match(BACKUP_SRC, /entry\.integrity = "missing";/);
+  assert.match(BACKUP_SRC, /entry\.integrity = `unreadable: \$\{err\.message\}`/);
+});
+
+test("list surfaces the checkpoint state — the manifest alone warns nobody", () => {
+  assert.match(BACKUP_SRC, /UNVERIFIED-WAL/);
+  const listAt = BACKUP_SRC.indexOf('if (args[0] === "list")');
+  const flagAt = BACKUP_SRC.indexOf("const flag = (e) =>");
+  assert.ok(flagAt > 0 && flagAt < listAt, "the flag helper must be in scope for list");
+  assert.match(BACKUP_SRC, /\$\{flag\(e\)\}/);
+});
+
 // ── Housekeeping ─────────────────────────────────────────────────────────────────────────────
 
 test("sidecars are removed with their .db, and orphans are swept", () => {
