@@ -1,4 +1,5 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import * as ToastPrimitives from "@radix-ui/react-toast";
 import { cva } from "class-variance-authority";
 import { X } from "lucide-react";
@@ -6,13 +7,33 @@ import { cn } from "../../lib/utils";
 
 const ToastProvider = ToastPrimitives.Provider;
 
-const ToastViewport = React.forwardRef(({ className, ...props }, ref) => (
-  <ToastPrimitives.Viewport
-    ref={ref}
-    className={cn("fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]", className)}
-    {...props}
-  />
-));
+// TWO CHANGES, and the second one is why the first was not enough.
+//
+// 1. z-[var(--z-toast)], not the literal z-[100] this carried. 100 is below Z.NAV (250), so the
+//    viewport would have painted UNDER the top bar and under every overlay tier in the app. The
+//    variable is published from client/src/styles/zLayers.js by installZLayerVars(), the same
+//    mechanism UnifiedSearchBar.css uses, so this file holds no copy of the number.
+//
+// 2. PORTALLED TO document.body. With only the number fixed, a toast still lost to the filters
+//    drawer — measured: viewport z-index 11000, drawer 600, and document.elementFromPoint at the
+//    toast's own centre returned the drawer. The cause is the trap zLayers.js rule 2 names:
+//    components/AppShell.jsx wraps the app in `relative z-10 min-h-screen`, which is a STACKING
+//    CONTEXT, so 11000 only ordered the toast against its siblings inside that div and the whole
+//    subtree competed with the drawer at z-index 10. No value would have fixed it. Radix does not
+//    portal its Viewport, so it is portalled here — createPortal preserves React context, so the
+//    Provider above it still works. Same reason PanelScrim, PanelDock and the filters drawer are
+//    portalled.
+const ToastViewport = React.forwardRef(({ className, ...props }, ref) => {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <ToastPrimitives.Viewport
+      ref={ref}
+      className={cn("fixed top-0 z-[var(--z-toast)] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]", className)}
+      {...props}
+    />,
+    document.body
+  );
+});
 ToastViewport.displayName = ToastPrimitives.Viewport.displayName;
 
 const toastVariants = cva(

@@ -122,10 +122,31 @@ export const Z = {
   MODAL: 850,
 
   // Transient, user-invoked MENUS: the profile menu, the profile switcher, portalled popovers.
-  // Above everything else by design. A menu belongs to whatever the user just clicked, so it must
+  // Above every APP SURFACE by design. A menu belongs to whatever the user just clicked, so it must
   // never be clipped or underlapped — including by a modal drawer, since a drawer can itself contain
   // a menu. This is the tier that lets a portalled popover escape a clipping ancestor.
+  //
+  // It is no longer "above everything": TOAST is above it. See below for why that one exception.
   POPOVER: 10000,
+
+  // Toasts — components/ui/toast.jsx's ToastViewport, mounted once in App.jsx.
+  //
+  // THE TOP OF THE SCALE, above POPOVER, and it is the only tier that needed a reason to outrank a
+  // menu. Everything else here can be resolved by the user: a menu that covers something is
+  // dismissed by pressing Escape or clicking away, a drawer has a close button. A toast cannot be
+  // summoned. It appears once, on a timer, to report the outcome of something that already happened
+  // — so a toast that is covered is not an annoyance, it is a message that never arrived, and the
+  // user has no way of knowing they missed it. That asymmetry is the whole argument.
+  //
+  // Also above the 9000-series full-screen modals listed at the top of this file, which is the
+  // relationship those need: "your resume was generated" has to be visible over the modal that
+  // generated it.
+  //
+  // This surface carried the Tailwind literal `z-[100]` — below NAV's 250, so it would have rendered
+  // UNDER the top bar and under every overlay in the app. It was never seen, because nothing mounted
+  // <Toaster/> and nothing called toast(); Y2's audit could measure every other surface and not this
+  // one. Mounting it is what made the number falsifiable.
+  TOAST: 11000,
 };
 
 // CSS needs the same numbers (UnifiedSearchBar.css positions the search surface), and two copies of
