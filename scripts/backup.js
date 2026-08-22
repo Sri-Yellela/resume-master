@@ -1,15 +1,39 @@
 // scripts/backup.js
-// Run directly:  node scripts/backup.js
-// Or via npm:    npm run backup
-import Database from "better-sqlite3";
+// Run directly:  node scripts/backup.js [list|restore <filename>]
+// Or via npm:    npm run backup / npm run restore
+//
+// RETENTION IS SIZE-AWARE, not just count-capped, and the reason is worth stating: this directory
+// reached 442 MB across 30 backups. `manifest.slice(0, 30)` was written when the DB was 1.3 MB, so
+// thirty copies cost 40 MB. Migration 082's LCA tables took the DB to 116 MB, and the same rule
+// then cost 3.5 GB — the policy did not change, the multiplier did. A byte budget is the backstop
+// that a count cannot provide, because a count cannot know how big a row got.
+//
+// See selectRetained() for the rules. They protect the newest backup and the newest of each LABEL
+// before spending the budget on depth, so a tight budget loses HISTORY rather than losing the
+// distinct kinds of restore point.
 import fs       from "fs";
 import path     from "path";
 import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const DB_PATH   = path.join(__dirname, "..", "data", "resume_master.db");
 const BAK_DIR   = path.join(__dirname, "..", "data", "backups");
 const MANIFEST  = path.join(BAK_DIR, "manifest.json");
+
+const envInt = (name, dflt) => {
+  const n = parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : dflt;
+};
+
+// Budget, overridable per deploy. 512 MB holds the current 116 MB DB plus a few generations; a
+// bigger DB keeps fewer copies rather than silently using more disk, which is the whole point.
+const MAX_BYTES = envInt("BACKUP_MAX_BYTES", 512 * 1024 * 1024);
+const MAX_COUNT = envInt("BACKUP_MAX_COUNT", 30);
+// One backup is not a backup — if it is corrupt there is nothing behind it. The floor overrides the
+// byte budget on purpose, so a DB that grows past the budget on its own degrades to "few copies"
+// instead of "no history".
+const MIN_KEEP  = envInt("BACKUP_MIN_KEEP", 3);
 
 fs.mkdirSync(BAK_DIR, { recursive: true });
 
@@ -21,6 +45,79 @@ function loadManifest() {
 function saveManifest(entries) {
   fs.writeFileSync(MANIFEST, JSON.stringify(entries, null, 2));
 }
+
+/**
+ * Decides which manifest entries survive. PURE — no filesystem, no dates, so it is testable and so
+ * "why was this deleted?" has an answer that does not depend on the disk.
+ *
+ * Priority, highest first:
+ *   1. the newest entry, unconditionally. Pruning the only copy of the current state to satisfy a
+ *      budget would be the single worst thing this function could do.
+ *   2. the newest entry of each distinct LABEL. Without this a burst of manual backups evicts every
+ *      auto-daily and every pre-restore snapshot, so the directory ends up holding five copies of
+ *      one afternoon and no coarse history. Bounded by the number of labels, which is 3-4.
+ *   3. everything else, newest first, until either cap binds.
+ *
+ * MIN_KEEP is a floor applied after the caps, because the alternative — obeying a byte budget
+ * smaller than one backup — leaves zero backups.
+ *
+ * @param {{filename:string,label:string,size:number}[]} entries newest-first, as the manifest stores them
+ * @returns {{keep:object[], drop:object[], keptBytes:number}} `keep` in the input's order
+ */
+export function selectRetained(entries, opts = {}) {
+  const maxBytes = opts.maxBytes ?? MAX_BYTES;
+  const maxCount = opts.maxCount ?? MAX_COUNT;
+  const minKeep  = opts.minKeep  ?? MIN_KEEP;
+  if (!entries.length) return { keep: [], drop: [], keptBytes: 0 };
+
+  const sizeOf = (e) => (Number.isFinite(e.size) ? e.size : 0);
+  const priority = [];
+  const seen = new Set();
+  const push = (e) => { if (e && !seen.has(e.filename)) { seen.add(e.filename); priority.push(e); } };
+
+  push(entries[0]);
+  for (const label of new Set(entries.map(e => e.label))) {
+    push(entries.find(e => e.label === label));
+  }
+  for (const e of entries) push(e);
+
+  const kept = new Set();
+  let bytes = 0;
+  for (const e of priority) {
+    const withinCount = kept.size < maxCount;
+    const withinBytes = bytes + sizeOf(e) <= maxBytes;
+    const belowFloor  = kept.size < minKeep;
+    // The floor ignores the byte budget but never the count cap — a maxCount of 1 must mean 1.
+    if (withinCount && (withinBytes || belowFloor)) { kept.add(e.filename); bytes += sizeOf(e); }
+  }
+
+  return {
+    keep: entries.filter(e => kept.has(e.filename)),
+    drop: entries.filter(e => !kept.has(e.filename)),
+    keptBytes: bytes,
+  };
+}
+
+/** Deletes a backup and the -shm/-wal sidecars SQLite may have left beside it. */
+function removeBackupFile(filename) {
+  const p = path.join(BAK_DIR, filename);
+  try { fs.unlinkSync(p); } catch {}
+  for (const side of ["-shm", "-wal"]) { try { fs.unlinkSync(p + side); } catch {} }
+}
+
+/** Sidecars whose .db is already gone. They are invisible in `list` and outlive everything else. */
+function sweepOrphanSidecars() {
+  let removed = 0;
+  for (const f of fs.readdirSync(BAK_DIR)) {
+    const m = /^(.*\.db)-(shm|wal)$/.exec(f);
+    if (m && !fs.existsSync(path.join(BAK_DIR, m[1]))) {
+      try { fs.unlinkSync(path.join(BAK_DIR, f)); removed++; } catch {}
+    }
+  }
+  return removed;
+}
+
+const mb = (n) => `${(n / 1048576).toFixed(0)} MB`;
 
 export function createBackup(label = "manual") {
   if (!fs.existsSync(DB_PATH)) {
@@ -34,7 +131,7 @@ export function createBackup(label = "manual") {
   // fs.copyFileSync is safe, synchronous, and works regardless of connection state.
   // Do NOT use db.backup() here — it conflicts with the server's open connection.
   fs.copyFileSync(DB_PATH, dest);
-  console.log(`[backup] Saved: ${dest}`);
+  console.log(`[backup] Saved: ${dest} (${mb(fs.statSync(dest).size)})`);
 
   const manifest = loadManifest();
   manifest.unshift({
@@ -42,11 +139,16 @@ export function createBackup(label = "manual") {
     created: new Date().toISOString(),
     size: fs.statSync(dest).size,
   });
-  const pruned = manifest.slice(0, 30);
-  manifest.slice(30).forEach(e => {
-    try { fs.unlinkSync(path.join(BAK_DIR, e.filename)); } catch {}
-  });
-  saveManifest(pruned);
+
+  const { keep, drop, keptBytes } = selectRetained(manifest);
+  for (const e of drop) removeBackupFile(e.filename);
+  sweepOrphanSidecars();
+  saveManifest(keep);
+  if (drop.length) {
+    const freed = drop.reduce((n, e) => n + (e.size || 0), 0);
+    console.log(`[backup] Pruned ${drop.length} older backup(s), freed ${mb(freed)}; ` +
+                `retaining ${keep.length} (${mb(keptBytes)} of ${mb(MAX_BYTES)} budget)`);
+  }
   return { filename, path: dest, created: new Date().toISOString() };
 }
 
@@ -58,11 +160,25 @@ export function restoreBackup(filename) {
   const src = path.join(BAK_DIR, filename);
   if (!fs.existsSync(src)) throw new Error(`Backup not found: ${filename}`);
 
-  // Safety: back up current DB before restoring
+  // Safety: back up current DB before restoring.
   if (fs.existsSync(DB_PATH)) {
     const safeTs   = new Date().toISOString().replace(/[:.]/g,"-");
     const safeName = `resume_master_${safeTs}_pre-restore.db`;
-    fs.copyFileSync(DB_PATH, path.join(BAK_DIR, safeName));
+    const safePath = path.join(BAK_DIR, safeName);
+    fs.copyFileSync(DB_PATH, safePath);
+    // RECORDED IN THE MANIFEST, which it was not before. An untracked file is never pruned and never
+    // listed, so pre-restore snapshots accumulated forever and invisibly — and the one file you most
+    // want to find after a mistaken restore was the one `list` would not show you. Its own label
+    // means selectRetained's rule 2 protects the newest of them.
+    const manifest = loadManifest();
+    manifest.unshift({
+      filename: safeName, label: "pre-restore",
+      created: new Date().toISOString(),
+      size: fs.statSync(safePath).size,
+    });
+    const { keep, drop } = selectRetained(manifest);
+    for (const e of drop) removeBackupFile(e.filename);
+    saveManifest(keep);
     console.log(`[restore] Current DB backed up as ${safeName} before restore`);
   }
 
@@ -72,16 +188,25 @@ export function restoreBackup(filename) {
 }
 
 // ── Run as script ──────────────────────────────────────────────
-// node scripts/backup.js [list|restore <filename>]
-const args = process.argv.slice(2);
-if (args[0] === "list") {
-  const entries = listBackups();
-  if (!entries.length) { console.log("No backups found."); }
-  else entries.forEach((e, i) => console.log(`${i+1}. ${e.filename}  (${e.label})  ${e.created}`));
-} else if (args[0] === "restore") {
-  if (!args[1]) { console.error("Usage: node scripts/backup.js restore <filename>"); process.exit(1); }
-  restoreBackup(args[1]);
-} else {
-  // Default: create a backup
-  createBackup(args[0] || "manual");
+// GUARDED BY AN ENTRY-POINT CHECK, and this is a bug fix rather than tidying. This block used to run
+// on IMPORT: server.js imports createBackup for its auto-daily job, so every server boot fell
+// through to the `else` branch and wrote a full copy of the DB. That is where 27 of the 30 backups
+// in this directory came from — they are restarts, not backups, and at 116 MB each they were the
+// entire 442 MB. A module with a side effect at import time cannot be imported safely.
+const isEntryPoint = process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(__filename);
+
+if (isEntryPoint) {
+  const args = process.argv.slice(2);
+  if (args[0] === "list") {
+    const entries = listBackups();
+    if (!entries.length) { console.log("No backups found."); }
+    else entries.forEach((e, i) => console.log(
+      `${i+1}. ${e.filename}  (${e.label})  ${e.created}  ${mb(e.size || 0)}`));
+  } else if (args[0] === "restore") {
+    if (!args[1]) { console.error("Usage: node scripts/backup.js restore <filename>"); process.exit(1); }
+    restoreBackup(args[1]);
+  } else {
+    createBackup(args[0] || "manual");
+  }
 }
