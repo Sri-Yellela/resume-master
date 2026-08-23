@@ -501,8 +501,15 @@ test("every capability of the old strip survived the reorganisation", () => {
     ["the queue's tier notice", /automationTier === "account"/],
     ["the CAPTCHA warning",     /automationTier === "gated"/],
     ["queue removal",           /removeFromApplyQueue\(job\.jobId\)/],
-    ["per-run detail",          /loadApplyRunDetail\(run\.id\)/],
     ["run history",             /Run history/],
+    // AC4 replaced the run-history CHIP LIST with a dated view, so the assertion that used to pin
+    // `loadApplyRunDetail(run.id)` — the chip's own onClick — no longer describes anything that
+    // exists. The CAPABILITY is what matters and it survives in two places: every application row
+    // opens its run through onOpenRun, and the run's own status and counts render in that modal's
+    // header (the status moved there deliberately, because the chip's dot was the only place a run
+    // said whether it had finished).
+    ["per-run detail",          /onOpenRun=\{loadApplyRunDetail\}/],
+    ["the run's own status",    /applyRunDetail\.run\.status === "completed"/],
     ["the approvals surface",   /waiting for your approval/],
     // Reads the SCOPED list since AB3 — the surface is unchanged, what it lists is now scoped to
     // whatever the user opened it from.

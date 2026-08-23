@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../styles/theme.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
@@ -8,12 +9,17 @@ import {
 } from "../lib/applyObstacles.js";
 import {
   SectionHeading, ObstacleCard, ApplicationRow, PrerequisiteCards, ApplicationObstacleCard,
-  CompanyHeading, AttemptRow, CompanyTile, CompanyApplicationRow,
+  CompanyHeading, AttemptRow, CompanyTile, CompanyApplicationRow, HistoryGroup,
 } from "./AutoApplyPanelSections.jsx";
 // AC3: the company tier is now a TILE in the ManageJobProfiles idiom, and TileGrid is what makes it
 // sit several-to-a-row at desktop width and stack when there is no room. Extracted from that panel,
 // which renders the same components — see the note at the top of TileCard.jsx.
 import { TileGrid } from "../components/ui/TileCard.jsx";
+// AC4: the Database panel's own calendar, extracted rather than reimplemented, and the portal it
+// has always been rendered inside. Reuse, not a second date picker.
+import { DateCalendar } from "../components/ui/DateCalendar.jsx";
+import { DockPortal } from "../components/DockPortal.jsx";
+import { OUTCOME } from "../../../shared/applyOutcomeGroups.js";
 
 // ============================================================
 // AutoApplyPanel — the auto-apply pipeline, on its own tab
@@ -59,6 +65,10 @@ export function AutoApplyPanel() {
     addToApplyQueue, removeFromApplyQueue, loadApplyRunDetail,
     submitApplyAnswers, openPendingDetail, decidePending,
     artifactUrl, startApplyRun,
+    // AC4: the dated run history. Nothing here is populated until loadHistory is called with a
+    // date the user picked — there is no loader effect anywhere behind it.
+    historyDate, history, historyLoading, historyMsg, historyMarkers, historyBusyId,
+    loadHistory, loadHistoryMonth, abortRunJob, hideRunJob,
   } = useAutoApply();
 
   const nothingYet =
@@ -240,6 +250,27 @@ export function AutoApplyPanel() {
   // one does not open another's, and the state outlives the popup rather than dying with it —
   // reopening the same application remembers what you were reading.
   const [openAttempts, setOpenAttempts] = useState({});
+
+  /**
+   * A YYYY-MM-DD rendered as the day the USER picked.
+   *
+   * `new Date("2026-08-11")` is parsed as UTC MIDNIGHT — so west of Greenwich toLocaleDateString
+   * renders the 10th, and the panel told the user "No applications on 8/10" for a date they had
+   * just clicked on. Constructed from the parts instead: no conversion, so nothing to get wrong.
+   */
+  const localDateLabel = (iso) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+    if (!m) return iso || "";
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
+  };
+
+  // The history calendar popover. Local, because it is chrome — which date is SELECTED lives in
+  // the context (the fetch is there), but whether the picker happens to be open is nobody else's
+  // business. Anchored by rect and portalled, the same treatment the Database panel gives it: the
+  // panel scrolls, and an absolutely-positioned popover inside a scrolling column is clipped by it.
+  const historyCalRef = useRef(null);
+  const [historyCalOpen, setHistoryCalOpen] = useState(false);
+  const [historyCalRect, setHistoryCalRect] = useState(null);
 
   /**
    * AC2 requirement 2: this application's problems, with the CO-RESOLVABLE ones lifted out.
@@ -746,32 +777,121 @@ export function AutoApplyPanel() {
         </>
       )}
 
-      {/* Run history stays REACHABLE but stops being the organising idea. A run is how the work was
-          dispatched, which matters when something looks wrong and never otherwise. */}
-      {applyRuns.length > 0 && (
-        <details style={{ marginTop: 6 }}>
-          <summary style={{ fontSize: 11, fontWeight: 700, cursor: "pointer", color: theme.textMuted,
-                            textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            Run history ({applyRuns.length})
-          </summary>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", paddingTop: 8 }}>
-            {applyRuns.map(run => (
-              <button key={run.id} onClick={() => loadApplyRunDetail(run.id)}
-                style={{ display: "inline-flex", alignItems: "center", gap: 5,
-                         border: `1px solid ${theme.border}`, borderRadius: 4, padding: "3px 8px",
-                         background: theme.surface, color: theme.text, cursor: "pointer", fontSize: 11 }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background:
-                  run.status === "completed" ? "#16a34a" :
-                  run.status === "running" ? theme.accent :
-                  run.status === "queued" ? "#d97706" : "#6b7280" }} />
-                {run.startedAt ? new Date(run.startedAt).toLocaleDateString() : `Run ${run.id}`}
-                <span style={{ color: theme.textDim }}>
-                  {run.submittedCount}✓ {run.heldCount ? `${run.heldCount} held` : ""} {run.failedCount ? `${run.failedCount} stopped` : ""}
-                </span>
-              </button>
-            ))}
-          </div>
-        </details>
+      {/* ── AC4: RUN HISTORY, DATE-DRIVEN AND ON DEMAND ─────────────────────────────────────
+          This was a <details> holding chips for the last 20 RUNS. A run is an implementation detail
+          — nobody thinks "run 47" — and twenty of them is neither all of the history nor a useful
+          window on it. It is the same record, asked the question a candidate actually has: what did
+          I put into auto-apply on this day, and how did each one end.
+
+          REQUIREMENT 2 IS WHY THERE IS NO EFFECT BEHIND THIS. Nothing loads until a date is
+          selected; the panel's initial render issues no history query. `history === null` means
+          "you have not asked yet" and an empty payload means "nothing happened that day" — two
+          different states, rendered differently, because collapsing them is how requirement 6's
+          "no applications on this date" becomes a permanent spinner.
+
+          The per-run detail the old chips opened is NOT lost: loadApplyRunDetail is still reachable
+          from every application row's `details` link, which is where a question about a specific
+          run actually starts. */}
+      <SectionHeading theme={theme} note="pick a date to see what you queued that day">
+        Run history
+      </SectionHeading>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div ref={historyCalRef} style={{ position: "relative" }}>
+          <button
+            onClick={() => {
+              const opening = !historyCalOpen;
+              setHistoryCalRect(historyCalRef.current?.getBoundingClientRect() || null);
+              setHistoryCalOpen(opening);
+              // Requirement 7's markers, fetched when the calendar is OPENED — an action the user
+              // took — never on the panel's initial render. See loadHistoryMonth for the tradeoff
+              // and how to remove it if an owner would rather have no query at all before a pick.
+              if (opening) {
+                const d = historyDate ? new Date(historyDate) : new Date();
+                loadHistoryMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+              }
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 6,
+                     background: historyDate ? theme.accentMuted : theme.surfaceHigh,
+                     color: historyDate ? theme.accentText : theme.textMuted,
+                     border: `1px solid ${theme.border}`, borderRadius: 999,
+                     padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            📅 {historyDate ? `Date: ${localDateLabel(historyDate)}` : "Pick a date"}
+          </button>
+          <AnimatePresence>
+            {historyCalOpen && historyCalRect && (
+              <DockPortal anchorRect={historyCalRect} theme={theme}
+                onClose={() => setHistoryCalOpen(false)} style={{ minWidth: 260, padding: 0 }}>
+                <motion.div key="history-cal"
+                  initial={{ opacity: 0, scale: 0.96, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96, y: -4 }}
+                  transition={{ duration: 0.15 }}>
+                  {/* THE DATABASE PANEL'S OWN CALENDAR, extracted rather than reimplemented — same
+                      component, same DockPortal treatment, same interaction. `markers` is the one
+                      thing added, and it is optional, so the Database panel renders as before. */}
+                  <DateCalendar theme={theme}
+                    value={historyDate || ""}
+                    markers={historyMarkers}
+                    onMonth={loadHistoryMonth}
+                    onChange={(iso) => loadHistory(iso)}
+                    onClose={() => setHistoryCalOpen(false)} />
+                </motion.div>
+              </DockPortal>
+            )}
+          </AnimatePresence>
+        </div>
+        {historyDate && (
+          <button onClick={() => loadHistory(null)}
+            style={{ border: "none", background: "transparent", color: theme.textDim,
+                     fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>
+            Clear
+          </button>
+        )}
+        {historyLoading && (
+          <span style={{ fontSize: 11, color: theme.textMuted }}>Loading…</span>
+        )}
+        {historyMsg && (
+          <span style={{ fontSize: 11.5, color: theme.accentText }}>{historyMsg}</span>
+        )}
+      </div>
+
+      {/* NOT YET ASKED. The resting state, and it is deliberately not a spinner and not a default
+          day's results — requirement 2 forbids the second and the first would be a lie. */}
+      {history === null && !historyLoading && (
+        <div style={{ padding: "18px 20px", border: `1px dashed ${theme.border}`, borderRadius: 8,
+                      color: theme.textMuted, fontSize: 12, textAlign: "center" }}>
+          Pick a date to see the applications you added to auto-apply that day.
+          {Object.keys(historyMarkers).length > 0 && " Dates with activity are dotted in the calendar."}
+        </div>
+      )}
+
+      {/* AN EMPTY DATE IS A NORMAL STATE (requirement 6) — not an error, not a spinner. */}
+      {history !== null && history.total === 0 && (
+        <div style={{ padding: "18px 20px", border: `1px dashed ${theme.border}`, borderRadius: 8,
+                      color: theme.textMuted, fontSize: 12, textAlign: "center" }}>
+          No applications on {localDateLabel(history.date)}.
+        </div>
+      )}
+
+      {history !== null && history.total > 0 && (
+        <TileGrid min={330} gap={12}>
+          {/* All THREE groups, always, even at zero: "0 completed" on a day where four applications
+              broke is information, and hiding the group makes the reader count sections to work out
+              what is missing. The order is the order of the requirement. */}
+          {[OUTCOME.COMPLETED, OUTCOME.PENDING, OUTCOME.ABORTED].map(group => (
+            <HistoryGroup
+              key={group}
+              group={group}
+              jobs={history[group] || []}
+              theme={theme}
+              busyId={historyBusyId}
+              onAbort={abortRunJob}
+              onHide={hideRunJob}
+              artifactUrl={artifactUrl}
+            />
+          ))}
+        </TileGrid>
       )}
 
       {/* ── Apply Runs Review Modal ──────────────────────────────────── */}
@@ -810,7 +930,22 @@ export function AutoApplyPanel() {
                   : "Every application needing review"}
               </div>
               {applyRunDetail?.run && (
-                <div style={{ display:"flex", gap:10, fontSize:11, flexWrap:"wrap" }}>
+                <div style={{ display:"flex", gap:10, fontSize:11, flexWrap:"wrap", alignItems:"center" }}>
+                  {/* THE RUN'S OWN STATUS. It used to live on the dot of the run-history chip that
+                      AC4's dated view replaced — and the chip was the only place a run said whether
+                      it had finished, so removing the list would have quietly dropped that. It
+                      belongs here anyway: this is the run's detail, and "is this run still going"
+                      is the first thing to know when reading one. */}
+                  <span style={{ fontWeight:700, padding:"1px 7px", borderRadius:999,
+                                 whiteSpace:"nowrap",
+                                 background: applyRunDetail.run.status === "completed" ? "#16a34a22"
+                                   : applyRunDetail.run.status === "running" ? `${theme.accent}22`
+                                   : applyRunDetail.run.status === "queued" ? "#d9770622" : "#6b728022",
+                                 color: applyRunDetail.run.status === "completed" ? "#16a34a"
+                                   : applyRunDetail.run.status === "running" ? theme.accent
+                                   : applyRunDetail.run.status === "queued" ? "#d97706" : theme.textMuted }}>
+                    {applyRunDetail.run.status || "—"}
+                  </span>
                   {applyRunDetail.run.submittedCount > 0 && (
                     <span style={{ color:"#16a34a", fontWeight:700 }}>✓ {applyRunDetail.run.submittedCount} submitted</span>
                   )}

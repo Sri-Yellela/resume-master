@@ -73,10 +73,14 @@ test("AC3: the Auto Apply panel renders the SAME primitive, in a grid", () => {
   assert.match(sections, /<TileCard/);
   // Requirement 3: side by side at desktop, stacked at narrow. auto-fill with a min track does both
   // without a media query — below the min there is room for one and they stack.
+  // The COMPANY grids, identified by their own min track. AC4 added a fifth TileGrid for the dated
+  // history's three outcome groups — a different thing at a different width — so counting every
+  // grid in the file would make this fail on any unrelated reuse of the primitive, which is the
+  // opposite of what it is for.
   const grids = [...panel.matchAll(/<TileGrid min=\{(\d+)\}/g)].map(m => Number(m[1]));
-  assert.equal(grids.length, 4, "not every company grouping is a tile grid");
-  assert.ok(grids.every(g => g === 430),
-    `the four company grids disagree about their min track: ${grids.join(', ')}`);
+  const companyGrids = grids.filter(g => g === 430);
+  assert.equal(companyGrids.length, 4,
+    `expected four company tile grids, found ${companyGrids.length} (all grids: ${grids.join(', ')})`);
 });
 
 test("AC3: all FOUR company groupings became tiles — none was left as a full-width list", () => {

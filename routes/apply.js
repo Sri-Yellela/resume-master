@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
-import { autoApply } from "../services/applyAutomation.js";
+import { autoApply, requestAbort, isAbortRequested, clearAbort } from "../services/applyAutomation.js";
 import {
   buildGatePacket, mintPacketToken, verifyPacketToken, hashToken, originOf,
   DEFAULT_TOKEN_TTL_MS,
@@ -17,6 +17,9 @@ import { detectPlatformFromUrl } from "../services/platformDetector.js";
 import { classifyRuntimeError } from "../shared/failureAttribution.js";
 import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
 import { canUseAPlusResume, normalisePlanTier } from "../services/entitlements.js";
+// TASK AC4: the three outcome groups of the dated history. In shared/ because the panel renders
+// the same partition — a copy on each side is how "COMPLETED" comes to mean two things.
+import { OUTCOME, OUTCOME_STATUSES, outcomeGroupFor } from "../shared/applyOutcomeGroups.js";
 
 // Must match services/applyAutomation.js SCREENSHOT_DIR — screenshot_path rows are absolute paths
 // written by takeScreenshot(), and this is the only directory they are ever allowed to resolve into.
@@ -428,16 +431,37 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // so without this the browser's outcome silently wins the attribution race.
     let genFailure = null;
 
+    /**
+     * Write a terminal status — unless the user has ABORTED this run-job (TASK AC4).
+     *
+     * `AND status != 'cancelled'` is the whole guard, and it has to be in the WHERE clause rather
+     * than in a read-then-write: the abort endpoint and this worker are different call stacks, and
+     * a check followed by an update loses the race the guard exists to win. better-sqlite3 is
+     * synchronous, so one statement is one atomic decision.
+     *
+     * Without it, aborting mid-flight closes the browser, the run throws, the catch writes 'failed',
+     * and the row the user just stopped comes back as a failure with a Retry button on it.
+     */
     const setJobStatus = (status, reasonCode = null, reasonDetail = null) => {
       db.prepare(`
         UPDATE apply_run_jobs
         SET status=?, reason_code=?, reason_detail=?, finished_at=unixepoch()
-        WHERE id=?
+        WHERE id=? AND status != 'cancelled'
       `).run(status, reasonCode, reasonDetail, runJobId);
     };
 
     try {
-      db.prepare(`UPDATE apply_run_jobs SET status='running', started_at=unixepoch() WHERE id=?`).run(runJobId);
+      // Aborted between being queued and being picked up. processRun snapshots the queued rows
+      // before it starts launching them, so a job cancelled in that window is still in its list —
+      // and would otherwise open a browser and fill a real employer's form after the user stopped
+      // it. The abort endpoint has already written 'cancelled'; this just declines to undo it.
+      const beforeStart = db.prepare("SELECT status FROM apply_run_jobs WHERE id=?").get(runJobId);
+      if (beforeStart?.status === "cancelled") {
+        logEvent(runId, runJobId, userId, jobId, "run_job_cancelled",
+          "Cancelled before it started. Nothing was opened and nothing was submitted.");
+        return;
+      }
+      db.prepare(`UPDATE apply_run_jobs SET status='running', started_at=unixepoch() WHERE id=? AND status != 'cancelled'`).run(runJobId);
 
       const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(String(jobId));
       if (!job) { setJobStatus("failed", "job_not_found", "Job not found in DB"); return; }
@@ -750,7 +774,12 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // job whose form was never reached indistinguishable, to every status='held_review' query, from
       // one that was filled and needs three answers checked. See the G1 decision in §8.
       const gated = result.status === "held_gate";
-      const finalStatus = submitted ? "submitted"
+      // TASK AC4: an aborted run reports `cancelled`, and it outranks everything below it — a run
+      // the user stopped is not "held for review" and not a failure. autoApply returns this only
+      // from its abort checkpoints, so it can never be reached by a run that submitted.
+      const cancelled = result.status === "cancelled";
+      const finalStatus = cancelled ? "cancelled"
+        : submitted ? "submitted"
         : genFailure ? "held_review"
         : gated ? "held_gate"
         : previewed || atsHeld || result.status === "awaiting_user" ? "held_review"
@@ -767,7 +796,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       //
       // A generation failure outranks all of it: when generation is why we are not submitting,
       // that is the fact worth reporting, not the browser's or the scorer's downstream symptom.
-      const reasonCode = submitted ? null
+      const reasonCode = cancelled ? (result.reasonCode || "user_aborted")
+        : submitted ? null
         : genFailure ? genFailure.reasonCode
         : atsHeld ? (result.reasonCode || "ats_below_threshold")
         : previewed ? "awaiting_approval"
@@ -871,6 +901,12 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       if (submitted) {
         logEvent(runId, runJobId, userId, jobId, "submitted", "Application submitted successfully");
         db.prepare(`UPDATE apply_runs SET submitted_count=submitted_count+1 WHERE id=?`).run(runId);
+      } else if (cancelled) {
+        // Counted as neither held nor failed. The run's three counters are what the run chip
+        // reports, and a cancelled job is not work waiting on the user (held) nor work that broke
+        // (failed) — incrementing either would misreport the run for the sake of a tidier sum.
+        logEvent(runId, runJobId, userId, jobId, "run_job_cancelled",
+          "You stopped this application. Nothing was submitted.");
       } else if (finalStatus === "held_review") {
         db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
       } else {
@@ -878,6 +914,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       }
 
     } catch (e) {
+      // TASK AC4: an abort is not a crash. requestAbort closes the browser out from under whatever
+      // this job was awaiting, so the throw arriving here is usually a "Target closed" — and
+      // attributing it would file a deliberate stop as a browser failure with a Retry button on it.
+      // The DB write below is guarded too (setJobStatus's `status != 'cancelled'`), but returning
+      // early also skips the failed_count increment and the misleading error log.
+      if (isAbortRequested(jobId)) {
+        logEvent(runId, runJobId, userId, jobId, "run_job_cancelled",
+          "You stopped this application mid-run. The browser was closed and nothing was submitted.");
+        return;
+      }
       console.error(`[applyRoutes] processRunJob error job=${jobId}: ${e.message}`);
       // A generation failure that happened earlier in this job outranks whatever threw here:
       // it is the reason there was nothing to submit. Otherwise attribute the throw by cause
@@ -898,6 +944,11 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     } finally {
       if (resumeTmpPath) { try { unlinkSync(resumeTmpPath); } catch {} }
       if (coverLetterTmpPath) { try { unlinkSync(coverLetterTmpPath); } catch {} }
+      // TASK AC4: retire the abort flag HERE, not in the endpoint that raised it. This is the point
+      // at which the run it was aimed at has genuinely finished unwinding and recorded itself, so
+      // clearing is safe — and it must be cleared, because the key is the POSTING and the same
+      // posting is routinely re-queued. A flag left set would silently cancel the next attempt.
+      clearAbort(jobId);
     }
   }
 
@@ -1176,7 +1227,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // approve and once as a bare "needs review" row with no action on it.
     const review = db.prepare(`
       ${RUN_JOB_SELECT}
-      WHERE rj.user_id=? AND rj.status='held_review'
+      WHERE rj.user_id=? AND rj.hidden_at IS NULL AND rj.status='held_review'
         AND COALESCE(rj.reason_code, '') != 'awaiting_approval'
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id);
@@ -1188,7 +1239,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // one. ADDITIVE: `runs` and `review` are unchanged, so an existing caller sees no difference.
     const gated = db.prepare(`
       ${RUN_JOB_SELECT}
-      WHERE rj.user_id=? AND rj.status='held_gate'
+      WHERE rj.user_id=? AND rj.hidden_at IS NULL AND rj.status='held_gate'
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id);
     // ── The four surfaces the panel is organised around, as a TOTAL PARTITION ──────────────────
@@ -1207,17 +1258,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     const NEEDS_YOU   = ['held_review', 'held_gate'];
     const inFlight = db.prepare(`
       ${RUN_JOB_SELECT}
-      WHERE rj.user_id=? AND rj.status IN (${IN_FLIGHT.map(() => '?').join(',')})
+      WHERE rj.user_id=? AND rj.hidden_at IS NULL AND rj.status IN (${IN_FLIGHT.map(() => '?').join(',')})
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id, ...IN_FLIGHT);
     const submitted = db.prepare(`
       ${RUN_JOB_SELECT}
-      WHERE rj.user_id=? AND rj.status='submitted'
+      WHERE rj.user_id=? AND rj.hidden_at IS NULL AND rj.status='submitted'
       ORDER BY COALESCE(rj.finished_at, rj.created_at) DESC LIMIT 50
     `).all(req.user.id);
     const stopped = db.prepare(`
       ${RUN_JOB_SELECT}
-      WHERE rj.user_id=?
+      WHERE rj.user_id=? AND rj.hidden_at IS NULL
         AND rj.status NOT IN (${[...IN_FLIGHT, ...NEEDS_YOU].map(() => '?').join(',')})
         AND rj.status != 'submitted'
       ORDER BY COALESCE(rj.finished_at, rj.created_at) DESC LIMIT 50
@@ -1227,7 +1278,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // it exists so "which bucket did this land in?" is answerable from the response alone, and so
     // test/applyObstacleSurfaces.test.js can prove the four buckets sum to the total.
     const statusCounts = Object.fromEntries(
-      db.prepare(`SELECT status, COUNT(*) n FROM apply_run_jobs WHERE user_id=? GROUP BY status`)
+      db.prepare(`SELECT status, COUNT(*) n FROM apply_run_jobs WHERE user_id=? AND hidden_at IS NULL GROUP BY status`)
         .all(req.user.id).map(r => [r.status, r.n])
     );
 
@@ -1428,6 +1479,273 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   }
 
   /** Jobs held at a gate, with what is prepared for each. Grouped by portal in G5; flat here. */
+
+  // ── TASK AC4: RUN HISTORY, DATE-DRIVEN AND ON DEMAND ─────────────────────────────────────────
+  //
+  // The panel's history was a small expandable list of the last 20 RUNS. A run is an implementation
+  // detail — nobody thinks "run 47" — and twenty of them is neither all of the history nor a
+  // useful window on it. This is the same record asked the question a candidate actually has:
+  // what did I put into auto-apply on this day, and how did each one end.
+  //
+  // DATE-SCOPED AND USER-SCOPED ON THE SERVER (requirement 5). Explicitly not "fetch all history and
+  // filter client-side": that would defeat requirement 2's on-demand loading, it would grow without
+  // bound, and it would ship every application a user has ever attempted to the browser to render
+  // one day of it. The index added by migration 085 — (user_id, created_at) — is the exact shape of
+  // this query; the pre-existing idx_apply_run_jobs_user_status leads with status and cannot serve
+  // a date range.
+  //
+  // WHICH DATE. `created_at` — when the application was ADDED to auto-apply, which is what the
+  // requirement asks for ("the applications added to auto-apply on that date") and what a user
+  // remembers doing. finished_at would scatter one afternoon's queueing across several days
+  // depending on when each job happened to be picked up.
+  //
+  // THE TIMEZONE, which is not a detail here. created_at is unixepoch seconds, i.e. UTC. The
+  // calendar hands over a LOCAL date. Without the offset, a run queued at 8pm in Boston lands on
+  // the next UTC day, and the user picks the day they remember and is told nothing happened. The
+  // client sends its own getTimezoneOffset(); the day boundary is computed from it. Absent or
+  // malformed, it falls back to UTC — which is the old behaviour, not a crash.
+  const dayRangeUtc = (dateStr, offsetMinutes) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ""));
+    if (!m) return null;
+    const [, y, mo, d] = m;
+    // Date.UTC of the local wall-clock midnight, then shifted by the offset to reach the real
+    // instant. getTimezoneOffset() is minutes WEST of UTC (Boston in winter is +300), so local
+    // midnight is that many minutes LATER in UTC — hence the addition.
+    const off = Number.isFinite(Number(offsetMinutes)) ? Number(offsetMinutes) : 0;
+    const startMs = Date.UTC(Number(y), Number(mo) - 1, Number(d)) + off * 60_000;
+    return { start: Math.floor(startMs / 1000), end: Math.floor(startMs / 1000) + 86400 };
+  };
+
+  /**
+   * One day's applications, in three groups.
+   *
+   * Nothing here loads unless a date is asked for — there is no "recent" default and no implicit
+   * today, because requirement 2 is that the panel's initial render issues no history query at all,
+   * and an endpoint with a sensible default invites a caller to hit it on mount.
+   */
+  app.get("/api/apply/history", requireAuth, (req, res) => {
+    const range = dayRangeUtc(req.query.date, req.query.tzOffset);
+    if (!range) return res.status(400).json({ error: "bad_date", message: "Expected date=YYYY-MM-DD." });
+
+    const rows = db.prepare(`
+      ${RUN_JOB_SELECT}
+      WHERE rj.user_id=? AND rj.hidden_at IS NULL
+        AND rj.created_at >= ? AND rj.created_at < ?
+      ORDER BY rj.created_at DESC, rj.id DESC
+    `).all(req.user.id, range.start, range.end);
+
+    // The partition, from shared/applyOutcomeGroups.js so the panel cannot disagree with it. Each
+    // row lands in exactly one group; outcomeGroupFor is total by construction (an unmapped status
+    // is ABORTED rather than dropped) and asserted total by test/applyRunHistory.test.js.
+    const groups = { [OUTCOME.COMPLETED]: [], [OUTCOME.PENDING]: [], [OUTCOME.ABORTED]: [] };
+    for (const r of rows) {
+      const pub = publicRunJob(r);
+      // The dead-posting override needs to know the posting is gone, and that is the LEFT JOIN
+      // coming back empty rather than anything on the run-job row.
+      const group = outcomeGroupFor({ ...pub, postingGone: r.title == null && r.company == null });
+      groups[group].push({
+        ...pub,
+        postingGone: r.title == null && r.company == null,
+        // Whether THIS row can still be aborted, decided by the server. The client must not
+        // re-derive it: the button's presence and the endpoint's guard have to agree, and two
+        // copies of that rule is how a button appears for something the server will refuse.
+        abortable: OUTCOME_STATUSES[OUTCOME.PENDING].includes(r.status),
+      });
+    }
+
+    res.json({
+      date: req.query.date,
+      // Empty is a NORMAL state, not an error and not a spinner (requirement 6). The response is
+      // shaped identically whether or not anything happened, so the client renders emptiness from
+      // data rather than from the absence of it.
+      total: rows.length,
+      completed: groups[OUTCOME.COMPLETED],
+      pending:   groups[OUTCOME.PENDING],
+      aborted:   groups[OUTCOME.ABORTED],
+    });
+  });
+
+  /**
+   * Which dates in a month have anything on them (requirement 7: dates with activity should be
+   * discoverable — the user should not hunt blindly).
+   *
+   * THE TRADEOFF, STATED. Requirement 7 allows a calendar marker only if it does not violate
+   * requirement 2. This does not: requirement 2 is that "the panel's initial render issues no
+   * history query", and this fires when the user OPENS THE CALENDAR, which is an action they took.
+   * The panel can be mounted, scrolled and read without ever calling it.
+   *
+   * It is a COUNT-PER-DAY aggregate over one month — no rows, no joins, served by the same
+   * (user_id, created_at) index — so it is cheap in a way that fetching the month's runs would not
+   * be. If an owner would still rather have no query at all before a date is picked, deleting the
+   * `loadHistoryMonth` call in AutoApplyContext removes it and leaves the picker working blind.
+   */
+  app.get("/api/apply/history/months/:month", requireAuth, (req, res) => {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(req.params.month || ""));
+    if (!m) return res.status(400).json({ error: "bad_month", message: "Expected YYYY-MM." });
+    const [, y, mo] = m;
+    const off = Number.isFinite(Number(req.query.tzOffset)) ? Number(req.query.tzOffset) : 0;
+    const start = Math.floor((Date.UTC(Number(y), Number(mo) - 1, 1) + off * 60_000) / 1000);
+    const end   = Math.floor((Date.UTC(Number(y), Number(mo), 1) + off * 60_000) / 1000);
+
+    // Bucketed in SQL by the same local-day boundary the day query uses, so a date that is marked
+    // is a date that returns rows. Two different definitions of "day" between the marker and the
+    // fetch would put a dot on an empty day, which is worse than no dot.
+    const rows = db.prepare(`
+      SELECT strftime('%Y-%m-%d', (rj.created_at - ?) , 'unixepoch') AS day, COUNT(*) AS n
+      FROM apply_run_jobs rj
+      WHERE rj.user_id=? AND rj.hidden_at IS NULL
+        AND rj.created_at >= ? AND rj.created_at < ?
+      GROUP BY day
+    `).all(off * 60, req.user.id, start, end);
+
+    res.json({ month: req.params.month, days: Object.fromEntries(rows.map(r => [r.day, r.n])) });
+  });
+
+  /**
+   * ABORT one pending run-job (requirement 4).
+   *
+   * THE ORDER OF THE THREE STEPS IS THE SAFETY PROPERTY, and it is:
+   *
+   *   1. WRITE 'cancelled' FIRST, conditionally on the row still being pending. better-sqlite3 is
+   *      synchronous, so `UPDATE ... WHERE status IN (pending)` is one atomic decision — it both
+   *      claims the abort and rejects it if the run finished a millisecond ago. Doing this first is
+   *      what makes the worker's `AND status != 'cancelled'` guard bite: processRunJob's terminal
+   *      write loses to a row already marked cancelled, so a run that completes during the abort
+   *      cannot overwrite it, and one that is still going cannot be recorded as failed when its
+   *      browser is closed underneath it.
+   *   2. VOID THE PACKET. A prepared handoff for an application the user just stopped is a live
+   *      credential-bearing artifact for work that is not happening; consumed_at is how a packet is
+   *      retired everywhere else, so it drops out of GET /api/apply/gate-packets, out of the portal
+   *      batches, and out of the token mint — which refuses a consumed packet.
+   *   3. TELL THE BROWSER. requestAbort sets its flag and closes the Chromium process. The page,
+   *      the frames and the filled DOM go with it. Every await in flight rejects; the flag in front
+   *      of autoApply's catch is what keeps that from being reported as a browser failure.
+   *
+   * WHAT CANNOT BE PROMISED, said plainly rather than implied: an abort that arrives after the
+   * submit click has dispatched cannot recall it. That window is one statement wide — autoApply
+   * checks the flag immediately before the click — and the run reports what it observed rather than
+   * assuming. Everything before that point is guaranteed not to submit.
+   */
+  app.post("/api/apply/run-jobs/:runJobId/abort", requireAuth, (req, res) => {
+    const rj = ownedRunJob(req.params.runJobId, req.user.id);
+    if (!rj) return res.status(404).json({ error: "not_found" });
+
+    const PENDING = OUTCOME_STATUSES[OUTCOME.PENDING];
+    // 1. Claim it. The WHERE clause is the race guard — see above.
+    const claimed = db.prepare(`
+      UPDATE apply_run_jobs
+      SET status='cancelled', reason_code='user_aborted',
+          reason_detail='You stopped this application. Nothing was submitted.',
+          finished_at=unixepoch()
+      WHERE id=? AND user_id=? AND status IN (${PENDING.map(() => "?").join(",")})
+    `).run(rj.id, req.user.id, ...PENDING);
+
+    if (claimed.changes === 0) {
+      // It finished between the panel rendering the button and the click landing. Reported as a
+      // conflict with the status it actually reached, so the UI can say what happened instead of
+      // showing a generic failure for an application that may well have been submitted.
+      const now = db.prepare("SELECT status FROM apply_run_jobs WHERE id=? AND user_id=?")
+        .get(rj.id, req.user.id);
+      return res.status(409).json({
+        error: "not_abortable",
+        status: now?.status ?? null,
+        message: now?.status === "submitted"
+          ? "This one was submitted before the abort reached it. It cannot be recalled."
+          : `This application already finished (${now?.status ?? "unknown"}), so there was nothing to stop.`,
+      });
+    }
+
+    // 2. Void the packet. Unconsumed packets for this run-job AND for this posting: a re-run makes
+    //    a new run-job, and an older attempt's packet is still a usable handoff into the same form.
+    const voided = db.prepare(`
+      UPDATE apply_gate_packets SET consumed_at=unixepoch()
+      WHERE user_id=? AND consumed_at IS NULL AND (run_job_id=? OR job_id=?)
+    `).run(req.user.id, rj.id, String(rj.job_id));
+
+    // 3. Stop the browser, if one is running for this posting.
+    //    Fire-and-forget on purpose: browser.close() can take seconds against a hung page, and the
+    //    row is ALREADY cancelled — making the user wait on Chromium to acknowledge a decision the
+    //    database has recorded would turn a click into a spinner for no added guarantee.
+    // The flag is NOT cleared here. requestAbort resolves as soon as the Chromium process is
+    // gone, while the run that was awaiting a page operation is still unwinding through its own
+    // catch — clearing it in that window makes the catch attribute a deliberate stop to the browser.
+    // processRunJob's `finally` clears it once the run has actually finished; a five-minute TTL in
+    // applyAutomation is the backstop for when there was no run in flight to do so.
+    requestAbort(rj.job_id).catch(e => console.warn("[applyRoutes] abort:", e.message));
+
+    logEvent(rj.run_id, rj.id, req.user.id, rj.job_id, "run_job_cancelled",
+      "Aborted by the user. The browser was closed, nothing was submitted, and the prepared handoff was voided.",
+      { packetsVoided: voided.changes });
+
+    res.json({ ok: true, runJobId: rj.id, status: "cancelled", packetsVoided: voided.changes });
+  });
+
+  /**
+   * HIDE one run-job from the user's own view (requirement 4's DELETE).
+   *
+   * IT IS A SOFT HIDE, FOR EVERYTHING, AND THAT IS THE DECISION. The requirement asks which was
+   * implemented and recommends soft-hide for submitted; this goes further and soft-hides all of it.
+   *
+   *   A submitted application is EVIDENCE THAT REACHED A REAL EMPLOYER. That record — the date, the
+   *   exact resume, the screenshot of the form as sent — is what the candidate needs when an
+   *   interview lands three weeks later, and it must not be destroyable by a click made while
+   *   tidying up. So submitted rows are never hard-deleted.
+   *
+   *   And rather than two code paths with different consequences, nothing is. Three things a DELETE
+   *   would have cost, none of them obvious at the call site:
+   *     - apply_job_logs.run_job_id and apply_gate_packets.run_job_id both cascade ON DELETE, so
+   *       removing one run-job would silently take its whole audit trail with it.
+   *     - apply_runs' submitted_count / held_count / failed_count are STORED counters. Deleting a
+   *       row would leave the run claiming work that no longer exists.
+   *     - A hide is reversible by an operator (`SET hidden_at=NULL`). A delete is a support ticket
+   *       that cannot be answered.
+   *
+   * A pending application is ABORTED FIRST, not merely hidden: hiding a running job would take it
+   * off the user's screen while its browser carried on filling a real employer's form. "Remove
+   * this" cannot mean "stop looking at it while it continues".
+   */
+  app.delete("/api/apply/run-jobs/:runJobId", requireAuth, (req, res) => {
+    const rj = ownedRunJob(req.params.runJobId, req.user.id);
+    if (!rj) return res.status(404).json({ error: "not_found" });
+
+    const wasPending = OUTCOME_STATUSES[OUTCOME.PENDING].includes(rj.status);
+    if (wasPending) {
+      const PENDING = OUTCOME_STATUSES[OUTCOME.PENDING];
+      db.prepare(`
+        UPDATE apply_run_jobs
+        SET status='cancelled', reason_code='user_aborted',
+            reason_detail='You removed this application. Nothing was submitted.',
+            finished_at=unixepoch()
+        WHERE id=? AND user_id=? AND status IN (${PENDING.map(() => "?").join(",")})
+      `).run(rj.id, req.user.id, ...PENDING);
+      db.prepare(`
+        UPDATE apply_gate_packets SET consumed_at=unixepoch()
+        WHERE user_id=? AND consumed_at IS NULL AND (run_job_id=? OR job_id=?)
+      `).run(req.user.id, rj.id, String(rj.job_id));
+      // Not cleared here either — same reason as the abort endpoint above.
+      requestAbort(rj.job_id).catch(e => console.warn("[applyRoutes] abort-on-delete:", e.message));
+    }
+
+    db.prepare("UPDATE apply_run_jobs SET hidden_at=unixepoch() WHERE id=? AND user_id=?")
+      .run(rj.id, req.user.id);
+
+    logEvent(rj.run_id, rj.id, req.user.id, rj.job_id, "run_job_hidden",
+      wasPending
+        ? "Removed from your history. It was still pending, so it was stopped first — nothing was submitted."
+        : "Removed from your history. The record is retained and can be restored by an operator.",
+      { previousStatus: rj.status, aborted: wasPending });
+
+    res.json({
+      ok: true,
+      runJobId: rj.id,
+      hidden: true,
+      // Said back to the caller so the UI can be honest about what "delete" did, rather than
+      // implying an erasure that did not happen.
+      softHide: true,
+      abortedFirst: wasPending,
+    });
+  });
+
   app.get("/api/apply/gate-packets", requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT p.id, p.job_id, p.run_id, p.run_job_id, p.apply_url, p.expected_origin, p.gate_reason,

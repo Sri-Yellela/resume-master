@@ -2794,6 +2794,39 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE lca_source_files ADD COLUMN quarters_covered INTEGER;
       `,
     },
+    {
+      // TASK AC4: a USER-SIDE DELETE that is a soft hide, and the index the dated history reads on.
+      //
+      // WHY SOFT, AND WHY FOR EVERYTHING. The requirement asks for the decision to be made and
+      // stated. A submitted application is evidence that reached a real employer; that record is
+      // exactly what the candidate needs when an interview lands three weeks later, and a hard
+      // delete would destroy it on a click made while tidying up. So submitted rows are never
+      // hard-deleted — and rather than two code paths, NOTHING is: `hidden_at` is set on any row
+      // the user removes, and every user-facing feed filters it out. Three things fall out of that
+      // which a DELETE would have cost:
+      //
+      //   - apply_job_logs.run_job_id and apply_gate_packets.run_job_id both cascade on DELETE, so
+      //     hard-deleting one run-job would silently take its whole audit trail and its prepared
+      //     handoff with it.
+      //   - apply_runs.submitted_count / held_count / failed_count are stored counters, not
+      //     derived. Removing a row would leave the run claiming work that no longer exists.
+      //   - It is reversible. `UPDATE apply_run_jobs SET hidden_at=NULL` restores anything an
+      //     operator is asked to restore; a DELETE is a support ticket that cannot be answered.
+      //
+      // Nullable with no default and no backfill: NULL means visible, which is what every existing
+      // row is. A row written before this migration cannot have been hidden.
+      //
+      // The index is what makes the dated view a lookup rather than a scan. AC4 requirement 5 says
+      // the history must be date-scoped AND user-scoped on the SERVER — "do not fetch all history
+      // and filter client-side" — and (user_id, created_at) is the exact shape of that query. The
+      // existing idx_apply_run_jobs_user_status leads with status, so it cannot serve a date range.
+      id: "085_apply_run_jobs_hidden",
+      sql: `
+        ALTER TABLE apply_run_jobs ADD COLUMN hidden_at INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_apply_run_jobs_user_created
+          ON apply_run_jobs(user_id, created_at);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

@@ -524,6 +524,111 @@ fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 // In-progress tracker: jobId -> { status, browser }
 const inProgress = new Map();
 
+// ── TASK AC4: ABORT ──────────────────────────────────────────────────────────────────────────
+//
+// A run being aborted while its browser is filling must terminate cleanly, MUST NOT SUBMIT, and
+// must release its packet. The packet is the caller's job (routes/apply.js voids it); the two
+// halves here are the flag and the browser.
+//
+// WHY BOTH, AND WHY IN THIS ORDER. Closing the browser alone is not an abort — it is a crash. Every
+// pending page operation rejects, autoApply's catch runs, and the run is recorded as `failed` with
+// whatever Puppeteer said, which is a lie about what happened and puts a "Retry" button on a thing
+// the user deliberately stopped. So the FLAG is set first and the browser closed second: whichever
+// of the two the run notices, it reports `cancelled`, because the flag is checked before the catch
+// attributes anything.
+//
+// WHAT HAPPENS TO THE IN-FLIGHT PUPPETEER CONTEXT, precisely: browser.close() terminates the
+// Chromium process. The page, every frame, and the filled DOM go with it — that DOM only ever
+// existed in that process, which is the same fact AB1 was built around. Any await in flight
+// (a navigation, a click, a screenshot) rejects with a "Target closed" / "Session closed" error,
+// which classifyRuntimeError would attribute to the browser; the flag check in front of it is what
+// stops that misattribution.
+//
+// THE SUBMIT GUARANTEE, and its exact limit. The flag is checked immediately before the submit
+// click and after every gate, so an abort that arrives at any point up to that check cannot result
+// in a submission. An abort that arrives in the microseconds AFTER the check and BEFORE the click
+// has dispatched cannot be un-clicked by anything — no flag and no process kill can recall a
+// request the network has already taken. That window is bounded by one statement, it is reported
+// honestly (the run records what it observed rather than assuming), and it is the only case where
+// "aborted" and "submitted" can both be near-true. Closing the browser mid-click does not help and
+// can hurt: it would leave the run unable to READ whether the submit landed, turning a knowable
+// outcome into an unknown one.
+// jobId -> the epoch ms the abort was requested at. A TIMESTAMP rather than a Set membership, for
+// the reason in ABORT_FLAG_TTL_MS below.
+const aborted = new Map();
+
+/**
+ * How long an abort request stays in force.
+ *
+ * THE FLAG CANNOT SIMPLY BE PERMANENT, and it cannot be cleared immediately either — this is the
+ * whole reason it is timestamped:
+ *
+ *   Permanent would be wrong because the key is the JOB (the posting), and the same posting is
+ *   routinely re-queued and re-run. One abort would silently cancel every future attempt at that
+ *   job, and nothing would say why.
+ *
+ *   Clearing it the moment browser.close() resolves is ALSO wrong, and was the first version of
+ *   this: close() resolves as soon as the process is gone, while the run that was awaiting a page
+ *   operation is still unwinding through its own catch. Clear the flag in that window and the catch
+ *   sees no abort, attributes the "Target closed" to the browser, and records a deliberate stop as
+ *   a failure with a Retry button on it. The DB guard still protects the STATUS, but the run's
+ *   failed_count and its error log would both be lying.
+ *
+ * So it expires. Five minutes is far longer than any unwind (a page operation times out in 30s) and
+ * far shorter than the time it takes a user to re-queue and re-dispatch the same posting. The
+ * normal path does not rely on the TTL at all — processRunJob clears the flag in its `finally`, as
+ * soon as the run it belongs to has actually finished. The TTL is the backstop for the case where
+ * no run was in flight to clear it.
+ */
+export const ABORT_FLAG_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Ask an in-flight run to stop. Idempotent, and safe to call for a job that is not running.
+ * @param {string|number} jobId
+ */
+export async function requestAbort(jobId) {
+  const key = String(jobId);
+  // Flag FIRST. See above: a browser closed without the flag is indistinguishable from a crash.
+  aborted.set(key, Date.now());
+  const entry = inProgress.get(key);
+  if (entry?.browser) {
+    try { await entry.browser.close(); } catch { /* already gone: the abort still stands */ }
+  }
+  inProgress.set(key, { status: "cancelled", browser: null });
+}
+
+/** Whether an abort has been requested for this job, and is still in force. */
+export function isAbortRequested(jobId) {
+  const at = aborted.get(String(jobId));
+  if (at == null) return false;
+  if (Date.now() - at > ABORT_FLAG_TTL_MS) { aborted.delete(String(jobId)); return false; }
+  return true;
+}
+
+/**
+ * Forget an abort, so a later run of the same job is not stopped by an old request.
+ *
+ * Called by processRunJob's `finally` — i.e. once the run it belongs to has fully unwound and
+ * recorded itself. NOT by the abort endpoint: see ABORT_FLAG_TTL_MS for why clearing it as soon as
+ * the browser closes loses the race with the run's own catch.
+ */
+export function clearAbort(jobId) {
+  aborted.delete(String(jobId));
+  inProgress.delete(String(jobId));
+}
+
+/** The result an aborted run returns. Never `error` — nothing went wrong, the user stopped it. */
+function abortedResult(fieldsFilled = 0) {
+  return {
+    status: "cancelled",
+    reasonCode: "user_aborted",
+    reasonDetail: "You stopped this application. Nothing was submitted.",
+    fieldsFilled,
+    submitVerified: false,
+    submitEvidence: "aborted_before_submit",
+  };
+}
+
 // -- Fill script injected into page context ------------------------------------
 // Logic ported directly from extension/content.js and background.js
 const FILL_FN_SRC = `
@@ -1873,6 +1978,16 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       }
     }
 
+    // An abort that arrives while the browser is still LAUNCHING lands here. requestAbort sets the
+    // flag before it looks for a browser to close, so a job aborted in that window has the flag and
+    // no browser — this is what catches it, rather than letting a run the user stopped go on to
+    // navigate to a real employer's form.
+    if (isAbortRequested(jobId)) {
+      console.log(`[autoApply] aborted before navigation — job=${jobId}`);
+      try { await browser.close(); } catch {}
+      return abortedResult(0);
+    }
+
     inProgress.set(String(jobId), { status: "navigating", browser });
     console.log(`[autoApply] navigating to ${jobUrl}`);
 
@@ -2227,6 +2342,18 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
         };
       }
 
+      // ── THE ABORT CHECKPOINT THAT MATTERS (TASK AC4) ────────────────────────────────────────
+      // Last statement before the run becomes capable of submitting. Everything above this line is
+      // reading and filling; everything below can send an application to a real employer. An abort
+      // observed here returns without a click, and without a screenshot — the browser may already
+      // have been closed by requestAbort, and reaching into a dead context to take a picture would
+      // turn a clean stop into a "Target closed" error attributed to the browser.
+      if (isAbortRequested(jobId)) {
+        console.log(`[autoApply] aborted before submit — job=${jobId}`);
+        try { await browser.close(); } catch {}
+        return { ...abortedResult(totalFilled), answers: resolvedAnswers, platform: detected };
+      }
+
       inProgress.set(String(jobId), { status: "submitting", browser });
       // Submit-button matching lives in classifySubmitLabel — see the note there for why the
       // old /^(submit|apply|…)/ anchor rejected the exact phrasing real ATSes use, and why
@@ -2379,6 +2506,18 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     };
 
   } catch (e) {
+    // ── AN ABORT IS NOT A CRASH (TASK AC4) ────────────────────────────────────────────────────
+    // requestAbort closes the browser out from under whatever this run was awaiting, so the throw
+    // arriving here is usually "Target closed" or "Session closed" — and classifyRuntimeError would
+    // correctly identify that as a browser failure, which is the wrong story: nothing failed, the
+    // user stopped it. Checked BEFORE attribution, so the run reports what actually happened and
+    // the row does not get a "Retry" affordance for a thing that was deliberately halted.
+    if (isAbortRequested(jobId)) {
+      console.log(`[autoApply] aborted mid-run — job=${jobId} (${e.message})`);
+      inProgress.delete(String(jobId));
+      try { if (browser) await browser.close(); } catch {}
+      return abortedResult(0);
+    }
     console.error(`[autoApply] error: ${e.message}`);
     inProgress.delete(String(jobId));
     let ss = { base64: null, path: null };

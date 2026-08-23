@@ -155,6 +155,25 @@ const BY_STATUS = {
                  protective: true, retryable: true },
   held_review: { obstacle: "Held for you to look at",       action: "Open it and decide", protective: true,  retryable: false },
   rejected:    { obstacle: "You rejected this one",         action: null, protective: true,  retryable: false },
+  // ── Three statuses the server writes that this table did not describe ────────────────────────
+  //
+  // Found while building AC4's mapping, which requires every status to land in exactly one outcome
+  // group. All three fell through to the unknown fallback below, so they rendered as their own
+  // RAW CODE with the underscores swapped out — "dismissed", "superseded" — and were filed as
+  // BROKEN, under "These broke". None of them broke:
+  //
+  //   dismissed   POST /api/apply/reject. The user said no. The `rejected` entry above was written
+  //               for this and never matched it: reject writes status='dismissed' with
+  //               reason_code='rejected', and BY_REASON has no 'rejected' key, so neither lookup
+  //               hit. The sentence existed and was unreachable.
+  //   superseded  POST /api/apply/approve and /api/apply/answers. This attempt was REPLACED by a
+  //               newer run-job, which appears in its own right. Nothing went wrong and there is
+  //               nothing to do — offering "Retry" on it would create a third attempt at a job
+  //               already being attempted.
+  //   cancelled   AC4's abort. The user stopped it deliberately, so it is protective by definition.
+  dismissed:   { obstacle: "You rejected this one",         action: null, protective: true,  retryable: false },
+  superseded:  { obstacle: "Replaced by a newer attempt",   action: null, protective: true,  retryable: false },
+  cancelled:   { obstacle: "You stopped this one",          action: null, protective: true,  retryable: false },
   failed:      { obstacle: "This one did not complete",     action: "Retry", protective: false, retryable: true },
 };
 

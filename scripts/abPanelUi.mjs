@@ -275,6 +275,42 @@ const FIXTURES = {
   ],
 };
 
+// ── AC4: the dated run history ───────────────────────────────────────────────────────────────
+//
+// Two days in the CURRENT month, because the picker opens on today. One has activity across all
+// three outcome groups; the other has none, which is requirement 6's normal-not-an-error state.
+const dayIso = (d) => {
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth(), d).toISOString().slice(0, 10);
+};
+const HISTORY_DAY = dayIso(10);
+const EMPTY_DAY   = dayIso(11);
+
+/** The mapping, in data: one of each kind, including the DEAD POSTING that makes a pending row aborted. */
+const HISTORY_PAYLOAD = {
+  date: HISTORY_DAY,
+  total: 6,
+  completed: [{ ...SUBMITTED[0], abortable: false, postingGone: false }],
+  pending: [
+    { ...IN_FLIGHT[0], abortable: true, postingGone: false },
+    { ...ANTHROPIC_HELD[0], abortable: true, postingGone: false },
+  ],
+  aborted: [
+    { ...STOPPED[0], abortable: false, postingGone: false },
+    // status 'dismissed' with reason_code 'rejected' is what POST /api/apply/reject actually
+    // writes. The old fixture used 'rejected' as a STATUS, which the server never writes — which
+    // is how the vocabulary gap in BY_STATUS went unnoticed until AC4's mapping forced it out.
+    { ...STOPPED[3], status: 'dismissed', reasonCode: 'rejected', abortable: false, postingGone: false },
+    { ...DEAD_POSTING[0], status: 'held_review', abortable: false, postingGone: true },
+  ],
+};
+
+/** Requirement 7: which days are dotted. Same month the picker opens on. */
+const HISTORY_MONTHS = { days: { [HISTORY_DAY]: 6, [dayIso(3)]: 2 } };
+
+/** Every request the page made for history, so requirement 2 can be checked on the NETWORK. */
+const historyRequests = [];
+const abortCalls = [];
 /** Anything not named above answers with a benign empty shape rather than a 404 storm. */
 const FALLBACK = { ok: true, jobs: [], items: [], results: [], data: [], count: 0, total: 0 };
 
@@ -331,6 +367,25 @@ async function main() {
       const url = new URL(req.url(), vite.url);
       if (!url.pathname.startsWith('/api/')) return req.continue();
       served.add(url.pathname);
+      // The history paths are answered dynamically — the whole point of AC4 is WHICH date was
+      // asked for and WHEN, so the query string is recorded rather than discarded.
+      if (url.pathname === '/api/apply/history') {
+        historyRequests.push(url.pathname + url.search);
+        const asked = url.searchParams.get('date');
+        const body = asked === HISTORY_DAY
+          ? HISTORY_PAYLOAD
+          : { date: asked, total: 0, completed: [], pending: [], aborted: [] };
+        return req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      }
+      if (url.pathname.startsWith('/api/apply/history/months')) {
+        historyRequests.push(url.pathname + url.search);
+        return req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(HISTORY_MONTHS) });
+      }
+      if (/\/api\/apply\/run-jobs\/\d+\/abort$/.test(url.pathname)) {
+        abortCalls.push(url.pathname);
+        return req.respond({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ ok: true, status: 'cancelled', packetsVoided: 1 }) });
+      }
       const body = FIXTURES[url.pathname] ?? FALLBACK;
       req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     });
@@ -893,6 +948,171 @@ async function main() {
     console.log(`      screenshot: ${path.join(OUT_DIR, 'ac3-company-tiles-narrow.png')}`);
     await page.setViewport({ width: 1400, height: 1200, deviceScaleFactor: 1 });
     await sleep(600);
+
+    // ── AC4 ────────────────────────────────────────────────────────────────────────────────
+    //
+    // The dated run history. The first check is the one the requirement is most explicit about, and
+    // it is a NETWORK check rather than a DOM one: "ON DEMAND, NOT PRELOADED — this is explicit.
+    // Nothing loads until a date is selected. The panel's initial render issues no history query."
+    // The only honest way to verify that is to watch what the page asked for.
+    console.log('\n── AC4: run history, date-driven and on demand ──');
+
+    check('AC4  the panel\'s initial render issues NO history request',
+      ![...served].some(p => p.startsWith('/api/apply/history')),
+      `history paths requested on load: ${[...served].filter(p => p.startsWith('/api/apply/history')).join(', ') || 'none'}`);
+    check('AC4  and the resting state SAYS to pick a date, rather than spinning',
+      /Pick a date to see the applications you added to auto-apply that day/i.test(text)
+      && !/Loading…/.test(text),
+      (text.match(/Pick a date[^\n]*/i) || ['absent'])[0]);
+    check('AC4  the old run-history chip list is gone as the organising idea',
+      !/RUN HISTORY \(\d+\)/.test(text) && /RUN HISTORY/i.test(text),
+      'replaced by the dated view, and still present as a section');
+
+    // Opening the CALENDAR may fetch markers — that is a user action, not the initial render, and
+    // requirement 7 allows it on exactly that condition.
+    const openedCal = await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find(b => /Pick a date/i.test(b.innerText));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    check('AC4  a date picker is offered', openedCal);
+    await sleep(700);
+    const cal = await page.evaluate(() => {
+      const el = document.querySelector('[data-rm-calendar="1"]');
+      if (!el) return null;
+      return {
+        marked: [...el.querySelectorAll('[data-rm-marked]')]
+          .filter(d => d.dataset.rmMarked).map(d => d.dataset.rmDay),
+        days: [...el.querySelectorAll('[data-rm-day]')].filter(d => d.dataset.rmDay).length,
+      };
+    });
+    check('AC4  it is the DATABASE PANEL\'S calendar, not a second date picker',
+      !!cal && cal.days >= 28, cal ? `${cal.days} day cells` : 'no calendar rendered');
+    check('AC4  dates WITH activity are marked, so the user is not hunting blindly',
+      !!cal && cal.marked.length > 0, `marked: ${(cal?.marked || []).join(', ') || 'none'}`);
+    check('AC4  the marker query fires on OPENING the calendar, not on the panel\'s first render',
+      [...served].some(p => p.startsWith('/api/apply/history/months')),
+      'requirement 7, inside requirement 2');
+    await shot('ac4-calendar.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-calendar.png')}`);
+
+    // Selecting a date loads that date.
+    const picked = await page.evaluate((day) => {
+      const cell = document.querySelector(`[data-rm-calendar="1"] [data-rm-day="${day}"]`);
+      if (!cell) return false;
+      cell.click();
+      return true;
+    }, HISTORY_DAY);
+    check('AC4  a date can be selected', picked, HISTORY_DAY);
+    await sleep(900);
+
+    check('AC4  selecting a date issues the history request, date-scoped',
+      historyRequests.some(u => u.includes(`date=${HISTORY_DAY}`)),
+      historyRequests.join(' | ') || 'no history request');
+    // The DAY requests specifically — the month-marker request is an aggregate and carries no date,
+    // which is the point of it being separate.
+    const dayRequests = historyRequests.filter(u => u.startsWith('/api/apply/history?'));
+    check('AC4  and it is scoped on the SERVER, not fetched whole and filtered here',
+      dayRequests.length > 0 && dayRequests.every(u => /[?&]date=/.test(u) && /[?&]tzOffset=/.test(u)),
+      dayRequests.join(' | ') || 'no day request');
+
+    const groups = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-rm-history-group]')].map(g => ({
+        group: g.dataset.rmHistoryGroup,
+        count: Number(g.dataset.rmCount),
+        rows: g.querySelectorAll('[data-rm-history-row]').length,
+        text: g.innerText,
+      })));
+    check('AC4  the day loads into THREE groups',
+      groups.length === 3 && groups.map(g => g.group).join(',') === 'completed,pending,aborted',
+      groups.map(g => `${g.group}:${g.count}`).join(' '));
+    check('AC4  and each group holds the rows it claims',
+      groups.every(g => g.count === g.rows),
+      groups.map(g => `${g.group} claims ${g.count} holds ${g.rows}`).join('; '));
+    // The mapping, on screen: one submitted, the pending ones, and the aborted ones — including the
+    // dead posting, which is the requirement's one non-status input.
+    const byGroup = Object.fromEntries(groups.map(g => [g.group, g]));
+    check('AC4  COMPLETED holds the submitted application',
+      byGroup.completed?.count === 1 && /Infrastructure Engineer/.test(byGroup.completed.text),
+      (byGroup.completed?.text || '').replace(/\n/g, ' | ').slice(0, 90));
+    check('AC4  PENDING holds what is queued, in flight or waiting on you',
+      byGroup.pending?.count === 2
+      && /Security Engineer/.test(byGroup.pending.text) && /Research Engineer/.test(byGroup.pending.text),
+      (byGroup.pending?.text || '').replace(/\n/g, ' | ').slice(0, 110));
+    check('AC4  ABORTED holds what ended without being sent — including the DEAD POSTING',
+      byGroup.aborted?.count === 3
+      && /posting was removed from the board/i.test(byGroup.aborted.text),
+      (byGroup.aborted?.text || '').replace(/\n/g, ' | ').slice(0, 140));
+    check('AC4  and ABORTED is not called "failed" — three of its four members did not fail',
+      /ABORTED/i.test(byGroup.aborted?.text || '') && /ended without being sent/i.test(byGroup.aborted?.text || ''),
+      (byGroup.aborted?.text || '').split('\n').slice(0, 2).join(' | '));
+
+    // Requirement 4: per-item actions, and only where they apply.
+    const actions = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-rm-history-row]')].map(r => ({
+        group: r.dataset.rmGroup,
+        buttons: [...r.querySelectorAll('button')].map(b => b.innerText.trim()),
+      })));
+    check('AC4  ABORT is offered on pending rows',
+      actions.filter(a => a.group === 'pending').every(a => a.buttons.includes('Abort')),
+      actions.filter(a => a.group === 'pending').map(a => a.buttons.join('/')).join(' '));
+    check('AC4  and NEVER on a submitted or already-ended one',
+      actions.filter(a => a.group !== 'pending').every(a => !a.buttons.includes('Abort')),
+      actions.filter(a => a.group !== 'pending' && a.buttons.includes('Abort'))
+        .map(a => a.group).join(', ') || 'none offer it');
+    check('AC4  every row can be removed, and the copy says it is a soft hide',
+      actions.length > 0 && actions.every(a => a.buttons.includes('Remove')),
+      `${actions.length} rows`);
+    const removeTitle = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('[data-rm-history-row] button')]
+        .find(x => x.innerText.trim() === 'Remove');
+      return b?.title || '';
+    });
+    check('AC4  and the copy does not imply an erasure that does not happen',
+      /hidden, not deleted|never erased|record is KEPT/i.test(removeTitle), removeTitle.slice(0, 110));
+    await shot('ac4-history-groups.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-history-groups.png')}`);
+
+    // Requirement 4, the abort itself: it posts, and it does not submit.
+    const abortPosted = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('[data-rm-history-row] button')]
+        .find(x => x.innerText.trim() === 'Abort');
+      if (!b) return false;
+      b.click();
+      return true;
+    });
+    await sleep(900);
+    check('AC4  Abort posts to the per-run-job abort endpoint',
+      abortPosted && abortCalls.length > 0, abortCalls.join(', ') || 'no abort request');
+    check('AC4  and it never posts to anything that submits',
+      !served.has('/api/apply/approve') && ![...served].some(p => /\/api\/apply$/.test(p)),
+      'no approve and no apply call was made by an abort');
+    const afterAbort = await page.evaluate(() => document.body.innerText);
+    check('AC4  the panel says what the abort actually did',
+      /Nothing was submitted/i.test(afterAbort),
+      (afterAbort.match(/[^\n]*Nothing was submitted[^\n]*/i) || ['absent'])[0]);
+
+    // Requirement 6: an empty date is a normal state.
+    await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find(b => /Date:|Pick a date/i.test(b.innerText));
+      if (btn) btn.click();
+    });
+    await sleep(600);
+    const pickedEmpty = await page.evaluate((day) => {
+      const cell = document.querySelector(`[data-rm-calendar="1"] [data-rm-day="${day}"]`);
+      if (!cell) return false;
+      cell.click();
+      return true;
+    }, EMPTY_DAY);
+    await sleep(800);
+    const emptyText = await page.evaluate(() => document.body.innerText);
+    check('AC4  an EMPTY date reports emptiness — not an error, not a spinner',
+      pickedEmpty && /No applications on/i.test(emptyText)
+      && !/Loading…/.test(emptyText) && !/Could not load/i.test(emptyText),
+      (emptyText.match(/No applications on[^\n]*/i) || ['absent'])[0]);
+    await shot('ac4-empty-date.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-empty-date.png')}`);
 
     if (process.env.AB_KEEP_OPEN) {
       console.log('\nAB_KEEP_OPEN set — leaving the browser open. Ctrl+C to finish.');

@@ -141,7 +141,7 @@ function setup() {
       finished_at INTEGER, created_at INTEGER DEFAULT (unixepoch()),
       answers_json TEXT, resume_artifact_id INTEGER, resume_ats_score INTEGER,
       screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT,
-      open_questions_json TEXT, UNIQUE(run_id, job_id));
+      open_questions_json TEXT, hidden_at INTEGER, UNIQUE(run_id, job_id));
     CREATE TABLE apply_job_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, run_job_id INTEGER,
       user_id INTEGER, job_id TEXT, level TEXT DEFAULT 'info', event TEXT, message TEXT,
       details_json TEXT, created_at INTEGER DEFAULT (unixepoch()));

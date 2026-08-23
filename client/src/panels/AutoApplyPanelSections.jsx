@@ -10,6 +10,9 @@
 import { useTheme } from "../styles/theme.jsx";
 import { describeApplication, attemptStatusChip, PREREQUISITE_LABELS } from "../lib/applyObstacles.js";
 import { TileCard, TilePill } from "../components/ui/TileCard.jsx";
+// AC4: the three outcome groups of the dated run history. In shared/ because routes/apply.js
+// groups the rows with the same partition — a copy on each side is how the two come to disagree.
+import { OUTCOME_LABELS } from "../../../shared/applyOutcomeGroups.js";
 
 export function SectionHeading({ children, count, note, theme }) {
   return (
@@ -883,5 +886,118 @@ export function CompanyTile({
       }
       footer={footer}
     />
+  );
+}
+
+/**
+ * ONE APPLICATION in the dated history, with its per-item actions (TASK AC4 requirement 4).
+ *
+ * Compact on purpose — this is a log, read to answer "what happened on the 14th", not a work
+ * surface. The obstacle sentence comes from the shared vocabulary, so a row here and the same
+ * application on the panel above cannot describe themselves differently.
+ */
+export function HistoryRow({ job, theme, group, busy, onAbort, onHide, artifactUrl }) {
+  const d = describeApplication(job);
+  const { color } = OUTCOME_LABELS[group];
+  const when = job.createdAt || job.startedAt;
+  const btn = {
+    border: `1px solid ${theme.border}`, borderRadius: 6, padding: "3px 9px",
+    background: theme.surface, color: theme.text, fontWeight: 700, fontSize: 10.5,
+    cursor: busy ? "wait" : "pointer", opacity: busy ? 0.5 : 1, whiteSpace: "nowrap",
+  };
+
+  return (
+    <div data-rm-history-row={job.id} data-rm-group={group}
+         style={{ display: "flex", flexDirection: "column", gap: 4,
+                  borderTop: `1px solid ${theme.border}`, paddingTop: 7 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: theme.text }}>
+          {job.company || "Unknown company"}
+        </span>
+        <span style={{ fontSize: 11.5, color: theme.textMuted, flex: 1, minWidth: 120 }}>
+          {job.title || job.jobId || "—"}
+        </span>
+        {when && (
+          <span style={{ fontSize: 10, color: theme.textDim, whiteSpace: "nowrap" }}>
+            {new Date(when).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 11, color, lineHeight: 1.45 }}>
+        {/* A dead posting is its own state here too, and it is WHY this row is filed as aborted
+            rather than pending — said, rather than left for the user to infer from a group heading. */}
+        {job.postingGone && !job.title
+          ? "The posting was removed from the board, so there is nothing left to finish"
+          : d.obstacle}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {job.resumeAvailable && (
+          <a href={artifactUrl(job.id, "resume")} target="_blank" rel="noreferrer"
+            style={{ ...btn, textDecoration: "none", cursor: "pointer", opacity: 1 }}>
+            Resume PDF ↗
+          </a>
+        )}
+        {job.screenshotAvailable && (
+          <a href={artifactUrl(job.id, "screenshot")} target="_blank" rel="noreferrer"
+            style={{ ...btn, textDecoration: "none", cursor: "pointer", opacity: 1,
+                     color: theme.textMuted }}>
+            What we filled ↗
+          </a>
+        )}
+        <span style={{ flex: 1 }} />
+        {/* ABORT — only where the server says it is abortable. The flag comes from the response
+            rather than being re-derived here: the button's presence and the endpoint's guard have
+            to agree, and two copies of that rule is how a button appears for something the server
+            will refuse. */}
+        {job.abortable && (
+          <button onClick={() => onAbort(job.id)} disabled={busy}
+            title="Stops this application. If it is filling a form right now, the browser is closed, nothing is submitted, and the prepared answers are voided."
+            style={{ ...btn, color: "#dc2626", borderColor: "#dc262655" }}>
+            Abort
+          </button>
+        )}
+        {/* DELETE — a SOFT HIDE, and the tooltip says so rather than implying an erasure that does
+            not happen. A submitted application is evidence that reached a real employer. */}
+        <button onClick={() => onHide(job.id)} disabled={busy}
+          title={job.status === "submitted"
+            ? "Removes this from your history. The record is KEPT — an application that reached an employer is never erased, and an operator can restore it."
+            : "Removes this from your history. It is hidden, not deleted, and can be restored."}
+          style={btn}>
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ONE OUTCOME GROUP of the dated history (AC4 requirement 3).
+ *
+ * Always rendered, even at zero. "0 completed" on a day where four applications broke is
+ * information; hiding the group makes the reader count the sections to work out what is missing.
+ */
+export function HistoryGroup({ group, jobs, theme, busyId, onAbort, onHide, artifactUrl }) {
+  const { label, note, color } = OUTCOME_LABELS[group];
+  return (
+    <div data-rm-history-group={group} data-rm-count={jobs.length}
+         style={{ border: `1px solid ${theme.border}`, borderLeft: `3px solid ${color}`,
+                  borderRadius: 8, padding: "10px 13px", background: theme.surfaceHigh,
+                  display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em",
+                       textTransform: "uppercase", color }}>
+          {label}
+        </span>
+        <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
+                       fontSize: 18, lineHeight: 1, color }}>{jobs.length}</span>
+        <span style={{ fontSize: 10.5, color: theme.textDim }}>{note}</span>
+      </div>
+      {jobs.length === 0 ? (
+        <span style={{ fontSize: 11, color: theme.textDim }}>None on this date.</span>
+      ) : jobs.map(job => (
+        <HistoryRow key={job.id} job={job} theme={theme} group={group}
+          busy={busyId === job.id} onAbort={onAbort} onHide={onHide} artifactUrl={artifactUrl} />
+      ))}
+    </div>
   );
 }

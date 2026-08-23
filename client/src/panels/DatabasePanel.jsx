@@ -7,130 +7,17 @@ import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import JobCard      from "../components/JobCard.jsx";
 import { DockPortal } from "../components/DockPortal.jsx";
 import { Z } from "../styles/zLayers.js";
+// AC4: the calendar this panel established, extracted so the Auto Apply panel's dated run history
+// can reuse it rather than growing a second date picker. Same component, same two call sites here.
+import { DateCalendar } from "../components/ui/DateCalendar.jsx";
 
 // ── Calendar component ────────────────────────────────────────
-const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
-const MONTHS = ["January","February","March","April","May","June",
-                "July","August","September","October","November","December"];
+//
+// MOVED to components/ui/DateCalendar.jsx and imported above. Task AC4 reuses this widget for the
+// Auto Apply panel's dated run history rather than building a second date picker, so it was
+// lifted out whole; both of this panel's uses — the applied-jobs date FILTER in the toolbar and
+// the per-row "set date" cell — render the extracted component unchanged.
 
-function Calendar({ value, onChange, onClose, theme }) {
-  const today = new Date();
-  const init  = value ? new Date(value) : today;
-  const [view, setView] = useState({ year: init.getFullYear(), month: init.getMonth() });
-
-  const selected = value ? new Date(value) : null;
-  const firstDay = new Date(view.year, view.month, 1).getDay();
-  const daysInMonth = new Date(view.year, view.month + 1, 0).getDate();
-  const cells = Array(firstDay).fill(null).concat(
-    Array.from({ length: daysInMonth }, (_, i) => i + 1)
-  );
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const prev = () => setView(v => {
-    const m = v.month === 0 ? 11 : v.month - 1;
-    const y = v.month === 0 ? v.year - 1 : v.year;
-    return { year: y, month: m };
-  });
-  const next = () => setView(v => {
-    const m = v.month === 11 ? 0 : v.month + 1;
-    const y = v.month === 11 ? v.year + 1 : v.year;
-    return { year: y, month: m };
-  });
-
-  const pick = day => {
-    if (!day) return;
-    const d = new Date(view.year, view.month, day);
-    onChange(d.toISOString().slice(0, 10));
-    onClose();
-  };
-
-  const isSelected = day => {
-    if (!day || !selected) return false;
-    return selected.getFullYear() === view.year &&
-           selected.getMonth()    === view.month &&
-           selected.getDate()     === day;
-  };
-  const isToday = day => {
-    if (!day) return false;
-    return today.getFullYear() === view.year &&
-           today.getMonth()    === view.month &&
-           today.getDate()     === day;
-  };
-
-  return (
-    // No position/z-index/frame of its own: this is rendered INSIDE a DockPortal, which supplies
-    // the surface, the viewport clamping and the tier. It used to be position:absolute with
-    // z-index:300 inside the Applications sheet — and the sheet's root is `flex:1; overflow:hidden`,
-    // so the popover was CLIPPED by its ancestor rather than underlapped. That is why it appeared to
-    // bleed into the table, and why no z-index value could have fixed it: clipping is resolved before
-    // stacking is even considered. Only leaving the clipping ancestor fixes it.
-    <div style={{ padding:16, width:260, maxHeight:"320px", overflowY:"auto" }}>
-      <div style={{ display:"flex", alignItems:"center",
-                    justifyContent:"space-between", marginBottom:12 }}>
-        <button style={{ background:"transparent",
-                         border:`1px solid ${theme.border}`,
-                         color:theme.textMuted, borderRadius:"999px", width:28, height:28,
-                         cursor:"pointer", fontSize:16,
-                         display:"flex", alignItems:"center", justifyContent:"center" }}
-          onClick={prev}>‹</button>
-        <span style={{ fontWeight:700, fontSize:13, color:theme.text }}>
-          {MONTHS[view.month]} {view.year}
-        </span>
-        <button style={{ background:"transparent",
-                         border:`1px solid ${theme.border}`,
-                         color:theme.textMuted, borderRadius:"999px", width:28, height:28,
-                         cursor:"pointer", fontSize:16,
-                         display:"flex", alignItems:"center", justifyContent:"center" }}
-          onClick={next}>›</button>
-      </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
-        {DAYS.map(d => (
-          <div key={d} style={{ textAlign:"center", fontSize:9, fontWeight:700,
-                                color:theme.textMuted, padding:"4px 0",
-                                textTransform:"uppercase" }}>
-            {d}
-          </div>
-        ))}
-        {cells.map((day, i) => {
-          const sel = isSelected(day);
-          const tod = isToday(day);
-          return (
-            <div key={i}
-              style={{
-                textAlign:"center", fontSize:11, padding:"6px 2px", borderRadius:6,
-                cursor:day ? "pointer" : "default", userSelect:"none",
-                color:sel ? "#fff" : tod ? theme.accent : day ? theme.text : "transparent",
-                background:sel ? theme.accent : "transparent",
-                border:tod && !sel ? `1px solid ${theme.accent}` : "1px solid transparent",
-                fontWeight:sel || tod ? 700 : 400,
-                position:"relative",
-              }}
-              onClick={() => pick(day)}>
-              {day || ""}
-              {tod && !sel && (
-                <span style={{ position:"absolute", bottom:1, left:"50%",
-                               transform:"translateX(-50%)",
-                               width:3, height:3, borderRadius:"50%",
-                               background:theme.accent, display:"block" }}/>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ display:"flex", justifyContent:"space-between", marginTop:10,
-                    paddingTop:10, borderTop:`1px solid ${theme.border}` }}>
-        <button style={{ background:"transparent", border:"none",
-                         color:theme.textMuted, fontSize:10, cursor:"pointer", fontWeight:600 }}
-          onClick={() => { onChange(""); onClose(); }}>Clear date</button>
-        <button style={{ background:"transparent", border:"none",
-                         color:theme.textMuted, fontSize:10, cursor:"pointer", fontWeight:600 }}
-          onClick={() => { onChange(new Date().toISOString().slice(0,10)); onClose(); }}>
-          Today
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ── Column definitions ─────────────────────────────────────────
 const APP_COLS = [
@@ -702,7 +589,7 @@ export function DatabasePanel({ user }) {
                     animate={{ opacity:1, scale:1, y:0 }}
                     exit={{ opacity:0, scale:0.96, y:-4 }}
                     transition={{ duration:0.15 }}>
-                    <Calendar theme={theme}
+                    <DateCalendar theme={theme}
                       value={filterDate}
                       onChange={setFilterDate}
                       onClose={() => setCalFilter(false)}/>
@@ -846,7 +733,7 @@ export function DatabasePanel({ user }) {
                                       animate={{ opacity:1, scale:1, y:0 }}
                                       exit={{ opacity:0, scale:0.96, y:-4 }}
                                       transition={{ duration:0.15 }}>
-                                      <Calendar theme={theme}
+                                      <DateCalendar theme={theme}
                                         value={isoVal}
                                         onChange={iso => handleDatePick(rowId, iso)}
                                         onClose={() => setCalCell(null)}/>

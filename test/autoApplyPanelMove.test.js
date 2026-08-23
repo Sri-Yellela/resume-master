@@ -46,7 +46,10 @@ test("every piece of the surface arrived in the panel — nothing dropped in the
     // COUNT-plus-noun shape rather than one adjective. The capability is stronger than it was: the
     // pending queue now has its own obstacle card with its own action, not a CTA among others.
     ["pending approvals",      /application\$\{applyPending\.length === 1 \? "" : "s"\} waiting for your approval/],
-    ["per-run detail",         /loadApplyRunDetail\(run\.id\)/],
+    // AC4 replaced the run-history chip list with a dated view. Per-run detail is reached from every
+    // application row instead of from a chip, and the run's status and counts moved into the detail
+    // modal's own header — so what is asserted is the capability, not the call site that carried it.
+    ["per-run detail",         /onOpenRun=\{loadApplyRunDetail\}/],
     ["the queue's tier notice",/automationTier === "account"/],
     ["the readiness gate",     /applyReadiness && !applyReadiness\.available/],
   ]) {

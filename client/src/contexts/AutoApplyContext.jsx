@@ -315,6 +315,129 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       `You review it and you submit it — we never submit on that page.` });
   }, []);
 
+
+  // ── TASK AC4: THE DATED RUN HISTORY, LOADED ON DEMAND ───────────────────────────────────────
+  //
+  // REQUIREMENT 2 IS THE CONSTRAINT THIS STATE IS SHAPED AROUND: "ON DEMAND, NOT PRELOADED — this is
+  // explicit. Nothing loads until a date is selected. The panel's initial render issues no history
+  // query."
+  //
+  // So there is deliberately NO effect here. Every other feed in this file is loaded by a
+  // useEffect on `user` — that is what makes the panel work when you open it, and it is exactly
+  // what must not happen for the history. `historyDate` starts null, `history` starts null, and the
+  // only thing that fills them is loadHistory(), which nothing calls until the user picks a date.
+  //
+  // `null` vs `{ ... }` is a real distinction and both are rendered differently: null is "you have
+  // not asked yet", an empty payload is "nothing happened on that day" (requirement 6). Collapsing
+  // them into one falsy state is how "no applications on this date" becomes a permanent spinner.
+  const [historyDate, setHistoryDate] = useState(null);   // "YYYY-MM-DD", or null before any pick
+  const [history, setHistory] = useState(null);           // the payload, or null before any pick
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyMsg, setHistoryMsg] = useState("");
+  const [historyMarkers, setHistoryMarkers] = useState({}); // "YYYY-MM-DD" -> count
+  const [historyBusyId, setHistoryBusyId] = useState(null); // the run-job an action is running on
+
+  // The browser's own offset, sent with every history request. Without it the server's day boundary
+  // is UTC's, and an application queued at 8pm in Boston lands on the next day — so the user picks
+  // the date they remember and is told nothing happened. Read per call rather than once: a laptop
+  // can cross a timezone, or DST, between one query and the next.
+  const tzOffset = () => new Date().getTimezoneOffset();
+
+  /**
+   * One day's applications, in three groups. The ONLY thing that populates the history.
+   * @param {string} date "YYYY-MM-DD"
+   */
+  const loadHistory = useCallback(async (date) => {
+    if (!date) { setHistoryDate(null); setHistory(null); setHistoryMsg(""); return; }
+    setHistoryDate(date);
+    setHistoryLoading(true);
+    setHistoryMsg("");
+    try {
+      const data = await api(`/api/apply/history?date=${encodeURIComponent(date)}&tzOffset=${tzOffset()}`);
+      setHistory(data);
+    } catch (e) {
+      // The date stays selected on a failure. Clearing it would bounce the user back to "pick a
+      // date" and lose what they asked for, which reads as the click having done nothing.
+      setHistory(null);
+      setHistoryMsg(e.message || "Could not load that date.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  /**
+   * Which days in a month have anything on them (requirement 7).
+   *
+   * CALLED WHEN THE CALENDAR IS OPENED, never on mount — that is what keeps it inside requirement 2,
+   * whose words are "the panel's initial render issues no history query". Opening the picker is an
+   * action the user took. It is a count-per-day aggregate over one month, no rows and no joins, so
+   * it is cheap in a way that fetching the month's runs would not be.
+   *
+   * THE TRADEOFF, for the owner: if no query at all before a date is picked is preferred, deleting
+   * the two loadHistoryMonth calls in AutoApplyPanel removes it entirely and leaves the picker
+   * working — blind, but working. Nothing else depends on the markers.
+   */
+  const loadHistoryMonth = useCallback(async (month) => {
+    if (!month) return;
+    try {
+      const data = await api(`/api/apply/history/months/${encodeURIComponent(month)}?tzOffset=${tzOffset()}`);
+      // Merged rather than replaced, so paging back and forth does not re-clear months already
+      // fetched and make the dots flicker.
+      setHistoryMarkers(prev => ({ ...prev, ...(data.days || {}) }));
+    } catch { /* markers are a convenience; failing to get them must not break the picker */ }
+  }, []);
+
+  /**
+   * ABORT one pending application (requirement 4).
+   *
+   * The server does the work and owns the decision — including refusing an abort that lost its race
+   * with a submit, which comes back 409 with the status it actually reached. That refusal is
+   * SURFACED rather than swallowed: telling a candidate their application was stopped when it is at
+   * that moment in an employer's inbox is the worst thing this surface could do.
+   */
+  const abortRunJob = useCallback(async (runJobId) => {
+    setHistoryBusyId(runJobId);
+    setHistoryMsg("");
+    try {
+      await api(`/api/apply/run-jobs/${runJobId}/abort`, { method: "POST" });
+      // Both surfaces: the row leaves PENDING in the history, and it leaves the panel's own feeds.
+      await Promise.all([loadHistory(historyDate), loadApplyRuns(), loadApplyPending()]);
+      // AFTER the reload, not before. loadHistory clears historyMsg on entry — so setting the
+      // confirmation first wiped it a few hundred milliseconds later, and the one sentence the user
+      // most needs to read after stopping an application ("nothing was submitted") flashed and went.
+      setHistoryMsg("Stopped. Nothing was submitted, and the prepared answers were voided.");
+    } catch (e) {
+      setHistoryMsg(e.message || "Could not stop that application.");
+      await loadHistory(historyDate);
+    } finally {
+      setHistoryBusyId(null);
+    }
+  }, [historyDate, loadHistory, loadApplyRuns, loadApplyPending]);
+
+  /**
+   * REMOVE one application from the user's view (requirement 4's delete).
+   *
+   * A SOFT HIDE, and the copy says so rather than implying an erasure that did not happen — the
+   * server never hard-deletes, because a submitted application is evidence that reached a real
+   * employer and that record is what the candidate needs when an interview lands.
+   */
+  const hideRunJob = useCallback(async (runJobId) => {
+    setHistoryBusyId(runJobId);
+    setHistoryMsg("");
+    try {
+      const r = await api(`/api/apply/run-jobs/${runJobId}`, { method: "DELETE" });
+      await Promise.all([loadHistory(historyDate), loadApplyRuns(), loadApplyPending()]);
+      // After the reload, for the same reason as abortRunJob above.
+      setHistoryMsg(r.abortedFirst
+        ? "Stopped and removed from your history. Nothing was submitted."
+        : "Removed from your history. The record is kept — nothing that reached an employer is erased.");
+    } catch (e) {
+      setHistoryMsg(e.message || "Could not remove that application.");
+    } finally {
+      setHistoryBusyId(null);
+    }
+  }, [historyDate, loadHistory, loadApplyRuns, loadApplyPending]);
+
   // The resume and screenshot are served as files, so they cannot carry the auth header api() adds.
   // authContextQuery is the query-param form of the same token, which requireAuth also honours
   // (server.js: `req.query?.authContext`) — the mechanism useSyncEvents already relies on for SSE.
@@ -426,6 +549,10 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       loadApplyRuns, loadApplyRunDetail, loadApplyQuestions, loadApplyPending,
       submitApplyAnswers, openPendingDetail, decidePending,
       artifactUrl, runInFlight, startApplyRun,
+      // AC4: the dated run history. Deliberately no loader effect anywhere above — nothing here is
+      // populated until loadHistory is called with a date the user picked.
+      historyDate, history, historyLoading, historyMsg, setHistoryMsg, historyMarkers, historyBusyId,
+      loadHistory, loadHistoryMonth, abortRunJob, hideRunJob,
       // The single number the JOBS-adjacent chrome needs: how many things are waiting on a human.
       // A review queue nobody sees is worse than a cluttered board, so this is what puts a count on
       // the AUTO APPLY tab. Summed here rather than in the tab so the badge and the panel can never

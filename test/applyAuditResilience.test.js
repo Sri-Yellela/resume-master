@@ -33,7 +33,7 @@ function setup({ omit = [] } = {}) {
     CREATE TABLE apply_run_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, user_id INTEGER, approved_at INTEGER, approved_from_run_job_id INTEGER,
       job_id TEXT, status TEXT, reason_code TEXT, reason_detail TEXT, started_at INTEGER,
       finished_at INTEGER, created_at INTEGER DEFAULT (unixepoch())
-      ${auditCols ? ", " + auditCols : ""}, UNIQUE(run_id, job_id));
+      ${auditCols ? ", " + auditCols : ""}, hidden_at INTEGER, UNIQUE(run_id, job_id));
     CREATE TABLE apply_job_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, run_job_id INTEGER,
       user_id INTEGER, job_id TEXT, level TEXT DEFAULT 'info', event TEXT, message TEXT,
       details_json TEXT, created_at INTEGER DEFAULT (unixepoch()));
