@@ -6,6 +6,7 @@ import { useTheme } from "../styles/theme.jsx";
 import CompanyViewModal from "./CompanyViewModal.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { boardApplicationChip } from "../lib/applyObstacles.js";
+import CompanyIcon from "./ui/CompanyIcon.jsx";
 
 // ── Helpers ─────────────────────────────────────────────────────
 // Compute elapsed time since posting.
@@ -42,28 +43,6 @@ function PlatformLogo({ platform, size = 16, theme }) {
 }
 
 // ── Company icon ────────────────────────────────────────────────
-function CompanyIcon({ company, iconUrl, size = 48 }) {
-  const [failed, setFailed] = useState(false);
-  const letter = (company || "?")[0].toUpperCase();
-  const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706","#9333ea"];
-  let hash = 0;
-  for (const c of company || "") hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
-  const bg = colors[hash % colors.length];
-  if (iconUrl && !failed) {
-    return (
-      <img src={iconUrl} alt={company} onError={() => setFailed(true)}
-        style={{ width:size, height:size, borderRadius:10, objectFit:"contain",
-                 border:"1px solid transparent", background:"transparent", flexShrink:0 }}/>
-    );
-  }
-  return (
-    <div style={{ width:size, height:size, borderRadius:10, background:bg, color:"#fff",
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  fontWeight:800, fontSize:Math.round(size*0.38), flexShrink:0, letterSpacing:"-0.5px" }}>
-      {letter}
-    </div>
-  );
-}
 
 // ── Work badge ──────────────────────────────────────────────────
 function WorkBadge({ t, theme }) {
@@ -316,7 +295,6 @@ export default function JobCard({
   job,
   theme: themeProp,
   isLoggedOut = false,
-  showDislike = true,
   showApplyButton = true,
   g,                  // generated resume entry
   done,               // has generated resume
@@ -347,16 +325,16 @@ export default function JobCard({
   const [expanded, setExpanded] = useState(false);
   const [showCompanyView, setShowCompanyView] = useState(false);
 
-  // Local star/dislike state — used when onStar/onDislike callbacks are not provided
-  // (e.g. when rendered from LandingPage without a parent managing state)
+  // Local STAR state — used when onStar is not provided (e.g. rendered from LandingPage with no
+  // parent managing state). The matching `disliked` state went with the thumbs-down (AE5): it
+  // existed only to drive that button's fill, and keeping a write-only copy of a flag whose one
+  // remaining reader is `job.disliked` below would be a second source of truth for it.
   const [starred,  setStarred]  = useState(job._user?.starred  ?? job.starred  ?? false);
-  const [disliked, setDisliked] = useState(job._user?.disliked ?? job.disliked ?? false);
 
   // Sync if job prop changes (e.g. parent re-fetches)
   useEffect(() => {
     setStarred(job._user?.starred  ?? job.starred  ?? false);
-    setDisliked(job._user?.disliked ?? job.disliked ?? false);
-  }, [job._user, job.starred, job.disliked]);
+  }, [job._user, job.starred]);
 
   // Persist interact (star/dislike) when no parent callback provided
   async function interact(patch) {
@@ -382,16 +360,28 @@ export default function JobCard({
   const handleStar = onStar ?? (() => {
     const next = !starred;
     setStarred(next);
-    if (next) setDisliked(false);
+    // Still clears `disliked` SERVER-side: starring a job you had passed on has to un-pass it, and
+    // that is the flag the board query filters on.
     interact({ starred: next, ...(next ? { disliked: false } : {}) });
   });
 
-  const handleDislike = onDislike ?? (() => {
-    const next = !disliked;
-    setDisliked(next);
-    if (next) setStarred(false);
-    interact({ disliked: next, ...(next ? { starred: false } : {}) });
-  });
+  // ── AE5: QUEUE AUTO REPLACES THE THUMBS-DOWN ────────────────────────────────────────────────
+  // Read straight off the AutoApply context, the same way ApplyStateChip above does, so the action
+  // the card most needs does not have to be threaded through JobsPanel's board component. `queued`
+  // is the queue's own membership, so the button reports state rather than firing blindly twice.
+  //
+  // WHAT HAPPENED TO DISLIKE. It was checked before it was moved, and it is NOT merely a UI
+  // preference: `uj.disliked = 0` is a WHERE clause on the board query, the poll query and the
+  // facet counts (server.js), and routes/adminDb.js reports "disliked" as a reason a job was
+  // filtered out. It is the pass list. So it is not dropped — JobDetailPanel's "Pass" action drives
+  // exactly the same PATCH, and this card still renders a passed job dimmed and greyscaled. What
+  // changed is which of the two gets the scarce slot on a listing: one of these hides a job, the
+  // other applies to it, and only one of them is why the user is on this board.
+  const { addToApplyQueue, applyQueue } = useAutoApply();
+  const queueKey = job.jobId || job.id;
+  const queued = (applyQueue || []).some(item => item.jobId === queueKey);
+  const canQueue = !!(job.applyUrl || job.url) && !!queueKey;
+  const handleQueue = () => { if (!queued) addToApplyQueue?.({ ...job, jobId: queueKey }); };
 
   const frostedBg = hov ? "rgba(28,28,28,0.88)" : "rgba(17,17,17,0.55)";
   const frostedBlur = hov ? "blur(20px) saturate(2)" : "blur(12px) saturate(1.6)";
@@ -455,7 +445,12 @@ export default function JobCard({
           : hov
             ? "1px solid color-mix(in srgb, var(--color-primary) 40%, transparent)"
             : "1px solid var(--border-glass)",
-        borderRadius: 4, margin: "0 16px 8px",
+        borderRadius: 4,
+        // AE5: the 16px side margin moved onto the listing GRID. Inside a grid cell a per-card
+        // margin insets each cell separately, so the two columns ended up with 32px of nothing
+        // between them on top of the gap. The bottom margin went too — the grid owns the gap now,
+        // and keeping both stacked them.
+        margin: 0,
         boxShadow: hov
           ? "0 0 0 2px var(--color-primary), 0 8px 24px color-mix(in srgb, var(--color-primary) 27%, transparent)"
           : "var(--shadow-sm)",
@@ -540,30 +535,13 @@ export default function JobCard({
                   inactiveChildren="☆"
                 />
               )}
-              {!isLoggedOut && showDislike && (
-                <ToggleIconBtn
-                  bg="#dc2626"
-                  size={28}
-                  theme={theme}
-                  active={disliked}
-                  activeLabel="Undo pass"
-                  inactiveLabel="Not interested"
-                  onClick={e => { e.stopPropagation(); handleDislike(); }}
-                  activeChildren={
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
-                      <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
-                    </svg>
-                  }
-                  inactiveChildren={
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
-                      <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
-                    </svg>
-                  }
-                />
+              {!isLoggedOut && canQueue && (
+                <IconBtn bg="#16a34a" theme={theme} active={queued} size={28}
+                  title={queued ? "Already in the auto-apply queue" : "Add to auto-apply queue"}
+                  disabled={queued}
+                  onClick={e => { e.stopPropagation(); handleQueue(); }}>
+                  {queued ? "✓" : "⚡"}
+                </IconBtn>
               )}
             </div>
             {/* Row 2: job title */}
@@ -697,33 +675,18 @@ export default function JobCard({
               />
             )}
 
-            {/* Dislike */}
-            {!isLoggedOut && showDislike && (
-              <ToggleIconBtn
-                bg="#dc2626"
-                size={28}
-                theme={theme}
-                active={disliked}
-                activeLabel="Undo pass"
-                inactiveLabel="Not interested"
-                onClick={e => { e.stopPropagation(); handleDislike(); }}
-                activeChildren={
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
-                    <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
-                  </svg>
-                }
-                inactiveChildren={
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
-                    <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
-                  </svg>
-                }
-              />
+            {/* Queue Auto — AE5. Where the thumbs-down was. A listing has room for a handful of
+                controls and this is the one that moves an application forward; Pass lives on
+                JobDetailPanel, which is one click away and is where you decide you do NOT want a
+                job. Green matches JobDetailPanel's own "Queue Auto" so the two read as one action. */}
+            {!isLoggedOut && canQueue && (
+              <IconBtn bg="#16a34a" theme={theme} active={queued}
+                title={queued ? "Already in the auto-apply queue" : "Add to auto-apply queue"}
+                disabled={queued}
+                onClick={e => { e.stopPropagation(); handleQueue(); }}>
+                {queued ? "✓" : "⚡"}
+              </IconBtn>
             )}
-
             {/* Generate */}
             {!isLoggedOut && canUseGenerate && onGenerate && showApplyButton && (
               <IconBtn bg="var(--color-primary)" title={done ? "Regenerate" : "Generate resume"}

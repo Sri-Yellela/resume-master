@@ -828,7 +828,11 @@ function PendingJobsPane({ jobs, theme, onRefresh, onDislike }) {
         <div style={{ flex:1 }}/>
         <button className="rm-btn rm-btn-ghost rm-btn-sm" onClick={onRefresh}>↻ Refresh</button>
       </div>
-      <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:16 }}>
+      <div style={{ flex:1, overflowY:"auto",
+                    // AE5 moved JobCard's own `margin: "0 16px 8px"` onto its container, because a
+                    // per-card margin double-insets a grid cell. This list is not a grid, so it
+                    // takes over the exact spacing the card used to carry and looks unchanged.
+                    display:"flex", flexDirection:"column", gap:8, padding:"8px 16px 16px" }}>
         {jobs.map(job => {
           const jid = job.job_id || job.jobId;
           return (
@@ -836,7 +840,6 @@ function PendingJobsPane({ jobs, theme, onRefresh, onDislike }) {
               key={jid}
               job={{ ...job, jobId: jid }}
               theme={theme}
-              showDislike={true}
               showApplyButton={true}
               applyMode="SIMPLE"
               onVisit={() => job.url && window.open(job.url, "_blank", "noreferrer")}
@@ -888,7 +891,11 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasRe
       </div>
 
       {/* card list */}
-      <div style={{ flex:1, overflowY:"auto", paddingTop:8, paddingBottom:16 }}>
+      <div style={{ flex:1, overflowY:"auto",
+                    // AE5 moved JobCard's own `margin: "0 16px 8px"` onto its container, because a
+                    // per-card margin double-insets a grid cell. This list is not a grid, so it
+                    // takes over the exact spacing the card used to carry and looks unchanged.
+                    display:"flex", flexDirection:"column", gap:8, padding:"8px 16px 16px" }}>
         {jobs.map(job => {
           const g    = generated[job.jobId];
           const done = !!g?.html;
@@ -898,7 +905,6 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasRe
               key={job.jobId}
               job={{ ...job, starred: true }}
               theme={theme}
-              showDislike={false}
               showApplyButton={true}
               g={g}
               done={done}

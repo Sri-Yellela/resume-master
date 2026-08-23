@@ -53,7 +53,13 @@ test("AC3: the values in the primitive are the profile card's own, not re-invent
     /padding: "10px 12px"/,
     /background: "var\(--color-surface-offset\)"/,
     /minHeight: 36/,                                      // the body line
-    /repeat\(auto-fill, minmax\(\$\{min\}px, 1fr\)\)/,     // the grid
+    // The grid. AE5 added an OPT-IN column cap for the job board, so the track is now a variable
+    // — but the default path has to compute the identical value, or the extraction did change
+    // something on the way out. Asserted as: the untapped branch is the original literal, and
+    // the cap is off unless a caller asks for it.
+    /repeat\(auto-fill, \$\{track\}\)/,
+    /: `minmax\(\$\{min\}px, 1fr\)`/,
+    /maxColumns = null/,
   ]) {
     assert.match(tile, value, `a value was changed on the way out of JobProfilesPanel: ${value}`);
   }

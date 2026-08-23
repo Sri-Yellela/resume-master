@@ -11,7 +11,15 @@ test("job card hover preview uses shared active-aware icon helpers for save and 
   assert.match(jobCard, /preview = hov && !disabled/);
   assert.match(jobCard, /function ToggleIconBtn/);
   assert.match(jobCard, /activeLabel="Remove from saved"/);
-  assert.match(jobCard, /activeLabel="Undo pass"/);
+  // AE5 replaced the card's thumbs-down with Queue Auto, so there is no "Undo pass" toggle on a
+  // listing any more. Pass still exists and still drives the pass list — it lives on
+  // JobDetailPanel's action bar. What this line now pins is that the slot went to the action
+  // that MOVES an application forward, and that it reports its own state rather than firing
+  // twice.
+  assert.match(jobCard, /title=\{queued \? "Already in the auto-apply queue" : "Add to auto-apply queue"\}/);
+  assert.match(jobCard, /disabled=\{queued\}/);
+  assert.doesNotMatch(jobCard, /activeLabel="Undo pass"/,
+    "the listing must not grow the thumbs-down back — see AE5 for where Pass lives");
   assert.match(jobCard, /active=\{done && !generateLoading\}/);
   // The A+ action is no longer a JobCard button — only Generate is — and the dead `aPlusLoading`
   // local that lingered alongside it has now been removed too (§5.14). The card must not grow a

@@ -6,6 +6,7 @@ import { useTheme } from "../styles/theme.jsx";
 import CoverLetterModal from "./CoverLetterModal.jsx";
 import CompanyViewModal from "./CompanyViewModal.jsx";
 import PanelShell from "./PanelShell.jsx";
+import CompanyIcon from "./ui/CompanyIcon.jsx";
 
 function ago(postedAt, scrapedAt) {
   let ms = postedAt ? new Date(postedAt).getTime() : NaN;
@@ -27,25 +28,6 @@ function WorkBadge({ t }) {
   return <span style={{ background:"var(--color-surface-offset)", color:"var(--color-text-muted)", padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700 }}>{t || "Onsite"}</span>;
 }
 
-function CompanyIcon({ company, iconUrl, size = 44 }) {
-  const [failed, setFailed] = useState(false);
-  const letter = (company || "?")[0].toUpperCase();
-  const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706","#9333ea"];
-  let hash = 0;
-  for (const c of company || "") hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
-  const bg = colors[hash % colors.length];
-  if (iconUrl && !failed) {
-    return <img src={iconUrl} alt={company} onError={() => setFailed(true)}
-      style={{ width:size, height:size, borderRadius:8, objectFit:"contain", flexShrink:0 }}/>;
-  }
-  return (
-    <div style={{ width:size, height:size, borderRadius:8, background:bg, color:"#fff",
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  fontWeight:800, fontSize:Math.round(size*0.38), flexShrink:0, letterSpacing:"-0.5px" }}>
-      {letter}
-    </div>
-  );
-}
 
 // ── FE-1 chips (visa badge, NEW pill, skill chips) — matches JobCard.jsx's styling ──
 function VisaBadge({ isH1bSponsor, requiresWorkAuth }) {
@@ -187,7 +169,7 @@ export default function JobDetailPanel({
       onResizeStart={onResizeStart} onResize={onResize} onResizeEnd={onResizeEnd}
       header={
         <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
-              <CompanyIcon company={selectedJob.company} iconUrl={selectedJob.companyIconUrl}/>
+              <CompanyIcon company={selectedJob.company} iconUrl={selectedJob.companyIconUrl} size={44} radius={8}/>
               <div style={{ flex:1, minWidth:0 }}>
                 <div onClick={() => setShowCompanyView(true)} title={`View ${selectedJob.company}'s KB profile`}
                   style={{ fontWeight:700, fontSize:14, color:"var(--color-text)", cursor:"pointer",

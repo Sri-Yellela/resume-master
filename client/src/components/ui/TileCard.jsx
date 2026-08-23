@@ -29,11 +29,24 @@
  * they stack. `min` is a prop because a company tile carries a list of applications and needs more
  * room than a profile tile's three lines — the mechanism is identical, the threshold is not.
  */
-export function TileGrid({ children, min = 260, gap = 14, style = {} }) {
+export function TileGrid({ children, min = 260, gap = 14, maxColumns = null, style = {} }) {
+  // ── maxColumns (AE5) ─────────────────────────────────────────────────────────────────────────
+  // auto-fill alone answers "how many `min`-wide columns fit", which is the right question for the
+  // company tiles and the wrong one for the job board: AE5 asks for exactly TWO listings per row,
+  // and a bare minmax(430px) gives three at 1400px and four on a wide monitor.
+  //
+  // Capping it is still one grid and still has no breakpoint to keep in sync with the panel chrome.
+  // The floor becomes `max(min, an-Nth-of-the-row)`: when the row is wide, the Nth wins and auto-fill
+  // can only fit N; when the row is narrow, `min` wins and auto-fill drops to as many as genuinely
+  // fit, which is the stacking behaviour unchanged. The gap is subtracted first, or N columns of
+  // 100/N% plus the gaps between them overflow the row and collapse it to N-1.
+  const track = maxColumns
+    ? `minmax(max(${min}px, calc((100% - ${(maxColumns - 1) * gap}px) / ${maxColumns})), 1fr)`
+    : `minmax(${min}px, 1fr)`;
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))`,
+      gridTemplateColumns: `repeat(auto-fill, ${track})`,
       gap,
       ...style,
     }}>

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { api, printResume, dislikeJob, authHeaders, authContextQuery } from "../lib/api.js";
+import { TileGrid } from "../components/ui/TileCard.jsx";
 import { GENERATE_TOOL, A_PLUS_TOOL, TOOL_LABELS, normalizeTool } from "../lib/applyTools.js";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { useTheme } from "../styles/theme.jsx";
@@ -30,6 +31,7 @@ import {
   EXPERIENCE_LEVELS, WORK_MODELS, EMPLOYMENT_TYPES, SOURCES, AUTOMATION_TIERS,
   POSTING_AGE, VISITED, ageDaysMap,
 } from "../../../shared/jobFilterOptions.js";
+import CompanyIcon from "../components/ui/CompanyIcon.jsx";
 
 // The three extension-bridge stubs that stood here (getLinkedInExtensionInstallUrl,
 // isLinkedInExtensionInstalled, sendExtensionRequest) are gone with cleanup 5.3. They returned
@@ -180,41 +182,6 @@ function PlatformLogo({ platform, size = 20, theme }) {
 }
 
 // â"€â"€ Company icon with monogram fallback â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-function CompanyIcon({ company, iconUrl, size = 48 }) {
-  const [failed, setFailed] = useState(false);
-  const letter = (company || "?")[0].toUpperCase();
-  // Deterministic color from company name
-  const colors = ["#0A66C2","#7c3aed","#0891b2","#16a34a","#dc2626","#d97706","#9333ea"];
-  let hash = 0;
-  for (const c of company || "") hash = (hash * 31 + c.charCodeAt(0)) & 0xffff;
-  const bg = colors[hash % colors.length];
-
-  if (iconUrl && !failed) {
-    return (
-      <img
-        src={iconUrl}
-        alt={company}
-        onError={() => setFailed(true)}
-        style={{
-          width:size, height:size, borderRadius:10,
-          objectFit:"contain", border:"1px solid transparent",
-          background:"transparent", flexShrink:0,
-        }}
-      />
-    );
-  }
-  return (
-    <div style={{
-      width:size, height:size, borderRadius:10,
-      background:bg, color:"#fff",
-      display:"flex", alignItems:"center", justifyContent:"center",
-      fontWeight:800, fontSize:Math.round(size*0.38), flexShrink:0,
-      letterSpacing:"-0.5px",
-    }}>
-      {letter}
-    </div>
-  );
-}
 
 // â"€â"€ Work type badge â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 function WorkBadge({ t, theme }) {
@@ -3625,7 +3592,24 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
             </div>
           )}
 
-          {/* Job cards â€" always rendered (even when scraping) */}
+          {/* ── AE5: TWO LISTINGS PER ROW ────────────────────────────────────────────────────
+              One full-width listing per row is why the board read as oversized: a card whose
+              content is a 48px logo, two lines of text and a chip row was being given 1200px to
+              put them in, so the eye travelled the whole width for every listing and half of it
+              was empty.
+
+              TileGrid is the Database / Auto Apply card idiom, imported rather than reimplemented —
+              `repeat(auto-fill, minmax(430px, 1fr))`, the same min and gap AutoApplyPanel's company
+              tiles use. auto-fill is what makes the stacking automatic and honest: two equal columns
+              wherever two 430px columns fit, one below that, and no breakpoint to keep in sync with
+              the panel's chrome. The cards keep their own tier logic (JobCard measures its container
+              and drops to tier 2/3 when it gets narrow), so a single column on a phone is the
+              condensed layout it always was.
+
+              The horizontal margin moved off the card and onto this wrapper: a per-card margin
+              inside a grid cell insets each cell separately, which puts 32px of nothing between the
+              two columns on top of the gap. */}
+          <TileGrid min={430} gap={14} maxColumns={2} style={{ padding: "0 16px 8px" }}>
           {jobs.map(job => {
             const key = job.jobId, g = generated[key],
                   done = !!g?.html, st = loading[key];
@@ -3635,7 +3619,6 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                 applyMode={applyMode}
                 canUseGenerate={canUseGenerate} canUseAPlusResume={canUseAPlusResume}
                 theme={theme}
-                showDislike={true}
                 showApplyButton={!compact}
                 compact={compact}
                 selected={selectedJobId === key}
@@ -3651,6 +3634,11 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                 onExport={() => exportAndTrack(job, getActiveArtifact(g)?.html, job.company, getActiveArtifact(g))}
                 onVisit={() => visitUrl(job)}
                 onStar={() => toggleStar(key)}
+                // AE5: the card's thumbs-down became Queue Auto, which JobCard reads off the
+                // AutoApply context itself — the same way ApplyStateChip in that file already does,
+                // so the queue action needs no plumbing through this component. `onDislike` is still
+                // passed: JobDetailPanel's "Pass" action is where the pass list is driven from now,
+                // and the dimmed rendering of an already-passed job is unchanged.
                 onDislike={() => toggleDislike?.(key)}
                 onCardClick={!onJobSelect ? () => {
                   if (done && g.html !== "__exists__") {
@@ -3670,6 +3658,7 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
               />
             );
           })}
+          </TileGrid>
 
           {/* Pagination controls */}
           {totalPages > 1 && (
