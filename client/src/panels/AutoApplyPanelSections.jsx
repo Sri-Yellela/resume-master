@@ -324,15 +324,17 @@ export function ApplicationObstacleCard({
             Generate a resume
           </button>
         ) : null}
-        {app.primary?.row?.screenshotAvailable && (
-          <a href={artifactUrl(app.primary.row.id, "screenshot")} target="_blank" rel="noreferrer"
-            title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
-            style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
-                     border: `1px solid ${theme.border}`, background: theme.surface,
-                     color: theme.textMuted, textDecoration: "none", whiteSpace: "nowrap" }}>
-            What we filled ↗
-          </a>
-        )}
+        {/* ── AE4: "What we filled" IS GONE FROM HELD ROWS ────────────────────────────────────
+            AB1 reframed this from a route into evidence, which was the right correction and not
+            enough: on a held application it carries nothing the row does not already say. The row
+            names the company, the role, the obstacle and the field count; the picture adds a second
+            way to look at the same facts. And when a run holds before it fills anything — which is
+            what AE1 made happen — the "evidence" is a screenshot of an EMPTY form, offered under a
+            label that promises a record of work that never happened.
+            It stays on SUBMITTED rows (ApplicationRow, variant="submitted"), where it is the one
+            thing a candidate actually needs months later when an interview lands and they have to
+            remember what they told this employer. The artifact and its endpoint are untouched — the
+            audit row still references screenshot_path, and this removes an affordance, not a record. */}
         {app.atsScore != null && (
           <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
                          background: app.atsScore >= 80 ? "#dcfce7" : app.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
@@ -498,13 +500,14 @@ export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOp
                 </button>
               )
               : null}
-        {/* EVIDENCE (AB1 requirement 4). For a SUBMITTED application this is proof of what went out.
-            For a held one it is a picture of a form in a browser that has since closed — so it is
-            named as evidence rather than as a link that looks like it reopens the application. It
-            never was that, and presenting it as that is what made a hold look finishable when the
-            only way onward was to redo the whole thing by hand. */}
-        {job.screenshotAvailable && link(artifactUrl(job.id, "screenshot"),
-          variant === "submitted" ? "Screenshot of the form ↗" : "What we filled ↗")}
+        {/* EVIDENCE, AND ONLY WHERE IT IS EVIDENCE OF SOMETHING (AE4). A submitted application is
+            the case where this genuinely earns its place: it is what a candidate needs when an
+            interview lands and they have to recall what they told this employer, and it is the only
+            record of it. On an in-flight or stopped row it is a picture of a form in a browser that
+            has since closed, saying nothing the row does not already say — so it is not offered
+            there at all rather than offered under a softer label. */}
+        {variant === "submitted" && job.screenshotAvailable
+          && link(artifactUrl(job.id, "screenshot"), "Screenshot of the form ↗")}
         {job.atsScore != null && chip(
           job.atsScore >= 80 ? "#dcfce7" : job.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
           job.atsScore >= 80 ? "#166534" : job.atsScore >= 60 ? "#854d0e" : "#991b1b",
@@ -599,7 +602,7 @@ export function PrerequisiteCards({ missing, queuedCount, theme, onGo }) {
  *
  * This is the modal's old flat list item, MOVED here whole and otherwise unchanged. Every control
  * it carried is still on it: the status pill, the obstacle sentence from the shared vocabulary, the
- * ATS chip, the timestamps and attempt counter, the resume artifact, the "What we filled"
+ * ATS chip, the timestamps and attempt counter, the resume artifact, the submitted screenshot
  * screenshot, the submission-verified chip, the Open & fill / Run it again route, the posting-gone
  * state, and the apply URL.
  *
@@ -689,18 +692,19 @@ export function AttemptRow({ job, theme, artifactUrl, packetFor, onHandoff, onRe
             no resume on this attempt
           </span>
         )}
-        {/* EVIDENCE, NOT THE ROUTE (AB1 requirement 4). This is a screenshot of a form in a browser
-            that closed when the run ended — it shows what we filled and it cannot be submitted. It
-            used to be the only thing offered for a held application, which is why a hold was a dead
-            end. Labelled for what it is; the resume action below is what continues the application. */}
-        {job.screenshotAvailable && (
+        {/* Same rule as the rows above (AE4): kept for an attempt that SUBMITTED, where it is the
+            record of what went to the employer, and dropped for a held attempt, where it duplicated
+            the attempt line beside it. Gated on this attempt's own status rather than the
+            application's — one application can have a held attempt and a submitted one, and only
+            the second has anything to show. */}
+        {job.status === "submitted" && job.screenshotAvailable && (
           <a href={artifactUrl(job.id, "screenshot")} target="_blank" rel="noreferrer"
             onClick={e => e.stopPropagation()}
-            title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
+            title="A picture of the form as it was submitted. This is the record of what went out."
             style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
                      border: `1px solid ${theme.border}`, background: theme.surfaceHigh,
                      color: theme.textMuted, textDecoration: "none", whiteSpace: "nowrap" }}>
-            What we filled ↗
+            Screenshot of the form ↗
           </a>
         )}
         {/* THE ROUTE. Present on every held attempt that has a prepared packet, so the list is not
@@ -843,13 +847,9 @@ export function CompanyApplicationRow({
             Generate a resume
           </button>
         ) : null}
-        {app.primary?.row?.screenshotAvailable && (
-          <a href={artifactUrl(app.primary.row.id, "screenshot")} target="_blank" rel="noreferrer"
-            title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
-            style={{ ...chip, color: theme.textMuted }}>
-            What we filled ↗
-          </a>
-        )}
+        {/* AE4: not offered here. This row is a held application inside a company tile, where the
+            whole point of the tier is compactness — and the picture was the least informative chip
+            on it. See ApplicationObstacleCard for the full reasoning. */}
         {app.atsScore != null && (
           <span style={{ ...chip, border: "none",
                          background: app.atsScore >= 80 ? "#dcfce7" : app.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
@@ -976,7 +976,8 @@ export function CompanyTile({
 //                                       them already
 //   the obstacle sentence            -> both rows, from describeApplication, unchanged
 //   "the posting was removed"        -> the postingGone branch on both rows, unchanged
-//   Resume PDF / What we filled      -> both rows, which additionally carry the ATS chip and the
+//   Resume PDF                       -> both rows, which additionally carry the ATS chip and the
+//                                      (the screenshot is SUBMITTED-only since AE4)
 //                                       posting link the compact log row never had
 //   Abort (server-decided)           -> both rows, above; the flag is still `job.abortable`
 //   Remove, and its soft-hide copy   -> both rows, above

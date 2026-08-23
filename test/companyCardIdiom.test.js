@@ -125,7 +125,9 @@ test("AC3: nothing was dropped from the row on the way to being compact", () => 
   // states how many there are, so nothing is hidden without being counted.
   const row = sections.slice(sections.indexOf("export function CompanyApplicationRow"));
   for (const control of [
-    /Resume PDF ↗/, /Generate a resume/, /What we filled ↗/, /ATS \{app\.atsScore\}/,
+    // AE4: no screenshot on a compact held row - it was the least informative chip on the tier
+    // whose entire purpose is compactness.
+    /Resume PDF ↗/, /Generate a resume/, /ATS \{app\.atsScore\}/,
     /The posting ↗/, /Run it again/, /posting gone — cannot be resumed/, /\{resolveLabel \|\| "Open"\}/,
     /Details/,
   ]) {

@@ -930,8 +930,10 @@ async function main() {
             text: scrim ? scrim.innerText : '',
           };
         });
+        // AE4 removed the held-attempt screenshot, so an attempt's evidence here is its STATUS and
+        // its resume — the two things that differ between attempts. The screenshot never did.
         check('AC2  opening it shows every attempt, with its own status and evidence',
-          after.attempts === 2 && /Review/.test(after.text) && /What we filled/.test(after.text),
+          after.attempts === 2 && /Review/.test(after.text) && /Resume PDF/.test(after.text),
           `${after.attempts} attempt rows`);
       } else {
         check('AC2  opening it shows every attempt', false, 'no attempts disclosure');
@@ -975,10 +977,14 @@ async function main() {
           .find(d => d.style && d.style.position === 'fixed' && d.style.inset === '0px');
         return scrim ? scrim.innerText : '';
       });
-      check('AC2  every control survives in the modal: resume, evidence, ATS, posting, Open, Details',
-        /Resume PDF/.test(controls) && /What we filled/.test(controls) && /ATS \d+/.test(controls)
+      check('AC2  every control survives in the modal: resume, ATS, posting, Open, Details',
+        /Resume PDF/.test(controls) && /ATS \d+/.test(controls)
         && /The posting/.test(controls) && /Open/.test(controls) && /attempts?/i.test(controls),
         'artifact links, score chip, posting link, resolve action and the attempts disclosure');
+      // AE4: and the one control that must NOT be here. These are held rows; the picture repeated
+      // what the row said, and on a run that held before filling it was a picture of an empty form.
+      check('AE4  "What we filled" is gone from the held modal',
+        !/What we filled/.test(controls), 'no screenshot affordance on a held application');
       await shot('ac2-dead-posting.png');
       console.log(`      screenshot: ${path.join(OUT_DIR, 'ac2-dead-posting.png')}`);
       await closeModal();
@@ -1090,7 +1096,9 @@ async function main() {
     const allTabsText = `${pendingText}\n${submittedTier.map(t => t.text).join('\n')}\n${abortedText0}`;
     check('AB4  nothing was dropped: resume, evidence, ATS chip, apply URL, resolve action',
       /Resume PDF|The resume that went out/.test(allTabsText)
-      && /What we filled|Screenshot of the form/.test(allTabsText)
+      // AE4: the screenshot survives on SUBMITTED rows only, so this names that label specifically
+      // rather than accepting either — accepting the held label would let the removal regress here.
+      && submittedTier.some(t => /Screenshot of the form/.test(t.text))
       && /ATS \d+/.test(allTabsText)
       && /The posting ↗/.test(allTabsText)
       && /Open & fill/.test(allTabsText) && /Retry/.test(allTabsText),
@@ -1613,6 +1621,37 @@ async function main() {
       `db "${dbShape.dateText}" ${dbShape.date?.h}px vs apply "${aaDated.dateText}" ${aaDated.date?.h}px`);
     await shot('ad1-side-by-side-autoapply-dated.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-side-by-side-autoapply-dated.png')}`);
+
+    // ── AE4: "WHAT WE FILLED" IS OFF THE HELD ROWS AND STILL ON THE SUBMITTED ONES ──────────
+    //
+    // Read per TAB, because the whole claim is about WHERE the affordance appears. A page-level
+    // check would pass with it on every row or on none.
+    console.log('\n── AE4: the screenshot is evidence of a SUBMISSION ──');
+    await page.goto(`${vite.url}/app/auto-apply`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.waitForFunction(() => !!document.querySelector('[data-rm-subtabs]'), { timeout: 30000 });
+    await openDay(HISTORY_DAY);
+
+    const tabText = async (id) => { await selectTab(id); await sleep(600);
+      return page.evaluate(() => document.body.innerText); };
+    const pendingAe4   = await tabText('pending');
+    const completedAe4 = await tabText('completed');
+
+    check('AE4  a HELD application offers no "What we filled"',
+      !/What we filled/.test(pendingAe4),
+      (pendingAe4.match(/.{0,40}What we filled.{0,20}/) || ['clean'])[0]);
+    check('AE4  and the held row still says everything it said before it',
+      /Resume PDF/.test(pendingAe4) && /to resolve/.test(pendingAe4) && /Open/.test(pendingAe4),
+      'resume, the problem count and the route are all still on the row');
+    check('AE4  a SUBMITTED application keeps its screenshot, as the record of what went out',
+      /Screenshot of the form/.test(completedAe4),
+      (completedAe4.match(/.{0,20}Screenshot of the form.{0,10}/) || ['MISSING'])[0]);
+    check('AE4  and the submitted row does not use the held label either',
+      !/What we filled/.test(completedAe4));
+    await selectTab('pending');
+    await shot('ae4-held-no-screenshot.png');
+    await selectTab('completed');
+    await shot('ae4-submitted-keeps-screenshot.png');
+    console.log(`      screenshots: ae4-held-no-screenshot.png, ae4-submitted-keeps-screenshot.png`);
 
     // ── AE3: THE MODAL HEADER NAMES THE EMPLOYER, NOT THE ATS HOST ──────────────────────────
     //

@@ -1179,9 +1179,15 @@ export function AutoApplyPanel() {
                               Resume PDF ↗
                             </a>
                           )}
-                          {/* Evidence, not a route. This application's way forward is Approve & send
-                              below — the server submits it — so the screenshot is here to be read
-                              before deciding, never to be submitted from. */}
+                          {/* ── KEPT HERE ON PURPOSE (AE4) ──────────────────────────────────
+                              AE4 removed this from held and review rows, where it duplicated facts
+                              the row already stated. This is neither: it is the APPROVAL queue, and
+                              the button beside it sends a real application to a real employer. The
+                              screenshot is the only view of the actual form before that happens, so
+                              here it is a decision input rather than a second telling of the row —
+                              removing it would leave "Approve & send" as the only unreviewable
+                              control in the product. Evidence, not a route: the server submits, and
+                              nothing is ever submitted from the picture. */}
                           {p.screenshotAvailable && (
                             <a href={artifactUrl(p.runJobId, "screenshot")} target="_blank" rel="noreferrer"
                               title="A picture of the form as we filled it. Read it before you approve."

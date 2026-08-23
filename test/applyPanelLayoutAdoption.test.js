@@ -104,7 +104,10 @@ test("AD1 requirement 2: the separate run-history surface is removed", () => {
   // The enumeration of where each piece went is the deliverable, not decoration: a removal that
   // does not say what it moved is indistinguishable from a removal that dropped something.
   assert.match(sections, /HistoryRow AND HistoryGroup ARE GONE/);
-  for (const moved of ["Abort", "Remove", "Resume PDF", "What we filled", "the obstacle sentence"]) {
+  // "What we filled" is deliberately absent from this list since AE4: the affordance was REMOVED
+  // from held rows, not moved, so an enumeration accounting for where it went would be describing a
+  // relocation that did not happen. Its removal is asserted in applyHeldResumable.test.js.
+  for (const moved of ["Abort", "Remove", "Resume PDF", "the obstacle sentence"]) {
     assert.ok(sections.includes(moved), `the enumeration does not account for "${moved}"`);
   }
 });
@@ -257,7 +260,9 @@ test("AD1 requirement 6: nothing AC1–AC4 built was dropped by the restructure"
   // The row-level evidence, on the rows the listing renders.
   for (const [what, needle] of [
     ["Resume PDF",     /Resume PDF ↗/],
-    ["What we filled", /What we filled ↗/],
+    // AE4: on a held listing row the screenshot said nothing the row did not, so it is gone from
+    // here. What has to survive is the SUBMITTED case, which is the one a candidate needs later.
+    ["the submitted screenshot", /Screenshot of the form ↗/],
     ["the ATS chip",   /ATS \{app\.atsScore\}/],
     ["the posting",    /The posting ↗/],
     ["Details",        /Details\s*\n\s*<\/button>/],

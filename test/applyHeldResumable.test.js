@@ -357,20 +357,29 @@ test("the held card's action is the HANDOFF, not the review modal", () => {
   assert.match(panel, /handoffMsg/);
 });
 
-test("the screenshot survives as EVIDENCE, labelled as such, and is no longer the route", () => {
-  // Requirement 4: distinguish evidence from action. It is still reachable — nothing is dropped.
+test("the screenshot is EVIDENCE OF A SUBMISSION, and is not offered on a held row at all", () => {
+  // AB1 requirement 4 was "distinguish evidence from action", and relabelling the screenshot from a
+  // route to evidence was the right half of that. AE4 finished it: on a held application the picture
+  // carries nothing the row does not already state, and when a run holds before filling anything —
+  // which AE1 made happen — it is a screenshot of an EMPTY form offered under a label promising a
+  // record of work that never took place. So it is not reachable from a held row any more.
   //
-  // Read across the panel AND its sections module. AC2 moved the modal's per-attempt row into
-  // AutoApplyPanelSections.jsx as AttemptRow when the modal was restructured; the label and the
-  // route beside it are unchanged, and this assertion is about the LABEL, not about which file
-  // renders it. Pinning it to one file made it fail on a move that changed nothing it cares about.
+  // Read across the panel AND its sections module: AC2 moved the modal's per-attempt row into
+  // AutoApplyPanelSections.jsx as AttemptRow, and this assertion is about WHERE the affordance is
+  // offered, not about which file renders it.
   const surface = panel + "\n" + sections;
-  assert.match(surface, /What we filled ↗/);
-  assert.match(sections, /"Screenshot of the form ↗" : "What we filled ↗"/);
+  assert.ok(!/What we filled ↗/.test(sections),
+    "no row in the sections module may offer the held-row screenshot any more");
+  // Kept exactly twice, and both are cases where it is not a second telling of the row: an
+  // application that WENT OUT, and the approval queue, where the button beside it sends a real
+  // application and the picture is the only view of the form before that happens.
+  assert.match(sections, /variant === "submitted" && job\.screenshotAvailable/);
+  assert.match(sections, /job\.status === "submitted" && job\.screenshotAvailable/);
+  assert.match(sections, /Screenshot of the form ↗/);
+  assert.match(panel, /Approve &amp; send/, "the approval surface is the one exception, and it exists");
   assert.ok(!/>\s*Filled form ↗\s*</.test(surface),
     "a held application still offers 'Filled form ↗' as though the form could be reopened");
-  assert.match(surface, /it cannot be submitted from here/);
-  // The action beside it is what actually continues the application.
+  // The action on a held row is what actually continues the application, and it is what remains.
   assert.match(surface, /Open & fill ↗/);
 });
 

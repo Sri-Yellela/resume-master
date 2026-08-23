@@ -269,13 +269,17 @@ test("AC2 requirement 5: every control survives, and the attempts are one disclo
   // rendered as the card's children.
   assert.match(sections, /export function AttemptRow\(/);
   for (const control of [
-    /Resume PDF ↗/, /What we filled ↗/, /ATS \{job\.atsScore\}/, /Open & fill ↗/, /Run it again/,
+    // AE4 removed the held-attempt screenshot; a SUBMITTED attempt keeps its own, which is the
+    // control this now pins. An attempt that went out and an attempt that held are different rows.
+    /Resume PDF ↗/, /job\.status === "submitted" && job\.screenshotAvailable/,
+    /ATS \{job\.atsScore\}/, /Open & fill ↗/, /Run it again/,
     /posting gone — cannot be resumed/, /submission verified/, /unverified submit/,
   ]) {
     assert.match(sections, control, `a control was dropped from the attempt row: ${control}`);
   }
   // And on the application entry itself.
-  for (const control of [/Resume PDF ↗/, /What we filled ↗/, /ATS \{app\.atsScore\}/, /The posting ↗/,
+  // The application entry is a HELD application by construction, so AE4 leaves it no screenshot.
+  for (const control of [/Resume PDF ↗/, /ATS \{app\.atsScore\}/, /The posting ↗/,
                          /Generate a resume/]) {
     assert.match(sections, control, `a control was dropped from the application entry: ${control}`);
   }
