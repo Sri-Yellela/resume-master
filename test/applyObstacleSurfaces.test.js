@@ -352,9 +352,59 @@ test("the popup was never GIVEN a scope — that is the defect, not a scope it i
   assert.match(panel, /const openScoped = \(s\) => \{ setApplyRunDetail\(null\); setApplyReviewScope\(s\); setApplyRunDetailOpen\(true\); \}/);
   assert.match(panel, /const openApplicationReview = \(app\) => openScoped\(\{/);
   // Every card now opens the popup on the thing it stands for, so no card opens it bare.
-  assert.ok(!/onAction=\{openReview\}/.test(panel),
-    "a card still opens the popup with no scope — its Open shows every application again");
-  assert.ok(!/onDetails=\{\(\) => openReview\(\)\}/.test(panel));
+  //
+  // The two assertions that used to live here were `!/onAction={openReview}/` and
+  // `!/onDetails={() => openReview()}/` — CALL-SITE SHAPES, and the two exact strings AB3 had just
+  // finished replacing. They could only ever fail if someone re-typed the shape that had already
+  // been fixed, and they passed for the whole time Open was unscoped through a third shape. They
+  // are replaced by the identifier-level check in the AC1 test below, which does not care what
+  // shape a call site takes.
+  assert.match(panel, /onDetails=\{\(\) => openApplicationReview\(app\)\}/);
+});
+
+// ── AC1: Open is STILL unscoped — the half-fix, and the assertion that closes the class ──────
+
+test("AC1: no CARD-LEVEL handler can name the unscoped entry point, whatever its shape", () => {
+  // THE DIAGNOSIS. Not (a) a regression and not (c) a scope ignored downstream: (b) a HALF-FIX.
+  // AB3 rewrote every call site whose SHAPE was `onAction={openReview}` / `onDetails={() =>
+  // openReview()}` and left the one whose shape differed — `openReview` as the fallback arm of a
+  // ternary on `onResolve`. Details was scoped; Open, on the same card, was not.
+  //
+  // THE MECHANISM. A fix applied by rewriting the call sites that MATCH A PATTERN, while the wrong
+  // handler stays in scope as a bare zero-argument callable any site can still name. The pattern
+  // covers the shapes the author looked at; the IDENTIFIER covers every shape. So this assertion is
+  // written on the identifier, not on a call-site shape — the same reason the earlier assertion in
+  // this file (`!/onAction={openReview}/`) failed to catch it.
+  const code = panel.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+  assert.ok(!/\bopenReview\b/.test(code),
+    "the unscoped handler is still named `openReview` in live code — rename it away from the word " +
+    "every card's control uses, or the next card-level prop will reach for it again");
+  // The unscoped path exists, under a name no card control would reach for by habit.
+  assert.match(panel, /const openEverything = \(\) => openScoped\(null\)/);
+
+  // EVERY card-level handler prop must pass something scoped. Read the props off the source rather
+  // than trusting one hand-written list: a prop added later is covered without editing this test.
+  const CARD_HANDLER_PROPS = /\b(onResolve|onDetails|onAction|onSecondary)=\{([^}]*)\}/g;
+  const UNSCOPED = /\bopenEverything\b/;
+  for (const [whole, prop, expr] of code.matchAll(CARD_HANDLER_PROPS)) {
+    assert.ok(!UNSCOPED.test(expr),
+      `${prop} reaches the unscoped "everything" handler — its Open shows every application: ${whole}`);
+  }
+  // ...and openEverything is reached from exactly ONE place: the deliberate Review-all control.
+  const reaches = [...code.matchAll(/openEverything/g)].length;
+  assert.equal(reaches, 2, "openEverything must be declared once and called from ONE control");
+  assert.match(panel, /<button onClick=\{openEverything\}/);
+});
+
+test("AC1: Open and Details on the same card scope to the SAME one application", () => {
+  // The bug was that they did not: Details went through openApplicationReview, Open went bare. Both
+  // arms are now the scoped handler, so they cannot disagree.
+  assert.match(panel, /onResolve=\{resumable \? \(\) => openHandoff\(packet, app\) : openApplicationReview\}/);
+  assert.match(panel, /onDetails=\{\(\) => openApplicationReview\(app\)\}/);
+  // ApplicationObstacleCard must actually PASS the app, or a scoped handler receives nothing and
+  // scopes to an empty set — which renders an empty popup rather than an over-full one.
+  assert.match(sections, /onClick=\{\(\) => onResolve\(app\)\}/,
+    "the card calls onResolve with no argument, so a scoped handler gets no application");
 });
 
 test("EVERY feed the popup renders is filtered by the scope, including the bulk actions", () => {
@@ -401,7 +451,7 @@ test("REVIEW ALL survives as a deliberate, separate control", () => {
   // Requirement 3: it may exist — it is genuinely useful for working a queue in one sitting — but it
   // must not be what every row's Open does.
   assert.match(panel, /Review all \{needsYouCount\} →/);
-  assert.match(panel, /const openReview = \(\) => openScoped\(null\)/);
+  assert.match(panel, /const openEverything = \(\) => openScoped\(null\)/);
 });
 
 test("closing the popup clears the scope, so the next open cannot inherit the last card's", () => {

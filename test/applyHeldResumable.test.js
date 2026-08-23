@@ -342,7 +342,11 @@ test("the client refuses the two unresumable states BEFORE opening a tab that ca
 test("the held card's action is the HANDOFF, not the review modal", () => {
   // AB2 replaced the obstacle-keyed card with a per-application one; the action is unchanged in
   // substance — resume via the handoff when a packet exists, re-run when it has gone off.
-  assert.match(panel, /onResolve=\{resumable \? \(\) => openHandoff\(packet, app\) : openReview\}/);
+  // The fallback arm used to be `openReview`, the UNSCOPED handler — so this very assertion
+  // pinned AC1's defect in place: Open on a packet-less card listed every application needing
+  // review, and the test insisted on it verbatim. The arm is now the SCOPED handler, which
+  // ApplicationObstacleCard invokes as onResolve(app).
+  assert.match(panel, /onResolve=\{resumable \? \(\) => openHandoff\(packet, app\) : openApplicationReview\}/);
   assert.match(panel, /resolveLabel=\{resumable \? "Open & fill" : "Open"\}/);
   assert.match(panel, /const resumable = !!packet && !packet\.postingGone && !packet\.stale && !app\.postingGone/);
   assert.match(panel, /onRerun=\{rerunJob\}/);

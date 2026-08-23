@@ -85,6 +85,27 @@ const DEAD_POSTING = [
     resumeAvailable: false, screenshotAvailable: true, applyUrl: null },
 ];
 
+/**
+ * TASK AC1, IN DATA: a held application with NO handoff packet.
+ *
+ * This shape is the whole reason a green harness sat on top of a live defect. The card's plain
+ * "Open" button is rendered by exactly one combination — a packet that does not exist, a posting
+ * that is still on the board, and nothing stale — because every other combination renders
+ * "Open & fill", "Run it again", or the posting-gone text instead. No fixture had that combination,
+ * so the arm that reached the unscoped handler was unreachable from this harness, and the AB3 check
+ * clicked DETAILS (which was scoped) rather than OPEN (which was not).
+ *
+ * Deliberately a company that appears nowhere else in these fixtures, so "the popup shows only this
+ * application" cannot pass by accident on a name that is also in another section.
+ */
+const VERCEL_NO_PACKET = [
+  { id: 930, runId: 9, jobId: 'vercel-plat', company: 'Vercel', title: 'Platform Engineer',
+    status: 'held_review', reasonCode: 'full_auto_disabled', reasonDetail: null,
+    startedAt: ago(3), finishedAt: ago(3), attemptCount: 1, atsScore: 76,
+    resumeAvailable: true, screenshotAvailable: true,
+    applyUrl: 'https://vercel.com/careers/930' },
+];
+
 /** Queued and running. NOT one of the three outcome sections — the fixture proves it survives. */
 const IN_FLIGHT = [
   { id: 500, runId: 9, jobId: 'openai-sec', company: 'OpenAI', title: 'Security Engineer',
@@ -184,7 +205,7 @@ const REVIEW_PACKETS = [
     answerCount: 8, unresolvedCount: 0, resumeAvailable: false },
 ];
 
-const REVIEW = [...ANTHROPIC_HELD, ...OPENAI_HELD, ...DEAD_POSTING];
+const REVIEW = [...ANTHROPIC_HELD, ...OPENAI_HELD, ...DEAD_POSTING, ...VERCEL_NO_PACKET];
 
 const FIXTURES = {
   '/api/auth/me': { authenticated: true, user: { id: 1, username: 'ada', email: 'ada@example.com', planTier: 'PRO' } },
@@ -358,6 +379,86 @@ async function main() {
       await sleep(400);
     } else {
       check('AB3  Details opened a popup', false, 'no Details button on the card');
+    }
+
+    // ── AC1 ────────────────────────────────────────────────────────────────────────────────
+    //
+    // THE ASSERTION THE HALF-FIX NEEDED. AB3's check above clicks DETAILS. Details was scoped; OPEN,
+    // on the same card, was not — its handler was the unscoped "everything" entry point, reached
+    // through a call-site shape AB3 did not rewrite. So this clicks the control the user clicks, on
+    // a card that HAS a plain Open (no packet), and reads back what the popup actually contains.
+    console.log('\n── AC1: Open receives and honours a scope ──');
+
+    const vercelBtn = await page.evaluate(() => {
+      const card = document.querySelector('[data-rm-card="application"][data-rm-job="vercel-plat"]');
+      if (!card) return { found: false };
+      return { found: true, btns: [...card.querySelectorAll('button')].map(b => b.innerText.trim()) };
+    });
+    check('AC1  a packet-less held application renders a plain "Open" (the arm that was unscoped)',
+      vercelBtn.found && vercelBtn.btns.includes('Open'),
+      vercelBtn.found ? vercelBtn.btns.join(' / ') : 'no Vercel card rendered');
+
+    const readModal = () => page.evaluate(() => {
+      const scrim = [...document.querySelectorAll('div')]
+        .find(d => d.style && d.style.position === 'fixed' && d.style.inset === '0px');
+      return scrim ? scrim.innerText : null;
+    });
+    const closeModal = async () => {
+      await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find(b => /^Close$/i.test(b.innerText.trim()));
+        if (btn) btn.click();
+      });
+      await sleep(400);
+    };
+
+    const openClicked = await page.evaluate(() => {
+      const card = document.querySelector('[data-rm-card="application"][data-rm-job="vercel-plat"]');
+      const btn = [...(card?.querySelectorAll('button') || [])].find(b => b.innerText.trim() === 'Open');
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    if (openClicked) {
+      await sleep(700);
+      const modal = await readModal();
+      check('AC1  Open opened the popup', !!modal, modal ? `${modal.length} chars` : 'no modal');
+      // The bug report exactly: Open on one card listed three cards across two other jobs, one of
+      // them a dead posting. Named individually so a failure says WHICH foreign application leaked.
+      const foreign = ['OpenAI', 'Anthropic', 'Salesforce', 'Datadog', '4369183334']
+        .filter(c => modal && modal.includes(c));
+      check("AC1  Open shows ONLY that card's application — no other job, no dead posting",
+        !!modal && modal.includes('Vercel') && foreign.length === 0,
+        foreign.length ? `leaked: ${foreign.join(', ')}` : 'scoped to Vercel alone');
+      check('AC1  and the popup is TITLED with that application, not "Every application"',
+        // Case-insensitive: the title is `text-transform: uppercase`, and innerText returns
+        // the RENDERED text — a case-sensitive match reads a string the DOM never has.
+        !!modal && /vercel/i.test(modal.split("\n")[0] || "") && !/Every application/i.test(modal),
+        (modal || '').split('\n')[0]);
+      await shot('ac1-open-scoped.png');
+      console.log(`      screenshot: ${path.join(OUT_DIR, 'ac1-open-scoped.png')}`);
+      await closeModal();
+    } else {
+      check('AC1  Open opened the popup', false, 'no plain Open button to click');
+    }
+
+    // REVIEW ALL remains the ONE unscoped path, and must still BE unscoped.
+    const reviewAllClicked = await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find(b => /^Review all /.test(b.innerText.trim()));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    if (reviewAllClicked) {
+      await sleep(700);
+      const modal = await readModal();
+      const seen = ['OpenAI', 'Anthropic', 'Vercel'].filter(c => modal && modal.includes(c));
+      check('AC1  "Review all" is still the deliberate UNSCOPED path — it shows everything',
+        seen.length === 3, `popup mentions: ${seen.join(', ') || 'nothing'}`);
+      await shot('ac1-review-all.png');
+      console.log(`      screenshot: ${path.join(OUT_DIR, 'ac1-review-all.png')}`);
+      await closeModal();
+    } else {
+      check('AC1  "Review all" is still the deliberate UNSCOPED path', false, 'no Review all control');
     }
 
     // ── AB4 ────────────────────────────────────────────────────────────────────────────────

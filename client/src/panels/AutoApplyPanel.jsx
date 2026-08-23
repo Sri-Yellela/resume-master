@@ -112,19 +112,48 @@ export function AutoApplyPanel() {
     applyQuestions.length + applyPending.length + heldApplications.length +
     applyPrereqMissing.length;
 
-  // ── AB3: OPEN IS SCOPED TO THE CARD ─────────────────────────────────────────────────────────
+  // ── AC1: OPEN IS SCOPED TO THE CARD ─────────────────────────────────────────────────────────
   //
-  // `openReview` is now the DELIBERATE "review everything" entry point, and it is reached from its
-  // own control rather than from every row. It used to be what every card's Open did — which is why
-  // clicking Open on one row listed the problems of every application: the popup was never given a
-  // scope, so it rendered the full cross-run feeds every time.
   // A scope is { label, jobIds, rowIds, only }. `only` narrows to one FACET of the popup, for the
   // cards that are inherently about a queue rather than about one job — a portal batch, the question
-  // queue, the approvals queue. Every card now opens the popup on the thing it is standing for.
+  // queue, the approvals queue. Every card opens the popup on the thing it is standing for.
   const openScoped = (s) => { setApplyRunDetail(null); setApplyReviewScope(s); setApplyRunDetailOpen(true); };
 
-  /** The deliberate "everything" entry point (requirement 3). Reached from its OWN control. */
-  const openReview = () => openScoped(null);
+  /**
+   * THE UNSCOPED ENTRY POINT, AND THE ONLY ONE (requirement: "Review all" is the ONLY unscoped path).
+   *
+   * It is named `openEverything` rather than `openReview` on purpose, and that rename IS the fix for
+   * the class of defect described below — not decoration.
+   *
+   * WHAT WENT WRONG, PRECISELY. AB3 (679ddac) did not regress and it did not leave a scope ignored
+   * downstream. It was a HALF-FIX. AB3 rewrote every call site whose SHAPE was `onAction={openReview}`
+   * or `onDetails={() => openReview()}` into a scoped call, and it left one call site alone — the one
+   * whose shape was different, because its `openReview` sat in the fallback arm of a ternary:
+   *
+   *     onResolve={resumable ? () => openHandoff(packet, app) : openReview}
+   *                                                             ^^^^^^^^^^ never rewritten
+   *
+   * So Details was scoped and OPEN was not, on the same card. Open only reaches that arm when the
+   * application has no usable handoff packet — which is exactly the OpenAI card in the bug report,
+   * and exactly the case the fixtures did not cover.
+   *
+   * THE MECHANISM, NAMED. This is the third appearance in this codebase of "a handler wired to the
+   * wrong thing" (the no-op onSearch callbacks; the three hardcoded tab lists). Every instance has
+   * the same cause: a fix applied by REWRITING THE CALL SITES THAT MATCHED A PATTERN, while the
+   * wrong handler stayed in scope as a bare, zero-argument callable that any call site could still
+   * name. A pattern-matched fix covers the shapes the author happened to look at; the identifier
+   * covers every shape. So the unscoped handler is renamed away from the word every card's control
+   * uses, the card's non-resumable arm now passes the SCOPED handler, and two assertions below hold
+   * it: a source assertion that no card-level prop names the unscoped handler, and a real-browser
+   * assertion in scripts/abPanelUi.mjs that CLICKS Open on a packet-less card and reads back what
+   * the popup contains.
+   *
+   * The source assertion alone would not have caught this — test/applyObstacleSurfaces.test.js
+   * asserted `!/onAction={openReview}/`, the exact string AB3 had just replaced, and
+   * test/applyHeldResumable.test.js asserted the broken ternary VERBATIM. A test pinned the defect
+   * in place. That is why the browser assertion exists.
+   */
+  const openEverything = () => openScoped(null);
 
   /** ONE application, with its full set of blocking reasons. */
   const openApplicationReview = (app) => openScoped({
@@ -341,7 +370,7 @@ export function AutoApplyPanel() {
               genuinely useful for working through a queue in one sitting — but it is now its own
               control, rather than being what every row's Open did. */}
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -6 }}>
-            <button onClick={openReview}
+            <button onClick={openEverything}
               title="Every application needing review, in one list."
               style={{ border: `1px solid ${theme.border}`, borderRadius: 6, padding: "4px 10px",
                        background: "transparent", color: theme.textMuted, fontWeight: 700,
@@ -462,11 +491,16 @@ export function AutoApplyPanel() {
                     artifactUrl={artifactUrl}
                     packet={packet}
                     onRerun={rerunJob}
-                    onResolve={resumable ? () => openHandoff(packet, app) : openReview}
+                    // THE DEFECT, FIXED. The fallback arm was `openReview` — the unscoped
+                    // "everything" handler — so Open on a packet-less card listed every
+                    // application needing review. It now passes the SCOPED handler, which
+                    // ApplicationObstacleCard invokes as onResolve(app), so Open and Details
+                    // scope to the same one application by construction.
+                    onResolve={resumable ? () => openHandoff(packet, app) : openApplicationReview}
                     resolveLabel={resumable ? "Open & fill" : "Open"}
                     resolveTitle={resumable
                       ? `Opens the application in your own browser and fills it with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved. You review and submit.`
-                      : "Open this application's review"}
+                      : "Open this application's review — only this one"}
                     onDetails={() => openApplicationReview(app)}
                     // AB4 requirement 5: "no resume was generated" was a dead text chip on a
                     // PROBLEM with an obvious fix. It gets the button.
