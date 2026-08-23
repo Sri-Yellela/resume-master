@@ -36,11 +36,12 @@ export function AutoApplyPanel() {
     // W1's no-op callbacks. The context has exported it all along.
     applyQueue = [], applyQueueMsg, setApplyQueueMsg,
     applyRuns = [], applyReviewJobs = [], applyGatePortals = [],
-    handoffPacketFor, openHandoff, handoffMsg, setHandoffMsg,
-    applyInFlight = [], applySubmitted = [], applyStopped = [],
+    applyHandoffPackets = [], handoffPacketFor, openHandoff, handoffMsg, setHandoffMsg,
+    applyInFlight = [], applySubmitted = [], applyStopped = [], applyGatedJobs = [],
     applyPrereqMissing = [],
     applyRunDetailOpen, setApplyRunDetailOpen,
     applyRunDetail, setApplyRunDetail,
+    applyReviewScope, setApplyReviewScope,
     applyReadiness,
     applyQuestions = [], applyQuestionMeta,
     questionDrafts, setQuestionDrafts,
@@ -94,7 +95,68 @@ export function AutoApplyPanel() {
     applyQuestions.length + applyPending.length + heldApplications.length +
     applyPrereqMissing.length;
 
-  const openReview = () => { setApplyRunDetail(null); setApplyRunDetailOpen(true); };
+  // ── AB3: OPEN IS SCOPED TO THE CARD ─────────────────────────────────────────────────────────
+  //
+  // `openReview` is now the DELIBERATE "review everything" entry point, and it is reached from its
+  // own control rather than from every row. It used to be what every card's Open did — which is why
+  // clicking Open on one row listed the problems of every application: the popup was never given a
+  // scope, so it rendered the full cross-run feeds every time.
+  // A scope is { label, jobIds, rowIds, only }. `only` narrows to one FACET of the popup, for the
+  // cards that are inherently about a queue rather than about one job — a portal batch, the question
+  // queue, the approvals queue. Every card now opens the popup on the thing it is standing for.
+  const openScoped = (s) => { setApplyRunDetail(null); setApplyReviewScope(s); setApplyRunDetailOpen(true); };
+
+  /** The deliberate "everything" entry point (requirement 3). Reached from its OWN control. */
+  const openReview = () => openScoped(null);
+
+  /** ONE application, with its full set of blocking reasons. */
+  const openApplicationReview = (app) => openScoped({
+    jobIds: app.jobId != null ? [String(app.jobId)] : [],
+    // A row with no jobId can only be identified by its run-job ids, so both are carried and the
+    // modal matches on either. Without this an unidentifiable application would scope to nothing and
+    // the popup would come up empty.
+    rowIds: (app.rows || []).map(r => r.id),
+    label: [app.company, app.title].filter(Boolean).join(" — ") || app.jobId || "This application",
+  });
+
+  /** One PORTAL's applications — the batch is the point here, so the scope is the batch. */
+  const openPortalReview = (p) => openScoped({
+    jobIds: (applyHandoffPackets || [])
+      .filter(k => k.expectedOrigin === p.origin).map(k => String(k.jobId)),
+    rowIds: [],
+    label: `${p.host} — ${p.count} application${p.count === 1 ? "" : "s"}`,
+  });
+
+  /** One facet of the queue: the questions, or the approvals. */
+  const openFacet = (only, label) => openScoped({ jobIds: [], rowIds: [], only, label });
+
+  const closeReview = () => { setApplyRunDetailOpen(false); setApplyRunDetail(null); setApplyReviewScope(null); };
+
+  // The scope, applied. A run detail is its own scope and outranks this — opening "Run 9" is a
+  // question about that run, not about one application.
+  const scope = applyRunDetail ? null : applyReviewScope;
+  // A facet scope says nothing about WHICH jobs, so it does not filter by job at all.
+  const byJob = scope && (scope.jobIds?.length || scope.rowIds?.length);
+  const inScope = (jobId, rowId) => !byJob
+    || (jobId != null && scope.jobIds.includes(String(jobId)))
+    || (rowId != null && scope.rowIds.includes(rowId));
+  const facet = (name) => !scope?.only || scope.only === name;
+
+  // A scope names specific applications, so it has to be able to show them whichever feed they came
+  // from. Gated jobs live in their own feed and have only ever been visible as a portal BATCH — so
+  // scoping to a portal and then filtering `review` alone would open an empty popup. The unscoped
+  // view is left as it was: there the batches above already stand for these rows, and listing them
+  // twice is what the batching exists to avoid.
+  const reviewPool = byJob
+    ? [...applyReviewJobs, ...applyGatedJobs].filter((j, i, a) => a.findIndex(x => x.id === j.id) === i)
+    : applyReviewJobs;
+  const scopedReviewJobs = facet("applications") ? reviewPool.filter(j => inScope(j.jobId, j.id)) : [];
+  const scopedPending    = facet("pending")      ? applyPending.filter(p => inScope(p.jobId, p.runJobId)) : [];
+  // A question is in scope when it blocks this application. Questions are deduplicated across jobs
+  // by the server, so one question can block several — it belongs to every one of them.
+  const scopedQuestions  = facet("questions")
+    ? applyQuestions.filter(q => !byJob || (q.blocking || []).some(b => inScope(b.jobId, null)))
+    : [];
   // No per-job retry endpoint exists — the only way to try again is a new run — so "Retry" puts the
   // job back on the queue and says so, rather than pretending to re-dispatch it.
   const retryJob = (job) => {
@@ -217,6 +279,19 @@ export function AutoApplyPanel() {
             Needs you
           </SectionHeading>
 
+          {/* THE DELIBERATE "REVIEW ALL" (AB3 requirement 3). This view is still reachable — it is
+              genuinely useful for working through a queue in one sitting — but it is now its own
+              control, rather than being what every row's Open did. */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -6 }}>
+            <button onClick={openReview}
+              title="Every application needing review, in one list."
+              style={{ border: `1px solid ${theme.border}`, borderRadius: 6, padding: "4px 10px",
+                       background: "transparent", color: theme.textMuted, fontWeight: 700,
+                       fontSize: 11, cursor: "pointer" }}>
+              Review all {needsYouCount} →
+            </button>
+          </div>
+
           {/* Prerequisites first: they block EVERY application, so clearing anything else is wasted
               effort until they are done. */}
           {/* The count is what the jobs are blocked FROM, so it has to include applications already
@@ -249,7 +324,7 @@ export function AutoApplyPanel() {
                 count={p.count}
                 countLabel={p.count === 1 ? "application" : "applications"}
                 actionLabel={isCaptcha ? "Open them" : "Sign in"}
-                onAction={openReview}
+                onAction={() => openPortalReview(p)}
               />
             );
           })}
@@ -266,7 +341,7 @@ export function AutoApplyPanel() {
               count={confirmQuestions.length}
               countLabel="to confirm"
               actionLabel="Confirm answers"
-              onAction={openReview}
+              onAction={() => openFacet("questions", "Answers to confirm")}
             />
           )}
 
@@ -281,7 +356,7 @@ export function AutoApplyPanel() {
               count={attestQuestions.length}
               countLabel="attestations"
               actionLabel="Answer"
-              onAction={openReview}
+              onAction={() => openFacet("questions", "Questions only you can answer")}
             />
           )}
 
@@ -294,7 +369,7 @@ export function AutoApplyPanel() {
               count={otherQuestions.length}
               countLabel="to answer"
               actionLabel="Answer"
-              onAction={openReview}
+              onAction={() => openFacet("questions", "Fields we would not fill without you")}
             />
           )}
 
@@ -308,7 +383,7 @@ export function AutoApplyPanel() {
               count={applyPending.length}
               countLabel="to approve"
               actionLabel="Review & approve"
-              onAction={openReview}
+              onAction={() => openFacet("pending", "Applications waiting for your approval")}
             />
           )}
 
@@ -330,7 +405,7 @@ export function AutoApplyPanel() {
                 resolveTitle={resumable
                   ? `Opens the application in your own browser and fills it with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved. You review and submit.`
                   : "Open this application's review"}
-                onDetails={() => openReview()}
+                onDetails={() => openApplicationReview(app)}
               />
             );
           })}
@@ -435,7 +510,7 @@ export function AutoApplyPanel() {
       {/* ── Apply Runs Review Modal ──────────────────────────────────── */}
       {applyRunDetailOpen && (
         <div
-          onClick={e => { if (e.target === e.currentTarget) { setApplyRunDetailOpen(false); setApplyRunDetail(null); } }}
+          onClick={e => { if (e.target === e.currentTarget) closeReview() }}
           style={{
             // Named tier rather than the literal 700 it carried. Same class as JobsPanel's
             // resume-enhance modal: a focused takeover over the app, above the filters drawer.
@@ -459,9 +534,13 @@ export function AutoApplyPanel() {
             }}>
               <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800,
                              fontSize:18, letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                {/* The popup SAYS what it is about. It used to be titled "Jobs Needing Review"
+                    whichever row you opened it from, which is the honest name for a popup that was
+                    always showing all of them. */}
                 {applyRunDetail
                   ? `Apply Run #${applyRunDetail.run?.id} — ${applyRunDetail.run?.mode || "auto"}`
-                  : "Jobs Needing Review"}
+                  : scope ? scope.label
+                  : "Every application needing review"}
               </div>
               {applyRunDetail?.run && (
                 <div style={{ display:"flex", gap:10, fontSize:11, flexWrap:"wrap" }}>
@@ -482,7 +561,7 @@ export function AutoApplyPanel() {
                 </div>
               )}
               <button
-                onClick={() => { setApplyRunDetailOpen(false); setApplyRunDetail(null); }}
+                onClick={() => closeReview()}
                 style={{ background:"transparent", border:"none", cursor:"pointer",
                           color:theme.textMuted, fontSize:20, lineHeight:1, padding:"0 4px",
                           marginLeft:"auto", flexShrink:0 }}>
@@ -499,12 +578,12 @@ export function AutoApplyPanel() {
                   around reading before deciding: the row says how many answers were GUESSED, and
                   the detail view shows every answer with the rule that produced it, plus the exact
                   resume that will be attached. */}
-              {!applyRunDetail && applyPending.length > 0 && (
+              {!applyRunDetail && scopedPending.length > 0 && (
                 <div style={{ border:"1px solid #2563eb", borderRadius:6, padding:"12px 14px",
                               background:theme.surfaceHigh, display:"flex", flexDirection:"column", gap:10 }}>
                   <div>
                     <div style={{ fontWeight:800, fontSize:13, color:theme.text }}>
-                      {applyPending.length} application{applyPending.length === 1 ? "" : "s"} waiting on you
+                      {scopedPending.length} application{scopedPending.length === 1 ? "" : "s"} waiting on you
                     </div>
                     <div style={{ fontSize:11, color:theme.textMuted, marginTop:2 }}>
                       Filled and checked, but nothing has been sent. Read one before you approve it —
@@ -512,7 +591,7 @@ export function AutoApplyPanel() {
                     </div>
                   </div>
 
-                  {applyPending.map(p => {
+                  {scopedPending.map(p => {
                     const open = pendingDetail?.runJobId === p.runJobId;
                     const btn  = (bg, fg, bd) => ({
                       border:`1px solid ${bd}`, borderRadius:6, padding:"5px 10px", background:bg,
@@ -623,13 +702,13 @@ export function AutoApplyPanel() {
                   <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", paddingTop:4 }}>
                     {/* Bulk approval is the one place a stray click could send several real
                         applications at once, so it takes two deliberate steps. */}
-                    {applyPending.length > 1 && (
+                    {scopedPending.length > 1 && (
                       confirmApproveAll ? (
                         <>
                           <span style={{ fontSize:11, color:"#dc2626", fontWeight:700 }}>
-                            Send all {applyPending.length} to their employers?
+                            Send all {scopedPending.length} to their employers?
                           </span>
-                          <button onClick={() => decidePending(applyPending.map(p => p.runJobId), true)}
+                          <button onClick={() => decidePending(scopedPending.map(p => p.runJobId), true)}
                             disabled={pendingBusy}
                             style={{ border:"none", borderRadius:6, padding:"6px 12px", background:"#dc2626",
                                      color:"#fff", fontWeight:800, fontSize:12,
@@ -648,7 +727,7 @@ export function AutoApplyPanel() {
                           style={{ border:`1px solid ${theme.border}`, borderRadius:6, padding:"6px 12px",
                                    background:theme.surface, color:theme.text, fontWeight:700, fontSize:12,
                                    cursor: pendingBusy ? "wait" : "pointer" }}>
-                          Approve all {applyPending.length}
+                          Approve all {scopedPending.length}
                         </button>
                       )
                     )}
@@ -664,12 +743,12 @@ export function AutoApplyPanel() {
                   its own; answering them is what turns the hold into a completed application. The
                   answers are stored as custom_answers, which is the only exact-by-construction
                   resolution path — so on retry they are used verbatim, never inferred. */}
-              {!applyRunDetail && applyQuestions.length > 0 && (
+              {!applyRunDetail && scopedQuestions.length > 0 && (
                 <div style={{ border:`1px solid ${theme.accent}`, borderRadius:6, padding:"12px 14px",
                               background:theme.surfaceHigh, display:"flex", flexDirection:"column", gap:10 }}>
                   <div>
                     <div style={{ fontWeight:800, fontSize:13, color:theme.text }}>
-                      Answer {applyQuestions.length} question{applyQuestions.length === 1 ? "" : "s"}
+                      Answer {scopedQuestions.length} question{scopedQuestions.length === 1 ? "" : "s"}
                       {applyQuestionMeta.blockedJobs > 0 &&
                         ` to unblock ${applyQuestionMeta.blockedJobs} application${applyQuestionMeta.blockedJobs === 1 ? "" : "s"}`}
                     </div>
@@ -680,7 +759,7 @@ export function AutoApplyPanel() {
                     </div>
                   </div>
 
-                  {applyQuestions.map(q => {
+                  {scopedQuestions.map(q => {
                     const isEligibility = !!q.eligibility;
                     const isConfirm     = q.reason === "low_confidence";
                     const value         = questionDrafts[q.question] ?? "";
@@ -775,7 +854,9 @@ export function AutoApplyPanel() {
                   offer: a ten-second sign-in that releases seven applications is a different
                   product from seven separate reviews. Only shown on the cross-run view, because a
                   single run's detail is about that run. */}
-              {!applyRunDetail && applyGatePortals.length > 0 && (
+              {/* A portal batch is BY DEFINITION about several applications, so it has no place in a
+                  popup scoped to one. Shown only on the review-everything view. */}
+              {!applyRunDetail && !scope && applyGatePortals.length > 0 && (
                 <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:14 }}>
                   {applyGatePortals.map(p => (
                     <div key={p.origin} style={{
@@ -800,13 +881,18 @@ export function AutoApplyPanel() {
                 </div>
               )}
 
-              {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).length === 0 &&
-               (applyRunDetail || (applyQuestions.length === 0 && applyPending.length === 0)) && (
+              {/* The guard reads the SCOPED feeds, not the whole ones: a popup scoped to one
+                  application whose questions and approvals belong to other jobs would otherwise
+                  render nothing at all and say nothing about it. */}
+              {(applyRunDetail ? applyRunDetail.jobs : scopedReviewJobs).length === 0 &&
+               (applyRunDetail || (scopedQuestions.length === 0 && scopedPending.length === 0)) && (
                 <div style={{ padding:"24px 0", textAlign:"center", color:theme.textMuted, fontSize:12 }}>
-                  No jobs in this run yet.
+                  {applyRunDetail ? "No jobs in this run yet."
+                    : scope ? `Nothing left to resolve on ${scope.label}.`
+                    : "Nothing is waiting on you."}
                 </div>
               )}
-              {(applyRunDetail ? applyRunDetail.jobs : applyReviewJobs).map(job => {
+              {(applyRunDetail ? applyRunDetail.jobs : scopedReviewJobs).map(job => {
                 // held_gate reads as "Sign in", not "Review" and not "Failed". The portal wants an
                 // account or a CAPTCHA before it will take an application, so the next move is the
                 // candidate's and it is a specific one — which is a different message from "check
@@ -1036,7 +1122,7 @@ export function AutoApplyPanel() {
               display:"flex", justifyContent:"flex-end",
             }}>
               <button
-                onClick={() => { setApplyRunDetailOpen(false); setApplyRunDetail(null); }}
+                onClick={() => closeReview()}
                 style={{
                   padding:"8px 20px", borderRadius:4, fontWeight:700, fontSize:12,
                   background:"transparent", color:theme.textMuted,

@@ -243,11 +243,16 @@ test("the questions surface uses the modal conventions and its own CTA", () => {
   // not read through it.
   assert.match(jobsPanel, /background:theme\.modalSurface \|\| theme\.surface/);
   // Its own entry point, because answering is the actionable step rather than just "needs review".
-  assert.match(jobsPanel, /Answer \{applyQuestions\.length\} question/);
+  //
+  // Reads the SCOPED list since AB3. The surface and its CTA are unchanged; what it lists is now
+  // whatever the user opened the popup from, instead of every question regardless of the card
+  // clicked. The assertion follows the rename rather than pinning the old identifier, because the
+  // capability is what must survive — not the variable's name.
+  assert.match(jobsPanel, /Answer \{scopedQuestions\.length\} question/);
   // Only on the review view, not when inspecting one run's detail.
-  assert.match(jobsPanel, /!applyRunDetail && applyQuestions\.length > 0/);
+  assert.match(jobsPanel, /!applyRunDetail && scopedQuestions\.length > 0/);
   // The empty state must not contradict a visible question list — nor a visible pending list, which
   // renders in the same place and would otherwise sit under "No jobs in this run yet."
   assert.match(jobsPanel,
-    /\(applyRunDetail \|\| \(applyQuestions\.length === 0 && applyPending\.length === 0\)\)/);
+    /\(applyRunDetail \|\| \(scopedQuestions\.length === 0 && scopedPending\.length === 0\)\)/);
 });

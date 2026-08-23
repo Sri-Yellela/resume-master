@@ -39,7 +39,9 @@ test("every piece of the surface arrived in the panel — nothing dropped in the
     ["run status badges",      /run\.submittedCount/],
     ["the review queue",       /need review/],
     ["held-gate batches",      /applyGatePortals\.map/],
-    ["the question queue",     /Answer \{applyQuestions\.length\}/],
+    // Reads the scoped list since AB3 — the queue survives, its contents are now scoped to the card
+    // the popup was opened from rather than being every question every time.
+    ["the question queue",     /Answer \{scopedQuestions\.length\}/],
     // Copy changed with the obstacle restructure ("awaiting" -> "waiting for"), so this matches the
     // COUNT-plus-noun shape rather than one adjective. The capability is stronger than it was: the
     // pending queue now has its own obstacle card with its own action, not a CTA among others.

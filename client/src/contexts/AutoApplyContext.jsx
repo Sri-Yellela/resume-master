@@ -41,6 +41,16 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   const [applyQueueMsg, setApplyQueueMsg] = useState("");
   const [applyRunDetailOpen, setApplyRunDetailOpen] = useState(false);
   const [applyRunDetail, setApplyRunDetail] = useState(null); // { run, jobs, logs }
+  // ── WHAT THE REVIEW POPUP IS ABOUT (TASK AB3) ───────────────────────────────────────────────
+  // Clicking Open on one row used to list the problems of EVERY application. Not because the popup
+  // ignored a scope it had been given — it was never given one. openReview took no arguments, every
+  // card passed the same bare function, and the modal rendered the full cross-run feeds. There was
+  // no scoping concept anywhere in the path.
+  //
+  //   null            every application. The "Review all" control, which stays — but as a
+  //                   deliberate, separate entry point rather than as what every row's Open does.
+  //   { jobId, ... }  ONE application.
+  const [applyReviewScope, setApplyReviewScope] = useState(null);
   const [applyReadiness, setApplyReadiness] = useState(null); // null=unknown, {available,reason}
   // Validation-correction loop. A held run used to be a dead end; these are the questions that would
   // turn it into a completion, deduplicated across jobs by GET /api/apply/questions.
@@ -405,6 +415,7 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       applyQueueMsg, setApplyQueueMsg,
       applyRunDetailOpen, setApplyRunDetailOpen,
       applyRunDetail, setApplyRunDetail,
+      applyReviewScope, setApplyReviewScope,
       applyReadiness,
       applyQuestions, applyQuestionMeta,
       questionDrafts, setQuestionDrafts,

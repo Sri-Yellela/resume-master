@@ -262,6 +262,79 @@ test("prerequisites are surfaced BEFORE queueing, as one blocking item with a fi
   }
 });
 
+// ── AB3: Open is scoped to the card ──────────────────────────────────────────────────────────
+
+test("the popup was never GIVEN a scope — that is the defect, not a scope it ignored", () => {
+  // AB3 requirement 2 asks which of the two it is. It is the first: `openReview` took no arguments,
+  // all seven cards passed the same bare function, and the modal had no scoping parameter at all —
+  // so it rendered the full cross-run feeds every time. The fix is a scope that exists.
+  assert.match(ctx, /const \[applyReviewScope, setApplyReviewScope\] = useState\(null\)/);
+  assert.match(ctx, /applyReviewScope, setApplyReviewScope,/);
+  assert.match(panel, /const openScoped = \(s\) => \{ setApplyRunDetail\(null\); setApplyReviewScope\(s\); setApplyRunDetailOpen\(true\); \}/);
+  assert.match(panel, /const openApplicationReview = \(app\) => openScoped\(\{/);
+  // Every card now opens the popup on the thing it stands for, so no card opens it bare.
+  assert.ok(!/onAction=\{openReview\}/.test(panel),
+    "a card still opens the popup with no scope — its Open shows every application again");
+  assert.ok(!/onDetails=\{\(\) => openReview\(\)\}/.test(panel));
+});
+
+test("EVERY feed the popup renders is filtered by the scope, including the bulk actions", () => {
+  // Scoping the visible list but not the bulk action would be worse than not scoping at all: a
+  // popup titled with one application, whose "Approve all" submitted every pending one.
+  for (const needle of [
+    /const scopedReviewJobs = facet\("applications"\)/,
+    /const scopedPending    = facet\("pending"\)/,
+    /const scopedQuestions  = facet\("questions"\)/,
+    /\(applyRunDetail \? applyRunDetail\.jobs : scopedReviewJobs\)/,
+    /\{!applyRunDetail && scopedPending\.length > 0 && \(/,
+    /\{!applyRunDetail && scopedQuestions\.length > 0 && \(/,
+    /decidePending\(scopedPending\.map\(p => p\.runJobId\), true\)/,
+    /Approve all \{scopedPending\.length\}/,
+  ]) {
+    assert.match(panel, needle, `an unscoped feed survives in the popup: ${needle}`);
+  }
+  // And nothing inside the modal reads the unscoped lists any more.
+  const modal = panel.slice(panel.indexOf("Apply Runs Review Modal"));
+  assert.ok(!/applyPending\.(length|map)/.test(modal),
+    "the modal still reads the full pending list");
+  assert.ok(!/applyQuestions\.(length|map)/.test(modal),
+    "the modal still reads the full question list");
+});
+
+test("a portal batch is never shown inside a popup scoped to one application", () => {
+  // A batch is BY DEFINITION about several applications.
+  assert.match(panel, /\{!applyRunDetail && !scope && applyGatePortals\.length > 0 && \(/);
+});
+
+test("the popup SAYS which application it is about, and the empty state does too", () => {
+  // It used to be titled "Jobs Needing Review" whichever row opened it — the honest name for a
+  // popup that was always showing all of them.
+  assert.match(panel, /: scope \? scope\.label/);
+  assert.match(panel, /"Every application needing review"/);
+  // The old title must not be RENDERED. It is still named in the comment that explains why it went,
+  // so the check looks at the JSX expression rather than anywhere in the file.
+  assert.ok(!/\?\s*"Jobs Needing Review"|:\s*"Jobs Needing Review"/.test(panel),
+    "the popup is titled 'Jobs Needing Review' again — the honest name for one showing all of them");
+  assert.match(panel, /Nothing left to resolve on \$\{scope\.label\}/);
+});
+
+test("REVIEW ALL survives as a deliberate, separate control", () => {
+  // Requirement 3: it may exist — it is genuinely useful for working a queue in one sitting — but it
+  // must not be what every row's Open does.
+  assert.match(panel, /Review all \{needsYouCount\} →/);
+  assert.match(panel, /const openReview = \(\) => openScoped\(null\)/);
+});
+
+test("closing the popup clears the scope, so the next open cannot inherit the last card's", () => {
+  assert.match(panel, /const closeReview = \(\) => \{ setApplyRunDetailOpen\(false\); setApplyRunDetail\(null\); setApplyReviewScope\(null\); \}/);
+  assert.ok(!/setApplyRunDetailOpen\(false\); setApplyRunDetail\(null\); \}/.test(panel),
+    "a close path still leaves the scope behind");
+});
+
+test("a run detail outranks an application scope — a run is its own question", () => {
+  assert.match(panel, /const scope = applyRunDetail \? null : applyReviewScope/);
+});
+
 // ── The board and the pipeline stop being separate worlds ────────────────────────────────────
 
 test("the board card shows its application state, from the SAME vocabulary", () => {
@@ -297,7 +370,9 @@ test("every capability of the old strip survived the reorganisation", () => {
     ["per-run detail",          /loadApplyRunDetail\(run\.id\)/],
     ["run history",             /Run history/],
     ["the approvals surface",   /waiting for your approval/],
-    ["the questions surface",   /Answer \{applyQuestions\.length\}/],
+    // Reads the SCOPED list since AB3 — the surface is unchanged, what it lists is now scoped to
+    // whatever the user opened it from.
+    ["the questions surface",   /Answer \{scopedQuestions\.length\}/],
     ["bulk approve guard",      /confirmApproveAll/],
     ["artifact links",          /artifactUrl/],
   ]) {
