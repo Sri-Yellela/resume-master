@@ -362,8 +362,12 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         gateReason: reasonCode || result.reasonCode || "login_required",
       });
     } catch (e) {
-      // An unparseable apply URL is the one case buildGatePacket refuses, because a packet with no
-      // expected origin could only be released by trusting whatever page it landed on.
+      // buildGatePacket refuses in exactly two cases, and both leave the run held with no packet —
+      // a degraded handoff, which is the honest outcome:
+      //   gate_packet_unparseable_url  no expected origin, so it could only be released by trusting
+      //                                whatever page it landed on.
+      //   gate_packet_no_answers       nothing to fill, so "Open & fill" would promise work that
+      //                                cannot happen (AE2).
       logEvent(runId, runJobId, userId, jobId, "gate_packet_failed",
         "Could not prepare a handoff packet for this gate", { reasonCode: e.reasonCode || null, error: e.message });
       return null;

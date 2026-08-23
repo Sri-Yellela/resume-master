@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import {
-  isCredentialField, sanitizeDiscoveredFields, buildAnswers, detectGate,
+  isCredentialField, sanitizeDiscoveredFields, buildAnswers, detectGate, classifyGateEvidence,
   CREDENTIAL_SUBJECT_RE, CREDENTIAL_AUTOCOMPLETE,
 } from "../services/applyAutomation.js";
 
@@ -144,17 +144,23 @@ test("the application form on the same page is still filled", () => {
 
 // ── Defence 1: the gate is detected before anything is typed ─────────────────
 
-const fakePage = ({ html = "", url = "https://x.example.com/apply" }) => ({
+// detectGate reads MEASURED evidence now, not a boolean, so the fake supplies evidence in
+// GATE_EVIDENCE_SRC's shape. That is what makes the visibility rule testable at all: the old fake
+// answered "is there a recaptcha node" — the exact question that could not distinguish AE1's hidden
+// anchor frame from a challenge a human has to solve.
+const ev = (over = {}) => ({ challenges: [], configured: [], credentials: [], ...over });
+const shown  = (over) => ({ selector: ".g-recaptcha", tag: "div", visible: true,  why: "rendered", w: 304, h: 78, ...over });
+const hidden = (over) => ({ selector: ".g-recaptcha", tag: "div", visible: false, why: "no_box", w: 0, h: 0, ...over });
+const pwd = (over) => ({ selector: 'input[type="password"]', tag: "input", visible: true, why: "rendered",
+                         w: 200, h: 30, formVisible: true, formHasVisibleText: true, ...over });
+
+const fakePage = ({ evidence = ev(), url = "https://x.example.com/apply" }) => ({
   url: () => url,
-  evaluate: async (src) => {
-    if (String(src).includes("password")) return /type="password"/.test(html);
-    if (String(src).includes("recaptcha")) return /recaptcha|g-recaptcha|data-sitekey/.test(html);
-    return false;
-  },
+  evaluate: async () => evidence,
 });
 
 test("detectGate finds a login wall by its password input", async () => {
-  assert.equal(await detectGate(fakePage({ html: '<input type="password">' })), "login_required");
+  assert.equal(await detectGate(fakePage({ evidence: ev({ credentials: [pwd()] }) })), "login_required");
 });
 
 test("detectGate finds a login wall by its URL", async () => {
@@ -162,11 +168,84 @@ test("detectGate finds a login wall by its URL", async () => {
 });
 
 test("detectGate finds a CAPTCHA", async () => {
-  assert.equal(await detectGate(fakePage({ html: '<div class="g-recaptcha"></div>' })), "captcha_required");
+  assert.equal(await detectGate(fakePage({ evidence: ev({ challenges: [shown()] }) })), "captcha_required");
 });
 
 test("detectGate says nothing about an ordinary application page", async () => {
-  assert.equal(await detectGate(fakePage({ html: '<input name="first_name">' })), null);
+  assert.equal(await detectGate(fakePage({})), null);
+});
+
+// ── AE1: presence is not proof ───────────────────────────────────────────────
+
+test("THE EXACT ELEMENT THAT CAUSED AE1: an invisible reCAPTCHA anchor frame is not a gate", async () => {
+  // Measured off the live posting by scripts/ae1Diagnose.mjs. 256x60, visibility:hidden — invisible
+  // reCAPTCHA's bot-scoring frame, which every visitor loads and nobody interacts with. The old
+  // probe called this captcha_required and terminated a run on a plain 15-field apply form.
+  const anchor = {
+    selector: 'iframe[src*="/recaptcha/"]', tag: "iframe", visible: false, why: "visibility_hidden",
+    w: 256, h: 60, src: "https://www.recaptcha.net/recaptcha/api2/anchor?ar=1&k=6LeFb_YU",
+  };
+  assert.equal(await detectGate(fakePage({ evidence: ev({ challenges: [anchor] }) })), null);
+});
+
+test("a data-sitekey attribute is never proof, in any visibility state", () => {
+  // It says a captcha is PROVISIONED, not that one is presented — invisible Turnstile and reCAPTCHA
+  // v3 both carry it on pages that challenge nobody. Reported as context, never as a verdict.
+  for (const vis of [true, false]) {
+    const v = classifyGateEvidence(
+      ev({ configured: [{ selector: "[data-sitekey]", tag: "div", visible: vis, why: "rendered", w: 300, h: 80 }] }),
+      "https://x.example.com/apply");
+    assert.equal(v.gate, null, `data-sitekey with visible=${vis} must not decide a gate`);
+  }
+});
+
+test("a hidden node never outvotes the absence of a visible one", () => {
+  const v = classifyGateEvidence(ev({ challenges: [hidden(), hidden({ why: "transparent" })] }), "https://x/apply");
+  assert.equal(v.gate, null);
+  assert.equal(v.captcha, false);
+});
+
+test("the probe reads the DOM, never page source", () => {
+  // A bundled JS chunk that merely mentions 'hcaptcha' is not a challenge, and no text match could
+  // tell the two apart. Every probe has to be a querySelector against live nodes.
+  const src = fs.readFileSync("services/applyAutomation.js", "utf8");
+  const probe = src.slice(src.indexOf("export const GATE_EVIDENCE_SRC"), src.indexOf("export const EMPTY_GATE_EVIDENCE"));
+  assert.ok(probe.length > 200, "the probe source must be locatable");
+  for (const forbidden of ["innerHTML", "outerHTML", "documentElement.innerHTML", "textContent.includes", "document.scripts"]) {
+    assert.ok(!probe.includes(forbidden), `the gate probe must not read ${forbidden}`);
+  }
+  assert.match(probe, /getComputedStyle/, "rendered-ness has to be measured, not assumed");
+  assert.match(probe, /getClientRects/, "a node with no box is not on the page");
+});
+
+// ── The credential half keeps the wider net ──────────────────────────────────
+
+test("a two-step sign-in still walls the run even with the password step not yet shown", () => {
+  // The errors are not symmetric: a false CAPTCHA costs an application, a missed sign-in wall types
+  // the candidate's identity into a third party's login box. So the credential probe accepts a
+  // visible owning form as proof, not only a visible password input.
+  const v = classifyGateEvidence(
+    ev({ credentials: [pwd({ visible: false, why: "display_none", formVisible: true, formHasVisibleText: true })] }),
+    "https://x.example.com/apply");
+  assert.equal(v.gate, "login_required");
+  assert.equal(v.login, true);
+});
+
+test("a password input in a hidden subtree with no visible form is not a wall", () => {
+  const v = classifyGateEvidence(
+    ev({ credentials: [pwd({ visible: false, why: "no_box", formVisible: false, formHasVisibleText: false })] }),
+    "https://x.example.com/apply");
+  assert.equal(v.gate, null);
+});
+
+test("a page carrying BOTH keeps login separately readable, so the pre-fill check is not fooled", () => {
+  // detectGate reports the challenge first, as it always did. If `login` were only inferable from
+  // that collapsed answer, the pre-fill check would read 'captcha_required', decline to halt, and
+  // type into the sign-in form sitting on the same page.
+  const v = classifyGateEvidence(ev({ challenges: [shown()], credentials: [pwd()] }), "https://x/apply");
+  assert.equal(v.gate, "captcha_required");
+  assert.equal(v.login, true);
+  assert.equal(v.captcha, true);
 });
 
 test("the gate is checked BEFORE the fill, not only after it", () => {
@@ -178,14 +257,35 @@ test("the gate is checked BEFORE the fill, not only after it", () => {
     "the gate check must come before the first discovery/fill pass, or the login form is typed into first");
 });
 
+test("a CREDENTIAL wall halts the pre-fill; a challenge does not (AE2)", () => {
+  // Halting on a challenge is what produced a handoff packet with nothing in it: the run returned
+  // with resolvedAnswers: [] before discovery had seen the employer's controls.
+  const src = fs.readFileSync("services/applyAutomation.js", "utf8");
+  assert.match(src, /if \(preFillGate\?\.login\) \{/,
+    "the pre-fill halt must key on the credential half specifically");
+  const halt = src.slice(src.indexOf("if (preFillGate?.login) {"), src.indexOf("await runDiscovery();"));
+  assert.match(halt, /flowState: 'login_required'/,
+    "the only gate that may hold with zero answers is the one where typing is the harm");
+  assert.ok(!/if \(preFillGate\)\s*\{/.test(src),
+    "no branch may halt the fill on either gate indiscriminately");
+});
+
 test("classifyFlowState and the pre-fill check share ONE definition of a gate", () => {
   // Two copies would drift, and the drift would show up as a page filled by one and held by the
   // other — the exact inconsistency this bug was made of.
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
   const classify = src.slice(src.indexOf("export async function classifyFlowState"));
   assert.match(classify.slice(0, 2000), /const gate = await detectGate\(page\)/);
-  assert.equal((src.match(/input\[type="password"\]'\)`\)/g) || []).length, 1,
-    "the password probe must exist in exactly one place");
+  // The gate's password probe lives in the evidence source and nowhere else. Counted inside that
+  // slice rather than across the file, because defence 2's in-page credential-form check queries
+  // the same selector for a different question ("is this control in a login form") and is not a
+  // second copy of the gate rule.
+  const probe = src.slice(src.indexOf("export const GATE_EVIDENCE_SRC"), src.indexOf("export const EMPTY_GATE_EVIDENCE"));
+  assert.equal((probe.match(/querySelectorAll\('input\[type="password"\]'\)/g) || []).length, 1,
+    "the gate's password probe must exist in exactly one place");
+  const decider = src.slice(src.indexOf("export function classifyGateEvidence"), src.indexOf("export async function gatherGateEvidence"));
+  assert.ok(!decider.includes("querySelector"),
+    "the DECISION must be a pure function of measured evidence — a DOM query here would be a second definition");
 });
 
 // ── Defence 2 covers the legacy in-page sweep ────────────────────────────────

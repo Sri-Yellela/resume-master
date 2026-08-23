@@ -1664,19 +1664,179 @@ async function applyTypeaheadAnswer(page, answer) {
  * which is why the gate part is what gets lifted rather than the whole classifier being moved
  * earlier.
  *
- * @returns {'login_required'|'captcha_required'|null}
+ * ── A GATE HAS TO BE PROVABLE FROM THE RENDERED PAGE (AE1) ────────────────────────────────────
+ * The previous version asked `document.querySelector('iframe[src*="recaptcha"]') || …` and treated
+ * a hit as a gate. Measured against the live posting this was reported on
+ * (jobs.ashbyhq.com/openai/0432731c-…/application, scripts/ae1Diagnose.mjs):
+ *
+ *   iframe[src*="recaptcha"] → https://www.recaptcha.net/recaptcha/api2/anchor?k=6LeFb_YU…
+ *                              w=256 h=60  visibility: HIDDEN
+ *
+ * That is INVISIBLE reCAPTCHA's anchor frame: bot-scoring infrastructure that every visitor loads
+ * and no visitor ever interacts with. There was no challenge, no gate, and a plain fill-and-submit
+ * form of 15 fields sitting behind the false verdict. A false gate stops an application that would
+ * have succeeded, and the candidate is told the employer asked for a CAPTCHA — so the failure is
+ * silent as well as wrong.
+ *
+ * The rule this now enforces: a terminal gate state is a claim about what the CANDIDATE WOULD SEE,
+ * so only a node that is actually rendered may support it. Concretely —
+ *   - PRESENCE IS NOT PROOF. A node that is display:none, visibility:hidden, transparent, or
+ *     smaller than a control a human could click is infrastructure, not a challenge.
+ *   - `[data-sitekey]` IS NOT PROOF, in any visibility state. It is a CONFIGURATION attribute: it
+ *     says a captcha is provisioned for this page, not that one is being presented. Invisible
+ *     Turnstile and reCAPTCHA v3 carry it on pages that never challenge anyone. It is collected as
+ *     context for the log and deliberately cannot decide the outcome.
+ *   - NOTHING READS PAGE SOURCE. Every probe is a DOM query against live nodes with their computed
+ *     style. A page's SCRIPTS are not its CONTENT: a bundled JS chunk that merely mentions
+ *     'hcaptcha' is not a challenge, and a text match against source could never tell the two
+ *     apart. This is also why the widget-class probes require a rendered box rather than the mere
+ *     existence of the container element a provider script is told to fill.
+ *
+ * The credential half keeps a wider net ON PURPOSE, because the two errors are not symmetric: a
+ * false CAPTCHA costs an application, while a missed sign-in wall means typing a candidate's
+ * identity into a third party's login box. So a password input counts when it is visible OR when
+ * its owning form is on screen with a visible text control beside it — which is the two-step
+ * sign-in shape (email, then password) that a visible-only probe would walk straight into.
  */
+
+// The in-page probe. A plain EXPRESSION, matching APPLY_FN_SRC / COUNT_CONTROLS: frame.evaluate()
+// evaluates the string as an expression, so an arrow function would come back as a function object.
+//
+// Returns EVIDENCE, not a verdict. The decision is classifyGateEvidence() — a pure function on the
+// other side of this seam, so the rule that decides a gate is unit-testable without a browser, and
+// so a run can log exactly which node and which measurement produced the answer. Reporting only
+// `true` is what made AE1 undiagnosable from the logs.
+export const GATE_EVIDENCE_SRC = `(() => {
+  // Rendered-ness, measured. Not a heuristic: these are the four ways a node can be in the DOM and
+  // absent from the page. Ancestors are walked because opacity and display are not inherited into
+  // getComputedStyle the way visibility is.
+  const MIN_W = 24, MIN_H = 12;
+  function rendered(el) {
+    if (!el.getClientRects().length) return { ok: false, why: 'no_box' };
+    const r = el.getBoundingClientRect();
+    if (r.width < MIN_W || r.height < MIN_H) return { ok: false, why: 'below_min_size', w: Math.round(r.width), h: Math.round(r.height) };
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none') return { ok: false, why: 'display_none' };
+      if (cs.visibility !== 'visible') return { ok: false, why: 'visibility_' + cs.visibility };
+      if (parseFloat(cs.opacity) < 0.05) return { ok: false, why: 'transparent' };
+    }
+    return { ok: true, why: 'rendered', w: Math.round(r.width), h: Math.round(r.height) };
+  }
+  const describe = (el, selector) => {
+    const v = rendered(el);
+    return {
+      selector, tag: el.tagName.toLowerCase(), visible: v.ok, why: v.why,
+      w: v.w ?? null, h: v.h ?? null,
+      src: (el.getAttribute('src') || '').slice(0, 160),
+    };
+  };
+
+  // A challenge WIDGET, by provider. Matching the provider path rather than the bare word means a
+  // same-origin asset that merely has 'captcha' in its filename cannot qualify.
+  const CHALLENGE = [
+    'iframe[src*="/recaptcha/"]',
+    'iframe[src*="hcaptcha.com"]',
+    'iframe[src*="challenges.cloudflare.com"]',
+    'iframe[src*="/fc/api/"]',
+    '.g-recaptcha', '.h-captcha', '.cf-turnstile',
+  ];
+  const challenges = [];
+  for (const s of CHALLENGE) {
+    for (const el of document.querySelectorAll(s)) challenges.push(describe(el, s));
+  }
+
+  // Configured-but-not-presented. Never decides anything — see the note above. Carried so a log can
+  // say "a captcha is provisioned here and was not shown" instead of leaving that indistinguishable
+  // from "no captcha exists".
+  const configured = [];
+  for (const el of document.querySelectorAll('[data-sitekey]')) configured.push(describe(el, '[data-sitekey]'));
+
+  // The credential half. Each password input reports its own rendered-ness AND its owning form's, so
+  // the pure classifier can apply the asymmetric rule without a second round trip.
+  const credentials = [];
+  for (const el of document.querySelectorAll('input[type="password"]')) {
+    const own = rendered(el);
+    const form = el.form || el.closest('form');
+    let formVisible = false, formHasVisibleText = false;
+    if (form) {
+      formVisible = rendered(form).ok;
+      for (const sib of form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select')) {
+        if (sib !== el && rendered(sib).ok) { formHasVisibleText = true; break; }
+      }
+    }
+    credentials.push({
+      selector: 'input[type="password"]', tag: 'input',
+      visible: own.ok, why: own.why, w: own.w ?? null, h: own.h ?? null,
+      formVisible, formHasVisibleText,
+    });
+  }
+
+  return { challenges, configured, credentials };
+})()`;
+
+/** Nothing found. The shape a failed evaluate degrades to, so the classifier never sees undefined. */
+export const EMPTY_GATE_EVIDENCE = Object.freeze({ challenges: [], configured: [], credentials: [] });
+
+/**
+ * The gate DECISION, as a pure function of measured evidence plus the URL.
+ *
+ * @param {{challenges:Array,configured:Array,credentials:Array}} evidence  GATE_EVIDENCE_SRC output
+ * @param {string} url  the URL the page is actually on
+ * @returns {{gate:'login_required'|'captcha_required'|null, captcha:boolean, login:boolean,
+ *            matched:object|null, reason:string}}
+ *   `captcha` and `login` are reported SEPARATELY as well as collapsed into `gate`, because the
+ *   pre-fill check and the terminal classification want different halves: nothing may be typed into
+ *   a credential wall, whereas a challenge sitting on the real application form must not stop the
+ *   fill (AE2 — that is what produced a handoff packet with nothing in it).
+ */
+export function classifyGateEvidence(evidence, url) {
+  const ev = evidence && typeof evidence === 'object' ? evidence : EMPTY_GATE_EVIDENCE;
+
+  const challenge = (ev.challenges || []).find(c => c && c.visible) || null;
+
+  // Visible password input, or the two-step sign-in shape. See the asymmetry note above.
+  const credential = (ev.credentials || []).find(c => c && (c.visible || (c.formVisible && c.formHasVisibleText))) || null;
+
+  const urlLower = String(url || '').toLowerCase();
+  const urlWall = /\/login|\/signin|\/sign-in/.test(urlLower);
+
+  // The URL is not page source — it is where the browser actually is, and a browser sitting on a
+  // sign-in path is a sign-in wall whether or not the form has mounted yet.
+  const login = !!credential || urlWall;
+  const captcha = !!challenge;
+
+  // Ordering preserved from the original: a challenge is reported ahead of a wall when both are
+  // present. `login` stays separately readable, so the pre-fill check is never fooled by a page
+  // that carries both.
+  const gate = captcha ? 'captcha_required' : (login ? 'login_required' : null);
+  const matched = captcha ? challenge : (credential || null);
+  const reason = captcha ? `visible ${challenge.selector} ${challenge.w}x${challenge.h}`
+    : credential ? `visible credential form (${credential.why})`
+    : urlWall ? 'url is a sign-in path'
+    : 'no rendered challenge or credential wall';
+
+  return { gate, captcha, login, matched, reason };
+}
+
+/**
+ * Read the evidence off a live page and classify it. Logs what matched and what was rejected, so a
+ * gate verdict is auditable after the fact rather than a bare boolean.
+ */
+export async function gatherGateEvidence(page) {
+  const evidence = await page.evaluate(GATE_EVIDENCE_SRC).catch(() => EMPTY_GATE_EVIDENCE);
+  const verdict = classifyGateEvidence(evidence, page.url());
+  const rejected = [...(evidence.challenges || []), ...(evidence.configured || [])].filter(c => !c.visible);
+  if (verdict.gate || rejected.length) {
+    console.log(`[applyAutomation] gate evidence: ${verdict.gate ?? 'none'} — ${verdict.reason}` +
+      (rejected.length ? `; not presented: ${rejected.map(r => `${r.selector}(${r.why})`).join(', ')}` : ''));
+  }
+  return { ...verdict, evidence };
+}
+
+/** @returns {'login_required'|'captcha_required'|null} */
 export async function detectGate(page) {
-  const hasCaptcha = await page.evaluate(`!!(document.querySelector('iframe[src*="recaptcha"]') || document.querySelector('iframe[src*="hcaptcha"]') || document.querySelector('.g-recaptcha') || document.querySelector('.h-captcha') || document.querySelector('[data-sitekey]'))`).catch(() => false);
-  if (hasCaptcha) return 'captcha_required';
-
-  const hasPassword = await page.evaluate(`!!document.querySelector('input[type="password"]')`).catch(() => false);
-  if (hasPassword) return 'login_required';
-
-  const urlLower = (page.url() || '').toLowerCase();
-  if (/\/login|\/signin|\/sign-in/.test(urlLower)) return 'login_required';
-
-  return null;
+  return (await gatherGateEvidence(page)).gate;
 }
 
 // ── landedUrl: WHERE THE FORM ACTUALLY WAS ────────────────────────────────────────────────────
@@ -1766,10 +1926,16 @@ export async function classifyFlowState(page, originalDomain) {
     }
 
     // 9. Form inputs present
-    const hasForm = await page.evaluate(`!!document.querySelector('input:not([type="hidden"]):not([type="submit"]):not([type="button"])')`).catch(() => false);
-    if (hasForm) return 'form_ready';
-
-    return 'form_ready';
+    //
+    // ZERO FIELDS IS ITS OWN ANSWER (AE2). These two returns were both 'form_ready' — a dead
+    // branch, and the second instance of the defect the `no_fields_discovered` outcome was
+    // introduced to kill. `hasForm` was computed, tested, and then discarded: a page with no
+    // fillable control anywhere reported the same state as a fully mounted application form. The
+    // run downstream then read 'form_ready' and carried on, which is exactly "a silent condition
+    // reported as a different condition". It must never fall through to a gate state either — a
+    // page we could not read is not a page that challenged us.
+    const hasForm = await page.evaluate(`!!document.querySelector('input:not([type="hidden"]):not([type="submit"]):not([type="button"]),select,textarea,[contenteditable="true"]')`).catch(() => false);
+    return hasForm ? 'form_ready' : 'no_fields_discovered';
   } catch (e) {
     console.warn("[applyAutomation] classifyFlowState error:", e.message);
     return 'error';
@@ -2200,15 +2366,34 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // Checking here costs two evaluates on a page we are about to walk anyway, and a gate found now
     // means nothing is typed at all. `fieldsFilled: 0` is then the truth rather than a count of
     // writes into a form that was never the application.
-    const preFillGate = isUnattended ? await detectGate(page) : null;
-    if (preFillGate) {
-      console.log(`[autoApply] gate detected BEFORE filling (${preFillGate}) — nothing typed`);
+    // ── ONLY A CREDENTIAL WALL HALTS THE FILL (AE2) ─────────────────────────────────────────────
+    // This check used to halt on EITHER gate, and halting on a CAPTCHA is what produced the empty
+    // handoff. Measured on the live posting: a hidden reCAPTCHA frame was read as a gate, the run
+    // returned here with `resolvedAnswers: []`, and routes/apply.js then built the packet from the
+    // canonical profile set instead of the form — so the extension's "Open & fill" had canonical
+    // names to match against Ashby's `_systemfield_email` / UUID control names and filled nothing.
+    // The screenshot filed as evidence was of an untouched form.
+    //
+    // The asymmetry is deliberate and is the reason this check exists at all. A sign-in wall must
+    // be met with nothing typed: its controls are a THIRD PARTY'S credential form, and an email in
+    // that box is an account-existence probe against the candidate's own identity. A challenge is
+    // the opposite case — it sits ON the real application form, so the correct behaviour is to fill
+    // the form and hold afterwards, where the hold carries answers that were matched against the
+    // employer's actual controls. buildGateHold already says exactly this about its `answers`; the
+    // pre-fill branch was contradicting it.
+    const preFillGate = isUnattended ? await gatherGateEvidence(page) : null;
+    if (preFillGate?.login) {
+      console.log(`[autoApply] credential wall detected BEFORE filling — nothing typed (${preFillGate.reason})`);
       inProgress.set(String(jobId), { status: 'held_gate', browser: null });
       const held = await buildGateHold({
-        page, jobId, flowState: preFillGate, detected, totalFilled: 0, jobUrl, resolvedAnswers: [],
+        page, jobId, flowState: 'login_required', detected, totalFilled: 0, jobUrl, resolvedAnswers: [],
       });
       await browser.close();
       return held;
+    }
+    if (preFillGate?.captcha) {
+      console.log(`[autoApply] challenge present before filling (${preFillGate.reason}) — filling anyway, ` +
+        `the hold after the fill is the one that carries answers`);
     }
 
     await runDiscovery();
@@ -2334,6 +2519,33 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // Check flow state after fill + upload
     const originalDomain = (() => { try { return new URL(jobUrl).hostname; } catch { return null; } })();
     const flowState = await classifyFlowState(page, originalDomain);
+
+    // A form that is no longer there. classifyFlowState now names this rather than calling it
+    // 'form_ready' (see step 9), so it has to be terminal HERE too: falling through would put a
+    // page with no controls into the completeness gate, which would find nothing missing —
+    // because there is nothing at all — and clear the run to click submit on it.
+    if (isUnattended && flowState === 'no_fields_discovered') {
+      const pageTitleN = await page.title().catch(() => "");
+      const ssN = await takeScreenshot(page, jobId);
+      inProgress.set(String(jobId), { status: "no_fields_discovered", browser: null });
+      await browser.close();
+      return {
+        status:           "no_fields_discovered",
+        reasonCode:       "no_fields_discovered",
+        reasonDetail:     `The form was reachable and ${totalFilled} field(s) were filled, but no ` +
+                          `fillable control remained when the run re-read the page. It moved or ` +
+                          `unmounted mid-run, so nothing here can be verified as sent.`,
+        flowState,
+        fieldsFilled:     totalFilled,
+        fieldsDiscovered: firstPassFieldCount ?? 0,
+        answers:          resolvedAnswers,
+        platform:         detected,
+        pageTitle:        pageTitleN,
+        landedUrl:        page.url(),
+        screenshotBase64: ssN.base64,
+        screenshotPath:   ssN.path,
+      };
+    }
 
     // Terminal states
     if (isUnattended && (GATE_FLOW_STATES.has(flowState) || flowState === 'expired')) {

@@ -227,8 +227,11 @@ test("a login_required gate does not carry the sign-in page's fields into the pa
 
   // And the stronger guarantee the credential fix adds: on a sign-in page there are no fillable
   // answers to withhold in the first place, because nothing was filled.
-  assert.match(src, /const preFillGate = isUnattended \? await detectGate\(page\) : null;/,
+  assert.match(src, /const preFillGate = isUnattended \? await gatherGateEvidence\(page\) : null;/,
     "a gate must be detected before the fill, not only after it");
+  assert.match(src, /if \(preFillGate\?\.login\) \{/,
+    "and only the CREDENTIAL half may halt the fill — halting on a challenge is what produced " +
+    "a packet with zero answers on a form that was sitting right there (AE2)");
 });
 
 // ── Migration ────────────────────────────────────────────────────────────────

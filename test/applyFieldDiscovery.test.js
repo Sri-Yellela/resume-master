@@ -194,6 +194,21 @@ function makeMockPage(opts = {}) {
     url: () => url,
     evaluate: async (fnOrStr) => {
       if (typeof fnOrStr !== "string") return null;
+      // The gate probe first, and matched on getClientRects: it returns measured EVIDENCE rather
+      // than a boolean, and its source mentions password, recaptcha and `input:not` — so any of the
+      // looser branches below would otherwise swallow it and hand the classifier a bare `true`.
+      if (fnOrStr.includes("getClientRects")) {
+        return {
+          challenges: hasCaptcha
+            ? [{ selector: '.g-recaptcha', tag: "div", visible: true, why: "rendered", w: 304, h: 78, src: "" }]
+            : [],
+          configured: [],
+          credentials: hasPassword
+            ? [{ selector: 'input[type="password"]', tag: "input", visible: true, why: "rendered",
+                 w: 200, h: 30, formVisible: true, formHasVisibleText: true }]
+            : [],
+        };
+      }
       if (fnOrStr.includes("innerText") || fnOrStr.includes("body?.innerText")) return bodyText.toLowerCase();
       if (fnOrStr.includes('type="password"') || fnOrStr.includes("type='password'") || fnOrStr.includes("password")) return hasPassword;
       if (fnOrStr.includes("recaptcha") || fnOrStr.includes("hcaptcha") || fnOrStr.includes("data-sitekey")) return hasCaptcha;

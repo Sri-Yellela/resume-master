@@ -170,6 +170,21 @@ export function buildGatePacket({
     .filter(a => a && !a.skipped && a.value !== null && a.value !== undefined && a.value !== "")
     .map(a => toPacketAnswer({ ...a, is_required: a.required ?? a.is_required ?? required.get(a.name) ?? false }));
 
+  // ── NEVER MINT A PACKET WITH NOTHING TO FILL (AE2 requirement 3) ────────────────────────────
+  // A packet IS the "Open & fill" promise: the panel offers that route for a row that has one, and
+  // the extension's only job on the far side is to type the packet's answers into the employer's
+  // form. Zero answers makes that promise unkeepable — the overlay opens, matches nothing, and
+  // fills nothing, which is indistinguishable to the candidate from the extension being broken.
+  // Refuse, and let the caller park the hold WITHOUT a packet: the row then offers plain "Open",
+  // which is honest about what it can do. routes/apply.js already treats a throw here as a
+  // degraded handoff rather than a failed run, so nothing is lost by saying so.
+  if (packetAnswers.length === 0) {
+    const err = new Error(
+      `gate packet would carry zero answers (resolved=${real.length}, source=${usedCanonical ? "canonical_profile" : "discovered_form"})`);
+    err.reasonCode = "gate_packet_no_answers";
+    throw err;
+  }
+
   // What we could NOT answer. Surfacing it here is what lets the queue say "this one will ask you
   // two questions" before the human opens the portal (the same idea as G4 requirement 4).
   const answeredNames = new Set(packetAnswers.map(a => a.name));
