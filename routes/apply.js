@@ -671,10 +671,26 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           open_questions_json: Array.isArray(result.openQuestions) && result.openQuestions.length
             ? JSON.stringify(result.openQuestions) : null,
         });
+        // ── AE6: SAY WHAT IS STILL THEIRS TO ANSWER ────────────────────────────────────────
+        // A semi run runs neither the completeness gate nor the low-confidence gate, so the human's
+        // reading of the form is the only check there is. That is a defensible product decision;
+        // being SILENT about it is not. autoApply now returns `missingRequired` on a semi result —
+        // an empty array meaning "we checked and nothing is outstanding", which is a different fact
+        // from the field being absent — so the run's own event states the count rather than
+        // reporting "Autofilled 7 fields" over a form that cannot be submitted.
+        const semiMissing = Array.isArray(result.missingRequired) ? result.missingRequired : null;
         logEvent(runId, runJobId, userId, jobId, "autofill_done",
-          `Autofilled ${result.fieldsFilled ?? 0} fields`, {
+          `Autofilled ${result.fieldsFilled ?? 0} fields` +
+          (semiMissing === null ? ""
+            : semiMissing.length
+              ? ` — ${semiMissing.length} required field${semiMissing.length === 1 ? " is" : "s are"} yours to answer`
+              : " — no required field is left blank"), {
             platform: result.platform,
             answerCount: semiAnswers.length,
+            // Recorded even when zero: the count is the claim, and an absent key is how this went
+            // unnoticed in the first place.
+            missingRequiredCount: semiMissing === null ? null : semiMissing.length,
+            missingRequired: semiMissing,
             resumeArtifactId: usedArtifactId,
             screenshotPath: result.screenshotPath || null,
             columnsWritten: semiAudit.written,

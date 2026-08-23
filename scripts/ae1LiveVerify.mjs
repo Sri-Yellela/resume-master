@@ -18,19 +18,21 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { autoApply } from "../services/applyAutomation.js";
+import { autoApply, closeSemiBrowser } from "../services/applyAutomation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 
-const URL_ = process.argv[2]
+// Flags are not the URL. `--semi` in argv[2] was navigated to as one, and the run then failed with
+// "Cannot navigate to invalid URL" — which the AE6 check correctly read as "reported nothing".
+const ARGS = process.argv.slice(2);
+const URL_ = ARGS.find(a => !a.startsWith("--"))
   || "https://jobs.ashbyhq.com/openai/0432731c-f229-476e-92b6-d53491e79096/application";
 
 const db = new Database(path.join(ROOT, "data", "resume_master.db"), { readonly: true });
 // The FIXTURE candidate specifically, not "the most recent user" — this run types into a real
 // employer's form, and the most recent user is a real person. `--user N` overrides.
-const argv = process.argv.slice(3);
-const wanted = argv.indexOf("--user") >= 0 ? Number(argv[argv.indexOf("--user") + 1]) : null;
+const wanted = ARGS.indexOf("--user") >= 0 ? Number(ARGS[ARGS.indexOf("--user") + 1]) : null;
 const user = wanted
   ? db.prepare("SELECT id FROM users WHERE id=?").get(wanted)
   : db.prepare(`SELECT u.id FROM users u JOIN user_profile p ON p.user_id=u.id
@@ -58,14 +60,19 @@ const payload = {
   custom_answers: (() => { try { return JSON.parse(prof.custom_answers || "{}"); } catch { return {}; } })(),
 };
 
+// `--semi` runs the ATTENDED path instead of preview (AE6): a visible browser, no gates, and — since
+// AE6 — a report of what the human still has to answer. Neither mode ever clicks submit.
+const MODE = ARGS.includes("--semi") ? "semi" : "preview";
+
 console.log("=".repeat(90));
-console.log("AE1/AE2 LIVE VERIFICATION — preview mode, nothing submitted");
+console.log(`AE1/AE2/AE6 LIVE VERIFICATION — ${MODE} mode, nothing submitted`);
 console.log("=".repeat(90));
 console.log(`target    : ${URL_}`);
 console.log(`candidate : ${prof.first_name} ${prof.last_name} <${prof.email}>  (fixture)`);
 console.log("");
 
-const res = await autoApply(URL_, payload, { mode: "preview", jobId: "ae1-live-verify" });
+const res = await autoApply(URL_, payload, { mode: MODE, jobId: `ae1-live-verify-${MODE}` });
+if (MODE === "semi") await closeSemiBrowser(`ae1-live-verify-semi`);
 
 const filled = (res.answers || []).filter(a => !a.skipped && a.value !== null && a.value !== "");
 console.log("\n" + "-".repeat(90));
@@ -76,7 +83,8 @@ console.log(`fieldsFilled      : ${res.fieldsFilled}`);
 console.log(`answers (filled)  : ${filled.length}`);
 console.log(`screenshot        : ${res.screenshotPath ?? "(none)"}`);
 console.log(`landedUrl         : ${res.landedUrl ?? "(none)"}`);
-if (res.missingRequired) console.log(`missingRequired   : ${JSON.stringify(res.missingRequired)}`);
+console.log(`missingRequired   : ${res.missingRequired === undefined ? "(ABSENT — the AE6 defect)" : JSON.stringify(res.missingRequired)}`);
+console.log(`openQuestions     : ${(res.openQuestions || []).length}`);
 console.log("-".repeat(90));
 for (const a of filled) {
   console.log(`  ${String(a.name || a.field_id).padEnd(42)} ${String(a.provenance).padEnd(16)} ` +
@@ -98,6 +106,13 @@ if (!filled.some(a => /_systemfield_|^[0-9a-f]{8}-/.test(String(a.name || ""))))
   problems.push("no answer is keyed on one of Ashby's own control names — the packet would not match");
 }
 
+// AE6: the attended path runs no gates by design, and used to say nothing at all about the form it
+// had just filled. An empty array is a pass — "we checked, nothing is outstanding"; an ABSENT field
+// is the defect.
+if (MODE === "semi" && !Array.isArray(res.missingRequired)) {
+  problems.push("a semi run reported NOTHING about its required fields — missingRequired is absent");
+}
+
 console.log("");
 if (problems.length) {
   console.log("FAILED:");
@@ -106,3 +121,7 @@ if (problems.length) {
 }
 console.log("PASSED: no gate reported, discovery found real fields, the fill filled, and the answers");
 console.log("        are keyed on the employer's own control names.");
+if (MODE === "semi") {
+  console.log(`        And the attended run states its own gap: ${res.missingRequired.length} required ` +
+              `field(s) are yours to answer${res.missingRequired.length ? ` — ${res.missingRequired.join(", ")}` : ""}.`);
+}

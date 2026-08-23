@@ -11,6 +11,13 @@ neither the profile nor the resolver can supply and that I will not invent on a 
 
 The stop is **not** the "wrong answer → return to the resolver" stop. No wrong answer was found.
 
+> **Update, 2026-08-23 (AE6).** This document is still accurate about A5: no application was
+> submitted and `mode:'full'` has still never run against a real employer. Two things HAVE since
+> run against one, both stopping short of a submission — a `preview` run and a `semi` run against
+> `jobs.ashbyhq.com/openai/0432731c-…/application`, under a fixture identity, to diagnose AE1/AE2.
+> `docs/GATED_HANDOFF_STATUS.md` §8 is the single place that states which paths have met a real
+> employer and which have not; read it before quoting anything here or elsewhere as "end to end".
+
 ---
 
 ## 1. Preconditions — every one checked

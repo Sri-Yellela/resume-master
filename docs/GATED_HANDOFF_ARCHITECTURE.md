@@ -225,12 +225,20 @@ is a separate question and still G4's gate; it has not been re-measured here.
   hydration chunks (~3.7s). The harness refuses to proceed if that first number is ever non-zero and
   the second ever zero, because capturing then would persist empty schemas.
 
-  **What is still unmeasured:** the original observation was a live Ashby posting, and the testing
-  convention forbids pointing automation at a real ATS, so whether discovery holds on a real, heavier
-  SPA has not been established. Two things limit the damage if it does not. An empty capture is
-  REFUSED (422, `form_schema_empty`) rather than stored, so the failure mode the ⛔ existed to prevent
-  cannot occur even if discovery regresses. And a schema that comes back different reconciles — the
-  store cannot be poisoned permanently by one bad reading, only temporarily by a repeated one.
+  **MEASURED, 2026-08-23 (AE1).** This was "still unmeasured" until a live semi run produced two
+  safety-critical defects and the diagnosis required pointing a read-only instrument at the exact
+  posting the original ⛔ came from — `jobs.ashbyhq.com/openai/0432731c-…/application`. Result
+  (`scripts/ae1Diagnose.mjs`): `waitForFormReady` settled at **32 stable controls in 2.9-3.3s, no
+  timeout**, and `discoverFields` found **15 fields across 3 frames** — including Ashby's React
+  comboboxes, its typeahead, its date picker and four EEOC radio groups. So the readiness condition
+  DOES hold on a real, heavy SPA, and it was never the fault in the reported failure: the run was
+  terminated before discovery ran, by a gate check that matched an invisible reCAPTCHA frame.
+
+  The two limits below still apply and are still worth having, because one measurement of one
+  provider's form is not a guarantee about the next one. An empty capture is REFUSED (422,
+  `form_schema_empty`) rather than stored, so the failure mode the ⛔ existed to prevent cannot occur
+  even if discovery regresses. And a schema that comes back different reconciles — the store cannot
+  be poisoned permanently by one bad reading, only temporarily by a repeated one.
 
 ---
 

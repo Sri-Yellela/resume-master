@@ -30,6 +30,16 @@ wrong, not the boundary.
 
 TESTING: all runs against scripts/fakeAts.js on localhost until a task explicitly says otherwise.
 Never point automation at a real ATS. The A5 live gate still stands.
+
+THE ONE EXCEPTION, and its exact scope (recorded 2026-08-23, AE6). A live run against a real Ashby
+posting produced two safety-critical defects (AE1/AE2) that could not be diagnosed on the fixture,
+because everything had only ever been verified against a replica with native <select>s. Diagnosing
+them required pointing an instrument at that exact posting. What was permitted, and all that was:
+READ-ONLY diagnosis, and `mode:'preview'`/`mode:'semi'` under a FIXTURE identity — both of which fill
+a form and stop before any submit button is touched. `mode:'full'` has still never run against a real
+employer. `scripts/ae1LiveVerify.mjs` refuses to run under a non-placeholder identity, for the same
+reason a5Rehearsal refuses a non-localhost target. The rule above is unchanged: it takes a specific
+instruction naming a specific URL, and it never extends to submitting.
 ```
 
 ---

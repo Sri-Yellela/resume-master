@@ -585,6 +585,26 @@ the client derives its own flag from the same `canUseAPlusResume(planTier)`, so 
 disagree and no legitimate user sees a false 403.
 
 All three are server-side fixes; the client was self-consistent on all three and is unchanged.
+
+### 5.16 CORRECTED — what "the pipeline works" does and does not mean (AE6, 2026-08-23)
+
+§5.15(1) is the reason this needs saying explicitly. That defect submitted real applications for a
+user who had asked to review them first, and it was invisible because every surface reported
+success. The mode arithmetic is now: `applyMode = mode !== "auto" ? "semi" : needsApproval ?
+"preview" : "full"`, and `isUnattended = isFullAuto || isPreview`. Three consequences that were
+being glossed:
+
+1. **Queueing produces `preview`** — full-auto minus the click — not a submission. "Autofill for
+   review" is accurate.
+2. **A `semi` run runs NEITHER the completeness gate nor the low-confidence gate.** The human's
+   reading of the form is the only check. Until AE6 it also reported nothing about the required
+   fields it had left blank, so the review surface showed a clean row over an unsubmittable form;
+   it now states the count and lists them.
+3. **`mode:'full'` has never run against a real employer.** A `preview` run and a `semi` run have,
+   as of 2026-08-23, and neither submitted anything.
+
+`docs/GATED_HANDOFF_STATUS.md` §8 is the single source for that table; this is a pointer to it, not
+a second copy.
 Both spellings are now accepted for mode (`manual`/`semi`) and tool (`tool`/`toolType`).
 
 Covered by `test/applyRunPayloadContract.test.js`, which exercises the endpoint over real HTTP

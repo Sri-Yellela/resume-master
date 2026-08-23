@@ -1,6 +1,8 @@
 # Gated Portal Handoff — build status and handover
 
-**As of commit `4e02450`.** Companion to `GATED_HANDOFF_ARCHITECTURE.md` (the design, now updated to
+**As of commit `4e02450`, with §8 added 2026-08-23 (AE6).** Read §8 before quoting anything
+here as "verified end to end": it states exactly which paths have met a real employer and
+which have not. Companion to `GATED_HANDOFF_ARCHITECTURE.md` (the design, now updated to
 match what was built) and `GATED_HANDOFF_PROMPTS.md` (the task definitions).
 
 Read this first if you are picking the work up cold. It says what exists, what was decided and why,
@@ -191,11 +193,51 @@ byte-for-byte and will fail the suite. `npm run build:extension`.
 2. **The privacy policy must go live before the listing points at it.** The copy is written and
    committed (`client/src/pages/marketing/PrivacyPage.jsx`) but needs deploying.
 
-3. **Discovery on a real, heavy SPA is unmeasured.** G4's original ⛔ was a live Ashby posting
-   returning zero fields. On the fixture that is fixed and re-measured on every capture run. On a real
-   ATS it has not been re-checked, because the testing convention forbids pointing automation at one.
-   Two things limit the exposure: an empty capture is **refused** (422) rather than stored, and a
-   changed schema reconciles — so one bad reading cannot permanently poison the store.
+3. ~~**Discovery on a real, heavy SPA is unmeasured.**~~ **MEASURED 2026-08-23 — see §8.** G4's
+   original ⛔ was a live Ashby posting returning zero fields. Re-checked against that exact posting
+   with a read-only instrument: readiness settles at **32 stable controls in ~3s** and discovery finds
+   **15 fields across 3 frames**, comboboxes and typeahead included. It holds. The two limits stay
+   anyway, because one provider's form is not a guarantee about the next: an empty capture is
+   **refused** (422) rather than stored, and a changed schema reconciles.
 
-4. **No live gate has ever been crossed end to end.** Everything is verified against `fakeAts`. The
-   first real run against a real portal is still ahead, and the A5 live gate still stands.
+4. **No live gate has ever been crossed end to end.** Everything about the HANDOFF is verified
+   against `fakeAts`. See §8 for exactly which paths have and have not met a real employer.
+
+---
+
+## 8. What has run against a real employer, and what has not (AE6, 2026-08-23)
+
+This section exists because "end to end" was being used loosely, and a stale status doc is what this
+project's golden rule exists to prevent. The precise position:
+
+| Path | Mode | Met a real employer? | Notes |
+|---|---|---|---|
+| **Unattended, non-submitting** | `preview` | **YES — 2026-08-23** | `scripts/ae1LiveVerify.mjs` against `jobs.ashbyhq.com/openai/0432731c-…/application`. Fixture identity. 15 fields discovered, 4 filled, held `incomplete_form`, **nothing submitted** — `preview` stops at the PREVIEW STOP before any submit button is touched. |
+| **Attended** | `semi` | **YES — 2026-08-23** | Same script, `--semi`. 4 filled, 2 required fields reported as the human's to answer, **nothing submitted**. |
+| **Unattended, SUBMITTING** | `full` | **NO** | The path that actually clicks submit has never run against a real employer. This is the A5 live gate, and it still stands. |
+| **A gate crossing** | any | **NO** | Every packet, token, overlay and portal batch is verified against `fakeAts` only. |
+
+Three things follow, and none of them were said plainly before:
+
+1. **`ab1HeldHandoff`'s end-to-end proof was `semi`, against `fakeAts`.** The script says so itself
+   and always did — it is the docs that let "verified end to end" be read as "verified against an
+   employer". It proves the pipeline→packet→extension→submission chain on a fixture. That is a real
+   and useful proof of the chain; it is not a claim about any employer's form.
+
+2. **The attended path runs no automated checks.** `isUnattended = isFullAuto || isPreview`, so a
+   `semi` run executes NEITHER the completeness gate nor the low-confidence gate. That is deliberate
+   — semi's premise is that a human is reading the form, and pre-filling a guess for them to correct
+   is the entire point of the mode — which means **the human's reading of the form is the only check
+   that runs.** Anything the docs imply about semi being "verified" is a statement about the fill,
+   not about the answers.
+
+3. **Silence is no longer part of that.** Until AE6 a semi run returned no `missingRequired` at all,
+   so the review surface rendered a clean row over a form that could not be submitted. It now states
+   the count and lists the fields (`"N required fields are yours to answer"`), and populates
+   `openQuestions` so they can be answered rather than merely named. The gates are still off; the
+   run no longer pretends there is nothing outstanding.
+
+**Queueing produces `semi`-shaped work, not a submission.** The board's "Autofill for Review" and
+the queue both post `mode:"auto"` with the server's approval-required default, which
+`processRunJob` turns into `applyMode = 'preview'` — full-auto minus the click. Nothing the board
+can do today reaches the submitting path without an explicit approval.

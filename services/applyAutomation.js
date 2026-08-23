@@ -2586,6 +2586,10 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
 
     let status, pageTitle;
     let submitVerified = null, submitEvidence = null, submitReasonCode = null;
+    // Semi's report of what the human still has to fill in (AE6). Named separately from the
+    // unattended gate's locals because these do NOT stop the run — they are attached to a result
+    // whose status is `awaiting_user`.
+    let semiMissingRequired = null, semiOpenQuestions = null;
     if (isUnattended) {
       // Completeness gate: re-discover all frames; hold if any required non-file field is still empty.
       const postFillFields = (await Promise.all(
@@ -2852,6 +2856,38 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     } else {
       status    = "awaiting_user";
       pageTitle = await page.title().catch(() => "");
+
+      // ── SEMI MUST SAY WHAT IS STILL YOURS TO ANSWER (AE6) ──────────────────────────────────
+      // The completeness gate above lives inside `if (isUnattended)`, so a semi run performed no
+      // check on the form it had just filled and returned no `missingRequired` at all. The review
+      // surface then rendered a clean row — no obstacle, nothing outstanding — over a form that
+      // could not be submitted. That is not "the gates are off in semi", which is a defensible
+      // product decision; it is the run declining to report a fact it already had in hand.
+      //
+      // The same discovery pass the gate uses, WITHOUT the hold: semi's whole premise is that a
+      // human is looking at the form and will finish it, so blocking would defeat the mode. What it
+      // owes them is the list. `missingRequired` is the same shape the unattended hold emits, so
+      // routes/apply.js and the panel consume it unchanged, and `openQuestions` carries the type
+      // and options so a question can be answered rather than merely named.
+      const semiFields = (await Promise.all(
+        frameList(page).map(f => discoverFields(f, detected).catch(() => []))
+      )).flat();
+      const semiMissingFields = semiFields
+        .filter(f => f.is_required && (f.current_value === '' || f.current_value == null));
+      // Why each one is empty, when the resolver had an opinion: "we would not guess your
+      // sponsorship answer" is a different statement from "this is blank".
+      const semiRefusals = new Map();
+      for (const a of resolvedAnswers) {
+        if (a.skipped && a.refusals?.length) semiRefusals.set(a.field_id ?? a.name, a.refusals);
+      }
+      for (const f of semiMissingFields) {
+        const r = semiRefusals.get(f.field_id) ?? semiRefusals.get(f.name);
+        if (r) f.refusals = r;
+      }
+      semiMissingRequired = semiMissingFields.map(f => f.label || f.field_id || '(unknown)');
+      semiOpenQuestions   = buildOpenQuestions({ missingFields: semiMissingFields });
+      console.log(`[autoApply] semi: ${semiMissingRequired.length} required field(s) are yours to answer` +
+        (semiMissingRequired.length ? ` — ${semiMissingRequired.join(', ')}` : ''));
     }
 
     console.log(`[autoApply] done — status=${status} fieldsFilled=${totalFilled}`);
@@ -2875,6 +2911,11 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       submitVerified,
       submitEvidence,
       ...(submitReasonCode ? { reasonCode: submitReasonCode } : {}),
+      // AE6: present on a semi run whether or not anything is missing. An EMPTY array is a real
+      // answer — "we checked, nothing is outstanding" — and is not the same as the absent field
+      // this used to return, which the review surface could only read as "no information".
+      ...(semiMissingRequired ? { missingRequired: semiMissingRequired } : {}),
+      ...(semiOpenQuestions?.length ? { openQuestions: semiOpenQuestions } : {}),
       pageTitle,
       landedUrl:        page.url(),
       screenshotBase64: ss.base64,
