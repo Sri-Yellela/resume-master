@@ -257,6 +257,22 @@ const FIXTURES = {
   '/api/apply/pending': { pending: [] },
   '/api/apply/readiness': { available: true, reason: null },
   '/api/integrations/status': { apply: { missing: [] } },
+  // AC3 reads the ManageJobProfiles card idiom and reuses its primitive. These fixtures let the
+  // harness screenshot THAT panel before and after the extraction, so "reuse, do not clone" can be
+  // held to the standard the task sets: the profile cards must look and behave identically.
+  '/api/domain-profiles': [
+    { id: 1, profile_name: 'Backend Engineer', seniority: 'senior', is_active: 1,
+      has_base_resume: 1, base_resume_updated_at: Math.floor(now / 1000) - 86400,
+      target_titles: ['Staff Engineer', 'Backend Engineer', 'Platform Engineer'], role_family: 'engineering' },
+    { id: 2, profile_name: 'Data Platform', seniority: 'mid', is_active: 0,
+      has_base_resume: 0, base_resume_updated_at: null,
+      target_titles: ['Data Engineer'], role_family: 'data' },
+    { id: 3, profile_name: 'ML Research', seniority: 'senior', is_active: 0,
+      has_base_resume: 1, base_resume_updated_at: Math.floor(now / 1000) - 172800,
+      // No titles AND no role family, so the card's empty body state renders — the branch that
+      // would otherwise go unverified on both sides of the extraction.
+      target_titles: [], role_family: null },
+  ],
 };
 
 /** Anything not named above answers with a benign empty shape rather than a 404 storm. */
@@ -351,14 +367,25 @@ async function main() {
     const openai = cards.filter(c => c.job === 'openai-staff');
     check('AB2  three held rows for ONE application render as ONE card',
       openai.length === 1, `${openai.length} cards for openai-staff — all cards: ${summary}`);
-    check('AB2  and that card lists all THREE of its blocking reasons',
-      openai[0]?.obstacles === 3 && /3 things to resolve/.test(openai[0]?.text || ''),
-      `obstacles=${openai[0]?.obstacles}`);
+    // AC3 compacted the panel's application rows into company tiles: the COUNT of problems stays on
+    // the row (it is what a user triages on) and the problem SENTENCES moved into the modal, which
+    // AC2 restructured for exactly that. So the count is checked here and the sentences are checked
+    // where they now live — see the AC2 block below, which opens the modal and reads them back.
+    check('AB2  and that card reports all THREE of its blocking reasons',
+      openai[0]?.obstacles === 3 && /3 to resolve/.test(openai[0]?.text || ''),
+      `obstacles=${openai[0]?.obstacles}, row says "${(openai[0]?.text || '').match(/\d+ to resolve/)?.[0]}"`);
     check('AB2  no card claims to be "1 APPLICATION" beside a single job any more',
       !/\n1\nAPPLICATION\n/.test(text), 'the per-problem count is gone');
-    check('AB2  the card names the company AND the role',
-      /OpenAI/.test(openai[0]?.text || '') && /Staff Engineer/.test(openai[0]?.text || ''),
-      (openai[0]?.text || '').split('\n').slice(0, 2).join(' | '));
+    // The COMPANY is on the tile and the ROLE is on the row inside it — that is the tier AC3 builds.
+    // Read as a pair rather than off one element, or this stops covering anything the moment the
+    // hierarchy changes shape again.
+    const openaiTileText = await page.evaluate(() => {
+      const row = document.querySelector('[data-rm-card="application"][data-rm-job="openai-staff"]');
+      return row?.closest('[data-rm-tile="company"]')?.innerText || null;
+    });
+    check('AB2  the application is named by company AND role',
+      /OpenAI/.test(openaiTileText || '') && /Staff Engineer/.test(openai[0]?.text || ''),
+      `tile: ${(openaiTileText || 'none').split('\n')[0]} | row: ${(openai[0]?.text || '').split('\n')[0]}`);
     check('AB2  a DIFFERENT application is still its own card',
       cards.some(c => c.job === 'anthropic-re'), summary);
     check('AB2  each held application appears EXACTLY once',
@@ -663,26 +690,30 @@ async function main() {
     }
 
     // ── The COMPANY tier ──
-    // Read as a tier: the company headings that appear, and how many roles each claims. A user with
-    // two submitted OpenAI roles must see them under ONE OpenAI heading saying "2 roles".
-    const companyTier = await page.evaluate(() => {
-      const out = [];
-      for (const el of document.querySelectorAll('*')) {
-        if (el.children.length !== 0) continue;
-        const t = (el.textContent || '').trim();
-        if (/^\d+ roles$/.test(t)) out.push({
-          roles: Number(t.split(' ')[0]),
-          company: el.previousElementSibling?.textContent?.trim() || null,
-        });
-      }
-      return out;
-    });
-    check('AB4  applications are grouped by COMPANY, with the role count on the group',
-      companyTier.some(g => g.company === 'OpenAI' && g.roles === 2),
-      companyTier.map(g => `${g.company}:${g.roles}`).join(' ') || 'no company tier rendered');
-    check('AB4  a company with ONE role is not labelled with a count it does not have',
-      !companyTier.some(g => g.roles === 1),
-      companyTier.map(g => `${g.company}:${g.roles}`).join(' '));
+    // Read as a tier: which companies appear, and how many applications each claims. A user with two
+    // submitted OpenAI roles must see them in ONE OpenAI group that says so.
+    //
+    // AC3 made the group a TILE rather than a heading followed by full-width rows, so this reads the
+    // tile's own count instead of hunting for a loose "N roles" text node. It is the same question —
+    // is the grouping real, and does it state its size — asked of the element that now answers it.
+    // Counting the application rows INSIDE each tile also makes the claim self-checking: a tile that
+    // says 2 and contains 3 fails, where a text-node search could not have noticed.
+    const companyTier = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-rm-tile="company"]')].map(t => ({
+        company: t.dataset.rmCompany || null,
+        section: t.dataset.rmSection,
+        claims: Number(t.dataset.rmApps),
+        contains: t.querySelectorAll('[data-rm-card]').length,
+        text: t.innerText,
+      })));
+    const openaiSubmitted = companyTier.find(g => g.company === 'OpenAI' && g.section === 'submitted');
+    check('AB4  applications are grouped by COMPANY, with the count on the group',
+      !!openaiSubmitted && openaiSubmitted.claims === 2 && /2 applications/.test(openaiSubmitted.text),
+      companyTier.map(g => `${g.company || '(none)'}/${g.section}:${g.claims}`).join(' ') || 'no company tier rendered');
+    check('AB4  and a group\'s count matches what it actually contains',
+      companyTier.every(g => g.claims === g.contains),
+      companyTier.filter(g => g.claims !== g.contains)
+        .map(g => `${g.company} claims ${g.claims} contains ${g.contains}`).join('; ') || 'every tile is honest');
 
     // ── Held on purpose vs broke ──
     // Asserted separately, so a fixture missing one kind reports THAT rather than blaming the split.
@@ -753,6 +784,115 @@ async function main() {
 
     await shot('sections.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'sections.png')}`);
+
+    // ── AC3 ────────────────────────────────────────────────────────────────────────────────
+    //
+    // Company cards in the ManageJobProfiles idiom, and the PROOF THAT THE IDIOM WAS REUSED rather
+    // than cloned: the Job Profiles panel is driven here too, so its cards can be shown to look and
+    // behave exactly as they did before the primitive was lifted out of it. A "reuse" that quietly
+    // restyles the panel it was taken from is a clone with extra steps.
+    console.log('\n── AC3: company cards in the Job Profiles idiom ──');
+
+    await page.goto(`${vite.url}/app/job-profiles`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.waitForFunction(() => /Manage Job Profiles/i.test(document.body.innerText), { timeout: 30000 });
+    await sleep(800);
+    const profiles = await page.evaluate(() => {
+      const titles = [...document.querySelectorAll('div')]
+        .filter(d => d.children.length === 0 && /^(Backend Engineer|Data Platform|ML Research)$/.test(d.textContent.trim()));
+      const cards = titles.map(t => t.closest('[data-rm-tile], div[style*="border-radius: 16px"]'));
+      return {
+        names: titles.map(t => t.textContent.trim()),
+        // Two cards on the same visual ROW share a top edge. That is what "side by side" means.
+        rows: [...new Set(cards.map(c => c ? Math.round(c.getBoundingClientRect().top) : -1))].length,
+        controls: [...document.querySelectorAll('button, label')].map(b => b.innerText.trim()).filter(Boolean),
+        text: document.body.innerText,
+      };
+    });
+    check('AC3  the Job Profiles panel still renders all three profile cards',
+      profiles.names.length === 3, profiles.names.join(' / '));
+    check('AC3  its cards still sit side by side, and its controls are unchanged',
+      profiles.rows === 1
+      // Case-insensitive: these controls are  and innerText returns
+      // the RENDERED text, so a case-sensitive match reads a string the DOM never has.
+      && ['Edit', 'Switch', 'Delete', 'Active', 'Upload', 'Replace', 'Add Profile']
+           .every(c => profiles.controls.some(x => x.toUpperCase().includes(c.toUpperCase()))),
+      profiles.controls.join(' / '));
+    check('AC3  and every piece of its card content survives',
+      /Base Resume/i.test(profiles.text) && /resume linked/i.test(profiles.text)
+      && /resume missing/i.test(profiles.text) && /No target titles yet/i.test(profiles.text)
+      && /Required before search, ATS, and enhancement/i.test(profiles.text),
+      'title, status pill, metadata line, inset sub-block and footer row all present');
+    await shot('ac3-job-profiles.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac3-job-profiles.png')}`);
+
+    // Back to the panel under test.
+    await page.goto(`${vite.url}/app/auto-apply`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.waitForFunction(() => /AUTO APPLY/i.test(document.body.innerText), { timeout: 30000 });
+    await sleep(1000);
+
+    const companyTiles = await page.evaluate(() => {
+      const tiles = [...document.querySelectorAll('[data-rm-tile="company"]')];
+      return tiles.map(t => ({
+        company: t.dataset.rmCompany,
+        section: t.dataset.rmSection,
+        apps: Number(t.dataset.rmApps),
+        top: Math.round(t.getBoundingClientRect().top),
+        left: Math.round(t.getBoundingClientRect().left),
+        width: Math.round(t.getBoundingClientRect().width),
+        text: t.innerText,
+      }));
+    });
+    check('AC3  the company grouping renders as company TILES',
+      companyTiles.length > 0, `${companyTiles.length} tiles`);
+    // Requirement 3: side by side at desktop width. Two tiles sharing a top edge is the test; a
+    // stacked layout gives every tile its own row and would fail it.
+    const held = companyTiles.filter(t => t.section === 'needsReview');
+    const sameRow = held.filter(t => held.some(o => o !== t && o.top === t.top));
+    check('AC3  multiple company cards sit SIDE BY SIDE at desktop width',
+      sameRow.length >= 2 && held.every(t => t.width < 700),
+      held.map(t => `${t.company}@${t.left}x${t.top}:${t.width}`).join(' '));
+    // Requirement 2: name, count, a compact list of its applications, a footer action row.
+    const openaiTile = companyTiles.find(t => t.company === 'OpenAI' && t.section === 'needsReview');
+    check('AC3  a tile names the company and counts the applications needing action',
+      !!openaiTile && /OpenAI/.test(openaiTile.text) && /1 application/.test(openaiTile.text),
+      (openai?.text || 'no OpenAI tile').split('\n').slice(0, 3).join(' | '));
+    check('AC3  and lists its applications compactly — role plus count to resolve',
+      !!openaiTile && /Staff Engineer/.test(openaiTile.text) && /3 to resolve/.test(openaiTile.text),
+      (openai?.text || '').replace(/\n/g, ' | ').slice(0, 140));
+    // Requirement 4: triage without opening anything.
+    check('AC3  HELD ON PURPOSE vs a problem is visible at CARD level, without opening anything',
+      companyTiles.some(t => /held on purpose/i.test(t.text))
+      && companyTiles.some(t => /did not complete|broke/i.test(t.text)),
+      'both states are readable on the tiles themselves');
+    // Requirement 2's footer action row, asserted on the tiles the requirement is about — the ones
+    // counting "applications needing action". A submitted tile and a broke tile carry their actions
+    // per row (the evidence links, Retry) because there is no honest company-level action for them:
+    // "retry all of Figma" is a capability this task did not ask for and would be inventing.
+    check('AC3  every NEEDS-REVIEW tile has a footer action row scoped to that company',
+      held.length > 0 && held.every(t => /Review all \d+ →/.test(t.text)),
+      held.map(t => (t.text.match(/Review all \d+ →/) || ['none'])[0]).join(' / '));
+    check('AC3  a tile whose postings were all cleaned up says THAT, not "held on purpose"',
+      companyTiles.some(t => t.company === '' && /posting gone/i.test(t.text)
+                          && !/held on purpose/i.test(t.text.split('\n')[1] || '')),
+      (companyTiles.find(t => t.company === '')?.text || 'no such tile').split('\n').slice(0, 2).join(' | '));
+    await shot('ac3-company-tiles.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac3-company-tiles.png')}`);
+
+    // Requirement 3, the other half: STACK at narrow widths.
+    await page.setViewport({ width: 560, height: 1200, deviceScaleFactor: 1 });
+    await sleep(600);
+    const narrow = await page.evaluate(() => {
+      const tiles = [...document.querySelectorAll('[data-rm-tile="company"]')]
+        .filter(t => t.dataset.rmSection === 'needsReview');
+      return tiles.map(t => Math.round(t.getBoundingClientRect().top));
+    });
+    check('AC3  and they STACK at narrow widths — one per row',
+      narrow.length >= 2 && new Set(narrow).size === narrow.length,
+      `${narrow.length} tiles on ${new Set(narrow).size} rows`);
+    await shot('ac3-company-tiles-narrow.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac3-company-tiles-narrow.png')}`);
+    await page.setViewport({ width: 1400, height: 1200, deviceScaleFactor: 1 });
+    await sleep(600);
 
     if (process.env.AB_KEEP_OPEN) {
       console.log('\nAB_KEEP_OPEN set — leaving the browser open. Ctrl+C to finish.');

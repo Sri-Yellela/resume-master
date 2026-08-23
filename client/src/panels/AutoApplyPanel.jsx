@@ -8,8 +8,12 @@ import {
 } from "../lib/applyObstacles.js";
 import {
   SectionHeading, ObstacleCard, ApplicationRow, PrerequisiteCards, ApplicationObstacleCard,
-  CompanyHeading, AttemptRow,
+  CompanyHeading, AttemptRow, CompanyTile, CompanyApplicationRow,
 } from "./AutoApplyPanelSections.jsx";
+// AC3: the company tier is now a TILE in the ManageJobProfiles idiom, and TileGrid is what makes it
+// sit several-to-a-row at desktop width and stack when there is no room. Extracted from that panel,
+// which renders the same components — see the note at the top of TileCard.jsx.
+import { TileGrid } from "../components/ui/TileCard.jsx";
 
 // ============================================================
 // AutoApplyPanel — the auto-apply pipeline, on its own tab
@@ -164,6 +168,20 @@ export function AutoApplyPanel() {
     // the popup would come up empty.
     rowIds: (app.rows || []).map(r => r.id),
     label: [app.company, app.title].filter(Boolean).join(" — ") || app.jobId || "This application",
+  });
+
+  /**
+   * ONE COMPANY's applications (AC3). The tile's footer action.
+   *
+   * Scoped like every other entry point, and for the reason AC1 exists: the tile is a triage
+   * surface, so its one control has to open the thing it stands for. A company is several
+   * applications, so the scope carries all of their ids — which is what makes this different from
+   * `openEverything`, and the difference is the whole point.
+   */
+  const openCompanyReview = (company, items) => openScoped({
+    jobIds: items.filter(a => a.jobId != null).map(a => String(a.jobId)),
+    rowIds: items.flatMap(a => (a.rows || []).map(r => r.id)),
+    label: company || "Postings no longer on the board",
   });
 
   /** One PORTAL's applications — the batch is the point here, so the scope is the batch. */
@@ -525,42 +543,75 @@ export function AutoApplyPanel() {
             />
           )}
 
-          {/* ONE CARD PER APPLICATION, listing everything in its way (AB2), under a COMPANY tier
-              (AB4). Seven roles at one employer belong together — that is the grouping a user came
-              here to find, and flat reverse-chronological order made it invisible. */}
-          {heldByCompany.map(({ company, items }) => (
-            <div key={`held-${company}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <CompanyHeading company={company} count={items.length} theme={theme} />
-              {items.map(app => {
-                const packet = handoffPacketFor?.(app.primary.row) || handoffPacketFor?.(app);
-                const resumable = !!packet && !packet.postingGone && !packet.stale && !app.postingGone;
-                return (
-                  <ApplicationObstacleCard
-                    key={app.key}
-                    app={app}
-                    theme={theme}
-                    artifactUrl={artifactUrl}
-                    packet={packet}
-                    onRerun={rerunJob}
-                    // THE DEFECT, FIXED. The fallback arm was `openReview` — the unscoped
-                    // "everything" handler — so Open on a packet-less card listed every
-                    // application needing review. It now passes the SCOPED handler, which
-                    // ApplicationObstacleCard invokes as onResolve(app), so Open and Details
-                    // scope to the same one application by construction.
-                    onResolve={resumable ? () => openHandoff(packet, app) : openApplicationReview}
-                    resolveLabel={resumable ? "Open & fill" : "Open"}
-                    resolveTitle={resumable
-                      ? `Opens the application in your own browser and fills it with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved. You review and submit.`
-                      : "Open this application's review — only this one"}
-                    onDetails={() => openApplicationReview(app)}
-                    // AB4 requirement 5: "no resume was generated" was a dead text chip on a
-                    // PROBLEM with an obvious fix. It gets the button.
-                    onGenerateResume={app.primary?.row?.resumeAvailable ? null : generateResume}
-                  />
-                );
-              })}
-            </div>
-          ))}
+          {/* ── AC3: ONE TILE PER COMPANY, IN THE JOB PROFILES IDIOM ────────────────────────
+              This was a company HEADING followed by full-width application cards, one per row down
+              the whole page — so four employers took four screens and no two could be compared. The
+              tile is a TRIAGE surface: employer, how many applications, how much is in the way, and
+              held-on-purpose vs broke, several to a row. The problem SENTENCES are one click away in
+              the modal, which AC2 restructured into company → application → problems for this. */}
+          <TileGrid min={430} gap={14}>
+            {heldByCompany.map(({ company, items }) => {
+              const toResolve = items.reduce((n, a) => n + a.reasons.length, 0);
+              // One broken application is enough to stop calling the whole tile deliberate — the
+              // same rule groupByApplication uses within one application, one tier up.
+              const allProtective = items.every(a => a.protective);
+              const allGone = items.every(a => a.postingGone);
+              const tone = allGone ? "#6b7280" : allProtective ? "#d97706" : "#dc2626";
+              return (
+                <CompanyTile
+                  key={`held-${company}`}
+                  company={company}
+                  count={items.length}
+                  section="needsReview"
+                  tone={tone}
+                  theme={theme}
+                  // A tile of applications whose postings the cleanup removed is not "held on
+                  // purpose" — nothing is holding them, there is nothing left to hold. Its own
+                  // state, at tile level, the same way each row states it.
+                  pillText={allGone ? "posting gone" : allProtective ? "held on purpose" : "needs you"}
+                  meta={`${items.length} application${items.length === 1 ? "" : "s"} · ${toResolve} thing${toResolve === 1 ? "" : "s"} to resolve`}
+                  footer={
+                    <button onClick={() => openCompanyReview(company, items)}
+                      title={`Everything in the way of ${company || "these applications"}, in one list.`}
+                      style={{ border: `1px solid ${theme.border}`, borderRadius: 6, padding: "6px 12px",
+                               background: theme.surface, color: theme.text, fontWeight: 700,
+                               fontSize: 11.5, cursor: "pointer" }}>
+                      Review all {items.length} →
+                    </button>
+                  }
+                >
+                  {items.map(app => {
+                    const packet = handoffPacketFor?.(app.primary.row) || handoffPacketFor?.(app);
+                    const resumable = !!packet && !packet.postingGone && !packet.stale && !app.postingGone;
+                    return (
+                      <CompanyApplicationRow
+                        key={app.key}
+                        app={app}
+                        theme={theme}
+                        artifactUrl={artifactUrl}
+                        packet={packet}
+                        onRerun={rerunJob}
+                        // THE AC1 DEFECT, FIXED. The fallback arm was `openReview` — the unscoped
+                        // "everything" handler — so Open on a packet-less card listed every
+                        // application needing review. It passes the SCOPED handler, invoked as
+                        // onResolve(app), so Open and Details scope to the same one application by
+                        // construction.
+                        onResolve={resumable ? () => openHandoff(packet, app) : openApplicationReview}
+                        resolveLabel={resumable ? "Open & fill" : "Open"}
+                        resolveTitle={resumable
+                          ? `Opens the application in your own browser and fills it with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved. You review and submit.`
+                          : "Open this application's review — only this one"}
+                        onDetails={() => openApplicationReview(app)}
+                        // AB4 requirement 5: "no resume was generated" was a dead text chip on a
+                        // PROBLEM with an obvious fix. It gets the button.
+                        onGenerateResume={app.primary?.row?.resumeAvailable ? null : generateResume}
+                      />
+                    );
+                  })}
+                </CompanyTile>
+              );
+            })}
+          </TileGrid>
 
           {/* The handoff happens in ANOTHER TAB, so the panel has to say what to expect there. A
               refusal (stale answers, a posting that is gone) is reported in the same place, because
@@ -591,15 +642,30 @@ export function AutoApplyPanel() {
           <SectionHeading theme={theme} count={applySubmitted.length} note="what went out, and the proof">
             Submitted
           </SectionHeading>
-          {submittedByCompany.map(({ company, items }) => (
-            <div key={`sub-${company}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <CompanyHeading company={company} count={items.length} theme={theme} />
-              {items.map(job => (
-                <ApplicationRow key={job.id} job={job} theme={theme} variant="submitted"
-                  artifactUrl={artifactUrl} onOpenRun={loadApplyRunDetail} />
-              ))}
-            </div>
-          ))}
+          {/* The same tile, so the page reads as one system rather than as a tiled section above a
+              listed one. The rows INSIDE are the existing ApplicationRow, untouched: a submitted
+              application's evidence — the date, the exact resume that went out, the screenshot,
+              whether the site confirmed it — is what a user reaches for when an interview lands,
+              and compacting that would be trading away the thing the section exists for. */}
+          <TileGrid min={430} gap={14}>
+            {submittedByCompany.map(({ company, items }) => (
+              <CompanyTile
+                key={`sub-${company}`}
+                company={company}
+                count={items.length}
+                section="submitted"
+                tone="#16a34a"
+                theme={theme}
+                pillText="sent"
+                meta={`${items.length} application${items.length === 1 ? "" : "s"} · ${items.filter(j => j.submitVerified).length} confirmed by the site`}
+              >
+                {items.map(job => (
+                  <ApplicationRow key={job.id} job={job} theme={theme} variant="submitted"
+                    artifactUrl={artifactUrl} onOpenRun={loadApplyRunDetail} />
+                ))}
+              </CompanyTile>
+            ))}
+          </TileGrid>
         </>
       )}
 
@@ -621,18 +687,28 @@ export function AutoApplyPanel() {
                             textTransform: "uppercase", color: "#dc2626", marginTop: 4 }}>
                 These broke — {stoppedSplit.broke.length} application{stoppedSplit.broke.length === 1 ? "" : "s"}
               </div>
-              {brokeByCompany.map(({ company, items }) => (
-                <div key={`broke-${company}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <CompanyHeading company={company} count={items.length} theme={theme} />
-                  {items.map(job => (
-                    <ApplicationRow key={job.id} job={job} theme={theme} variant="stopped"
-                      artifactUrl={artifactUrl} onRetry={retryJob} onOpenRun={loadApplyRunDetail}
-                      // Requirement 5: a missing resume is a problem with an obvious fix, so it gets
-                      // a button instead of the dead "no resume generated" chip it used to be.
-                      onGenerateResume={job.resumeAvailable ? null : generateResume} />
-                  ))}
-                </div>
-              ))}
+              <TileGrid min={430} gap={14}>
+                {brokeByCompany.map(({ company, items }) => (
+                  <CompanyTile
+                    key={`broke-${company}`}
+                    company={company}
+                    count={items.length}
+                    section="broke"
+                    tone="#dc2626"
+                    theme={theme}
+                    pillText="did not complete"
+                    meta={`${items.length} application${items.length === 1 ? "" : "s"} · nothing was sent`}
+                  >
+                    {items.map(job => (
+                      <ApplicationRow key={job.id} job={job} theme={theme} variant="stopped"
+                        artifactUrl={artifactUrl} onRetry={retryJob} onOpenRun={loadApplyRunDetail}
+                        // Requirement 5: a missing resume is a problem with an obvious fix, so it gets
+                        // a button instead of the dead "no resume generated" chip it used to be.
+                        onGenerateResume={job.resumeAvailable ? null : generateResume} />
+                    ))}
+                  </CompanyTile>
+                ))}
+              </TileGrid>
             </>
           )}
 
@@ -645,16 +721,26 @@ export function AutoApplyPanel() {
               <div style={{ fontSize: 11, color: theme.textMuted, marginTop: -2 }}>
                 Nothing went wrong with these. The pipeline stopped them, or you did.
               </div>
-              {heldOnPurposeByCompany.map(({ company, items }) => (
-                <div key={`held-stop-${company}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <CompanyHeading company={company} count={items.length} theme={theme} />
-                  {items.map(job => (
-                    <ApplicationRow key={job.id} job={job} theme={theme} variant="stopped"
-                      artifactUrl={artifactUrl} onRetry={retryJob} onOpenRun={loadApplyRunDetail}
-                      onGenerateResume={job.resumeAvailable ? null : generateResume} />
-                  ))}
-                </div>
-              ))}
+              <TileGrid min={430} gap={14}>
+                {heldOnPurposeByCompany.map(({ company, items }) => (
+                  <CompanyTile
+                    key={`held-stop-${company}`}
+                    company={company}
+                    count={items.length}
+                    section="heldOnPurpose"
+                    tone="#d97706"
+                    theme={theme}
+                    pillText="held on purpose"
+                    meta={`${items.length} application${items.length === 1 ? "" : "s"} · nothing went wrong`}
+                  >
+                    {items.map(job => (
+                      <ApplicationRow key={job.id} job={job} theme={theme} variant="stopped"
+                        artifactUrl={artifactUrl} onRetry={retryJob} onOpenRun={loadApplyRunDetail}
+                        onGenerateResume={job.resumeAvailable ? null : generateResume} />
+                    ))}
+                  </CompanyTile>
+                ))}
+              </TileGrid>
             </>
           )}
         </>

@@ -9,6 +9,7 @@
 // the same application differently.
 import { useTheme } from "../styles/theme.jsx";
 import { describeApplication, attemptStatusChip, PREREQUISITE_LABELS } from "../lib/applyObstacles.js";
+import { TileCard, TilePill } from "../components/ui/TileCard.jsx";
 
 export function SectionHeading({ children, count, note, theme }) {
   return (
@@ -709,5 +710,178 @@ export function AttemptRow({ job, theme, artifactUrl, packetFor, onHandoff, onRe
         </a>
       )}
     </div>
+  );
+}
+
+// ── AC3: THE COMPANY CARD, IN THE JOB PROFILES IDIOM ─────────────────────────────────────────
+//
+// The company tier used to be a HEADING followed by full-width application cards — one per row,
+// down the whole page, so four employers took four screens and nothing could be compared. The
+// ManageJobProfiles panel had already solved this shape: a bordered tile with a title and a status
+// pill, a compact metadata line, an inset sub-block for the state that matters, and a footer action
+// row, several to a row in an auto-fill grid.
+//
+// So that primitive was EXTRACTED from JobProfilesPanel into components/ui/TileCard.jsx and both
+// panels render it. Not cloned — JobProfilesPanel was refactored onto it in the same change, and
+// scripts/abPanelUi.mjs drives that panel to prove its cards are unchanged. A "reuse" that leaves
+// two implementations behind is a clone with extra steps, and it drifts within a month.
+//
+// WHAT MOVED, AND WHERE IT WENT. The tile is a TRIAGE surface: which employer, how many
+// applications, how much is in the way, and whether it was held on purpose or broke — requirement
+// 4's "triage without opening anything". The full problem SENTENCES moved into the review modal,
+// which AC2 restructured into company -> application -> problems for exactly this. Every control
+// survives: the artifact chips and the resolve action stay on the compact row, and Open/Details
+// lead to the modal that now carries the rest.
+
+/**
+ * ONE APPLICATION, compact, inside a company tile (AC3 requirement 2: "role + count to resolve").
+ *
+ * Keeps ApplicationObstacleCard's data hooks so the real-browser checks can still ask which
+ * application a row is for and how many problems it has — the AB2 defect was about exactly that
+ * count, and an assertion that silently stopped covering it would be worse than one that fails.
+ */
+export function CompanyApplicationRow({
+  app, theme, artifactUrl, packet, onResolve, resolveLabel, resolveTitle, onDetails, onRerun,
+  onGenerateResume,
+}) {
+  const tone = app.postingGone ? "#6b7280" : app.protective ? "#d97706" : "#dc2626";
+  const stale = packet?.stale;
+  const chip = {
+    fontSize: 9.5, fontWeight: 700, padding: "2px 7px", borderRadius: 999,
+    border: `1px solid ${theme.border}`, background: theme.surface, color: theme.text,
+    textDecoration: "none", whiteSpace: "nowrap",
+  };
+
+  return (
+    <div data-rm-card="application"
+         data-rm-job={app.jobId || ""}
+         data-rm-company={app.company || ""}
+         data-rm-obstacles={app.reasons.length}
+         style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: tone }} />
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: theme.text, flex: 1, minWidth: 0,
+                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {app.title || app.jobId || "Unknown role"}
+        </span>
+        {/* The count, at row level. AC3 requirement 4 — a user triages on this without opening
+            anything, and the problems themselves are one click away in the modal. */}
+        <span style={{ fontSize: 10, fontWeight: 800, color: tone, whiteSpace: "nowrap", flexShrink: 0 }}>
+          {app.reasons.length} to resolve
+        </span>
+      </div>
+      <div style={{ fontSize: 10, color: theme.textDim, paddingLeft: 13 }}>
+        {/* HELD ON PURPOSE vs BROKEN, at card level. Requirement 4 again: the distinction this whole
+            line of work exists to preserve must survive the compaction, not only the modal. */}
+        <span style={{ color: tone, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          {app.postingGone ? "the posting is gone"
+            : stale ? "prepared too long ago"
+            : app.protective ? "held on purpose" : "did not complete"}
+        </span>
+        {app.attempts > 1 && ` · ${app.attempts} attempts`}
+        {app.when ? ` · ${new Date(app.when).toLocaleDateString()}` : ""}
+      </div>
+
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", paddingLeft: 13 }}>
+        {app.primary?.row?.resumeAvailable ? (
+          <a href={artifactUrl(app.primary.row.id, "resume")} target="_blank" rel="noreferrer" style={chip}>
+            Resume PDF ↗
+          </a>
+        ) : onGenerateResume && !app.postingGone && app.reasons.some(r => r.resumeBlocked) ? (
+          // AB4 requirement 5, unchanged: a missing resume is a problem with a one-click fix, so it
+          // is a button — and only where a missing resume is actually what is wrong.
+          <button onClick={() => onGenerateResume(app)}
+            title="Queues this job so the next run generates a tailored resume for it before it applies."
+            style={{ ...chip, border: "none", background: "#2563eb", color: "#fff", fontWeight: 800,
+                     cursor: "pointer" }}>
+            Generate a resume
+          </button>
+        ) : null}
+        {app.primary?.row?.screenshotAvailable && (
+          <a href={artifactUrl(app.primary.row.id, "screenshot")} target="_blank" rel="noreferrer"
+            title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
+            style={{ ...chip, color: theme.textMuted }}>
+            What we filled ↗
+          </a>
+        )}
+        {app.atsScore != null && (
+          <span style={{ ...chip, border: "none",
+                         background: app.atsScore >= 80 ? "#dcfce7" : app.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
+                         color: app.atsScore >= 80 ? "#166534" : app.atsScore >= 60 ? "#854d0e" : "#991b1b" }}>
+            ATS {app.atsScore}
+          </span>
+        )}
+        {app.applyUrl && (
+          <a href={app.applyUrl} target="_blank" rel="noreferrer" style={chip}>The posting ↗</a>
+        )}
+
+        <span style={{ flex: 1 }} />
+
+        {/* A posting that no longer exists gets no action and says why — requirement 6, and AC2
+            requirement 4. There is no form to open and no run that would find one. */}
+        {app.postingGone ? (
+          <span style={{ fontSize: 9.5, color: theme.textDim, whiteSpace: "nowrap" }}>
+            posting gone — cannot be resumed
+          </span>
+        ) : stale && onRerun ? (
+          <button onClick={() => onRerun(app)}
+            title="These answers were prepared too long ago to fill safely. A fresh run prepares new ones."
+            style={{ ...chip, fontWeight: 800, cursor: "pointer" }}>
+            Run it again
+          </button>
+        ) : onResolve ? (
+          <button onClick={() => onResolve(app)} title={resolveTitle}
+            style={{ ...chip, border: "none", background: tone, color: "#fff", fontWeight: 800,
+                     cursor: "pointer" }}>
+            {resolveLabel || "Open"}
+          </button>
+        ) : null}
+        {onDetails && (
+          <button onClick={() => onDetails(app)}
+            title="Everything in this application's way, with its actions and its attempts."
+            style={{ ...chip, fontWeight: 700, cursor: "pointer" }}>
+            Details
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ONE COMPANY, as a tile in the Job Profiles idiom (AC3).
+ *
+ * @param {string}   company   the employer, or "" for applications whose posting was cleaned up
+ * @param {Array}    items     what to list inside — grouped applications, or raw rows
+ * @param {function} children  the rendered list
+ * @param {string}   section   which outcome section this tile belongs to, for the DOM checks
+ * @param {string}   tone      the state colour: held on purpose, broke, submitted
+ * @param {node}     pillText  the status chip's text
+ * @param {node}     meta      the compact metadata line
+ * @param {node}     footer    the action row
+ */
+export function CompanyTile({
+  company, count, section, tone, pillText, meta, footer, theme, children,
+}) {
+  return (
+    <TileCard
+      tone={tone}
+      data={{ tile: "company", company: company || "", section, apps: count }}
+      // A posting removed by the 7-day cleanup leaves an application with no employer. Said
+      // plainly, rather than rendered as a blank tile title — the same sentence CompanyHeading used.
+      title={company || "Posting no longer on the board"}
+      pill={pillText ? <TilePill tone={tone}>{pillText}</TilePill> : null}
+      meta={meta}
+      // No `body`: the profile card's body is a summary line above the inset, and a company tile's
+      // summary IS the metadata line. An empty body would only add the 36px min-height reserved for
+      // one, which is what made the old full-width cards wasteful in the first place.
+      body={null}
+      inset={
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {children}
+        </div>
+      }
+      footer={footer}
+    />
   );
 }

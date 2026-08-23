@@ -1,9 +1,12 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 import { useCallback, useEffect, useState } from "react";
 import { api, authHeaders } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import DomainProfileWizard from "../components/DomainProfileWizard.jsx";
+// AC3: the card idiom below was lifted OUT of this panel into a shared primitive, and this panel
+// renders it. Extraction, not duplication — see the note at the top of TileCard.jsx.
+import { TileGrid, TileCard, TilePill } from "../components/ui/TileCard.jsx";
 
 export function JobProfilesPanel() {
   const { theme } = useTheme();
@@ -148,105 +151,81 @@ export function JobProfilesPanel() {
           </div>
         )}
 
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))", gap:14 }}>
+        {/* The card idiom this panel established now lives in components/ui/TileCard.jsx, and this
+            panel renders it (AC3 requirement 1: reuse the primitive, do not clone it into a second
+            implementation). The markup was lifted out and parameterised, not rebuilt — every value
+            is the one that was here, so these cards are unchanged. */}
+        <TileGrid min={260} gap={14}>
           {profiles.map(profile => {
             const active = !!profile.is_active;
             return (
-              <div key={profile.id} style={{
-                border:`1px solid ${active ? "var(--color-primary)" : "var(--color-border)"}`,
-                background:active ? "color-mix(in srgb, var(--color-primary) 9%, transparent)" : "var(--color-surface)",
-                borderRadius:16,
-                padding:"16px 18px",
-                boxShadow:"var(--shadow-sm)",
-              }}>
-                <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start" }}>
-                  <div>
-                    <div style={{ fontWeight:800, fontSize:15 }}>{profile.profile_name}</div>
-                    <div style={{ fontSize:11, color:"var(--color-text-muted)", marginTop:4 }}>
-                      {profile.seniority || "mid"} | {profile.has_base_resume ? "resume linked" : "resume missing"}
+              <TileCard
+                key={profile.id}
+                active={active}
+                data={{ tile: "profile", profile: profile.id }}
+                title={profile.profile_name}
+                meta={`${profile.seniority || "mid"} | ${profile.has_base_resume ? "resume linked" : "resume missing"}`}
+                pill={active ? <TilePill>Active</TilePill> : null}
+                body={(profile.target_titles || []).slice(0, 3).join(", ") || profile.role_family || "No target titles yet"}
+                inset={
+                  <>
+                    <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"center" }}>
+                      <div>
+                        <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.06em", color:"var(--color-text)" }}>
+                          Base Resume
+                        </div>
+                        <div style={{ fontSize:11, color:profile.has_base_resume ? "#16a34a" : "#d97706", marginTop:3 }}>
+                          {profile.has_base_resume
+                            ? `Ready${profile.base_resume_updated_at ? ` · ${formatTimestamp(profile.base_resume_updated_at)}` : ""}`
+                            : "Required before search, ATS, and enhancement"}
+                        </div>
+                        <div style={{ fontSize:10, color:"var(--color-text-muted)", marginTop:2 }}>
+                          {profile.has_base_resume
+                            ? "Extracted metadata ready for this profile only"
+                            : "ATS scoring, new scrapes, and enhancement are blocked for this profile"}
+                        </div>
+                      </div>
+                      <label className="rm-btn rm-btn-sm" style={{ cursor:"pointer", margin:0 }}>
+                        {uploadingProfileId === profile.id
+                          ? "Parsing..."
+                          : profile.has_base_resume ? "Replace" : "Upload"}
+                        <input
+                          type="file"
+                          accept=".txt,.html,.md,.docx,.pdf"
+                          onChange={event => uploadProfileResume(profile, event)}
+                          style={{ display:"none" }}
+                          disabled={uploadingProfileId === profile.id}
+                        />
+                      </label>
                     </div>
-                  </div>
-                  {active && (
-                    <span style={{
-                      fontSize:10,
-                      fontWeight:800,
-                      textTransform:"uppercase",
-                      color:"var(--color-primary-text)",
-                      background:"var(--color-primary-muted)",
-                      borderRadius:999,
-                      padding:"3px 8px",
-                    }}>
-                      Active
-                    </span>
-                  )}
-                </div>
-
-                <div style={{ fontSize:12, color:"var(--color-text-muted)", marginTop:12, minHeight:36, lineHeight:1.45 }}>
-                  {(profile.target_titles || []).slice(0, 3).join(", ") || profile.role_family || "No target titles yet"}
-                </div>
-
-                <div style={{
-                  marginTop:14,
-                  border:`1px solid ${"var(--color-border)"}`,
-                  background:"var(--color-surface-offset)",
-                  borderRadius:12,
-                  padding:"10px 12px",
-                }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"center" }}>
-                    <div>
-                      <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.06em", color:"var(--color-text)" }}>
-                        Base Resume
-                      </div>
-                      <div style={{ fontSize:11, color:profile.has_base_resume ? "#16a34a" : "#d97706", marginTop:3 }}>
-                        {profile.has_base_resume
-                          ? `Ready${profile.base_resume_updated_at ? ` · ${formatTimestamp(profile.base_resume_updated_at)}` : ""}`
-                          : "Required before search, ATS, and enhancement"}
-                      </div>
-                      <div style={{ fontSize:10, color:"var(--color-text-muted)", marginTop:2 }}>
-                        {profile.has_base_resume
-                          ? "Extracted metadata ready for this profile only"
-                          : "ATS scoring, new scrapes, and enhancement are blocked for this profile"}
-                      </div>
+                    <div style={{ marginTop:7, fontSize:10, color:"var(--color-text-muted)", lineHeight:1.4 }}>
+                      Stored and extracted only for this profile. Other profiles keep their own resume, signals, ATS basis, and search readiness.
                     </div>
-                    <label className="rm-btn rm-btn-sm" style={{ cursor:"pointer", margin:0 }}>
-                      {uploadingProfileId === profile.id
-                        ? "Parsing..."
-                        : profile.has_base_resume ? "Replace" : "Upload"}
-                      <input
-                        type="file"
-                        accept=".txt,.html,.md,.docx,.pdf"
-                        onChange={event => uploadProfileResume(profile, event)}
-                        style={{ display:"none" }}
-                        disabled={uploadingProfileId === profile.id}
-                      />
-                    </label>
-                  </div>
-                  <div style={{ marginTop:7, fontSize:10, color:"var(--color-text-muted)", lineHeight:1.4 }}>
-                    Stored and extracted only for this profile. Other profiles keep their own resume, signals, ATS basis, and search readiness.
-                  </div>
-                </div>
-
-                <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:16 }}>
-                  <button type="button" className="rm-btn rm-btn-sm" onClick={() => openEdit(profile)}>
-                    Edit
-                  </button>
-                  <button type="button" className="rm-btn rm-btn-sm" onClick={() => activateProfile(profile.id)} disabled={active}>
-                    {active ? "Active" : "Switch"}
-                  </button>
-                  <button
-                    type="button"
-                    className="rm-btn rm-btn-sm"
-                    onClick={() => deleteProfile(profile)}
-                    disabled={profiles.length <= 1}
-                    style={{ color:profiles.length <= 1 ? "var(--color-text-muted)" : "#dc2626" }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
+                  </>
+                }
+                footer={
+                  <>
+                    <button type="button" className="rm-btn rm-btn-sm" onClick={() => openEdit(profile)}>
+                      Edit
+                    </button>
+                    <button type="button" className="rm-btn rm-btn-sm" onClick={() => activateProfile(profile.id)} disabled={active}>
+                      {active ? "Active" : "Switch"}
+                    </button>
+                    <button
+                      type="button"
+                      className="rm-btn rm-btn-sm"
+                      onClick={() => deleteProfile(profile)}
+                      disabled={profiles.length <= 1}
+                      style={{ color:profiles.length <= 1 ? "var(--color-text-muted)" : "#dc2626" }}
+                    >
+                      Delete
+                    </button>
+                  </>
+                }
+              />
             );
           })}
-        </div>
+        </TileGrid>
 
         {profiles.length === 0 && (
           <div style={{
