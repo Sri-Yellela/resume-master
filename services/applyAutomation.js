@@ -1934,8 +1934,20 @@ export async function classifyFlowState(page, originalDomain) {
     // run downstream then read 'form_ready' and carried on, which is exactly "a silent condition
     // reported as a different condition". It must never fall through to a gate state either — a
     // page we could not read is not a page that challenged us.
-    const hasForm = await page.evaluate(`!!document.querySelector('input:not([type="hidden"]):not([type="submit"]):not([type="button"]),select,textarea,[contenteditable="true"]')`).catch(() => false);
-    return hasForm ? 'form_ready' : 'no_fields_discovered';
+    //
+    // ACROSS EVERY FRAME, and this cost a regression to learn twice. The first version of this
+    // asked the MAIN frame only, which is fine for the greenhouse/lever/ashby shape and wrong for
+    // workday/icims/taleo, where the entire application lives in an iframe and the main document
+    // legitimately holds no control at all. Those runs went from `submitted` to
+    // `no_fields_discovered` — caught by scripts/a8FileUploadTrap.mjs, not by the node suite, since
+    // it takes a real iframe to see it. waitForFormReady's own comment says exactly this about its
+    // own sum, one function away; the same rule applies to any "is there a form" question.
+    let controls = 0;
+    for (const frame of frameList(page)) {
+      const n = Number(await frame.evaluate(COUNT_CONTROLS).catch(() => 0));
+      if (Number.isFinite(n)) controls += n;
+    }
+    return controls > 0 ? 'form_ready' : 'no_fields_discovered';
   } catch (e) {
     console.warn("[applyAutomation] classifyFlowState error:", e.message);
     return 'error';

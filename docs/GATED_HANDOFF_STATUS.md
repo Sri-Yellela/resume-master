@@ -237,6 +237,34 @@ Three things follow, and none of them were said plainly before:
    `openQuestions` so they can be answered rather than merely named. The gates are still off; the
    run no longer pretends there is nothing outstanding.
 
+### The submitting path IS now exercised end to end — against the shape, not the employer
+
+Added after the table above, and it changes what "still ahead" means. AE1's diagnosis found that
+everything had been verified against `/ashby`, a static replica with native controls, while the live
+posting is a React SPA that does not resemble it. `scripts/fakeAts.js` now serves **`/ashby-spa`**:
+the live form's shape transcribed field-for-field from `ae1Diagnose.mjs` — 15 fields, every label,
+name, type and required flag identical, rendered in two chunks, with the nameless required date
+picker, the three UUID field names and the checkboxes named with their own question text.
+
+`scripts/ae7SubmitOnRealShape.mjs` drives **`mode:'full'`** against it — the submitting path,
+including the click — in four cases, asserting on what the ATS RECORDS rather than on any status:
+
+| Case | Form | Outcome | Why it matters |
+|---|---|---|---|
+| A | as measured | `held_review / incomplete_form`, `missingRequired: ["Pick date..."]`, 4 filled, **0 recorded** | The live outcome, reproduced locally. The fill works; the FORM declines to say what one required control wants. |
+| B | `?answerable=1` | **`submitted`**, `confirmation_page,url_changed`, **1 recorded** | The only difference from A is that one control has a label. Resume arrived at 193 bytes in `_systemfield_resume`; the UUID phone field resolved by label; the date came from the candidate's own `custom_answers`. |
+| C | `?deadsubmit=1` | `filled_not_submitted / submit_unverified`, `clicked_no_evidence`, **0 recorded** | A1 finding N1's case, which had no local target on a JS-submitted form. |
+| D | `?autofilltrap=1` | `held_review`, `missingRequired: ["Resume"]`, **0 recorded** | The resume uploads into the wrong file input, because that input carries the real page's own autofill copy. |
+
+Case B's **negative** assertions are the ones worth reading: no EEOC self-identification was
+answered, no arbitration agreement was accepted, and the nameless typeahead was left alone. Nothing
+was invented for a question nobody could answer, and no attestation was made on the candidate's
+behalf. That is the property that has to hold on the path that actually submits.
+
+What this does **not** establish: that the click works at a real employer. It establishes that it
+works against the real employer's *markup*, which is the part that can be tested without spending an
+application. The A5 gate is unchanged.
+
 **Queueing produces `semi`-shaped work, not a submission.** The board's "Autofill for Review" and
 the queue both post `mode:"auto"` with the server's approval-required default, which
 `processRunJob` turns into `applyMode = 'preview'` — full-auto minus the click. Nothing the board

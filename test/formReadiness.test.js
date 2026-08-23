@@ -121,3 +121,27 @@ test("every harness form with a file input declares enctype", () => {
     }
   }
 });
+
+test("ANY \"is there a form\" question is asked ACROSS FRAMES, not of the main document", () => {
+  // A REGRESSION THAT ACTUALLY HAPPENED, twice in one file. waitForFormReady sums COUNT_CONTROLS
+  // over frameList precisely because workday/icims/taleo host the whole application in an iframe
+  // and the main document legitimately holds no control. classifyFlowState step 9 was then written
+  // asking the MAIN frame only, so those providers went from `submitted` to
+  // `no_fields_discovered` — a run that filled and submitted correctly, reported as a page we could
+  // not read.
+  //
+  // scripts/a8FileUploadTrap.mjs caught it and this suite did not, because it takes a real iframe to
+  // see. This is the static half of that guard: the check has to be frame-summed at the source.
+  const src = fs.readFileSync("services/applyAutomation.js", "utf8");
+  const classify = src.slice(src.indexOf("export async function classifyFlowState"),
+                             src.indexOf("export function frameList"));
+  assert.match(classify, /for \(const frame of frameList\(page\)\)/,
+    "the form check must walk every frame");
+  assert.match(classify, /frame\.evaluate\(COUNT_CONTROLS\)/,
+    "and count with the SAME expression waitForFormReady uses — two different selectors would let " +
+    "readiness and the flow state disagree about whether this page has a form at all");
+  assert.match(classify, /controls > 0 \? .form_ready. : .no_fields_discovered./);
+  // The specific shape that broke it: a main-frame-only query for the form.
+  assert.ok(!/page\.evaluate\(`!!document\.querySelector\(.input:not/.test(classify),
+    "step 9 is asking the main document again — an iframe-hosted form reads as zero");
+});

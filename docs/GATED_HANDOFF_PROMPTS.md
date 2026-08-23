@@ -33,7 +33,10 @@ Never point automation at a real ATS. The A5 live gate still stands.
 
 THE ONE EXCEPTION, and its exact scope (recorded 2026-08-23, AE6). A live run against a real Ashby
 posting produced two safety-critical defects (AE1/AE2) that could not be diagnosed on the fixture,
-because everything had only ever been verified against a replica with native <select>s. Diagnosing
+because everything had only ever been verified against a replica with native <select>s.
+That gap is now closed locally: fakeAts serves /ashby-spa, the live form's shape transcribed
+field-for-field, and scripts/ae7SubmitOnRealShape.mjs drives mode:'full' against it. Use that
+for anything about the submit path; it needs no employer. Diagnosing
 them required pointing an instrument at that exact posting. What was permitted, and all that was:
 READ-ONLY diagnosis, and `mode:'preview'`/`mode:'semi'` under a FIXTURE identity — both of which fill
 a form and stop before any submit button is touched. `mode:'full'` has still never run against a real

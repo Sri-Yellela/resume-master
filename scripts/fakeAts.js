@@ -22,6 +22,13 @@
  *   GET  /greenhouse           2-step form (traps: sponsorship inversion, name ambiguity)
  *   GET  /lever                1-step form (traps: lowercase yes/no, "Review and Submit")
  *   GET  /ashby                1-step form (traps: required typeahead, date format)
+ *   GET  /ashby-spa            THE LIVE POSTING'S MEASURED SHAPE — React-rendered in two chunks,
+ *                              transcribed from ae1Diagnose.mjs's reading of a real Ashby form:
+ *                              nameless required date picker, UUID field names, checkboxes named
+ *                              with their own question, EEOC radio groups. This is the target the
+ *                              submit path had never been exercised against; /ashby is a native-
+ *                              control replica and that gap is what AE1/AE2 came out of.
+ *                              ?answerable=1  ?autofilltrap=1  ?deadsubmit=1  ?delay=ms
  *   GET  /multistep            2-step form offering BOTH navigation styles from one step 1
  *                              (real POST -> new document, history.pushState -> same document)
  *                              plus a cross-origin control. Built for TASK G0: whether an
@@ -89,6 +96,37 @@ const TRAPS = {
              'rather than submit an incomplete form.',
     field:   'hear_about_us',
     expect:  "status === 'held_review' with this label in missingRequired",
+  },
+  // ── /ashby-spa, transcribed from the live posting (AE1/AE2 follow-up) ──────
+  nameless_required: {
+    finding: 'A required control with NO name and NO associated <label> takes its label from ' +
+             '`placeholder` via getLabel()\'s last resort. Nothing can resolve "Pick date..." — the ' +
+             'form has not said what it wants. Every fixture before this one labelled everything, ' +
+             'so the case that actually stops a live Ashby run had no local target.',
+    field:   '(nameless, placeholder "Pick date...")',
+    expect:  "held_review/incomplete_form with 'Pick date...' in missingRequired — never a submit",
+  },
+  uuid_field_names: {
+    finding: 'Three controls are named with a bare GUID, so the ONLY signal is the label. This is ' +
+             'why a canonical-profile gate packet (keyed on `email`, `first_name`) fills nothing ' +
+             'here, which is what AE2 observed as "Open & fill filled an empty form".',
+    fields:  ['09a328e0-…', '20f8883c-…', 'f189fed2-…'],
+    expect:  'resolved by LABEL, and the packet source reported as discovered_form not canonical_profile',
+  },
+  autofill_slot_theft: {
+    finding: 'The live page puts an unlabelled file input behind the copy "Upload your resume here ' +
+             'to autofill key application fields". uploadIntoContext classifies file inputs on ' +
+             'label+name+id, so if that copy ever reaches the input as an aria-label the resume ' +
+             'lands in the WRONG slot and the required one stays empty — a hold that reads as ' +
+             '"no resume" when the resume was uploaded.',
+    field:   '_systemfield_resume',
+    expect:  "?autofilltrap=1 -> held_review with 'Resume' in missingRequired, resume NOT recorded",
+  },
+  dead_submit: {
+    finding: 'A1 finding N1: `submitted` was once set by the CLICK ALONE. A submit-shaped button ' +
+             'that changes nothing must report clicked_no_evidence — the false positive is ' +
+             'self-concealing, because the duplicate guard then never retries the job.',
+    expect:  "?deadsubmit=1 -> filled_not_submitted/submit_unverified, and /_submissions stays EMPTY",
   },
 };
 
@@ -249,6 +287,218 @@ function ashbyForm() {
 
     <button type="submit">Submit</button>
   </form>`);
+}
+
+// ── /ashby-spa: THE REAL FORM'S SHAPE, MEASURED ──────────────────────────────
+//
+// WHY THIS EXISTS AND /ashby DOES NOT SUFFICE
+// `/ashby` above is static HTML with native controls. That is what AE1/AE2 turned out to have been
+// verified against, while the live posting is a React SPA whose controls do not resemble it — and the
+// docs said so explicitly ("everything was verified against a replica with native <select>s").
+//
+// So this is not invented. Every field below is transcribed from `scripts/ae1Diagnose.mjs`'s reading
+// of `jobs.ashbyhq.com/openai/0432731c-…/application`, which reported 15 fields across 3 frames and
+// 32 raw controls. The four things the old fixture could not reproduce, and which are the whole
+// reason a live run behaved differently:
+//
+//   1. NAMELESS REQUIRED CONTROLS. The date picker and the typeahead carry NO `name` and NO
+//      associated <label> — their label comes from `placeholder` via getLabel()'s last resort, which
+//      is why they read as "Pick date..." and "Start typing...". A required field whose only
+//      identity is the word "Pick date..." cannot be resolved by any map, and that is not a bug in
+//      the resolver: it is the form declining to say what it wants. The completeness gate holding on
+//      it is the correct outcome, and this fixture is where that can be asserted.
+//   2. UUID FIELD NAMES. Three fields are named with a bare GUID, so the ONLY signal is the label.
+//      This is what made AE2's canonical-profile packet fill nothing: it is keyed on `email` and
+//      `first_name`, which match no control here.
+//   3. CHECKBOXES WHOSE `name` IS THE ENTIRE LABEL TEXT. Measured, not stylised — the arbitration
+//      checkbox really is named with its own 180-character question.
+//   4. RADIO GROUPS LABELLED BY THEIR FIRST OPTION. discoverFields dedupes a group to one field and
+//      takes getLabel() of the first radio, so the four EEOC groups present as "Male",
+//      "Hispanic or Latino", and so on — which is what a resolver actually has to cope with.
+//
+// It renders client-side in two chunks like `/spa`, because that is the other half of the reality:
+// the readiness condition has to be exercised, not bypassed.
+//
+// SUBMISSION IS RECORDED THE WAY THE REAL ONE HAPPENS. Real Ashby does not do a native form POST; it
+// collects state in JS and sends it. So does this — an intercepted submit builds a real multipart
+// FormData (so `files` records the resume for real, through the existing parser), POSTs it to
+// /_submit/ashby-spa, and then NAVIGATES to a confirmation page. That last step matters: it is what
+// gives the post-click evidence check something honest to find (`url_changed` plus the confirmation
+// text `classifyFlowState` matches on) instead of a status nobody verified.
+//
+// Query params, each one a case worth being able to reach:
+//   ?delay=ms      hydration delay (default 2500; 0 renders synchronously)
+//   ?answerable=1  gives the date field a real <label> and a name, so a run CAN complete it and the
+//                  submit click is reachable. The difference between this and the default IS the
+//                  finding: the form is unsubmittable because of how it labels one control.
+//   ?autofilltrap=1  gives the unnamed "autofill from resume" file input the real page's own copy
+//                  ("Upload your resume here to autofill…") as an aria-label. uploadIntoContext
+//                  classifies file inputs on label+name+id, so the resume then lands in the WRONG
+//                  slot and `_systemfield_resume` stays empty — a hold that looks like a missing
+//                  resume when the resume was in fact uploaded, to the wrong input.
+//   ?deadsubmit=1  the submit button posts nothing and navigates nowhere. This is A1 finding N1's
+//                  case: a submit-shaped button that changes nothing must report
+//                  `clicked_no_evidence`, never `submitted`.
+const EEOC_PREFIX = '41056061-f039-4b0f-8310-713131d11bda';
+function ashbySpaForm({ delayMs, answerable = false, autofillTrap = false, deadSubmit = false } = {}) {
+  const d = Number.isFinite(delayMs) ? delayMs : 2500;
+  // Kept as data so the radio groups below are one loop rather than four hand-written blocks, and so
+  // the option labels stay exactly as measured.
+  const eeoc = [
+    ['gender',            ['Male', 'Female', 'Decline to self identify']],
+    ['race',              ['Hispanic or Latino', 'White', 'Black or African American', 'Asian', 'Decline to self identify']],
+    ['veteran_status',    ['I identify as one or more of the classifications of protected veteran listed above',
+                           'I am not a protected veteran', 'I decline to self identify']],
+    ['disability_status', ['Yes, I have a disability, or have had one in the past',
+                           'No, I do not have a disability', 'I do not want to answer']],
+  ];
+  const radioHtml = eeoc.map(([key, opts]) => {
+    const name = `${EEOC_PREFIX}__systemfield_eeoc_${key}`;
+    return opts.map((opt, i) => {
+      const id = `f_eeoc_${key}_${i}`;
+      return `<label for="${id}" style="font-weight:400">` +
+             `<input type="radio" id="${id}" name="${name}" value="${escapeHtml(opt)}" ` +
+             `style="width:auto;margin-right:6px"> ${escapeHtml(opt)}</label>`;
+    }).join('');
+  }).join('<hr style="border:0;border-top:1px solid #eee;margin:14px 0">');
+
+  // Measured: the `name` attribute IS the question, verbatim, for both of these. Built here in Node
+  // rather than assembled in the page, so the attribute quoting is done once and visibly.
+  const ARBITRATION = 'I acknowledge that I have opened, read, and understood the Arbitration ' +
+    'Agreement. I understand that by submitting my application, I am agreeing to be bound by the ' +
+    'terms of the Arbitration Agreement.';
+  const CONFIRM = 'I confirm I have read the above.';
+  const checkbox = (id, text) =>
+    `<label for="${id}" style="font-weight:400">` +
+    `<input type="checkbox" id="${id}" name="${escapeHtml(text)}" ` +
+    `style="width:auto;margin-right:6px"> ${escapeHtml(text)}</label>`;
+  const checkboxHtml =
+    '<fieldset><legend>Arbitration Agreement</legend>' +
+    checkbox('f_arb', ARBITRATION) + checkbox('f_conf', CONFIRM) +
+    '</fieldset>';
+
+  // The date field, in its two forms. The default is the measured one: no name, no label, required.
+  const dateField = answerable
+    ? `<label class="req" for="f_start">Earliest start date</label>` +
+      `<input id="f_start" name="start_date" placeholder="Pick date..." required>`
+    : `<input placeholder="Pick date..." required style="margin-top:14px">`;
+
+  const autofillAria = autofillTrap
+    ? ` aria-label="Upload your resume here to autofill key application fields"`
+    : '';
+
+  return page('Software Engineer, Agent Productivity — OpenAI', `
+  <h1>Software Engineer, Agent Productivity</h1>
+  <p style="font-size:13px;color:#666">Shape transcribed from a live Ashby posting
+  (scripts/ae1Diagnose.mjs). Rendered by JavaScript ${d}ms after load, in two chunks.</p>
+  <div id="app"><p id="boot">Loading application form…</p></div>
+  <script>
+  (function(){
+    var DELAY = ${d};
+    var DEAD  = ${deadSubmit ? 'true' : 'false'};
+
+    // CHUNK 1 — the identity block. Note _systemfield_* beside bare GUIDs: that mix is the real
+    // form's, and it is why label-based resolution is not optional here.
+    var chunk1 =
+      // enctype declared even though the submit is intercepted and posts a hand-built FormData: if
+      // the interception is ever removed, a native POST of a file input WITHOUT it sends a filename
+      // and no bytes, and the resume path silently stops being exercised. Pinned by
+      // formReadiness.test.js for every form in this harness.
+      '<form id="ashbyform" enctype="multipart/form-data">' +
+      '<fieldset><legend>Autofill from resume</legend>' +
+        '<p style="font-size:13px;color:#666">Upload your resume here to autofill key application fields.</p>' +
+        '<input type="file"${autofillAria}>' +
+      '</fieldset>' +
+      '<label class="req" for="f_legal">Legal Name</label>' +
+      '<input id="f_legal" name="_systemfield_name" required>' +
+      '<label for="f_pref">Preferred Name (if applicable)</label>' +
+      '<input id="f_pref" name="09a328e0-8d57-4f88-86ab-688de1657b17">' +
+      '<label class="req" for="f_email">Email</label>' +
+      '<input id="f_email" name="_systemfield_email" required>' +
+      '<label class="req" for="f_resume">Resume</label>' +
+      '<input id="f_resume" type="file" name="_systemfield_resume" required>' +
+      '<label class="req" for="f_phone">Phone Number</label>' +
+      '<input id="f_phone" name="20f8883c-d278-427c-9465-dc614f612e1f" required>' +
+      '<div id="chunk2"></div>' +
+      '<button id="f_submit" type="' + (DEAD ? 'button' : 'submit') + '">Submit Application</button>' +
+      '</form>';
+
+    // CHUNK 2 — everything with no name, no label, or a label that is really an option. The half of
+    // the form that a resolver cannot map, arriving late enough that a readiness check which fires
+    // on "any field" would miss all of it.
+    var chunk2 =
+      '<div role="combobox" aria-autocomplete="list" style="display:none"></div>' +
+      '<input placeholder="Start typing..." role="combobox" aria-autocomplete="list">' +
+      ${JSON.stringify(dateField)} +
+      '<label for="f_addl">Additional Information</label>' +
+      '<textarea id="f_addl" name="f189fed2-624b-41a1-a76f-0c67a2611d1a" rows="3"></textarea>' +
+      ${JSON.stringify(checkboxHtml)} +
+      '<fieldset><legend>Voluntary self-identification</legend>' +
+        ${JSON.stringify(radioHtml)} +
+      '</fieldset>';
+
+    setTimeout(function(){
+      var b = document.getElementById('boot'); if (b) b.remove();
+      document.getElementById('app').innerHTML = chunk1;
+      setTimeout(function(){
+        document.getElementById('chunk2').innerHTML = chunk2;
+        wire();
+      }, 400);
+    }, DELAY);
+
+    // The submit path. Real Ashby collects state and sends it, so this does too — and it includes
+    // the NAMELESS controls, keyed by the label a human reads, because otherwise the one thing this
+    // fixture exists to reproduce would be invisible in the recorded submission.
+    function wire() {
+      var form = document.getElementById('ashbyform');
+      var btn  = document.getElementById('f_submit');
+      if (!form || !btn) return;
+      var handler = function(ev){
+        if (ev) ev.preventDefault();
+        if (DEAD) return;                       // clicked, nothing happens, nothing changes
+        var fd = new FormData();
+        var seen = 0;
+        Array.prototype.forEach.call(
+          form.querySelectorAll('input,textarea,select,[role=combobox]'), function(el){
+          if (el.type === 'submit' || el.type === 'button') return;
+          var key = el.getAttribute('name');
+          if (!key) {
+            // Nameless control: record it under the label a human sees, which for these IS the
+            // placeholder. Prefixed so an assertion cannot confuse it with a real field name.
+            var lbl = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+            if (!lbl) return;
+            key = 'unnamed:' + lbl;
+          }
+          if (el.type === 'file') {
+            if (el.files && el.files[0]) { fd.append(key, el.files[0], el.files[0].name); seen++; }
+            return;
+          }
+          if (el.type === 'checkbox') { if (el.checked) { fd.append(key, 'true'); seen++; } return; }
+          if (el.type === 'radio')    { if (el.checked) { fd.append(key, el.value); seen++; } return; }
+          if (el.value) { fd.append(key, el.value); seen++; }
+        });
+        fd.append('_controlsRecorded', String(seen));
+        fetch('/_submit/ashby-spa', { method: 'POST', body: fd })
+          .then(function(){ location.assign('/ashby-spa/thanks'); })
+          .catch(function(){ location.assign('/ashby-spa/thanks'); });
+      };
+      form.addEventListener('submit', handler);
+      if (DEAD) btn.addEventListener('click', handler);
+    }
+  })();
+  </script>`);
+}
+
+// The confirmation the submit navigates to. Separate page, real navigation — so `url_changed` and
+// the confirmation text are both genuinely earned rather than asserted by the fixture.
+function ashbySpaThanks() {
+  return page('Application received — OpenAI', `
+  <h1>Thank you for your application</h1>
+  <p>Your application has been submitted successfully. We'll be in touch.</p>
+  <p style="font-size:12px;color:#666">Reached by a real navigation from /ashby-spa, so a run that
+  claims <code>submitted</code> here has both <code>url_changed</code> and a confirmation page —
+  the two independent signals A1 finding N1 requires. Assert against
+  <a href="/_submissions">/_submissions</a>, never on the status.</p>`);
 }
 
 // ── JS-RENDERED (SPA) form ───────────────────────────────────────────────────
@@ -578,6 +828,12 @@ function indexPage() {
     <li><a href="/lever">/lever</a> — 1-step (lowercase yes/no, "Review and Submit" button)</li>
     <li><a href="/spa">/spa</a> — JS-rendered, fields appear after a delay (SPA hydration)</li>
     <li><a href="/ashby">/ashby</a> — 1-step (required typeahead, non-ISO date)</li>
+    <li><a href="/ashby-spa">/ashby-spa</a> — <strong>the live posting's measured shape</strong>:
+      React-rendered in two chunks, nameless required date picker, UUID field names, checkboxes
+      named with their own question text, four EEOC radio groups labelled by their first option.
+      <code>?answerable=1</code> makes the date resolvable so the submit click is reachable;
+      <code>?autofilltrap=1</code> sends the resume to the wrong file input;
+      <code>?deadsubmit=1</code> clicks and changes nothing.</li>
     <li><a href="/multistep">/multistep</a> — 2-step offering a real POST, a pushState advance and
       a cross-origin control from one step 1 (TASK G0: activeTab grant lifetime)</li>
     <li><a href="/gated">/gated</a> — 302 to a sign-in wall, no form behind it
@@ -676,6 +932,17 @@ const server = http.createServer(async (req, res) => {
     if (path === '/greenhouse') return send(200, greenhouseStep1());
     if (path === '/lever')      return send(200, leverForm());
     if (path === '/ashby')      return send(200, ashbyForm());
+    // The measured replica of the live posting. See ashbySpaForm for what each param reaches.
+    if (path === '/ashby-spa') {
+      const q = url.searchParams.get('delay');
+      return send(200, ashbySpaForm({
+        delayMs:      q === null ? undefined : Number(q),
+        answerable:   url.searchParams.get('answerable') === '1',
+        autofillTrap: url.searchParams.get('autofilltrap') === '1',
+        deadSubmit:   url.searchParams.get('deadsubmit') === '1',
+      }));
+    }
+    if (path === '/ashby-spa/thanks') return send(200, ashbySpaThanks());
     if (path === '/spa') {
       // ?delay=<ms> overrides the hydration delay; ?delay=0 renders synchronously.
       // ?variant=2 serves a CHANGED form, for the schema-reconciliation case.
