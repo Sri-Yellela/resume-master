@@ -10,14 +10,18 @@
 // A resume below your ATS floor, a question we refused to guess, and an application filled and
 // waiting for approval are the system working. A missing browser binary is not. Both said "failed".
 //
-// These tests pin the four surfaces, the total partition that guarantees no application can fall
-// out of all of them, and the rule that every row names an obstacle and an action rather than a
-// status code.
+// These tests pin the SERVER's four-way partition — which guarantees no application can fall out of
+// every bucket — and the rule that every row names an obstacle and an action rather than a status
+// code. The PANEL is now organised around three outcomes (needs review, submitted, problems) over a
+// company tier, which is a different cut of the same data: the server's job is that nothing is lost,
+// the panel's is that a human can act on it. AB4 separated held-on-purpose from broken INSIDE
+// problems rather than leaving both under one word, which is the same flattening in a new place.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  describeApplication, sectionFor, boardApplicationChip, groupByApplication, SECTION, PREREQUISITE_LABELS,
+  describeApplication, sectionFor, boardApplicationChip, groupByApplication, groupByCompany,
+  splitByFault, SECTION, PREREQUISITE_LABELS,
 } from "../client/src/lib/applyObstacles.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
@@ -30,13 +34,88 @@ const applyRoute = read("routes/apply.js");
 
 // ── The four surfaces ────────────────────────────────────────────────────────────────────────
 
-test("the panel renders the four sections the restructure is built on", () => {
-  for (const heading of ["Needs you", "In flight", "Submitted", "Stopped"]) {
-    assert.ok(panel.includes(`>\n            ${heading}\n          </SectionHeading>`)
-      || panel.includes(`>${heading}</SectionHeading>`)
-      || new RegExp(`SectionHeading[^>]*>\\s*${heading}\\s*<`).test(panel),
+test("the panel is organised around OUTCOME: three sections, plus progress (AB4)", () => {
+  // Was ["Needs you", "In flight", "Submitted", "Stopped"]. AB4 restructures the outcomes into
+  // three — NEEDS REVIEW, SUBMITTED, PROBLEMS — and "Stopped" is gone as a heading because it put
+  // "we protected you" and "this failed" under one word, which is the flattening this line of work
+  // exists to undo. PROBLEMS keeps both but separates and labels them.
+  for (const heading of ["Needs review", "Submitted", "Problems"]) {
+    assert.ok(new RegExp(`SectionHeading[^>]*>\\s*${heading}\\s*<`).test(panel),
       `the "${heading}" section is missing from the panel`);
   }
+  // IN FLIGHT is NOT an outcome — a queued application is neither submitted, nor waiting on the
+  // user, nor broken — so it is not a fourth outcome section. It still has to exist: dropping it
+  // would lose a capability.
+  assert.match(panel, /SectionHeading[^>]*>\s*In flight\s*</);
+  assert.ok(!/SectionHeading[^>]*>\s*Stopped\s*</.test(panel),
+    "the Stopped heading is back — it collapses held-on-purpose into failed");
+  // Each section still carries its own count.
+  for (const c of [/count=\{needsYouCount\}/, /count=\{applySubmitted\.length\}/,
+                   /count=\{applyStopped\.length\}/, /count=\{applyInFlight\.length\}/]) {
+    assert.match(panel, c);
+  }
+});
+
+test("PROBLEMS keeps 'we protected you' distinguishable from 'this failed'", () => {
+  // The requirement is explicit that the HELD ON PURPOSE copy is right and must stay visible,
+  // because the two need different affordances and produce different feelings.
+  assert.match(panel, /const stoppedSplit = splitByFault\(applyStopped\)/);
+  assert.match(panel, /These broke —/);
+  assert.match(panel, /Held on purpose —/);
+  assert.match(panel, /Nothing went wrong with these/);
+
+  const { broke, held } = splitByFault([
+    { status: "failed",   reasonCode: "internal_error" },
+    { status: "failed",   reasonCode: "browser_binary_not_found" },
+    { status: "rejected", reasonCode: null },
+    { status: "held_review", reasonCode: "ats_below_threshold" },
+  ]);
+  assert.equal(broke.length, 2);
+  assert.equal(held.length, 2, "a rejection and a protective hold are not failures");
+});
+
+test("every section groups by COMPANY — seven roles at one employer belong together", () => {
+  assert.match(panel, /const heldByCompany      = groupByCompany\(heldApplications\)/);
+  assert.match(panel, /const submittedByCompany = groupByCompany\(applySubmitted\)/);
+  assert.match(panel, /groupByCompany\(stoppedSplit\.broke\)/);
+  assert.match(panel, /groupByCompany\(stoppedSplit\.held\)/);
+  assert.match(sections, /export function CompanyHeading/);
+
+  const g = groupByCompany([
+    { company: "OpenAI", title: "A", finishedAt: 3 },
+    { company: "OpenAI", title: "B", finishedAt: 5 },
+    { company: "Stripe", title: "C", finishedAt: 9 },
+  ]);
+  assert.equal(g.length, 2);
+  // Biggest employer first — that is the group the user came here to find.
+  assert.equal(g[0].company, "OpenAI");
+  assert.equal(g[0].items.length, 2);
+  // Most recent first within a company.
+  assert.equal(g[0].items[0].title, "B");
+  // A posting removed by the cleanup has no company; they collect under one honest heading rather
+  // than each becoming its own group of employers the user has never heard of.
+  const anon = groupByCompany([{ company: null, finishedAt: 1 }, { company: "", finishedAt: 2 }]);
+  assert.equal(anon.length, 1);
+  assert.match(sections, /Posting no longer on the board/);
+});
+
+test("a missing resume is a BUTTON, and only where a resume is the problem (requirement 5)", () => {
+  // "resume required" was left as text — a dead chip with a tooltip. It gets a one-click fix.
+  assert.match(panel, /const generateResume = \(job\) => \{/);
+  assert.match(sections, /Generate a resume/);
+  // But keyed on the REASON, not on resumeAvailable: three rows can lack a resume while only one
+  // stopped because of it, and a Generate button beside "the apply browser is not installed on the
+  // server" contradicts the sentence directly above it.
+  assert.match(sections, /onGenerateResume && d\.resumeBlocked/);
+  assert.match(sections, /app\.reasons\.some\(r => r\.resumeBlocked\)/);
+  assert.equal(describeApplication({ status: "failed", reasonCode: "resume_unavailable" }).resumeBlocked, true);
+  assert.equal(describeApplication({ status: "failed", reasonCode: "generation_failed" }).resumeBlocked, true);
+  for (const c of ["browser_binary_not_found", "internal_error", "manual_review", "login_required"]) {
+    assert.equal(describeApplication({ status: "failed", reasonCode: c }).resumeBlocked, false,
+      `"${c}" is not fixed by generating a resume, so it must not offer to`);
+  }
+  // An unknown reason must not opt in by accident.
+  assert.equal(describeApplication({ status: "failed", reasonCode: "brand_new" }).resumeBlocked, false);
 });
 
 test("the server serves the four surfaces as a TOTAL partition", () => {

@@ -85,6 +85,15 @@ const DEAD_POSTING = [
     resumeAvailable: false, screenshotAvailable: true, applyUrl: null },
 ];
 
+/** Queued and running. NOT one of the three outcome sections — the fixture proves it survives. */
+const IN_FLIGHT = [
+  { id: 500, runId: 9, jobId: 'openai-sec', company: 'OpenAI', title: 'Security Engineer',
+    status: 'running', reasonCode: null, startedAt: ago(0.1), finishedAt: null, attemptCount: 1,
+    resumeAvailable: false, screenshotAvailable: false, applyUrl: null },
+  { id: 501, runId: 9, jobId: 'stripe-inf', company: 'Stripe', title: 'Infra Engineer',
+    status: 'queued', reasonCode: null, startedAt: null, finishedAt: null, attemptCount: 1,
+    resumeAvailable: false, screenshotAvailable: false, applyUrl: null },
+];
 const SUBMITTED = [
   { id: 800, runId: 6, jobId: 'openai-infra', company: 'OpenAI', title: 'Infrastructure Engineer',
     status: 'submitted', reasonCode: null, startedAt: ago(70), finishedAt: ago(70),
@@ -113,6 +122,13 @@ const STOPPED = [
     status: 'failed', reasonCode: 'internal_error', reasonDetail: 'timeout',
     startedAt: ago(130), finishedAt: ago(130), attemptCount: 3, atsScore: null,
     resumeAvailable: false, screenshotAvailable: false, applyUrl: 'https://notion.so/jobs/702' },
+  // NOT a failure — the user rejected it. Terminal, so it belongs in PROBLEMS, but nothing went
+  // wrong with it. Without a row like this the "held on purpose" half of the section cannot render,
+  // and the distinction the requirement insists on would go unverified.
+  { id: 703, runId: 5, jobId: 'notion-des', company: 'Notion', title: 'Design Engineer',
+    status: 'rejected', reasonCode: null, reasonDetail: null,
+    startedAt: ago(131), finishedAt: ago(131), attemptCount: 1, atsScore: 72,
+    resumeAvailable: true, screenshotAvailable: true, applyUrl: 'https://notion.so/jobs/703' },
 ];
 
 /** SEVEN gated jobs across TWO portals — the amortisation AB4's verify insists must survive. */
@@ -178,7 +194,7 @@ const FIXTURES = {
       { id: 6, status: 'completed', mode: 'auto', startedAt: ago(70), submittedCount: 3, heldCount: 0, failedCount: 0 },
       { id: 5, status: 'completed', mode: 'auto', startedAt: ago(120), submittedCount: 0, heldCount: 0, failedCount: 3 },
     ],
-    review: REVIEW, gated: GATED, inFlight: [], submitted: SUBMITTED, stopped: STOPPED,
+    review: REVIEW, gated: GATED, inFlight: IN_FLIGHT, submitted: SUBMITTED, stopped: STOPPED,
     statusCounts: { held_review: REVIEW.length, held_gate: GATED.length, submitted: SUBMITTED.length, failed: STOPPED.length },
   },
   '/api/apply/gate-packets': {
@@ -352,23 +368,113 @@ async function main() {
       check(`AB4  the "${want}" section is present`,
         headings.some(h => h.toUpperCase().includes(want)), headings.join(' / '));
     }
-    check('AB4  each section carries its own count',
-      await page.evaluate(() => [...document.querySelectorAll('h3')].every(h => {
-        const n = h.parentElement?.innerText || '';
-        return /\d/.test(n);
-      })), headings.join(' / '));
-    check('AB4  applications are grouped by COMPANY inside a section',
-      /OpenAI/.test(text) && (text.match(/OpenAI/g) || []).length >= 2,
-      `${(text.match(/OpenAI/g) || []).length} OpenAI mentions`);
-    check('AB4  "held on purpose" stays visibly distinct from what broke',
-      /held on purpose/i.test(text) && /(did not complete|didn.t send|broke)/i.test(text));
-    check('AB4  the resume-required problem offers a one-click fix, not just words',
-      !/resume required — Generate a resume/.test(text) || /Generate/i.test(text));
-    check('AB4  nothing was dropped: resume, evidence and ATS chips all survive',
+    // The three sections, in the order they are rendered. NEEDS REVIEW leads because it is the only
+    // one where anything is waiting on a human.
+    const outcomeOrder = headings.filter(h => /NEEDS REVIEW|SUBMITTED|PROBLEMS/.test(h.toUpperCase()))
+      .map(h => h.toUpperCase());
+    check('AB4  NEEDS REVIEW leads — the only section where anything waits on a human',
+      outcomeOrder[0] === 'NEEDS REVIEW', outcomeOrder.join(' / '));
+
+    // Each section's own count, read from the heading's own row rather than from the whole page.
+    const counts = await page.evaluate(() =>
+      [...document.querySelectorAll('h3')].map(h => {
+        const sib = h.nextElementSibling;
+        return { name: h.innerText.trim(), count: sib ? sib.innerText.trim() : null };
+      }));
+    for (const want of ['NEEDS REVIEW', 'SUBMITTED', 'PROBLEMS']) {
+      const row = counts.find(c => c.name.toUpperCase().includes(want));
+      check(`AB4  "${want}" carries its own count`, !!row && /^\d+$/.test(row.count || ''),
+        `${row?.name} -> ${row?.count}`);
+    }
+
+    // ── The COMPANY tier ──
+    // Read as a tier: the company headings that appear, and how many roles each claims. A user with
+    // two submitted OpenAI roles must see them under ONE OpenAI heading saying "2 roles".
+    const companyTier = await page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll('*')) {
+        if (el.children.length !== 0) continue;
+        const t = (el.textContent || '').trim();
+        if (/^\d+ roles$/.test(t)) out.push({
+          roles: Number(t.split(' ')[0]),
+          company: el.previousElementSibling?.textContent?.trim() || null,
+        });
+      }
+      return out;
+    });
+    check('AB4  applications are grouped by COMPANY, with the role count on the group',
+      companyTier.some(g => g.company === 'OpenAI' && g.roles === 2),
+      companyTier.map(g => `${g.company}:${g.roles}`).join(' ') || 'no company tier rendered');
+    check('AB4  a company with ONE role is not labelled with a count it does not have',
+      !companyTier.some(g => g.roles === 1),
+      companyTier.map(g => `${g.company}:${g.roles}`).join(' '));
+
+    // ── Held on purpose vs broke ──
+    // Asserted separately, so a fixture missing one kind reports THAT rather than blaming the split.
+    // Case-insensitive on purpose: these labels are `text-transform: uppercase`, and innerText
+    // returns the RENDERED text — so a case-sensitive match here reads a string the DOM never has.
+    check('AB4  PROBLEMS labels what BROKE', /These broke — 3 applications/i.test(text),
+      (text.match(/These broke[^\n]*/i) || ['absent'])[0]);
+    check('AB4  PROBLEMS labels what was held on purpose, separately',
+      /Held on purpose — 1 application\b/i.test(text),
+      (text.match(/Held on purpose[^\n]*/i) || ['absent'])[0]);
+    check('AB4  and says plainly that nothing went wrong with the held ones',
+      /Nothing went wrong with these/.test(text));
+    check('AB4  a rejected application is NOT presented as a failure',
+      /You rejected this one/.test(text));
+
+    // ── Requirement 5 ──
+    const genBtn = await page.evaluate(() =>
+      [...document.querySelectorAll('button')].filter(b => /Generate a resume/.test(b.innerText)).length);
+    check('AB4  a missing resume is a BUTTON, not the dead "no resume generated" chip',
+      genBtn > 0, `${genBtn} Generate-a-resume buttons`);
+    check('AB4  and the dead chip is gone from the rows that now have the button',
+      !/no resume generated/.test(text));
+    // Only where a resume is actually the blocker. Three fixture rows have no resume; only ONE of
+    // them stopped because of it. A button beside "the apply browser is not installed on the server"
+    // contradicts the sentence directly above it.
+    const genRows = await page.evaluate(() =>
+      [...document.querySelectorAll('button')]
+        .filter(b => /Generate a resume/.test(b.innerText))
+        .map(b => b.closest('[data-rm-card]')?.innerText || ''));
+    check('AB4  the button appears ONLY where a missing resume is the problem',
+      genRows.length === 1 && /No resume was generated/.test(genRows[0]),
+      genRows.map(r => r.split('\n')[1] || r.slice(0, 40)).join(' | ') || 'none');
+    check('AB4  and never beside a problem no resume can fix',
+      !genRows.some(r => /apply browser is not installed|something went wrong on our side/i.test(r)),
+      `${genRows.length} rows offer it`);
+
+    // ── Requirement 3: what each application row must carry ──
+    const submittedRow = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('h3')].find(x => /SUBMITTED/i.test(x.innerText));
+      let el = h?.parentElement?.nextElementSibling;
+      while (el && !/Infrastructure Engineer/.test(el.innerText || '')) el = el.nextElementSibling;
+      return el ? el.innerText : null;
+    });
+    check('AB4  a submitted row carries role, date, the exact resume and the evidence',
+      /Infrastructure Engineer/.test(submittedRow || '')
+      && /\d{1,2}\/\d{1,2}\/\d{4}/.test(submittedRow || '')
+      && /The resume that went out/.test(submittedRow || '')
+      && /Screenshot of the form/.test(submittedRow || '')
+      && /confirmed by the site|sent, not confirmed/.test(submittedRow || ''),
+      (submittedRow || 'row not found').replace(/\n/g, ' | ').slice(0, 150));
+
+    // ── Requirement 4: nothing dropped ──
+    check('AB4  nothing was dropped: resume, evidence, ATS chip, apply URL, resolve action',
       /Resume PDF|The resume that went out/.test(text)
       && /What we filled|Screenshot of the form/.test(text)
-      && /ATS \d+/.test(text),
-      'artifact links and score chip present');
+      && /ATS \d+/.test(text)
+      && /The posting ↗/.test(text)
+      && /Open & fill/.test(text) && /Retry/.test(text),
+      'artifact links, score chip, posting link and resolve actions all present');
+    check('AB4  IN FLIGHT survives — it is not an outcome, so it is not a fourth section',
+      /IN FLIGHT/i.test(text) && /Security Engineer/.test(text)
+      && !outcomeOrder.includes('IN FLIGHT'),
+      headings.join(' / '));
+    check('AB4  the queue and the run history both survive',
+      /RUN HISTORY/i.test(text));
+    check('AB4  attempts are still reported on an application',
+      /attempts/i.test(text));
 
     await shot('sections.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'sections.png')}`);

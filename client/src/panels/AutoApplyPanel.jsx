@@ -2,9 +2,12 @@ import { useNavigate } from "react-router-dom";
 import { useTheme } from "../styles/theme.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { Z } from "../styles/zLayers.js";
-import { describeApplication, groupByApplication } from "../lib/applyObstacles.js";
+import {
+  describeApplication, groupByApplication, groupByCompany, splitByFault,
+} from "../lib/applyObstacles.js";
 import {
   SectionHeading, ObstacleCard, ApplicationRow, PrerequisiteCards, ApplicationObstacleCard,
+  CompanyHeading,
 } from "./AutoApplyPanelSections.jsx";
 
 // ============================================================
@@ -88,6 +91,20 @@ export function AutoApplyPanel() {
   // when many obstacles block one (this).
   const heldApplications = groupByApplication(applyReviewJobs);
 
+  // ── AB4: OUTCOME, THEN COMPANY, THEN APPLICATION ────────────────────────────────────────────
+  //
+  // The company tier. A user applying to seven OpenAI roles wants them together; flat
+  // reverse-chronological order interleaved them with everything else and made the one fact that
+  // matters when a recruiter calls — which employer this is — invisible.
+  const heldByCompany      = groupByCompany(heldApplications);
+  const submittedByCompany = groupByCompany(applySubmitted);
+  // PROBLEMS holds both terminal kinds, separated. "We protected you" and "this failed" need
+  // different affordances and produce different feelings; the old STOPPED section put both under one
+  // heading, which is the flattening this work has been undoing throughout.
+  const stoppedSplit = splitByFault(applyStopped);
+  const brokeByCompany          = groupByCompany(stoppedSplit.broke);
+  const heldOnPurposeByCompany  = groupByCompany(stoppedSplit.held);
+
   const needsYouCount =
     applyGatePortals.reduce((n, p) => n + (p.count || 0), 0) +
     // APPLICATIONS, not rows. The old sum counted every held run-job, so one application held three
@@ -170,6 +187,25 @@ export function AutoApplyPanel() {
     addToApplyQueue({ jobId: job.jobId, company: job.company, title: job.title });
     setHandoffMsg(null);
     setApplyQueueMsg(`${job.company || "Job"} is queued for a fresh run — press Autofill for Review to prepare new answers.`);
+  };
+
+  /**
+   * AB4 requirement 5: a missing resume is a PROBLEM WITH A ONE-CLICK FIX, and it was left as text —
+   * a dead "no resume generated" chip with a tooltip.
+   *
+   * The click puts the job back on the queue, because the run is what generates a resume: the
+   * pipeline's CASE C generates one in parallel with the browser and gates the upload on it. There is
+   * no way to reach the board's own generator for a specific job from here — JobsPanel has no
+   * deep-link — so using the pipeline's own generation path is both the shortest honest fix and the
+   * one that produces a resume tailored the same way an auto-apply run would.
+   *
+   * The message says what actually happened rather than implying a resume now exists.
+   */
+  const generateResume = (job) => {
+    addToApplyQueue({ jobId: job.jobId, company: job.company, title: job.title });
+    setApplyQueueMsg(
+      `${job.company || "Job"} is queued — the next run generates a resume for it before it applies. ` +
+      `Press Autofill for Review to start.`);
   };
 
   return (
@@ -270,13 +306,35 @@ export function AutoApplyPanel() {
         <span style={{ fontSize: 11.5, color: theme.accentText }}>{applyQueueMsg}</span>
       )}
 
-      {/* ── 1. NEEDS YOU ─────────────────────────────────────────────────────────────────────
-          Grouped by obstacle, each with ONE action and a count of what it unblocks. This is the
-          hero of the panel: it is the only section where anything is waiting on a human. */}
+      {/* ── IN FLIGHT ────────────────────────────────────────────────────────────────────────
+          NOT one of AB4's three outcome sections, and deliberately placed ABOVE them rather than
+          made a fourth. A queued or running application has no outcome yet — it is neither
+          submitted, nor waiting on the user, nor broken — so filing it under any of the three would
+          be a claim about it that is not true, and dropping it would lose a capability. It reads as
+          progress, which is what it is: small, self-clearing, and out of the way. */}
+      {applyInFlight.length > 0 && (
+        <>
+          <SectionHeading theme={theme} count={applyInFlight.length} note="nothing to do — these clear themselves">
+            In flight
+          </SectionHeading>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {applyInFlight.map(job => (
+              <ApplicationRow key={job.id} job={job} theme={theme} variant="inFlight"
+                artifactUrl={artifactUrl} onOpenRun={loadApplyRunDetail} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ── 1. NEEDS REVIEW ──────────────────────────────────────────────────────────────────
+          The first of AB4's three outcome sections, and first on the page: it is the only one where
+          anything is waiting on a human. Inside it, both halves of the grouping rule — per-portal
+          batches where one action unblocks many, per-application cards where many obstacles block
+          one — then a company tier over the cards. */}
       {needsYouCount > 0 && (
         <>
           <SectionHeading theme={theme} count={needsYouCount} note="each of these is one action">
-            Needs you
+            Needs review
           </SectionHeading>
 
           {/* THE DELIBERATE "REVIEW ALL" (AB3 requirement 3). This view is still reachable — it is
@@ -387,28 +445,37 @@ export function AutoApplyPanel() {
             />
           )}
 
-          {/* ONE CARD PER APPLICATION, listing everything in its way (AB2). The action is AB1's
-              handoff: the real apply URL in the user's own browser, filled from the same answers. */}
-          {heldApplications.map(app => {
-            const packet = handoffPacketFor?.(app.primary.row) || handoffPacketFor?.(app);
-            const resumable = !!packet && !packet.postingGone && !packet.stale && !app.postingGone;
-            return (
-              <ApplicationObstacleCard
-                key={app.key}
-                app={app}
-                theme={theme}
-                artifactUrl={artifactUrl}
-                packet={packet}
-                onRerun={rerunJob}
-                onResolve={resumable ? () => openHandoff(packet, app) : openReview}
-                resolveLabel={resumable ? "Open & fill" : "Open"}
-                resolveTitle={resumable
-                  ? `Opens the application in your own browser and fills it with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved. You review and submit.`
-                  : "Open this application's review"}
-                onDetails={() => openApplicationReview(app)}
-              />
-            );
-          })}
+          {/* ONE CARD PER APPLICATION, listing everything in its way (AB2), under a COMPANY tier
+              (AB4). Seven roles at one employer belong together — that is the grouping a user came
+              here to find, and flat reverse-chronological order made it invisible. */}
+          {heldByCompany.map(({ company, items }) => (
+            <div key={`held-${company}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <CompanyHeading company={company} count={items.length} theme={theme} />
+              {items.map(app => {
+                const packet = handoffPacketFor?.(app.primary.row) || handoffPacketFor?.(app);
+                const resumable = !!packet && !packet.postingGone && !packet.stale && !app.postingGone;
+                return (
+                  <ApplicationObstacleCard
+                    key={app.key}
+                    app={app}
+                    theme={theme}
+                    artifactUrl={artifactUrl}
+                    packet={packet}
+                    onRerun={rerunJob}
+                    onResolve={resumable ? () => openHandoff(packet, app) : openReview}
+                    resolveLabel={resumable ? "Open & fill" : "Open"}
+                    resolveTitle={resumable
+                      ? `Opens the application in your own browser and fills it with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved. You review and submit.`
+                      : "Open this application's review"}
+                    onDetails={() => openApplicationReview(app)}
+                    // AB4 requirement 5: "no resume was generated" was a dead text chip on a
+                    // PROBLEM with an obvious fix. It gets the button.
+                    onGenerateResume={app.primary?.row?.resumeAvailable ? null : generateResume}
+                  />
+                );
+              })}
+            </div>
+          ))}
 
           {/* The handoff happens in ANOTHER TAB, so the panel has to say what to expect there. A
               refusal (stale answers, a posting that is gone) is reported in the same place, because
@@ -429,53 +496,82 @@ export function AutoApplyPanel() {
         </>
       )}
 
-      {/* ── 2. IN FLIGHT ─────────────────────────────────────────────────────────────────────
-          Small and self-clearing: nothing here needs a decision, so it says what is happening and
-          gets out of the way. */}
-      {applyInFlight.length > 0 && (
-        <>
-          <SectionHeading theme={theme} count={applyInFlight.length} note="nothing to do — these clear themselves">
-            In flight
-          </SectionHeading>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {applyInFlight.map(job => (
-              <ApplicationRow key={job.id} job={job} theme={theme} variant="inFlight"
-                artifactUrl={artifactUrl} onOpenRun={loadApplyRunDetail} />
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* ── 3. SUBMITTED ─────────────────────────────────────────────────────────────────────
-          With the evidence a user actually reaches for when an interview lands: the date, the exact
-          resume that went out, and the screenshot of the form as submitted. */}
+      {/* ── 2. SUBMITTED ─────────────────────────────────────────────────────────────────────
+          What a user reaches for when an interview lands: the date, the EXACT resume that went out,
+          and the screenshot of the form as submitted. Grouped by company, because that is the
+          question being asked at that moment — a recruiter from OpenAI has called, and the seven
+          OpenAI applications need to be together. */}
       {applySubmitted.length > 0 && (
         <>
           <SectionHeading theme={theme} count={applySubmitted.length} note="what went out, and the proof">
             Submitted
           </SectionHeading>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {applySubmitted.map(job => (
-              <ApplicationRow key={job.id} job={job} theme={theme} variant="submitted"
-                artifactUrl={artifactUrl} onOpenRun={loadApplyRunDetail} />
-            ))}
-          </div>
+          {submittedByCompany.map(({ company, items }) => (
+            <div key={`sub-${company}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <CompanyHeading company={company} count={items.length} theme={theme} />
+              {items.map(job => (
+                <ApplicationRow key={job.id} job={job} theme={theme} variant="submitted"
+                  artifactUrl={artifactUrl} onOpenRun={loadApplyRunDetail} />
+              ))}
+            </div>
+          ))}
         </>
       )}
 
-      {/* ── 4. STOPPED ───────────────────────────────────────────────────────────────────────
-          The reason in plain language, and retry ONLY where retrying can work. */}
+      {/* ── 3. PROBLEMS ──────────────────────────────────────────────────────────────────────
+          Things that BROKE, kept distinct from things we deliberately held — the distinction this
+          whole line of work exists to preserve. "We protected you" and "this failed" need different
+          affordances and produce different feelings, and the old STOPPED section put both under one
+          heading. Both live here, because both are terminal and neither is waiting on a decision,
+          but they are separated and labelled inside it. */}
       {applyStopped.length > 0 && (
         <>
           <SectionHeading theme={theme} count={applyStopped.length} note="why, in plain language">
-            Stopped
+            Problems
           </SectionHeading>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {applyStopped.map(job => (
-              <ApplicationRow key={job.id} job={job} theme={theme} variant="stopped"
-                artifactUrl={artifactUrl} onRetry={retryJob} onOpenRun={loadApplyRunDetail} />
-            ))}
-          </div>
+
+          {brokeByCompany.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em",
+                            textTransform: "uppercase", color: "#dc2626", marginTop: 4 }}>
+                These broke — {stoppedSplit.broke.length} application{stoppedSplit.broke.length === 1 ? "" : "s"}
+              </div>
+              {brokeByCompany.map(({ company, items }) => (
+                <div key={`broke-${company}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <CompanyHeading company={company} count={items.length} theme={theme} />
+                  {items.map(job => (
+                    <ApplicationRow key={job.id} job={job} theme={theme} variant="stopped"
+                      artifactUrl={artifactUrl} onRetry={retryJob} onOpenRun={loadApplyRunDetail}
+                      // Requirement 5: a missing resume is a problem with an obvious fix, so it gets
+                      // a button instead of the dead "no resume generated" chip it used to be.
+                      onGenerateResume={job.resumeAvailable ? null : generateResume} />
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
+
+          {heldOnPurposeByCompany.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em",
+                            textTransform: "uppercase", color: "#d97706", marginTop: 8 }}>
+                Held on purpose — {stoppedSplit.held.length} application{stoppedSplit.held.length === 1 ? "" : "s"}
+              </div>
+              <div style={{ fontSize: 11, color: theme.textMuted, marginTop: -2 }}>
+                Nothing went wrong with these. The pipeline stopped them, or you did.
+              </div>
+              {heldOnPurposeByCompany.map(({ company, items }) => (
+                <div key={`held-stop-${company}`} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <CompanyHeading company={company} count={items.length} theme={theme} />
+                  {items.map(job => (
+                    <ApplicationRow key={job.id} job={job} theme={theme} variant="stopped"
+                      artifactUrl={artifactUrl} onRetry={retryJob} onOpenRun={loadApplyRunDetail}
+                      onGenerateResume={job.resumeAvailable ? null : generateResume} />
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
         </>
       )}
 

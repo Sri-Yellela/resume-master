@@ -97,10 +97,21 @@ const BY_REASON = {
   },
 
   // ── Actually broke ───────────────────────────────────────────────────────────────────────────
+  // `resumeBlocked` marks the outcomes a MISSING RESUME caused. It is what decides whether the
+  // "Generate a resume" button belongs on a row (AB4 requirement 5), and it has to be a property of
+  // the reason rather than of `resumeAvailable`: plenty of applications stop with no resume attached
+  // for reasons a resume would not fix, and offering to generate one there points the user at the
+  // wrong thing. A missing browser binary is the clearest case — the row correctly says "this needs
+  // an operator, not you", and a Generate button beside it contradicts that.
   resume_unavailable: {
     obstacle: "No resume was generated, so there was nothing to attach",
-    action: "Retry — generation may succeed this time",
-    protective: false, retryable: true,
+    action: "Generate one for this job, and it will be attached on the next run",
+    protective: false, retryable: true, resumeBlocked: true,
+  },
+  generation_failed: {
+    obstacle: "The resume for this job could not be generated",
+    action: "Generate one for this job and try again",
+    protective: false, retryable: true, resumeBlocked: true,
   },
   internal_error: {
     obstacle: "Something went wrong on our side",
@@ -181,6 +192,9 @@ export function describeApplication(job = {}) {
     };
   return {
     ...base,
+    // Default false so a row only offers to generate a resume where a resume is genuinely the
+    // blocker. Spreading `base` first means a table entry can opt in; nothing opts in by accident.
+    resumeBlocked: base.resumeBlocked === true,
     section: sectionFor(status),
     detail: job.reasonDetail || null,
     // Kept for tooling and logs. Deliberately NOT rendered as the row's label anywhere.
@@ -286,6 +300,51 @@ export function groupByApplication(jobs = []) {
       postingGone: !ordered.some(r => r.title),
     };
   }).sort((a, b) => b.when - a.when);
+}
+
+// ── OUTCOME, THEN COMPANY, THEN APPLICATION (TASK AB4) ───────────────────────────────────────
+//
+// A user applying to seven OpenAI roles wants them together. The panel listed applications in flat
+// reverse-chronological order inside each section, so those seven were interleaved with everything
+// else and the fact that they were all one employer — the fact that matters when a recruiter from
+// that employer calls — was invisible.
+
+/**
+ * Group anything carrying a `company` into per-employer buckets.
+ *
+ * @param {Array} items       rows or grouped applications; anything with `.company`
+ * @param {(item:any)=>number} whenOf  recency, for ordering within and between companies
+ * @returns {Array<{company: string, items: Array, when: number}>}
+ */
+export function groupByCompany(items = [], whenOf = (i) => i.when || i.finishedAt || i.startedAt || i.createdAt || 0) {
+  const byCompany = new Map();
+  for (const item of items) {
+    // Applications whose posting has been cleaned up have no company. They are collected under one
+    // honest heading rather than each becoming its own single-item company group, which would read
+    // as a list of employers the user has never heard of.
+    const key = item.company || "";
+    if (!byCompany.has(key)) byCompany.set(key, { company: key, items: [], when: 0 });
+    const g = byCompany.get(key);
+    g.items.push(item);
+    g.when = Math.max(g.when, whenOf(item));
+  }
+  return [...byCompany.values()]
+    .map(g => ({ ...g, items: [...g.items].sort((a, b) => whenOf(b) - whenOf(a)) }))
+    // Biggest employer first, then most recent. Seven roles at one company is the group a user came
+    // here to find; a single application is not.
+    .sort((a, b) => b.items.length - a.items.length || b.when - a.when);
+}
+
+/**
+ * Split stopped applications into the two things the requirement insists must stay distinguishable:
+ * what BROKE, and what we deliberately held. "We protected you" and "this failed" need different
+ * affordances and produce different feelings, and calling both "Failed" is what this work has been
+ * undoing throughout.
+ */
+export function splitByFault(jobs = []) {
+  const broke = [], held = [];
+  for (const job of jobs) (describeApplication(job).protective ? held : broke).push(job);
+  return { broke, held };
 }
 
 /**

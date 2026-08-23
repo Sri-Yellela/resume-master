@@ -101,6 +101,33 @@ export function ObstacleCard({
 }
 
 /**
+ * The COMPANY tier of AB4's hierarchy: outcome -> company -> application.
+ *
+ * Quieter than SectionHeading on purpose — it is a tier below it, and two headings competing for the
+ * same weight is how a hierarchy stops reading as one. The count is the point for an employer with
+ * several roles, which is the case this tier exists to make visible.
+ */
+export function CompanyHeading({ company, count, theme }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.04em",
+                     textTransform: "uppercase", color: theme.textMuted }}>
+        {/* A posting removed by the cleanup leaves an application with no employer. Said plainly,
+            rather than rendered as a blank heading. */}
+        {company || "Posting no longer on the board"}
+      </span>
+      {count > 1 && (
+        <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 999,
+                       background: `${theme.border}66`, color: theme.textDim, whiteSpace: "nowrap" }}>
+          {count} roles
+        </span>
+      )}
+      <div style={{ flex: 1, height: 1, background: theme.border, opacity: 0.5 }} />
+    </div>
+  );
+}
+
+/**
  * ONE APPLICATION, with every obstacle blocking it listed inside (TASK AB2).
  *
  * The counterpart to ObstacleCard, and the other half of the grouping rule in applyObstacles.js:
@@ -113,6 +140,7 @@ export function ObstacleCard({
  */
 export function ApplicationObstacleCard({
   app, theme, artifactUrl, onResolve, resolveLabel, resolveTitle, onDetails, onRerun, packet,
+  onGenerateResume,
 }) {
   const many = app.reasons.length > 1;
   const tone = app.postingGone ? "#6b7280" : app.protective ? "#d97706" : "#dc2626";
@@ -190,14 +218,27 @@ export function ApplicationObstacleCard({
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        {app.primary?.row?.resumeAvailable && (
+        {app.primary?.row?.resumeAvailable ? (
           <a href={artifactUrl(app.primary.row.id, "resume")} target="_blank" rel="noreferrer"
             style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
                      border: `1px solid ${theme.border}`, background: theme.surface,
                      color: theme.text, textDecoration: "none", whiteSpace: "nowrap" }}>
             Resume PDF ↗
           </a>
-        )}
+        ) : onGenerateResume && !app.postingGone
+             && app.reasons.some(r => r.resumeBlocked) ? (
+          // Requirement 5. No resume means this application cannot be submitted, which is a problem
+          // with an obvious fix — so it is a button, not the dead chip it used to be. Offered only
+          // when a missing resume is one of the reasons this application is held, and withheld when
+          // the posting is gone: there would be nothing to tailor a resume to.
+          <button onClick={() => onGenerateResume(app)}
+            title="Queues this job so the next run generates a tailored resume for it before it applies."
+            style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 999,
+                     border: "none", background: "#2563eb", color: "#fff", cursor: "pointer",
+                     whiteSpace: "nowrap" }}>
+            Generate a resume
+          </button>
+        ) : null}
         {app.primary?.row?.screenshotAvailable && (
           <a href={artifactUrl(app.primary.row.id, "screenshot")} target="_blank" rel="noreferrer"
             title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
@@ -267,7 +308,7 @@ export function ApplicationObstacleCard({
  * the screenshot, because that is what a user reaches for when an interview lands. STOPPED needs the
  * plain-language reason and a retry ONLY where retrying can work.
  */
-export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOpenRun }) {
+export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOpenRun, onGenerateResume }) {
   const d = describeApplication(job);
   const when = job.finishedAt || job.startedAt || job.createdAt;
   // Protective vs broken is the distinction the old UI lost by calling both "failed".
@@ -287,7 +328,13 @@ export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOp
   );
 
   return (
-    <div style={{ border: `1px solid ${theme.border}`, borderLeft: `3px solid ${tone}`,
+    // Same reason as the card's hooks: scripts/abPanelUi.mjs has to be able to say which ROW a
+    // control belongs to, and finding a row boundary by inline-style substring does not work — React
+    // does not serialise the style attribute in a form that survives that kind of matching.
+    <div data-rm-card="row"
+         data-rm-job={job.jobId || ""}
+         data-rm-variant={variant || ""}
+         style={{ border: `1px solid ${theme.border}`, borderLeft: `3px solid ${tone}`,
                   borderRadius: 6, padding: "9px 12px", background: theme.surfaceHigh,
                   display: "flex", flexDirection: "column", gap: 5 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
@@ -331,8 +378,25 @@ export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOp
         {job.resumeAvailable
           ? link(artifactUrl(job.id, "resume"), variant === "submitted" ? "The resume that went out ↗" : "Resume PDF ↗")
           : variant === "submitted"
+            // On a SUBMITTED application there is nothing to fix — it already went out, and a
+            // Generate button here would offer to change something that has been sent.
             ? chip(`${theme.border}55`, theme.textDim, "no resume recorded")
-            : null}
+            // AB4 requirement 5: a missing resume is a problem with a one-click fix, so it gets the
+            // button rather than the dead chip it used to be — but ONLY where the resume is what is
+            // actually wrong. `d.resumeBlocked` is that test. Keyed on resumeAvailable alone, the
+            // button appeared beside "the apply browser is not installed on the server", which the
+            // row correctly says needs an operator and which no resume will fix.
+            : onGenerateResume && d.resumeBlocked
+              ? (
+                <button onClick={() => onGenerateResume(job)}
+                  title="Queues this job so the next run generates a tailored resume for it before it applies."
+                  style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 999,
+                           border: "none", background: "#2563eb", color: "#fff", cursor: "pointer",
+                           whiteSpace: "nowrap" }}>
+                  Generate a resume
+                </button>
+              )
+              : null}
         {/* EVIDENCE (AB1 requirement 4). For a SUBMITTED application this is proof of what went out.
             For a held one it is a picture of a form in a browser that has since closed — so it is
             named as evidence rather than as a link that looks like it reopens the application. It
