@@ -28,8 +28,8 @@ job, and the user applies to it. Nothing runs without a direct user action — t
 activity of any kind, and **no content script**, so nothing runs on page load either. Every read of
 every page begins with a click or a keystroke.
 
-The popup's other buttons (Open Resume Builder, ATS Score Tool, Sign in with LinkedIn, Capture
-Shortcut Settings) are not separate features; they open a page of the user's own Resume Master
+The popup's other buttons (Open Resume Builder, ATS Score Tool, Sign in with LinkedIn, Keyboard
+Shortcuts) are not separate features; they open a page of the user's own Resume Master
 account, or the extension's own options page. They request no permission of their own beyond the
 `scripting` call the ATS Score Tool makes on a job page, which is disclosed below.
 
@@ -51,7 +51,7 @@ account, or the extension's own options page. They request no permission of thei
 | **Ctrl+Shift+Y** on an application form | The gated handoff: fetches the answers the user already saved in their account, fills the form, shows a review panel. The user submits. |
 | Toolbar → **ATS Score Tool** | Collects the visible text of the page in view and opens the user's ATS Score page with it prefilled. |
 | Toolbar → **Open Resume Builder** / **Sign in with LinkedIn** | Opens a Resume Master page in a new tab. Nothing is read from the current page. |
-| Toolbar → **Capture Shortcut Settings** | Opens the extension's own options page, which shows the current shortcut and links to Chrome's own shortcuts page — the only place a command can actually be rebound. |
+| Toolbar → **Keyboard Shortcuts** | Opens the extension's own options page, which lists both commands with the key currently bound to each, and links to Chrome's own shortcuts page — the only place a command can actually be rebound. Reads no page. |
 
 There is exactly **one** capture implementation. The button and the shortcut are two triggers for
 it, they land in the same place with the same duplicate detection, and they report the same text.

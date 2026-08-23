@@ -153,7 +153,9 @@ document.getElementById('btn-ats').addEventListener('click', async () => {
   setTimeout(() => window.close(), 900);
 });
 
-// ─── Settings (capture shortcut) ───────────────────────────────────────────
+// ─── Settings (keyboard shortcuts) ─────────────────────────────────────────
+// Named for both commands, not just capture: this button was the only route to the shortcuts page
+// and it advertised one of the two hotkeys, which is how the fill shortcut stayed invisible.
 
 document.getElementById('btn-settings')?.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();

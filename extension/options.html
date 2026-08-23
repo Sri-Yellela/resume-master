@@ -13,19 +13,15 @@
     h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
     .subtitle { font-size: 12px; color: #7A7974; margin-bottom: 18px; line-height: 1.5; }
     label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
-    #shortcut-input {
+    /* One row per declared command. Nothing here is typed into: the recorder this page used to
+       carry is gone, so these are read-outs of Chrome's own binding, not inputs. */
+    .shortcut-row + .shortcut-row { margin-top: 14px; }
+    .shortcut-input {
       width: 100%; padding: 10px 12px; font-size: 14px; font-weight: 600;
       border: 1px solid #D4D1CA; border-radius: 8px; background: #fff; color: #28251D;
-      text-align: center; cursor: pointer; outline: none;
+      text-align: center; outline: none;
     }
-    #shortcut-input:focus { border-color: #01696F; box-shadow: 0 0 0 2px rgba(1,105,111,0.15); }
-    #shortcut-input.shake { animation: shake 0.4s ease; border-color: #a12c2c; }
-    @keyframes shake {
-      10%, 90% { transform: translateX(-1px); }
-      20%, 80% { transform: translateX(2px); }
-      30%, 50%, 70% { transform: translateX(-4px); }
-      40%, 60% { transform: translateX(4px); }
-    }
+    .shortcut-input.unset { border-color: #a12c2c; color: #a12c2c; font-weight: 500; }
     .hint { font-size: 11px; color: #7A7974; margin-top: 6px; min-height: 14px; }
     .hint.error { color: #a12c2c; }
     .btn-row { display: flex; gap: 8px; margin-top: 16px; }
@@ -44,18 +40,20 @@
   </style>
 </head>
 <body>
-  <h1>Resume Master — Capture Shortcut</h1>
+  <h1>Resume Master — Keyboard Shortcuts</h1>
   <p class="subtitle">
-    Press the shortcut on any job posting to capture it into your Resume Master job pool.
-    The default is Ctrl+Shift+K (&#8984;+Shift+K on Mac).
+    Two shortcuts, one for each half of the job. Press the first on a job posting to capture it
+    into your job pool. Press the second on an application form you have already signed in to
+    reach, and the answers you prepared in Resume Master are filled in for you to review.
+    Resume Master never submits an application &mdash; you do.
   </p>
 
-  <label for="shortcut-input">Current shortcut</label>
-  <input id="shortcut-input" type="text" readonly value="Loading&hellip;" tabindex="-1">
-  <p class="hint" id="hint"></p>
+  <!-- Filled by options.js from the commands the manifest actually declares, so this list cannot
+       fall behind the manifest the way a hand-written one did. -->
+  <div id="shortcut-rows"></div>
 
   <div class="btn-row">
-    <button class="btn btn-primary" id="btn-change">Change shortcut&hellip;</button>
+    <button class="btn btn-primary" id="btn-change">Change shortcuts&hellip;</button>
   </div>
   <p class="status" id="status"></p>
 
@@ -64,9 +62,11 @@
     Shortcuts are set in Chrome's own shortcuts page, which is the only thing that can actually
     rebind one &mdash; an extension cannot reassign its own keys. This page used to record a
     custom combination itself, but that only worked while one of six job sites had focus, because
-    it was implemented by a script running on those pages. Capture no longer works that way: it
-    runs on whatever page you invoke it on, so the shortcut is Chrome's to own and it works
-    everywhere.
+    it was implemented by a script running on those pages. Neither shortcut works that way now:
+    each runs on whatever page you invoke it on, so the keys are Chrome's to own and they work
+    everywhere. If one reads &ldquo;Not set&rdquo; above, Chrome declined the default &mdash;
+    usually because another installed extension already claimed that combination &mdash; and
+    assigning any free key there fixes it.
   </p>
 
   <script src="options.js"></script>

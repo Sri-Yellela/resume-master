@@ -41,12 +41,18 @@ That gave the extension standing access to those six and made every other job pa
 including Greenhouse boards embedded on employers' own domains — which are common, and which no
 list of hosts could have enumerated. See `MANIFEST_RATIONALE.md`.
 
-## Capture Shortcut Settings
-The options page (popup → "Capture Shortcut Settings") shows the current binding and links to
-`chrome://extensions/shortcuts`, which is the only surface that can actually rebind a command — an
-extension cannot reassign its own keys. An earlier version recorded a custom combination itself;
-that only worked while one of six job sites had focus, and it was removed along with the content
-script it depended on.
+## Keyboard Shortcuts
+The options page (popup → "Keyboard Shortcuts") lists **every** command the manifest declares, with
+the key Chrome has actually bound to each, and links to `chrome://extensions/shortcuts` — the only
+surface that can actually rebind a command, since an extension cannot reassign its own keys. An
+earlier version recorded a custom combination itself; that only worked while one of six job sites
+had focus, and it was removed along with the content script it depended on.
+
+The list is read from `chrome.commands.getAll()` rather than written out by hand. It used to name
+only the capture shortcut while the manifest declared two, so `Ctrl+Shift+Y` was bound and working
+but mentioned nowhere in the UI — which is indistinguishable, from the outside, from not existing.
+A command that Chrome declined to bind (usually because another extension already owns the key)
+reads "Not set" here, which is otherwise reported nowhere at all.
 
 ## Permissions Explained
 - `activeTab`: reads the page you are on, only when you click the extension button or press a
