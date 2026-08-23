@@ -1,5 +1,10 @@
 # TASK A5 — NOT STARTED. Preflight says NO-GO.
 
+> **SUPERSEDED in part — read `auto-apply-a5-live-run.md` first.** The identity blocker below is
+> cleared: a real candidate (user 15) now exists and the preflight reports CLEAR for them. The
+> greenhouse pool is 101 rows, not 35. Still true, and still the reason nothing has been sent: no
+> posting has been chosen, and no live gate has been crossed.
+
 A5 submits a real application to a real employer under a real candidate's name, and a submission
 cannot be recalled. Its preconditions turned out to be checkable, so they are now checked by
 `scripts/a5Preflight.mjs` rather than by eye. **One of them still fails.** No application has been
