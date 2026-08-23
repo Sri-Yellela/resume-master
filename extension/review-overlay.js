@@ -28,13 +28,21 @@ export const CONFIDENCE_BY_PROVENANCE = {
   custom_answer:   0.85,
   label_fuzzy:     0.3,
   default:         0.1,
+  // Sponsorship answers are computed for the tense the question asks about, never read off a
+  // stored yes/no. 'derived' had an explicit tense to read; 'assumed_future' did not, and took the
+  // disclosing reading — which is a judgement, so it sits below LOW_CONFIDENCE deliberately.
+  sponsorship_derived:        1.0,
+  sponsorship_assumed_future: 0.75,
 };
 
 /** Below this an answer may not be auto-submitted; here, it is what "uncertain" means. */
 export const LOW_CONFIDENCE = 0.8;
 
 /** A guess, not a resolution. Requires an explicit acknowledgement (requirement 4). */
-export const GUESS_PROVENANCE = new Set(['label_fuzzy', 'default']);
+// `sponsorship_assumed_future` is here because the question named no tense, so the reading — not
+// the candidate's situation — was inferred. That is an attestation about the right to work, and it
+// should not be submitted without the candidate saying yes to it.
+export const GUESS_PROVENANCE = new Set(['label_fuzzy', 'default', 'sponsorship_assumed_future']);
 
 export const TIER_LABEL = {
   handler_exact:   'exact',
@@ -43,6 +51,8 @@ export const TIER_LABEL = {
   custom_answer:   'your answer',
   label_fuzzy:     'guess',
   default:         'guess',
+  sponsorship_derived:        'derived',
+  sponsorship_assumed_future: 'assumed',
 };
 
 /**

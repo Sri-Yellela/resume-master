@@ -2486,4 +2486,22 @@ export const MIGRATIONS = [
           ON apply_run_jobs(user_id, created_at);
       `,
     },
+    {
+      // The sponsorship SITUATION, replacing a stored ANSWER. `requires_sponsorship` is one
+      // boolean, and the standard Greenhouse question is "do you NOW OR IN THE FUTURE require
+      // sponsorship" — two tenses that disagree for anyone on a time-limited status. An F-1 STEM
+      // OPT candidate needs no sponsorship today and will need H-1B when OPT expires, so the
+      // boolean answered the future-tense question "No": a false material attestation, submitted
+      // at confidence 1.0. See docs/auto-apply-a5-live-run.md §4.1.
+      //
+      // NULLABLE ON PURPOSE, with no default. 'none' is not a safe default — it is precisely the
+      // wrong guess for the population this exists to protect — and resolveSponsorshipNeed refuses
+      // (holding the run for a human) rather than inventing a situation it cannot derive. The
+      // legacy boolean is left in place: it still answers the present tense, and it is what the
+      // derivation falls back to.
+      id: "086_user_profile_sponsorship_need",
+      sql: `
+        ALTER TABLE user_profile ADD COLUMN sponsorship_need TEXT;
+      `,
+    },
   ];

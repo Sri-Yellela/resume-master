@@ -135,7 +135,7 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
     location:"", address_line1:"", address_line2:"",
     city:"", state:"", zip:"", country:"United States",
     gender:"", ethnicity:"", veteran_status:"", disability_status:"",
-    requires_sponsorship:false, has_clearance:false,
+    requires_sponsorship:false, sponsorship_need:"", has_clearance:false,
     clearance_level:"", visa_type:"", work_auth:"",
     website_url:"", portfolio_url:"",
     desired_salary:"", salary_currency:"USD",
@@ -255,6 +255,10 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
       .then(d => setForm(f => ({
         ...f, ...d,
         requires_sponsorship: !!d.requires_sponsorship,
+        // "" renders as "Select…", which is the honest rendering of never-asked. Do NOT collapse
+        // an unset situation to 'none' — that is the wrong guess for exactly the people this field
+        // exists for.
+        sponsorship_need:     d.sponsorship_need || "",
         has_clearance:        !!d.has_clearance,
         willing_to_relocate:  !!d.willing_to_relocate,
         custom_answers: (() => { try { return typeof d.custom_answers === 'object' && d.custom_answers !== null ? d.custom_answers : JSON.parse(d.custom_answers || '{}'); } catch { return {}; } })(),
@@ -664,14 +668,27 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
               <option>Will require sponsorship now or in the future</option>
             </select>
           </PRow>
-          <label style={{ display:"flex", alignItems:"center", gap:8,
-                          marginBottom:10, cursor:"pointer",
-                          fontSize:13, color:theme.text }}>
-            <input type="checkbox" checked={!!form.requires_sponsorship}
-              onChange={e => set("requires_sponsorship", e.target.checked)}
-              style={{ accentColor:theme.accent, width:16, height:16 }}/>
-            Requires visa sponsorship
-          </label>
+          {/* Three situations, not a checkbox. Employers ask this in two tenses — "do you require
+              sponsorship" and "do you NOW OR IN THE FUTURE require sponsorship" — and for anyone on
+              a time-limited status the honest answers differ. A single box cannot hold both, and
+              answering the future question from it submitted a false attestation at full
+              confidence. Left unset the run holds and asks rather than guessing. */}
+          <PRow label="Visa Sponsorship" theme={theme}>
+            <select style={selStyle} value={form.sponsorship_need || ""}
+              onChange={e => set("sponsorship_need", e.target.value)}>
+              <option value="">Select…</option>
+              <option value="none">Never — I am a citizen or permanent resident</option>
+              <option value="future">Not now, but later — time-limited status (F-1/OPT, CPT, J-1)</option>
+              <option value="now">Yes, now — I need sponsorship to start</option>
+            </select>
+          </PRow>
+          {form.sponsorship_need === "future" && (
+            <div style={{ fontSize:12, color:theme.textDim, marginBottom:10, lineHeight:1.5 }}>
+              "Do you now or in the future require sponsorship?" will be answered <strong>Yes</strong>;
+              "do you <em>currently</em> require sponsorship?" will be answered <strong>No</strong>.
+              Both are true.
+            </div>
+          )}
           <label style={{ display:"flex", alignItems:"center", gap:8,
                           marginBottom:10, cursor:"pointer",
                           fontSize:13, color:theme.text }}>

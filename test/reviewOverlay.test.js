@@ -11,7 +11,7 @@ import fs from "fs";
 
 import {
   orderForReview, readinessOf, toReviewItem, keyOf,
-  CONFIDENCE_BY_PROVENANCE, MATCH_CONFIDENCE, LOW_CONFIDENCE, GUESS_PROVENANCE,
+  CONFIDENCE_BY_PROVENANCE, MATCH_CONFIDENCE, LOW_CONFIDENCE, GUESS_PROVENANCE, TIER_LABEL,
 } from "../extension/review-overlay.js";
 import { CONFIDENCE_BY_PROVENANCE as SERVER_CONFIDENCE } from "../services/applyAutomation.js";
 
@@ -154,6 +154,23 @@ test("guess provenance is exactly the tiers the resolver treats as guesses", () 
   for (const p of ["label_fuzzy", "default"]) assert.ok(GUESS_PROVENANCE.has(p));
   for (const p of ["handler_exact", "field_map_exact", "label_exact", "custom_answer"]) {
     assert.ok(!GUESS_PROVENANCE.has(p), `${p} is a resolution, not a guess`);
+  }
+});
+
+test("an ASSUMED sponsorship tense is a guess; a DERIVED one is not", () => {
+  // The situation is known in both cases. What was inferred in the assumed case is the QUESTION's
+  // time scope — and answering an eligibility question on an inferred reading is exactly the thing
+  // a candidate should have to say yes to.
+  assert.ok(GUESS_PROVENANCE.has("sponsorship_assumed_future"));
+  assert.ok(!GUESS_PROVENANCE.has("sponsorship_derived"),
+    "an explicitly tensed question read correctly is a resolution");
+});
+
+test("every provenance the resolver can emit has a tier label", () => {
+  // A missing label renders as `undefined` in the overlay chip — visible to the candidate, and the
+  // sort of thing that only shows up once a new provenance ships.
+  for (const p of Object.keys(CONFIDENCE_BY_PROVENANCE)) {
+    assert.ok(TIER_LABEL[p], `no TIER_LABEL for provenance "${p}"`);
   }
 });
 

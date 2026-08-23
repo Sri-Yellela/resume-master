@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { SPONSORSHIP_NEEDS } from "../services/applyAutomation.js";
 
 const DEFAULT_DOCK_ITEMS = ["profile_switcher", "notifications", "quick_actions", "settings", "user_avatar"];
 
@@ -271,7 +272,7 @@ export function createAccountRouter({
       full_name=?,email=?,phone=?,linkedin_url=?,github_url=?,location=?,
       address_line1=?,address_line2=?,city=?,state=?,zip=?,country=?,
       gender=?,ethnicity=?,veteran_status=?,disability_status=?,
-      requires_sponsorship=?,has_clearance=?,clearance_level=?,
+      requires_sponsorship=?,sponsorship_need=?,has_clearance=?,clearance_level=?,
       visa_type=?,work_auth=?,
       website_url=?,portfolio_url=?,desired_salary=?,salary_currency=?,
       available_start_date=?,willing_to_relocate=?,highest_degree=?,
@@ -283,7 +284,12 @@ export function createAccountRouter({
       f.full_name || null, f.email || null, f.phone || null, f.linkedin_url || null, f.github_url || null, f.location || null,
       f.address_line1 || null, f.address_line2 || null, f.city || null, f.state || null, f.zip || null, f.country || "United States",
       f.gender || null, f.ethnicity || null, f.veteran_status || null, f.disability_status || null,
-      f.requires_sponsorship ? 1 : 0, f.has_clearance ? 1 : 0, f.clearance_level || null,
+      // Only the three stated situations are storable. Anything else — including the empty string
+      // a select posts when nothing is chosen — is NULL, i.e. "we have not asked", which the
+      // resolver treats as a refusal rather than guessing 'none' on the candidate's behalf.
+      f.requires_sponsorship ? 1 : 0,
+      SPONSORSHIP_NEEDS.has(String(f.sponsorship_need || "")) ? String(f.sponsorship_need) : null,
+      f.has_clearance ? 1 : 0, f.clearance_level || null,
       f.visa_type || null, f.work_auth || null,
       f.website_url || null, f.portfolio_url || null,
       f.desired_salary ? Number(f.desired_salary) : null, f.salary_currency || null,

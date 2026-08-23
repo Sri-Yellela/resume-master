@@ -104,7 +104,12 @@ is true — an F-1 STEM OPT holder is authorized to work now.
 
 ## 4. Findings
 
-### 4.1 The trap matrix cannot see the sponsorship hazard it is supposed to guard (HIGH, latent)
+### 4.1 The trap matrix cannot see the sponsorship hazard it is supposed to guard (HIGH) — **FIXED**
+
+> **Fixed before the run, at the owner's instruction. See §7 for what was built and how it verifies.**
+> The paragraphs below are the diagnosis as written, kept because the reasoning is the argument for
+> the shape of the fix.
+
 
 Precondition 6 is satisfied, and it is weaker than it sounds. The matrix passes the
 sponsorship-inversion trap by *holding* — but it holds only because **its payload has no sponsorship
@@ -225,3 +230,70 @@ field-by-field read against the real rendered form, and the human clicks submit.
 **Recommended before that run:** fix §4.3's two profile facts (one-line edits), and decide §4.1 — not
 because this posting needs it, but because the next employer might ask, and the wrong answer will look
 like the most trustworthy row on the page.
+
+---
+
+## 7. The sponsorship fix (§4.1), built before the run
+
+`requires_sponsorship` stored an **answer**. It now stores a **situation**, and the answer is computed
+per question. Migration **086** adds `user_profile.sponsorship_need`:
+
+| value | meaning | present tense | future-inclusive |
+|---|---|:---:|:---:|
+| `none` | citizen or permanent resident | No | No |
+| `future` | authorized now under a time-limited status (F-1/OPT, CPT, J-1) | No | **Yes** |
+| `now` | needs sponsorship to start at all | Yes | Yes |
+| `NULL` | never asked | *refuses* | *refuses* |
+
+`sponsorshipQuestionTense` reads the question's own time scope — future-inclusive checked **first**,
+because the canonical wording contains both markers ("now **or in the future**") and the future
+reading governs. `sponsorshipAnswer` then combines tense with the existing direction logic
+(`needs` vs `without`), so both dimensions are resolved rather than one.
+
+**Three things are deliberate:**
+
+- **`NULL` is the default, and there is no fallback to the boolean when the tri-state is present but
+  null.** `resolveSponsorshipNeed` returns null for exactly one input — `requires_sponsorship=0` on a
+  profile whose visa/work-auth text names a time-limited status — because that 0 was set against the
+  present-tense reading and is ambiguous between `none` and `future`. Falling back there would
+  reinstate the bug. It refuses, and the run holds.
+- **A payload with no `sponsorship_need` key keeps the old path.** Present-but-null and absent are
+  different: the extension payload and the A1-era tests carry no tri-state, and none of them changed
+  behaviour. `'sponsorship_need' in payload` is the discriminator.
+- **An untensed question takes the disclosing reading**, marked `sponsorship_assumed_future` at
+  confidence **0.75** — below `AUTO_SUBMIT_MIN_CONFIDENCE` (0.8), so full-auto holds and asks. Across
+  both question directions the future-inclusive answer is the one that *discloses* the need;
+  over-disclosing is honest, and the opposite error misrepresents the candidate.
+
+**Step 1 of `buildAnswers` was the actual hole.** It reads `handler_map` by handler type and applies
+**no guard at all** — no `refuseReason`, no polarity check. That is how `handler_map['sponsorship'] =
+"No"` reached a future-tense question at confidence 1.0 while every guard in the system stood by.
+Steps 1 and 2 are now closed to sponsorship-class fields. `custom_answers` (step 3) still wins: the
+candidate's own answer to that exact question is better evidence than anything computed.
+
+### Verified
+
+```
+Do you now or in the future require sponsorship for work authorization?
+  before:  "No"   handler_exact         1.0     <- false attestation
+  after:   "Yes"  sponsorship_derived   1.0     matched_on=sponsorship_need:future/future
+Are you legally authorized to work in the country of employment?
+  after:   "Yes"  handler_exact         1.0     unchanged, and true
+```
+
+The pair is now consistent and both halves are true: authorized today, will need sponsorship later.
+
+Suite **1480 → 1506, zero failures** — 24 new tests in `test/sponsorshipTense.test.js` and 2 in
+`reviewOverlay.test.js`. The new ones pin the OPT case, the citizen case that must not be disturbed,
+the refusal on an ambiguous legacy profile, the untensed-question reading, the checkbox path (a
+derived answer must not be re-inverted by the polarity layer), and the absent-key back-compatibility
+path. The extension's duplicated confidence table gained both tiers — a drift there would have the
+overlay calling an answer certain that the resolver scored as a guess — and a new test now requires
+every provenance to carry a tier label, so the next one cannot ship rendering `undefined`.
+
+Re-verified against the Figma target form afterwards: **unchanged**, 7 filled, all correct. That form
+asks no sponsorship question, so the fix is invisible there — which is the point of doing it now
+rather than on the posting that does ask.
+
+`user_profile.sponsorship_need` for user 15 is set to **`future`**, and the Profile panel now offers
+the three situations as a select instead of a checkbox that cannot express them.

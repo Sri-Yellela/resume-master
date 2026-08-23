@@ -118,6 +118,10 @@ export const PROVENANCE = {
   LABEL_EXACT:     'label_exact',
   LABEL_FUZZY:     'label_fuzzy',
   DEFAULT:         'default',
+  // A sponsorship answer is COMPUTED from the tri-state for the tense the question asks about,
+  // never read off a stored yes/no. See the sponsorship tense section below.
+  SPONSORSHIP_DERIVED:       'sponsorship_derived',
+  SPONSORSHIP_ASSUMED_FUTURE:'sponsorship_assumed_future',
 };
 
 export const CONFIDENCE_BY_PROVENANCE = {
@@ -136,6 +140,13 @@ export const CONFIDENCE_BY_PROVENANCE = {
   custom_answer:   0.85,
   label_fuzzy:     0.3,
   default:         0.1,
+  // Derived from an explicitly stated fact and an explicitly tensed question — not a guess about
+  // either, so it carries the same weight as an attribute hit.
+  sponsorship_derived:        1.0,
+  // The question named no tense, so the disclosing reading was used (see sponsorshipAnswer).
+  // Deliberately BELOW AUTO_SUBMIT_MIN_CONFIDENCE: reading an employer's intent about someone's
+  // immigration status is exactly the judgement a human should confirm, so full-auto holds on it.
+  sponsorship_assumed_future: 0.75,
 };
 
 // Below this, an answer may not be auto-submitted in mode:'full' (requirement 5).
@@ -377,6 +388,108 @@ export function booleanPolarity({ label = '', name = '', key = null } = {}) {
   if (!qSense) return 'unknown';           // question direction unreadable — refuse, never guess
 
   return qSense === keySense ? 'direct' : 'invert';
+}
+
+// -- Sponsorship TENSE: one boolean cannot answer a two-tense question ---------
+// The A5 live-run review (docs/auto-apply-a5-live-run.md §4.1) found the failure the direction
+// layer above does not cover. `requires_sponsorship` is a single boolean, and the canonical
+// Greenhouse question is "do you NOW OR IN THE FUTURE require sponsorship". For a candidate on
+// F-1 STEM OPT both tenses are true at once and they DISAGREE: no sponsorship is needed today,
+// and H-1B will be needed when OPT expires. Answering the future-inclusive question from the
+// present-tense boolean submitted "No" — a false material attestation — at handler_exact/1.0,
+// the most trustworthy tier the resolver has, with no flag and the completeness gate satisfied.
+//
+// The A1 trap matrix could not see this: its payload carries no sponsorship key at all, so it
+// exercised the fallthrough refusal. buildAutofillPayload does carry one.
+//
+// The fix is to stop storing an ANSWER and store the SITUATION instead. Three values cover it:
+//   'none'   — never needs sponsorship (citizen, permanent resident)
+//   'future' — authorized now under a time-limited status, will need sponsorship later (OPT/CPT/J-1)
+//   'now'    — needs sponsorship to start at all
+// and the answer to a given question is computed from that plus the question's own tense.
+export const SPONSORSHIP_NEEDS = new Set(['none', 'future', 'now']);
+
+// Future-inclusive scope. Checked FIRST, because the canonical wording contains BOTH markers
+// ("now or in the future") and the future reading is the one that governs.
+const SPONSORSHIP_FUTURE_RE =
+  /\b(?:in\s+the\s+future|at\s+any\s+(?:point|time)|ever|eventually|at\s+some\s+point|down\s+the\s+(?:road|line)|future)\b/i;
+// Present-only scope — the question explicitly limits itself to today.
+const SPONSORSHIP_PRESENT_RE =
+  /\b(?:currently|presently|today|right\s+now|at\s+(?:this|the\s+present)\s+time)\b/i;
+
+/**
+ * Which time scope does this sponsorship question ask about?
+ * Returns 'future' | 'present' | null (the question names no tense).
+ */
+export function sponsorshipQuestionTense(text) {
+  const t = String(text ?? '');
+  if (!t) return null;
+  if (SPONSORSHIP_FUTURE_RE.test(t)) return 'future';
+  if (SPONSORSHIP_PRESENT_RE.test(t)) return 'present';
+  return null;
+}
+
+/**
+ * The candidate's situation as a tri-state, from a profile row.
+ *
+ * `sponsorship_need` is authoritative when set. Otherwise it is derived from the legacy boolean,
+ * and the derivation deliberately REFUSES the one case that caused the bug: `requires_sponsorship=0`
+ * on a profile whose visa/work-auth text names a time-limited status is ambiguous between 'none'
+ * and 'future', because the 0 was set against the present-tense reading. Guessing 'none' there is
+ * precisely the false attestation this exists to stop, so it returns null and the resolver holds.
+ *
+ * Returns 'none' | 'future' | 'now' | null (unknown — the caller must refuse).
+ */
+export function resolveSponsorshipNeed(profile) {
+  const explicit = String(profile?.sponsorship_need ?? '').toLowerCase();
+  if (SPONSORSHIP_NEEDS.has(explicit)) return explicit;
+
+  if (profile?.requires_sponsorship) return 'now';
+
+  // A time-limited authorization means "not now" does not imply "not ever".
+  const statusText = `${profile?.visa_type ?? ''} ${profile?.work_auth ?? ''}`;
+  const TEMPORARY_STATUS_RE =
+    /\b(?:f-?1|opt|stem\s*opt|cpt|j-?1|h-?4|l-?2|tn\b|ead|student\s+visa|work\s+permit|h-?1-?b)\b/i;
+  if (TEMPORARY_STATUS_RE.test(statusText)) return null;
+
+  return 'none';
+}
+
+/**
+ * The truthful answer to THIS sponsorship question.
+ *
+ * Returns { affirmative, tense, assumed } — or null when the situation is unknown or the
+ * question's direction cannot be read, in which case the caller must refuse rather than guess.
+ *
+ * When the question names no tense, the FUTURE-INCLUSIVE reading is used. That choice is
+ * deliberate and it is not a coin toss: across both question directions the future-inclusive
+ * answer is the one that DISCLOSES the sponsorship need. Over-disclosing is honest; the opposite
+ * error is a misrepresentation to an employer. It is marked `assumed` so it scores below the
+ * auto-submit floor and a human is asked.
+ */
+export function sponsorshipAnswer({ label = '', name = '', need = null } = {}) {
+  if (!SPONSORSHIP_NEEDS.has(String(need ?? ''))) return null;
+  const subject = `${label} ${name}`;
+  const sense = sponsorshipQuestionSense(subject);
+  if (!sense) return null;
+
+  const read  = sponsorshipQuestionTense(subject);
+  const tense = read || 'future';
+  const needsAtTense = need === 'now' ? true
+    : need === 'future' ? tense === 'future'
+    : false;
+
+  return {
+    affirmative: sense === 'needs' ? needsAtTense : !needsAtTense,
+    tense,
+    assumed: !read,
+  };
+}
+
+/** Was this answer produced by sponsorshipAnswer? Its direction is already resolved. */
+export function isDerivedSponsorship(provenance) {
+  return provenance === PROVENANCE.SPONSORSHIP_DERIVED ||
+         provenance === PROVENANCE.SPONSORSHIP_ASSUMED_FUTURE;
 }
 
 // -- Option-set constraint -----------------------------------------------------
@@ -1047,6 +1160,19 @@ export async function discoverFields(pageOrFrame, provider) {
 export function buildAnswers(fields, profilePayload) {
   const { field_map = {}, handler_map = {}, custom_answers = {} } = profilePayload || {};
   const SKIP_TYPES = new Set(['file','hidden','password','static','unknown','complex']);
+  // The tri-state, not an answer. A stored yes/no cannot answer both tenses of the sponsorship
+  // question — see the sponsorship tense section and docs/auto-apply-a5-live-run.md §4.1.
+  //
+  // PRESENT-BUT-NULL IS NOT THE SAME AS ABSENT, and the distinction is the fix:
+  //   absent          — a caller that predates the tri-state (the extension payload, older tests).
+  //                     Keep the legacy boolean path so nothing that worked stops working.
+  //   present, valid  — derive the answer for the tense each question asks about.
+  //   present, null   — resolveSponsorshipNeed looked and REFUSED, because `requires_sponsorship=0`
+  //                     on a time-limited status is ambiguous between 'none' and 'future'. Falling
+  //                     back to the boolean here would reinstate the exact false attestation this
+  //                     exists to prevent, so it must refuse instead.
+  const hasSponsorshipTriState = !!profilePayload && 'sponsorship_need' in profilePayload;
+  const sponsorshipNeed = hasSponsorshipTriState ? profilePayload.sponsorship_need : undefined;
   const answers = [];
 
   for (const field of fields) {
@@ -1063,8 +1189,17 @@ export function buildAnswers(fields, profilePayload) {
     let matched_on = null;
     const refusals = [];
 
+    // A sponsorship question is answered by DERIVATION, below, never by reading a stored yes/no
+    // off the payload. Steps 1 and 2 are therefore closed to it: step 1 in particular applies no
+    // guard at all, which is exactly how `handler_map['sponsorship'] = "No"` reached a
+    // future-tense question at confidence 1.0. A user's own answer to this exact question (step 3)
+    // still wins — that is better evidence than anything we can compute.
+    const deriveSponsorship = hasSponsorshipTriState &&
+      eligibilityClassOf(`${label} ${field.name || ''}`) === 'sponsorship';
+
     // 1. handler_map by handler_type — an exact signal, and the strongest one available.
-    if (field.handler_type && handler_map[field.handler_type] !== undefined && handler_map[field.handler_type] !== '') {
+    if (!deriveSponsorship &&
+        field.handler_type && handler_map[field.handler_type] !== undefined && handler_map[field.handler_type] !== '') {
       value = handler_map[field.handler_type];
       provenance = PROVENANCE.HANDLER_EXACT;
       matched_on = field.handler_type;
@@ -1073,7 +1208,7 @@ export function buildAnswers(fields, profilePayload) {
     // 2. field_map by handler_type (with dash -> underscore fallback). Also exact: the handler
     //    itself was derived from an attribute, or from a label the guards already vetted in
     //    sanitizeDiscoveredFields.
-    if (value === null && field.handler_type) {
+    if (value === null && !deriveSponsorship && field.handler_type) {
       const candidates = [
         field.handler_type,
         field.handler_type.replace(/-/g, '_'),
@@ -1142,6 +1277,28 @@ export function buildAnswers(fields, profilePayload) {
       }
     }
 
+    // 5. Sponsorship — computed for the tense THIS question asks about, from the tri-state.
+    //    Reached only when the user has not answered this exact question themselves. A yes/no is
+    //    produced here and the option/checkbox formatting below turns it into whatever the control
+    //    accepts, so this one branch covers selects, radios and checkboxes alike.
+    if (value === null && deriveSponsorship) {
+      const derived = sponsorshipAnswer({ label, name: field.name || '', need: sponsorshipNeed });
+      if (derived) {
+        value = derived.affirmative ? 'Yes' : 'No';
+        provenance = derived.assumed
+          ? PROVENANCE.SPONSORSHIP_ASSUMED_FUTURE
+          : PROVENANCE.SPONSORSHIP_DERIVED;
+        matched_on = `sponsorship_need:${sponsorshipNeed}/${derived.tense}`;
+      } else {
+        // Either the situation is unknown, or the question's direction is unreadable. Both are
+        // refusals: a wrong answer here is a false statement to an employer about the candidate's
+        // right to work, and the completeness gate can hold on it.
+        refusals.push(SPONSORSHIP_NEEDS.has(String(sponsorshipNeed ?? ''))
+          ? 'sponsorship:undetermined_question_sense'
+          : 'sponsorship:unknown_sponsorship_need');
+      }
+    }
+
     if (value === null) {
       if (refusals.length) {
         answers.push({
@@ -1162,7 +1319,14 @@ export function buildAnswers(fields, profilePayload) {
       // "authorized to work without sponsorship" vs `requires_sponsorship`. Passing the stored
       // value straight through then attests the opposite of the truth. Resolve the direction
       // before coercing; refuse outright when it cannot be established.
-      const polarity = booleanPolarity({ label, name: field.name || '', key: matched_on });
+      //
+      // A derived sponsorship answer is exempt: sponsorshipAnswer already resolved the question's
+      // direction, so `value` is the answer AS THE QUESTION ASKS IT. Running polarity over it again
+      // would invert a correct answer — and would refuse outright, since `matched_on` here names
+      // the tri-state rather than one of the canonical boolean keys.
+      const polarity = isDerivedSponsorship(provenance)
+        ? 'direct'
+        : booleanPolarity({ label, name: field.name || '', key: matched_on });
       if (polarity === 'unknown') {
         // Same shape as the other refusals: recorded, never typed, so the completeness gate holds
         // and the correction loop can ask the user. Guessing here is a false attestation.

@@ -50,6 +50,7 @@ import { normaliseRole, buildApifyQueries, isTitleRelevant as isTitleRelevantNew
 import { getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRoleFamilyDomainForKey } from "./services/jobClassifier.js";
 import { inferWorkType, jobHash, normaliseItem, isFullTimeNorm, isEmploymentTypeWanted, parseYearsExperience, ghostJobScoreNorm, isReposted } from "./services/jobNormalization.js";
 import { profileTitleSql } from "./services/profileTitleFilter.js";
+import { resolveSponsorshipNeed } from "./services/applyAutomation.js";
 import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
@@ -2827,6 +2828,24 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON apply_run_jobs(user_id, created_at);
       `,
     },
+    {
+      // The sponsorship SITUATION, replacing a stored ANSWER. `requires_sponsorship` is one
+      // boolean, and the standard Greenhouse question is "do you NOW OR IN THE FUTURE require
+      // sponsorship" — two tenses that disagree for anyone on a time-limited status. An F-1 STEM
+      // OPT candidate needs no sponsorship today and will need H-1B when OPT expires, so the
+      // boolean answered the future-tense question "No": a false material attestation, submitted
+      // at confidence 1.0. See docs/auto-apply-a5-live-run.md §4.1.
+      //
+      // NULLABLE ON PURPOSE, with no default. 'none' is not a safe default — it is precisely the
+      // wrong guess for the population this exists to protect — and resolveSponsorshipNeed refuses
+      // (holding the run for a human) rather than inventing a situation it cannot derive. The
+      // legacy boolean is left in place: it still answers the present tense, and it is what the
+      // derivation falls back to.
+      id: "086_user_profile_sponsorship_need",
+      sql: `
+        ALTER TABLE user_profile ADD COLUMN sponsorship_need TEXT;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -3913,6 +3932,12 @@ function buildAutofillPayload(profile, mode) {
   return {
     full_name:profile?.full_name||"", email:profile?.email||"", phone,
     location:loc, linkedin_url:linkedinUrl, github_url:githubUrl,
+    // The tri-state the resolver answers sponsorship questions FROM. The yes/no strings below are
+    // kept for the extension's autofill payload and for non-sponsorship consumers, but buildAnswers
+    // deliberately ignores them for sponsorship-class fields: a stored answer cannot be right for
+    // both "do you require sponsorship now" and "now or in the future". See
+    // docs/auto-apply-a5-live-run.md §4.1 and resolveSponsorshipNeed.
+    sponsorship_need:resolveSponsorshipNeed(profile),
     requires_sponsorship:!!profile?.requires_sponsorship,
     has_clearance:!!profile?.has_clearance,
     clearance_level:profile?.clearance_level||"",
