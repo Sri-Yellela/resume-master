@@ -68,11 +68,21 @@ const OPENAI_HELD = [
     resumeAvailable: false, screenshotAvailable: false, applyUrl: null },
 ];
 
-/** A second, unrelated application — so "one card" cannot pass by collapsing everything. */
+/**
+ * A second, unrelated application — so "one card" cannot pass by collapsing everything — and TWO
+ * PROBLEMS ON ONE JOB (AC2). The modal used to render those as two entries; requirement 1 says it
+ * must render one, as the card summary already does. One of the two is `manual_review`, which is
+ * the hold the shared question below is the concrete form of.
+ */
 const ANTHROPIC_HELD = [
   { id: 910, runId: 9, jobId: 'anthropic-re', company: 'Anthropic', title: 'Research Engineer',
     status: 'held_review', reasonCode: 'incomplete_form', reasonDetail: 'Sponsorship question',
     startedAt: ago(1), finishedAt: ago(1), attemptCount: 2, atsScore: 91,
+    resumeAvailable: true, screenshotAvailable: true,
+    applyUrl: 'https://job-boards.greenhouse.io/anthropic/jobs/910' },
+  { id: 911, runId: 8, jobId: 'anthropic-re', company: 'Anthropic', title: 'Research Engineer',
+    status: 'held_review', reasonCode: 'manual_review', reasonDetail: null,
+    startedAt: ago(26), finishedAt: ago(26), attemptCount: 1, atsScore: 91,
     resumeAvailable: true, screenshotAvailable: true,
     applyUrl: 'https://job-boards.greenhouse.io/anthropic/jobs/910' },
 ];
@@ -227,7 +237,23 @@ const FIXTURES = {
     ],
     packets: [...GATE_PACKETS, ...REVIEW_PACKETS],
   },
-  '/api/apply/questions': { questions: [], eligibilityCount: 0, blockedJobs: 0 },
+  // A SHARED QUESTION (AC2). Deduplicated across jobs by the server and blocking two different
+  // applications, so one answer really does release both. The other genuine co-resolution.
+  '/api/apply/questions': {
+    questions: [
+      { question: 'Are you legally authorised to work in the United States?',
+        // buildOpenQuestions emits 'unanswered' or 'low_confidence'. This is the former:
+        // the form asked and the resolver would not fill it. QUESTION_REASON_TO_HOLD binds it to
+        // the manual_review hold, so that hold is not ALSO listed as a bare category beneath it.
+        reason: 'unanswered', eligibility: true, type: 'select',
+        options: [{ value: 'Yes' }, { value: 'No' }], proposed: '', answered: false,
+        blocking: [
+          { jobId: 'anthropic-re', runId: 9, title: 'Research Engineer', company: 'Anthropic' },
+          { jobId: 'openai-staff', runId: 9, title: 'Staff Engineer', company: 'OpenAI' },
+        ] },
+    ],
+    eligibilityCount: 1, blockedJobs: 2,
+  },
   '/api/apply/pending': { pending: [] },
   '/api/apply/readiness': { available: true, reason: null },
   '/api/integrations/status': { apply: { missing: [] } },
@@ -358,17 +384,27 @@ async function main() {
     });
     if (openedFor.clicked) {
       await sleep(700);
-      const modal = await page.evaluate(() => {
+      const shown = await page.evaluate(() => {
         const scrim = [...document.querySelectorAll('div')]
           .find(d => (d.getAttribute('style') || '').includes('position:fixed')
                   || (d.style && d.style.position === 'fixed' && d.style.inset === '0px'));
-        return scrim ? scrim.innerText : null;
+        if (!scrim) return null;
+        return {
+          text: scrim.innerText,
+          // THE APPLICATION ENTRIES, by their own data hook. This used to be a substring search for
+          // company names over the whole popup — which stopped being able to tell a leaked
+          // application from a legitimately NAMED one the moment AC2 landed: a shared question
+          // reports the other applications it blocks ("Blocks: Anthropic, OpenAI"), and that
+          // sentence IS the co-resolution being offered, not a scope leak. Counting entries
+          // answers the question the check is actually asking.
+          entries: [...scrim.querySelectorAll('[data-rm-card="application"]')].map(e => e.dataset.rmJob),
+        };
       });
+      const modal = shown?.text ?? null;
       check('AB3  Details opened a popup', !!modal, modal ? `${modal.length} chars` : 'no modal');
-      const companies = ['OpenAI', 'Anthropic', 'Salesforce', 'Datadog'].filter(c => modal && modal.includes(c));
       check('AB3  the popup shows ONLY that application, not every application',
-        companies.length === 1 && companies[0] === 'OpenAI',
-        `popup mentions: ${companies.join(', ') || 'nothing'}`);
+        !!shown && shown.entries.length === 1 && shown.entries[0] === 'openai-staff',
+        `popup lists: ${(shown?.entries || []).join(', ') || 'nothing'}`);
       await shot('scoped-open.png');
       console.log(`      screenshot: ${path.join(OUT_DIR, 'scoped-open.png')}`);
       await page.keyboard.press('Escape').catch(() => {});
@@ -422,13 +458,18 @@ async function main() {
       await sleep(700);
       const modal = await readModal();
       check('AC1  Open opened the popup', !!modal, modal ? `${modal.length} chars` : 'no modal');
-      // The bug report exactly: Open on one card listed three cards across two other jobs, one of
-      // them a dead posting. Named individually so a failure says WHICH foreign application leaked.
-      const foreign = ['OpenAI', 'Anthropic', 'Salesforce', 'Datadog', '4369183334']
-        .filter(c => modal && modal.includes(c));
+      // The bug report exactly: Open on one card listed three entries across two other jobs, one of
+      // them a dead posting. Counted off the entries' own data hook rather than by searching the
+      // popup text for company names — a shared question legitimately NAMES the other applications
+      // it unblocks, and a text search cannot tell that apart from a scope leak.
+      const entries = await page.evaluate(() => {
+        const scrim = [...document.querySelectorAll('div')]
+          .find(d => d.style && d.style.position === 'fixed' && d.style.inset === '0px');
+        return scrim ? [...scrim.querySelectorAll('[data-rm-card="application"]')].map(e => e.dataset.rmJob) : [];
+      });
       check("AC1  Open shows ONLY that card's application — no other job, no dead posting",
-        !!modal && modal.includes('Vercel') && foreign.length === 0,
-        foreign.length ? `leaked: ${foreign.join(', ')}` : 'scoped to Vercel alone');
+        entries.length === 1 && entries[0] === 'vercel-plat',
+        entries.length === 1 ? 'scoped to Vercel alone' : `listed: ${entries.join(', ') || 'nothing'}`);
       check('AC1  and the popup is TITLED with that application, not "Every application"',
         // Case-insensitive: the title is `text-transform: uppercase`, and innerText returns
         // the RENDERED text — a case-sensitive match reads a string the DOM never has.
@@ -459,6 +500,139 @@ async function main() {
       await closeModal();
     } else {
       check('AC1  "Review all" is still the deliberate UNSCOPED path', false, 'no Review all control');
+    }
+
+    // ── AC2 ────────────────────────────────────────────────────────────────────────────────
+    //
+    // The modal, restructured: COMPANY → APPLICATION → PROBLEMS, with co-resolvable problems
+    // grouped. Read out of the real DOM, because "how many entries does one application produce"
+    // is precisely the kind of defect a source-string test passes over.
+    console.log('\n── AC2: company → application → problems ──');
+
+    const openAnthropic = await page.evaluate(() => {
+      const card = document.querySelector('[data-rm-card="application"][data-rm-job="anthropic-re"]');
+      const btn = [...(card?.querySelectorAll('button') || [])].find(b => /Details/i.test(b.innerText));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    if (openAnthropic) {
+      await sleep(700);
+      const m = await page.evaluate(() => {
+        const scrim = [...document.querySelectorAll('div')]
+          .find(d => d.style && d.style.position === 'fixed' && d.style.inset === '0px');
+        if (!scrim) return null;
+        return {
+          text: scrim.innerText,
+          entries: [...scrim.querySelectorAll('[data-rm-card="application"]')].map(el => ({
+            job: el.dataset.rmJob,
+            groups: el.querySelectorAll('[data-rm-plan="group"]').length,
+            singles: el.querySelectorAll('[data-rm-plan="single"]').length,
+            unblocks: [...el.querySelectorAll('[data-rm-plan="group"]')].map(g => Number(g.dataset.rmUnblocks)),
+            text: el.innerText,
+          })),
+          companyHeadings: [...scrim.querySelectorAll('span')]
+            .map(s => s.innerText.trim())
+            .filter(t => /^(ANTHROPIC|OPENAI|VERCEL|POSTING NO LONGER ON THE BOARD)$/i.test(t)),
+          attempts: scrim.querySelectorAll('[data-rm-card="attempt"]').length,
+        };
+      });
+
+      check('AC2  two problems on ONE job render as ONE application entry, not two',
+        !!m && m.entries.length === 1 && m.entries[0].job === 'anthropic-re',
+        m ? m.entries.map(e => e.job).join(', ') : 'no modal');
+      // The grouped item is the shared question: one answer, two applications. The single is
+      // incomplete_form, which nothing else shares — so the entry has exactly two items.
+      check('AC2  its two problems are listed TOGETHER inside that one entry',
+        !!m && (m.entries[0]?.groups + m.entries[0]?.singles) === 2,
+        m ? `${m.entries[0]?.groups} grouped + ${m.entries[0]?.singles} single` : 'no modal');
+      check('AC2  the co-resolvable one is presented as ONE action with the count it unblocks',
+        !!m && m.entries[0]?.groups === 1 && m.entries[0]?.unblocks[0] === 2
+          && /one action, 2 applications/i.test(m.entries[0]?.text || ''),
+        m ? `unblocks=${m.entries[0]?.unblocks.join(',')}` : 'no modal');
+      check('AC2  and it names the shared question rather than the bare category beneath it',
+        !!m && /legally authorised to work/i.test(m.entries[0]?.text || '')
+          && !/The form asked something only you can answer/i.test(m.entries[0]?.text || ''),
+        'the specific statement replaces the category it is the form of');
+      check('AC2  a COMPANY tier sits above the application',
+        !!m && m.companyHeadings.some(h => /ANTHROPIC/i.test(h)), (m?.companyHeadings || []).join(' / '));
+      check('AC2  HELD ON PURPOSE is still distinguished from BROKEN inside the modal',
+        !!m && /held on purpose/i.test(m.text), (m?.text || '').split('\n')[1]);
+      // Collapsing run-jobs into one application is only honest if the attempts stay reachable.
+      check('AC2  the per-attempt detail is not lost — it is one disclosure away',
+        !!m && m.attempts === 0 && /show 2 attempts/i.test(m.text),
+        (m?.text.match(/Show \d+ attempts?/i) || ['absent'])[0]);
+
+      const attemptsShown = await page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find(b => /Show \d+ attempts?/i.test(b.innerText));
+        if (!btn) return -1;
+        btn.click();
+        return 1;
+      });
+      if (attemptsShown === 1) {
+        await sleep(400);
+        const after = await page.evaluate(() => {
+          const scrim = [...document.querySelectorAll('div')]
+            .find(d => d.style && d.style.position === 'fixed' && d.style.inset === '0px');
+          return {
+            attempts: scrim ? scrim.querySelectorAll('[data-rm-card="attempt"]').length : 0,
+            text: scrim ? scrim.innerText : '',
+          };
+        });
+        check('AC2  opening it shows every attempt, with its own status and evidence',
+          after.attempts === 2 && /Review/.test(after.text) && /What we filled/.test(after.text),
+          `${after.attempts} attempt rows`);
+      } else {
+        check('AC2  opening it shows every attempt', false, 'no attempts disclosure');
+      }
+      await shot('ac2-application-entry.png');
+      console.log(`      screenshot: ${path.join(OUT_DIR, 'ac2-application-entry.png')}`);
+      await closeModal();
+    } else {
+      check('AC2  two problems on ONE job render as ONE application entry, not two', false,
+        'no Anthropic card');
+    }
+
+    // Requirement 4: a dead posting is its OWN STATE, not a reviewable item with a dead Review
+    // button. Reached through Review-all, which is where it used to sit beside unrelated jobs.
+    const deadOpened = await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find(b => /^Review all /.test(b.innerText.trim()));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    if (deadOpened) {
+      await sleep(700);
+      const dead = await page.evaluate(() => {
+        const scrim = [...document.querySelectorAll('div')]
+          .find(d => d.style && d.style.position === 'fixed' && d.style.inset === '0px');
+        const el = scrim?.querySelector('[data-rm-card="application"][data-rm-job="4369183334"]');
+        if (!el) return null;
+        return {
+          text: el.innerText,
+          buttons: [...el.querySelectorAll('button')].map(b => b.innerText.trim()),
+        };
+      });
+      check('AC2  the dead posting is its OWN state inside the modal, not a "Review" row',
+        !!dead && /the posting is gone/i.test(dead.text)
+          && /posting gone — cannot be resumed/i.test(dead.text)
+          && !dead.buttons.some(b => /^(Open|Open & fill|Sign in)$/i.test(b)),
+        dead ? `buttons: ${dead.buttons.join(' / ') || 'none'}` : 'no dead-posting entry');
+      // Requirement 5: nothing was dropped on the way.
+      const controls = await page.evaluate(() => {
+        const scrim = [...document.querySelectorAll('div')]
+          .find(d => d.style && d.style.position === 'fixed' && d.style.inset === '0px');
+        return scrim ? scrim.innerText : '';
+      });
+      check('AC2  every control survives in the modal: resume, evidence, ATS, posting, Open, Details',
+        /Resume PDF/.test(controls) && /What we filled/.test(controls) && /ATS \d+/.test(controls)
+        && /The posting/.test(controls) && /Open/.test(controls) && /attempts?/i.test(controls),
+        'artifact links, score chip, posting link, resolve action and the attempts disclosure');
+      await shot('ac2-dead-posting.png');
+      console.log(`      screenshot: ${path.join(OUT_DIR, 'ac2-dead-posting.png')}`);
+      await closeModal();
+    } else {
+      check('AC2  the dead posting is its OWN state inside the modal', false, 'no Review all control');
     }
 
     // ── AB4 ────────────────────────────────────────────────────────────────────────────────

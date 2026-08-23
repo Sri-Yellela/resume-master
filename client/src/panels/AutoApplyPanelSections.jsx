@@ -8,7 +8,7 @@
 // lib/applyObstacles.js, which the board's own chip reads too, so the two surfaces cannot describe
 // the same application differently.
 import { useTheme } from "../styles/theme.jsx";
-import { describeApplication, PREREQUISITE_LABELS } from "../lib/applyObstacles.js";
+import { describeApplication, attemptStatusChip, PREREQUISITE_LABELS } from "../lib/applyObstacles.js";
 
 export function SectionHeading({ children, count, note, theme }) {
   return (
@@ -137,10 +137,28 @@ export function CompanyHeading({ company, count, theme }) {
  *
  * Company and role are the headline, never "One application". A card that names neither leaves the
  * user unable to tell which job it is about, which is the one thing they need to know first.
+ *
+ * ── AC2: THE MODAL RENDERS THIS SAME COMPONENT ────────────────────────────────────────────────
+ *
+ * The modal used to be a flat list of problem-cards built from run-job rows by its own inline JSX —
+ * two problems on one job rendered as two entries, and a dead posting for a different job sat
+ * alongside them with a Review pill and nothing to click. AC2 requirement 1 says the modal must
+ * MATCH the card summary, which already gets this right. So it is not re-described there; the modal
+ * renders this component under a company tier, and the two surfaces cannot drift apart because
+ * there is only one of them.
+ *
+ * Three optional props carry what the modal needs and the panel does not:
+ *
+ *   plan          resolutionPlan(app, …) — the problem list with CO-RESOLVABLE ones lifted out and
+ *                 counted. When absent the flat reason list renders exactly as before, so the
+ *                 panel's own cards are unchanged.
+ *   onGroupAction called with a plan item when its amortised action is pressed.
+ *   children      rendered at the foot of the card. The modal puts the per-ATTEMPT rows there —
+ *                 the run-job detail this component collapses — so grouping loses nothing.
  */
 export function ApplicationObstacleCard({
   app, theme, artifactUrl, onResolve, resolveLabel, resolveTitle, onDetails, onRerun, packet,
-  onGenerateResume,
+  onGenerateResume, plan = null, onGroupAction, detailsLabel, children,
 }) {
   const many = app.reasons.length > 1;
   const tone = app.postingGone ? "#6b7280" : app.protective ? "#d97706" : "#dc2626";
@@ -198,23 +216,83 @@ export function ApplicationObstacleCard({
       {/* EVERY obstacle, inside the one card. */}
       <div style={{ display: "flex", flexDirection: "column", gap: 5,
                     borderTop: `1px solid ${theme.border}`, paddingTop: 7 }}>
-        {app.reasons.map((r, i) => (
-          <div key={`${r.code}-${i}`} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <span style={{ width: 5, height: 5, borderRadius: "50%", marginTop: 6, flexShrink: 0,
-                           background: r.protective ? "#d97706" : "#dc2626" }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11.5, color: theme.text, lineHeight: 1.45 }}>
-                {r.obstacle}
-                {r.detail && r.detail !== r.obstacle && (
-                  <span style={{ color: theme.textMuted }}> — {r.detail}</span>
+        {plan
+          // ── AC2 requirement 2: CO-RESOLVABLE PROBLEMS, GROUPED ──────────────────────────────
+          // An amortised item is not a bullet with a bigger font. It is a different OFFER — one
+          // action, a count of what it releases — so it is rendered as the offer, and the count is
+          // the part that carries the argument. resolutionPlan decides which items qualify; see the
+          // table there for what can and cannot share one crossing (a CAPTCHA cannot, and is
+          // excluded by name even though the server groups it by origin like a sign-in does).
+          ? plan.map((item) => item.kind === "group" ? (
+            <div key={item.key} data-rm-plan="group" data-rm-unblocks={item.unblocks}
+              style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+                       border: `1px solid #2563eb55`, borderLeft: "3px solid #2563eb",
+                       borderRadius: 6, padding: "8px 10px", background: `${theme.surface}` }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center",
+                            minWidth: 34, flexShrink: 0 }}>
+                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
+                               fontSize: 20, lineHeight: 1, color: "#2563eb" }}>{item.unblocks}</span>
+                <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "0.06em",
+                               textTransform: "uppercase", color: theme.textDim }}>unblocked</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.08em",
+                              textTransform: "uppercase", color: "#2563eb", marginBottom: 2 }}>
+                  one action, {item.unblocks} applications
+                </div>
+                <div style={{ fontSize: 11.5, color: theme.text, lineHeight: 1.45 }}>
+                  {item.headline}
+                </div>
+                {item.detail && (
+                  <div style={{ fontSize: 10.5, color: theme.textMuted, lineHeight: 1.45 }}>
+                    {item.detail}
+                  </div>
                 )}
               </div>
-              {r.action && (
-                <div style={{ fontSize: 10.5, color: theme.textMuted }}>→ {r.action}</div>
+              {item.action && onGroupAction && (
+                <button onClick={() => onGroupAction(item)}
+                  style={{ border: "none", borderRadius: 6, padding: "6px 11px", background: "#2563eb",
+                           color: "#fff", fontWeight: 800, fontSize: 11, cursor: "pointer",
+                           whiteSpace: "nowrap", flexShrink: 0 }}>
+                  {item.action}
+                </button>
               )}
             </div>
-          </div>
-        ))}
+          ) : (
+            // Its own problem, and only its own. No count — a "1" beside every line is the number
+            // that made three cards look like three jobs, and it would do the same here.
+            <div key={item.key} data-rm-plan="single"
+                 style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", marginTop: 6, flexShrink: 0,
+                             background: item.protective ? "#d97706" : "#dc2626" }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: theme.text, lineHeight: 1.45 }}>
+                  {item.headline}
+                  {item.detail && <span style={{ color: theme.textMuted }}> — {item.detail}</span>}
+                </div>
+                {item.action && (
+                  <div style={{ fontSize: 10.5, color: theme.textMuted }}>→ {item.action}</div>
+                )}
+              </div>
+            </div>
+          ))
+          : app.reasons.map((r, i) => (
+            <div key={`${r.code}-${i}`} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", marginTop: 6, flexShrink: 0,
+                             background: r.protective ? "#d97706" : "#dc2626" }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, color: theme.text, lineHeight: 1.45 }}>
+                  {r.obstacle}
+                  {r.detail && r.detail !== r.obstacle && (
+                    <span style={{ color: theme.textMuted }}> — {r.detail}</span>
+                  )}
+                </div>
+                {r.action && (
+                  <div style={{ fontSize: 10.5, color: theme.textMuted }}>→ {r.action}</div>
+                )}
+              </div>
+            </div>
+          ))}
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -293,10 +371,16 @@ export function ApplicationObstacleCard({
             style={{ border: `1px solid ${theme.border}`, borderRadius: 6, padding: "6px 11px",
                      background: theme.surface, color: theme.text, fontWeight: 700, fontSize: 11.5,
                      cursor: "pointer", whiteSpace: "nowrap" }}>
-            Details
+            {/* In the panel this opens the scoped popup and reads "Details". In the modal there is
+                nothing further to open, so it toggles the per-ATTEMPT rows and says so — the label
+                is the caller's because the two mean different things. */}
+            {detailsLabel || "Details"}
           </button>
         )}
       </div>
+      {/* The per-attempt rows, when the caller supplies them. Collapsing run-jobs into one
+          application is only honest if the attempts remain reachable. */}
+      {children}
     </div>
   );
 }
@@ -461,4 +545,169 @@ export function PrerequisiteCards({ missing, queuedCount, theme, onGo }) {
       />
     );
   });
+}
+
+/**
+ * ONE ATTEMPT at one application — a single apply_run_jobs row (TASK AC2).
+ *
+ * This is the modal's old flat list item, MOVED here whole and otherwise unchanged. Every control
+ * it carried is still on it: the status pill, the obstacle sentence from the shared vocabulary, the
+ * ATS chip, the timestamps and attempt counter, the resume artifact, the "What we filled"
+ * screenshot, the submission-verified chip, the Open & fill / Run it again route, the posting-gone
+ * state, and the apply URL.
+ *
+ * WHAT CHANGED IS WHERE IT SITS, NOT WHAT IT IS. The modal used to render these rows at the top
+ * level, so a job held, re-run and held again was three entries and a dead posting for a different
+ * job sat between them. They are now nested inside the application they are attempts AT, behind
+ * that application's own disclosure. The server returns one row per RUN-JOB and always has; that
+ * is the right unit for "what happened on attempt 2" and the wrong unit for "what is in my way".
+ *
+ * Collapsing without this would lose the audit trail, which is the one thing a user needs when an
+ * interview lands — so the attempts stay, one click away, rather than being summarised out.
+ */
+export function AttemptRow({ job, theme, artifactUrl, packetFor, onHandoff, onRerun }) {
+  // The status pill's words and colour come from the shared vocabulary, not from a chain of
+  // ternaries here. They used to be written inline in the modal — a second copy of a mapping the
+  // rest of the app already had — and that is precisely the drift applyObstacles.js exists to stop:
+  // this surface said "Failed" while the panel behind it said "This one did not complete".
+  const { label: statusLabel, color: statusColor } = attemptStatusChip(job.status, theme.accent);
+
+  return (
+    <div data-rm-card="attempt" data-rm-job={job.jobId || ""} style={{
+      border: `1px solid ${theme.border}`, borderRadius: 6,
+      padding: "8px 11px", display: "flex", flexDirection: "column", gap: 5,
+      background: theme.surface,
+    }}>
+      {/* which attempt, and how it ended */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ fontSize: 10.5, color: theme.textMuted }}>
+          {job.startedAt && `Started ${new Date(job.startedAt).toLocaleString()}`}
+          {job.startedAt && job.finishedAt && " · "}
+          {job.finishedAt && `Finished ${new Date(job.finishedAt).toLocaleTimeString()}`}
+          {(job.startedAt || job.finishedAt) && " · "}Attempts: {job.attemptCount || 1}
+        </div>
+        <span style={{
+          fontSize: 10, fontWeight: 700, padding: "2px 8px",
+          borderRadius: 999, background: `${statusColor}22`,
+          color: statusColor, whiteSpace: "nowrap", flexShrink: 0,
+        }}>
+          {statusLabel}
+        </span>
+      </div>
+
+      {/* The obstacle SENTENCE, from the shared vocabulary, plus the score. This line used to be
+          `job.reasonCode.replace(/_/g, " ")` — a raw code with its underscores swapped for spaces,
+          so the modal said "ats below threshold" while the panel behind it said "Resume scored
+          below your ATS threshold" for the same row. applyObstacles.js exists precisely so the two
+          cannot disagree. */}
+      {(job.reasonCode || job.atsScore != null) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {job.reasonCode && (() => {
+            const d = describeApplication(job);
+            return (
+              <span style={{ fontSize: 11, color: statusColor, fontWeight: 600 }}>
+                {d.obstacle}
+                {d.detail && d.detail !== d.obstacle ? ` — ${d.detail}` : ""}
+              </span>
+            );
+          })()}
+          {job.atsScore != null && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
+              background: job.atsScore >= 80 ? "#dcfce7" : job.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
+              color: job.atsScore >= 80 ? "#166534" : job.atsScore >= 60 ? "#854d0e" : "#991b1b",
+            }}>
+              ATS {job.atsScore}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* What was actually sent on THIS attempt. The audit trail has recorded the resume artifact
+          and the end-of-attempt screenshot all along; nothing linked them, so there was no way to
+          tell whether a resume had even been generated. */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {job.resumeAvailable ? (
+          <a href={artifactUrl(job.id, "resume")} target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                     border: `1px solid ${theme.border}`, background: theme.surfaceHigh,
+                     color: theme.text, textDecoration: "none", whiteSpace: "nowrap" }}>
+            Resume PDF ↗
+          </a>
+        ) : (
+          <span title="No resume artifact was recorded for this attempt."
+            style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                     background: `${theme.border}55`, color: theme.textDim, whiteSpace: "nowrap" }}>
+            no resume on this attempt
+          </span>
+        )}
+        {/* EVIDENCE, NOT THE ROUTE (AB1 requirement 4). This is a screenshot of a form in a browser
+            that closed when the run ended — it shows what we filled and it cannot be submitted. It
+            used to be the only thing offered for a held application, which is why a hold was a dead
+            end. Labelled for what it is; the resume action below is what continues the application. */}
+        {job.screenshotAvailable && (
+          <a href={artifactUrl(job.id, "screenshot")} target="_blank" rel="noreferrer"
+            onClick={e => e.stopPropagation()}
+            title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
+            style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                     border: `1px solid ${theme.border}`, background: theme.surfaceHigh,
+                     color: theme.textMuted, textDecoration: "none", whiteSpace: "nowrap" }}>
+            What we filled ↗
+          </a>
+        )}
+        {/* THE ROUTE. Present on every held attempt that has a prepared packet, so the list is not
+            just readable but finishable. */}
+        {(() => {
+          if (!["held_review", "held_gate"].includes(job.status)) return null;
+          const packet = packetFor?.(job);
+          if (!packet) return null;
+          // A posting that no longer exists is a STATE, not a disabled button (requirement 6).
+          // There is no form to open and no run that would find one, so nothing is offered —
+          // saying so is the whole affordance.
+          if (packet.postingGone) {
+            return (
+              <span title="This posting was removed from the board. There is no application left to finish; the record of the attempt stays here."
+                style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                         background: `${theme.border}55`, color: theme.textDim, whiteSpace: "nowrap" }}>
+                posting gone — cannot be resumed
+              </span>
+            );
+          }
+          const stale = packet.stale;
+          return (
+            <button
+              onClick={e => { e.stopPropagation(); if (stale) onRerun?.(job); else onHandoff?.(packet, job); }}
+              title={stale
+                ? "These answers were prepared too long ago to fill safely. A fresh run prepares new ones."
+                : "Opens the real application in your own browser and fills it with the answers we prepared. You review and submit."}
+              style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 999,
+                       border: stale ? `1px solid ${theme.border}` : "none",
+                       background: stale ? theme.surfaceHigh : "#2563eb",
+                       color: stale ? theme.text : "#fff", cursor: "pointer",
+                       whiteSpace: "nowrap" }}>
+              {stale ? "Run it again" : "Open & fill ↗"}
+            </button>
+          );
+        })()}
+        {job.status === "submitted" && (
+          <span title={job.submitEvidence || ""}
+            style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                     background: job.submitVerified ? "#16a34a22" : "#d9770622",
+                     color: job.submitVerified ? "#16a34a" : "#d97706", whiteSpace: "nowrap" }}>
+            {job.submitVerified ? "submission verified" : "unverified submit"}
+          </span>
+        )}
+      </div>
+
+      {/* apply URL */}
+      {job.applyUrl && (
+        <a href={job.applyUrl} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          style={{ fontSize: 10, color: theme.accent, textDecoration: "none", wordBreak: "break-all" }}>
+          {job.applyUrl.length > 90 ? job.applyUrl.slice(0, 90) + "…" : job.applyUrl}
+        </a>
+      )}
+    </div>
+  );
 }

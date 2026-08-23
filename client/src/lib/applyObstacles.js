@@ -376,3 +376,214 @@ export const PREREQUISITE_LABELS = {
   profile_email: { obstacle: "Your profile has no email address", action: "Add it in your profile",   to: "profile" },
   profile_name:  { obstacle: "Your profile has no name",        action: "Add it in your profile",     to: "profile" },
 };
+
+// ── CO-RESOLUTION: WHICH PROBLEMS ACTUALLY SHARE ONE CROSSING (TASK AC2) ─────────────────────
+//
+// The panel's grouping rule has two halves (see the note above groupByApplication): group by
+// OBSTACLE when one action unblocks many, by APPLICATION when many obstacles block one. Inside a
+// single application's problem list BOTH can be true at once — one of its three problems may also
+// be blocking four other applications, while the other two are entirely its own.
+//
+// That is what this computes: for ONE application, which of its problems are co-resolvable with
+// problems on OTHER applications, and how many applications each such action releases.
+//
+// IT COMPUTES NO GROUPING OF ITS OWN. Both groupings already exist upstream and are authoritative:
+//
+//   PORTAL SIGN-IN   GET /api/apply/gate-packets groups gate-crossing packets by expected_origin —
+//                    the unit an activeTab grant is actually scoped to (G0). This reads that
+//                    server-computed `portals` array. Re-deriving it from apply URLs client-side
+//                    would be the second grouping the requirement forbids, and it would be wrong:
+//                    the origin is a stored fact on the packet, not something a UI should parse
+//                    back out of a URL.
+//
+//   SHARED QUESTION  GET /api/apply/questions already deduplicates questions across jobs and
+//                    returns `blocking` — every run-job the question holds up. One answer, saved to
+//                    custom_answers by exact question text, releases all of them.
+//
+// ── WHAT CAN BE CO-RESOLVED, AND WHAT CANNOT ────────────────────────────────────────────────
+//
+// Stated explicitly, because claiming co-resolution where it does not hold is worse than not
+// grouping at all: it prices a ten-second fix at four applications and delivers one.
+//
+// CAN:
+//   login_required        One sign-in, one origin. The grant survives every same-origin navigation
+//                         (G0), so every application queued behind that origin genuinely continues.
+//   a shared question     One answer stored by question text and reused verbatim on every form that
+//                         asks it. The server has already proved the sharing by deduplicating.
+//
+// CANNOT — and each of these is grouped by origin or by reason UPSTREAM, so the temptation is real:
+//   captcha_required      Grouped by origin in `portals` alongside login_required, because it is a
+//                         gate reason. It is NOT co-resolvable: a CAPTCHA is a per-attempt human
+//                         challenge, not a session grant. Solving one clears one. Excluded here by
+//                         name rather than by omission, so the exclusion is visible.
+//   ats_below_threshold   A per-resume score against a per-job description.
+//   incomplete_form,
+//   no_submit_button,
+//   manual_review,
+//   no_fields_discovered  Facts about ONE employer's form.
+//   resume_unavailable,
+//   generation_failed     One resume per job; generating one does not produce the others.
+//   answers_changed_since_approval   A drift between one approval and one re-resolve.
+//   daily_cap_reached     Clears with TIME, not with an action. A count of applications would imply
+//                         an action that does not exist.
+//   full_auto_disabled,
+//   provider_review_only  Policy. There is no user action at all, so there is no count to offer.
+//   browser_binary_not_found, internal_error, form_schema_*, gate_token_no_secret
+//                         Operator problems. They may well affect many applications at once, but
+//                         the person reading this panel cannot clear them, and "one action unblocks
+//                         4" has to name an action the reader can actually take.
+
+/** The gate reasons where one crossing really does release the whole batch. */
+export const CO_RESOLVABLE_GATE_REASONS = Object.freeze(new Set(["login_required"]));
+
+/**
+ * Which HOLD an open question is the concrete form of, keyed by the question's own `reason`.
+ *
+ * A run-job holds with `manual_review` and the same hold ALSO surfaces as a row in
+ * GET /api/apply/questions — one fact recorded twice, at two levels of detail: "the form asked
+ * something only you can answer", and the question itself. Listing both reports one problem as two,
+ * which is the per-problem inflation AB2 removed from the cards; worse, the grouped one would claim
+ * to unblock 2 applications while the bare category beside it silently meant the same thing. So a
+ * shared question CLAIMS its hold, and the specific statement is the one that survives.
+ *
+ * Keyed on the question's reason rather than "any question-shaped hold", because picking the first
+ * plausible reason off a list is not a binding — it is a guess that lands differently depending on
+ * which attempt happened to be newest. buildOpenQuestions emits exactly two reasons:
+ *
+ *   low_confidence  we HAD a value and would not send it        → low_confidence_answers
+ *   unanswered      the form asked and we would not fill it     → manual_review, then incomplete_form
+ *
+ * `unanswered` lists two holds because the pipeline records that same situation under either code
+ * depending on where it was detected (the completeness gate says incomplete_form, the resolver says
+ * manual_review). manual_review is preferred where an application carries both: it is the narrower
+ * claim — "only you can answer this" — and incomplete_form then correctly remains as its own
+ * problem, since an application with both really does have a second empty field beyond the question.
+ *
+ * At most one hold per question, so two shared questions claim two holds and a third claims none
+ * rather than swallowing an unrelated one.
+ */
+export const QUESTION_REASON_TO_HOLD = Object.freeze({
+  low_confidence: ["low_confidence_answers"],
+  unanswered:     ["manual_review", "incomplete_form"],
+});
+
+/**
+ * One application's problems, with the co-resolvable ones lifted out and counted.
+ *
+ * @param {object} app        an entry from groupByApplication
+ * @param {object} ctx
+ * @param {Array}  ctx.portals    GET /api/apply/gate-packets `portals`, verbatim
+ * @param {Array}  ctx.packets    GET /api/apply/gate-packets `packets`, verbatim
+ * @param {Array}  ctx.questions  GET /api/apply/questions `questions`, verbatim
+ * @returns {Array<{kind:"group"|"single", key:string, reasons:Array, unblocks:number,
+ *   headline:string, detail:string|null, action:string|null, protective:boolean,
+ *   origin?:string, host?:string, question?:string}>}
+ */
+export function resolutionPlan(app = {}, { portals = [], packets = [], questions = [] } = {}) {
+  const reasons = app.reasons || [];
+  const jobId = app.jobId != null ? String(app.jobId) : null;
+  const claimed = new Set();          // reason indexes already spoken for by a group
+  const groups = [];
+
+  // ── 1. The portal batch ────────────────────────────────────────────────────────────────────
+  // The PACKET is what knows which origin this application is queued behind. The reason code does
+  // not, and the apply URL is not the same thing — a posting host and the login host it redirects
+  // to routinely differ. Found by run-job first and by job second, the same precedence
+  // handoffPacketFor uses and for the same reason: a re-run makes a new run-job, and the packet
+  // prepared for the previous attempt is still the one that can be crossed.
+  const rowIds = new Set((app.rows || []).map(r => r.id));
+  const packet = packets.find(p => p.runJobId != null && rowIds.has(p.runJobId))
+    || packets.find(p => jobId != null && String(p.jobId) === jobId)
+    || null;
+  const gateIdx = reasons.findIndex(r => CO_RESOLVABLE_GATE_REASONS.has(r.code));
+  if (gateIdx !== -1 && packet) {
+    const portal = portals.find(p => p.origin === packet.expectedOrigin);
+    // count > 1 or nothing is amortised. A "batch" of one is just the problem, and presenting it as
+    // a batch inflates one sign-in into an offer it cannot keep.
+    if (portal && portal.count > 1) {
+      claimed.add(gateIdx);
+      groups.push({
+        kind: "group", key: `portal:${portal.origin}`, reasons: [reasons[gateIdx]],
+        unblocks: portal.count, origin: portal.origin, host: portal.host,
+        headline: `Sign in to ${portal.host} once`,
+        detail: `Releases this application and ${portal.count - 1} other${portal.count === 2 ? "" : "s"} queued behind the same portal. Each one is still reviewed by you before it is sent.`,
+        action: "Sign in", protective: true,
+      });
+    }
+  }
+
+  // ── 2. A question that blocks more than this application ───────────────────────────────────
+  // Matched on jobId, and counted on DISTINCT jobs: `blocking` carries one entry per RUN-JOB, so a
+  // job held, re-run and held again appears twice and would otherwise read as two applications
+  // unblocked. That is the same overcount AB2 removed from the cards.
+  for (const q of questions) {
+    const blockedJobs = [...new Set((q.blocking || []).map(b => String(b.jobId)))];
+    if (jobId == null || !blockedJobs.includes(jobId)) continue;
+    if (blockedJobs.length < 2) continue;
+    // The hold this question IS, so it is not also listed as a bare category beneath itself. See
+    // QUESTION_REASON_TO_HOLD: one fact recorded at two levels of detail, and the specific one wins.
+    // Preference order within the mapping matters, so the search is by hold code rather than by
+    // position — otherwise which hold gets claimed depends on which attempt happened to be newest.
+    let backedIdx = -1;
+    for (const code of QUESTION_REASON_TO_HOLD[q.reason] || []) {
+      backedIdx = reasons.findIndex((r, i) => !claimed.has(i) && r.code === code);
+      if (backedIdx !== -1) break;
+    }
+    if (backedIdx !== -1) claimed.add(backedIdx);
+    groups.push({
+      kind: "group", key: `question:${q.question}`,
+      reasons: backedIdx !== -1 ? [reasons[backedIdx]] : [], unblocks: blockedJobs.length,
+      question: q.question,
+      headline: q.question,
+      detail: `One answer. It is also blocking ${blockedJobs.length - 1} other application${blockedJobs.length === 2 ? "" : "s"}, and is saved and reused verbatim on every form that asks it.`,
+      action: q.eligibility ? "Answer it — only you can state this" : "Answer once",
+      protective: true,
+    });
+  }
+
+  // ── 3. Everything else, in its own right ───────────────────────────────────────────────────
+  const singles = reasons
+    .map((r, i) => ({ r, i }))
+    .filter(({ i }) => !claimed.has(i))
+    .map(({ r }) => ({
+      kind: "single", key: `reason:${r.code}`, reasons: [r], unblocks: 1,
+      headline: r.obstacle, detail: r.detail && r.detail !== r.obstacle ? r.detail : null,
+      action: r.action, protective: r.protective,
+    }));
+
+  // Amortised actions first: they are worth the most per click, and that is the entire argument for
+  // separating them from the per-application list.
+  return [...groups.sort((a, b) => b.unblocks - a.unblocks), ...singles];
+}
+
+/**
+ * The short STATUS label and colour for one attempt — a single apply_run_jobs row.
+ *
+ * Distinct from describeApplication, which answers "what is in the way and what clears it" in a
+ * sentence. This answers "how did this attempt end" in one word, for a pill beside a timestamp.
+ * Both are needed and they are not the same question, but both are VOCABULARY, so both live here:
+ * the moment a component writes `status === "held_review" ? "Review" : …` inline, that mapping has
+ * a second copy and the surfaces can drift.
+ *
+ * held_gate reads as "Sign in", not "Review" and not "Failed". The portal wants an account or a
+ * CAPTCHA before it will take an application, so the next move is the candidate's and it is a
+ * specific one — a different message from "check these answers". Blue rather than amber for the
+ * same reason: nothing is wrong here.
+ *
+ * @param {string} status
+ * @param {string|null} accent  the theme's accent, for the one in-progress state that uses it
+ */
+export function attemptStatusChip(status, accent = null) {
+  const BY_STATUS = {
+    submitted:   { label: "Submitted", color: "#16a34a" },
+    held_review: { label: "Review",    color: "#d97706" },
+    held_gate:   { label: "Sign in",   color: "#2563eb" },
+    failed:      { label: "Failed",    color: "#dc2626" },
+    cancelled:   { label: "Aborted",   color: "#6b7280" },
+    running:     { label: "Running",   color: accent || "#2563eb" },
+    queued:      { label: "Queued",    color: "#6b7280" },
+  };
+  // An unknown status still renders — as itself, muted — rather than as a blank pill. A status this
+  // table has not met is a fact worth seeing, not one worth hiding.
+  return BY_STATUS[status] || { label: status || "—", color: "#6b7280" };
+}

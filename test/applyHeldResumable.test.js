@@ -359,13 +359,19 @@ test("the held card's action is the HANDOFF, not the review modal", () => {
 
 test("the screenshot survives as EVIDENCE, labelled as such, and is no longer the route", () => {
   // Requirement 4: distinguish evidence from action. It is still reachable — nothing is dropped.
-  assert.match(panel, /What we filled ↗/);
+  //
+  // Read across the panel AND its sections module. AC2 moved the modal's per-attempt row into
+  // AutoApplyPanelSections.jsx as AttemptRow when the modal was restructured; the label and the
+  // route beside it are unchanged, and this assertion is about the LABEL, not about which file
+  // renders it. Pinning it to one file made it fail on a move that changed nothing it cares about.
+  const surface = panel + "\n" + sections;
+  assert.match(surface, /What we filled ↗/);
   assert.match(sections, /"Screenshot of the form ↗" : "What we filled ↗"/);
-  assert.ok(!/>\s*Filled form ↗\s*</.test(panel),
+  assert.ok(!/>\s*Filled form ↗\s*</.test(surface),
     "a held application still offers 'Filled form ↗' as though the form could be reopened");
-  assert.match(panel, /it cannot be submitted from here/);
+  assert.match(surface, /it cannot be submitted from here/);
   // The action beside it is what actually continues the application.
-  assert.match(panel, /Open & fill ↗/);
+  assert.match(surface, /Open & fill ↗/);
 });
 
 test("reopening an abandoned handoff works for a held review too, not only for a gate", async () => {

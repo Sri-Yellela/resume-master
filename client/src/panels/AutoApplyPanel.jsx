@@ -1,13 +1,14 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../styles/theme.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { Z } from "../styles/zLayers.js";
 import {
-  describeApplication, groupByApplication, groupByCompany, splitByFault,
+  groupByApplication, groupByCompany, splitByFault, resolutionPlan,
 } from "../lib/applyObstacles.js";
 import {
   SectionHeading, ObstacleCard, ApplicationRow, PrerequisiteCards, ApplicationObstacleCard,
-  CompanyHeading,
+  CompanyHeading, AttemptRow,
 } from "./AutoApplyPanelSections.jsx";
 
 // ============================================================
@@ -203,6 +204,56 @@ export function AutoApplyPanel() {
   const scopedQuestions  = facet("questions")
     ? applyQuestions.filter(q => !byJob || (q.blocking || []).some(b => inScope(b.jobId, null)))
     : [];
+
+  // ── AC2: THE MODAL, AS COMPANY → APPLICATION → PROBLEMS ─────────────────────────────────────
+  //
+  // The same two functions the panel's own sections use, applied to whichever rows the popup is
+  // showing. That is the point of requirement 1: "the card summary already does this correctly; the
+  // modal must match it" — so this is not a second grouping, it is the same one.
+  //
+  // A RUN DETAIL is grouped too, not left as a flat list. The old code branched here and rendered
+  // run-job rows raw for a run, which meant one job attempted twice inside one run read as two
+  // applications on that surface while reading as one everywhere else. The per-attempt rows are
+  // preserved underneath each application, so nothing about a run has become less visible.
+  const modalApplications = groupByApplication(applyRunDetail ? applyRunDetail.jobs : scopedReviewJobs);
+  const modalCompanies    = groupByCompany(modalApplications);
+
+  // Which applications have their attempt list expanded. Keyed by the application key, so opening
+  // one does not open another's, and the state outlives the popup rather than dying with it —
+  // reopening the same application remembers what you were reading.
+  const [openAttempts, setOpenAttempts] = useState({});
+
+  /**
+   * AC2 requirement 2: this application's problems, with the CO-RESOLVABLE ones lifted out.
+   *
+   * Everything it needs is already computed by the server and already in this panel's hands —
+   * `applyGatePortals` is GET /api/apply/gate-packets' own per-origin grouping (the unit an
+   * activeTab grant is scoped to), and `applyQuestions` is GET /api/apply/questions' own cross-job
+   * deduplication. resolutionPlan CONSUMES both rather than re-deriving either; see the table there
+   * for exactly which holds can share one crossing and which cannot.
+   */
+  const planFor = (app) => resolutionPlan(app, {
+    portals: applyGatePortals, packets: applyHandoffPackets, questions: applyQuestions,
+  });
+
+  /** What an amortised action does when pressed. One per group KIND, and there are only two. */
+  const resolveGroup = (item, app) => {
+    if (item.kind !== "group") return;
+    if (item.origin) {
+      // The portal batch. Cross it via this application's own packet when there is one — that puts
+      // the user on the real form with the answers already prepared — and fall back to the batch
+      // view, which is what the panel's own portal card opens.
+      const packet = handoffPacketFor?.(app.primary?.row) || handoffPacketFor?.(app);
+      const portal = applyGatePortals.find(p => p.origin === item.origin);
+      if (packet && !packet.stale && !packet.postingGone) openHandoff(packet, app);
+      else if (portal) openPortalReview(portal);
+      return;
+    }
+    // The shared question. Its answer is stored by exact question text and reused on every form
+    // that asks it, so the questions facet is where it is answered — for all of them at once.
+    if (item.question) openFacet("questions", item.question);
+  };
+
   // No per-job retry endpoint exists — the only way to try again is a new run — so "Retry" puts the
   // job back on the queue and says so, rather than pretending to re-dispatch it.
   const retryJob = (job) => {
@@ -1014,7 +1065,7 @@ export function AutoApplyPanel() {
               {/* The guard reads the SCOPED feeds, not the whole ones: a popup scoped to one
                   application whose questions and approvals belong to other jobs would otherwise
                   render nothing at all and say nothing about it. */}
-              {(applyRunDetail ? applyRunDetail.jobs : scopedReviewJobs).length === 0 &&
+              {modalApplications.length === 0 &&
                (applyRunDetail || (scopedQuestions.length === 0 && scopedPending.length === 0)) && (
                 <div style={{ padding:"24px 0", textAlign:"center", color:theme.textMuted, fontSize:12 }}>
                   {applyRunDetail ? "No jobs in this run yet."
@@ -1022,184 +1073,74 @@ export function AutoApplyPanel() {
                     : "Nothing is waiting on you."}
                 </div>
               )}
-              {(applyRunDetail ? applyRunDetail.jobs : scopedReviewJobs).map(job => {
-                // held_gate reads as "Sign in", not "Review" and not "Failed". The portal wants an
-                // account or a CAPTCHA before it will take an application, so the next move is the
-                // candidate's and it is a specific one — which is a different message from "check
-                // these answers". Blue rather than amber for the same reason: nothing is wrong here.
-                const statusColor = job.status === "submitted" ? "#16a34a"
-                  : job.status === "held_review" ? "#d97706"
-                  : job.status === "held_gate" ? "#2563eb"
-                  : job.status === "failed" ? "#dc2626"
-                  : job.status === "running" ? theme.accent
-                  : theme.textMuted;
-                const statusLabel = job.status === "submitted" ? "Submitted"
-                  : job.status === "held_review" ? "Review"
-                  : job.status === "held_gate" ? "Sign in"
-                  : job.status === "failed" ? "Failed"
-                  : job.status === "running" ? "Running"
-                  : job.status === "queued" ? "Queued"
-                  : job.status || "—";
-                return (
-                  <div key={job.id} style={{
-                    border:`1px solid ${theme.border}`, borderRadius:6,
-                    padding:"10px 14px", display:"flex", flexDirection:"column", gap:5,
-                    background:theme.surfaceHigh,
-                  }}>
-                    {/* title / company / status */}
-                    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
-                      <div>
-                        {/* Falls back to the job id: a posting expired by the 7-day cleanup leaves
-                            the application behind, and a row identified by nothing at all is what
-                            made this list unreadable. */}
-                        <span style={{ fontWeight:700, fontSize:13, color:theme.text }}>
-                          {job.title || job.jobId || "—"}
-                        </span>
-                        {job.company && (
-                          <span style={{ fontSize:12, color:theme.textMuted, marginLeft:8 }}>{job.company}</span>
+
+              {/* ── AC2: COMPANY → APPLICATION → PROBLEMS ────────────────────────────────────
+                  The modal was a FLAT LIST OF PROBLEM-CARDS built from run-job rows. Two problems
+                  on one job rendered as two entries; a dead posting for an unrelated job sat
+                  between them wearing a "Review" pill and leading nowhere; and nothing on screen
+                  said which application was which.
+
+                  Requirement 1 says the modal must match the card summary, which already gets this
+                  right — so the modal does not re-describe it. It renders the SAME
+                  ApplicationObstacleCard the panel does, under the SAME CompanyHeading, grouped by
+                  the SAME groupByApplication / groupByCompany. There is one renderer, so the two
+                  surfaces cannot disagree about how many applications there are.
+
+                  The per-ATTEMPT rows the modal used to show at the top level are not lost: they
+                  are passed as children and sit behind each application's own disclosure. */}
+              {modalCompanies.map(({ company, items }) => (
+                <div key={`modal-${company}`} style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  <CompanyHeading company={company} count={items.length} theme={theme} />
+                  {items.map(app => {
+                    const packet = handoffPacketFor?.(app.primary?.row) || handoffPacketFor?.(app);
+                    const resumable = !!packet && !packet.postingGone && !packet.stale && !app.postingGone;
+                    const attemptsOpen = !!openAttempts[app.key];
+                    return (
+                      <ApplicationObstacleCard
+                        key={app.key}
+                        app={app}
+                        theme={theme}
+                        artifactUrl={artifactUrl}
+                        packet={packet}
+                        onRerun={rerunJob}
+                        // Same wiring as the panel's cards, and for the same reason (AC1): the
+                        // scoped handler, never the unscoped one. Inside a popup already scoped to
+                        // this application it re-scopes to itself, which is a no-op — but a no-op
+                        // is the correct behaviour, and reaching for `openEverything` here would
+                        // reintroduce exactly the defect AC1 removed, one surface along.
+                        onResolve={resumable ? () => openHandoff(packet, app) : openApplicationReview}
+                        resolveLabel={resumable ? "Open & fill" : "Open"}
+                        resolveTitle={resumable
+                          ? `Opens the application in your own browser and fills it with the ${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we already resolved. You review and submit.`
+                          : "Open this application's review — only this one"}
+                        // AC2 requirement 2. The co-resolvable problems, lifted out and counted.
+                        plan={planFor(app)}
+                        onGroupAction={(item) => resolveGroup(item, app)}
+                        // In the panel this opens the popup. Inside the popup there is nothing
+                        // further to open, so it toggles the attempts — and says which it is.
+                        detailsLabel={`${attemptsOpen ? "Hide" : "Show"} ${app.rows.length} attempt${app.rows.length === 1 ? "" : "s"}`}
+                        onDetails={() => setOpenAttempts(o => ({ ...o, [app.key]: !o[app.key] }))}
+                        onGenerateResume={app.primary?.row?.resumeAvailable ? null : generateResume}
+                      >
+                        {attemptsOpen && (
+                          <div style={{ display:"flex", flexDirection:"column", gap:6,
+                                        borderTop:`1px solid ${theme.border}`, paddingTop:8 }}>
+                            <div style={{ fontSize:9, fontWeight:800, letterSpacing:"0.08em",
+                                          textTransform:"uppercase", color:theme.textDim }}>
+                              Every attempt at this application
+                            </div>
+                            {app.rows.map(row => (
+                              <AttemptRow key={row.id} job={row} theme={theme}
+                                artifactUrl={artifactUrl} packetFor={handoffPacketFor}
+                                onHandoff={openHandoff} onRerun={rerunJob} />
+                            ))}
+                          </div>
                         )}
-                        {!job.title && job.jobId && (
-                          <span style={{ fontSize:10, color:theme.textDim, marginLeft:8 }}>
-                            (posting no longer on the board)
-                          </span>
-                        )}
-                      </div>
-                      <span style={{
-                        fontSize:10, fontWeight:700, padding:"2px 8px",
-                        borderRadius:999, background:`${statusColor}22`,
-                        color:statusColor, whiteSpace:"nowrap", flexShrink:0,
-                      }}>
-                        {statusLabel}
-                      </span>
-                    </div>
-                    {/* reason + ATS score */}
-                    {(job.reasonCode || job.atsScore != null) && (
-                      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-                        {/* The obstacle SENTENCE, from the shared vocabulary. This line used to be
-                            `job.reasonCode.replace(/_/g, " ")` — a raw code with its underscores
-                            swapped for spaces, so the modal said "ats below threshold" while the
-                            panel behind it said "Resume scored below your ATS threshold" for the
-                            same row. applyObstacles.js exists precisely so the two cannot disagree. */}
-                        {job.reasonCode && (() => {
-                          const d = describeApplication(job);
-                          return (
-                            <span style={{ fontSize:11, color:statusColor, fontWeight:600 }}>
-                              {d.obstacle}
-                              {d.detail && d.detail !== d.obstacle ? ` — ${d.detail}` : ""}
-                            </span>
-                          );
-                        })()}
-                        {job.atsScore != null && (
-                          <span style={{
-                            fontSize:10, fontWeight:700, padding:"1px 6px", borderRadius:999,
-                            background: job.atsScore >= 80 ? "#dcfce7" : job.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
-                            color: job.atsScore >= 80 ? "#166534" : job.atsScore >= 60 ? "#854d0e" : "#991b1b",
-                          }}>
-                            ATS {job.atsScore}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {/* timestamps */}
-                    {(job.startedAt || job.finishedAt) && (
-                      <div style={{ fontSize:10, color:theme.textDim }}>
-                        {job.startedAt && `Started ${new Date(job.startedAt).toLocaleTimeString()}`}
-                        {job.startedAt && job.finishedAt && " · "}
-                        {job.finishedAt && `Finished ${new Date(job.finishedAt).toLocaleTimeString()}`}
-                        {" · "}Attempts: {job.attemptCount || 1}
-                      </div>
-                    )}
-                    {/* What was actually sent. The audit trail has recorded the resume artifact and
-                        the end-of-attempt screenshot all along; nothing linked them, so there was
-                        no way to tell whether a resume had even been generated. */}
-                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-                      {job.resumeAvailable ? (
-                        <a href={artifactUrl(job.id, "resume")} target="_blank" rel="noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
-                                   border:`1px solid ${theme.border}`, background:theme.surface,
-                                   color:theme.text, textDecoration:"none", whiteSpace:"nowrap" }}>
-                          Resume PDF ↗
-                        </a>
-                      ) : (
-                        <span title="No resume artifact was recorded for this application."
-                          style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
-                                   background:`${theme.border}55`, color:theme.textDim, whiteSpace:"nowrap" }}>
-                          no resume generated
-                        </span>
-                      )}
-                      {/* EVIDENCE, NOT THE ROUTE (AB1 requirement 4). This is a screenshot of a form
-                          in a browser that closed when the run ended — it shows what we filled and
-                          it cannot be submitted. It used to be the only thing offered for a held
-                          application, which is why a hold was a dead end. Labelled for what it is,
-                          and the resume action below is what actually continues the application. */}
-                      {job.screenshotAvailable && (
-                        <a href={artifactUrl(job.id, "screenshot")} target="_blank" rel="noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          title="A picture of the form as we filled it. Evidence — it cannot be submitted from here."
-                          style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
-                                   border:`1px solid ${theme.border}`, background:theme.surface,
-                                   color:theme.textMuted, textDecoration:"none", whiteSpace:"nowrap" }}>
-                          What we filled ↗
-                        </a>
-                      )}
-                      {/* THE ROUTE. Present on every held row that has a prepared packet, so the
-                          list is not just readable but finishable. */}
-                      {(() => {
-                        if (!["held_review", "held_gate"].includes(job.status)) return null;
-                        const packet = handoffPacketFor?.(job);
-                        if (!packet) return null;
-                        // A posting that no longer exists is a STATE, not a disabled button
-                        // (requirement 6). There is no form to open and no run that would find one,
-                        // so nothing is offered — saying so is the whole affordance.
-                        if (packet.postingGone) {
-                          return (
-                            <span title="This posting was removed from the board. There is no application left to finish; the record of the attempt stays here."
-                              style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
-                                       background:`${theme.border}55`, color:theme.textDim, whiteSpace:"nowrap" }}>
-                              posting gone — cannot be resumed
-                            </span>
-                          );
-                        }
-                        const stale = packet.stale;
-                        return (
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              if (stale) rerunJob(job); else openHandoff(packet, job);
-                            }}
-                            title={stale
-                              ? "These answers were prepared too long ago to fill safely. A fresh run prepares new ones."
-                              : "Opens the real application in your own browser and fills it with the answers we prepared. You review and submit."}
-                            style={{ fontSize:10, fontWeight:800, padding:"2px 8px", borderRadius:999,
-                                     border: stale ? `1px solid ${theme.border}` : "none",
-                                     background: stale ? theme.surface : "#2563eb",
-                                     color: stale ? theme.text : "#fff", cursor:"pointer",
-                                     whiteSpace:"nowrap" }}>
-                            {stale ? "Run it again" : "Open & fill ↗"}
-                          </button>
-                        );
-                      })()}
-                      {job.status === "submitted" && (
-                        <span title={job.submitEvidence || ""}
-                          style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:999,
-                                   background: job.submitVerified ? "#16a34a22" : "#d9770622",
-                                   color: job.submitVerified ? "#16a34a" : "#d97706", whiteSpace:"nowrap" }}>
-                          {job.submitVerified ? "submission verified" : "unverified submit"}
-                        </span>
-                      )}
-                    </div>
-                    {/* apply URL */}
-                    {job.applyUrl && (
-                      <a href={job.applyUrl} target="_blank" rel="noopener noreferrer"
-                        onClick={e => e.stopPropagation()}
-                        style={{ fontSize:10, color:theme.accent, textDecoration:"none", wordBreak:"break-all" }}>
-                        {job.applyUrl.length > 90 ? job.applyUrl.slice(0, 90) + "…" : job.applyUrl}
-                      </a>
-                    )}
-                  </div>
-                );
-              })}
+                      </ApplicationObstacleCard>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
 
             {/* Logs section — run detail only */}

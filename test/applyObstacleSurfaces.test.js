@@ -319,8 +319,13 @@ test("the card names the application, and counts OBSTACLES rather than applicati
   assert.match(sections, /One application · \{app\.reasons\.length\} thing\{many \? "s" : ""\} to resolve/);
   assert.match(sections, /\{app\.company \|\| "Unknown company"\}/);
   assert.match(sections, /to resolve\s*\n\s*<\/span>/);
-  // Every obstacle is listed INSIDE the card.
-  assert.match(sections, /\{app\.reasons\.map\(\(r, i\) =>/);
+  // Every obstacle is listed INSIDE the card. AC2 put a `plan` in front of this list — the same
+  // problems with the co-resolvable ones lifted out — so the flat map is now the fallback arm and
+  // the panel's own cards still take it. Both arms are asserted, because dropping either would
+  // silently stop listing an application's problems on one of the two surfaces.
+  assert.match(sections, /: app\.reasons\.map\(\(r, i\) => \(/,
+    "the flat obstacle list is gone — the panel's own cards would list nothing");
+  assert.match(sections, /\{plan\s*$/m, "the grouped arm is gone — the modal would list nothing");
 });
 
 test("the needs-you count is in APPLICATIONS, not run-job rows", () => {
@@ -514,11 +519,25 @@ test("the obstacle vocabulary is the only place these sentences live", () => {
   // would drift — which is the class of bug the shared registry work has been closing all along.
   // The member list is not the point — that the panel READS the shared vocabulary is. Pinning the
   // exact list made this fail the moment the panel legitimately needed a second symbol from it.
-  assert.match(panel, /import \{[^}]*describeApplication[^}]*\} from "\.\.\/lib\/applyObstacles\.js"/);
-  assert.match(sections, /import \{ describeApplication, PREREQUISITE_LABELS \}/);
+  //
+  // Nor is WHICH symbol the point. AC2 moved the modal's per-attempt row into the sections module,
+  // and describeApplication went with it — the panel no longer calls it directly, and importing a
+  // symbol it does not use would be dead code added to satisfy a test. So the assertion is that
+  // the panel imports its vocabulary FROM applyObstacles.js and writes none of its own.
+  assert.match(panel, /import \{[\s\S]{0,200}?\} from "\.\.\/lib\/applyObstacles\.js"/);
+  assert.match(sections, /import \{[^}]*describeApplication[^}]*\} from "\.\.\/lib\/applyObstacles\.js"/);
   assert.ok(!/reasonCode === "/.test(panel),
     "the panel is branching on a reason code again — that belongs in applyObstacles.js");
   assert.ok(!/status === "held_review"/.test(sections),
-    "the row component is branching on a status again — it must ask describeApplication");
+    "the row component is branching on a status again — it must ask the shared vocabulary");
   assert.match(obstacles, /export function describeApplication/);
+  // The STATUS PILL is vocabulary too, and it is a different question from describeApplication's:
+  // "how did this attempt end" in one word, beside a timestamp, versus "what is in the way and what
+  // clears it" in a sentence. It was written inline in the modal as a chain of ternaries — a second
+  // copy of a mapping the rest of the app already had — so that surface said "Failed" where the
+  // panel behind it said "This one did not complete". It has a home now.
+  assert.match(obstacles, /export function attemptStatusChip/);
+  assert.match(sections, /attemptStatusChip\(job\.status, theme\.accent\)/);
+  assert.ok(!/status === "submitted" \? "Submitted"/.test(sections),
+    "the attempt row is writing its own status labels again");
 });
