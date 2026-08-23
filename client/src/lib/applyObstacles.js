@@ -22,6 +22,8 @@
 // application in two different ways.
 
 /** The four surfaces. Mirrors the server's partition in routes/apply.js's GET /api/apply/runs. */
+import { companyLabel } from "../../../shared/atsHosts.js";
+
 export const SECTION = {
   NEEDS_YOU: "needsYou",
   IN_FLIGHT: "inFlight",
@@ -341,7 +343,12 @@ export function groupByCompany(items = [], whenOf = (i) => i.when || i.finishedA
     // Applications whose posting has been cleaned up have no company. They are collected under one
     // honest heading rather than each becoming its own single-item company group, which would read
     // as a list of employers the user has never heard of.
-    const key = item.company || "";
+    //
+    // AE3: keyed on the LABEL, not the raw value, so everything unnameable collapses into that one
+    // group rather than a blank company and an ATS host each getting their own — two headings that
+    // would render identically and mean the same thing. companyLabel is idempotent, so the group's
+    // `company` can be rendered directly or passed through it again.
+    const key = companyLabel(item.company);
     if (!byCompany.has(key)) byCompany.set(key, { company: key, items: [], when: 0 });
     const g = byCompany.get(key);
     g.items.push(item);

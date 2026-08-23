@@ -97,7 +97,7 @@ test("AC3: all FOUR company groupings became tiles — none was left as a full-w
 });
 
 test("AC3 requirement 2: name, count, a compact application list, and a footer action row", () => {
-  assert.match(panel, /title=\{company \|\| "Posting no longer on the board"\}|company=\{company\}/);
+  assert.match(panel, /title=\{companyLabel\(company\)\}|company=\{company\}/);
   assert.match(panel, /meta=\{`\$\{items\.length\} application\$\{items\.length === 1 \? "" : "s"\} · \$\{toResolve\} thing/);
   assert.match(sections, /export function CompanyApplicationRow\(/);
   assert.match(sections, /\{app\.reasons\.length\} to resolve/);

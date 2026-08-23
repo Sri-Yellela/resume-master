@@ -41,6 +41,11 @@ const OUT_DIR = path.join(os.tmpdir(), 'ab-panel-ui');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 let failures = 0;
+// A tile with no employer. AE3 made groupByCompany key on the LABEL rather than the raw value, so
+// what used to arrive here as "" now arrives as "Unknown company" — the same fact, said out loud.
+// Both are accepted, so this reads as "no employer" rather than as one string's spelling.
+const noEmployer = (c) => !c || c === 'Unknown company';
+
 const check = (label, cond, extra = '') => {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${extra ? '  — ' + extra : ''}`);
   if (!cond) failures++;
@@ -192,6 +197,24 @@ for (let i = 0; i < 3; i++) {
     answerCount: 11, unresolvedCount: 2, resumeAvailable: true });
 }
 
+// ── AE3: THE ROW THAT PRODUCED "JOBS.ASHBYHQ.COM — 1 APPLICATION" ──────────────────────────────
+// The reported shape exactly: ONE application, at a DIRECT per-employer ATS host, held on a gate.
+// scraped_jobs.company says OpenAI and the card says OpenAI; the modal header said the host,
+// because openPortalReview labelled its scope by origin. A batch of one is also the case that makes
+// the substitution most obvious — there is exactly one employer it could have named.
+GATED.push({ id: 690, runId: 4, jobId: 'ashby-openai', company: 'OpenAI',
+  title: 'Software Engineer, Agent Productivity',
+  status: 'held_gate', reasonCode: 'captcha_required', startedAt: ago(3), finishedAt: ago(3),
+  attemptCount: 1, resumeAvailable: true, screenshotAvailable: true,
+  applyUrl: 'https://jobs.ashbyhq.com/openai/0432731c/application' });
+GATE_PACKETS.push({ packetId: 690, jobId: 'ashby-openai', runId: 4, runJobId: 690,
+  title: 'Software Engineer, Agent Productivity', company: 'OpenAI',
+  applyUrl: 'https://jobs.ashbyhq.com/openai/0432731c/application',
+  expectedOrigin: 'https://jobs.ashbyhq.com', gateReason: 'captcha_required',
+  createdAt: ago(3), kind: 'gate', ageMs: 3 * 3600_000, stale: false,
+  staleAfterMs: 259200000, postingGone: false,
+  answerCount: 4, unresolvedCount: 2, resumeAvailable: true });
+
 // Per-application review packets, so the held cards can offer AB1's handoff on screen. The OpenAI
 // one is fresh; the dead-posting one reports postingGone.
 const REVIEW_PACKETS = [
@@ -234,6 +257,9 @@ const FIXTURES = {
         count: 4, packetIds: [600, 601, 602, 603], oldestAt: ago(6), gateReasons: ['login_required'] },
       { origin: 'https://datadog.avature.net', host: 'datadog.avature.net',
         count: 3, packetIds: [650, 651, 652], oldestAt: ago(7), gateReasons: ['login_required'] },
+      // AE3. One application, one employer, a per-employer ATS host.
+      { origin: 'https://jobs.ashbyhq.com', host: 'jobs.ashbyhq.com',
+        count: 1, packetIds: [690], oldestAt: ago(3), gateReasons: ['captcha_required'] },
     ],
     packets: [...GATE_PACKETS, ...REVIEW_PACKETS],
   },
@@ -641,8 +667,30 @@ async function main() {
     check('AB2  and that card reports all THREE of its blocking reasons',
       openai[0]?.obstacles === 3 && /3 to resolve/.test(openai[0]?.text || ''),
       `obstacles=${openai[0]?.obstacles}, row says "${(openai[0]?.text || '').match(/\d+ to resolve/)?.[0]}"`);
+    // Scoped to APPLICATION cards. The AB2 defect was one job's three problems rendering as three
+    // cards each headed "1 APPLICATION" — a count of PROBLEMS presented as a count of applications.
+    // A portal card reading "1 application" is a different card and a true statement: there really
+    // is one application behind that portal, which is the case AE3's fixture adds. So the assertion
+    // is that no card in the APPLICATION listing makes the claim — not that the string is absent
+    // from the page, which would have made this check about the fixture rather than the defect.
+    const oneApplicationClaims = await page.evaluate(() => {
+      const hits = [];
+      for (const el of document.querySelectorAll('div')) {
+        if (!/\n1\nAPPLICATION\n/.test(el.innerText || '')) continue;
+        // The innermost element making the claim, so every ancestor up to <body> is not also counted.
+        if ([...el.querySelectorAll('div')].some(c => /\n1\nAPPLICATION\n/.test(c.innerText || ''))) continue;
+        hits.push({
+          portal: /sign in to|behind a CAPTCHA/i.test(el.innerText || ''),
+          text: (el.innerText || '').replace(/\n/g, ' | ').slice(0, 90),
+        });
+      }
+      return hits;
+    });
     check('AB2  no card claims to be "1 APPLICATION" beside a single job any more',
-      !/\n1\nAPPLICATION\n/.test(text), 'the per-problem count is gone');
+      oneApplicationClaims.every(h => h.portal),
+      oneApplicationClaims.length
+        ? oneApplicationClaims.map(h => `${h.portal ? 'portal' : 'APPLICATION CARD'}: ${h.text}`).join(' // ')
+        : 'the per-problem count is gone');
     // The COMPANY is on the tile and the ROLE is on the row inside it — that is the tier AC3 builds.
     // Read as a pair rather than off one element, or this stops covering anything the moment the
     // hierarchy changes shape again.
@@ -1139,11 +1187,12 @@ async function main() {
       held.map(t => `${t.company}@${t.left}x${t.top}:${t.width}`).join(' '));
     // Requirement 2: name, count, a compact list of its applications, a footer action row.
     const openaiTile = companyTiles.find(t => t.company === 'OpenAI' && t.section === 'needsReview');
-    // TWO now, not one: the PENDING tab is one day of one outcome, and OpenAI has both the held
-    // Staff Engineer and the running Security Engineer on it. The tile's claim is checked against
-    // what it actually contains a few lines above, so the number is not taken on trust.
+    // THREE now: the PENDING tab is one day of one outcome, and OpenAI has the held Staff Engineer,
+    // the running Security Engineer, and — since AE3 — the Ashby posting held on a gate. The tile's
+    // claim is checked against what it actually contains a few lines above, so it is not taken on
+    // trust: the extra row is a real third application, not a loosened number.
     check('AC3  a tile names the company and counts the applications needing action',
-      !!openaiTile && /OpenAI/.test(openaiTile.text) && /2 applications/.test(openaiTile.text),
+      !!openaiTile && /OpenAI/.test(openaiTile.text) && /3 applications/.test(openaiTile.text),
       (openaiTile?.text || 'no OpenAI tile').split('\n').slice(0, 3).join(' | '));
     check('AC3  and lists its applications compactly — role plus count to resolve',
       !!openaiTile && /Staff Engineer/.test(openaiTile.text) && /3 to resolve/.test(openaiTile.text),
@@ -1168,9 +1217,9 @@ async function main() {
     // PENDING by status and ABORTED in reality, and the override files it there. The tile-level
     // statement had to move with it: "held on purpose" is a claim about a tile nothing is holding.
     check('AC3  a tile whose postings were all cleaned up says THAT, not "held on purpose"',
-      abortedTilesAc3.some(t => !t.company && /posting gone/i.test(t.text)
+      abortedTilesAc3.some(t => noEmployer(t.company) && /posting gone/i.test(t.text)
                              && !/held on purpose/i.test(t.text)),
-      (abortedTilesAc3.find(t => !t.company)?.text || 'no such tile').split('\n').slice(0, 3).join(' | '));
+      (abortedTilesAc3.find(t => noEmployer(t.company))?.text || 'no such tile').split('\n').slice(0, 3).join(' | '));
     await selectTab('pending');
     await shot('ac3-company-tiles.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'ac3-company-tiles.png')}`);
@@ -1207,7 +1256,7 @@ async function main() {
     // posting is counted under ABORTED even though its STATUS is held_review.
     check('AD1  and the counts follow the partition, dead posting included',
       datedTabs.find(t => t.id === 'completed')?.count === '3'
-      && datedTabs.find(t => t.id === 'pending')?.count === '15'
+      && datedTabs.find(t => t.id === 'pending')?.count === '16'
       && datedTabs.find(t => t.id === 'aborted')?.count === '5',
       datedTabs.map(t => `${t.id}=${t.count}`).join(' '));
 
@@ -1564,6 +1613,52 @@ async function main() {
       `db "${dbShape.dateText}" ${dbShape.date?.h}px vs apply "${aaDated.dateText}" ${aaDated.date?.h}px`);
     await shot('ad1-side-by-side-autoapply-dated.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-side-by-side-autoapply-dated.png')}`);
+
+    // ── AE3: THE MODAL HEADER NAMES THE EMPLOYER, NOT THE ATS HOST ──────────────────────────
+    //
+    // Opened the way the user did: from the portal card, which is the only entry point whose unit is
+    // an origin and therefore the only one that ever named one. The assertion is on the RENDERED
+    // header text, because the defect was invisible to every existing check — the card three pixels
+    // above it said OpenAI throughout.
+    await page.goto(`${vite.url}/app/auto-apply`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.waitForFunction(
+      () => /ashbyhq\.com is behind a CAPTCHA/i.test(document.body.innerText), { timeout: 30000 });
+    await sleep(600);
+
+    const opened = await page.evaluate(() => {
+      // The portal card for the Ashby origin, found by its own headline, then ITS action button —
+      // not the first "Open them" on the page, which could belong to another card entirely.
+      const card = [...document.querySelectorAll('div')]
+        .filter(d => /ashbyhq\.com is behind a CAPTCHA/i.test(d.innerText || '')
+                  && [...d.querySelectorAll('button')].some(b => /open them/i.test(b.textContent || '')))
+        .sort((a, b) => a.innerText.length - b.innerText.length)[0];
+      const btn = card && [...card.querySelectorAll('button')]
+        .find(b => /open them/i.test(b.textContent || ''));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    check('AE3  the Ashby portal card offers its own action', opened);
+    await sleep(900);
+
+    const header = await page.evaluate(() => {
+      // The modal's own title, read from the overlay rather than from the page: the panel behind it
+      // legitimately contains the host, and matching the whole body would prove nothing.
+      const titles = [...document.querySelectorAll('div')]
+        .filter(d => getComputedStyle(d).textTransform === 'uppercase'
+                  && /— \d+ APPLICATION/i.test(d.innerText || ''));
+      return titles.length ? titles.sort((a, b) => a.innerText.length - b.innerText.length)[0].innerText.trim() : null;
+    });
+    console.log(`      modal header: ${JSON.stringify(header)}`);
+    check('AE3  the header names the EMPLOYER', /OPENAI/i.test(header || ''), header || '(no header)');
+    check('AE3  and never the ATS host',
+      !/ASHBYHQ|ASHBY\.COM|GREENHOUSE\.IO|MYWORKDAYJOBS/i.test(header || ''), header || '(no header)');
+    check('AE3  the count it was always right about is preserved',
+      /1 APPLICATION\b/i.test(header || ''), header || '(no header)');
+    await shot('ae3-modal-header.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ae3-modal-header.png')}`);
+    await page.keyboard.press('Escape').catch(() => {});
+    await sleep(300);
 
     if (process.env.AB_KEEP_OPEN) {
       console.log('\nAB_KEEP_OPEN set — leaving the browser open. Ctrl+C to finish.');

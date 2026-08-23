@@ -27,6 +27,7 @@ import { TileGrid } from "../components/ui/TileCard.jsx";
 // hand-assembles the three.)
 import { PanelSubTabs, PanelSearch, DateFilterButton } from "../components/ui/PanelControls.jsx";
 import { OUTCOME, OUTCOME_LABELS } from "../../../shared/applyOutcomeGroups.js";
+import { companyLabel, UNKNOWN_COMPANY } from "../../../shared/atsHosts.js";
 
 // ============================================================
 // AutoApplyPanel — the auto-apply pipeline, on its own tab
@@ -219,7 +220,7 @@ export function AutoApplyPanel() {
     // modal matches on either. Without this an unidentifiable application would scope to nothing and
     // the popup would come up empty.
     rowIds: (app.rows || []).map(r => r.id),
-    label: [app.company, app.title].filter(Boolean).join(" — ") || app.jobId || "This application",
+    label: [companyLabel(app.company), app.title].filter(Boolean).join(" — "),
   });
 
   /**
@@ -233,16 +234,48 @@ export function AutoApplyPanel() {
   const openCompanyReview = (company, items) => openScoped({
     jobIds: items.filter(a => a.jobId != null).map(a => String(a.jobId)),
     rowIds: items.flatMap(a => (a.rows || []).map(r => r.id)),
-    label: company || "Postings no longer on the board",
+    label: companyLabel(company),
   });
 
-  /** One PORTAL's applications — the batch is the point here, so the scope is the batch. */
-  const openPortalReview = (p) => openScoped({
-    jobIds: (applyHandoffPackets || [])
-      .filter(k => k.expectedOrigin === p.origin).map(k => String(k.jobId)),
-    rowIds: [],
-    label: `${p.host} — ${p.count} application${p.count === 1 ? "" : "s"}`,
-  });
+  /**
+   * One PORTAL's applications — the batch is the point here, so the scope is the batch.
+   *
+   * ── AE3: THE ATS HOST IS NOT THE EMPLOYER ───────────────────────────────────────────────────
+   * This label was `${p.host} — N applications`, which is how the modal came to be headed
+   * "JOBS.ASHBYHQ.COM — 1 APPLICATION" over a card that correctly said OpenAI. It was never a
+   * missing-company fallback: a portal is DEFINED by its origin, so the one entry point whose unit
+   * is an origin was the one that named an origin. Every other entry point — openApplicationReview,
+   * openCompanyReview — already labelled by company, which is why the sibling OpenAI application
+   * read correctly and this one did not. What put this row here at all was the false CAPTCHA (AE1);
+   * the label would have been just as wrong for a genuine gate.
+   *
+   * `jobs.ashbyhq.com` is a multi-tenant apply host serving hundreds of unrelated employers, so it
+   * does not identify anyone. The batch is named by the COMPANIES in it, which is the fact the user
+   * is actually looking for, with the host demoted to the parenthetical it is — a detail about where
+   * the sign-in happens, not a name.
+   */
+  const openPortalReview = (p) => {
+    const jobIds = (applyHandoffPackets || [])
+      .filter(k => k.expectedOrigin === p.origin).map(k => String(k.jobId));
+    // Company comes from the ROW (scraped_jobs.company, carried through the feeds), never from the
+    // URL. A packet knows an origin and a jobId; only the job knows who the employer is.
+    const ids = new Set(jobIds);
+    const companies = [...new Set(
+      [...applyGatedJobs, ...applyReviewJobs]
+        .filter(j => ids.has(String(j.jobId)))
+        .map(j => companyLabel(j.company))
+    )];
+    // Two employers behind one portal is the amortisation case and reads better as a count than as
+    // a list; one is named outright. UNKNOWN_COMPANY is what an unnameable employer gets — a
+    // hostname is never a display name.
+    const label = companies.length === 1 ? companies[0]
+      : companies.length > 1 ? `${companies.length} employers`
+      : UNKNOWN_COMPANY;
+    return openScoped({
+      jobIds, rowIds: [],
+      label: `${label} — ${p.count} application${p.count === 1 ? "" : "s"}`,
+    });
+  };
 
   /** One facet of the queue: the questions, or the approvals. */
   const openFacet = (only, label) => openScoped({ jobIds: [], rowIds: [], only, label });
@@ -365,7 +398,7 @@ export function AutoApplyPanel() {
   // job back on the queue and says so, rather than pretending to re-dispatch it.
   const retryJob = (job) => {
     addToApplyQueue({ jobId: job.jobId, company: job.company, title: job.title });
-    setApplyQueueMsg(`${job.company || "Job"} is back on the queue — press Autofill for Review to try again.`);
+    setApplyQueueMsg(`${companyLabel(job.company)} is back on the queue — press Autofill for Review to try again.`);
   };
   // The remedy for a STALE or unpreparable handoff (AB1 requirement 5): a fresh run, which produces
   // a fresh packet. Same mechanism as retryJob — there is no per-job re-dispatch endpoint, so it
@@ -373,7 +406,7 @@ export function AutoApplyPanel() {
   const rerunJob = (job) => {
     addToApplyQueue({ jobId: job.jobId, company: job.company, title: job.title });
     setHandoffMsg(null);
-    setApplyQueueMsg(`${job.company || "Job"} is queued for a fresh run — press Autofill for Review to prepare new answers.`);
+    setApplyQueueMsg(`${companyLabel(job.company)} is queued for a fresh run — press Autofill for Review to prepare new answers.`);
   };
 
   /**
@@ -391,7 +424,7 @@ export function AutoApplyPanel() {
   const generateResume = (job) => {
     addToApplyQueue({ jobId: job.jobId, company: job.company, title: job.title });
     setApplyQueueMsg(
-      `${job.company || "Job"} is queued — the next run generates a resume for it before it applies. ` +
+      `${companyLabel(job.company)} is queued — the next run generates a resume for it before it applies. ` +
       `Press Autofill for Review to start.`);
   };
 
@@ -846,7 +879,7 @@ export function AutoApplyPanel() {
                 meta={`${items.length} application${items.length === 1 ? "" : "s"} · ${toResolve} thing${toResolve === 1 ? "" : "s"} to resolve`}
                 footer={
                   <button onClick={() => openCompanyReview(company, items)}
-                    title={`Everything in the way of ${company || "these applications"}, in one list.`}
+                    title={`Everything in the way of ${companyLabel(company)}, in one list.`}
                     style={{ border: `1px solid ${theme.border}`, borderRadius: 6, padding: "6px 12px",
                              background: theme.surface, color: theme.text, fontWeight: 700,
                              fontSize: 11.5, cursor: "pointer" }}>
@@ -1118,7 +1151,7 @@ export function AutoApplyPanel() {
                                                      display:"flex", flexDirection:"column", gap:6 }}>
                         <div style={{ display:"flex", alignItems:"flex-start", gap:8, flexWrap:"wrap" }}>
                           <span style={{ fontSize:12, fontWeight:700, color:theme.text, flex:1, minWidth:200 }}>
-                            {p.company || "Unknown company"}
+                            {companyLabel(p.company)}
                             {p.title ? <span style={{ color:theme.textMuted, fontWeight:600 }}> — {p.title}</span> : null}
                           </span>
                           {/* A guess is the thing worth a human's attention; an exact mapping is not. */}

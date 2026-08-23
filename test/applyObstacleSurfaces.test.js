@@ -130,7 +130,9 @@ test("every section groups by COMPANY — seven roles at one employer belong tog
   // than each becoming its own group of employers the user has never heard of.
   const anon = groupByCompany([{ company: null, finishedAt: 1 }, { company: "", finishedAt: 2 }]);
   assert.equal(anon.length, 1);
-  assert.match(sections, /Posting no longer on the board/);
+  // AE3: the string moved into shared/atsHosts.js, which is now the ONE place a company becomes
+  // display text — so an unnameable employer and an ATS host cannot be labelled differently.
+  assert.match(sections, /\{companyLabel\(company\)\}/);
 });
 
 test("a missing resume is a BUTTON, and only where a resume is the problem (requirement 5)", () => {
@@ -351,7 +353,7 @@ test("the card names the application, and counts OBSTACLES rather than applicati
   // A big "1" beside three separate cards is what made one job look like three.
   assert.match(sections, /export function ApplicationObstacleCard/);
   assert.match(sections, /One application · \{app\.reasons\.length\} thing\{many \? "s" : ""\} to resolve/);
-  assert.match(sections, /\{app\.company \|\| "Unknown company"\}/);
+  assert.match(sections, /\{companyLabel\(app\.company\)\}/);
   assert.match(sections, /to resolve\s*\n\s*<\/span>/);
   // Every obstacle is listed INSIDE the card. AC2 put a `plan` in front of this list — the same
   // problems with the co-resolvable ones lifted out — so the flat map is now the fallback arm and

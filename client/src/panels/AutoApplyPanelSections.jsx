@@ -10,6 +10,7 @@
 import { useTheme } from "../styles/theme.jsx";
 import { describeApplication, attemptStatusChip, PREREQUISITE_LABELS } from "../lib/applyObstacles.js";
 import { TileCard, TilePill } from "../components/ui/TileCard.jsx";
+import { companyLabel } from "../../../shared/atsHosts.js";
 // AD1: OUTCOME_LABELS moved to AutoApplyPanel with the groups themselves — they name the SUB-TABS
 // now, and nothing in this module reads them. The partition still lives in shared/ because
 // routes/apply.js groups rows with it; a copy on each side is how the two come to disagree.
@@ -116,9 +117,11 @@ export function CompanyHeading({ company, count, theme }) {
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
       <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.04em",
                      textTransform: "uppercase", color: theme.textMuted }}>
-        {/* A posting removed by the cleanup leaves an application with no employer. Said plainly,
-            rather than rendered as a blank heading. */}
-        {company || "Posting no longer on the board"}
+        {/* A posting removed by the cleanup leaves an application with no employer, and so does a
+            row whose only identifying data is an ATS host. Both are said plainly — companyLabel is
+            the ONE place a company becomes display text, which is what makes "an ATS host can never
+            appear as a company name" (AE3) a property rather than a promise about call sites. */}
+        {companyLabel(company)}
       </span>
       {count > 1 && (
         <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 999,
@@ -190,7 +193,7 @@ export function ApplicationObstacleCard({
           </div>
           {/* THE APPLICATION, named. */}
           <div style={{ fontSize: 14, fontWeight: 800, color: theme.text, lineHeight: 1.35 }}>
-            {app.company || "Unknown company"}
+            {companyLabel(app.company)}
             {app.title && <span style={{ color: theme.textMuted, fontWeight: 600 }}> — {app.title}</span>}
             {!app.title && app.jobId && (
               <span style={{ fontSize: 10, color: theme.textDim, fontWeight: 600 }}> · {app.jobId}</span>
@@ -428,7 +431,7 @@ export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOp
                   display: "flex", flexDirection: "column", gap: 5 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12.5, fontWeight: 700, color: theme.text }}>
-          {job.company || "Unknown company"}
+          {companyLabel(job.company)}
         </span>
         <span style={{ fontSize: 11.5, color: theme.textMuted, flex: 1, minWidth: 120 }}>
           {job.title || job.jobId || "—"}
@@ -916,7 +919,8 @@ export function CompanyApplicationRow({
 /**
  * ONE COMPANY, as a tile in the Job Profiles idiom (AC3).
  *
- * @param {string}   company   the employer, or "" for applications whose posting was cleaned up
+ * @param {string}   company   the employer, already through companyLabel by groupByCompany (AE3),
+ *                             so it is a real name or UNKNOWN_COMPANY — never blank, never a host
  * @param {Array}    items     what to list inside — grouped applications, or raw rows
  * @param {function} children  the rendered list
  * @param {string}   section   which outcome section this tile belongs to, for the DOM checks
@@ -934,7 +938,7 @@ export function CompanyTile({
       data={{ tile: "company", company: company || "", section, apps: count }}
       // A posting removed by the 7-day cleanup leaves an application with no employer. Said
       // plainly, rather than rendered as a blank tile title — the same sentence CompanyHeading used.
-      title={company || "Posting no longer on the board"}
+      title={companyLabel(company)}
       pill={pillText ? <TilePill tone={tone}>{pillText}</TilePill> : null}
       meta={meta}
       // No `body`: the profile card's body is a summary line above the inset, and a company tile's
