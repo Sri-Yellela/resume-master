@@ -23,6 +23,9 @@ import {
   describeApplication, sectionFor, boardApplicationChip, groupByApplication, groupByCompany,
   splitByFault, SECTION, PREREQUISITE_LABELS,
 } from "../client/src/lib/applyObstacles.js";
+// AD1: the outcome partition itself, so the sub-tab assertions read the shared source of truth
+// rather than three literal words that could drift from what routes/apply.js files rows under.
+import { OUTCOME, OUTCOME_LABELS } from "../shared/applyOutcomeGroups.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const panel = read("client/src/panels/AutoApplyPanel.jsx");
@@ -34,32 +37,57 @@ const applyRoute = read("routes/apply.js");
 
 // ── The four surfaces ────────────────────────────────────────────────────────────────────────
 
-test("the panel is organised around OUTCOME: three sections, plus progress (AB4)", () => {
-  // Was ["Needs you", "In flight", "Submitted", "Stopped"]. AB4 restructures the outcomes into
-  // three — NEEDS REVIEW, SUBMITTED, PROBLEMS — and "Stopped" is gone as a heading because it put
-  // "we protected you" and "this failed" under one word, which is the flattening this line of work
-  // exists to undo. PROBLEMS keeps both but separates and labels them.
-  for (const heading of ["Needs review", "Submitted", "Problems"]) {
-    assert.ok(new RegExp(`SectionHeading[^>]*>\\s*${heading}\\s*<`).test(panel),
-      `the "${heading}" section is missing from the panel`);
-  }
-  // IN FLIGHT is NOT an outcome — a queued application is neither submitted, nor waiting on the
-  // user, nor broken — so it is not a fourth outcome section. It still has to exist: dropping it
-  // would lose a capability.
-  assert.match(panel, /SectionHeading[^>]*>\s*In flight\s*</);
+test("the panel is organised around OUTCOME: three SUB-TABS, plus progress (AB4 -> AD1)", () => {
+  // Was ["Needs you", "In flight", "Submitted", "Stopped"], then AB4's three SECTIONS stacked down
+  // the page. AD1 keeps the three outcomes and changes only how you reach one: they are SUB-TABS
+  // over a dated listing, in the Database panel's layout, so the page is ONE listing rather than
+  // three stacked ones plus a run history underneath showing the same rows a second time.
+  //
+  // RE-PINNED, NOT DELETED. What is being asserted — the panel is organised around three outcomes,
+  // progress is not a fourth, and "Stopped" as one flattening word does not come back — is exactly
+  // what it was. The three headings became three tabs whose labels come from OUTCOME_LABELS, the
+  // same shared partition routes/apply.js files rows with; re-asserting the literal words here
+  // would recreate the drift that partition exists to prevent.
+  assert.match(panel, /<PanelSubTabs/);
+  assert.match(panel, /\[OUTCOME\.COMPLETED, OUTCOME\.PENDING, OUTCOME\.ABORTED\]\.map/);
+  assert.match(panel, /label: OUTCOME_LABELS\[g\]\.label\.toUpperCase\(\)/);
+  assert.deepEqual(
+    [OUTCOME.COMPLETED, OUTCOME.PENDING, OUTCOME.ABORTED].map(g => OUTCOME_LABELS[g].label),
+    ["Completed", "Pending", "Aborted"]);
+  // Held-on-purpose vs broke lives INSIDE aborted, still separated and still labelled.
+  assert.match(panel, /These broke —/);
+  assert.match(panel, /Held on purpose —/);
   assert.ok(!/SectionHeading[^>]*>\s*Stopped\s*</.test(panel),
     "the Stopped heading is back — it collapses held-on-purpose into failed");
-  // Each section still carries its own count.
-  for (const c of [/count=\{needsYouCount\}/, /count=\{applySubmitted\.length\}/,
-                   /count=\{applyStopped\.length\}/, /count=\{applyInFlight\.length\}/]) {
-    assert.match(panel, c);
-  }
+  // IN FLIGHT is NOT an outcome — a queued application is neither submitted, nor waiting on the
+  // user, nor broken — so it is not a fourth tab. It still has to exist: dropping it would lose a
+  // capability, at the moment a user most needs it (a run they just started).
+  assert.match(panel, /SectionHeading[^>]*>\s*In flight\s*</);
+  assert.match(panel, /count=\{applyInFlight\.length\}/);
+  assert.match(panel, /count=\{needsYouCount\}/);
+  // The counts that sat on the SUBMITTED and PROBLEMS headings are the sub-tab count pills now, and
+  // AD1 requirement 4 scopes them to the SELECTED DATE — with the label beside them saying so,
+  // which is what makes the choice unambiguous rather than the number.
+  assert.match(panel, /count: historyDate && history\?\.counts \? \(history\.counts\[g\] \?\? 0\) : null/);
+  assert.match(panel, /Counts are for \$\{localDateLabel\(historyDate\)\}/);
+  assert.match(panel, /"Pick a date to see counts"/);
 });
 
 test("PROBLEMS keeps 'we protected you' distinguishable from 'this failed'", () => {
   // The requirement is explicit that the HELD ON PURPOSE copy is right and must stay visible,
   // because the two need different affordances and produce different feelings.
-  assert.match(panel, /const stoppedSplit = splitByFault\(applyStopped\)/);
+  // RE-PINNED FOR AD1: splitByFault is applied to the DAY'S aborted rows rather than to the
+  // cross-run `applyStopped` feed, because the ABORTED tab is one day of one outcome. The split
+  // itself, and the two labelled halves it produces, are unchanged — which is the point.
+  assert.match(panel, /const listedSplit\s+= splitByFault\(listedJobs\)/);
+  // And the distinction is visible WITHOUT OPENING ANYTHING: two headings, two tones, two pills.
+  assert.match(panel, /pillText="did not complete"/);
+  // The held pill is CONDITIONAL, and that is AC3's rule surviving into the ABORTED tab rather than
+  // a weakening of this one: a tile whose postings the 7-day cleanup removed is not "held on
+  // purpose", because nothing is holding it and there is nothing left to hold. A dead posting is
+  // filed under ABORTED by the override, so this is where such a tile now lands.
+  assert.match(panel, /pillText=\{allGone \? "posting gone" : "held on purpose"\}/);
+  assert.match(panel, /const allGone = items\.every\(j => j\.postingGone\)/);
   assert.match(panel, /These broke —/);
   assert.match(panel, /Held on purpose —/);
   assert.match(panel, /Nothing went wrong with these/);
@@ -75,10 +103,16 @@ test("PROBLEMS keeps 'we protected you' distinguishable from 'this failed'", () 
 });
 
 test("every section groups by COMPANY — seven roles at one employer belong together", () => {
-  assert.match(panel, /const heldByCompany      = groupByCompany\(heldApplications\)/);
-  assert.match(panel, /const submittedByCompany = groupByCompany\(applySubmitted\)/);
-  assert.match(panel, /groupByCompany\(stoppedSplit\.broke\)/);
-  assert.match(panel, /groupByCompany\(stoppedSplit\.held\)/);
+  // RE-PINNED FOR AD1. The four cross-run groupings became three per-tab ones over the same day's
+  // rows — the sections they fed are sub-tabs now — and the RULE is identical in each: company over
+  // application. Note that PENDING groups by APPLICATION first (AB2: three held run-job rows for one
+  // posting are one card, not three) while COMPLETED and ABORTED group the raw rows, because a
+  // submitted attempt and a failed attempt are each their own event, and collapsing two of them
+  // would hide one of the two things that actually happened.
+  assert.match(panel, /const listedByCompany\s+= groupByCompany\(groupByApplication\(listedJobs\)\)/);
+  assert.match(panel, /const listedFlatByCompany = groupByCompany\(listedJobs\)/);
+  assert.match(panel, /groupByCompany\(listedSplit\.broke\)/);
+  assert.match(panel, /groupByCompany\(listedSplit\.held\)/);
   assert.match(sections, /export function CompanyHeading/);
 
   const g = groupByCompany([
@@ -501,7 +535,15 @@ test("every capability of the old strip survived the reorganisation", () => {
     ["the queue's tier notice", /automationTier === "account"/],
     ["the CAPTCHA warning",     /automationTier === "gated"/],
     ["queue removal",           /removeFromApplyQueue\(job\.jobId\)/],
-    ["run history",             /Run history/],
+    // AD1 REMOVED THE SEPARATE RUN-HISTORY SURFACE and dated navigation supersedes it: the calendar
+    // is the panel's primary navigation and the three outcome groups are its sub-tabs, so a second
+    // dated view underneath would have been the same rows twice. The CAPABILITY — "what did I put
+    // into auto-apply on this day, and how did each one end" — is what this list is for, and it is
+    // now the panel's whole body rather than a section at the bottom of it.
+    ["dated navigation",        /onChange=\{\(iso\) => loadHistory\(iso, historyGroup\)\}/],
+    ["the three outcome tabs",  /active=\{historyGroup\}/],
+    ["abort, on the listing",   /const abortApplication = \(app\) =>/],
+    ["soft delete",             /const hideApplication  = \(app\) =>/],
     // AC4 replaced the run-history CHIP LIST with a dated view, so the assertion that used to pin
     // `loadApplyRunDetail(run.id)` — the chip's own onClick — no longer describes anything that
     // exists. The CAPABILITY is what matters and it survives in two places: every application row

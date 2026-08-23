@@ -287,10 +287,18 @@ const FIXTURES = {
   ],
 };
 
-// ── AC4: the dated run history ───────────────────────────────────────────────────────────────
+// ── AC4 / AD1: the dated listing, which IS the panel's body now ────────────────────────
 //
-// Two days in the CURRENT month, because the picker opens on today. One has activity across all
-// three outcome groups; the other has none, which is requirement 6's normal-not-an-error state.
+// AD1 promoted AC4's three outcome groups to SUB-TABS and made the dated listing the panel's whole
+// body, so this fixture stopped being a small extra surface and became the thing every check below
+// reads. Two days in the CURRENT month, because the picker opens on today: one with activity across
+// all three groups, one with none, which is requirement 7's normal-not-an-error state.
+//
+// THE PENDING GROUP CARRIES THE WHOLE BUG-REPORT SHAPE, deliberately. The AB2 / AB3 / AC1 / AC2 /
+// AC3 defects all live on HELD applications, and held applications now render in the PENDING tab of
+// this listing rather than in a cross-run section — so if this fixture did not serve them, those
+// checks would pass over an empty page, which is precisely the failure mode this harness exists to
+// prevent. They are the SAME row objects those checks already assert on.
 const dayIso = (d) => {
   const n = new Date();
   return new Date(n.getFullYear(), n.getMonth(), d).toISOString().slice(0, 10);
@@ -298,31 +306,42 @@ const dayIso = (d) => {
 const HISTORY_DAY = dayIso(10);
 const EMPTY_DAY   = dayIso(11);
 
+const withAbort = (jobs, can) => jobs.map(j => ({ ...j, abortable: can, postingGone: false }));
+
 /** The mapping, in data: one of each kind, including the DEAD POSTING that makes a pending row aborted. */
-const HISTORY_PAYLOAD = {
-  date: HISTORY_DAY,
-  total: 6,
-  completed: [{ ...SUBMITTED[0], abortable: false, postingGone: false }],
+const HISTORY_GROUPS = {
+  completed: withAbort(SUBMITTED, false),
+  // Held and gated rows are PENDING by status. The dead posting is NOT here — the override moves it.
   pending: [
-    { ...IN_FLIGHT[0], abortable: true, postingGone: false },
-    { ...ANTHROPIC_HELD[0], abortable: true, postingGone: false },
+    ...withAbort(IN_FLIGHT, true),
+    ...withAbort([...ANTHROPIC_HELD, ...OPENAI_HELD, ...VERCEL_NO_PACKET], true),
+    ...withAbort(GATED, true),
   ],
   aborted: [
-    { ...STOPPED[0], abortable: false, postingGone: false },
+    ...withAbort(STOPPED.slice(0, 3), false),
     // status 'dismissed' with reason_code 'rejected' is what POST /api/apply/reject actually
-    // writes. The old fixture used 'rejected' as a STATUS, which the server never writes — which
+    // writes. An older fixture used 'rejected' as a STATUS, which the server never writes — which
     // is how the vocabulary gap in BY_STATUS went unnoticed until AC4's mapping forced it out.
     { ...STOPPED[3], status: 'dismissed', reasonCode: 'rejected', abortable: false, postingGone: false },
+    // HELD BY STATUS, ABORTED IN REALITY. The one non-status input, and the row that proves the
+    // server is not simply filtering on the group's statuses.
     { ...DEAD_POSTING[0], status: 'held_review', abortable: false, postingGone: true },
   ],
 };
+const HISTORY_COUNTS = { completed: 0, pending: 0, aborted: 0 };
 
 /** Requirement 7: which days are dotted. Same month the picker opens on. */
-const HISTORY_MONTHS = { days: { [HISTORY_DAY]: 6, [dayIso(3)]: 2 } };
+const HISTORY_MONTHS = { days: { [HISTORY_DAY]: 11, [dayIso(3)]: 2 } };
 
 /** Every request the page made for history, so requirement 2 can be checked on the NETWORK. */
 const historyRequests = [];
 const abortCalls = [];
+const deleteCalls = [];
+/** The counts follow the rows, or a pill would keep claiming a row that moved to another tab. */
+function recount() {
+  for (const g of ['completed', 'pending', 'aborted']) HISTORY_COUNTS[g] = HISTORY_GROUPS[g].length;
+}
+recount();
 /** Anything not named above answers with a benign empty shape rather than a 404 storm. */
 const FALLBACK = { ok: true, jobs: [], items: [], results: [], data: [], count: 0, total: 0 };
 
@@ -384,9 +403,19 @@ async function main() {
       if (url.pathname === '/api/apply/history') {
         historyRequests.push(url.pathname + url.search);
         const asked = url.searchParams.get('date');
-        const body = asked === HISTORY_DAY
-          ? HISTORY_PAYLOAD
-          : { date: asked, total: 0, completed: [], pending: [], aborted: [] };
+        const group = url.searchParams.get('group');
+        const live  = asked === HISTORY_DAY;
+        // AD1: ONE GROUP'S ROWS PLUS ALL THREE COUNTS, which is exactly what the real endpoint
+        // answers a ?group request with. Serving all three here would let "it must not load all
+        // three" pass against a client that in fact loads all three.
+        const counts = live ? { ...HISTORY_COUNTS } : { completed: 0, pending: 0, aborted: 0 };
+        const total  = counts.completed + counts.pending + counts.aborted;
+        const body = group
+          ? { date: asked, group, jobs: live ? (HISTORY_GROUPS[group] || []) : [], counts, total }
+          : { date: asked, counts, total,
+              completed: live ? HISTORY_GROUPS.completed : [],
+              pending:   live ? HISTORY_GROUPS.pending   : [],
+              aborted:   live ? HISTORY_GROUPS.aborted   : [] };
         return req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
       }
       if (url.pathname.startsWith('/api/apply/history/months')) {
@@ -395,8 +424,34 @@ async function main() {
       }
       if (/\/api\/apply\/run-jobs\/\d+\/abort$/.test(url.pathname)) {
         abortCalls.push(url.pathname);
+        const id = Number(url.pathname.split('/')[4]);
+        // The abort really MOVES the row, in the fixture as on the server: it leaves PENDING and
+        // arrives in ABORTED as `cancelled`. Answering OK while leaving the row where it was would
+        // let "aborting stops it" pass against a panel that never refetched.
+        const row = HISTORY_GROUPS.pending.find(j => j.id === id);
+        if (row) {
+          HISTORY_GROUPS.pending = HISTORY_GROUPS.pending.filter(j => j.id !== id);
+          HISTORY_GROUPS.aborted = [{ ...row, status: 'cancelled', reasonCode: 'user_aborted',
+                                      abortable: false }, ...HISTORY_GROUPS.aborted];
+          recount();
+        }
         return req.respond({ status: 200, contentType: 'application/json',
           body: JSON.stringify({ ok: true, status: 'cancelled', packetsVoided: 1 }) });
+      }
+      // SOFT DELETE. The row is hidden, and the fixture hides it — so "it does not return on
+      // refetch" is a claim about what the NEXT FETCH answers rather than about the DOM immediately
+      // after the click, which would pass for a panel that only removed it locally.
+      if (req.method() === 'DELETE' && /\/api\/apply\/run-jobs\/\d+$/.test(url.pathname)) {
+        const id = Number(url.pathname.split('/').pop());
+        deleteCalls.push(id);
+        let wasPending = false;
+        for (const g of ['completed', 'pending', 'aborted']) {
+          if (g === 'pending' && HISTORY_GROUPS[g].some(j => j.id === id)) wasPending = true;
+          HISTORY_GROUPS[g] = HISTORY_GROUPS[g].filter(j => j.id !== id);
+        }
+        recount();
+        return req.respond({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ ok: true, hidden: true, abortedFirst: wasPending }) });
       }
       const body = FIXTURES[url.pathname] ?? FALLBACK;
       req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -417,11 +472,153 @@ async function main() {
       served.has('/api/apply/runs') && served.has('/api/apply/gate-packets'),
       [...served].join(' '));
 
-    const text = await page.evaluate(() => document.body.innerText);
+    // `text` is captured AFTER the date is picked (see the AD1 resting-state block below):
+    // every AB2 / AB3 / AC1 check below reads the PENDING listing, which does not exist until
+    // then. Reading it here would have made those checks pass over an empty page.
     const shot = (name) => page.screenshot({ path: path.join(OUT_DIR, name), fullPage: true });
 
     await shot('panel.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'panel.png')}\n`);
+
+    // ── AD1: THE RESTING STATE ──────────────────────────────────────────────────────────────
+    //
+    // The panel now opens as a sub-tab row over a control row over NOTHING, and the first check is
+    // the one AD1 is most explicit about. It is a NETWORK check rather than a DOM one: "Initial
+    // render issues NO listing query — verify in the network tab." The only honest way to verify
+    // that is to watch what the page asked for.
+    console.log('── AD1: the resting state — no listing query, no counts, three tabs ──');
+
+    const restingText = await page.evaluate(() => document.body.innerText);
+
+    check('AD1  the panel\'s initial render issues NO listing request',
+      ![...served].some(p => p.startsWith('/api/apply/history')),
+      `history paths requested on load: ${[...served].filter(p => p.startsWith('/api/apply/history')).join(', ') || 'none'}`);
+
+    const restingTabs = await page.evaluate(() => [...document.querySelectorAll('[data-rm-subtab]')]
+      .map(b => ({ id: b.dataset.rmSubtab, active: b.dataset.rmSubtabActive === '1',
+                   count: b.querySelector('[data-rm-subtab-count]')?.innerText ?? null,
+                   label: b.innerText.trim() })));
+    check('AD1  three sub-tabs, in the requirement\'s order',
+      restingTabs.map(t => t.id).join(',') === 'completed,pending,aborted',
+      restingTabs.map(t => t.label.replace(/\n/g, ' ')).join(' | ') || 'no sub-tabs rendered');
+    // Requirement 5: PENDING is the actionable tab, so it is where you land — burying it behind
+    // COMPLETED repeats the mistake AB4 fixed by putting NEEDS REVIEW first.
+    check('AD1  PENDING is the tab you land on',
+      restingTabs.find(t => t.active)?.id === 'pending',
+      `active: ${restingTabs.find(t => t.active)?.id || 'none'}`);
+    // Requirement 4: date-scoped counts, so before a date is chosen there is no number to show —
+    // a "0" would be a claim about a day the user has not named — and the label says so.
+    check('AD1  no counts before a date is picked, and the label SAYS which scope they are',
+      restingTabs.every(t => t.count === null) && /Pick a date to see counts/i.test(restingText),
+      `counts: ${restingTabs.map(t => `${t.id}=${t.count}`).join(' ')}`);
+    check('AD1  the resting state says to pick a date, rather than spinning',
+      /Pick a date to see the applications you added to auto-apply that day/i.test(restingText)
+      && !/Loading…/.test(restingText),
+      (restingText.match(/Pick a date[^\n]*/i) || ['absent'])[0]);
+    const restingEmpty = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-rm-empty]')].map(e => e.dataset.rmEmpty));
+    check('AD1  and it reports WHICH emptiness it is — "no date", not a blank',
+      restingEmpty.join(',') === 'no-date', restingEmpty.join(',') || 'no empty state rendered');
+    check('AD1  the separate run-history surface is gone as an organising idea',
+      !/RUN HISTORY/i.test(restingText),
+      'dated navigation supersedes it — the calendar IS the navigation now');
+    // THE STANDING WORK is not behind the date picker: a portal batch releases applications queued
+    // across many days, so filing it under one day would file it under a day that is not true of it.
+    check('AD1  the portal batches are visible WITHOUT a date — they are not date-scoped',
+      /Sign in to salesforce\.wd1\.myworkdayjobs\.com once/.test(restingText)
+      && /4 applications ready/.test(restingText),
+      'one action unblocking many is still the hero, and still reachable on arrival');
+    await shot('ad1-resting.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-resting.png')}`);
+
+    // Opening the CALENDAR may fetch markers — a user action, not the initial render, which is
+    // exactly the condition requirement 7 allows it on.
+    const openedCal = await page.evaluate(() => {
+      const btn = document.querySelector('[data-rm-date-filter]');
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    check('AD1  the control row offers the Database panel\'s date filter', openedCal);
+    await sleep(700);
+    const cal = await page.evaluate(() => {
+      const el = document.querySelector('[data-rm-calendar="1"]');
+      if (!el) return null;
+      return {
+        marked: [...el.querySelectorAll('[data-rm-marked]')]
+          .filter(d => d.dataset.rmMarked).map(d => d.dataset.rmDay),
+        days: [...el.querySelectorAll('[data-rm-day]')].filter(d => d.dataset.rmDay).length,
+      };
+    });
+    check('AD1  it is the DATABASE PANEL\'S calendar, not a second date picker',
+      !!cal && cal.days >= 28, cal ? `${cal.days} day cells` : 'no calendar rendered');
+    check('AD1  dates WITH activity are marked, so the user is not hunting blindly',
+      !!cal && cal.marked.length > 0, `marked: ${(cal?.marked || []).join(', ') || 'none'}`);
+    check('AD1  the marker query fires on OPENING the calendar, not on the first render',
+      [...served].some(p => p.startsWith('/api/apply/history/months')),
+      'requirement 7, inside requirement 3');
+    await shot('ad1-calendar.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-calendar.png')}`);
+
+    // PICK THE DAY. Everything below reads the listing this produces — which is the restructure:
+    // held applications are no longer a cross-run section, they are the PENDING tab of one day.
+    const picked = await page.evaluate((day) => {
+      const cell = document.querySelector(`[data-rm-calendar="1"] [data-rm-day="${day}"]`);
+      if (!cell) return false;
+      cell.click();
+      return true;
+    }, HISTORY_DAY);
+    check('AD1  a date can be selected', picked, HISTORY_DAY);
+    await sleep(1000);
+
+    const dayRequests0 = historyRequests.filter(u => u.startsWith('/api/apply/history?'));
+    check('AD1  selecting a date issues ONE listing request, for ONE group',
+      dayRequests0.length === 1 && dayRequests0[0].includes(`date=${HISTORY_DAY}`)
+      && /[?&]group=pending\b/.test(dayRequests0[0]) && /[?&]tzOffset=/.test(dayRequests0[0]),
+      dayRequests0.join(' | ') || 'no day request');
+    await shot('ad1-pending-listing.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-pending-listing.png')}\n`);
+
+    // Re-read the page now that the listing has content. Everything from here down asserts on the
+    // PENDING tab of the selected day, which is where held applications live.
+    const text = await page.evaluate(() => document.body.innerText);
+
+    // ── The sub-tab helpers, used by every block below ──────────────────────────────────────
+    const readTabs = () => page.evaluate(() => [...document.querySelectorAll('[data-rm-subtab]')]
+      .map(b => ({ id: b.dataset.rmSubtab, active: b.dataset.rmSubtabActive === '1',
+                   count: b.querySelector('[data-rm-subtab-count]')?.innerText ?? null })));
+    const selectTab = async (id) => {
+      await page.evaluate((tab) => document.querySelector(`[data-rm-subtab="${tab}"]`)?.click(), id);
+      await sleep(900);
+    };
+    const readTiles = () => page.evaluate(() =>
+      [...document.querySelectorAll('[data-rm-tile="company"]')].map(t => ({
+        company: t.dataset.rmCompany || null, section: t.dataset.rmSection,
+        claims: Number(t.dataset.rmApps),
+        contains: t.querySelectorAll('[data-rm-card]').length,
+        apps: Number(t.dataset.rmApps), text: t.innerText,
+      })));
+    /**
+     * Re-open the panel on a chosen day.
+     *
+     * Needed because two blocks below navigate AWAY (the Job Profiles comparison, the Database
+     * comparison) and come back — and a fresh mount has no date, by design. Without this the checks
+     * after a navigation read an empty listing and report a regression that is actually the
+     * requirement working.
+     */
+    const openDay = async (day, tab = 'pending') => {
+      await page.evaluate(() => document.querySelector('[data-rm-date-filter]')?.click());
+      await sleep(600);
+      const ok = await page.evaluate((d) => {
+        const cell = document.querySelector(`[data-rm-calendar="1"] [data-rm-day="${d}"]`);
+        if (!cell) return false;
+        cell.click();
+        return true;
+      }, day);
+      await sleep(1000);
+      if (tab !== 'pending') await selectTab(tab);
+      return ok;
+    };
 
     // ── AB2 ────────────────────────────────────────────────────────────────────────────────
     console.log('── AB2: one card per application ──');
@@ -465,8 +662,17 @@ async function main() {
       && /Sign in to datadog\.avature\.net once/.test(text)
       && /4 applications ready/.test(text) && /3 applications ready/.test(text),
       'one action unblocking many is still grouped by obstacle');
+    // A VANISHED POSTING. AD1 moved where this is READ, not whether it is said: a held row whose
+    // posting the cleanup removed is PENDING by status and ABORTED in reality, and the dated listing
+    // applies that override — so the row is on the ABORTED tab, saying why it is there. The PENDING
+    // tab keeps its own version of the statement for a posting that goes while the application is
+    // still live, which is the CompanyApplicationRow branch checked in the AC2 block below.
+    await selectTab('aborted');
+    const goneText = await page.evaluate(() => document.body.innerText);
     check('AB2  a vanished posting says so instead of offering a broken link',
-      /posting gone — cannot be resumed/.test(text));
+      /posting was removed from the board/i.test(goneText),
+      (goneText.match(/[^\n]*posting was removed[^\n]*/i) || ['absent'])[0]);
+    await selectTab('pending');
 
     // ── AB3 ────────────────────────────────────────────────────────────────────────────────
     console.log('\n── AB3: Open is scoped to the card ──');
@@ -733,79 +939,87 @@ async function main() {
     }
 
     // ── AB4 ────────────────────────────────────────────────────────────────────────────────
+    //
+    // AB4 organised the panel around OUTCOME, then COMPANY, then APPLICATION. AD1 kept all three
+    // tiers and changed only the first one's shape: the three outcomes were stacked SECTIONS and are
+    // now SUB-TABS over a dated listing. So this block asks the same questions of the same data — is
+    // each outcome its own place, does it carry its own count, is the company tier real inside it,
+    // and is held-on-purpose still distinguishable from broke — of the elements that answer them now.
     console.log('\n── AB4: outcome, then company, then application ──');
+
+    const ab4Tabs = await readTabs();
+    for (const [want, id] of [['COMPLETED', 'completed'], ['PENDING', 'pending'], ['ABORTED', 'aborted']]) {
+      check(`AB4  the "${want}" outcome is its own place`,
+        ab4Tabs.some(t => t.id === id), ab4Tabs.map(t => t.id).join(' / ') || 'no sub-tabs');
+    }
+    // PENDING leads in the sense that matters — it is where you land — because it is the only outcome
+    // where anything is waiting on a human. AB4 made that point by putting NEEDS REVIEW first.
+    check('AB4  PENDING is where you land — the only outcome where anything waits on a human',
+      ab4Tabs.find(t => t.active)?.id === 'pending',
+      `active: ${ab4Tabs.find(t => t.active)?.id || 'none'}`);
+    for (const t of ab4Tabs) {
+      check(`AB4  "${t.id.toUpperCase()}" carries its own count`, /^\d+$/.test(t.count || ''),
+        `${t.id} -> ${t.count}`);
+    }
+    // NEEDS REVIEW is still a heading, on the PENDING tab, over the standing work — the portal
+    // batches, the questions and the approvals, which are not date-scoped and never could be.
     const headings = await page.evaluate(() =>
       [...document.querySelectorAll('h3')].map(h => h.innerText.trim()));
-    for (const want of ['SUBMITTED', 'NEEDS REVIEW', 'PROBLEMS']) {
-      check(`AB4  the "${want}" section is present`,
-        headings.some(h => h.toUpperCase().includes(want)), headings.join(' / '));
-    }
-    // The three sections, in the order they are rendered. NEEDS REVIEW leads because it is the only
-    // one where anything is waiting on a human.
-    const outcomeOrder = headings.filter(h => /NEEDS REVIEW|SUBMITTED|PROBLEMS/.test(h.toUpperCase()))
-      .map(h => h.toUpperCase());
-    check('AB4  NEEDS REVIEW leads — the only section where anything waits on a human',
-      outcomeOrder[0] === 'NEEDS REVIEW', outcomeOrder.join(' / '));
+    check('AB4  NEEDS REVIEW still heads the standing work, with its own count',
+      headings.some(h => /NEEDS REVIEW/i.test(h)), headings.join(' / '));
 
-    // Each section's own count, read from the heading's own row rather than from the whole page.
-    const counts = await page.evaluate(() =>
-      [...document.querySelectorAll('h3')].map(h => {
-        const sib = h.nextElementSibling;
-        return { name: h.innerText.trim(), count: sib ? sib.innerText.trim() : null };
-      }));
-    for (const want of ['NEEDS REVIEW', 'SUBMITTED', 'PROBLEMS']) {
-      const row = counts.find(c => c.name.toUpperCase().includes(want));
-      check(`AB4  "${want}" carries its own count`, !!row && /^\d+$/.test(row.count || ''),
-        `${row?.name} -> ${row?.count}`);
-    }
-
-    // ── The COMPANY tier ──
+    // ── The COMPANY tier, on each outcome ──
     // Read as a tier: which companies appear, and how many applications each claims. A user with two
-    // submitted OpenAI roles must see them in ONE OpenAI group that says so.
-    //
-    // AC3 made the group a TILE rather than a heading followed by full-width rows, so this reads the
-    // tile's own count instead of hunting for a loose "N roles" text node. It is the same question —
-    // is the grouping real, and does it state its size — asked of the element that now answers it.
-    // Counting the application rows INSIDE each tile also makes the claim self-checking: a tile that
-    // says 2 and contains 3 fails, where a text-node search could not have noticed.
-    const companyTier = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-rm-tile="company"]')].map(t => ({
-        company: t.dataset.rmCompany || null,
-        section: t.dataset.rmSection,
-        claims: Number(t.dataset.rmApps),
-        contains: t.querySelectorAll('[data-rm-card]').length,
-        text: t.innerText,
-      })));
-    const openaiSubmitted = companyTier.find(g => g.company === 'OpenAI' && g.section === 'submitted');
+    // submitted OpenAI roles must see them in ONE OpenAI tile that says so. Counting the application
+    // rows INSIDE each tile makes the claim self-checking: a tile that says 2 and contains 3 fails,
+    // where a text-node search could not have noticed.
+    await selectTab('completed');
+    const submittedTier = await readTiles();
+    const openaiSubmitted = submittedTier.find(g => g.company === 'OpenAI' && g.section === 'submitted');
     check('AB4  applications are grouped by COMPANY, with the count on the group',
       !!openaiSubmitted && openaiSubmitted.claims === 2 && /2 applications/.test(openaiSubmitted.text),
-      companyTier.map(g => `${g.company || '(none)'}/${g.section}:${g.claims}`).join(' ') || 'no company tier rendered');
+      submittedTier.map(g => `${g.company || '(none)'}/${g.section}:${g.claims}`).join(' ') || 'no company tier rendered');
     check('AB4  and a group\'s count matches what it actually contains',
-      companyTier.every(g => g.claims === g.contains),
-      companyTier.filter(g => g.claims !== g.contains)
+      submittedTier.every(g => g.claims === g.contains),
+      submittedTier.filter(g => g.claims !== g.contains)
         .map(g => `${g.company} claims ${g.claims} contains ${g.contains}`).join('; ') || 'every tile is honest');
 
-    // ── Held on purpose vs broke ──
+    // ── Requirement 3: what a submitted application row must carry ──
+    const submittedRow = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-rm-card="row"]')]
+        .map(e => e.innerText).find(t => /Infrastructure Engineer/.test(t)) || null);
+    check('AB4  a submitted row carries role, date, the exact resume and the evidence',
+      /Infrastructure Engineer/.test(submittedRow || '')
+      && /\d{1,2}\/\d{1,2}\/\d{4}/.test(submittedRow || '')
+      && /The resume that went out/.test(submittedRow || '')
+      && /Screenshot of the form/.test(submittedRow || '')
+      && /confirmed by the site|sent, not confirmed/.test(submittedRow || ''),
+      (submittedRow || 'row not found').replace(/\n/g, ' | ').slice(0, 150));
+
+    // ── Held on purpose vs broke, on the ABORTED tab ──
     // Asserted separately, so a fixture missing one kind reports THAT rather than blaming the split.
     // Case-insensitive on purpose: these labels are `text-transform: uppercase`, and innerText
     // returns the RENDERED text — so a case-sensitive match here reads a string the DOM never has.
-    check('AB4  PROBLEMS labels what BROKE', /These broke — 3 applications/i.test(text),
-      (text.match(/These broke[^\n]*/i) || ['absent'])[0]);
-    check('AB4  PROBLEMS labels what was held on purpose, separately',
-      /Held on purpose — 1 application\b/i.test(text),
-      (text.match(/Held on purpose[^\n]*/i) || ['absent'])[0]);
+    await selectTab('aborted');
+    const abortedText0 = await page.evaluate(() => document.body.innerText);
+    check('AB4  ABORTED labels what BROKE', /These broke — 3 applications/i.test(abortedText0),
+      (abortedText0.match(/These broke[^\n]*/i) || ['absent'])[0]);
+    check('AB4  ABORTED labels what was held on purpose, separately',
+      /Held on purpose — 2 applications\b/i.test(abortedText0),
+      (abortedText0.match(/Held on purpose[^\n]*/i) || ['absent'])[0]);
     check('AB4  and says plainly that nothing went wrong with the held ones',
-      /Nothing went wrong with these/.test(text));
+      /Nothing went wrong with these/.test(abortedText0));
     check('AB4  a rejected application is NOT presented as a failure',
-      /You rejected this one/.test(text));
+      /You rejected this one/.test(abortedText0),
+      (abortedText0.match(/[^\n]*rejected this one[^\n]*/i) || ['absent'])[0]);
 
-    // ── Requirement 5 ──
+    // ── Requirement 5: the resume button, where a resume is actually the problem ──
     const genBtn = await page.evaluate(() =>
       [...document.querySelectorAll('button')].filter(b => /Generate a resume/.test(b.innerText)).length);
     check('AB4  a missing resume is a BUTTON, not the dead "no resume generated" chip',
       genBtn > 0, `${genBtn} Generate-a-resume buttons`);
     check('AB4  and the dead chip is gone from the rows that now have the button',
-      !/no resume generated/.test(text));
+      !/no resume generated/.test(abortedText0));
     // Only where a resume is actually the blocker. Three fixture rows have no resume; only ONE of
     // them stopped because of it. A button beside "the apply browser is not installed on the server"
     // contradicts the sentence directly above it.
@@ -820,37 +1034,33 @@ async function main() {
       !genRows.some(r => /apply browser is not installed|something went wrong on our side/i.test(r)),
       `${genRows.length} rows offer it`);
 
-    // ── Requirement 3: what each application row must carry ──
-    const submittedRow = await page.evaluate(() => {
-      const h = [...document.querySelectorAll('h3')].find(x => /SUBMITTED/i.test(x.innerText));
-      let el = h?.parentElement?.nextElementSibling;
-      while (el && !/Infrastructure Engineer/.test(el.innerText || '')) el = el.nextElementSibling;
-      return el ? el.innerText : null;
-    });
-    check('AB4  a submitted row carries role, date, the exact resume and the evidence',
-      /Infrastructure Engineer/.test(submittedRow || '')
-      && /\d{1,2}\/\d{1,2}\/\d{4}/.test(submittedRow || '')
-      && /The resume that went out/.test(submittedRow || '')
-      && /Screenshot of the form/.test(submittedRow || '')
-      && /confirmed by the site|sent, not confirmed/.test(submittedRow || ''),
-      (submittedRow || 'row not found').replace(/\n/g, ' | ').slice(0, 150));
-
     // ── Requirement 4: nothing dropped ──
+    // Read across all three tabs, because the outcomes are three places now — asserting them against
+    // one page's text would only prove whichever tab happened to be open.
+    await selectTab('pending');
+    const pendingText = await page.evaluate(() => document.body.innerText);
+    const allTabsText = `${pendingText}\n${submittedTier.map(t => t.text).join('\n')}\n${abortedText0}`;
     check('AB4  nothing was dropped: resume, evidence, ATS chip, apply URL, resolve action',
-      /Resume PDF|The resume that went out/.test(text)
-      && /What we filled|Screenshot of the form/.test(text)
-      && /ATS \d+/.test(text)
-      && /The posting ↗/.test(text)
-      && /Open & fill/.test(text) && /Retry/.test(text),
+      /Resume PDF|The resume that went out/.test(allTabsText)
+      && /What we filled|Screenshot of the form/.test(allTabsText)
+      && /ATS \d+/.test(allTabsText)
+      && /The posting ↗/.test(allTabsText)
+      && /Open & fill/.test(allTabsText) && /Retry/.test(allTabsText),
       'artifact links, score chip, posting link and resolve actions all present');
-    check('AB4  IN FLIGHT survives — it is not an outcome, so it is not a fourth section',
-      /IN FLIGHT/i.test(text) && /Security Engineer/.test(text)
-      && !outcomeOrder.includes('IN FLIGHT'),
-      headings.join(' / '));
-    check('AB4  the queue and the run history both survive',
-      /RUN HISTORY/i.test(text));
+    check('AB4  IN FLIGHT survives — it is not an outcome, so it is not a fourth tab',
+      /IN FLIGHT/i.test(pendingText) && /Security Engineer/.test(pendingText)
+      && !ab4Tabs.some(t => /flight/i.test(t.id)),
+      ab4Tabs.map(t => t.id).join(' / '));
+    // The RUN-HISTORY LIST is what AD1 replaced, and this is the DOM half of that claim. The
+    // client-side QUEUE is not asserted here because these fixtures never populate it — "Ready to
+    // start" renders only when a job has been picked on the board, and asserting a section that
+    // cannot appear would be asserting nothing. Its machinery is pinned at the source in
+    // test/applyObstacleSurfaces.test.js ("the run control", "queue removal", the tier notices).
+    check('AB4  the dated view replaced the run-history list',
+      !/RUN HISTORY/i.test(pendingText),
+      'the run history is the panel now, rather than a section at the bottom of it');
     check('AB4  attempts are still reported on an application',
-      /attempts/i.test(text));
+      /attempts/i.test(pendingText));
 
     await shot('sections.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'sections.png')}`);
@@ -895,10 +1105,16 @@ async function main() {
     await shot('ac3-job-profiles.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'ac3-job-profiles.png')}`);
 
-    // Back to the panel under test.
+    // Back to the panel under test — and BACK TO A DAY. A fresh mount has no date selected, which
+    // is AD1 requirement 3 working rather than failing, so the day has to be re-picked or every
+    // check below reads the "pick a date" resting state and reports a regression that is not one.
     await page.goto(`${vite.url}/app/auto-apply`, { waitUntil: 'networkidle2', timeout: 60000 });
     await page.waitForFunction(() => /AUTO APPLY/i.test(document.body.innerText), { timeout: 30000 });
     await sleep(1000);
+    check('AC3  a fresh mount asks for a date again, rather than remembering one',
+      await page.evaluate(() => !!document.querySelector('[data-rm-empty="no-date"]')),
+      'the listing is on-demand on every mount, not only the first');
+    await openDay(HISTORY_DAY);
 
     const companyTiles = await page.evaluate(() => {
       const tiles = [...document.querySelectorAll('[data-rm-tile="company"]')];
@@ -923,17 +1139,24 @@ async function main() {
       held.map(t => `${t.company}@${t.left}x${t.top}:${t.width}`).join(' '));
     // Requirement 2: name, count, a compact list of its applications, a footer action row.
     const openaiTile = companyTiles.find(t => t.company === 'OpenAI' && t.section === 'needsReview');
+    // TWO now, not one: the PENDING tab is one day of one outcome, and OpenAI has both the held
+    // Staff Engineer and the running Security Engineer on it. The tile's claim is checked against
+    // what it actually contains a few lines above, so the number is not taken on trust.
     check('AC3  a tile names the company and counts the applications needing action',
-      !!openaiTile && /OpenAI/.test(openaiTile.text) && /1 application/.test(openaiTile.text),
-      (openai?.text || 'no OpenAI tile').split('\n').slice(0, 3).join(' | '));
+      !!openaiTile && /OpenAI/.test(openaiTile.text) && /2 applications/.test(openaiTile.text),
+      (openaiTile?.text || 'no OpenAI tile').split('\n').slice(0, 3).join(' | '));
     check('AC3  and lists its applications compactly — role plus count to resolve',
       !!openaiTile && /Staff Engineer/.test(openaiTile.text) && /3 to resolve/.test(openaiTile.text),
-      (openai?.text || '').replace(/\n/g, ' | ').slice(0, 140));
-    // Requirement 4: triage without opening anything.
+      (openaiTile?.text || '').replace(/\n/g, ' | ').slice(0, 140));
+    // Requirement 4: triage without opening anything. The two states are on TWO TABS now — a held
+    // application is pending and a broken one is aborted — so the check spans both rather than
+    // reading one page and concluding the distinction was lost.
+    const abortedTilesAc3 = await (async () => { await selectTab('aborted'); return readTiles(); })();
     check('AC3  HELD ON PURPOSE vs a problem is visible at CARD level, without opening anything',
       companyTiles.some(t => /held on purpose/i.test(t.text))
-      && companyTiles.some(t => /did not complete|broke/i.test(t.text)),
-      'both states are readable on the tiles themselves');
+      && abortedTilesAc3.some(t => /did not complete/i.test(t.text)),
+      `pending: ${companyTiles.map(t => (t.text.match(/held on purpose|needs you|posting gone/i) || [''])[0]).join('/')}`
+      + ` | aborted: ${abortedTilesAc3.map(t => (t.text.match(/did not complete|held on purpose|posting gone/i) || [''])[0]).join('/')}`);
     // Requirement 2's footer action row, asserted on the tiles the requirement is about — the ones
     // counting "applications needing action". A submitted tile and a broke tile carry their actions
     // per row (the evidence links, Retry) because there is no honest company-level action for them:
@@ -941,10 +1164,14 @@ async function main() {
     check('AC3  every NEEDS-REVIEW tile has a footer action row scoped to that company',
       held.length > 0 && held.every(t => /Review all \d+ →/.test(t.text)),
       held.map(t => (t.text.match(/Review all \d+ →/) || ['none'])[0]).join(' / '));
+    // The all-gone tile is an ABORTED tile now — a held row whose posting the cleanup removed is
+    // PENDING by status and ABORTED in reality, and the override files it there. The tile-level
+    // statement had to move with it: "held on purpose" is a claim about a tile nothing is holding.
     check('AC3  a tile whose postings were all cleaned up says THAT, not "held on purpose"',
-      companyTiles.some(t => t.company === '' && /posting gone/i.test(t.text)
-                          && !/held on purpose/i.test(t.text.split('\n')[1] || '')),
-      (companyTiles.find(t => t.company === '')?.text || 'no such tile').split('\n').slice(0, 2).join(' | '));
+      abortedTilesAc3.some(t => !t.company && /posting gone/i.test(t.text)
+                             && !/held on purpose/i.test(t.text)),
+      (abortedTilesAc3.find(t => !t.company)?.text || 'no such tile').split('\n').slice(0, 3).join(' | '));
+    await selectTab('pending');
     await shot('ac3-company-tiles.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'ac3-company-tiles.png')}`);
 
@@ -964,155 +1191,183 @@ async function main() {
     await page.setViewport({ width: 1400, height: 1200, deviceScaleFactor: 1 });
     await sleep(600);
 
-    // ── AC4 ────────────────────────────────────────────────────────────────────────────────
+    // ── AD1: THE SUB-TABS ───────────────────────────────────────────────────────────────────
     //
-    // The dated run history. The first check is the one the requirement is most explicit about, and
-    // it is a NETWORK check rather than a DOM one: "ON DEMAND, NOT PRELOADED — this is explicit.
-    // Nothing loads until a date is selected. The panel's initial render issues no history query."
-    // The only honest way to verify that is to watch what the page asked for.
-    console.log('\n── AC4: run history, date-driven and on demand ──');
+    // The tab row is the panel's navigation now, so the checks that matter are: does a switch fetch
+    // exactly one group, does the tab it switched to hold the right rows, and are the other two
+    // still unfetched. All three are network questions as much as DOM ones.
+    console.log('\n── AD1: sub-tabs, one refetch each, correct contents ──');
 
-    check('AC4  the panel\'s initial render issues NO history request',
-      ![...served].some(p => p.startsWith('/api/apply/history')),
-      `history paths requested on load: ${[...served].filter(p => p.startsWith('/api/apply/history')).join(', ') || 'none'}`);
-    check('AC4  and the resting state SAYS to pick a date, rather than spinning',
-      /Pick a date to see the applications you added to auto-apply that day/i.test(text)
-      && !/Loading…/.test(text),
-      (text.match(/Pick a date[^\n]*/i) || ['absent'])[0]);
-    check('AC4  the old run-history chip list is gone as the organising idea',
-      !/RUN HISTORY \(\d+\)/.test(text) && /RUN HISTORY/i.test(text),
-      'replaced by the dated view, and still present as a section');
+    const datedTabs = await readTabs();
+    check('AD1  the counts appear once a date is chosen, and are SCOPED to it',
+      datedTabs.every(t => t.count !== null)
+      && /Counts are for/i.test(await page.evaluate(() => document.body.innerText)),
+      datedTabs.map(t => `${t.id}=${t.count}`).join(' '));
+    // The numbers are the fixture's, which is the same partition the server applies: the dead
+    // posting is counted under ABORTED even though its STATUS is held_review.
+    check('AD1  and the counts follow the partition, dead posting included',
+      datedTabs.find(t => t.id === 'completed')?.count === '3'
+      && datedTabs.find(t => t.id === 'pending')?.count === '15'
+      && datedTabs.find(t => t.id === 'aborted')?.count === '5',
+      datedTabs.map(t => `${t.id}=${t.count}`).join(' '));
 
-    // Opening the CALENDAR may fetch markers — that is a user action, not the initial render, and
-    // requirement 7 allows it on exactly that condition.
-    const openedCal = await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')].find(b => /Pick a date/i.test(b.innerText));
-      if (!btn) return false;
+    // COMPLETED.
+    const before = historyRequests.filter(u => u.startsWith('/api/apply/history?')).length;
+    await selectTab('completed');
+    const afterCompleted = historyRequests.filter(u => u.startsWith('/api/apply/history?'));
+    check('AD1  switching tab issues exactly ONE refetch — not three',
+      afterCompleted.length === before + 1
+      && /[?&]group=completed\b/.test(afterCompleted[afterCompleted.length - 1]),
+      afterCompleted.slice(before).join(' | ') || 'no refetch');
+    check('AD1  and it never preloads the other two groups',
+      !afterCompleted.slice(before).some(u => /group=(pending|aborted)/.test(u)),
+      afterCompleted.slice(before).join(' | '));
+    const completedTiles = await readTiles();
+    check('AD1  COMPLETED holds the submitted applications, grouped by company',
+      completedTiles.length > 0 && completedTiles.every(t => t.section === 'submitted')
+      && completedTiles.some(t => t.company === 'OpenAI' && t.apps === 2)
+      && completedTiles.some(t => t.company === 'Stripe' && t.apps === 1),
+      completedTiles.map(t => `${t.company}:${t.apps}`).join(' ') || 'no tiles');
+    check('AD1  and the evidence a submitted application is read for is intact',
+      /The resume that went out/.test(completedTiles[0]?.text || '')
+      && /confirmed by the site/.test(completedTiles.map(t => t.text).join(' ')),
+      (completedTiles[0]?.text || '').replace(/\n/g, ' | ').slice(0, 110));
+    await shot('ad1-tab-completed.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-tab-completed.png')}`);
+
+    // ABORTED — and its two labelled halves, which is the distinction this line of work exists to
+    // preserve. It must be readable WITHOUT opening anything.
+    await selectTab('aborted');
+    const abortedTiles = await readTiles();
+    const abortedText = await page.evaluate(() => document.body.innerText);
+    check('AD1  ABORTED separates what BROKE from what was held on purpose',
+      abortedTiles.some(t => t.section === 'broke') && abortedTiles.some(t => t.section === 'heldOnPurpose')
+      // Case-INSENSITIVE: these labels are `text-transform: uppercase` and innerText returns the
+      // RENDERED text, so a case-sensitive match reads a string the DOM never has.
+      && /These broke —/i.test(abortedText) && /Held on purpose —/i.test(abortedText),
+      abortedTiles.map(t => `${t.company}:${t.section}`).join(' '));
+    check('AD1  and it is not called "failed" — most of what is here did not fail',
+      /Nothing went wrong with these/.test(abortedText),
+      (abortedText.match(/Nothing went wrong[^\n]*/) || ['absent'])[0]);
+    check('AD1  the DEAD POSTING is here, and says WHY it is here',
+      /posting was removed from the board/i.test(abortedText),
+      'the one non-status input, applied as an override after the map');
+    await shot('ad1-tab-aborted.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-tab-aborted.png')}`);
+
+    // ── AD1: ABORT, on the tab where it applies ─────────────────────────────────────────────
+    console.log('\n── AD1: abort, soft delete, and the three empty states ──');
+    check('AD1  ABORT is never offered on an ended application',
+      !(await page.evaluate(() => [...document.querySelectorAll('[data-rm-card="row"] button')]
+        .some(b => b.innerText.trim() === 'Abort'))),
+      'nothing in ABORTED offers to stop something that already stopped');
+
+    await selectTab('pending');
+    const abortTarget = await page.evaluate(() => {
+      const card = document.querySelector('[data-rm-card="application"][data-rm-job="anthropic-re"]');
+      const btn = [...(card?.querySelectorAll('button') || [])].find(b => b.innerText.trim() === 'Abort');
+      if (!btn) return null;
       btn.click();
       return true;
     });
-    check('AC4  a date picker is offered', openedCal);
-    await sleep(700);
-    const cal = await page.evaluate(() => {
-      const el = document.querySelector('[data-rm-calendar="1"]');
-      if (!el) return null;
-      return {
-        marked: [...el.querySelectorAll('[data-rm-marked]')]
-          .filter(d => d.dataset.rmMarked).map(d => d.dataset.rmDay),
-        days: [...el.querySelectorAll('[data-rm-day]')].filter(d => d.dataset.rmDay).length,
-      };
-    });
-    check('AC4  it is the DATABASE PANEL\'S calendar, not a second date picker',
-      !!cal && cal.days >= 28, cal ? `${cal.days} day cells` : 'no calendar rendered');
-    check('AC4  dates WITH activity are marked, so the user is not hunting blindly',
-      !!cal && cal.marked.length > 0, `marked: ${(cal?.marked || []).join(', ') || 'none'}`);
-    check('AC4  the marker query fires on OPENING the calendar, not on the panel\'s first render',
-      [...served].some(p => p.startsWith('/api/apply/history/months')),
-      'requirement 7, inside requirement 2');
-    await shot('ac4-calendar.png');
-    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-calendar.png')}`);
+    await sleep(1200);
+    check('AD1  Abort posts to the per-run-job abort endpoint',
+      !!abortTarget && abortCalls.length > 0, abortCalls.join(', ') || 'no abort request');
+    check('AD1  and it never posts to anything that submits',
+      !served.has('/api/apply/approve') && ![...served].some(p => /\/api\/apply$/.test(p)),
+      'no approve and no apply call was made by an abort');
+    // A grouped application is EVERY attempt at one posting, and Anthropic has two. Stopping one
+    // would leave the application in PENDING having been told it stopped.
+    check('AD1  it aborts every live attempt of the application, not just the newest',
+      abortCalls.length === 2, `aborted: ${abortCalls.join(', ')}`);
+    const afterAbort = await page.evaluate(() => document.body.innerText);
+    check('AD1  the panel says what the abort actually did',
+      /Nothing was submitted/i.test(afterAbort),
+      (afterAbort.match(/[^\n]*Nothing was submitted[^\n]*/i) || ['absent'])[0]);
+    const stillPending = await page.evaluate(() =>
+      !!document.querySelector('[data-rm-card="application"][data-rm-job="anthropic-re"]'));
+    check('AD1  the aborted application left PENDING on the refetch',
+      !stillPending, stillPending ? 'it is still listed as pending' : 'gone from the tab');
+    await shot('ad1-aborted-row.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-aborted-row.png')}`);
 
-    // Selecting a date loads that date.
-    const picked = await page.evaluate((day) => {
-      const cell = document.querySelector(`[data-rm-calendar="1"] [data-rm-day="${day}"]`);
-      if (!cell) return false;
-      cell.click();
+    // ── AD1: SOFT DELETE, and the claim that it does not come back ──────────────────────────
+    const beforeDelete = await page.evaluate(() => document.querySelectorAll('[data-rm-card="application"]').length);
+    const removed = await page.evaluate(() => {
+      const card = document.querySelector('[data-rm-card="application"][data-rm-job="vercel-plat"]');
+      const btn = [...(card?.querySelectorAll('button') || [])].find(b => b.innerText.trim() === 'Remove');
+      if (!btn) return null;
+      btn.click();
       return true;
-    }, HISTORY_DAY);
-    check('AC4  a date can be selected', picked, HISTORY_DAY);
-    await sleep(900);
-
-    check('AC4  selecting a date issues the history request, date-scoped',
-      historyRequests.some(u => u.includes(`date=${HISTORY_DAY}`)),
-      historyRequests.join(' | ') || 'no history request');
-    // The DAY requests specifically — the month-marker request is an aggregate and carries no date,
-    // which is the point of it being separate.
-    const dayRequests = historyRequests.filter(u => u.startsWith('/api/apply/history?'));
-    check('AC4  and it is scoped on the SERVER, not fetched whole and filtered here',
-      dayRequests.length > 0 && dayRequests.every(u => /[?&]date=/.test(u) && /[?&]tzOffset=/.test(u)),
-      dayRequests.join(' | ') || 'no day request');
-
-    const groups = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-rm-history-group]')].map(g => ({
-        group: g.dataset.rmHistoryGroup,
-        count: Number(g.dataset.rmCount),
-        rows: g.querySelectorAll('[data-rm-history-row]').length,
-        text: g.innerText,
-      })));
-    check('AC4  the day loads into THREE groups',
-      groups.length === 3 && groups.map(g => g.group).join(',') === 'completed,pending,aborted',
-      groups.map(g => `${g.group}:${g.count}`).join(' '));
-    check('AC4  and each group holds the rows it claims',
-      groups.every(g => g.count === g.rows),
-      groups.map(g => `${g.group} claims ${g.count} holds ${g.rows}`).join('; '));
-    // The mapping, on screen: one submitted, the pending ones, and the aborted ones — including the
-    // dead posting, which is the requirement's one non-status input.
-    const byGroup = Object.fromEntries(groups.map(g => [g.group, g]));
-    check('AC4  COMPLETED holds the submitted application',
-      byGroup.completed?.count === 1 && /Infrastructure Engineer/.test(byGroup.completed.text),
-      (byGroup.completed?.text || '').replace(/\n/g, ' | ').slice(0, 90));
-    check('AC4  PENDING holds what is queued, in flight or waiting on you',
-      byGroup.pending?.count === 2
-      && /Security Engineer/.test(byGroup.pending.text) && /Research Engineer/.test(byGroup.pending.text),
-      (byGroup.pending?.text || '').replace(/\n/g, ' | ').slice(0, 110));
-    check('AC4  ABORTED holds what ended without being sent — including the DEAD POSTING',
-      byGroup.aborted?.count === 3
-      && /posting was removed from the board/i.test(byGroup.aborted.text),
-      (byGroup.aborted?.text || '').replace(/\n/g, ' | ').slice(0, 140));
-    check('AC4  and ABORTED is not called "failed" — three of its four members did not fail',
-      /ABORTED/i.test(byGroup.aborted?.text || '') && /ended without being sent/i.test(byGroup.aborted?.text || ''),
-      (byGroup.aborted?.text || '').split('\n').slice(0, 2).join(' | '));
-
-    // Requirement 4: per-item actions, and only where they apply.
-    const actions = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-rm-history-row]')].map(r => ({
-        group: r.dataset.rmGroup,
-        buttons: [...r.querySelectorAll('button')].map(b => b.innerText.trim()),
-      })));
-    check('AC4  ABORT is offered on pending rows',
-      actions.filter(a => a.group === 'pending').every(a => a.buttons.includes('Abort')),
-      actions.filter(a => a.group === 'pending').map(a => a.buttons.join('/')).join(' '));
-    check('AC4  and NEVER on a submitted or already-ended one',
-      actions.filter(a => a.group !== 'pending').every(a => !a.buttons.includes('Abort')),
-      actions.filter(a => a.group !== 'pending' && a.buttons.includes('Abort'))
-        .map(a => a.group).join(', ') || 'none offer it');
-    check('AC4  every row can be removed, and the copy says it is a soft hide',
-      actions.length > 0 && actions.every(a => a.buttons.includes('Remove')),
-      `${actions.length} rows`);
+    });
+    await sleep(1200);
+    check('AD1  Remove posts a DELETE for the application', !!removed && deleteCalls.length > 0,
+      deleteCalls.join(', ') || 'no delete request');
+    const afterDelete = await page.evaluate(() => ({
+      cards: document.querySelectorAll('[data-rm-card="application"]').length,
+      vercel: !!document.querySelector('[data-rm-card="application"][data-rm-job="vercel-plat"]'),
+      text: document.body.innerText,
+    }));
+    // The row is gone from a REFETCH, not just from the DOM — the fixture hides it server-side, so
+    // a panel that only removed it locally would fail here.
+    check('AD1  the removed application does not come back on the refetch',
+      !afterDelete.vercel && afterDelete.cards === beforeDelete - 1,
+      `${beforeDelete} cards -> ${afterDelete.cards}, vercel present: ${afterDelete.vercel}`);
+    // TWO honest sentences, and which one you get depends on what was removed. A row that was still
+    // PENDING is stopped first, so the confirmation leads with that and with "nothing was submitted"
+    // — the fact that matters most at that moment. A row that had already ended gets the
+    // record-is-kept sentence instead, because for that one the question is whether the evidence
+    // survived. Neither claims an erasure that did not happen, which is what is actually being held.
+    check('AD1  and the copy does not imply an erasure that does not happen',
+      /removed from your history/i.test(afterDelete.text)
+      && /(nothing was submitted|record is kept|never erased)/i.test(afterDelete.text)
+      && !/permanently|deleted forever/i.test(afterDelete.text),
+      (afterDelete.text.match(/[^\n]*removed from your history[^\n]*/i) || ['absent'])[0]);
     const removeTitle = await page.evaluate(() => {
-      const b = [...document.querySelectorAll('[data-rm-history-row] button')]
+      const b = [...document.querySelectorAll('[data-rm-card="application"] button')]
         .find(x => x.innerText.trim() === 'Remove');
       return b?.title || '';
     });
-    check('AC4  and the copy does not imply an erasure that does not happen',
-      /hidden, not deleted|never erased|record is KEPT/i.test(removeTitle), removeTitle.slice(0, 110));
-    await shot('ac4-history-groups.png');
-    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-history-groups.png')}`);
+    check('AD1  the tooltip says the same thing before you press it',
+      /hidden, not deleted, and can be restored/i.test(removeTitle), removeTitle.slice(0, 110));
 
-    // Requirement 4, the abort itself: it posts, and it does not submit.
-    const abortPosted = await page.evaluate(() => {
-      const b = [...document.querySelectorAll('[data-rm-history-row] button')]
-        .find(x => x.innerText.trim() === 'Abort');
-      if (!b) return false;
-      b.click();
-      return true;
+    // ── AD1 requirement 7: THREE EMPTY STATES, three different sentences ────────────────────
+    //
+    // "no date selected", "no applications on this date", "nothing pending". One blank for all
+    // three is the failure this requirement names.
+    const emptyStates = {};
+    const readEmpty = () => page.evaluate(() => {
+      const el = document.querySelector('[data-rm-empty]');
+      return el ? { kind: el.dataset.rmEmpty, text: el.innerText.trim() } : null;
     });
-    await sleep(900);
-    check('AC4  Abort posts to the per-run-job abort endpoint',
-      abortPosted && abortCalls.length > 0, abortCalls.join(', ') || 'no abort request');
-    check('AC4  and it never posts to anything that submits',
-      !served.has('/api/apply/approve') && ![...served].some(p => /\/api\/apply$/.test(p)),
-      'no approve and no apply call was made by an abort');
-    const afterAbort = await page.evaluate(() => document.body.innerText);
-    check('AC4  the panel says what the abort actually did',
-      /Nothing was submitted/i.test(afterAbort),
-      (afterAbort.match(/[^\n]*Nothing was submitted[^\n]*/i) || ['absent'])[0]);
+    emptyStates['no-date'] = { kind: 'no-date',
+      text: (restingText.match(/Pick a date to see the applications[^\n]*/i) || [''])[0] };
 
-    // Requirement 6: an empty date is a normal state.
+    // An EMPTY SUB-TAB on a day that HAD activity. Everything pending was just aborted or removed
+    // except the in-flight pair and the gate batch, so the search box is used to empty the tab
+    // without emptying the day — which is exactly the state this sentence exists for.
     await page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')].find(b => /Date:|Pick a date/i.test(b.innerText));
-      if (btn) btn.click();
+      const input = document.querySelector('[data-rm-panel-search]');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, 'zzzz-no-such-employer');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    await sleep(600);
+    emptyStates['no-match'] = await readEmpty();
+    check('AD1  a search that matches nothing says SO, rather than claiming the tab is empty',
+      emptyStates['no-match']?.kind === 'no-match'
+      && /matches/i.test(emptyStates['no-match'].text),
+      emptyStates['no-match']?.text || 'no empty state');
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-rm-panel-search]');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await sleep(400);
+
+    // An EMPTY DATE — a day on which nothing at all happened.
+    await page.evaluate(() => document.querySelector('[data-rm-date-filter]')?.click());
     await sleep(600);
     const pickedEmpty = await page.evaluate((day) => {
       const cell = document.querySelector(`[data-rm-calendar="1"] [data-rm-day="${day}"]`);
@@ -1120,14 +1375,18 @@ async function main() {
       cell.click();
       return true;
     }, EMPTY_DAY);
-    await sleep(800);
-    const emptyText = await page.evaluate(() => document.body.innerText);
-    check('AC4  an EMPTY date reports emptiness — not an error, not a spinner',
-      pickedEmpty && /No applications on/i.test(emptyText)
-      && !/Loading…/.test(emptyText) && !/Could not load/i.test(emptyText),
-      (emptyText.match(/No applications on[^\n]*/i) || ['absent'])[0]);
-    await shot('ac4-empty-date.png');
-    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-empty-date.png')}`);
+    await sleep(900);
+    emptyStates['empty-date'] = await readEmpty();
+    check('AD1  an EMPTY date reports emptiness — not an error, not a spinner',
+      pickedEmpty && emptyStates['empty-date']?.kind === 'empty-date'
+      && /No applications on/i.test(emptyStates['empty-date'].text),
+      emptyStates['empty-date']?.text || 'absent');
+    check('AD1  the three empty states are three DIFFERENT sentences',
+      new Set(Object.values(emptyStates).map(e => (e?.text || '').toLowerCase())).size === 3,
+      Object.entries(emptyStates).map(([k, v]) => `${k}: "${(v?.text || '').slice(0, 40)}"`).join(' | '));
+    await shot('ad1-empty-states.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-empty-states.png')}`);
+
 
     // ── AC4 REGRESSION: the Database panel's calendar, UNCHANGED for its own use ─────────────
     //
@@ -1206,6 +1465,105 @@ async function main() {
       !!dbPicked && /^📅?\s*Date:/.test(dbAfter), `picked ${dbPicked} -> "${dbAfter}"`);
     await shot('ac4-database-calendar.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-database-calendar.png')}`);
+
+    // ── AD1: THE LAYOUTS, SIDE BY SIDE ──────────────────────────────────────────────────────
+    //
+    // "Side-by-side screenshot with the Database panel confirming the layout genuinely matches."
+    //
+    // A screenshot pair is evidence a person can check, and the MEASUREMENTS below are the part a
+    // machine can. The claim being tested is narrow and worth stating precisely: the two panels
+    // render the SAME CHROME, so their tab rows and control rows must agree on geometry and on
+    // affordances. Their BODIES are deliberately different — a fixed-column table of applications
+    // versus a two-tier hierarchy of company tiles — and asserting those matched would be asserting
+    // something AD1 never asked for and does not want.
+    console.log('\n── AD1: the two layouts, side by side ──');
+
+    const measure = () => page.evaluate(() => {
+      const row = document.querySelector('[data-rm-subtabs]');
+      const tabs = [...document.querySelectorAll('[data-rm-subtab]')];
+      const search = document.querySelector('[data-rm-panel-search]');
+      const date = document.querySelector('[data-rm-date-filter]');
+      const r = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+        return { h: Math.round(b.height), w: Math.round(b.width) }; };
+      const cs = (el, prop) => el ? getComputedStyle(el)[prop] : null;
+      return {
+        tabRow: r(row),
+        tabRowPad: cs(row, 'padding'),
+        tabs: tabs.length,
+        tab: r(tabs[0]),
+        tabPad: cs(tabs[0], 'padding'),
+        tabFont: cs(tabs[0], 'fontSize'),
+        pill: r(tabs.find(t => t.querySelector('[data-rm-subtab-count]'))
+                 ?.querySelector('[data-rm-subtab-count]')),
+        pillRadius: cs(tabs[0]?.querySelector('[data-rm-subtab-count]'), 'borderRadius'),
+        search: r(search),
+        searchRadius: cs(search, 'borderRadius'),
+        searchPad: cs(search, 'paddingLeft'),
+        date: r(date),
+        dateRadius: cs(date, 'borderRadius'),
+        dateText: date ? date.innerText.trim() : null,
+      };
+    });
+
+    // The Database panel is already open, on its Applications sheet.
+    await page.evaluate(() => document.querySelector('[data-rm-date-filter]')?.click());
+    await sleep(300);
+    await page.keyboard.press('Escape').catch(() => {});
+    await sleep(300);
+    const dbShape = await measure();
+    await shot('ad1-side-by-side-database.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-side-by-side-database.png')}`);
+
+    await page.goto(`${vite.url}/app/auto-apply`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.waitForFunction(() => !!document.querySelector('[data-rm-subtabs]'), { timeout: 30000 });
+    await sleep(1000);
+    const aaShape = await measure();
+    await shot('ad1-side-by-side-autoapply.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-side-by-side-autoapply.png')}`);
+
+    // THE TAB ROW: same height, same padding, same tab metrics, same count pill.
+    check('AD1  both panels render a sub-tab row of the same height and padding',
+      !!dbShape.tabRow && !!aaShape.tabRow
+      && Math.abs(dbShape.tabRow.h - aaShape.tabRow.h) <= 2
+      && dbShape.tabRowPad === aaShape.tabRowPad,
+      `db ${dbShape.tabRow?.h}px/${dbShape.tabRowPad} vs apply ${aaShape.tabRow?.h}px/${aaShape.tabRowPad}`);
+    check('AD1  the tabs themselves are the same size, padding and type',
+      dbShape.tabPad === aaShape.tabPad && dbShape.tabFont === aaShape.tabFont
+      && Math.abs((dbShape.tab?.h || 0) - (aaShape.tab?.h || 0)) <= 2,
+      `db ${dbShape.tab?.h}px ${dbShape.tabPad} ${dbShape.tabFont}`
+      + ` vs apply ${aaShape.tab?.h}px ${aaShape.tabPad} ${aaShape.tabFont}`);
+    // The COUNT PILL is measured on the Database panel, where a count is always present, and on the
+    // Auto Apply panel it is absent until a date is picked — which is AD1 requirement 4, not a
+    // difference in the chrome. So the pill's SHAPE is compared after picking a date.
+    check('AD1  the Database panel\'s tabs carry their count pills, as they always did',
+      !!dbShape.pill && dbShape.pillRadius === '999px',
+      `${dbShape.pill?.h}px, radius ${dbShape.pillRadius}`);
+    check('AD1  and the Auto Apply tabs carry none until a date is picked (requirement 4)',
+      aaShape.pill === null, `pill: ${JSON.stringify(aaShape.pill)}`);
+
+    await openDay(HISTORY_DAY);
+    const aaDated = await measure();
+    check('AD1  once a date is picked, the pill is the SAME pill',
+      !!aaDated.pill && aaDated.pillRadius === dbShape.pillRadius
+      && Math.abs(aaDated.pill.h - dbShape.pill.h) <= 2,
+      `db ${dbShape.pill?.h}px/${dbShape.pillRadius} vs apply ${aaDated.pill?.h}px/${aaDated.pillRadius}`);
+
+    // THE CONTROL ROW: the same search box and the same date pill.
+    check('AD1  both control rows hold the same search input',
+      !!dbShape.search && !!aaDated.search
+      && dbShape.searchRadius === aaDated.searchRadius
+      && dbShape.searchPad === aaDated.searchPad
+      && Math.abs(dbShape.search.h - aaDated.search.h) <= 2,
+      `db ${dbShape.search?.h}px r${dbShape.searchRadius} p${dbShape.searchPad}`
+      + ` vs apply ${aaDated.search?.h}px r${aaDated.searchRadius} p${aaDated.searchPad}`);
+    check('AD1  and the same "Filter by date" pill, in the same state language',
+      !!dbShape.date && !!aaDated.date
+      && dbShape.dateRadius === aaDated.dateRadius
+      && Math.abs(dbShape.date.h - aaDated.date.h) <= 2
+      && /^📅 Date:/.test(aaDated.dateText || ''),
+      `db "${dbShape.dateText}" ${dbShape.date?.h}px vs apply "${aaDated.dateText}" ${aaDated.date?.h}px`);
+    await shot('ad1-side-by-side-autoapply-dated.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ad1-side-by-side-autoapply-dated.png')}`);
 
     if (process.env.AB_KEEP_OPEN) {
       console.log('\nAB_KEEP_OPEN set — leaving the browser open. Ctrl+C to finish.');

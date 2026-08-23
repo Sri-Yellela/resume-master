@@ -1517,22 +1517,83 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   };
 
   /**
-   * One day's applications, in three groups.
+   * One day's applications, in three groups — or, since AD1, ONE group of them plus the counts of
+   * all three.
    *
    * Nothing here loads unless a date is asked for — there is no "recent" default and no implicit
    * today, because requirement 2 is that the panel's initial render issues no history query at all,
    * and an endpoint with a sensible default invites a caller to hit it on mount.
+   *
+   * ── TASK AD1: `group`, AND WHY THE COUNTS ARE NOT A SECOND REQUEST ─────────────────────────
+   *
+   * AD1 turns the three outcome groups into SUB-TABS and states the rule directly: "Switching
+   * sub-tabs with a date selected refetches for that tab; it must not load all three." So the
+   * endpoint learned to answer for one group. `group` is OPTIONAL and its absence keeps the
+   * original three-group shape, which is what AC4's own tests read and what any other caller would
+   * expect — this is additive, not a replacement.
+   *
+   * The counts, though, are needed for ALL THREE tabs whichever one is open, and AD1 requirement 4
+   * makes them date-scoped. Two ways to get them, and only one is honest:
+   *
+   *   - three requests, or one request that returns every row and is then filtered — which is the
+   *     "must not load all three" the requirement forbids, wearing a different hat;
+   *   - one aggregate over the SAME day range that reads `status` and whether the posting join came
+   *     back empty, and nothing else. No artifacts, no answers, no reasons — just enough to run
+   *     outcomeGroupFor, which is the only thing that can produce these numbers correctly because
+   *     the dead-posting override is not expressible as a GROUP BY status.
+   *
+   * It is the second. A day holds tens of run-jobs, not thousands, and this reads two columns from
+   * them. The full-row SELECT — the one with the joins and the artifact probes — runs for the ONE
+   * group asked for.
    */
   app.get("/api/apply/history", requireAuth, (req, res) => {
     const range = dayRangeUtc(req.query.date, req.query.tzOffset);
     if (!range) return res.status(400).json({ error: "bad_date", message: "Expected date=YYYY-MM-DD." });
 
+    // An unrecognised group is a 400 rather than a silent fallback to "all three": a typo'd tab
+    // name would otherwise ship the whole day to a client that asked for a slice of it, which is
+    // the exact thing requirement 3 is trying to prevent, and it would do it invisibly.
+    const asked = req.query.group ? String(req.query.group) : null;
+    if (asked && !Object.prototype.hasOwnProperty.call(OUTCOME_STATUSES, asked)) {
+      return res.status(400).json({
+        error: "bad_group",
+        message: `Expected group to be one of ${Object.keys(OUTCOME_STATUSES).join(", ")}.`,
+      });
+    }
+
+    // THE COUNTS. Two columns per run-job for the day, run through the same partition the rows use,
+    // so a tab's number and that tab's contents cannot disagree.
+    const counts = { [OUTCOME.COMPLETED]: 0, [OUTCOME.PENDING]: 0, [OUTCOME.ABORTED]: 0 };
+    const tally = db.prepare(`
+      SELECT rj.status AS status, (sj.job_id IS NULL) AS postingGone
+      FROM apply_run_jobs rj
+      LEFT JOIN scraped_jobs sj ON sj.job_id = rj.job_id
+      WHERE rj.user_id=? AND rj.hidden_at IS NULL
+        AND rj.created_at >= ? AND rj.created_at < ?
+    `).all(req.user.id, range.start, range.end);
+    for (const t of tally) {
+      counts[outcomeGroupFor({ status: t.status, postingGone: !!t.postingGone })] += 1;
+    }
+
     const rows = db.prepare(`
       ${RUN_JOB_SELECT}
       WHERE rj.user_id=? AND rj.hidden_at IS NULL
         AND rj.created_at >= ? AND rj.created_at < ?
+      ${asked
+        // The status filter narrows the read, and the dead-posting override is then applied per row
+        // below. PENDING has to over-fetch and drop, because a row can be PENDING by status and
+        // ABORTED in reality; ABORTED has to over-fetch the PENDING statuses for the mirror reason.
+        // Stated rather than hidden, because "SELECT the group's statuses" looks sufficient and is
+        // not — that is precisely the bug the override exists to prevent.
+        ? `AND rj.status IN (${[...OUTCOME_STATUSES[asked],
+             ...(asked === OUTCOME.ABORTED ? OUTCOME_STATUSES[OUTCOME.PENDING] : [])]
+             .map(() => "?").join(",")})`
+        : ""}
       ORDER BY rj.created_at DESC, rj.id DESC
-    `).all(req.user.id, range.start, range.end);
+    `).all(req.user.id, range.start, range.end,
+           ...(asked ? [...OUTCOME_STATUSES[asked],
+                        ...(asked === OUTCOME.ABORTED ? OUTCOME_STATUSES[OUTCOME.PENDING] : [])]
+                     : []));
 
     // The partition, from shared/applyOutcomeGroups.js so the panel cannot disagree with it. Each
     // row lands in exactly one group; outcomeGroupFor is total by construction (an unmapped status
@@ -1558,10 +1619,19 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // Empty is a NORMAL state, not an error and not a spinner (requirement 6). The response is
       // shaped identically whether or not anything happened, so the client renders emptiness from
       // data rather than from the absence of it.
-      total: rows.length,
-      completed: groups[OUTCOME.COMPLETED],
-      pending:   groups[OUTCOME.PENDING],
-      aborted:   groups[OUTCOME.ABORTED],
+      //
+      // `total` is the DAY's total in both shapes — it is what "nothing happened on this date"
+      // means, and scoping it to the asked-for group would make an empty COMPLETED tab on a busy
+      // day claim the day itself was empty. That is what `counts` is for.
+      total: counts[OUTCOME.COMPLETED] + counts[OUTCOME.PENDING] + counts[OUTCOME.ABORTED],
+      counts,
+      ...(asked
+        ? { group: asked, jobs: groups[asked] }
+        : {
+            completed: groups[OUTCOME.COMPLETED],
+            pending:   groups[OUTCOME.PENDING],
+            aborted:   groups[OUTCOME.ABORTED],
+          }),
     });
   });
 

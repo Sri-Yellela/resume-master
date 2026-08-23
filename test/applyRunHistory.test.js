@@ -34,6 +34,9 @@ const panel   = read("client/src/panels/AutoApplyPanel.jsx");
 const sections= read("client/src/panels/AutoApplyPanelSections.jsx");
 const ctx     = read("client/src/contexts/AutoApplyContext.jsx");
 const dbPanel = read("client/src/panels/DatabasePanel.jsx");
+// AD1: the Database panel's chrome, extracted so the Auto Apply panel can adopt this layout by
+// rendering it rather than by copying the markup.
+const controls = read("client/src/components/ui/PanelControls.jsx");
 const dateCalendar   = read("client/src/components/ui/DateCalendar.jsx");
 const shadcnCalendar = read("client/src/components/ui/calendar.jsx");
 const applyRoute = applySource;
@@ -246,7 +249,128 @@ test("AC4: an empty date is a NORMAL state, not an error and not a spinner", asy
     const r = await res.json();
     // Shaped identically to a day with results, so the client renders emptiness from DATA rather
     // than from the absence of it — which is what turns an empty day into a permanent spinner.
-    assert.deepEqual(r, { date: "2019-01-01", total: 0, completed: [], pending: [], aborted: [] });
+    assert.deepEqual(r, { date: "2019-01-01", total: 0, counts: { completed: 0, pending: 0, aborted: 0 },
+                          completed: [], pending: [], aborted: [] });
+  } finally { t.close(); }
+});
+
+// ── TASK AD1: ONE GROUP PER REQUEST ──────────────────────────────────────────────────────────
+//
+// The three outcome groups became SUB-TABS, and AD1 requirement 3 is explicit: "Switching sub-tabs
+// with a date selected refetches for that tab; it must not load all three."
+
+/** One day holding every group, including the two the vocabulary only learned about in AC4. */
+const seedOneOfEach = (db) => {
+  db.exec(`INSERT INTO scraped_jobs (job_id, title, company, apply_url) VALUES
+    ('j-dismissed',  'Design Engineer',  'Notion',  'https://notion.so/jobs/6'),
+    ('j-superseded', 'Platform Engineer','Vercel',  'https://vercel.com/careers/7'),
+    ('j-cancelled',  'SRE',              'Datadog', 'https://datadog.avature.net/8')`);
+  addJob(db, { id: 1, jobId: "j-sub",         status: "submitted",   createdAt: T });
+  addJob(db, { id: 2, jobId: "j-held",        status: "held_review", createdAt: T + 60 });
+  addJob(db, { id: 3, jobId: "j-run",         status: "running",     createdAt: T + 120 });
+  addJob(db, { id: 4, jobId: "j-fail",        status: "failed",      createdAt: T + 180 });
+  addJob(db, { id: 5, jobId: "j-dismissed",   status: "dismissed",   createdAt: T + 240 });
+  addJob(db, { id: 6, jobId: "j-superseded",  status: "superseded",  createdAt: T + 300 });
+  addJob(db, { id: 7, jobId: "j-cancelled",   status: "cancelled",   createdAt: T + 360 });
+  // NOT in scraped_jobs — the 7-day cleanup removed the posting. By STATUS this row is PENDING; in
+  // reality there is no form left to open, so the override files it under ABORTED. It is here
+  // because it is the one row a "filter on the group's statuses" query would get wrong.
+  addJob(db, { id: 8, jobId: "j-gone",        status: "held_gate",   createdAt: T + 420 });
+};
+const DATE = "2023-11-14";
+
+test("AD1: ?group returns ONLY that group's rows, and never the other two", async () => {
+  const t = setup();
+  try {
+    seedOneOfEach(t.db);
+    for (const [group, expected] of [
+      ["completed", ["j-sub"]],
+      ["pending",   ["j-held", "j-run"]],
+      // The dead posting is here by the OVERRIDE, not by its status — which is exactly why the
+      // query cannot simply filter on the group's statuses and stop there.
+      ["aborted",   ["j-fail", "j-dismissed", "j-superseded", "j-cancelled", "j-gone"]],
+    ]) {
+      const r = await (await fetch(
+        `${t.baseUrl}/api/apply/history?date=${DATE}&tzOffset=0&group=${group}`)).json();
+      assert.equal(r.group, group);
+      assert.deepEqual(r.jobs.map(j => j.jobId).sort(), expected.slice().sort(),
+        `group=${group} returned the wrong rows`);
+      // The other groups' KEYS are absent entirely: a client that asked for one tab must not be
+      // able to render another tab's rows out of the same response by accident.
+      for (const other of ["completed", "pending", "aborted"]) {
+        assert.equal(r[other], undefined, `group=${group} still shipped the ${other} rows`);
+      }
+    }
+  } finally { t.close(); }
+});
+
+test("AD1: the counts are for ALL THREE groups and for the SELECTED DATE", async () => {
+  // Requirement 4 asks for a decision and for it to be stated. DATE-SCOPED, because these are
+  // outcome states of ONE entity rather than entity types — a run-job moves between the tabs as it
+  // progresses, so a global number would change under the reader for reasons unrelated to what they
+  // are looking at. And a global count needs a query at render, which requirement 3 forbids.
+  const t = setup();
+  try {
+    seedOneOfEach(t.db);
+    const r = await (await fetch(
+      `${t.baseUrl}/api/apply/history?date=${DATE}&tzOffset=0&group=completed`)).json();
+    assert.deepEqual(r.counts, { completed: 1, pending: 2, aborted: 5 });
+    assert.equal(r.jobs.length, 1, "the counts came at the cost of loading all three after all");
+    // `total` is the DAY's total in both shapes. Scoping it to the asked-for group would make an
+    // empty COMPLETED tab on a busy day claim the day itself was empty — which is the difference
+    // between requirement 7's "no applications on this date" and its "nothing completed".
+    assert.equal(r.total, 8);
+    // A different day is a different set of counts, which is what proves they are not global.
+    const other = await (await fetch(
+      `${t.baseUrl}/api/apply/history?date=2019-01-01&tzOffset=0&group=pending`)).json();
+    assert.deepEqual(other.counts, { completed: 0, pending: 0, aborted: 0 });
+    assert.equal(other.total, 0);
+  } finally { t.close(); }
+});
+
+test("AD1: the counts apply the dead-posting override, exactly as the rows do", async () => {
+  // A GROUP BY status would put the dead posting in PENDING and the tab that renders it in ABORTED,
+  // so the pill and its contents would disagree — a "1" over an empty list. The aggregate reads the
+  // same partition the rows do, which is why it selects the join's emptiness rather than counting.
+  const t = setup();
+  try {
+    addJob(t.db, { id: 1, jobId: "j-gone", status: "held_review", createdAt: T });
+    const r = await (await fetch(
+      `${t.baseUrl}/api/apply/history?date=${DATE}&tzOffset=0&group=aborted`)).json();
+    assert.deepEqual(r.counts, { completed: 0, pending: 0, aborted: 1 });
+    assert.equal(r.jobs.length, 1);
+    assert.equal(r.jobs[0].postingGone, true);
+  } finally { t.close(); }
+});
+
+test("AD1: an unrecognised group is refused, never silently answered with everything", async () => {
+  // Falling back to "all three" on a typo'd tab name would ship the whole day to a client that
+  // asked for a slice of it — requirement 3's violation, committed invisibly.
+  const t = setup();
+  try {
+    for (const bad of ["Completed", "failed", "all", "held_review"]) {
+      const res = await fetch(`${t.baseUrl}/api/apply/history?date=${DATE}&tzOffset=0&group=${bad}`);
+      assert.equal(res.status, 400, `group='${bad}' was accepted`);
+    }
+  } finally { t.close(); }
+});
+
+test("AD1: a group request still hides soft-deleted rows and still scopes to the user", async () => {
+  // The two guards that matter most, re-asserted on the NEW code path rather than assumed to have
+  // been inherited by it. A WHERE clause present on the rows query and missing from the counts
+  // aggregate is exactly the shape of mistake this endpoint could now make, and it would surface as
+  // a tab pill that counts applications the user has removed.
+  const t = setup();
+  try {
+    addJob(t.db, { id: 1, jobId: "j-held", status: "held_review", createdAt: T });
+    addJob(t.db, { id: 2, jobId: "j-run",  status: "running",     createdAt: T + 60 });
+    addJob(t.db, { id: 3, jobId: "j-other", userId: 2, runId: 2, status: "held_review", createdAt: T });
+    t.db.prepare("UPDATE apply_run_jobs SET hidden_at=unixepoch() WHERE job_id='j-held'").run();
+    const r = await (await fetch(
+      `${t.baseUrl}/api/apply/history?date=${DATE}&tzOffset=0&group=pending`)).json();
+    assert.deepEqual(r.jobs.map(j => j.jobId), ["j-run"]);
+    assert.equal(r.counts.pending, 1, "the counts read a different WHERE clause from the rows");
+    assert.equal(r.total, 1);
   } finally { t.close(); }
 });
 
@@ -440,31 +564,69 @@ test("AC4 requirement 2: nothing loads until a date is selected", () => {
     "the history defaults to today somewhere — requirement 2 says nothing loads until a date is picked");
 });
 
-test("AC4: 'not asked yet' and 'nothing happened' are DIFFERENT states", () => {
-  // Collapsing them into one falsy check is how requirement 6's "no applications on this date"
-  // becomes a permanent spinner: the panel cannot tell an unasked question from an empty answer.
-  assert.match(panel, /\{history === null && !historyLoading && \(/);
+test("AC4 -> AD1: 'not asked yet', 'nothing happened' and 'nothing in this tab' are THREE states", () => {
+  // Collapsing them is how requirement 7's "no applications on this date" becomes a permanent
+  // spinner: the panel cannot tell an unasked question from an empty answer. AD1 adds a THIRD,
+  // because the sub-tabs made it possible to be looking at an empty tab on a busy day — "you queued
+  // nothing that day" and "you queued six things and none of them are pending" are different
+  // answers to the question being asked, and one sentence for both would be wrong for one of them.
+  //
+  // A FOURTH exists and is not one of the three: a search that matched nothing. A filtered listing
+  // saying "nothing pending" while six things are pending would be a lie.
+  assert.match(panel, /\{!historyDate && !historyLoading && \(/);
   assert.match(panel, /Pick a date to see the applications you added to auto-apply that day/);
-  assert.match(panel, /\{history !== null && history\.total === 0 && \(/);
+  assert.match(panel, /\{historyDate && history !== null && history\.total === 0 && \(/);
   assert.match(panel, /No applications on \{localDateLabel\(history\.date\)\}/);
-  assert.match(panel, /\{history !== null && history\.total > 0 && \(/);
+  assert.match(panel, /history\.total > 0 && listedJobs\.length === 0 && \(/);
+  assert.match(panel, /Nothing \$\{OUTCOME_LABELS\[historyGroup\]\.label\.toLowerCase\(\)\}/);
+  assert.match(panel, /matches “\$\{search\.trim\(\)\}”/);
+  // Each one is identifiable in the DOM, so scripts/abPanelUi.mjs can assert WHICH emptiness was
+  // reported rather than just that the page was empty — which is what it was really checking before.
+  for (const kind of ["no-date", "empty-date", "no-match", "empty-tab"]) {
+    assert.ok(new RegExp(`data-rm-empty=(\"${kind}\"|\{)`).test(panel),
+      `the "${kind}" empty state is not identifiable in the DOM`);
+  }
 });
 
-test("AC4: the DATABASE PANEL'S calendar is reused, not reimplemented", () => {
-  // Requirement: "REUSE that widget rather than building a second date picker." So the widget was
-  // extracted from DatabasePanel and BOTH panels render it — the same proof AC3 uses for the card
-  // primitive, and for the same reason: a second implementation that looks identical today drifts.
-  assert.match(dbPanel, /import \{ DateCalendar \} from "\.\.\/components\/ui\/DateCalendar\.jsx"/);
-  assert.match(panel, /import \{ DateCalendar \} from "\.\.\/components\/ui\/DateCalendar\.jsx"/);
-  // DatabasePanel's own two call sites — the toolbar date filter and the per-row date cell — render
-  // the extracted component, and its local copy is gone.
-  assert.equal((dbPanel.match(/<DateCalendar theme=\{theme\}/g) || []).length, 2);
+test("AC4 -> AD1: the DATABASE PANEL'S calendar — and now its whole CHROME — is reused, not rebuilt", () => {
+  // AC4's requirement was "REUSE that widget rather than building a second date picker", and it was
+  // met by extracting DateCalendar. AD1 widens the same requirement to the whole layout — the
+  // sub-tab row, the search box and the date filter — with the same reasoning: a second
+  // implementation that looks identical today drifts the first time either side is touched.
+  //
+  // RE-PINNED, NOT RELAXED. The two Auto Apply assertions that named DateCalendar and DockPortal
+  // directly now name the extracted CONTROL that contains both, because that is the unit both
+  // panels render; asserting the inner pieces at the panel would fail for a refactor that made the
+  // reuse stronger, which is the opposite of what this test is for.
+  assert.match(controls, /import \{ DateCalendar \} from "\.\/DateCalendar\.jsx"/);
+  assert.match(controls, /import \{ DockPortal \} from "\.\.\/DockPortal\.jsx"/);
+  for (const [name, src] of [["DatabasePanel", dbPanel], ["AutoApplyPanel", panel]]) {
+    assert.match(src, /import \{ PanelSubTabs, PanelSearch, DateFilterButton \} from "\.\.\/components\/ui\/PanelControls\.jsx"/,
+      `${name} does not render the shared chrome`);
+    assert.match(src, /<PanelSubTabs/, `${name} has its own tab row again`);
+    assert.match(src, /<PanelSearch/,  `${name} has its own search box again`);
+    assert.match(src, /<DateFilterButton/, `${name} has its own date filter again`);
+  }
+  // DatabasePanel's per-ROW date cell still renders DateCalendar directly — a table cell is not a
+  // filter pill and has no button to share — so exactly one direct call site remains there, and
+  // the panel's own local calendar is still gone.
+  assert.equal((dbPanel.match(/<DateCalendar theme=\{theme\}/g) || []).length, 1);
   assert.ok(!/^function Calendar\(\{ value, onChange, onClose, theme \}\)/m.test(dbPanel),
     "DatabasePanel still holds its own calendar — the extraction is a copy");
+  // The Auto Apply panel writes NEITHER any more: no bare DateCalendar, no hand-assembled portal.
+  assert.ok(!/<DateCalendar/.test(panel),
+    "the Auto Apply panel hand-assembles the calendar again instead of rendering the shared control");
+  assert.ok(!/<DockPortal/.test(panel),
+    "the Auto Apply panel hand-assembles the popover again instead of rendering the shared control");
   // And the same portal treatment, because the reason it is portalled has not changed: an
   // absolutely-positioned popover inside a scrolling column is CLIPPED by it, and clipping is
   // resolved before stacking, so no z-index can fix it.
-  assert.match(panel, /<DockPortal anchorRect=\{historyCalRect\} theme=\{theme\}/);
+  assert.match(controls, /<DockPortal anchorRect=\{rect\} theme=\{theme\}/);
+  // The layoutId is a PROP, not a literal shared by both panels — two surfaces animating one
+  // underline between them is a coupling this extraction exists to avoid.
+  assert.match(controls, /<motion\.div layoutId=\{layoutId\}/);
+  assert.match(dbPanel, /layoutId="db-tab-underline"/);
+  assert.match(panel, /layoutId="apply-outcome-underline"/);
 });
 
 test("AC4: the shadcn calendar.jsx was not clobbered by a case-insensitive filename", () => {
@@ -483,7 +645,10 @@ test("AC4: the calendar's date string and the server's day boundary agree", () =
   // 8pm in Boston lands on the next UTC day, so the user picks the day they remember and is told
   // nothing happened. Every history request carries the browser's own getTimezoneOffset().
   assert.match(ctx, /const tzOffset = \(\) => new Date\(\)\.getTimezoneOffset\(\)/);
-  assert.match(ctx, /\/api\/apply\/history\?date=\$\{encodeURIComponent\(date\)\}&tzOffset=\$\{tzOffset\(\)\}/);
+  // RE-PINNED FOR AD1: the request grew a `group`, because the three outcome groups are sub-tabs and
+  // a tab switch must refetch ONE of them. The date and the offset are unchanged and are still what
+  // this test is about.
+  assert.match(ctx, /\/api\/apply\/history\?date=\$\{encodeURIComponent\(date\)\}&group=\$\{encodeURIComponent\(wanted\)\}&tzOffset=\$\{tzOffset\(\)\}/);
   assert.match(ctx, /\/api\/apply\/history\/months\/\$\{encodeURIComponent\(month\)\}\?tzOffset=\$\{tzOffset\(\)\}/);
   // And the LABEL is built from the parts rather than through new Date(iso), which parses a
   // YYYY-MM-DD as UTC midnight and renders the previous day west of Greenwich — the panel was
@@ -497,9 +662,17 @@ test("AC4 requirement 7: markers are fetched on OPENING the picker, never on ren
   // Requirement 7 permits a marker only if it does not violate requirement 2. Requirement 2's words
   // are "the panel's initial render issues no history query" — and opening the calendar is an
   // action the user took, so the marker fetch is inside the rule rather than an exception to it.
-  assert.match(panel, /if \(opening\) \{[\s\S]{0,300}?loadHistoryMonth\(/);
+  // RE-PINNED FOR AD1. The open/closed state moved INTO the extracted DateFilterButton with the
+  // rest of the control, so the panel no longer writes `if (opening)` — it passes an `onOpen`
+  // callback that the control fires when the popover opens. Same rule, same moment, one place.
+  assert.match(controls, /if \(opening\) onOpen\?\.\(value\)/);
+  assert.match(panel, /onOpen=\{\(value\) => \{[\s\S]{0,400}?loadHistoryMonth\(/);
   assert.match(panel, /onMonth=\{loadHistoryMonth\}/);
   assert.match(panel, /markers=\{historyMarkers\}/);
+  // Opt-in, still: the Database panel passes no markers, so nothing is dotted there. That is what
+  // "unchanged for its own use" means at the source level; the browser check proves it renders.
+  assert.ok(!/markers=/.test(dbPanel),
+    "the Database panel started passing markers — its calendar is no longer unchanged for its own use");
   // Failing to get markers must not break the picker — they are a convenience, not the feature.
   assert.match(ctx, /catch \{ \/\* markers are a convenience/);
 });
@@ -507,10 +680,21 @@ test("AC4 requirement 7: markers are fetched on OPENING the picker, never on ren
 test("AC4 requirement 4: the abort button's presence is the SERVER's decision", () => {
   // The client must not re-derive abortability: the button's presence and the endpoint's guard have
   // to agree, and two copies of that rule is how a button appears for something the server refuses.
-  assert.match(sections, /\{job\.abortable && \(/);
+  // RE-PINNED FOR AD1: HistoryRow is gone — the dated listing is the panel's body now, so abort and
+  // remove live on the two rows that body renders. The RULE is untouched and is asserted on both:
+  // the flag comes from the response, never re-derived here.
+  assert.match(sections, /\{job\.abortable && onAbort && \(/);
+  assert.match(sections, /\{onAbort && app\.rows\?\.some\(r => r\.abortable\) && \(/);
   assert.ok(!/status === "running" \|\| .*status === "queued"/.test(sections),
     "the row is re-deriving which applications can be aborted");
   assert.match(applyRoute, /abortable: OUTCOME_STATUSES\[OUTCOME\.PENDING\]\.includes\(r\.status\)/);
+  // A GROUPED application aborts and hides EVERY run-job it holds. Stopping only the newest attempt
+  // leaves the application in PENDING after telling the user it stopped; hiding only the newest
+  // makes the row come back on the next fetch wearing an earlier attempt's face, which is exactly
+  // the "does not return on refetch" AD1 asks to verify.
+  assert.match(panel, /const abortApplication = \(app\) => abortRunJob\(\(app\.rows \|\| \[\]\)\.filter\(r => r\.abortable\)\.map\(r => r\.id\)\)/);
+  assert.match(panel, /const hideApplication  = \(app\) => hideRunJob\(\(app\.rows \|\| \[\]\)\.map\(r => r\.id\)\)/);
+  assert.match(ctx, /const ids = Array\.isArray\(runJobId\) \? runJobId : \[runJobId\];/);
 });
 
 test("AC4: the confirmation survives the refresh that follows it", () => {

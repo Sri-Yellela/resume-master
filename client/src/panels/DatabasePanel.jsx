@@ -10,13 +10,23 @@ import { Z } from "../styles/zLayers.js";
 // AC4: the calendar this panel established, extracted so the Auto Apply panel's dated run history
 // can reuse it rather than growing a second date picker. Same component, same two call sites here.
 import { DateCalendar } from "../components/ui/DateCalendar.jsx";
+// TASK AD1: this panel's CHROME — the underline sub-tab row with its count pills, the rounded
+// search box, and the "Filter by date" pill with its portalled calendar — extracted so the Auto
+// Apply panel can adopt this layout by rendering the same components rather than by copying the
+// markup. The three call sites below are the originals, now reading from the shared file: if this
+// panel kept its own copy the extraction would be a clone with extra steps, and the two surfaces
+// would drift the first time either was touched.
+import { PanelSubTabs, PanelSearch, DateFilterButton } from "../components/ui/PanelControls.jsx";
 
 // ── Calendar component ────────────────────────────────────────
 //
 // MOVED to components/ui/DateCalendar.jsx and imported above. Task AC4 reuses this widget for the
 // Auto Apply panel's dated run history rather than building a second date picker, so it was
 // lifted out whole; both of this panel's uses — the applied-jobs date FILTER in the toolbar and
-// the per-row "set date" cell — render the extracted component unchanged.
+// the per-row "set date" cell — render the extracted component unchanged. The toolbar one now
+// reaches it through PanelControls' DateFilterButton, which is the button plus the portal plus
+// this calendar as one piece; the per-row cell still renders DateCalendar directly, because a
+// table cell is not a filter pill and has no button to share.
 
 
 // ── Column definitions ─────────────────────────────────────────
@@ -251,8 +261,6 @@ export function DatabasePanel({ user }) {
   const [sortCol,      setSortCol]      = useState("applied_at");
   const [sortDir,      setSortDir]      = useState("desc");
   const [filterDate,   setFilterDate]   = useState("");
-  const [calFilter,    setCalFilter]    = useState(false);
-  const [calFilterRect, setCalFilterRect] = useState(null);
 
   // ── Saved Jobs tab state ──────────────────────────────────────
   const [savedJobs,    setSavedJobs]    = useState([]);
@@ -491,113 +499,55 @@ export function DatabasePanel({ user }) {
 
       <DetailModal modal={detailModal} onClose={() => setDetailModal(null)} theme={theme}/>
 
-      {/* ── Header ── */}
-      <div style={{
-        background: "rgba(17,17,17,0.92)",
-        backdropFilter:"blur(16px)",
-        borderBottom:`1px solid ${theme.border}`,
-        display:"flex", alignItems:"stretch", flexShrink:0,
-        padding:"0 14px",
-      }}>
-        {/* Tab switcher — underline style */}
-        <div style={{ display:"flex" }}>
-          {SHEETS.map(([id, lbl]) => (
-            <button key={id}
-              style={{ background:"transparent",
-                       color: activeSheet===id ? theme.accent : theme.textMuted,
-                       border:"none", padding:"12px 16px",
-                       cursor:"pointer", fontSize:13,
-                       fontWeight: activeSheet===id ? 700 : 500,
-                       position:"relative", transition:"color 0.15s",
-                       display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" }}
-              onClick={() => { setActiveSheet(id); setSearch(""); setFilterDate(""); }}>
-              {lbl}
-              <span style={{ background:activeSheet===id ? theme.accentMuted : theme.surfaceHigh,
-                             color:activeSheet===id ? theme.accentText : theme.textMuted,
-                             fontSize:10, fontWeight:700,
-                             padding:"1px 7px", borderRadius:999 }}>
-                {id === "applications" ? apps.length : id === "resumes" ? resumes.length : id === "pending" ? pendingJobs.length : null}
-              </span>
-              {activeSheet===id && (
-                <motion.div layoutId="db-tab-underline"
-                  style={{ position:"absolute", bottom:0, left:0, right:0,
-                           height:2, background:theme.accent, borderRadius:999 }}/>
-              )}
+      {/* ── Header ──
+          AD1: the same PanelSubTabs the Auto Apply panel renders. Identical behaviour to the markup
+          it replaces — same underline, same count pill, same "changing sheet clears the search and
+          the date filter" rule, which is the panel's own and stays here rather than moving into a
+          shared component that has no business knowing about it. */}
+      <PanelSubTabs
+        theme={theme}
+        layoutId="db-tab-underline"
+        active={activeSheet}
+        onSelect={(id) => { setActiveSheet(id); setSearch(""); setFilterDate(""); }}
+        tabs={SHEETS.map(([id, lbl]) => ({
+          id, label: lbl,
+          count: id === "applications" ? apps.length
+            : id === "resumes" ? resumes.length
+            : id === "pending" ? pendingJobs.length : null,
+        }))}
+        right={
+          <div style={{ display:"flex", alignItems:"center", gap:8, paddingRight:4 }}>
+            <button className="rm-btn rm-btn-ghost rm-btn-sm"
+              onClick={load} disabled={loading}>
+              {loading ? "⏳" : "↻"} Refresh
             </button>
-          ))}
-        </div>
-        <div style={{ flex:1 }}/>
-        <div style={{ display:"flex", alignItems:"center", gap:8, paddingRight:4 }}>
-          <button className="rm-btn rm-btn-ghost rm-btn-sm"
-            onClick={load} disabled={loading}>
-            {loading ? "⏳" : "↻"} Refresh
-          </button>
-          <button className="rm-btn rm-btn-primary rm-btn-sm" onClick={exportExcel}>
-            📥 Export Excel
-          </button>
-        </div>
-      </div>
+            <button className="rm-btn rm-btn-primary rm-btn-sm" onClick={exportExcel}>
+              📥 Export Excel
+            </button>
+          </div>
+        }
+      />
 
       {/* ── Toolbar (hidden for saved/pending tab — they have their own toolbars) ── */}
       {activeSheet !== "saved" && activeSheet !== "pending" && <div style={{ background:theme.surface, padding:"10px 16px",
                     display:"flex", alignItems:"center", gap:10,
                     borderBottom:`1px solid ${theme.border}`,
                     flexShrink:0, flexWrap:"wrap" }}>
-        {/* Search */}
-        <div style={{ position:"relative", display:"flex", alignItems:"center",
-                      flex:"0 0 260px" }}>
-          <span style={{ position:"absolute", left:12, fontSize:13,
-                         pointerEvents:"none", color:theme.textDim }}>🔍</span>
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => { if (e.key === "Escape") setSearch(""); }}
-            placeholder={`Search ${isApps ? "applications" : "resumes"}…`}
-            className="rm-input"
-            style={{ paddingLeft:36, borderRadius:999 }}/>
-          {search && (
-            <button style={{ position:"absolute", right:12, background:"transparent",
-                             border:"none", color:theme.textMuted, cursor:"pointer",
-                             fontSize:11 }}
-              onClick={() => setSearch("")}>✕</button>
-          )}
-        </div>
+        {/* Search — AD1's shared primitive. */}
+        <PanelSearch theme={theme} value={search} onChange={setSearch}
+          placeholder={`Search ${isApps ? "applications" : "resumes"}…`}/>
 
+        {/* Filter by date — the button, the portal and the calendar as one piece. No `markers` is
+            passed, so nothing is dotted here: the marker prop is opt-in and this panel did not opt
+            in, which is what keeps the Auto Apply reuse from changing this surface. */}
         {isApps && (
-          <div ref={calRef} style={{ position:"relative" }}>
-            <button
-              style={{ display:"flex", alignItems:"center", gap:6,
-                       background:filterDate ? theme.accentMuted : theme.surfaceHigh,
-                       color:filterDate ? theme.accentText : theme.textMuted,
-                       border:`1px solid ${filterDate ? "color-mix(in srgb, var(--color-primary) 25%, transparent)" : theme.border}`,
-                       borderRadius:999, padding:"6px 14px", cursor:"pointer", fontSize:12,
-                       fontWeight:600, whiteSpace:"nowrap" }}
-              onClick={() => {
-                setCalFilterRect(calRef.current?.getBoundingClientRect() || null);
-                setCalFilter(o => !o);
-              }}>
-              📅 {filterDate ? `Date: ${fmtDate(filterDate)}` : "Filter by date"}
-              {filterDate && (
-                <span style={{ marginLeft:4, color:theme.textMuted, fontWeight:700, fontSize:10 }}
-                  onClick={e => { e.stopPropagation(); setFilterDate(""); }}>✕</span>
-              )}
-            </button>
-            <AnimatePresence>
-              {calFilter && calFilterRect && (
-                <DockPortal anchorRect={calFilterRect} theme={theme}
-                  onClose={() => setCalFilter(false)} style={{ minWidth:260, padding:0 }}>
-                  <motion.div key="cal-filter"
-                    initial={{ opacity:0, scale:0.96, y:-4 }}
-                    animate={{ opacity:1, scale:1, y:0 }}
-                    exit={{ opacity:0, scale:0.96, y:-4 }}
-                    transition={{ duration:0.15 }}>
-                    <DateCalendar theme={theme}
-                      value={filterDate}
-                      onChange={setFilterDate}
-                      onClose={() => setCalFilter(false)}/>
-                  </motion.div>
-                </DockPortal>
-              )}
-            </AnimatePresence>
-          </div>
+          <DateFilterButton
+            theme={theme}
+            value={filterDate}
+            format={fmtDate}
+            onChange={setFilterDate}
+            onClear={() => setFilterDate("")}
+            portalKey="cal-filter"/>
         )}
 
         <div style={{ flex:1 }}/>

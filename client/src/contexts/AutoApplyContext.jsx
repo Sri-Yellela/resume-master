@@ -1,6 +1,9 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { api, authContextQuery } from "../lib/api.js";
 import { A_PLUS_TOOL, GENERATE_TOOL } from "../lib/applyTools.js";
+// AD1: the outcome partition, shared with routes/apply.js so the sub-tab a request asks for and the
+// group the server files a row under cannot disagree.
+import { OUTCOME } from "../../../shared/applyOutcomeGroups.js";
 
 // ============================================================
 // AutoApplyContext — the auto-apply pipeline's whole state, lifted out of JobsPanel
@@ -330,7 +333,20 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   // `null` vs `{ ... }` is a real distinction and both are rendered differently: null is "you have
   // not asked yet", an empty payload is "nothing happened on that day" (requirement 6). Collapsing
   // them into one falsy state is how "no applications on this date" becomes a permanent spinner.
+  //
+  // ── TASK AD1: THE SUB-TAB IS PART OF THE QUERY ────────────────────────────────────────────
+  //
+  // AD1 turns the three outcome groups into sub-tabs and makes the rule explicit: "Switching
+  // sub-tabs with a date selected refetches for that tab; it must not load all three." So the
+  // active group lives beside the active date and both are sent — a tab switch is a fetch, and a
+  // fetch is for exactly one group.
+  //
+  // PENDING IS THE DEFAULT (requirement 5). It is the only tab where anything is waiting on a
+  // human, and burying it behind COMPLETED would repeat the mistake AB4 fixed by putting NEEDS
+  // REVIEW first. Note that defaulting the TAB costs nothing at render: no date is selected, so
+  // there is still no query — requirement 3 is about what is fetched, not about what is selected.
   const [historyDate, setHistoryDate] = useState(null);   // "YYYY-MM-DD", or null before any pick
+  const [historyGroup, setHistoryGroup] = useState(OUTCOME.PENDING);
   const [history, setHistory] = useState(null);           // the payload, or null before any pick
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyMsg, setHistoryMsg] = useState("");
@@ -344,16 +360,24 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   const tzOffset = () => new Date().getTimezoneOffset();
 
   /**
-   * One day's applications, in three groups. The ONLY thing that populates the history.
-   * @param {string} date "YYYY-MM-DD"
+   * One day's applications, for ONE outcome group. The ONLY thing that populates the history.
+   *
+   * @param {string} date  "YYYY-MM-DD"
+   * @param {string} [group] one of OUTCOME; defaults to whichever sub-tab is active
    */
-  const loadHistory = useCallback(async (date) => {
+  const loadHistory = useCallback(async (date, group) => {
+    const wanted = group || historyGroup;
+    if (group) setHistoryGroup(group);
     if (!date) { setHistoryDate(null); setHistory(null); setHistoryMsg(""); return; }
     setHistoryDate(date);
     setHistoryLoading(true);
     setHistoryMsg("");
     try {
-      const data = await api(`/api/apply/history?date=${encodeURIComponent(date)}&tzOffset=${tzOffset()}`);
+      // ONE group's rows. `counts` comes back for all three so the sub-tab numbers are right
+      // without fetching the other two tabs' contents — see the endpoint for why that aggregate is
+      // not the same thing as loading all three.
+      const data = await api(
+        `/api/apply/history?date=${encodeURIComponent(date)}&group=${encodeURIComponent(wanted)}&tzOffset=${tzOffset()}`);
       setHistory(data);
     } catch (e) {
       // The date stays selected on a failure. Clearing it would bounce the user back to "pick a
@@ -363,7 +387,23 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
     } finally {
       setHistoryLoading(false);
     }
-  }, []);
+  }, [historyGroup]);
+
+  /**
+   * Switch sub-tab (AD1 requirement 3).
+   *
+   * With a date selected this refetches THAT tab and nothing else. With no date selected it changes
+   * the selection and issues no request at all — which is requirement 3's other half: the calendar
+   * is primary navigation, so a tab with no date behind it has nothing to show and nothing to ask
+   * for. Clearing `history` on the switch is deliberate: leaving the previous tab's rows on screen
+   * under a new heading is worse than an honest empty state for the few hundred milliseconds the
+   * refetch takes.
+   */
+  const selectHistoryGroup = useCallback((group) => {
+    setHistoryGroup(group);
+    if (historyDate) loadHistory(historyDate, group);
+    else setHistory(null);
+  }, [historyDate, loadHistory]);
 
   /**
    * Which days in a month have anything on them (requirement 7).
@@ -396,10 +436,18 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
    * that moment in an employer's inbox is the worst thing this surface could do.
    */
   const abortRunJob = useCallback(async (runJobId) => {
-    setHistoryBusyId(runJobId);
+    // AD1: ONE ID OR MANY, and the reason is the company -> application tier the listing now uses.
+    // A grouped application is every attempt at one posting, and several of those attempts can be
+    // abortable at once — a job held in run 7 and held again in run 8 is two live PENDING rows.
+    // Stopping only the newest would leave the application sitting in PENDING having been told it
+    // was stopped, which is the worst thing this surface can say. One reload and one message for
+    // the whole application, because "stop this application" is one act to the person doing it.
+    const ids = Array.isArray(runJobId) ? runJobId : [runJobId];
+    if (!ids.length) return;
+    setHistoryBusyId(ids[0]);
     setHistoryMsg("");
     try {
-      await api(`/api/apply/run-jobs/${runJobId}/abort`, { method: "POST" });
+      for (const id of ids) await api(`/api/apply/run-jobs/${id}/abort`, { method: "POST" });
       // Both surfaces: the row leaves PENDING in the history, and it leaves the panel's own feeds.
       await Promise.all([loadHistory(historyDate), loadApplyRuns(), loadApplyPending()]);
       // AFTER the reload, not before. loadHistory clears historyMsg on entry — so setting the
@@ -422,10 +470,18 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
    * employer and that record is what the candidate needs when an interview lands.
    */
   const hideRunJob = useCallback(async (runJobId) => {
-    setHistoryBusyId(runJobId);
+    // One id or many, for the same reason as abortRunJob above — and here it is load-bearing for
+    // AD1's "soft-delete hides a row and it does not return on refetch": hiding only the newest
+    // attempt leaves the application's older attempts in the feed, so the row the user removed
+    // reappears on the next fetch wearing an earlier attempt's face.
+    const ids = Array.isArray(runJobId) ? runJobId : [runJobId];
+    if (!ids.length) return;
+    setHistoryBusyId(ids[0]);
     setHistoryMsg("");
     try {
-      const r = await api(`/api/apply/run-jobs/${runJobId}`, { method: "DELETE" });
+      const results = [];
+      for (const id of ids) results.push(await api(`/api/apply/run-jobs/${id}`, { method: "DELETE" }));
+      const r = { abortedFirst: results.some(x => x?.abortedFirst) };
       await Promise.all([loadHistory(historyDate), loadApplyRuns(), loadApplyPending()]);
       // After the reload, for the same reason as abortRunJob above.
       setHistoryMsg(r.abortedFirst
@@ -551,8 +607,11 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       artifactUrl, runInFlight, startApplyRun,
       // AC4: the dated run history. Deliberately no loader effect anywhere above — nothing here is
       // populated until loadHistory is called with a date the user picked.
-      historyDate, history, historyLoading, historyMsg, setHistoryMsg, historyMarkers, historyBusyId,
-      loadHistory, loadHistoryMonth, abortRunJob, hideRunJob,
+      // AD1: `historyGroup` is the active SUB-TAB, and selectHistoryGroup is the only way to change
+      // it — so a tab switch is always one refetch of one group, never three.
+      historyDate, historyGroup, history, historyLoading, historyMsg, setHistoryMsg,
+      historyMarkers, historyBusyId,
+      loadHistory, selectHistoryGroup, loadHistoryMonth, abortRunJob, hideRunJob,
       // The single number the JOBS-adjacent chrome needs: how many things are waiting on a human.
       // A review queue nobody sees is worse than a cluttered board, so this is what puts a count on
       // the AUTO APPLY tab. Summed here rather than in the tab so the badge and the panel can never

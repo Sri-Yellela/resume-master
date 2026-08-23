@@ -242,13 +242,27 @@ test("no surface on the scale carries a literal any more", () => {
 // ── (ii) The clipping, and the click ──────────────────────────────────────────────────────────
 
 test("the clipped panel popover is portalled out of its overflow:hidden ancestor", () => {
+  // RE-PINNED FOR AD1, not relaxed. Both of this panel's date popovers are still portalled; one of
+  // them just stopped being written here. AD1 extracted the sheet-level "Filter by date" control —
+  // pill, portal and calendar as one piece — into components/ui/PanelControls.jsx so the Auto Apply
+  // panel could adopt this layout by rendering it rather than by copying it. Counting DockPortal
+  // call sites in this ONE file would now report a regression for a refactor that moved the call
+  // site, so the assertion follows it: one portal still written here (the per-row cell editor,
+  // which is inside a scrolling table and has no shared pill to belong to) and one in the extracted
+  // control this panel renders.
   assert.match(dbPanel, /import \{ DockPortal \} from "\.\.\/components\/DockPortal\.jsx";/);
-  // Both calendars — the sheet-level date filter and the per-row cell editor — go through the portal.
-  assert.equal((dbPanel.match(/<DockPortal anchorRect=/g) || []).length, 2,
-    "both date popovers must be portalled; the per-cell one is inside a scrolling table");
+  assert.equal((dbPanel.match(/<DockPortal anchorRect=/g) || []).length, 1,
+    "the per-cell date popover must be portalled; it is inside a scrolling table");
+  assert.match(dbPanel, /<DateFilterButton/,
+    "the sheet-level date filter is gone from this panel entirely");
+  const panelControls = read("client/src/components/ui/PanelControls.jsx");
+  assert.equal((panelControls.match(/<DockPortal anchorRect=/g) || []).length, 1,
+    "the extracted date filter stopped portalling its calendar — it is clipped again in BOTH panels");
   // And the popover no longer frames or positions itself, because the portal does.
-  assert.ok(!/position:"absolute", zIndex:300/.test(dbPanel),
-    "the calendar is self-positioning again, which puts it back inside the clipping ancestor");
+  for (const [where, src] of [["DatabasePanel", dbPanel], ["PanelControls", panelControls]]) {
+    assert.ok(!/position:"absolute", zIndex:300/.test(src),
+      `${where}'s calendar is self-positioning again, which puts it back inside the clipping ancestor`);
+  }
 });
 
 test("outside-click closes the dropdown WITHOUT swallowing the click", () => {

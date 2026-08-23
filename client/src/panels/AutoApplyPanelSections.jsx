@@ -10,9 +10,9 @@
 import { useTheme } from "../styles/theme.jsx";
 import { describeApplication, attemptStatusChip, PREREQUISITE_LABELS } from "../lib/applyObstacles.js";
 import { TileCard, TilePill } from "../components/ui/TileCard.jsx";
-// AC4: the three outcome groups of the dated run history. In shared/ because routes/apply.js
-// groups the rows with the same partition — a copy on each side is how the two come to disagree.
-import { OUTCOME_LABELS } from "../../../shared/applyOutcomeGroups.js";
+// AD1: OUTCOME_LABELS moved to AutoApplyPanel with the groups themselves — they name the SUB-TABS
+// now, and nothing in this module reads them. The partition still lives in shared/ because
+// routes/apply.js groups rows with it; a copy on each side is how the two come to disagree.
 
 export function SectionHeading({ children, count, note, theme }) {
   return (
@@ -396,7 +396,8 @@ export function ApplicationObstacleCard({
  * the screenshot, because that is what a user reaches for when an interview lands. STOPPED needs the
  * plain-language reason and a retry ONLY where retrying can work.
  */
-export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOpenRun, onGenerateResume }) {
+export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOpenRun, onGenerateResume,
+  onAbort, onHide, busy = false }) {
   const d = describeApplication(job);
   const when = job.finishedAt || job.startedAt || job.createdAt;
   // Protective vs broken is the distinction the old UI lost by calling both "failed".
@@ -442,7 +443,16 @@ export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOp
       {/* THE OBSTACLE, as a sentence. This replaces the status pill that used to say "Failed". */}
       {variant !== "submitted" && (
         <div style={{ fontSize: 11.5, color: theme.text, lineHeight: 1.5 }}>
-          {d.obstacle}
+          {/* A DEAD POSTING IS ITS OWN STATE, and it is WHY this row is filed as aborted rather than
+              pending — said, rather than left for the reader to infer from which tab they are on.
+              This sentence used to live on HistoryRow, which AD1 removed; a held row whose posting
+              the 7-day cleanup deleted lands in ABORTED by the override, so it is rendered by THIS
+              component now and the sentence had to come with it. Without it the row would report
+              whatever hold it was in when the posting vanished, which is a hold that can no longer
+              be cleared by anything. */}
+          {job.postingGone && !job.title
+            ? "The posting was removed from the board, so there is nothing left to finish"
+            : d.obstacle}
           {/* A detail that merely repeats the obstacle reads as a stutter ("You rejected this one —
               You rejected this one"), which happens whenever reason_detail restates reason_code. */}
           {d.detail && d.detail !== d.obstacle && (
@@ -518,6 +528,36 @@ export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOp
             style={{ border: "none", background: "transparent", color: theme.textDim,
                      fontSize: 10, cursor: "pointer", textDecoration: "underline" }}>
             details
+          </button>
+        )}
+        {/* ── AD1: ABORT AND REMOVE, moved here from the deleted HistoryRow ────────────────────
+            The dated listing IS the run history now, so the two per-item actions AC4 built have to
+            live on the rows that listing renders. They are the same actions against the same two
+            endpoints; what changed is that this row already carries the evidence links, the ATS
+            chip and the posting link that the compact history row did not, so a reader no longer
+            has to choose between "the log" and "the record".
+
+            ABORT's presence is still the SERVER's decision (`job.abortable`), not re-derived here:
+            the button and the endpoint's guard have to agree, and two copies of that rule is how a
+            button appears for something the server will refuse. */}
+        {job.abortable && onAbort && (
+          <button onClick={() => onAbort(job)} disabled={busy}
+            title="Stops this application. If it is filling a form right now, the browser is closed, nothing is submitted, and the prepared answers are voided."
+            style={{ border: "1px solid #dc262655", borderRadius: 6, padding: "4px 10px",
+                     background: theme.surface, color: "#dc2626", fontWeight: 700, fontSize: 11,
+                     cursor: busy ? "wait" : "pointer", opacity: busy ? 0.5 : 1 }}>
+            Abort
+          </button>
+        )}
+        {onHide && (
+          <button onClick={() => onHide(job)} disabled={busy}
+            title={job.status === "submitted"
+              ? "Removes this from your history. The record is KEPT — an application that reached an employer is never erased, and an operator can restore it."
+              : "Removes this from your history. It is hidden, not deleted, and can be restored."}
+            style={{ border: `1px solid ${theme.border}`, borderRadius: 6, padding: "4px 10px",
+                     background: theme.surface, color: theme.text, fontWeight: 700, fontSize: 11,
+                     cursor: busy ? "wait" : "pointer", opacity: busy ? 0.5 : 1 }}>
+            Remove
           </button>
         )}
       </div>
@@ -745,7 +785,7 @@ export function AttemptRow({ job, theme, artifactUrl, packetFor, onHandoff, onRe
  */
 export function CompanyApplicationRow({
   app, theme, artifactUrl, packet, onResolve, resolveLabel, resolveTitle, onDetails, onRerun,
-  onGenerateResume,
+  onGenerateResume, onAbort, onHide, busy = false,
 }) {
   const tone = app.postingGone ? "#6b7280" : app.protective ? "#d97706" : "#dc2626";
   const stale = packet?.stale;
@@ -846,6 +886,28 @@ export function CompanyApplicationRow({
             Details
           </button>
         )}
+        {/* AD1: abort and remove, on the APPLICATION rather than on one attempt of it. Both handlers
+            are given the grouped application and the panel hands the endpoint every run-job id it
+            holds — stopping the newest attempt alone leaves the application in PENDING, and hiding
+            the newest alone makes it reappear on the next fetch wearing an earlier attempt's face.
+            Abortability is the SERVER's flag, ORed across the attempts: if any of them is still
+            live, the application is still stoppable. */}
+        {onAbort && app.rows?.some(r => r.abortable) && (
+          <button onClick={() => onAbort(app)} disabled={busy}
+            title="Stops this application. If it is filling a form right now, the browser is closed, nothing is submitted, and the prepared answers are voided."
+            style={{ ...chip, color: "#dc2626", borderColor: "#dc262655", fontWeight: 800,
+                     cursor: busy ? "wait" : "pointer", opacity: busy ? 0.5 : 1 }}>
+            Abort
+          </button>
+        )}
+        {onHide && (
+          <button onClick={() => onHide(app)} disabled={busy}
+            title="Removes this application from your history. It is hidden, not deleted, and can be restored — nothing that reached an employer is ever erased."
+            style={{ ...chip, fontWeight: 700, cursor: busy ? "wait" : "pointer",
+                     opacity: busy ? 0.5 : 1 }}>
+            Remove
+          </button>
+        )}
       </div>
     </div>
   );
@@ -889,115 +951,28 @@ export function CompanyTile({
   );
 }
 
-/**
- * ONE APPLICATION in the dated history, with its per-item actions (TASK AC4 requirement 4).
- *
- * Compact on purpose — this is a log, read to answer "what happened on the 14th", not a work
- * surface. The obstacle sentence comes from the shared vocabulary, so a row here and the same
- * application on the panel above cannot describe themselves differently.
- */
-export function HistoryRow({ job, theme, group, busy, onAbort, onHide, artifactUrl }) {
-  const d = describeApplication(job);
-  const { color } = OUTCOME_LABELS[group];
-  const when = job.createdAt || job.startedAt;
-  const btn = {
-    border: `1px solid ${theme.border}`, borderRadius: 6, padding: "3px 9px",
-    background: theme.surface, color: theme.text, fontWeight: 700, fontSize: 10.5,
-    cursor: busy ? "wait" : "pointer", opacity: busy ? 0.5 : 1, whiteSpace: "nowrap",
-  };
-
-  return (
-    <div data-rm-history-row={job.id} data-rm-group={group}
-         style={{ display: "flex", flexDirection: "column", gap: 4,
-                  borderTop: `1px solid ${theme.border}`, paddingTop: 7 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: theme.text }}>
-          {job.company || "Unknown company"}
-        </span>
-        <span style={{ fontSize: 11.5, color: theme.textMuted, flex: 1, minWidth: 120 }}>
-          {job.title || job.jobId || "—"}
-        </span>
-        {when && (
-          <span style={{ fontSize: 10, color: theme.textDim, whiteSpace: "nowrap" }}>
-            {new Date(when).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </span>
-        )}
-      </div>
-      <div style={{ fontSize: 11, color, lineHeight: 1.45 }}>
-        {/* A dead posting is its own state here too, and it is WHY this row is filed as aborted
-            rather than pending — said, rather than left for the user to infer from a group heading. */}
-        {job.postingGone && !job.title
-          ? "The posting was removed from the board, so there is nothing left to finish"
-          : d.obstacle}
-      </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        {job.resumeAvailable && (
-          <a href={artifactUrl(job.id, "resume")} target="_blank" rel="noreferrer"
-            style={{ ...btn, textDecoration: "none", cursor: "pointer", opacity: 1 }}>
-            Resume PDF ↗
-          </a>
-        )}
-        {job.screenshotAvailable && (
-          <a href={artifactUrl(job.id, "screenshot")} target="_blank" rel="noreferrer"
-            style={{ ...btn, textDecoration: "none", cursor: "pointer", opacity: 1,
-                     color: theme.textMuted }}>
-            What we filled ↗
-          </a>
-        )}
-        <span style={{ flex: 1 }} />
-        {/* ABORT — only where the server says it is abortable. The flag comes from the response
-            rather than being re-derived here: the button's presence and the endpoint's guard have
-            to agree, and two copies of that rule is how a button appears for something the server
-            will refuse. */}
-        {job.abortable && (
-          <button onClick={() => onAbort(job.id)} disabled={busy}
-            title="Stops this application. If it is filling a form right now, the browser is closed, nothing is submitted, and the prepared answers are voided."
-            style={{ ...btn, color: "#dc2626", borderColor: "#dc262655" }}>
-            Abort
-          </button>
-        )}
-        {/* DELETE — a SOFT HIDE, and the tooltip says so rather than implying an erasure that does
-            not happen. A submitted application is evidence that reached a real employer. */}
-        <button onClick={() => onHide(job.id)} disabled={busy}
-          title={job.status === "submitted"
-            ? "Removes this from your history. The record is KEPT — an application that reached an employer is never erased, and an operator can restore it."
-            : "Removes this from your history. It is hidden, not deleted, and can be restored."}
-          style={btn}>
-          Remove
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * ONE OUTCOME GROUP of the dated history (AC4 requirement 3).
- *
- * Always rendered, even at zero. "0 completed" on a day where four applications broke is
- * information; hiding the group makes the reader count the sections to work out what is missing.
- */
-export function HistoryGroup({ group, jobs, theme, busyId, onAbort, onHide, artifactUrl }) {
-  const { label, note, color } = OUTCOME_LABELS[group];
-  return (
-    <div data-rm-history-group={group} data-rm-count={jobs.length}
-         style={{ border: `1px solid ${theme.border}`, borderLeft: `3px solid ${color}`,
-                  borderRadius: 8, padding: "10px 13px", background: theme.surfaceHigh,
-                  display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em",
-                       textTransform: "uppercase", color }}>
-          {label}
-        </span>
-        <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800,
-                       fontSize: 18, lineHeight: 1, color }}>{jobs.length}</span>
-        <span style={{ fontSize: 10.5, color: theme.textDim }}>{note}</span>
-      </div>
-      {jobs.length === 0 ? (
-        <span style={{ fontSize: 11, color: theme.textDim }}>None on this date.</span>
-      ) : jobs.map(job => (
-        <HistoryRow key={job.id} job={job} theme={theme} group={group}
-          busy={busyId === job.id} onAbort={onAbort} onHide={onHide} artifactUrl={artifactUrl} />
-      ))}
-    </div>
-  );
-}
+// ── TASK AD1: HistoryRow AND HistoryGroup ARE GONE ───────────────────────────────────────────
+//
+// AC4 built a dated run-history SECTION at the bottom of the panel: three outcome boxes, each
+// holding compact log rows. AD1 promotes those three groups to the panel's own SUB-TABS and makes
+// the dated listing the panel's body, so a second, smaller rendering of the same rows underneath
+// it would be the same data twice — which is the duplication this whole line of work has been
+// removing.
+//
+// NOTHING THAT LIVED HERE WAS LOST. What each piece showed, and where it is now:
+//
+//   the three outcome boxes          -> the COMPLETED / PENDING / ABORTED sub-tabs, whose labels,
+//                                       notes and colours still come from OUTCOME_LABELS
+//   "0 completed" at zero            -> the sub-tab's own count pill, which renders 0 rather than
+//                                       hiding, for the same reason: a missing group makes the
+//                                       reader count sections to work out what is absent
+//   "None on this date."             -> the empty-sub-tab state, which now says WHICH emptiness it
+//                                       is (AD1 requirement 7's three sentences)
+//   company / role / time            -> ApplicationRow and CompanyApplicationRow, which carried
+//                                       them already
+//   the obstacle sentence            -> both rows, from describeApplication, unchanged
+//   "the posting was removed"        -> the postingGone branch on both rows, unchanged
+//   Resume PDF / What we filled      -> both rows, which additionally carry the ATS chip and the
+//                                       posting link the compact log row never had
+//   Abort (server-decided)           -> both rows, above; the flag is still `job.abortable`
+//   Remove, and its soft-hide copy   -> both rows, above
