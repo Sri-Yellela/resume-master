@@ -260,6 +260,18 @@ const FIXTURES = {
   // AC3 reads the ManageJobProfiles card idiom and reuses its primitive. These fixtures let the
   // harness screenshot THAT panel before and after the extraction, so "reuse, do not clone" can be
   // held to the standard the task sets: the profile cards must look and behave identically.
+  // The Database panel is driven too, for AC4's "the Database calendar must be unchanged for its
+  // own use" regression. Both of these return ARRAYS from the real server; the generic FALLBACK
+  // object hangs the panel's render, which is a fixture problem rather than a defect — but a
+  // hung page is indistinguishable from a broken one, so it gets the real shape.
+  '/api/applications': [
+    { job_id: 'gh1', company: 'OpenAI', role: 'Staff Engineer', location: 'SF', source: 'greenhouse',
+      apply_mode: 'AUTO', applied_at: Math.floor(now / 1000) - 86400, notes: '', job_url: 'https://x/1',
+      auto_status: 'submitted' },
+    { job_id: 'gh2', company: 'Stripe', role: 'Infra Engineer', location: 'NYC', source: 'greenhouse',
+      apply_mode: 'MANUAL', applied_at: null, notes: '', job_url: 'https://x/2', auto_status: 'manual' },
+  ],
+  '/api/resumes': [],
   '/api/domain-profiles': [
     { id: 1, profile_name: 'Backend Engineer', seniority: 'senior', is_active: 1,
       has_base_resume: 1, base_resume_updated_at: Math.floor(now / 1000) - 86400,
@@ -395,7 +407,10 @@ async function main() {
     // fixed sleep, so a slow machine does not screenshot an empty panel and call it a defect.
     await page.waitForFunction(
       () => /AUTO APPLY/i.test(document.body.innerText) && document.body.innerText.length > 400,
-      { timeout: 30000 });
+      { timeout: 30000 }).catch(async () => {
+        const t = await page.evaluate(() => document.body.innerText.slice(0, 500));
+        console.log("      [db panel body]", JSON.stringify(t));
+      });
     await sleep(1200);
 
     check('the panel rendered against the stubbed API',
@@ -1113,6 +1128,84 @@ async function main() {
       (emptyText.match(/No applications on[^\n]*/i) || ['absent'])[0]);
     await shot('ac4-empty-date.png');
     console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-empty-date.png')}`);
+
+    // ── AC4 REGRESSION: the Database panel's calendar, UNCHANGED for its own use ─────────────
+    //
+    // The requirement is explicit that reusing this widget must not change it where it came from.
+    // A source check cannot see that — the component is shared, so both sides read identically
+    // whatever it renders. So the panel it was taken from is driven here, and its date filter is
+    // opened and used.
+    console.log('\n── AC4 regression: the Database panel\'s calendar ──');
+
+    // domcontentloaded, not networkidle2: this panel keeps an SSE connection open, so the network
+    // never goes idle and the navigation would time out waiting for a quiet it will never reach.
+    await page.goto(`${vite.url}/app/database`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // The panel's sheet tabs render as soon as it mounts; the date filter belongs to the
+    // Applications sheet, which is its default.
+    await page.waitForFunction(
+      () => /RESUMES/i.test(document.body.innerText) && /SAVED JOBS/i.test(document.body.innerText),
+      { timeout: 20000 },
+    ).catch(async () => {
+      const t = await page.evaluate(() => document.body.innerText.slice(0, 400));
+      console.log('      [db panel body]', JSON.stringify(t));
+    });
+    await sleep(1200);
+
+    const dbFilter = await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find(b => /Filter by date/i.test(b.innerText));
+      if (!btn) return { found: false, buttons: [...document.querySelectorAll('button')].map(b => b.innerText.trim()).slice(0, 20) };
+      btn.click();
+      return { found: true };
+    });
+    check('AC4  the Database panel still offers its date filter',
+      dbFilter.found, dbFilter.found ? '' : `buttons: ${(dbFilter.buttons || []).join(' / ')}`);
+    await sleep(700);
+
+    const dbCal = await page.evaluate(() => {
+      const el = document.querySelector('[data-rm-calendar="1"]');
+      if (!el) return null;
+      return {
+        days: [...el.querySelectorAll('[data-rm-day]')].filter(d => d.dataset.rmDay).length,
+        // The Database panel passes no `markers`, so NOTHING may be dotted there. That is the
+        // whole test of "unchanged for its own use": the one thing added for AC4 is opt-in, and
+        // this panel did not opt in.
+        marked: [...el.querySelectorAll('[data-rm-marked]')].filter(d => d.dataset.rmMarked).length,
+        text: el.innerText,
+        // Portalled, not nested — the sheet's root is `flex:1; overflow:hidden` and an
+        // absolutely-positioned popover inside it is CLIPPED, which no z-index can fix.
+        portalled: el.closest('[data-rm-calendar]') === el && !el.closest('table'),
+      };
+    });
+    check('AC4  and it renders the SAME calendar the Auto Apply panel now uses',
+      !!dbCal && dbCal.days >= 28, dbCal ? `${dbCal.days} day cells` : 'no calendar rendered');
+    check('AC4  with its own controls intact — month nav, Clear date, Today',
+      !!dbCal && /Clear date/i.test(dbCal.text) && /Today/i.test(dbCal.text)
+      && /\d{4}/.test(dbCal.text),
+      (dbCal?.text || '').split('\n').slice(0, 2).join(' | '));
+    check('AC4  and NOTHING dotted — the markers prop is opt-in and this panel did not opt in',
+      !!dbCal && dbCal.marked === 0, `${dbCal?.marked} marked cells in the Database panel`);
+    check('AC4  the popover is still portalled out of its clipping ancestor',
+      !!dbCal && dbCal.portalled);
+
+    // And it still FILTERS. Picking a date must change the toolbar's label, which is what the
+    // Database panel does with the value — the behaviour, not just the rendering.
+    const dbPicked = await page.evaluate(() => {
+      const cell = [...document.querySelectorAll('[data-rm-calendar="1"] [data-rm-day]')]
+        .find(d => d.dataset.rmDay);
+      if (!cell) return null;
+      const iso = cell.dataset.rmDay;
+      cell.click();
+      return iso;
+    });
+    await sleep(600);
+    const dbAfter = await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find(b => /Date:|Filter by date/i.test(b.innerText));
+      return btn ? btn.innerText.trim() : '';
+    });
+    check('AC4  picking a date still drives the Database panel\'s own filter',
+      !!dbPicked && /^📅?\s*Date:/.test(dbAfter), `picked ${dbPicked} -> "${dbAfter}"`);
+    await shot('ac4-database-calendar.png');
+    console.log(`      screenshot: ${path.join(OUT_DIR, 'ac4-database-calendar.png')}`);
 
     if (process.env.AB_KEEP_OPEN) {
       console.log('\nAB_KEEP_OPEN set — leaving the browser open. Ctrl+C to finish.');
