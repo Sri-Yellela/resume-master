@@ -17,7 +17,7 @@ The stop is **not** the "wrong answer → return to the resolver" stop. No wrong
 
 | # | Precondition | Verdict | Evidence |
 |---|---|---|---|
-| 1 | AA1 fixed — an empty board mid-run is disqualifying | **PASS (by symptom)** | `AA1` has no referent anywhere in the repo, so the behaviour it names was verified instead. User 15's active profile (`A5 Candidate`) has `target_titles=[]`; `profileTitleSql` returns `1 = 1` for that, so it is *no* filter — 1256 of 1256 active rows survive. `boardSecondLoadParity`, `jobsBoardColdLoad`, `syncEventsSingleConnection` all green. |
+| 1 | AA1 fixed — an empty board mid-run is disqualifying | **PASS (by symptom)** | `AA1` has no referent anywhere in the repo, so the behaviour it names was verified instead — and along **both** paths that can empty a board. (a) Title filter: user 15's active profile (`A5 Candidate`) has `target_titles=[]`, and `profileTitleSql` returns `1 = 1` for that, so it is *no* filter — 1256 of 1256 active rows survive. (b) Curation: "Showing 0 of N" is actually produced by `deriveProfileFilters` building `q` from `profile_simple_apply_profiles.search_terms_json`, which collapses to resume skills alone when `target_titles` is empty. User 15 has **no row in that table at all**, so no curation is applied. `boardSecondLoadParity`, `jobsBoardColdLoad`, `syncEventsSingleConnection` all green. |
 | 2 | Enrichment complete — 1261/1261, skills 99.8% | **PASS (exceeds)** | Board has grown since that figure: **1282/1282** enriched (100%), skills **1280/1282 = 99.84%**. |
 | 3 | PDF generation working end to end; the resume IS the payload | **PASS** | Ran `server.js`'s `htmlToPdf` settings against a real stored artifact: **94,760 bytes, valid `%PDF-` magic, 4.4 s**. Base resume for user 15 is real and substantive — 4,912 chars, the candidate's own contact details. |
 | 4 | A `claude-sonnet-5` row in `usage_events` since the model-ID fix | **PASS** | `usage_events` id 78 — `resume_generate`, `model=claude-sonnet-5`, `success=1`, 2,125 output tokens, `$0.0416`, 18.5 s, 2026-08-21. |
@@ -297,3 +297,18 @@ rather than on the posting that does ask.
 
 `user_profile.sponsorship_need` for user 15 is set to **`future`**, and the Profile panel now offers
 the three situations as a select instead of a checkbox that cannot express them.
+
+### Deliberately not changed: the second copy of this fact
+
+`profile_simple_apply_profiles.requires_sponsorship` is a **separate** boolean, surfaced as
+`structuredFacts.requiresSponsorship` and written by its own UI in the Profile panel. It was traced
+before being left alone. Its only consumers are `services/jobs/profileFilterBridge.js` (which jobs to
+show on the board), `services/localAtsScorer.js` (a scoring heuristic) and
+`services/profileSignalAggregator.js`. **None of them reaches `buildAutofillPayload` or
+`buildAnswers`**, so no form answer is derived from it.
+
+That makes it a different kind of fact with different stakes: wrong, it ranks postings badly. It
+cannot produce a false attestation to an employer, which is what this fix is about. It is still a
+duplicated fact that can drift from the tri-state, and unifying them is worth doing — but doing it
+here would have meant touching the board's filtering on the way to a live application, which is
+exactly the wrong time.
