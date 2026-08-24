@@ -25,6 +25,13 @@
  *   D  ?answerable=1&autofilltrap=1   -> must HOLD on "Resume". The resume IS uploaded, into the
  *                                        wrong file input, because that input carries the real page's
  *                                        own "Upload your resume here to autofill" copy.
+ *   E  ?answerable=1&fuzzylabel=1     -> must HOLD on a GUESS. Every required field has a value, so
+ *                                        the completeness gate is satisfied and the low-confidence
+ *                                        defence is the only thing left. AF3 requirement 4: that
+ *                                        defence had no live coverage, because every real run has
+ *                                        been semi, where `isUnattended` is false and no gate is
+ *                                        reached. E2 is its control — the same form without the
+ *                                        guessable field still submits.
  *
  * ASSERT ON WHAT THE ATS RECORDS, never on status. A status is the pipeline's opinion of itself.
  *
@@ -79,8 +86,8 @@ const recorded = () => fetch(`${ATS}/_submissions`).then(r => r.json());
 // `platform: 'ashby'` is passed explicitly. detectPlatformFromUrl sees `localhost` and answers
 // 'generic', which would silently exercise the WRONG label map — the fixture reproduces Ashby's
 // markup, so it has to be resolved with Ashby's map or the run is not the run under test.
-const run = (query, jobId, opts = {}) => autoApply(
-  `${ATS}/ashby-spa${query}`, PAYLOAD,
+const run = (query, jobId, opts = {}, payload = PAYLOAD) => autoApply(
+  `${ATS}/ashby-spa${query}`, payload,
   { mode: "full", jobId, platform: "ashby", resumePath: RESUME, ...opts });
 
 const summarise = (r) => `status=${r.status} reason=${r.reasonCode ?? "-"} ` +
@@ -181,6 +188,61 @@ check("D  the run HOLDS rather than submitting without a resume",
 check("D  and it names Resume — the required input that stayed empty",
   (d.missingRequired || []).includes("Resume"), JSON.stringify(d.missingRequired));
 check("D  nothing was recorded", (await recorded()).count === 0);
+
+// ── CASE E: the LOW-CONFIDENCE gate, which had never fired against a form ─────
+// AF3 requirement 4. The completeness gate is proven by A and D above — a blank required field
+// holds. The other unattended gate had no live coverage at all: every real run so far has been
+// SEMI, where `isUnattended` is false and neither gate is even reached, and no fixture case had
+// ever produced a form that was COMPLETE but partly guessed. This is that form.
+//
+// `team` exists in this payload and nowhere else, so cases A-D are untouched by it. The label
+// "Which team interests you most" token-matches the key and is not equal to it, which is exactly
+// label_fuzzy / 0.3 — under AUTO_SUBMIT_MIN_CONFIDENCE.
+console.log("\n── E. ?fuzzylabel=1 — every required field FILLED, but one of them is a guess ──");
+await reset();
+const FUZZY_PAYLOAD = { ...PAYLOAD, field_map: { ...PAYLOAD.field_map, team: "Platform Infrastructure" } };
+const e = await run("?answerable=1&fuzzylabel=1", "ae7-e", {}, FUZZY_PAYLOAD);
+console.log(`   ${summarise(e)}`);
+console.log(`   lowConfidence: ${JSON.stringify(e.lowConfidence ?? null)}`);
+
+check("E  the run HOLDS on the guess rather than submitting it",
+  e.status === "held_review" && e.reasonCode === "low_confidence_answers", summarise(e));
+check("E  THE ATS RECORDED NOTHING — the only assertion that cannot be self-congratulatory",
+  (await recorded()).count === 0);
+check("E  it names the field it guessed at",
+  (e.lowConfidence || []).some(a => /which team/i.test(a.field || "")),
+  JSON.stringify(e.lowConfidence));
+check("E  and reports the guess as label_fuzzy, below the auto-submit floor",
+  (e.lowConfidence || []).some(a => a.provenance === "label_fuzzy" && a.confidence < 0.8),
+  JSON.stringify((e.lowConfidence || []).map(a => [a.provenance, a.confidence])));
+check("E  the hold is NOT incomplete_form — the form was complete, which is the point",
+  e.reasonCode !== "incomplete_form", e.reasonCode);
+check("E  the guess is offered as a question a human can answer",
+  (e.openQuestions || []).some(q => /which team/i.test(q.question || "")),
+  JSON.stringify((e.openQuestions || []).map(q => q.question)));
+
+// WHICH mechanism held it, asserted rather than assumed. There are TWO low-confidence defences and
+// this run proves the FIRST one: the step-approval policy escalates at step 0, before anything is
+// typed — which is why fieldsFilled is 0 and nothing reached the page at all. The post-fill gate in
+// the `isUnattended` block is a second line, reachable only if resolution changes between the step
+// check and the post-fill re-discovery (a field revealed by filling, say). This fixture cannot reach
+// it, because escalation preempts it, and saying so is more useful than implying both fired.
+check("E  it was the STEP-0 policy escalation that held it, before anything was typed",
+  e.policyEscalation?.reason === "low_confidence_answers" && e.policyEscalation?.step === 0,
+  JSON.stringify(e.policyEscalation));
+check("E  and nothing was typed into the employer's form at all",
+  e.fieldsFilled === 0, `fieldsFilled=${e.fieldsFilled}`);
+
+// The control: the SAME form without that one field submits. Without this, "it held" could just
+// mean the fixture is broken.
+console.log("\n── E2. control: the same form WITHOUT the guessable field must still submit ──");
+await reset();
+const e2 = await run("?answerable=1", "ae7-e2", {}, FUZZY_PAYLOAD);
+console.log(`   ${summarise(e2)}`);
+check("E2 the run submits when nothing had to be guessed",
+  e2.status === "submitted", summarise(e2));
+check("E2 and the ATS recorded exactly one submission",
+  (await recorded()).count === 1);
 
 console.log("");
 console.log(`${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);

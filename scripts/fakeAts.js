@@ -354,8 +354,14 @@ function ashbyForm() {
 //   ?deadsubmit=1  the submit button posts nothing and navigates nowhere. This is A1 finding N1's
 //                  case: a submit-shaped button that changes nothing must report
 //                  `clicked_no_evidence`, never `submitted`.
+//   ?fuzzylabel=1  adds ONE required free-text question whose label only TOKEN-matches a profile key
+//                  ("Which team interests you most" against `team`). The resolver can produce a
+//                  value for it, at label_fuzzy / 0.3 — a guess. Every required field then has a
+//                  value, so the completeness gate passes and the LOW-CONFIDENCE gate is the only
+//                  thing left standing between a guess and a real employer. That gate had no live
+//                  coverage: this is what reaches it (AF3 requirement 4).
 const EEOC_PREFIX = '41056061-f039-4b0f-8310-713131d11bda';
-function ashbySpaForm({ delayMs, answerable = false, autofillTrap = false, deadSubmit = false } = {}) {
+function ashbySpaForm({ delayMs, answerable = false, autofillTrap = false, deadSubmit = false, fuzzyLabel = false } = {}) {
   const d = Number.isFinite(delayMs) ? delayMs : 2500;
   // Kept as data so the radio groups below are one loop rather than four hand-written blocks, and so
   // the option labels stay exactly as measured.
@@ -397,6 +403,14 @@ function ashbySpaForm({ delayMs, answerable = false, autofillTrap = false, deadS
     ? `<label class="req" for="f_start">Earliest start date</label>` +
       `<input id="f_start" name="start_date" placeholder="Pick date..." required>`
     : `<input placeholder="Pick date..." required style="margin-top:14px">`;
+
+  // Deliberately NOT resolvable by any handler or exact key: a free-text question whose only
+  // relation to the profile is that the word "team" appears in both. That is the definition of a
+  // fuzzy match, and the definition of something that must not be submitted unread.
+  const fuzzyField = fuzzyLabel
+    ? `<label class="req" for="f_team">Which team interests you most</label>` +
+      `<input id="f_team" name="team_pref" required>`
+    : '';
 
   const autofillAria = autofillTrap
     ? ` aria-label="Upload your resume here to autofill key application fields"`
@@ -445,6 +459,7 @@ function ashbySpaForm({ delayMs, answerable = false, autofillTrap = false, deadS
       '<div role="combobox" aria-autocomplete="list" style="display:none"></div>' +
       '<input placeholder="Start typing..." role="combobox" aria-autocomplete="list">' +
       ${JSON.stringify(dateField)} +
+      ${JSON.stringify(fuzzyField)} +
       '<label for="f_addl">Additional Information</label>' +
       '<textarea id="f_addl" name="f189fed2-624b-41a1-a76f-0c67a2611d1a" rows="3"></textarea>' +
       ${JSON.stringify(checkboxHtml)} +
@@ -955,6 +970,7 @@ const server = http.createServer(async (req, res) => {
         answerable:   url.searchParams.get('answerable') === '1',
         autofillTrap: url.searchParams.get('autofilltrap') === '1',
         deadSubmit:   url.searchParams.get('deadsubmit') === '1',
+        fuzzyLabel:   url.searchParams.get('fuzzylabel') === '1',
       }));
     }
     if (path === '/ashby-spa/thanks') return send(200, ashbySpaThanks());

@@ -3,7 +3,7 @@
     "pass": 11
   },
   "a3GuardsIntegration": {
-    "pass": 19
+    "pass": 25
   },
   "a4BrowserResolution": {
     "pass": 14
@@ -30,7 +30,7 @@
     "pass": 25
   },
   "ae7SubmitOnRealShape": {
-    "pass": 22
+    "pass": 32
   },
   "e2CaptureConvergence": {
     "pass": 15

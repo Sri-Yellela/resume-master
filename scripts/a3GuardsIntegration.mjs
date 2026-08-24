@@ -214,6 +214,50 @@ const check = (label, cond, extra = "") => {
   server.close();
 }
 
+// ── 4. Kill switch on an IN-FLIGHT batch ─────────────────────────────────────
+// AF3 requirement 1: "Verify it takes effect on an in-flight batch." Section 3 proves ADMISSION —
+// the switch refuses a new run with 503. That is the easy half. The half that matters unattended is
+// a batch that was ALREADY admitted and is part-way through: flipping the switch has to stop the
+// jobs that have not gone yet, or the switch is only a door lock on a room people are already in.
+//
+// processRunJob re-checks fullAutoDisabled() per job for exactly this reason. What makes the test
+// deterministic is processRun's own 1–3s jitter between job launches: job 1 is inside a browser
+// while job 2 has not yet reached its check, so a flip in that window must catch job 2.
+{
+  console.log("\n=== 4. kill switch flipped MID-BATCH ===");
+  await resetAts();
+  const { db, server, url } = boot({ jobIds: ["ash1", "ash2", "ash3"] });
+  const res = await post(url, "/api/apply/runs",
+    { jobIds: ["ash1", "ash2", "ash3"], mode: "auto", approvalMode: "auto" });
+  check("the batch is admitted while the switch is off", res.status === 202, `status=${res.status}`);
+
+  // Flip it while the run is live. No restart, no deploy, no redeploy of the queue.
+  db.prepare("INSERT INTO app_settings (key, value) VALUES ('apply_full_auto_disabled','1')").run();
+  console.log("   switch flipped; waiting for the batch to drain");
+
+  const done = await waitForRuns(db, 180000);
+  check("the run finished rather than hanging", done);
+
+  const rows = db.prepare("SELECT job_id, status, reason_code FROM apply_run_jobs ORDER BY id").all();
+  console.log(`   ${rows.map(r => `${r.job_id}:${r.status}/${r.reason_code ?? "-"}`).join("  ")}`);
+  const stopped = rows.filter(r => r.status === "held_review" && r.reason_code === "full_auto_disabled");
+  const submissions = await atsCount();
+  console.log(`   ATS submissions: ${submissions} of ${rows.length} jobs`);
+
+  check("at least one job was STOPPED by the flip, not submitted",
+    stopped.length > 0, JSON.stringify(rows));
+  check("the ATS received fewer submissions than the batch had jobs",
+    submissions < rows.length, `${submissions} submitted, ${rows.length} queued`);
+  check("every stopped job is HELD for a human, never silently dropped",
+    stopped.every(r => r.status === "held_review" && r.reason_code === "full_auto_disabled"),
+    JSON.stringify(stopped));
+  check("stopped jobs + submissions account for the whole batch",
+    rows.every(r => r.status === "held_review" || r.status === "submitted" ||
+                    r.status === "failed" || r.status === "filled_not_submitted"),
+    JSON.stringify(rows.map(r => r.status)));
+  server.close();
+}
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 // Exit naturally rather than process.exit() — an abrupt exit while a browser/server handle is still
 // closing trips a libuv teardown assertion on Windows.
