@@ -21,6 +21,21 @@
 
 import { actionVerbVocabularyTerms, companyStackTerms, skillVocabularyTerms } from "./skillVocabulary.js";
 
+/**
+ * The report format's version, and the cache key for every stored report.
+ *
+ * BUMPED FROM local_ats_v1 BECAUSE THE TERMS CHANGED, NOT THE SHAPE.
+ * Reports are cached in four places — scraped_jobs.ats_report, ats_only_reports, resumes.ats_report
+ * and resume_versions.ats_report — and the read path serves a cached report whenever its `source`
+ * matches. A v1 report is a list of sentence fragments. Leaving the version alone would have meant
+ * every job already scored kept showing "and scalable. We" forever, and the fix would have appeared
+ * to work only on jobs nobody had looked at yet.
+ *
+ * Anything comparing against this must import it rather than spell it, so a future bump cannot
+ * leave a stale reader behind.
+ */
+export const LOCAL_ATS_SOURCE = "local_ats_v2";
+
 const STOP_WORDS = new Set([
   "about","above","across","after","again","against","also","and","any","are","around",
   "based","been","being","best","both","but","can","candidate","company","daily","each",
@@ -458,7 +473,7 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   const score = Math.max(0, Math.min(100, Math.round(skillScore + verbScore + experienceScore + hardScore)));
 
   return {
-    source: "local_ats_v1",
+    source: LOCAL_ATS_SOURCE,
     score,
     tier1_matched: compactUnique(matchedSkills, 40),
     tier1_missing: compactUnique(missingSkills, 40),

@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { buildRuntimeAtsBasis, normaliseAtsTerm, scoreAtsLocally } from "../services/localAtsScorer.js";
+import { buildRuntimeAtsBasis, LOCAL_ATS_SOURCE, normaliseAtsTerm, scoreAtsLocally } from "../services/localAtsScorer.js";
 
 test("local ATS normalization catches common wording variations", () => {
   assert.equal(normaliseAtsTerm("REST APIs"), normaliseAtsTerm("REST API"));
@@ -35,7 +35,7 @@ test("local ATS scorer is deterministic and reports structured match sections", 
   const b = scoreAtsLocally({ job, runtimeBasis });
 
   assert.deepEqual(a, b);
-  assert.equal(a.source, "local_ats_v1");
+  assert.equal(a.source, LOCAL_ATS_SOURCE);
   assert.ok(a.score > 60);
   assert.ok(a.tier1_matched.some(v => normaliseAtsTerm(v) === "react"));
   assert.ok(a.tier1_missing.some(v => normaliseAtsTerm(v).includes("kubernetes")));
@@ -80,6 +80,24 @@ test("server precomputed and generated ATS paths use local scorer instead of LLM
   assert.doesNotMatch(keywordBlock, /checkLimit\(db, userId, "ats_score"\)|anthropic\.messages\.create|ATS_SYSTEM_PROMPT/);
   assert.match(generateBlock, /scoreAtsLocally/);
   assert.doesNotMatch(generateBlock, /anthropic\.messages\.create|ATS_SYSTEM_PROMPT/);
+});
+
+test("AG1: the report version was bumped, so cached fragment reports are not served forever", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const panel = fs.readFileSync("client/src/panels/ATSPanel.jsx", "utf8");
+
+  // A report is cached in four places and the read path serves it whenever `source` matches. If
+  // the version had stayed local_ats_v1, every job already scored would keep showing "and
+  // scalable. We" and the fix would only ever apply to jobs nobody had looked at yet.
+  assert.notEqual(LOCAL_ATS_SOURCE, "local_ats_v1", "the report content changed; the version must too");
+
+  // Every cache gate compares against the constant, so a future bump cannot strand a reader on an
+  // old string. Three read gates in the keywords route, plus the scrape-time log.
+  assert.equal((server.match(/parsed\?\.source === LOCAL_ATS_SOURCE/g) || []).length, 3);
+  assert.doesNotMatch(server, /"local_ats_v1"/, "no gate may still spell the old version");
+
+  // The panel hides the LLM-only sections for the whole local family, not one version of it.
+  assert.match(panel, /String\(activeReport\.source \|\| ""\)\.startsWith\("local_ats"\)/);
 });
 
 // ── AG1: the extractor emits skills, not text fragments ─────────────────────────────────────────

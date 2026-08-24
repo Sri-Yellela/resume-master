@@ -3571,7 +3571,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
             candidateCount: newlyInserted.length,
             attempted,
             failed,
-            scorer: "local_ats_v1",
+            scorer: LOCAL_ATS_SOURCE,
             status: "complete",
           });
         }
@@ -6608,7 +6608,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   if (existingResume?.ats_report) {
     try {
       const parsed = JSON.parse(existingResume.ats_report);
-      if (parsed?.source === "local_ats_v1") return res.json(parsed);
+      if (parsed?.source === LOCAL_ATS_SOURCE) return res.json(parsed);
     } catch {}
   }
 
@@ -6619,7 +6619,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   if (scrapeTimeReport?.ats_report) {
     try {
       const parsed = JSON.parse(scrapeTimeReport.ats_report);
-      if (parsed?.source === "local_ats_v1") return res.json(parsed);
+      if (parsed?.source === LOCAL_ATS_SOURCE) return res.json(parsed);
     } catch {}
   }
 
@@ -6630,7 +6630,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   if (cached?.ats_report) {
     try {
       const parsed = JSON.parse(cached.ats_report);
-      if (parsed?.source === "local_ats_v1") return res.json(parsed);
+      if (parsed?.source === LOCAL_ATS_SOURCE) return res.json(parsed);
     } catch {}
   }
 

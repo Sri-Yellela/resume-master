@@ -175,6 +175,11 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
 
   if (!activeReport) return null;
 
+  // Strengths and improvements only ever came from the LLM scorer. Matched on the family rather
+  // than one exact version string, so bumping the local report version (local_ats_v1 -> v2, and
+  // whatever comes after) cannot quietly switch two sections back on for local reports.
+  const isLocalReport = String(activeReport.source || "").startsWith("local_ats");
+
   const R = 32, cx = 40, cy = 40, stroke = 7;
   const circumference = 2 * Math.PI * R;
   const pct = Math.max(0, Math.min(100, activeReport.score ?? score ?? 0));
@@ -283,12 +288,12 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
       )}
 
       {/* Strengths */}
-      {activeReport.source !== "local_ats_v1" && activeReport.strengths?.length > 0 && (
+      {!isLocalReport && activeReport.strengths?.length > 0 && (
         <ListSection title="💪 Strengths" items={activeReport.strengths} color={"#22c55e"} theme={theme}/>
       )}
 
       {/* Improvements */}
-      {activeReport.source !== "local_ats_v1" && activeReport.improvements?.length > 0 && (
+      {!isLocalReport && activeReport.improvements?.length > 0 && (
         <ListSection title="🔧 Improvements" items={activeReport.improvements} color={"var(--color-primary)"} theme={theme}/>
       )}
     </div>
