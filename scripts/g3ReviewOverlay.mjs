@@ -40,6 +40,29 @@ import { buildGatePacket } from '../services/applyGatePacket.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(os.tmpdir(), 'g3-review-overlay');
+
+// --screenshots also writes Chrome Web Store listing images (AF4 item 4).
+//
+// Captured HERE rather than in a script of their own, deliberately: the listing screenshot of the
+// review overlay is a CLAIM about what the extension does, and this harness is the thing that proves
+// the claim in the same breath. A screenshot taken by a separate script could be of an overlay that
+// renders and does not work; one taken at this point in this run cannot be, because the assertions
+// above and below it have to pass for the run to be green.
+const SHOTS = process.argv.includes('--screenshots');
+const SHOT_DIR = path.join(ROOT, 'extension', 'submission', 'screenshots');
+// The Chrome Web Store accepts 1280x800 or 640x400. 1280x800 for all three.
+const SHOT_SIZE = { width: 1280, height: 800 };
+let shotCount = 0;
+async function shoot(page, name, note) {
+  if (!SHOTS) return;
+  fs.mkdirSync(SHOT_DIR, { recursive: true });
+  const file = path.join(SHOT_DIR, `${name}.png`);
+  await page.setViewport({ ...SHOT_SIZE, deviceScaleFactor: 1 });
+  await sleep(500);
+  await page.screenshot({ path: file, clip: { x: 0, y: 0, ...SHOT_SIZE } });
+  shotCount++;
+  console.log(`  shot  ${path.relative(ROOT, file)} — ${note}`);
+}
 const ATS_PORT = 4599;
 const PORTAL = `http://localhost:${ATS_PORT}`;
 const RESUME_PDF = process.env.A1_RESUME;
@@ -113,6 +136,11 @@ function startApi() {
     next();
   });
   app.use((req, _res, next) => { req.user = { id: 1, planTier: 'PRO' }; next(); });
+  // The popup's auth probe (via the service worker's PROBE_AUTH). Without it the probe fails closed
+  // and the popup renders its SIGN-IN wall — which is the wrong fixture state for a harness whose
+  // whole scenario is a candidate who has already signed in to reach a gated form, and which was
+  // also giving the store screenshots a signed-out popup.
+  app.get('/api/auth/me', (_req, res) => res.json({ authenticated: true, username: 'ada' }));
   applyRoutes(app, db, (q, r, n) => n(), () => ({ field_map: {}, handler_map: {}, custom_answers: {} }),
     async () => ({ error: 'not_needed' }), async () => fs.readFileSync(RESUME_PDF), async () => ({}));
   return new Promise(resolve => {
@@ -279,6 +307,15 @@ async function main() {
     check('the handoff ran', result?.ok === true, result?.message || result?.reason || 'no result');
     check('the overlay rendered', result?.overlay?.rendered === true, JSON.stringify(result?.overlay));
 
+    // The listing's most important image, captured BEFORE anything is acknowledged: the overlay is
+    // showing the uncertain fields and the state is not-ready. That is the whole pitch to a store
+    // reviewer — this extension fills a form and hands it back for review, it does not submit.
+    if (SHOTS) {
+      await page.bringToFront();
+      await shoot(page, '1-review-overlay',
+        'the review overlay over a real form, before anything is acknowledged');
+    }
+
     // ── 1. order ───────────────────────────────────────────────────────────
     console.log('\n── order is the feature ──');
     const sections = await page.evaluate(() => {
@@ -376,6 +413,36 @@ async function main() {
     check('it does NOT store the corrected VALUE, only that it changed',
       !JSON.stringify(review || {}).includes('Augusta'),
       'the value goes to the employer either way; the audit question is what changed');
+
+    // ── listing screenshots (AF4 item 4) ───────────────────────────────────
+    // Taken last so nothing above is disturbed by a viewport change, and only after every
+    // assertion has already run against this same extension build.
+    if (SHOTS) {
+      console.log('\n── store listing screenshots ──');
+      // The popup, ON a real posting. /ashby-spa is the measured shape of a live Ashby posting, so
+      // the tab behind the popup is a genuine application page rather than a mock-up. The popup is
+      // rendered from the extension's own popup.html by the extension itself.
+      const posting = await browser.newPage();
+      await posting.goto(`${PORTAL}/ashby-spa?delay=0`, { waitUntil: 'domcontentloaded' });
+      await sleep(800);
+
+      // ORDER MATTERS. popup.js asks the service worker for the ACTIVE TAB and only offers to
+      // capture when that tab holds a posting. So the popup tab is created blank, the POSTING is
+      // brought to the front, and only then is popup.html navigated to — so its init() sees the
+      // posting, exactly as the real popup does when opened from the toolbar over a job page.
+      // Screenshotting it while it is backgrounded is the price of that, and is what makes the
+      // image show the capture surface rather than "Open a job posting to capture it".
+      const popup = await browser.newPage();
+      await posting.bringToFront();
+      await sleep(300);
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+      await sleep(1200);
+      await shoot(popup, '2-popup', 'the popup, with a real posting as the active tab');
+
+      await control.bringToFront();
+      await shoot(control, '3-options', 'the options page — both shortcuts, and who submits');
+      console.log(`  ${shotCount} screenshot(s) in ${path.relative(ROOT, SHOT_DIR)}`);
+    }
 
   } finally {
     await browser.close().catch(() => {});
