@@ -1,0 +1,68 @@
+{
+  "a10SemiReviewAudit": {
+    "pass": 11
+  },
+  "a3GuardsIntegration": {
+    "pass": 19
+  },
+  "a4BrowserResolution": {
+    "pass": 14
+  },
+  "a6CorrectionLoop": {
+    "pass": 22
+  },
+  "a7CrossFrameSubmit": {
+    "pass": 13
+  },
+  "a8FileUploadTrap": {
+    "pass": 9
+  },
+  "a9ApprovalFlow": {
+    "pass": 17
+  },
+  "ab1HeldHandoff": {
+    "pass": 35
+  },
+  "abPanelUi": {
+    "pass": 119
+  },
+  "ae5BoardUi": {
+    "pass": 25
+  },
+  "ae7SubmitOnRealShape": {
+    "pass": 22
+  },
+  "e2CaptureConvergence": {
+    "pass": 15
+  },
+  "e3PermissionAudit": {
+    "pass": 26
+  },
+  "e4PolicyVerify": {
+    "pass": 21
+  },
+  "e5GreenhouseHost": {
+    "pass": 30
+  },
+  "e6PopupGrant": {
+    "pass": 4
+  },
+  "g1GatePacket": {
+    "pass": 41
+  },
+  "g2ExtensionHandoff": {
+    "pass": 27
+  },
+  "g3ReviewOverlay": {
+    "pass": 19
+  },
+  "g4SchemaCapture": {
+    "pass": 32
+  },
+  "g5PortalBatch": {
+    "pass": 28
+  },
+  "g6CredentialGuard": {
+    "pass": 20
+  }
+}

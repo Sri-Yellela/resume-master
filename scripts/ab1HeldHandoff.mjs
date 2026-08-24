@@ -112,7 +112,12 @@ function startApi() {
       reason_code TEXT, reason_detail TEXT, started_at INTEGER, finished_at INTEGER,
       created_at INTEGER DEFAULT (unixepoch()), answers_json TEXT, resume_artifact_id INTEGER,
       resume_ats_score INTEGER, screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT,
-      open_questions_json TEXT, UNIQUE(run_id, job_id));
+      open_questions_json TEXT,
+    -- gate_review_json is deliberately NOT declared here: migration 080_apply_gate_review, applied
+    -- a few lines below, ALTERs it in. Declaring it too makes that ALTER a duplicate-column error
+    -- and the harness dies before its first assertion.
+    ats_score INTEGER, attempt_count INTEGER NOT NULL DEFAULT 0, hidden_at INTEGER,
+    locked_at INTEGER, resume_file TEXT, resume_id INTEGER, UNIQUE(run_id, job_id));
     CREATE TABLE apply_job_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, run_job_id INTEGER,
       user_id INTEGER, job_id TEXT, level TEXT DEFAULT 'info', event TEXT, message TEXT,
       details_json TEXT, created_at INTEGER DEFAULT (unixepoch()));
@@ -427,10 +432,20 @@ async function main() {
     check('B1  a mismatched origin refuses BECAUSE OF THE ORIGIN, not for some other reason',
       mismatch?.ok === false && mismatch.reason === 'origin_mismatch',
       mismatch ? `${mismatch.reason}: ${mismatch.message}` : 'no result');
-    const leaked = await page.evaluate(() =>
-      [...document.querySelectorAll('input,select,textarea')].map(e => e.value).join('|'));
+    // COUNTED, not just concatenated. "Nothing was written" is a negative assertion, and a negative
+    // assertion over an empty haystack is a tautology: if this route ever stopped serving a form,
+    // `leaked` would be '' and this would keep passing while testing nothing. The field count is
+    // what makes it a real claim — there WERE places to write, and none was written to.
+    const leakProbe = await page.evaluate(() => {
+      const els = [...document.querySelectorAll('input,select,textarea')];
+      return { count: els.length, values: els.map(e => e.value).join('|') };
+    });
+    const leaked = leakProbe.values;
+    check('B1  the mismatched page really had fields to leak into',
+      leakProbe.count > 0, `${leakProbe.count} control(s)`);
     check('B1  NOTHING was written into the page — no name, no address, no eligibility answer',
-      !/Ada|Lovelace|Analytical|ada@|Boston/.test(leaked), `values=${JSON.stringify(leaked).slice(0, 70)}`);
+      leakProbe.count > 0 && !/Ada|Lovelace|Analytical|ada@|Boston/.test(leaked),
+      `${leakProbe.count} controls, values=${JSON.stringify(leaked).slice(0, 70)}`);
     check('B1  and the token was NOT spent', consumedAt() === null);
 
     // B2 — the real handoff.

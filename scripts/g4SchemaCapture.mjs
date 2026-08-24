@@ -65,7 +65,12 @@ function startApi() {
       reason_code TEXT, reason_detail TEXT, started_at INTEGER, finished_at INTEGER,
       created_at INTEGER DEFAULT (unixepoch()), answers_json TEXT, resume_artifact_id INTEGER,
       resume_ats_score INTEGER, screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT,
-      open_questions_json TEXT, UNIQUE(run_id, job_id));
+      open_questions_json TEXT,
+    -- gate_review_json is deliberately NOT declared here: migration 080_apply_gate_review, applied
+    -- a few lines below, ALTERs it in. Declaring it too makes that ALTER a duplicate-column error
+    -- and the harness dies before its first assertion.
+    ats_score INTEGER, attempt_count INTEGER NOT NULL DEFAULT 0, hidden_at INTEGER,
+    locked_at INTEGER, resume_file TEXT, resume_id INTEGER, UNIQUE(run_id, job_id));
     CREATE TABLE apply_job_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, run_job_id INTEGER,
       user_id INTEGER, job_id TEXT, level TEXT DEFAULT 'info', event TEXT, message TEXT,
       details_json TEXT, created_at INTEGER DEFAULT (unixepoch()));

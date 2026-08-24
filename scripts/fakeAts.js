@@ -80,16 +80,31 @@ const TRAPS = {
     fields:  ['legal_name', 'preferred_name', 'referrer_name'],
     expect:  'each name field gets ITS OWN value; referrer_name must not receive the candidate name',
   },
+  // A `finding` is written in the PAST TENSE once it is fixed, and says what the behaviour is now.
+  // This registry is served as JSON on the index page, so it is where a reader forms their
+  // expectation before writing an assertion — and a fixed defect described in the present tense is
+  // how a7's case 3 came to assert the broken behaviour as though it were the guarantee. The trap
+  // stays: it is still the regression target. Only the tense and the "now" line are new.
   lowercase_yes: {
-    finding: "buildAnswers checks value === 'Yes' (capital Y only), so 'yes' coerces to 'false' " +
-             '— silently answering No.',
+    finding: "WAS: buildAnswers checked value === 'Yes' (capital Y only), so 'yes' coerced to " +
+             "'false' — silently answering No.",
+    now:     'FIXED. coerceAffirmative() accepts an enumerated affirmative list and is fail-safe in ' +
+             'the other direction: anything unrecognised stays false, because an affirmative is ' +
+             'what attests something to an employer. booleanPolarity() resolves the DIRECTION ' +
+             'first, so an inverted question cannot be answered backwards.',
     field:   'authorized_to_work',
     expect:  "'yes' must be submitted as an affirmative, not 'false'",
   },
   submit_label: {
-    finding: 'SUBMIT_RE is anchored at ^, so a button labelled "Review and Submit" never matches ' +
-             'and the run silently ends as filled_not_submitted.',
-    expect:  'the run either submits or reports filled_not_submitted — never a false "submitted"',
+    finding: 'WAS: SUBMIT_RE was anchored at ^, so a button labelled "Review and Submit" never ' +
+             'matched and the run silently ended as filled_not_submitted.',
+    now:     'FIXED. classifySubmitLabel() scores labels instead of first-matching: ' +
+             'STRONG_SUBMIT_RE is /\\b(?:submit|send)\\b/, so a qualifier may precede the verb and ' +
+             '"Review and Submit" scores 2, while NOT_SUBMIT_RE still excludes "Save and Continue" ' +
+             'and "Submit Draft". The /lever form MUST therefore reach a real submission. Asserting ' +
+             'filled_not_submitted here is asserting the old bug — a7 case 3 did exactly that.',
+    expect:  'the run either submits or reports filled_not_submitted — never a false "submitted", ' +
+             'which is what the recorded submission count decides',
   },
   required_unmapped: {
     finding: 'buildAnswers skips unresolvable fields; the completeness gate must then HOLD ' +

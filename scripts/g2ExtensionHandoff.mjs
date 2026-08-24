@@ -77,7 +77,8 @@ function startApi() {
       reason_code TEXT, reason_detail TEXT, started_at INTEGER, finished_at INTEGER,
       created_at INTEGER DEFAULT (unixepoch()), answers_json TEXT, resume_artifact_id INTEGER,
       resume_ats_score INTEGER, screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT,
-      open_questions_json TEXT, UNIQUE(run_id, job_id));
+      open_questions_json TEXT,
+    ats_score INTEGER, attempt_count INTEGER NOT NULL DEFAULT 0, gate_review_json TEXT, hidden_at INTEGER, locked_at INTEGER, resume_file TEXT, resume_id INTEGER, UNIQUE(run_id, job_id));
     CREATE TABLE apply_job_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, run_job_id INTEGER,
       user_id INTEGER, job_id TEXT, level TEXT DEFAULT 'info', event TEXT, message TEXT,
       details_json TEXT, created_at INTEGER DEFAULT (unixepoch()));
@@ -341,10 +342,20 @@ async function main() {
     check('a mismatched origin refuses because of the ORIGIN, not for some other reason',
       mismatch?.ok === false && mismatch.reason === 'origin_mismatch',
       mismatch ? `${mismatch.reason}: ${mismatch.message} ${mismatch.detail || ''}` : 'no result');
-    const leaked = await page.evaluate(() =>
-      [...document.querySelectorAll('input,select,textarea')].map(e => e.value).join('|'));
-    check('NOTHING was written into the page on a mismatch', !/Ada|Lovelace|Analytical|ada@/.test(leaked),
-      `values=${JSON.stringify(leaked).slice(0, 80)}`);
+    // COUNTED, not just concatenated — see the same guard in ab1HeldHandoff. A negative assertion
+    // over an empty haystack is a tautology, and this is the highest-stakes negative in the suite:
+    // if /multistep ever stopped serving a form, "nothing was written" would pass over a page with
+    // nowhere to write, and a real leak on a page that DOES have fields would look identical.
+    const leakProbe = await page.evaluate(() => {
+      const els = [...document.querySelectorAll('input,select,textarea')];
+      return { count: els.length, values: els.map(e => e.value).join('|') };
+    });
+    const leaked = leakProbe.values;
+    check('the mismatched page really had fields to leak into',
+      leakProbe.count > 0, `${leakProbe.count} control(s)`);
+    check('NOTHING was written into the page on a mismatch',
+      leakProbe.count > 0 && !/Ada|Lovelace|Analytical|ada@/.test(leaked),
+      `${leakProbe.count} controls, values=${JSON.stringify(leaked).slice(0, 80)}`);
     check('the token was NOT spent on a mismatch',
       db.prepare('SELECT consumed_at c FROM apply_gate_packets WHERE id=1').get().c === null);
 
