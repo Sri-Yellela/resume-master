@@ -5,6 +5,7 @@ import fs from "node:fs";
 import {
   htmlToText, extractYearsClaims, maxYearsClaim, extractSeniorityClaims, maxSeniority,
   checkResumeClaims, assertResumeClaims, ResumeClaimError, profileContradictionFindings,
+  extractSummaryText,
 } from "../services/resumeClaimGuard.js";
 
 // The real base resume's shape: two SDE roles, no seniority word anywhere, summary says 4 years.
@@ -146,9 +147,56 @@ test("the honest resume passes untouched", () => {
   assert.doesNotThrow(() => assertResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME }));
 });
 
-test("claiming FEWER years than the profile is the candidate's business, not a violation", () => {
+// ── AG3: the opposite drift ─────────────────────────────────────────────────────────────────────
+//
+// This used to assert the reverse — that under-claiming was the candidate's business and silent.
+// AG3 reverses that call: both directions are the profile disagreeing with itself, and a summary
+// that quietly says three when the profile says four costs the candidate a screen they qualified
+// for, on an unattended run they never read.
+test("AG3: a summary claiming FEWER years than the profile is a violation too", () => {
   const html = resume("Software Engineer with 3 years building distributed systems.");
-  assert.equal(checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME }).ok, true);
+  const r = checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME });
+  assert.equal(r.ok, false);
+  const v = r.violations.find(x => x.kind === "years_below_profile");
+  assert.ok(v, "the under-claim must be reported by its own kind");
+  assert.equal(v.claimed, 3);
+  assert.equal(v.allowed, 4);
+  assert.deepEqual(v.evidence, ["3 years"]);
+  assert.equal(r.checked.summaryYears, 3);
+});
+
+test("AG3: the under-claim refuses the artifact, it does not merely warn", () => {
+  const html = resume("Software Engineer with 2 years building distributed systems.");
+  assert.throws(() => assertResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME }),
+    e => e instanceof ResumeClaimError && e.code === "resume_claim_violation");
+});
+
+test("AG3: a SCOPED years figure outside the summary is not an under-claim", () => {
+  // "3 years of Python" inside a skills line is a narrower, honest statement — not the document's
+  // total. Reading it as one would refuse an honest resume, which is the failure mode that kept
+  // this check off in the first place.
+  const html = resume(
+    "Fullstack Software Engineer with 4 years building scalable systems.",
+  ).replace("</body>", '<div class="section-title">TECHNICAL SKILLS</div><p>Python (3 years), Go (2 years)</p></body>');
+  const r = checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME });
+  assert.equal(r.ok, true, r.violations.map(v => v.message).join(" | "));
+});
+
+test("AG3: a summary that matches the profile passes in both directions", () => {
+  const html = resume("Fullstack Software Engineer with 4 years building scalable systems.");
+  const r = checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME });
+  assert.equal(r.ok, true, r.violations.map(v => v.message).join(" | "));
+  assert.equal(r.checked.summaryYears, 4);
+});
+
+test("AG3: extractSummaryText reads the summary and stops at the next section", () => {
+  const html = resume("Engineer with 4 years of experience.");
+  const summary = extractSummaryText(html);
+  assert.match(summary, /Engineer with 4 years of experience/);
+  assert.doesNotMatch(summary, /Built scalable microservices/, "the summary must stop at EXPERIENCE");
+  assert.doesNotMatch(summary, /SUMMARY/, "the heading is not part of the summary");
+  assert.equal(extractSummaryText("<p>no headings anywhere</p>"), "",
+    "no summary section means no under-claim check, rather than a guessed one");
 });
 
 test("a resume that states no years figure is not a violation", () => {
@@ -301,6 +349,54 @@ test("the assertion runs in coreGenerateResume, BEFORE the artifact is persisted
   // It must be the shared kernel, so BOTH the HTTP handler and the apply worker are covered — under
   // full-auto no human reads the resume, so a check only on the HTTP path protects nobody.
   assert.match(body, /assertResumeClaims\(\{ html: formattedHtml, profile, baseResumeText: authoritativeResumeText \}\)/);
+});
+
+// ── AG3 item 1: no generation path reaches persistence without the guard ────────────────────────
+
+test("AG3: every resume-generating path funnels through the guarded coreGenerateResume", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const apply = fs.readFileSync("routes/apply.js", "utf8");
+
+  // The UNATTENDED path. The apply worker never calls a model itself — it asks
+  // generateResumeForApply, which is a thin wrapper over the same guarded function the HTTP route
+  // uses. If that ever stops being true, a resume can be submitted to an employer unread and
+  // unchecked, which is the exact failure this guard exists for.
+  assert.match(apply, /generateResumeForApply\(userId, jobId, toolType\)/,
+    "the apply worker must go through generateResumeForApply");
+  const wrapper = server.slice(
+    server.indexOf("function generateResumeForApply"),
+    server.indexOf("app.post(\"/api/resumes/:jobId/html\""),
+  );
+  assert.match(wrapper, /coreGenerateResume\(/,
+    "generateResumeForApply must delegate to coreGenerateResume rather than call a model itself");
+
+  // And nothing else calls a model to build a resume. Exactly two callers, both accounted for.
+  const callers = server.split("coreGenerateResume(").length - 1;
+  assert.equal(callers, 3, `expected the definition plus two callers, found ${callers} occurrences`);
+});
+
+test("AG3: a withheld resume is never persisted, and the refusal reaches the caller", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const body = server.slice(
+    server.indexOf("async function coreGenerateResume"),
+    server.indexOf("function generateResumeForApply"),
+  );
+  const assertAt = body.indexOf("assertResumeClaims(");
+  const insertVersion = body.indexOf("INSERT INTO resume_versions");
+  const insertResume = body.indexOf("INSERT INTO resumes");
+  assert.ok(assertAt > 0, "coreGenerateResume must assert its own output");
+  assert.ok(assertAt < insertVersion && assertAt < insertResume,
+    "the assertion must run BEFORE either write — a warning after the write is not a refusal");
+
+  // The throw is not swallowed into a generic failure: it is attributed to us and explained.
+  const wrapper = server.slice(
+    server.indexOf("function generateResumeForApply"),
+    server.indexOf("app.post(\"/api/resumes/:jobId/html\""),
+  );
+  assert.match(wrapper, /classifyGenerationError\(e\)/);
+  const attribution = fs.readFileSync("shared/failureAttribution.js", "utf8");
+  assert.match(attribution, /e\?\.code === "resume_claim_violation"/,
+    "the refusal must keep its own code rather than becoming an upstream error");
 });
 
 test("kbFindings reports a profile contradiction alongside a company-KB one", () => {

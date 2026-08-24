@@ -62,19 +62,74 @@ const TITLE_CLAIM_RE = new RegExp(
   "gi",
 );
 
-/** Strip tags and decode the few entities that matter, so claims are matched against read text. */
-export function htmlToText(html) {
-  return String(html ?? "")
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
+function decodeEntities(text) {
+  return String(text ?? "")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&quot;/gi, '"')
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&quot;/gi, '"');
+}
+
+/** Strip tags and decode the few entities that matter, so claims are matched against read text. */
+export function htmlToText(html) {
+  return decodeEntities(
+    String(html ?? "")
+      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<[^>]+>/g, " "),
+  ).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The document's lines, with block boundaries preserved.
+ *
+ * htmlToText collapses everything to one line, which is right for "does this text claim eight
+ * years" and useless for "which section is that claim in". A section boundary is a block boundary,
+ * so the block tags become newlines before the rest are stripped.
+ */
+function htmlToLines(html) {
+  const withBreaks = String(html ?? "")
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|li|ul|ol|h[1-6]|section|tr|table|td|th)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ");
+  return decodeEntities(withBreaks)
+    .split("\n")
+    .map(line => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+const SUMMARY_HEADING = /^(?:professional|executive|career|personal)?\s*(?:summary|profile|objective)\b[:\s]*$/i;
+const KNOWN_HEADING = /^(?:technical\s+skills|core\s+competencies|skills|experience|professional\s+experience|work\s+experience|employment(?:\s+history)?|education|projects?|academic\s+projects?|certifications?|publications?|awards?|honors?|languages|interests|volunteer|leadership|summary|profile|objective)\b[:\s]*$/i;
+
+/** A line that opens a section rather than saying anything. */
+function isSectionHeading(line) {
+  if (KNOWN_HEADING.test(line)) return true;
+  // Short, shouted and wordless — the shape of a heading in every resume template we emit.
+  return line.length <= 40 && /^[A-Z0-9 &,'/-]+$/.test(line) && /[A-Z]{2,}/.test(line);
+}
+
+/**
+ * The SUMMARY section's prose, or "" when the document has no summary.
+ *
+ * WHY THE SUMMARY SPECIFICALLY, AND NOT THE WHOLE DOCUMENT
+ * The under-claim check needs the document's TOTAL-experience figure, and the summary is where the
+ * section rules put it. Reading the whole document instead would take "3 years of Python" in a
+ * skills line as a claim to three years of career — a scoped, honest statement — and refuse an
+ * honest resume. Over-claiming is still checked document-wide, because a fabricated quantity is
+ * fabrication wherever it sits; under-claiming is only meaningful about the headline figure.
+ */
+export function extractSummaryText(html) {
+  const lines = htmlToLines(html);
+  const start = lines.findIndex(line => SUMMARY_HEADING.test(line));
+  if (start === -1) return "";
+  const body = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (isSectionHeading(lines[i])) break;
+    body.push(lines[i]);
+  }
+  return body.join(" ").trim();
 }
 
 /**
@@ -160,9 +215,9 @@ export function checkResumeClaims({ html, profile, baseResumeText = "" }) {
   const claimedYears = maxYearsClaim(text);
   const claimList = extractYearsClaims(text);
 
-  // ── Years ──────────────────────────────────────────────────────────────────
-  // Only ever an UPPER bound. Claiming fewer years than the profile states is the candidate's
-  // business — modest is not a lie — so an under-claim is silent.
+  // ── Years, upward ──────────────────────────────────────────────────────────
+  // Checked across the WHOLE document: a quantity the candidate cannot defend is fabrication
+  // wherever it appears, not only in the summary.
   if (hasProfileYears && claimedYears !== null && claimedYears > profileYears) {
     violations.push({
       kind: "years_exceed_profile",
@@ -173,6 +228,33 @@ export function checkResumeClaims({ html, profile, baseResumeText = "" }) {
         `The generated resume claims ${claimedYears} years of experience; the profile states ` +
         `${profileYears}. A JD may steer what is emphasised, never how much experience the ` +
         `candidate has.`,
+    });
+  }
+
+  // ── Years, downward (AG3) ──────────────────────────────────────────────────
+  // The drift AF2 also saw: a resume whose summary states FEWER years than the profile does. It is
+  // not a lie to an employer, so it was left silent — but it is the same defect underneath. The
+  // profile is the authority on this number, and a document that disagrees with it in EITHER
+  // direction was written from something other than the candidate's own facts. Under-claiming
+  // costs them the screen they qualified for, silently, on an unattended run they never read.
+  //
+  // Scoped to the SUMMARY's figure for the reason extractSummaryText explains. A resume that
+  // states no total at all is not caught here: that is a different defect (omission, not
+  // disagreement), and the section rules are what require the figure.
+  const summaryYears = maxYearsClaim(extractSummaryText(html));
+  if (hasProfileYears && summaryYears !== null && summaryYears < profileYears) {
+    violations.push({
+      kind: "years_below_profile",
+      claimed: summaryYears,
+      allowed: profileYears,
+      evidence: extractYearsClaims(extractSummaryText(html))
+        .filter(c => c.years === summaryYears)
+        .map(c => c.text),
+      message:
+        `The generated resume's summary claims ${summaryYears} years of experience; the profile ` +
+        `states ${profileYears}. The profile is the authority on this number, and the resume ` +
+        `disagreeing with it in either direction means it was not written from the candidate's ` +
+        `own facts.`,
     });
   }
 
@@ -204,6 +286,7 @@ export function checkResumeClaims({ html, profile, baseResumeText = "" }) {
     violations,
     checked: {
       claimedYears,
+      summaryYears,
       profileYears: hasProfileYears ? profileYears : null,
       claimedSeniority: maxSeniority(text)?.word ?? null,
       supportedSeniority: baseText.trim() ? (maxSeniority(baseText)?.word ?? null) : null,
