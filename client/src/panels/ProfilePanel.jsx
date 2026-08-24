@@ -33,6 +33,43 @@ function normaliseState(raw) {
   return raw.trim().toUpperCase().slice(0, 2);
 }
 
+/** Whatever the API hands back — object, JSON string, junk — as a plain object. */
+function parseMap(v) {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v;
+  try {
+    const p = JSON.parse(v || "{}");
+    return p && typeof p === "object" && !Array.isArray(p) ? p : {};
+  } catch { return {}; }
+}
+
+// ── Custom answers: the `{company}` template rules ────────────────────────────
+// Kept in step with services/customAnswers.js. The server is the authority — it decides what is
+// actually submitted — but the editor has to SHOW the same verdict, or the candidate cannot tell
+// which of their answers will be used and which are only drafts.
+const COMPANY_TOKEN = "{company}";
+const COMPANY_TOKEN_TEST = /\{\s*company\s*\}/i;
+const MOTIVATION_PATTERNS = [
+  /\bwhy\b[^?]*\b(join|work|apply|applying|interested|interest|want|choose|chose)\b/i,
+  /\bwhat\b[^?]*\b(interests?|excites?|draws?|attracts?|appeals?)\b/i,
+  /\bmotivat/i,
+  /\bwhy (are|do|did) you\b/i,
+  /\bexcites? you\b/i,
+  /\btell us why\b/i,
+];
+const isTemplateQ  = (t) => COMPANY_TOKEN_TEST.test(String(t ?? ""));
+const isMotivationQ = (t) => MOTIVATION_PATTERNS.some(re => re.test(String(t ?? "")));
+const companyKeyOf = (c) => String(c ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+const expandCompanyText = (t, c) => String(t ?? "").replace(/\{\s*company\s*\}/gi, String(c ?? ""));
+
+/** The five questions the Figma posting asked. Wordings only — the answers are the candidate's. */
+const SEED_QUESTIONS = [
+  "Why do you want to join {company}?",
+  "From where do you intend to work?",
+  "Have you ever worked for {company} before?",
+  "Have you worked as a full-time software engineer (excluding internships)?",
+  "Years of professional experience",
+];
+
 function splitChipText(raw) {
   return String(raw || "")
     .split(",")
@@ -126,6 +163,174 @@ function CustomAnswerAdder({ onAdd, theme }) {
   );
 }
 
+const CA_CHIP = {
+  fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em",
+  borderRadius:5, padding:"2px 6px", whiteSpace:"nowrap",
+};
+
+/**
+ * The per-company overrides for one templated question.
+ *
+ * This is the surface that makes a motivation question answerable at all: the generic template is
+ * never submitted, so the only thing that can answer "Why do you want to join Figma?" is text the
+ * candidate wrote for Figma. The template above is a starting point they edit, not a claim the
+ * system makes on their behalf.
+ */
+function CompanyOverrides({ question, overrides, onChange, theme, needsOwnWords }) {
+  const [company, setCompany] = useState("");
+  const mine = Object.entries(overrides)
+    .map(([ck, byQ]) => [ck, byQ?.[question]])
+    .filter(([, a]) => a !== undefined)
+    .sort((x, y) => x[0].localeCompare(y[0]));
+
+  const write = (ck, value) => {
+    const next = {};
+    for (const [k, v] of Object.entries(overrides)) next[k] = { ...v };
+    if (value === null) {
+      if (next[ck]) {
+        delete next[ck][question];
+        if (Object.keys(next[ck]).length === 0) delete next[ck];
+      }
+    } else {
+      if (!next[ck]) next[ck] = {};
+      next[ck][question] = value;
+    }
+    onChange(next);
+  };
+
+  return (
+    <div style={{ marginTop:10, paddingTop:10, borderTop:`1px dashed ${theme.border}` }}>
+      <span style={{ fontSize:10, fontWeight:700, textTransform:"uppercase",
+                     letterSpacing:"0.06em", color:theme.textMuted }}>
+        Per-company answers
+      </span>
+      <PHint theme={theme}>
+        {needsOwnWords
+          ? "Required for this question. Without one, the run holds and asks you — the generic answer above is only ever offered back to you as a draft."
+          : "Optional. A company listed here uses its own answer instead of the template."}
+      </PHint>
+      {mine.length === 0 ? null : (
+        <div style={{ display:"flex", flexDirection:"column", gap:6, marginTop:8 }}>
+          {mine.map(([ck, a]) => (
+            <div key={ck} style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
+              <div style={{ flex:"0 0 110px", fontSize:11, fontWeight:600, color:theme.text,
+                            paddingTop:7, textTransform:"capitalize", overflowWrap:"anywhere" }}>
+                {ck}
+              </div>
+              <textarea className="rm-input" rows={2} value={a}
+                onChange={e => write(ck, e.target.value)}
+                style={{ flex:1, fontSize:12, resize:"vertical", fontFamily:"inherit" }}
+                placeholder={expandCompanyText(question, ck)}/>
+              <button type="button" onClick={() => write(ck, null)}
+                title={`Remove the ${ck} answer`}
+                style={{ border:"none", background:"transparent", color:theme.danger,
+                         cursor:"pointer", fontSize:16, lineHeight:1, padding:"6px 4px" }}>
+                &times;
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display:"flex", gap:6, marginTop:8 }}>
+        <input className="rm-input" value={company}
+          onChange={e => setCompany(e.target.value)}
+          placeholder="Company name (e.g. Figma)"
+          style={{ flex:"0 0 190px", fontSize:12 }}/>
+        <button type="button" className="rm-btn"
+          disabled={!companyKeyOf(company) || !!overrides[companyKeyOf(company)]?.[question]}
+          onClick={() => { write(companyKeyOf(company), ""); setCompany(""); }}
+          style={{ fontSize:12, border:`1px dashed ${theme.border}`,
+                   background:theme.bg, color:theme.textMuted, cursor:"pointer",
+                   borderRadius:8, padding:"6px 12px" }}>
+          + Add company
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One stored answer, editable in place.
+ *
+ * The QUESTION is editable, not just the answer, because these arrive by capture from a real form
+ * and matching is on exact wording: a stray character is the difference between an answer that
+ * resolves and one that never fires again.
+ */
+function CustomAnswerRow({ question, answer, overrides, onRename, onAnswer, onDelete, onOverrides, theme }) {
+  const templated = isTemplateQ(question);
+  const ownWords  = templated && isMotivationQ(question);
+  const [open, setOpen] = useState(false);
+  const overrideCount = Object.values(overrides).filter(byQ => byQ?.[question] !== undefined).length;
+
+  return (
+    <div style={{ border:`1px solid ${theme.border}`, borderRadius:12, padding:"12px 14px",
+                  marginBottom:10, background:theme.bg }}>
+      <div style={{ display:"flex", gap:8, alignItems:"flex-start" }}>
+        <input className="rm-input" value={question}
+          onChange={e => onRename(e.target.value)}
+          style={{ flex:1, fontSize:12, fontWeight:600 }}/>
+        <button type="button" onClick={onDelete} title="Delete this answer"
+          style={{ border:"none", background:"transparent", color:theme.danger,
+                   cursor:"pointer", fontSize:16, lineHeight:1, padding:"7px 4px" }}>
+          &times;
+        </button>
+      </div>
+
+      <div style={{ display:"flex", gap:6, marginTop:6, flexWrap:"wrap", alignItems:"center" }}>
+        {templated ? (
+          <span style={{ ...CA_CHIP, background:`${theme.accent}1f`, color:theme.accent }}>
+            Per-company template
+          </span>
+        ) : null}
+        {ownWords ? (
+          <span style={{ ...CA_CHIP, background:`${theme.warning || theme.danger}22`,
+                         color:theme.warning || theme.danger }}>
+            Your words only
+          </span>
+        ) : null}
+        {overrideCount > 0 ? (
+          <span style={{ ...CA_CHIP, background:theme.surface, color:theme.textMuted,
+                         border:`1px solid ${theme.border}` }}>
+            {overrideCount} company{overrideCount === 1 ? "" : " answers"}
+          </span>
+        ) : null}
+      </div>
+
+      <textarea className="rm-input" rows={2} value={answer}
+        onChange={e => onAnswer(e.target.value)}
+        placeholder={ownWords ? "A starting point you edit per company — never submitted as-is" : "Your answer"}
+        style={{ width:"100%", marginTop:8, fontSize:12, resize:"vertical", fontFamily:"inherit" }}/>
+
+      {ownWords ? (
+        <PHint theme={theme}>
+          This asks why you want a specific employer, so it is answered in your voice. The text above
+          is never submitted — a run holds and offers it back as a draft, and only the per-company
+          answer below is sent.
+        </PHint>
+      ) : null}
+      {templated && !ownWords ? (
+        <PHint theme={theme}>
+          <code>{COMPANY_TOKEN}</code> is replaced with the employer's name, so this one answer
+          matches the question at every company that asks it.
+        </PHint>
+      ) : null}
+
+      {templated ? (
+        open || overrideCount > 0 ? (
+          <CompanyOverrides question={question} overrides={overrides} onChange={onOverrides}
+            theme={theme} needsOwnWords={ownWords}/>
+        ) : (
+          <button type="button" onClick={() => setOpen(true)}
+            style={{ marginTop:8, border:"none", background:"transparent", color:theme.accent,
+                     cursor:"pointer", fontSize:11, fontWeight:600, padding:0 }}>
+            + Per-company answer
+          </button>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
   const { theme } = useTheme();
 
@@ -143,6 +348,8 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
     highest_degree:"", field_of_study:"", university:"", graduation_year:"",
     current_job_title:"", current_company:"", years_of_experience:"",
     custom_answers:{},
+    // {companyKey: {question: answer}} — a per-company answer to a `{company}`-templated question.
+    custom_answer_overrides:{},
   };
 
   const [form,   setForm]   = useState(BLANK);
@@ -261,7 +468,8 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
         sponsorship_need:     d.sponsorship_need || "",
         has_clearance:        !!d.has_clearance,
         willing_to_relocate:  !!d.willing_to_relocate,
-        custom_answers: (() => { try { return typeof d.custom_answers === 'object' && d.custom_answers !== null ? d.custom_answers : JSON.parse(d.custom_answers || '{}'); } catch { return {}; } })(),
+        custom_answers: parseMap(d.custom_answers),
+        custom_answer_overrides: parseMap(d.custom_answer_overrides),
       })))
       .catch(() => {});
   }, []);
@@ -351,8 +559,8 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
       location:      form.city && form.state
                        ? `${form.city}, ${form.state}`
                        : (form.city || form.state || form.location || ""),
-      custom_answers: typeof form.custom_answers === 'object' && form.custom_answers !== null
-                       ? form.custom_answers : {},
+      custom_answers: parseMap(form.custom_answers),
+      custom_answer_overrides: parseMap(form.custom_answer_overrides),
     };
     try {
       await api("/api/profile", { method:"POST", body:JSON.stringify(cleaned) });
@@ -849,29 +1057,88 @@ export function ProfilePanel({ onOpenJobProfiles = () => {} }) {
 
         {/* ── Custom Answers ── */}
         <PSec title="Custom Answers" theme={theme}>
-          <p style={{ fontSize:12, color:theme.textMuted, lineHeight:1.5, marginBottom:14 }}>
-            Pre-fill answers to common application questions (e.g. "How did you hear about us?").
+          <p style={{ fontSize:12, color:theme.textMuted, lineHeight:1.5, marginBottom:6 }}>
+            The answers only you can write. Each one is keyed to the question's exact wording, so
+            "Have you worked for us before?" and "Are you a former employee?" are separate entries —
+            store both if both get asked.
           </p>
-          {Object.entries(form.custom_answers || {}).map(([q, a]) => (
-            <div key={q} style={{ display:"flex", gap:8, alignItems:"center", marginBottom:8 }}>
-              <div style={{ flex:1, fontSize:12, color:theme.text, fontWeight:600 }}>{q}</div>
-              <div style={{ flex:2, fontSize:12, color:theme.textMuted }}>{String(a)}</div>
-              <button type="button"
+          <p style={{ fontSize:12, color:theme.textMuted, lineHeight:1.5, marginBottom:14 }}>
+            Write <code>{COMPANY_TOKEN}</code> where the employer's name goes and one entry covers
+            every company that asks it. Answers are matched exactly and never guessed at; a question
+            worded differently is left for you rather than answered from a near-miss.
+          </p>
+
+          {Object.keys(form.custom_answers || {}).length === 0 ? (
+            <div style={{ fontSize:12, color:theme.textDim, marginBottom:12 }}>
+              Nothing stored yet. Held runs offer to save the answers you write, so this fills itself
+              as you apply — or seed the five questions below and answer them once.
+            </div>
+          ) : null}
+
+          {Object.entries(form.custom_answers || {}).map(([q, a], i) => (
+            <CustomAnswerRow
+              key={`${i}:${q}`}
+              question={q}
+              answer={String(a ?? "")}
+              overrides={form.custom_answer_overrides || {}}
+              theme={theme}
+              onRename={(next) => {
+                const trimmed = next;
+                const rebuilt = {};
+                // Rebuilt in order so renaming a question does not jump it to the end of the list
+                // while it is being typed in.
+                for (const [k, v] of Object.entries(form.custom_answers)) {
+                  if (k === q) rebuilt[trimmed] = v; else rebuilt[k] = v;
+                }
+                // Overrides are keyed by the stored wording, so they have to follow the rename or
+                // they would be silently orphaned.
+                const nextOv = {};
+                for (const [ck, byQ] of Object.entries(form.custom_answer_overrides || {})) {
+                  const inner = {};
+                  for (const [k, v] of Object.entries(byQ)) inner[k === q ? trimmed : k] = v;
+                  nextOv[ck] = inner;
+                }
+                setForm(f => ({ ...f, custom_answers: rebuilt, custom_answer_overrides: nextOv }));
+              }}
+              onAnswer={(next) => set("custom_answers", { ...form.custom_answers, [q]: next })}
+              onDelete={() => {
+                const next = { ...form.custom_answers };
+                delete next[q];
+                const nextOv = {};
+                for (const [ck, byQ] of Object.entries(form.custom_answer_overrides || {})) {
+                  const inner = { ...byQ };
+                  delete inner[q];
+                  if (Object.keys(inner).length) nextOv[ck] = inner;
+                }
+                setForm(f => ({ ...f, custom_answers: next, custom_answer_overrides: nextOv }));
+              }}
+              onOverrides={(nextOv) => set("custom_answer_overrides", nextOv)}
+            />
+          ))}
+
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+            <CustomAnswerAdder onAdd={(q, a) => {
+              if (!q.trim()) return;
+              set("custom_answers", { ...form.custom_answers, [q.trim()]: a });
+            }} theme={theme} selStyle={selStyle} />
+            {SEED_QUESTIONS.every(q => Object.prototype.hasOwnProperty.call(form.custom_answers || {}, q)) ? null : (
+              <button type="button" className="rm-btn"
                 onClick={() => {
                   const next = { ...form.custom_answers };
-                  delete next[q];
+                  // Wordings only. Seeding an ANSWER would be the system putting words in your
+                  // mouth, which is the one thing this store exists not to do.
+                  for (const q of SEED_QUESTIONS) {
+                    if (!Object.prototype.hasOwnProperty.call(next, q)) next[q] = "";
+                  }
                   set("custom_answers", next);
                 }}
-                style={{ border:"none", background:"transparent", color:theme.danger,
-                         cursor:"pointer", fontSize:16, lineHeight:1, padding:"0 4px" }}>
-                &times;
+                style={{ fontSize:12, border:`1px dashed ${theme.border}`,
+                         background:theme.bg, color:theme.textMuted, cursor:"pointer",
+                         borderRadius:8, padding:"6px 12px" }}>
+                + Add the 5 commonly-asked questions
               </button>
-            </div>
-          ))}
-          <CustomAnswerAdder onAdd={(q, a) => {
-            if (!q.trim()) return;
-            set("custom_answers", { ...form.custom_answers, [q.trim()]: a });
-          }} theme={theme} selStyle={selStyle} />
+            )}
+          </div>
         </PSec>
 
         {/* ── Job Profiles ── */}

@@ -2504,4 +2504,15 @@ export const MIGRATIONS = [
         ALTER TABLE user_profile ADD COLUMN sponsorship_need TEXT;
       `,
     },
+    {
+      // Per-company overrides for a `{company}`-templated custom answer (AF1).
+      //
+      // A separate column rather than a reserved key inside custom_answers, because buildAnswers
+      // iterates that map's values and stringifies them: a nested object there would be typed into
+      // a real employer's form as "[object Object]". Shape is {companyKey: {question: answer}}.
+      id: "087_user_profile_answer_overrides",
+      sql: `
+        ALTER TABLE user_profile ADD COLUMN custom_answer_overrides TEXT NOT NULL DEFAULT '{}';
+      `,
+    },
   ];

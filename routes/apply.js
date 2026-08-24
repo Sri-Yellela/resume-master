@@ -3,7 +3,10 @@ import crypto from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
-import { autoApply, requestAbort, isAbortRequested, clearAbort } from "../services/applyAutomation.js";
+import { autoApply, requestAbort, isAbortRequested, clearAbort, normaliseText } from "../services/applyAutomation.js";
+import {
+  readAnswerStore, resolveForCompany, effectiveCustomAnswers, companyKey,
+} from "../services/customAnswers.js";
 import {
   buildGatePacket, mintPacketToken, verifyPacketToken, hashToken, originOf,
   DEFAULT_TOKEN_TTL_MS,
@@ -497,7 +500,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           const p = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(userId);
           createGatePacket({
             runId, runJobId, userId, jobId,
-            result: {}, autofillPayload: buildAutofillPayload(p, "APPLY"),
+            result: {}, autofillPayload: buildAutofillPayload(p, "APPLY", job?.company),
             resumeArtifactId: usedArtifactId, reasonCode, jobUrl,
           });
         } catch (e) {
@@ -545,7 +548,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
       db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(userId);
       const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(userId);
-      const autofillPayload = buildAutofillPayload(profile, "APPLY");
+      // The employer is passed so `{company}`-templated custom answers resolve for THIS company.
+      const autofillPayload = buildAutofillPayload(profile, "APPLY", job?.company);
 
       const toolType = run.tool_type || "generate";
 
@@ -2440,6 +2444,39 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   const parseJson = (s, dflt) => { try { return s ? JSON.parse(s) : dflt; } catch { return dflt; } };
   const withOpenQuestions = (row) => ({ ...row, openQuestions: parseJson(row.open_questions_json, []) });
 
+  /**
+   * The answer store, read WITHOUT naming custom_answer_overrides.
+   *
+   * `SELECT *` rather than a column list for the same reason auditColumns() exists above: an
+   * un-migrated deployment or a stale fixture would otherwise throw on the missing column and take
+   * the whole endpoint down with a 500 — including the plain-answers path that worked before 087.
+   * readAnswerStore treats an absent column as an empty override map, which is exactly right.
+   */
+  const answerStore = (userId) =>
+    readAnswerStore(db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(userId) || {});
+
+  // Whether overrides can be PERSISTED, which is a different question from whether they can be read.
+  // Named once per process, loudly, because a silently dropped override would look like the store
+  // simply not working.
+  let overridesColumnCache = null;
+  function canPersistOverrides() {
+    if (overridesColumnCache !== null) return overridesColumnCache;
+    let present = false;
+    try {
+      present = db.prepare("PRAGMA table_info(user_profile)").all().some(c => c.name === "custom_answer_overrides");
+    } catch (e) {
+      console.warn("[applyRoutes] could not read user_profile schema:", e.message);
+    }
+    if (!present) {
+      console.warn(
+        "[applyRoutes] PER-COMPANY ANSWERS DEGRADED — user_profile is missing custom_answer_overrides. " +
+        "Per-company overrides cannot be saved; run migrations (087 adds it). Plain answers still save."
+      );
+    }
+    overridesColumnCache = present;
+    return present;
+  }
+
   /** Every outstanding question across this user's held jobs, deduplicated by question text. */
   app.get("/api/apply/questions", requireAuth, (req, res) => {
     const rows = db.prepare(`
@@ -2451,19 +2488,39 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       ORDER BY rj.created_at DESC LIMIT 50
     `).all(req.user.id);
 
-    const stored = parseJson(
-      db.prepare("SELECT custom_answers FROM user_profile WHERE user_id=?").get(req.user.id)?.custom_answers,
-      {},
-    );
+    const store = answerStore(req.user.id);
+    // Resolution is per-employer once templates exist, so it is computed per company and cached
+    // rather than read off one flat map.
+    const perCompany = new Map();
+    const forCompany = (company) => {
+      const key = companyKey(company);
+      if (!perCompany.has(key)) perCompany.set(key, resolveForCompany(store, company));
+      return perCompany.get(key);
+    };
+
     const byQuestion = new Map();
     for (const row of rows) {
+      const { answers: resolved, withheld } = forCompany(row.company);
       for (const q of parseJson(row.open_questions_json, [])) {
         const key = String(q.question || "").trim().toLowerCase();
         if (!key) continue;
         if (!byQuestion.has(key)) {
-          byQuestion.set(key, { ...q, answered: Object.prototype.hasOwnProperty.call(stored, q.question), blocking: [] });
+          byQuestion.set(key, { ...q, answered: true, blocking: [] });
         }
-        byQuestion.get(key).blocking.push({ jobId: row.job_id, runId: row.run_id, title: row.title, company: row.company });
+        const entry = byQuestion.get(key);
+        // Answered means answered FOR EVERY employer still blocked on it. A template answered for
+        // one company does not unblock the same question at another.
+        if (!Object.prototype.hasOwnProperty.call(resolved, q.question)) entry.answered = false;
+        // A motivation template deliberately produced no answer. Hand back the expanded generic
+        // text as a DRAFT — a starting point the candidate edits into their own words — and say
+        // which stored template it came from, so saving it can become a per-company override.
+        const held = withheld.find(w => normaliseText(w.question) === normaliseText(q.question));
+        if (held && !entry.draft) {
+          entry.draft = held.draft;
+          entry.template = held.template;
+          entry.needsOwnWords = true;
+        }
+        entry.blocking.push({ jobId: row.job_id, runId: row.run_id, title: row.title, company: row.company });
       }
     }
     const questions = [...byQuestion.values()];
@@ -2472,6 +2529,8 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // Eligibility answers are attestations to an employer. A caller should present them as such,
       // and they are the ones the resolver refuses to infer on the user's behalf.
       eligibilityCount: questions.filter(q => q.eligibility).length,
+      // The ones the system will never write for the candidate, however full the store gets.
+      ownWordsCount: questions.filter(q => q.needsOwnWords).length,
       blockedJobs: rows.length,
     });
   });
@@ -2486,42 +2545,85 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // The retry goes through startRun, so it inherits the approval default too: answering the
       // questions unblocks the job, it does not authorise the submission. Pass approvalMode:'auto'
       // to answer-and-send in one step.
-      const { answers = {}, retryJobIds = null, mode = "auto", approvalMode = null } = req.body || {};
+      const { answers = {}, overrides = {}, retryJobIds = null, mode = "auto", approvalMode = null } = req.body || {};
       if (approvalMode === "approved")
         return out.status(400).json({ error: "approval_mode_reserved" });
       if (!answers || typeof answers !== "object" || Array.isArray(answers))
         return out.status(400).json({ error: "answers object required" });
+      if (!overrides || typeof overrides !== "object" || Array.isArray(overrides))
+        return out.status(400).json({ error: "overrides must be an object keyed by company" });
 
-      const entries = Object.entries(answers)
+      const clean = (obj) => Object.entries(obj)
         .map(([q, a]) => [String(q).trim(), a])
         .filter(([q, a]) => q.length > 0 && a !== null && a !== undefined && String(a).trim() !== "");
-      if (entries.length === 0)
+
+      const entries = clean(answers);
+      // A per-company override is how a motivation question gets answered at all: the generic
+      // template is never submitted, so the candidate's own words for THIS employer are the only
+      // thing that can resolve it. Keyed by company, then by the question as stored.
+      const overrideEntries = [];
+      for (const [company, byQuestion] of Object.entries(overrides)) {
+        if (!byQuestion || typeof byQuestion !== "object" || Array.isArray(byQuestion)) continue;
+        const key = companyKey(company);
+        if (!key) continue;
+        for (const [q, a] of clean(byQuestion)) overrideEntries.push([key, q, String(a)]);
+      }
+      if (entries.length === 0 && overrideEntries.length === 0)
         return out.status(400).json({ error: "no non-empty answers supplied" });
 
       db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
-      const existing = parseJson(
-        db.prepare("SELECT custom_answers FROM user_profile WHERE user_id=?").get(req.user.id)?.custom_answers,
-        {},
-      );
-      const merged = { ...existing };
+      const prior = answerStore(req.user.id);
+      const merged = { ...prior.answers };
       for (const [q, a] of entries) merged[q] = String(a);
-      db.prepare("UPDATE user_profile SET custom_answers=? WHERE user_id=?")
-        .run(JSON.stringify(merged), req.user.id);
+      const mergedOverrides = {};
+      for (const [c, byQ] of Object.entries(prior.overrides)) mergedOverrides[c] = { ...byQ };
+      for (const [c, q, a] of overrideEntries) {
+        if (!mergedOverrides[c]) mergedOverrides[c] = {};
+        mergedOverrides[c][q] = a;
+      }
+      const overridesPersisted = canPersistOverrides();
+      if (overridesPersisted) {
+        db.prepare("UPDATE user_profile SET custom_answers=?, custom_answer_overrides=? WHERE user_id=?")
+          .run(JSON.stringify(merged), JSON.stringify(mergedOverrides), req.user.id);
+      } else {
+        // Plain answers must still save. Losing them because a per-company column is missing would
+        // be a worse failure than losing the overrides.
+        db.prepare("UPDATE user_profile SET custom_answers=? WHERE user_id=?")
+          .run(JSON.stringify(merged), req.user.id);
+      }
 
       // Which held jobs are now fully answered? A job is retryable when every question it was
       // blocked on has an answer — retrying one that is still missing an answer just burns a run.
+      //
+      // Resolved PER EMPLOYER, not against the raw map: a `{company}` template answers the question
+      // only once expanded for that job's company, and a motivation template answers it for nobody.
+      // Checking the flat store would mark a job retryable that is still going to hold.
+      // Resolved against what was actually WRITTEN, not what was asked for: if the override column
+      // is missing, those answers did not persist and must not count towards unblocking a job.
+      const store = { answers: merged, overrides: overridesPersisted ? mergedOverrides : prior.overrides };
       const held = db.prepare(`
-        SELECT job_id, open_questions_json FROM apply_run_jobs
-        WHERE user_id=? AND status='held_review' AND open_questions_json IS NOT NULL
+        SELECT rj.job_id, rj.open_questions_json, sj.company
+        FROM apply_run_jobs rj
+        LEFT JOIN scraped_jobs sj ON sj.job_id = rj.job_id
+        WHERE rj.user_id=? AND rj.status='held_review' AND rj.open_questions_json IS NOT NULL
       `).all(req.user.id);
       const unblocked = held
         .filter(row => {
           const qs = parseJson(row.open_questions_json, []);
-          return qs.length > 0 && qs.every(q => Object.prototype.hasOwnProperty.call(merged, q.question));
+          if (qs.length === 0) return false;
+          const resolved = effectiveCustomAnswers(store, row.company);
+          return qs.every(q => Object.prototype.hasOwnProperty.call(resolved, q.question));
         })
         .map(row => row.job_id);
 
-      const body = { ok: true, saved: entries.map(([q]) => q), unblocked };
+      const body = {
+        ok: true,
+        saved: entries.map(([q]) => q),
+        savedOverrides: overridesPersisted
+          ? overrideEntries.map(([c, q]) => ({ company: c, question: q }))
+          : [],
+        unblocked,
+      };
 
       if (retryJobIds !== null) {
         const requested = (Array.isArray(retryJobIds) ? retryJobIds : []).map(String);

@@ -260,7 +260,10 @@ export function isCredentialField({
 // Negation/inversion tokens. A key must not fuzzy-match a label that inverts its sense.
 const INVERSION_RE = /\b(?:not|never|without|require[sd]?|requiring|need(?:s|ed)?|unable|cannot|can't|don'?t|do\s+not|lack)\b/i;
 
-const normaliseText = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+// Exported because services/customAnswers.js expands `{company}` templates into the literal question
+// text this same function then matches on. If the two normalisers ever diverged, a template would
+// expand to a key buildAnswers could no longer match, and the answer would silently go missing.
+export const normaliseText = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
 const keyToPhrase  = (k) => normaliseText(String(k).replace(/[_-]+/g, ' '));
 
 /** The eligibility class a label/name belongs to, or null. */

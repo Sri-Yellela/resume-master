@@ -51,6 +51,7 @@ import { getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRo
 import { inferWorkType, jobHash, normaliseItem, isFullTimeNorm, isEmploymentTypeWanted, parseYearsExperience, ghostJobScoreNorm, isReposted } from "./services/jobNormalization.js";
 import { profileTitleSql } from "./services/profileTitleFilter.js";
 import { resolveSponsorshipNeed } from "./services/applyAutomation.js";
+import { readAnswerStore, effectiveCustomAnswers } from "./services/customAnswers.js";
 import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
@@ -2846,6 +2847,17 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE user_profile ADD COLUMN sponsorship_need TEXT;
       `,
     },
+    {
+      // Per-company overrides for a `{company}`-templated custom answer (AF1).
+      //
+      // A separate column rather than a reserved key inside custom_answers, because buildAnswers
+      // iterates that map's values and stringifies them: a nested object there would be typed into
+      // a real employer's form as "[object Object]". Shape is {companyKey: {question: answer}}.
+      id: "087_user_profile_answer_overrides",
+      sql: `
+        ALTER TABLE user_profile ADD COLUMN custom_answer_overrides TEXT NOT NULL DEFAULT '{}';
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -3914,7 +3926,15 @@ function normaliseUrl(raw) {
 }
 
 // â”€â”€ Autofill payload builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function buildAutofillPayload(profile, mode) {
+/**
+ * @param {object} profile  the user_profile row
+ * @param {string} mode     "APPLY" | "CUSTOM_SAMPLER"
+ * @param {string=} company the employer this payload is for. OPTIONAL, and its absence is
+ *   meaningful rather than a default: `{company}`-templated custom answers are DROPPED when the
+ *   employer is unknown (the gate packet's profile-only case), because expanding a template
+ *   against nothing would misstate the question that was asked. See services/customAnswers.js.
+ */
+function buildAutofillPayload(profile, mode, company = null) {
   const loc   = mode==="CUSTOM_SAMPLER" ? "" : (profile?.location||"");
   const city  = mode==="CUSTOM_SAMPLER" ? "" : (profile?.city||loc.split(",")[0]?.trim()||"");
   const state = mode==="CUSTOM_SAMPLER" ? "" : (profile?.state||loc.split(",")[1]?.trim()||"");
@@ -4020,7 +4040,11 @@ function buildAutofillPayload(profile, mode) {
       'current-title': profile?.current_job_title || '',
       'current-company': profile?.current_company || '',
     },
-    custom_answers: (() => { try { return JSON.parse(profile?.custom_answers || '{}'); } catch { return {}; } })(),
+    // Resolved for THIS employer: templates expanded, per-company overrides applied, and motivation
+    // templates withheld so the run holds on them instead of interpolating a company name into
+    // borrowed enthusiasm. buildAnswers still receives nothing but literal question text, so its
+    // exact-match tier is unchanged.
+    custom_answers: effectiveCustomAnswers(readAnswerStore(profile), company),
     dropdown_map:{
       gender:   profile?.gender          ? [profile.gender]          : [],
       work_auth:profile?.work_auth       ? [profile.work_auth]        : [],

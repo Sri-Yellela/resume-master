@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { SPONSORSHIP_NEEDS } from "../services/applyAutomation.js";
+import { readAnswerStore } from "../services/customAnswers.js";
 
 const DEFAULT_DOCK_ITEMS = ["profile_switcher", "notifications", "quick_actions", "settings", "user_avatar"];
 
@@ -268,6 +269,21 @@ export function createAccountRouter({
   router.post("/api/profile", requireAuth, (req, res) => {
     const f = req.body;
     db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
+    // ABSENT IS NOT EMPTY. This handler writes every column unconditionally, so a client that does
+    // not know about the answer store — the extension, an older tab — would post no key for it and
+    // silently wipe answers the candidate spent a run capturing. Absence therefore preserves; only
+    // an explicitly supplied object replaces.
+    const existing = db.prepare(
+      "SELECT custom_answers, custom_answer_overrides FROM user_profile WHERE user_id=?"
+    ).get(req.user.id) || {};
+    const prior = readAnswerStore(existing);
+    const isMap = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+    // Re-read through the same cleaner that the resolver uses, so what is stored and what is
+    // resolved can never disagree about shape.
+    const nextStore = readAnswerStore({
+      custom_answers: isMap(f.custom_answers) ? f.custom_answers : prior.answers,
+      custom_answer_overrides: isMap(f.custom_answer_overrides) ? f.custom_answer_overrides : prior.overrides,
+    });
     db.prepare(`UPDATE user_profile SET
       full_name=?,email=?,phone=?,linkedin_url=?,github_url=?,location=?,
       address_line1=?,address_line2=?,city=?,state=?,zip=?,country=?,
@@ -278,7 +294,7 @@ export function createAccountRouter({
       available_start_date=?,willing_to_relocate=?,highest_degree=?,
       field_of_study=?,university=?,graduation_year=?,
       current_job_title=?,current_company=?,years_of_experience=?,
-      custom_answers=?,
+      custom_answers=?,custom_answer_overrides=?,
       updated_at=unixepoch() WHERE user_id=?`
     ).run(
       f.full_name || null, f.email || null, f.phone || null, f.linkedin_url || null, f.github_url || null, f.location || null,
@@ -298,7 +314,7 @@ export function createAccountRouter({
       f.graduation_year ? Number(f.graduation_year) : null,
       f.current_job_title || null, f.current_company || null,
       f.years_of_experience ? Number(f.years_of_experience) : null,
-      JSON.stringify(typeof f.custom_answers === 'object' && f.custom_answers !== null ? f.custom_answers : {}),
+      JSON.stringify(nextStore.answers), JSON.stringify(nextStore.overrides),
       req.user.id
     );
     res.json({ ok: true });
@@ -308,14 +324,17 @@ export function createAccountRouter({
     if (!requireModeEntitlement(req, res)) return;
     db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
     const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id) || {};
-    res.json(buildAutofillPayload(profile, req.user.applyMode));
+    // ?company= lets a caller that knows the employer resolve `{company}` templates. Omitting it is
+    // valid and simply drops them, rather than expanding a template against an empty name.
+    res.json(buildAutofillPayload(profile, req.user.applyMode, req.query?.company || null));
   });
 
   router.get("/api/extension/autofill", requireAuth, (req, res) => {
     if (!requireModeEntitlement(req, res)) return;
     db.prepare("INSERT OR IGNORE INTO user_profile (user_id) VALUES (?)").run(req.user.id);
     const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id) || {};
-    res.json({ ok: true, mode: req.user.applyMode, ...buildAutofillPayload(profile, req.user.applyMode) });
+    res.json({ ok: true, mode: req.user.applyMode,
+      ...buildAutofillPayload(profile, req.user.applyMode, req.query?.company || null) });
   });
 
   router.get("/api/categories", requireAuth, (_req, res) => res.json(INDUSTRY_CATEGORIES));
