@@ -72,19 +72,42 @@ console.log("\n=== the decoy third-party frame ===");
 check("the decoy was NOT clicked", !providers.includes("decoy"), JSON.stringify(providers));
 console.log("  (the decoy sits FIRST in the shell's DOM, so walking every frame would have hit it)");
 
-// ── 3. the no-false-submitted guarantee still holds ──────────────────────────
-// Lever's button reads "Review and Submit", which SUBMIT_RE does not match. Frame-awareness must not
-// have turned that into a claimed submission — A1 trap 4.
-console.log("\n=== a form with no matching submit button (A1 trap 4) ===");
+// ── 3. a qualifier before the verb is a real submit control ──────────────────
+//
+// THIS CHECK WAS INVERTED, and the inversion outlived its reason. It was written when SUBMIT_RE was
+// anchored at ^, so "Review and Submit" — Lever's actual wording — never matched and the run ended
+// as `filled_not_submitted`. A1 trap 4 recorded that as the defect, and this case asserted the
+// broken behaviour as though it were the guarantee.
+//
+// classifySubmitLabel then fixed it on purpose: STRONG_SUBMIT_RE is /\b(?:submit|send)\b/, so a
+// qualifier may precede the verb, and NOT_SUBMIT_RE still excludes "Save and Continue" and
+// "Submit Draft". "Review and Submit" scores 2. So the correct expectation is the opposite of what
+// stood here, and the trap registry's own wording already allowed for it: "the run either submits
+// or reports filled_not_submitted — never a FALSE submitted".
+//
+// The guarantee being protected is therefore unchanged, and this is still where it is checked — it
+// is just checked in the direction that is now true. What makes the submission not false is that the
+// ATS RECORDED IT, exactly once, so the three assertions below are about the record and not about
+// the status. The other half of the same guarantee — a submit-shaped button that changes NOTHING
+// must report clicked_no_evidence — is exercised by scripts/ae7SubmitOnRealShape.mjs case C, which
+// has a JS-submitted form to do it on; this fixture's button cannot be made inert without changing
+// what it is testing.
+console.log("\n=== a qualifier before the verb: Lever's \"Review and Submit\" (A1 trap 4) ===");
 await reset();
 const lever = await autoApply(`${ATS}/lever`, {
   ...PAYLOAD,
   custom_answers: { "Are you authorized to work without sponsorship?": "yes" },
 }, { mode: "full", jobId: "xf-lever", resumePath: RESUME });
 const leverSubs = await subs();
-check("status is filled_not_submitted", lever.status === "filled_not_submitted", `status=${lever.status}`);
-check("submitVerified is false", lever.submitVerified === false, String(lever.submitEvidence));
-check("no submission reached the ATS", leverSubs.count === 0, `count=${leverSubs.count}`);
+check("\"Review and Submit\" is recognised as the submit control",
+  lever.status === "submitted", `status=${lever.status} reason=${lever.reasonCode ?? "-"}`);
+check("and the submission is VERIFIED by evidence, not by the click alone",
+  lever.submitVerified === true && /confirmation_page|url_changed/.test(lever.submitEvidence || ""),
+  String(lever.submitEvidence));
+check("EXACTLY ONE submission reached the ATS — which is what makes it not a false claim",
+  leverSubs.count === 1, `count=${leverSubs.count}`);
+check("and it was the lever form", leverSubs.submissions[0]?.provider === "lever",
+  String(leverSubs.submissions[0]?.provider));
 
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : failures + " CHECK(S) FAILED"}`);
 process.exitCode = failures === 0 ? 0 : 1;

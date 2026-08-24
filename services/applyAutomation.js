@@ -1324,7 +1324,28 @@ export function buildAnswers(fields, profilePayload) {
       // direction, so `value` is the answer AS THE QUESTION ASKS IT. Running polarity over it again
       // would invert a correct answer — and would refuse outright, since `matched_on` here names
       // the tri-state rather than one of the canonical boolean keys.
-      const polarity = isDerivedSponsorship(provenance)
+      // A CUSTOM ANSWER IS EXEMPT FOR THE SAME REASON, and more strongly. booleanPolarity resolves
+      // the direction between a PROFILE KEY's sense and the QUESTION's sense — it exists because
+      // `requires_sponsorship: "No"` and "authorized to work WITHOUT sponsorship" state the same
+      // fact in opposite words. A custom answer has no such indirection: the candidate answered
+      // THIS question, so the value already IS the answer as the question asks it, and there is no
+      // direction left to resolve.
+      //
+      // Without this the guard fed `matched_on` — which for a custom answer is the QUESTION TEXT —
+      // into SPONSORSHIP_KEY_SENSE, found nothing (it is not a canonical key and never will be),
+      // returned 'unknown', and refused. The effect was that a candidate who had explicitly
+      // answered an eligibility checkbox was asked to answer it again: step 3's own note says
+      // "an explicit answer to this exact question is strictly better evidence", and the
+      // correction loop stores the user's reply THERE, so the loop could never converge on a
+      // checkbox — the same question forever. Found by scripts/a8FileUploadTrap.mjs, whose /ashby
+      // case held on exactly this.
+      //
+      // Safe because the exemption cannot be reached by a guess: refuseReason() only lets an
+      // eligibility-class subject through custom_answers on `allowEligibilityExactAnswer`, i.e. a
+      // normalised-EXACT question match. A fuzzy or containment match on an eligibility field is
+      // already refused before it gets here.
+      const answeredByCandidate = provenance === PROVENANCE.CUSTOM_ANSWER;
+      const polarity = (isDerivedSponsorship(provenance) || answeredByCandidate)
         ? 'direct'
         : booleanPolarity({ label, name: field.name || '', key: matched_on });
       if (polarity === 'unknown') {

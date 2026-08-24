@@ -99,3 +99,93 @@ test("buildAnswers refuses when the direction is unreadable", () => {
   assert.equal(a.value, null);
   assert.ok((a.refusals || []).some(r => /undetermined_boolean_polarity/.test(r)));
 });
+
+// ── A CUSTOM ANSWER HAS NO DIRECTION LEFT TO RESOLVE ────────────────────────────────────────
+//
+// booleanPolarity exists to reconcile a PROFILE KEY's sense with the QUESTION's sense —
+// `requires_sponsorship: "No"` and "authorized to work WITHOUT sponsorship" state one fact in
+// opposite words. A custom answer has no such indirection: the candidate answered THIS question, so
+// the stored value already IS the answer as asked.
+//
+// The guard did not know that. It fed `matched_on` — the QUESTION TEXT for a custom answer — into
+// SPONSORSHIP_KEY_SENSE, found nothing (it is not a canonical key and never will be), and refused.
+// A candidate who had explicitly ticked the box was asked to tick it again, and because the
+// correction loop STORES the user's reply in custom_answers, the loop could never converge on a
+// checkbox: the same question forever. Found by scripts/a8FileUploadTrap.mjs, whose /ashby case
+// held on precisely this and had been read as a stale expectation.
+
+test("THE CANDIDATE'S OWN ANSWER to an eligibility checkbox is honoured, not re-derived", () => {
+  const fields = [{
+    field_id: "f1", name: "authorized_no_sponsorship", type: "checkbox", handler_type: null,
+    label: "I am authorized to work without sponsorship", is_required: true, options: [],
+  }];
+  const [a] = buildAnswers(fields, {
+    handler_map: {}, field_map: {},
+    custom_answers: { "I am authorized to work without sponsorship": "yes" },
+  });
+  assert.equal(a.skipped, undefined, "the candidate answered this exact question");
+  assert.equal(a.value, "true");
+  assert.equal(a.provenance, "custom_answer");
+});
+
+test("and lowercase 'yes' still coerces — the A1 lowercase_yes trap, through this path", () => {
+  for (const stored of ["yes", "Yes", "true", "agree", "i am"]) {
+    const [a] = buildAnswers([{
+      field_id: "f1", name: "authorized_no_sponsorship", type: "checkbox", handler_type: null,
+      label: "I am authorized to work without sponsorship", is_required: true, options: [],
+    }], { handler_map: {}, field_map: {},
+          custom_answers: { "I am authorized to work without sponsorship": stored } });
+    assert.equal(a.value, "true", `stored=${stored}`);
+  }
+});
+
+test("an UNRECOGNISED custom answer stays unchecked — the fail-safe direction is load-bearing", () => {
+  // coerceAffirmative's contract: anything it does not recognise is false, because an affirmative
+  // is what attests something to an employer. "I agree" is deliberately NOT on that list, and the
+  // exemption above must not become a way around it — the box stays unchecked and the completeness
+  // gate then holds, which is the outcome that asks the candidate rather than guessing for them.
+  for (const stored of ["I agree", "sure", "affirmative-ish", "??"]) {
+    const [a] = buildAnswers([{
+      field_id: "f1", name: "authorized_no_sponsorship", type: "checkbox", handler_type: null,
+      label: "I am authorized to work without sponsorship", is_required: true, options: [],
+    }], { handler_map: {}, field_map: {},
+          custom_answers: { "I am authorized to work without sponsorship": stored } });
+    assert.equal(a.value, "false", `stored=${stored} must not become an affirmative`);
+  }
+});
+
+test("a NEGATIVE custom answer is honoured too — the exemption is not a rubber stamp", () => {
+  // The failure mode to avoid is an exemption that always answers YES. An affirmative is what
+  // attests something to an employer, so "no" must come through as unchecked.
+  const [a] = buildAnswers([{
+    field_id: "f1", name: "authorized_no_sponsorship", type: "checkbox", handler_type: null,
+    label: "I am authorized to work without sponsorship", is_required: true, options: [],
+  }], { handler_map: {}, field_map: {},
+        custom_answers: { "I am authorized to work without sponsorship": "no" } });
+  assert.equal(a.value, "false");
+});
+
+test("THE GUARD STILL REFUSES a profile KEY whose direction is unreadable", () => {
+  // The exemption must be narrow. With no custom answer, the same field resolved from a key the
+  // resolver cannot orient is still refused — that is the whole point of booleanPolarity.
+  const [a] = buildAnswers([{
+    field_id: "f1", name: "sponsorship_flag", type: "checkbox", handler_type: "sponsorship",
+    label: "Sponsorship", is_required: true, options: [],
+  }], { handler_map: {}, custom_answers: {}, field_map: { requires_sponsorship: "No" } });
+  assert.equal(a.skipped, true);
+  assert.ok((a.refusals || []).some(r => /undetermined_boolean_polarity/.test(r)));
+});
+
+test("a NON-EXACT custom answer cannot reach the exemption", () => {
+  // refuseReason only lets an eligibility-class subject through custom_answers on a
+  // normalised-EXACT question match, so a containment match is refused BEFORE polarity runs. If
+  // that ever changed, the exemption would start honouring a guess about an attestation.
+  const [a] = buildAnswers([{
+    field_id: "f1", name: "authorized_no_sponsorship", type: "checkbox", handler_type: null,
+    label: "I am authorized to work without sponsorship in the United States",
+    is_required: true, options: [],
+  }], { handler_map: {}, field_map: {},
+        custom_answers: { "authorized to work without sponsorship": "yes" } });
+  assert.equal(a.skipped, true, "a partial question match must not answer an eligibility field");
+  assert.equal(a.value, null);
+});
