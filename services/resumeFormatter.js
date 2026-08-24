@@ -195,6 +195,70 @@ function extractClassBlock(html, className) {
   return "";
 }
 
+/**
+ * Remove whole ELEMENTS, nesting and all (AG4).
+ *
+ * WHY THIS REPLACED A LIST OF REGEXES
+ * parseEntryBlockFromHtml built an entry's free text by deleting the blocks it had already read —
+ * the header, the role, the bullet list — and keeping whatever was left. It deleted them with
+ * `<div class="entry-header">[\s\S]*?</div>`, which is non-greedy and therefore stops at the FIRST
+ * `</div>`. An entry header contains a nested div, so the delete ended inside it and the date div
+ * survived into the "leftover" text. renderEntry then rendered the date twice: once styled by
+ * entry-date, once as body text. The bullet list had the same failure for a different reason — the
+ * pattern required class="bullets", so a plain <ul> from the model was read into entry.bullets AND
+ * left in the text, and every bullet rendered twice.
+ *
+ * Both are the same mistake: matching an element with a regex that cannot count. This walks the
+ * tag depth like extractClassBlock and extractElementsByClass already do, so an element is removed
+ * with everything inside it, however deeply that nests.
+ *
+ * @param {string} html
+ * @param {(tagName: string, classes: string[]) => boolean} shouldRemove
+ */
+function removeElements(html, shouldRemove) {
+  let source = String(html || "");
+  // Bounded: each pass removes one element, and a resume entry has nowhere near this many.
+  for (let guard = 0; guard < 500; guard += 1) {
+    const openPattern = /<([a-z0-9]+)([^>]*)>/gi;
+    let match;
+    let removedOne = false;
+    while ((match = openPattern.exec(source))) {
+      const tagName = String(match[1] || "").toLowerCase();
+      const attrs = String(match[2] || "");
+      if (/\/$/.test(attrs)) continue; // self-closing carries nothing to remove
+      const classes = String(attrs.match(/class=(["'])(.*?)\1/i)?.[2] || "")
+        .split(/\s+/)
+        .filter(Boolean);
+      if (!shouldRemove(tagName, classes)) continue;
+
+      const start = match.index;
+      const tagPattern = new RegExp(`</?${tagName}\\b[^>]*>`, "gi");
+      tagPattern.lastIndex = openPattern.lastIndex;
+      let depth = 1;
+      let end = -1;
+      let token;
+      while ((token = tagPattern.exec(source))) {
+        const text = token[0];
+        if (/\/>$/.test(text)) continue;
+        depth += text.startsWith("</") ? -1 : 1;
+        if (depth === 0) { end = tagPattern.lastIndex; break; }
+      }
+      // An unclosed tag owns the rest of the block, which is what a browser would render too.
+      source = `${source.slice(0, start)} ${source.slice(end === -1 ? source.length : end)}`;
+      removedOne = true;
+      break;
+    }
+    if (!removedOne) break;
+  }
+  return source;
+}
+
+/** True for any element whose content parseEntryBlockFromHtml has already read into a field. */
+function isAlreadyReadBlock(tagName, classes) {
+  if (tagName === "ul" || tagName === "ol" || tagName === "li") return true;
+  return classes.includes("entry-header") || classes.includes("entry-role") || classes.includes("tech-line");
+}
+
 function extractElementsByClass(html, tagName, className) {
   const source = String(html || "");
   const matches = [];
@@ -288,9 +352,32 @@ function parseSkillsRows(contentHtml) {
   }
   if (rows.length) return rows;
 
+  // The shape renderSection ITSELF emits: <li><strong>Label</strong> values</li> (AG4).
+  //
+  // Parsing our own output has to round-trip, because a stored artifact is re-formatted on the
+  // enhance and adopt paths. It did not: stripTagsToText turns "<li>" into "• ", the line then had
+  // no colon to split on, so the whole row became the VALUES with an empty label — rendering as
+  // `<li><strong></strong> • Languages Java ...`, a bullet glyph inside a bullet and an empty bold
+  // run. The style round-trip was altering the content, which is the same fault as the duplicated
+  // entry text, one section over.
+  const items = [...String(contentHtml || "").matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)].map(m => m[1]);
+  if (items.length) {
+    return items
+      .map(item => {
+        // A leading <strong> is the label. Later ones are emphasis inside the values.
+        const lead = item.match(/^\s*<strong[^>]*>([\s\S]*?)<\/strong>\s*([\s\S]*)$/i);
+        if (lead) return { label: stripTagsToText(lead[1]), values: stripTagsToText(lead[2]) };
+        const text = stripTagsToText(item).replace(/^[-•*·‣▪]\s+/, "");
+        const idx = text.indexOf(":");
+        if (idx === -1) return { label: "", values: text };
+        return { label: text.slice(0, idx).trim(), values: text.slice(idx + 1).trim() };
+      })
+      .filter(row => row.label || row.values);
+  }
+
   return collapseWhitespace(stripTagsToText(contentHtml))
     .split("\n")
-    .map(line => line.trim())
+    .map(line => line.trim().replace(/^[-•*·‣▪]\s+/, ""))
     .filter(Boolean)
     .map(line => {
       const idx = line.indexOf(":");
@@ -304,31 +391,69 @@ function parseSkillsRows(contentHtml) {
 
 function parseEntryBlockFromHtml(entryHtml) {
   const org = stripTagsToText(extractClassBlock(entryHtml, "entry-org")) || "";
-  const meta = stripTagsToText(extractClassBlock(entryHtml, "entry-meta")) || "";
+  // The separator span is STYLING, not content. renderEntry writes the "|" itself, so reading it
+  // back as part of the meta made every re-format add another one — "| | Technical Assistant".
+  const meta = stripTagsToText(
+    removeElements(extractClassBlock(entryHtml, "entry-meta"), (_tag, classes) => classes.includes("sep")),
+  ).replace(/^[\s|]+/, "") || "";
   const date = extractLeafClassText(entryHtml, "div", "entry-date") || "";
   const role = stripTagsToText(extractClassBlock(entryHtml, "entry-role")) || "";
   const tech = stripTagsToText(extractClassBlock(entryHtml, "tech-line")) || "";
   const bullets = [...String(entryHtml || "").matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
     .map(match => stripTagsToText(match[1]))
     .filter(Boolean);
-  const paragraphs = collapseWhitespace(
-    stripTagsToText(
-      String(entryHtml || "")
-        .replace(/<ul[^>]*class="[^"]*\bbullets\b[^"]*"[\s\S]*?<\/ul>/gi, "")
-        .replace(/<div[^>]*class="[^"]*\bentry-header\b[^"]*"[\s\S]*?<\/div>/i, "")
-        .replace(/<div[^>]*class="[^"]*\bentry-role\b[^"]*"[\s\S]*?<\/div>/i, "")
-        .replace(/<div[^>]*class="[^"]*\btech-line\b[^"]*"[\s\S]*?<\/div>/i, "")
-    )
+  // Whatever is left once every field above has been read. Removing those elements PROPERLY is the
+  // whole of the AG4 fix — see removeElements. Note the list removal is not limited to
+  // class="bullets": the <li> scan above reads bullets out of ANY list, so any list left behind
+  // here would be a second copy of them.
+  const leftover = collapseWhitespace(
+    stripTagsToText(removeElements(entryHtml, isAlreadyReadBlock)),
   );
-  return {
-    company: org,
-    meta,
-    date,
-    role,
-    tech,
-    bullets,
-    text: paragraphs,
-  };
+  const draft = { company: org, meta, date, role, tech, bullets, text: "" };
+  const { paragraphs, extraBullets } = classifyLeftover(leftover, draft);
+  return { ...draft, bullets: [...bullets, ...extraBullets], text: paragraphs };
+}
+
+/** Compare two lines as a reader would — ignoring case, bullet glyphs and punctuation spacing. */
+function comparableLine(value) {
+  return normalizeHeaderComparable(value).replace(/\s+/g, "");
+}
+
+/**
+ * Sort an entry's leftover text into prose and bullets, dropping what is already on screen (AG4).
+ *
+ * WHY THE LEFTOVER CANNOT SIMPLY BE TREATED AS PROSE
+ * Models routinely emit a plain <div> that restates the entry's header line and then lists the
+ * bullets again as "• ..." text, alongside the <ul> they also emitted. The old code read that div
+ * wholesale into entry.text, so renderEntry printed the role, the dates and every bullet a second
+ * time as body copy — which is precisely the "renders TWICE, then the bullet text runs on from it"
+ * report. cleanEntryHeaderDupes only caught it when the div held the header line and NOTHING else.
+ *
+ * So each line is classified once: an echo of the header is dropped because the header already
+ * renders it, a bullet already in the list is dropped for the same reason, and a bullet that is
+ * NOT in the list is PROMOTED rather than discarded. Nothing is deduplicated after rendering and
+ * nothing is thrown away — a line the entry does not already show still gets shown.
+ */
+function classifyLeftover(text, entry) {
+  const seen = new Set((entry.bullets || []).map(comparableLine).filter(Boolean));
+  const paragraphs = [];
+  const extraBullets = [];
+
+  for (const rawLine of String(text || "").split(/\n+/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const isBullet = /^[-•*·‣▪]\s+/.test(line);
+    const body = isBullet ? line.replace(/^[-•*·‣▪]\s+/, "").trim() : line;
+    const key = comparableLine(body);
+    if (!key) continue;
+    if (seen.has(key)) continue;                          // the bullet list already shows this
+    if (isDuplicateEntryHeaderLine(body, entry)) continue; // the header already shows this
+    seen.add(key);
+    if (isBullet) extraBullets.push(body);
+    else paragraphs.push(body);
+  }
+
+  return { paragraphs: paragraphs.join("\n\n"), extraBullets };
 }
 
 function parseEntriesFromHtml(contentHtml) {
@@ -455,6 +580,21 @@ function isDuplicateEntryHeaderLine(line, entry) {
   const compactText = text.replace(/\s+/g, "");
   const compactHeader = headerText.replace(/\s+/g, "");
   if (compactHeader && compactText === compactHeader) return true;
+
+  // A line that IS one of the header's own fields, exactly (AG4). The date-based rules below all
+  // require entry.date, and the model frequently leaves entry-date empty and folds the dates into
+  // the meta instead — "Technical Assistant | Jul 2016 - Present". That line then matched nothing
+  // and rendered a second time, in italics, directly beneath the header that already showed it.
+  // An exact match against a field the header renders is an echo by definition, not prose.
+  for (const part of headerParts) {
+    if (compactText === part.replace(/\s+/g, "")) return true;
+  }
+  // The same fields written back as one line, in the two orders a model actually writes them.
+  if (role && meta && (
+    compactText === normalizeHeaderComparable(`${role} ${meta}`).replace(/\s+/g, "") ||
+    compactText === normalizeHeaderComparable(`${meta} ${role}`).replace(/\s+/g, "")
+  )) return true;
+  if (company && meta && compactText === normalizeHeaderComparable(`${company} ${meta}`).replace(/\s+/g, "")) return true;
   if (date && text.includes(date) && (role && text.includes(role))) return true;
   if (date && text.includes(date) && (company && text.includes(company))) return true;
   if (date && meta && text.includes(date) && text.includes(meta)) return true;
@@ -608,7 +748,7 @@ function renderSection(section) {
   if (section.type === "skills") {
     return `<div class="section-title">${section.title}</div>
 <ul class="bullets">
-${section.rows.map(row => `  <li><strong>${renderInlineRichText(row.label)}</strong> ${renderInlineRichText(row.values)}</li>`).join("\n")}
+${section.rows.map(row => `  <li>${row.label ? `<strong>${renderInlineRichText(row.label)}</strong> ` : ""}${renderInlineRichText(row.values)}</li>`).join("\n")}
 </ul>`;
   }
   return `<div class="section-title">${section.title}</div>
