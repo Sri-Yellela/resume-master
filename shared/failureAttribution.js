@@ -27,6 +27,29 @@ export function classifyGenerationError(e) {
   const message = String(e?.message || e || "unknown error");
   const lower = message.toLowerCase();
 
+  // OUR REFUSAL, NOT THE API'S (AF2). The generation-time claim guard throws when the output would
+  // have overstated the candidate's experience. Classifying that as "upstream generation error"
+  // would be a false statement about whose fault it was, and would hide a safety event behind a
+  // generic failure — the candidate should see that a resume was withheld and why.
+  //
+  // Retryable on purpose: the generator is stochastic, so the next attempt may well come back
+  // honest. It is the SUBMISSION that must never happen, not the retry.
+  if (e?.code === "resume_claim_violation") {
+    return {
+      code: "resume_claim_violation",
+      permanent: false,
+      status: null,
+      apiType: null,
+      requestId: null,
+      isDeadModel: false,
+      message,
+      detail: [
+        "the generated resume contradicted your own profile, so it was NOT saved or sent",
+        ...(Array.isArray(e.violations) ? e.violations.map(v => v.message) : []),
+      ].join(" | ").slice(0, 600),
+    };
+  }
+
   // The SDK puts the parsed JSON body on e.error; request_id is a top-level property.
   const apiType = e?.error?.error?.type ?? e?.error?.type ?? null;
   const requestId = e?.request_id ?? e?.requestID ?? null;

@@ -312,3 +312,43 @@ test("kbFindings reports a profile contradiction alongside a company-KB one", ()
   // A validator bug must not break a real generate response — the existing contract.
   assert.match(body, /catch \(e\)/);
 });
+
+// ── How the refusal reaches the candidate ────────────────────────────────────
+
+test("a claim violation is attributed to US, not to the model provider", async () => {
+  const { classifyGenerationError } = await import("../shared/failureAttribution.js");
+  const err = new ResumeClaimError({
+    violations: [{ kind: "years_exceed_profile", message: "claims 8 years; the profile states 4." }],
+    checked: {},
+  });
+  const f = classifyGenerationError(err);
+  assert.equal(f.code, "resume_claim_violation",
+    "'generation_failed' would blame the API for our own refusal");
+  assert.doesNotMatch(f.detail, /upstream/i);
+  assert.match(f.detail, /NOT saved or sent/);
+  assert.match(f.detail, /claims 8 years/, "the specific violation must survive into reason_detail");
+  // Retryable: the generator is stochastic, so the next attempt may come back honest. It is the
+  // SUBMISSION that must never happen, not the retry.
+  assert.equal(f.permanent, false);
+});
+
+test("an ordinary upstream failure is still classified as before", async () => {
+  const { classifyGenerationError } = await import("../shared/failureAttribution.js");
+  const e = Object.assign(new Error("overloaded_error"), { status: 529 });
+  const f = classifyGenerationError(e);
+  assert.equal(f.code, "generation_failed");
+  assert.match(f.detail, /upstream generation error/);
+});
+
+test("the reason code renders as a sentence, not as a raw code", () => {
+  // An unmapped reason code falls through to a fallback that prints the code with its underscores
+  // swapped out — which this codebase treats as a bug, not a rendering.
+  const src = fs.readFileSync("client/src/lib/applyObstacles.js", "utf8");
+  assert.match(src, /resume_claim_violation: \{/);
+  const entry = src.slice(src.indexOf("resume_claim_violation: {"), src.indexOf("resume_claim_violation: {") + 400);
+  assert.match(entry, /obstacle:/);
+  assert.match(entry, /action:/);
+  // Protective: the guard did its job. Filing it under "these broke" would be the wrong story.
+  assert.match(entry, /protective: true/);
+  assert.match(entry, /resumeBlocked: true/);
+});

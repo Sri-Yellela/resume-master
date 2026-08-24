@@ -115,6 +115,14 @@ const BY_REASON = {
     action: "Generate one for this job and try again",
     protective: false, retryable: true, resumeBlocked: true,
   },
+  // PROTECTIVE, like a gate hold: nothing broke. The generated resume claimed more experience or
+  // more seniority than the profile and base resume support, so it was refused before being saved.
+  // Under full-auto that resume would have been attached and submitted with nobody reading it.
+  resume_claim_violation: {
+    obstacle: "The generated resume overstated your experience, so it was not sent",
+    action: "Regenerate it — or check the years and seniority on your profile if this keeps happening",
+    protective: true, retryable: true, resumeBlocked: true,
+  },
   internal_error: {
     obstacle: "Something went wrong on our side",
     action: "Retry",
