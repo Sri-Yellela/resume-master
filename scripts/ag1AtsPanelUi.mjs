@@ -77,13 +77,46 @@ const PROSE_SHAPES = [
 const isProse = (chip) => PROSE_SHAPES.some(re => re.test(chip));
 
 // ── The two reports, computed — never transcribed ─────────────────────────────────────────────
-/** HEAD's scorer, relocated so it can be imported alongside the working tree's copy. */
-function loadHeadScorer() {
-  const tmp = path.join(os.tmpdir(), `ag1-head-localAtsScorer-${process.pid}.mjs`);
-  const src = execFileSync('git', ['show', 'HEAD:services/localAtsScorer.js'],
-    { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
-  fs.writeFileSync(tmp, src);
-  return { url: pathToFileURL(tmp).href, tmp };
+/**
+ * The PRE-FIX scorer, relocated so it can be imported alongside the working tree's copy.
+ *
+ * WHICH REVISION, AND WHY NOT SIMPLY HEAD
+ * "HEAD" was right for exactly as long as the fix was uncommitted. The moment it landed, HEAD's
+ * scorer became the fixed one — and worse, it now imports ./skillVocabulary.js, which does not
+ * exist beside a lone file dropped in the temp directory, so this crashed with ERR_MODULE_NOT_FOUND
+ * instead of comparing anything. The BEFORE has to name the revision it means.
+ *
+ * So: the parent of the commit that introduced services/skillVocabulary.js — that file is the fix,
+ * and its first appearance is the boundary. If it has no history yet (the fix is still
+ * uncommitted), HEAD is the pre-fix revision and is used.
+ *
+ * Relative imports are followed and materialised from the SAME revision, so this keeps working
+ * whichever side of the boundary the chosen revision falls on.
+ */
+function loadPreFixScorer() {
+  const git = (...args) => execFileSync('git', args, { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+
+  let rev = 'HEAD';
+  try {
+    const introduced = git('log', '--diff-filter=A', '--format=%H', '--', 'services/skillVocabulary.js')
+      .toString().trim().split('\n').filter(Boolean).pop();
+    if (introduced) rev = `${introduced}^`;
+  } catch { /* no history for it — the fix is uncommitted, so HEAD is still the BEFORE */ }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `ag1-prefix-${process.pid}-`));
+  const written = new Set();
+
+  const materialise = (name) => {
+    if (written.has(name)) return;
+    written.add(name);
+    const src = git('show', `${rev}:services/${name}`).toString();
+    // Imported as .mjs so node treats it as a module wherever the temp directory lives.
+    fs.writeFileSync(path.join(dir, name.replace(/\.js$/, '.mjs')), src.replace(/(from\s+["']\.\/[^"']+)\.js(["'])/g, '$1.mjs$2'));
+    for (const m of src.matchAll(/from\s+["']\.\/([^"']+\.js)["']/g)) materialise(m[1]);
+  };
+  materialise('localAtsScorer.js');
+
+  return { url: pathToFileURL(path.join(dir, 'localAtsScorer.mjs')).href, tmp: dir, rev };
 }
 
 function loadInputs() {
@@ -115,12 +148,13 @@ async function buildReports() {
   // contributes to the term list, and a populated profile would seed the list from the other side.
   const signalProfile = { skills: [], keywords: [], yearsExperience: 4, structuredFacts: {} };
 
-  const head = loadHeadScorer();
+  const preFix = loadPreFixScorer();
+  console.log(`before   scorer from ${preFix.rev}`);
   const modules = {
-    before: await import(head.url),
+    before: await import(preFix.url),
     after: await import(pathToFileURL(path.join(ROOT, 'services', 'localAtsScorer.js')).href),
   };
-  try { fs.unlinkSync(head.tmp); } catch {}
+  try { fs.rmSync(preFix.tmp, { recursive: true, force: true }); } catch {}
 
   const reports = {};
   for (const [which, M] of Object.entries(modules)) {
