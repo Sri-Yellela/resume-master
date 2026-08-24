@@ -152,16 +152,37 @@ for (const name of all) {
 if (ats) { try { ats.kill(); } catch {} }
 
 if (updateBaseline) {
-  const next = {};
+  // MERGED, not replaced. With a filter active only a subset ran, and writing just those would
+  // silently delete every other floor — turning the file that detects truncation into the thing
+  // that hides it. Untouched entries are carried through verbatim.
+  const next = { ...baseline };
   for (const r of results.sort((a, b) => a.name.localeCompare(b.name))) {
     if (r.fail || r.crashed || r.pass === 0) {
       console.error(`\nREFUSING to baseline ${r.name}: it is not green (pass=${r.pass} fail=${r.fail}).`);
       process.exit(1);
     }
+    const before = baseline[r.name]?.pass;
+    if (before != null && r.pass < before) {
+      console.error(`\nREFUSING to LOWER ${r.name}: ${before} -> ${r.pass}. A drop means assertions ` +
+        `stopped running. If that is intended, delete the entry and say why in the commit.`);
+      process.exit(1);
+    }
     next[r.name] = { pass: r.pass };
+    if (before !== r.pass) console.log(`  ${r.name}: ${before ?? "(new)"} -> ${r.pass}`);
   }
-  fs.writeFileSync(BASELINE, JSON.stringify(next, null, 2) + "\n");
-  console.log(`\nbaseline written: ${path.relative(ROOT, BASELINE)} (${Object.keys(next).length} harnesses)`);
+  // Entries whose harness no longer exists are dropped, so a deleted harness cannot leave a floor
+  // nothing can ever satisfy.
+  for (const name of Object.keys(next)) {
+    if (!fs.existsSync(path.join(ROOT, "scripts", `${name}.mjs`))) {
+      console.log(`  ${name}: dropped (scripts/${name}.mjs no longer exists)`);
+      delete next[name];
+    }
+  }
+  const ordered = {};
+  for (const k of Object.keys(next).sort()) ordered[k] = next[k];
+  fs.writeFileSync(BASELINE, JSON.stringify(ordered, null, 2) + "\n");
+  console.log(`\nbaseline written: ${path.relative(ROOT, BASELINE)} (${Object.keys(ordered).length} harnesses` +
+    `${filters.length ? `, ${results.length} updated, the rest carried through` : ""})`);
   process.exit(0);
 }
 

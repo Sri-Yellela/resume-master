@@ -60,6 +60,21 @@ const describe = u =>
   u === undefined ? "(field absent)" : u === null ? "(present, EMPTY)"
   : `${u.filename} ${u.size}b ${u.contentType}`;
 
+// ── WHY THIS DISTINCTION EXISTS ──────────────────────────────────────────────
+// Part A reads the upload out of the SUBMITTED record, so there are two completely different
+// reasons `u` can be undefined: the resume genuinely failed to attach, or the run held for some
+// unrelated reason and nothing was submitted at all. The check reported both as
+// "resume arrived, intact — FAIL … (field absent)", which reads unambiguously as the first.
+//
+// It cost a real misdiagnosis. /ashby began holding on a sponsorship checkbox the resolver refused,
+// and this line said "(field absent)" — so the upload path was investigated, then the expectation
+// itself was written off as stale, when the actual defect was in buildAnswers and the harness had
+// been right all along. A failure message that names the wrong subsystem is worse than a bare
+// assertion, because it is confidently wrong about where to look.
+const explainMissing = (rec, u) => rec === undefined
+  ? "NO SUBMISSION WAS RECORDED — the run never reached submit, so this says NOTHING about the upload"
+  : describe(u);
+
 // ── A. the resume reaches the form ───────────────────────────────────────────
 // Each provider is a different upload shape: ashby is single-step, workday's input lives inside an
 // iframe, and greenhouse takes the file at step 1 — a POST that is not itself a submission, so the
@@ -77,9 +92,16 @@ for (const shape of SHAPES) {
     { mode: "full", jobId: `a8-${shape.provider}`, resumePath: RESUME });
   const rec = (await subs()).submissions.find(s => s.provider === shape.provider);
   const u = upload(rec, shape.field);
+  // Asked FIRST, and separately: did the run get far enough for the upload question to be
+  // answerable? A hold here is a statement about the FORM or the resolver, not about the file path,
+  // and it carries the reason so the next reader is pointed at the right subsystem.
+  check(`${shape.label}: the run reached a submission, so the upload is testable`,
+    !!rec,
+    `status=${res.status} reason=${res.reasonCode ?? "-"} ` +
+    `missingRequired=${JSON.stringify(res.missingRequired ?? null)}`);
   check(`${shape.label}: resume arrived, intact`,
     !!u && u.size === RESUME_SIZE && u.contentType === "application/pdf",
-    `status=${res.status} ${describe(u)}`);
+    `status=${res.status} ${explainMissing(rec, u)}`);
 }
 
 // The cover letter is optional and was never generated. It must be recorded as present-but-empty,
