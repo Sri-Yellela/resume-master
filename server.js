@@ -108,6 +108,7 @@ import { suggest } from "./services/jobs/searchSuggestions.js";
 // 400 rather than a board that silently matches nothing. See shared/jobFilterOptions.js.
 import { FILTER_DIMENSIONS, invalidEntries, ageDaysMap } from "./shared/jobFilterOptions.js";
 import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
+import { assertResumeClaims, profileContradictionFindings } from "./services/resumeClaimGuard.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
 
 console.log("[boot] server module loaded");
@@ -3790,6 +3791,16 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
   const candidateName = profile?.full_name ||
     [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "";
 
+  // AF2. The summary is required to state total years, and before this the ONLY number in context
+  // asking for a quantity was the JD's own "8+ years required" — so the prompt was being asked for
+  // a figure while being shown nothing but the employer's demand. The profile's own figure is the
+  // authority; when it is unset the base resume is, and the prompt is told so explicitly rather
+  // than left to infer a ceiling.
+  const profileYears = Number(profile?.years_of_experience);
+  const yearsBlock = Number.isFinite(profileYears) && profileYears > 0
+    ? `**Candidate years of experience (AUTHORITATIVE — the JD may not change this):** ${profileYears}\n`
+    : `**Candidate years of experience:** not stated — derive from the base resume dates only, never from the JD\n`;
+
   // Domain profile block â€” injected when user has an active profile
   let domainProfileBlock = "";
   if (domainProfile) {
@@ -3798,7 +3809,7 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
     const verbs = JSON.parse(domainProfile.selected_verbs    || "[]").join(", ");
     domainProfileBlock = `
 **User domain profile:** ${domainProfile.profile_name}
-**Target seniority:** ${domainProfile.seniority}
+**Seniority the user is TARGETING (an aspiration, not a level to claim):** ${domainProfile.seniority}
 **Profile keywords:** ${kw || "â€”"}
 **Profile tools:** ${tools || "â€”"}
 **Profile action verbs:** ${verbs || "â€”"}
@@ -3814,7 +3825,7 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
 **LinkedIn URL:** ${profile?.linkedin_url||""}
 **GitHub URL:** ${profile?.github_url||""}
 **User location (City, State):** ${userLocation}
-${employerBlock}${domainProfileBlock}
+${yearsBlock}${employerBlock}${domainProfileBlock}
 **Target role / job title:** ${job.title}
 **Target industry / domain:** ${job.category && job.category !== "Other" ? job.category : job.title || "Technology"}
 **Target company:** ${job.company}
@@ -7141,6 +7152,13 @@ RULES:
     }
   }
 
+  // ── AF2: the JD may steer emphasis, never a quantity ───────────────────────────────────────────
+  // Asserted HERE, before the artifact is persisted, scored or returned, so it covers BOTH callers:
+  // the /api/generate handler where a human reads the result, and the apply worker where under
+  // full-auto nobody does. A violation throws — see services/resumeClaimGuard.js on why this is a
+  // failure and not a warning. The artifact is never written, so no later step can pick it up.
+  assertResumeClaims({ html: formattedHtml, profile, baseResumeText: authoritativeResumeText });
+
   const resumeStripped = stripResumeHtml(formattedHtml);
   const activeProfile = getOrRepairActiveProfile(userId);
   const signalProfile = activeProfile
@@ -7357,9 +7375,28 @@ app.post("/api/generate", requireAuth, async (req, res) => {
 
   // Company KB failsafe gate (Task 9.6) — additive only: flags/suggests, never rewrites the
   // resume, never blocks generation. Never let a validator bug break a real generate response.
+  //
+  // AF2 extends it INWARD: the same rule that flags a resume contradicting a company's KB flags one
+  // contradicting the candidate's own profile. These findings are belt to the generation-time
+  // assertion's braces — the assertion refuses a fresh violation, and this catches one in an
+  // artifact CACHED before the assertion existed, which would otherwise be served unexamined.
   const kbFindingsFor = (html) => {
-    try { return validateResumeClaims(db, html); }
-    catch (e) { console.warn('[kb-failsafe] validation failed:', e.message); return []; }
+    let findings = [];
+    try { findings = validateResumeClaims(db, html); }
+    catch (e) { console.warn('[kb-failsafe] validation failed:', e.message); }
+    try {
+      const profile = db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(req.user.id) || {};
+      const activeDomainProfile = db.prepare(
+        "SELECT * FROM domain_profiles WHERE user_id=? AND is_active=1"
+      ).get(req.user.id);
+      const base = activeDomainProfile
+        ? getBaseResumeRecord(db, { userId: req.user.id, profileId: activeDomainProfile.id })
+        : null;
+      findings = findings.concat(
+        profileContradictionFindings({ html, profile, baseResumeText: base?.content || "" })
+      );
+    } catch (e) { console.warn('[kb-failsafe] profile contradiction check failed:', e.message); }
+    return findings;
   };
 
   // Limit check only applies to new generation (not cache hits)

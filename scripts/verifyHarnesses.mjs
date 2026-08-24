@@ -55,6 +55,7 @@ const EXCLUDED = {
   importJobUrls:       "utility, writes to the database",
   ingestLca:           "utility, downloads a dataset",
   runEnrichment:       "utility, spends model tokens",
+  af2ClaimVerify:      "REAL generation — spends model tokens on every run; run it by hand",
   fakeAts:             "the fixture server itself",
   verifyHarnesses:     "this runner",
 };
