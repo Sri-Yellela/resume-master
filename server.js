@@ -2859,6 +2859,21 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE user_profile ADD COLUMN custom_answer_overrides TEXT NOT NULL DEFAULT '{}';
       `,
     },
+    {
+      // AF5's campaign record. Two facts a semi run already had in hand and threw away:
+      //
+      //   fields_discovered — the DENOMINATOR for discovery reliability. answers_json says what was
+      //     resolved; without the count of what was FOUND, "12 fields filled" cannot be read as good
+      //     or bad, and per-ATS discovery reliability is not computable at all.
+      //   corrections_json — what the HUMAN changed after the resolver filled it. Each entry is
+      //     either a resolver defect or a missing custom answer, which makes this the most valuable
+      //     output of a semi run and the one thing nothing recorded.
+      id: "088_apply_run_jobs_campaign_record",
+      sql: `
+        ALTER TABLE apply_run_jobs ADD COLUMN fields_discovered INTEGER;
+        ALTER TABLE apply_run_jobs ADD COLUMN corrections_json TEXT;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

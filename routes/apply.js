@@ -286,7 +286,31 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   const AUDIT_COLUMNS = [
     "answers_json", "resume_artifact_id", "resume_ats_score",
     "screenshot_path", "submit_verified", "submit_evidence", "open_questions_json",
+    // 088, AF5's campaign record. Resolved against the live schema like the rest, so a missing one
+    // costs only itself.
+    "fields_discovered",
   ];
+
+  // corrections_json is written OUTSIDE persistAudit — the human's edits arrive after the audit row
+  // is complete — so it needs its own presence check.
+  let correctionsColumnCache = null;
+  function canRecordCorrections() {
+    if (correctionsColumnCache !== null) return correctionsColumnCache;
+    let present = false;
+    try {
+      present = db.prepare("PRAGMA table_info(apply_run_jobs)").all().some(c => c.name === "corrections_json");
+    } catch (e) {
+      console.warn("[applyRoutes] could not read apply_run_jobs schema:", e.message);
+    }
+    if (!present) {
+      console.warn(
+        "[applyRoutes] CAMPAIGN RECORD DEGRADED — apply_run_jobs is missing corrections_json. " +
+        "Hand corrections will not be recorded; run migrations (088 adds it). The application is unaffected."
+      );
+    }
+    correctionsColumnCache = present;
+    return present;
+  }
   let auditColumnsCache = null;
 
   function auditColumns() {
@@ -551,6 +575,28 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       // The employer is passed so `{company}`-templated custom answers resolve for THIS company.
       const autofillPayload = buildAutofillPayload(profile, "APPLY", job?.company);
 
+      /**
+       * AF5's correction record. A semi run returns while the browser is still open, so the human's
+       * edits arrive AFTER the audit block below has already written the row — which is why this
+       * writes on its own, once per reported change, last-write-wins.
+       *
+       * Guarded on the column existing for the same reason the override column is: an un-migrated
+       * deployment must lose the campaign note, not the application.
+       */
+      const recordCorrections = (corrections) => {
+        if (!Array.isArray(corrections) || !canRecordCorrections()) return;
+        try {
+          db.prepare("UPDATE apply_run_jobs SET corrections_json=? WHERE id=?")
+            .run(corrections.length ? JSON.stringify(corrections) : null, runJobId);
+          logEvent(runId, runJobId, userId, jobId, "corrections_observed",
+            `${corrections.length} field(s) corrected by hand`,
+            { corrections: corrections.map(c => ({
+                field: c.field, provenance: c.provenance, confidence: c.confidence })) });
+        } catch (e) {
+          console.warn(`[applyRoutes] correction record failed job=${jobId}: ${e.message}`);
+        }
+      };
+
       const toolType = run.tool_type || "generate";
 
       const artifact = db.prepare(
@@ -598,6 +644,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           resumePath: resumeTmpPath,
           coverLetterPath: clPath,
           approvedAnswers,
+          onCorrections: recordCorrections,
         });
 
       } else if (mode === "semi") {
@@ -651,6 +698,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           jobId,
           resumePathPromise: genPromise,
           coverLetterPathPromise,
+          onCorrections: recordCorrections,
         });
         const [,, applySettled] = await Promise.allSettled([genPromise, coverLetterPathPromise, browserPromise]);
         result = applySettled.status === "fulfilled" ? applySettled.value : { status: "awaiting_user", fieldsFilled: 0 };
@@ -850,6 +898,9 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         submit_evidence: result.submitEvidence || null,
         // Validation-correction loop: the questions that would turn this hold into a completion.
         open_questions_json: openQuestions.length ? JSON.stringify(openQuestions) : null,
+        // AF5: the denominator for "N fields filled". Null rather than 0 when the run never got to
+        // discovery — "we did not look" and "we looked and found nothing" are different facts.
+        fields_discovered: Number.isFinite(result.fieldsDiscovered) ? result.fieldsDiscovered : null,
       });
 
       // The durable record, independent of schema state. The columns are a queryable projection of

@@ -30,8 +30,12 @@ test("migration 087 is present, additive, and byte-identical in both migration p
   assert.match(block(server), /ALTER TABLE user_profile ADD COLUMN custom_answer_overrides TEXT NOT NULL DEFAULT '\{\}'/);
 });
 
-test("087 is the last migration and does not disturb custom_answers", () => {
-  assert.equal(MIGRATIONS[MIGRATIONS.length - 1].id, "087_user_profile_answer_overrides");
+test("087 is appended after 086 and does not disturb custom_answers", () => {
+  // Ordering, not position: pinning this to "the last migration" made every later migration break
+  // a test about custom answers, which is a false alarm about the wrong thing.
+  const ids = MIGRATIONS.map(m => m.id);
+  assert.ok(ids.indexOf("087_user_profile_answer_overrides") > ids.indexOf("086_user_profile_sponsorship_need"));
+  assert.equal(new Set(ids).size, ids.length, "migration ids must be unique");
   // The original column is untouched — an existing store keeps resolving after the upgrade.
   const touchingAnswers = MIGRATIONS.filter(m => /custom_answers/.test(m.sql));
   assert.deepEqual(touchingAnswers.map(m => m.id), ["060_user_profile_extended"]);

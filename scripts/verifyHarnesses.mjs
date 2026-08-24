@@ -44,6 +44,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const EXCLUDED = {
   a1TrapMatrix:        "diagnostic — prints a matrix, asserts nothing",
   a5Preflight:         "read-only gate report against the real database",
+  af5CampaignReport:   "read-only campaign report against the real database",
   a5Rehearsal:         "waits for a HUMAN to submit the form",
   a5SeedFixture:       "mutates the developer's database",
   ae1Diagnose:         "instrument, not a harness",

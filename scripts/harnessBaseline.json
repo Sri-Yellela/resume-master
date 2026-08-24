@@ -32,6 +32,9 @@
   "ae7SubmitOnRealShape": {
     "pass": 32
   },
+  "af5CorrectionWatch": {
+    "pass": 19
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

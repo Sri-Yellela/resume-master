@@ -1597,6 +1597,116 @@ export function lowConfidenceAnswers(answers) {
     !a.skipped && !a.policy_rejected && a.value !== null && (a.confidence ?? 0) < AUTO_SUBMIT_MIN_CONFIDENCE);
 }
 
+// ── Correction watching (AF5) ────────────────────────────────────────────────
+//
+// Reads back the controls THIS RUN WROTE TO, resolved by the same `getElementById(field_id) ||
+// [name=field_id]` lookup the filler itself uses — so a reported correction is a change to the exact
+// element that was filled, not to a lookalike found by a second, differently-written selector.
+//
+// A plain EXPRESSION, matching APPLY_FN_SRC and GATE_EVIDENCE_SRC: evaluate() treats the string as an
+// expression, so a bare arrow function would come back as a function object rather than run.
+export const CORRECTION_WATCH_SRC = `(filled, bindingName) => {
+  const locate = (key) => {
+    if (!key) return null;
+    // Bracketed ATS names ("job_application[requires_sponsorship]") are legal inside a quoted
+    // attribute selector; only a literal double quote needs escaping.
+    const safe = String(key).replace(/"/g, '\\\\"');
+    return document.getElementById(key) || document.querySelector('[name="' + safe + '"]');
+  };
+  const readValue = (el) => {
+    if (!el) return null;
+    if (el.type === 'checkbox') return el.checked ? 'true' : 'false';
+    if (el.type === 'radio') {
+      const safe = String(el.name || '').replace(/"/g, '\\\\"');
+      const group = document.querySelectorAll('input[type="radio"][name="' + safe + '"]');
+      for (const r of group) if (r.checked) return r.value;
+      return '';
+    }
+    return el.value == null ? '' : String(el.value);
+  };
+  const snapshot = () => {
+    const out = [];
+    for (const key of Object.keys(filled)) {
+      const el = locate(key);
+      // A control that has GONE is not a correction. An SPA can replace a step, and reporting
+      // "was X, now nothing" for a node that no longer exists would invent a defect.
+      if (!el) continue;
+      const now = readValue(el);
+      if (now === null) continue;
+      if (now !== filled[key].value) {
+        out.push({
+          field: filled[key].label || key, key,
+          was: filled[key].value, now,
+          provenance: filled[key].provenance, confidence: filled[key].confidence,
+        });
+      }
+    }
+    return out;
+  };
+  let last = '[]';
+  const report = () => {
+    let json;
+    try { json = JSON.stringify(snapshot()); } catch (e) { return; }
+    if (json === last) return;
+    last = json;
+    try { window[bindingName](json); } catch (e) {}
+  };
+  document.addEventListener('change', report, true);
+  document.addEventListener('input', report, true);
+  document.addEventListener('submit', report, true);
+  window.addEventListener('beforeunload', report);
+  // Polled as WELL as evented. A click-driven submit can navigate before a listener runs, and an
+  // SPA that swaps controls fires neither change nor input on the node we remembered.
+  setInterval(report, 2000);
+  return Object.keys(filled).length;
+}`;
+
+/**
+ * Watch a semi-filled form for edits the human makes, and report each one.
+ *
+ * @param {import('puppeteer-core').Page} page
+ * @param {Array} resolvedAnswers  what this run filled, with provenance
+ * @param {(corrections: Array) => void} onCorrections
+ */
+export async function installCorrectionWatcher(page, resolvedAnswers, onCorrections) {
+  const filled = {};
+  for (const a of resolvedAnswers || []) {
+    // Only what was actually WRITTEN can be corrected. A skipped or refused field is not a
+    // correction when the human fills it — it is them answering a question we declined to guess,
+    // which `missingRequired` already reports and which is a different fact.
+    if (a?.skipped || a?.policy_rejected) continue;
+    if (a?.value === null || a?.value === undefined || a.value === '') continue;
+    const key = a.field_id ?? a.name;
+    if (!key) continue;
+    filled[String(key)] = {
+      label: a.label || a.name || a.field_id || '',
+      value: String(a.value),
+      provenance: a.provenance ?? null,
+      confidence: a.confidence ?? null,
+    };
+  }
+  if (Object.keys(filled).length === 0) return 0;
+
+  const binding = '__rmReportCorrections';
+  try {
+    await page.exposeFunction(binding, (json) => {
+      try {
+        const parsed = JSON.parse(json);
+        if (Array.isArray(parsed)) onCorrections(parsed);
+      } catch { /* a malformed report is dropped, never thrown into the page */ }
+    });
+    const watched = await page.evaluate(
+      `(${CORRECTION_WATCH_SRC})(${JSON.stringify(filled)}, ${JSON.stringify(binding)})`
+    );
+    console.log(`[autoApply] watching ${watched} filled field(s) for corrections`);
+    return watched;
+  } catch (e) {
+    // Never fatal. Losing the campaign note is not worth losing the application.
+    console.warn(`[autoApply] correction watcher not installed: ${e.message}`);
+    return 0;
+  }
+}
+
 /** Stable identity for an answer across two runs of the same form. */
 const answerKey = (a) => String(a.field_id ?? a.name ?? a.label ?? "");
 
@@ -2305,6 +2415,15 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // When supplied, the run refuses to submit if what it resolves this time differs — see
     // driftFromApproved below.
     approvedAnswers   = null,
+    // AF5. Called with the corrections a HUMAN made to a semi-filled form, as
+    // [{field, was, now, provenance, confidence}], every time they change something.
+    //
+    // A callback rather than a return value because a semi run RETURNS while the browser is still
+    // open — `awaiting_user` means the human has not finished yet, so by definition their edits
+    // happen after the only moment autoApply could have reported them. Each correction is either a
+    // resolver defect or a missing custom answer, which makes this the most useful thing a semi
+    // campaign produces and the one thing nothing was recording.
+    onCorrections     = null,
   } = options;
 
   // 'preview' is full-auto in every respect EXCEPT the submit click: same headless browser, same
@@ -2924,6 +3043,18 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       semiOpenQuestions   = buildOpenQuestions({ missingFields: semiMissingFields });
       console.log(`[autoApply] semi: ${semiMissingRequired.length} required field(s) are yours to answer` +
         (semiMissingRequired.length ? ` — ${semiMissingRequired.join(', ')}` : ''));
+
+      // ── WATCH FOR CORRECTIONS (AF5) ────────────────────────────────────────────────────────
+      // Installed before returning, because there is no later moment: the run ends here and the
+      // human's edits happen afterwards, in a browser this process still owns.
+      //
+      // A page BINDING, never a fetch from the page. On a real employer's origin a fetch to our
+      // server is cross-origin and would either be blocked or would put the candidate's answers on
+      // the network to make a local note. The binding keeps every value inside this process, which
+      // is where answers_json already lives.
+      if (onCorrections) {
+        await installCorrectionWatcher(page, resolvedAnswers, onCorrections);
+      }
     }
 
     console.log(`[autoApply] done — status=${status} fieldsFilled=${totalFilled}`);
@@ -2952,6 +3083,11 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       // this used to return, which the review surface could only read as "no information".
       ...(semiMissingRequired ? { missingRequired: semiMissingRequired } : {}),
       ...(semiOpenQuestions?.length ? { openQuestions: semiOpenQuestions } : {}),
+      // AF5: the DENOMINATOR. Two hold branches already reported this and the terminal path did not,
+      // so the run that actually completes — the only kind a semi campaign produces — could report
+      // "12 fields filled" with no way to know whether 12 was most of the form or a tenth of it.
+      // Per-ATS discovery reliability is not computable without it.
+      fieldsDiscovered: firstPassFieldCount ?? 0,
       pageTitle,
       landedUrl:        page.url(),
       screenshotBase64: ss.base64,
