@@ -46,4 +46,4 @@ Managed, Optimised, Reduced (cost/waste/defects/cycle time), Improved (throughpu
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and operations function (supply chain/manufacturing/logistics/quality/procurement). Name the ERP or planning system and the improvement methodology most prominent in the JD. Close with cost or throughput outcome language.
+Open as Layer 1 requires — the candidate's own role title and years — then the operations function (supply chain/manufacturing/logistics/quality/procurement). Name the ERP or planning system and the improvement methodology most prominent in the JD. Close with cost or throughput outcome language.

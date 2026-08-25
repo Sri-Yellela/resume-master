@@ -45,4 +45,4 @@ Designed, Prototyped, Researched, Tested, Iterated, Facilitated, Developed (desi
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and design function (product design/UX research/design systems/visual design). Name the primary tool and design system context. Close with user or business outcome language matching the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the design function (product design/UX research/design systems/visual design). Name the primary tool and design system context. Close with user or business outcome language matching the JD.

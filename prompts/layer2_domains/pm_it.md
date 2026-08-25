@@ -47,4 +47,4 @@ Delivered, Governed, Coordinated, Tracked, Escalated, Facilitated, Managed, Repo
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and delivery methodology (waterfall/agile/hybrid). Name two frameworks or certifications prominent in the JD. Close with stakeholder and governance vocabulary from the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the delivery methodology (waterfall/agile/hybrid). Name two frameworks or certifications prominent in the JD. Close with stakeholder and governance vocabulary from the JD.

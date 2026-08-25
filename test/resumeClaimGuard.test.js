@@ -398,6 +398,51 @@ test("the prompt names the profile as the authority and forbids the JD setting a
   // The pre-fix wording is what let the JD supply the figure.
   assert.doesNotMatch(rules, /Open with target role title and total relevant years/,
     "'total RELEVANT years' left the source of the number to the JD");
+
+  // The level rule names the candidate's declaration, not just the base resume. Without this the
+  // prompt tells the model to open with the unqualified role even when the candidate has chosen
+  // "Senior" on their profile — which the guard now allows, so the two would disagree.
+  assert.match(rules, /Seniority the candidate states they are` in the runtime inputs, or what the base resume evidences — take whichever is higher/);
+});
+
+// ── The rule lives in ONE layer ─────────────────────────────────────────────────────────────────
+//
+// AF2 corrected the SUMMARY opening rule in layer 1 and left layer 2 alone, where eleven domain
+// modules restated it loosely and two stated the opposite outright — general.md said "the role
+// title from the JD and total years of relevant experience", engineering.md said "the exact target
+// role title". Layer 2 is appended AFTER layer 1 in the system blocks, so the contradicting copy
+// was the later and more specific instruction.
+//
+// engineering.md's own header already says why this is wrong: "Do NOT add global rules here — those
+// belong in layer1_global_rules.md." A directory-wide check is the part that was missing, and it is
+// what stops the next domain module from reintroducing it.
+test("no domain module sources the summary's title or years from the JD", () => {
+  const dir = "prompts/layer2_domains";
+  const files = fs.readdirSync(dir).filter(f => f.endsWith(".md"));
+  assert.ok(files.length >= 13, `expected the domain modules, found ${files.length}`);
+
+  for (const file of files) {
+    const text = fs.readFileSync(`${dir}/${file}`, "utf8");
+    const opening = text.split(/\r?\n/).find(line => line.startsWith("Open "));
+    assert.ok(opening, `${file} has no SUMMARY opening rule`);
+
+    // The two wordings that contradicted layer 1 outright.
+    assert.doesNotMatch(opening, /role title from the JD|target role title/i,
+      `${file} takes the summary's title from the JD`);
+    // And the loose restatement, which left whose title and which years unsaid in a paragraph
+    // otherwise full of "from the JD".
+    assert.doesNotMatch(opening, /^Open with role title, years,/,
+      `${file} restates the title/years rule instead of deferring to Layer 1`);
+    assert.match(opening, /Open as Layer 1 requires — the candidate's own role title/,
+      `${file} must defer to Layer 1 for the title and years`);
+  }
+
+  // Layer 2 must not name a years quantity at all — that is Layer 1's, sourced from the profile.
+  for (const file of files) {
+    const text = fs.readFileSync(`${dir}/${file}`, "utf8");
+    assert.doesNotMatch(text, /total years of relevant experience|a specific year count/i,
+      `${file} still describes how many years to state`);
+  }
 });
 
 test("the prompt tells the model to keep the honest figure rather than blur or omit it", () => {

@@ -47,4 +47,4 @@ Launched, Grew, Optimised, A/B-tested, Managed, Developed, Executed, Drove, Incr
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and marketing function (growth/demand gen/brand/product marketing/performance). Name the primary platform and channel mix from the JD. Close with business outcome vocabulary (pipeline, revenue, CAC, ROAS) matching the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the marketing function (growth/demand gen/brand/product marketing/performance). Name the primary platform and channel mix from the JD. Close with business outcome vocabulary (pipeline, revenue, CAC, ROAS) matching the JD.

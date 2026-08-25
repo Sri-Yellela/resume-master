@@ -42,4 +42,4 @@ Managed, Developed, Delivered, Coordinated, Facilitated, Improved, Implemented, 
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with the role title from the JD and total years of relevant experience. Identify two or three capabilities that directly match the JD requirements — use the JD's own vocabulary. Close with one sentence signalling fit for the specific business context of the hiring organisation, using language taken directly from the JD. Avoid industry jargon not present in the JD.
+Open as Layer 1 requires — the candidate's own role title and their years from the runtime inputs, never the JD's. Identify two or three capabilities that directly match the JD requirements — use the JD's own vocabulary. Close with one sentence signalling fit for the specific business context of the hiring organisation, using language taken directly from the JD. Avoid industry jargon not present in the JD.

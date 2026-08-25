@@ -48,4 +48,4 @@ Built, Modelled, Forecasted, Identified, Surfaced, Quantified, Evaluated, Analys
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and data function (data engineering/analytics/data science/ML engineering). Name the primary platform and language. Close with business or product outcome language from the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the data function (data engineering/analytics/data science/ML engineering). Name the primary platform and language. Close with business or product outcome language from the JD.

@@ -48,4 +48,4 @@ Defined, Prioritised, Launched, Shipped, Aligned, Synthesised, Validated, Resear
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and product domain (consumer/enterprise/platform/growth). Name two or three product capabilities (discovery, experimentation, roadmapping, cross-functional leadership). Close with the business problem the team was hired to solve using the JD's language.
+Open as Layer 1 requires — the candidate's own role title and years — then the product domain (consumer/enterprise/platform/growth). Name two or three product capabilities (discovery, experimentation, roadmapping, cross-functional leadership). Close with the business problem the team was hired to solve using the JD's language.

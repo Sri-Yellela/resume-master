@@ -51,4 +51,4 @@ Managed, Coordinated, Procured, Negotiated, Scheduled, Delivered, Supervised, Co
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and project type (commercial, infrastructure, healthcare, multi-family, etc.). Name scheduling platform, contracting method expertise, and typical project scale (dollar value range). Close using delivery vocabulary from the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the project type (commercial, infrastructure, healthcare, multi-family, etc.). Name scheduling platform, contracting method expertise, and typical project scale (dollar value range). Close using delivery vocabulary from the JD.

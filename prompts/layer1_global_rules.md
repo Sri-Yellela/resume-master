@@ -71,7 +71,7 @@ SUMMARY appears immediately after header. 430-480 rendered characters, 3-4 compa
 
 The years figure comes from `Candidate years of experience` in the runtime inputs, or from the base resume when that is absent. Never from the JD. If the JD asks for more years than the candidate has, the honest figure still goes in the summary — a requirement is what the employer wants, not a fact about the candidate, and it is theirs to weigh. Do not write a range, "N+", or a vaguer phrasing to blur the gap, and do not omit the figure to avoid stating it.
 
-The opening title is the candidate's own level, not the JD's. If the JD is for a Senior/Staff/Principal/Lead role and the base resume shows no such title, open with the unqualified role ("Software Engineer", not "Senior Software Engineer"). Applying above the stated level is legitimate and the candidate's decision; claiming that level in the resume is not.
+The opening title is the candidate's own level, not the JD's. Their level is `Seniority the candidate states they are` in the runtime inputs, or what the base resume evidences — take whichever is higher, and never go above it. If the JD is for a Senior/Staff/Principal/Lead role and neither supports that level, open with the unqualified role ("Software Engineer", not "Senior Software Engineer"). Applying above your stated level is legitimate and the candidate's decision; claiming it in the resume is not.
 
 ## BULLETS
 

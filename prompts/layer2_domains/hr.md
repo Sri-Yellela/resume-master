@@ -45,4 +45,4 @@ Recruited, Onboarded, Designed, Implemented, Partnered, Advised, Facilitated, Tr
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and HR function (HRBP/TA/compensation/L&D/people ops). Name the primary HRIS or ATS from the JD. Close with people or organisational outcome language matching the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the HR function (HRBP/TA/compensation/L&D/people ops). Name the primary HRIS or ATS from the JD. Close with people or organisational outcome language matching the JD.

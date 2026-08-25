@@ -146,3 +146,34 @@ generated resume claiming 4 passes even though the dated history supports ~2.9. 
 Closing the ~1-year gap is a decision about the candidate's own history — either the summary comes
 down to 3 or the profile explains the difference (unlisted work, internships counted, etc.). Not the
 system's call, and deliberately not changed here.
+
+---
+
+## Amendment (2026-08-25) — findings 1 and 3 were only half fixed
+
+The scope line above says the audit covered `layer1_global_rules.md` **+ domain/mode layers**. It did
+not. Findings 1 and 3 were fixed in layer 1 and marked FIXED, while the domain layer kept the exact
+wording this document names as the defect:
+
+| file | wording that survived | maps to |
+|---|---|---|
+| `layer2_domains/general.md` | "Open with the role title from the JD and total years of relevant experience." | findings 1 **and** 3 |
+| `layer2_domains/engineering.md` | "Open with the exact target role title and a specific year count." | findings 1 and 3 |
+| 11 other domain modules | "Open with role title, years, and <domain> function" — whose title, and which years, left unsaid | finding 3, loosely |
+
+This mattered more than a stale duplicate usually would, because `assemblePrompt` appends layer 2
+**after** layer 1 in the system blocks. The contradicting copy was the later and the more specific
+of the two, which is the one a model is most likely to follow.
+
+Measured before the fix: against a JD titled "Senior Platform Engineer", six of eight real
+generations put SENIOR PLATFORM ENGINEER in the header tagline of a candidate whose base resume
+shows no seniority — and the guard refused all six. (The immediate trigger there was a separate
+AG2 regression, fixed in its own commit; this wording was the standing pull underneath it, visible
+in the control arm where one run produced "Platform Engineer" — the JD's title with the seniority
+word stripped.)
+
+All thirteen modules now defer to layer 1 rather than restating the rule, which is what
+`engineering.md`'s own header always asked for: *"Do NOT add global rules here — those belong in
+layer1_global_rules.md."* A directory-wide test in `test/resumeClaimGuard.test.js` now fails if any
+domain module sources the summary's title or years from the JD. That check is the part that was
+missing: a rule fixed in one file and restated in thirteen others has no way to stay fixed.

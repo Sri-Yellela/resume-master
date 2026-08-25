@@ -47,4 +47,4 @@ Coordinated, Implemented, Standardised, Trained, Evaluated, Monitored, Reported,
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and setting (acute care, health plan, health IT, public health). Name the regulatory framework and/or EHR system most prominent in the JD. Close with patient outcome or operational improvement language from the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the setting (acute care, health plan, health IT, public health). Name the regulatory framework and/or EHR system most prominent in the JD. Close with patient outcome or operational improvement language from the JD.

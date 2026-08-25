@@ -44,4 +44,4 @@ Drafted, Negotiated, Advised, Reviewed, Analysed, Managed, Structured, Executed,
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with role title, years, and practice area (corporate/M&A, employment, IP, litigation, compliance, in-house general counsel). Name the transaction or regulatory framework most prominent in the JD. Close with business risk or transaction outcome language.
+Open as Layer 1 requires — the candidate's own role title and years — then the practice area (corporate/M&A, employment, IP, litigation, compliance, in-house general counsel). Name the transaction or regulatory framework most prominent in the JD. Close with business risk or transaction outcome language.

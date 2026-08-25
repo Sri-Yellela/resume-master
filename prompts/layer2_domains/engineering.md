@@ -86,4 +86,4 @@ Built, Designed, Reduced, Migrated, Refactored, Automated, Optimised, Deployed, 
 
 ### E. SUMMARY FRAMING GUIDANCE
 
-Open with the exact target role title and a specific year count. Name the primary language/stack and the system class (distributed systems, ML platform, data infrastructure, firmware, embedded software, drivers, platform software, validation, etc.). Use infrastructure, systems, hardware, or debug vocabulary native to the JD. Close with a sentence about the business domain or product area the candidate has most experience in, framed using the JD's functional language.
+Open as Layer 1 requires — the candidate's own role title and their years from the runtime inputs, never the JD's. Name the primary language/stack and the system class (distributed systems, ML platform, data infrastructure, firmware, embedded software, drivers, platform software, validation, etc.). Use infrastructure, systems, hardware, or debug vocabulary native to the JD. Close with a sentence about the business domain or product area the candidate has most experience in, framed using the JD's functional language.
