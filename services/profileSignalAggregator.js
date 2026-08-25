@@ -304,13 +304,33 @@ export function addVerbToProfile(db, { userId, profileId, label }) {
   });
 }
 
+/**
+ * Reconcile which skills are queued for the base-resume ENHANCEMENT rewrite.
+ *
+ * IT OWNS TWO STATUSES AND ONLY TWO. 'selected' means queued; 'inactive' means not. Everything else
+ * a row can be is an assertion the candidate made, and this control has no business moving it:
+ *
+ *   'applied'  — already written into domain_profiles.selected_tools. Downgrading it here left the
+ *                two stores disagreeing, with a fossil applied_at on a row claiming to be inactive.
+ *   'claimed'  — the candidate said "this is true of me" on an ATS report (AG2).
+ *
+ * This used to reconcile EVERY skill row to selected-or-inactive, so unticking one box in
+ * "Selected For Enhancement" silently downgraded every applied skill AND withdrew every claim on
+ * the profile. The claim case was the worse of the two and the newer: AG2 added a status this
+ * function did not know about, and a two-state reconciliation over a four-state column quietly
+ * destroys the states it has never heard of. Restricting it in SQL rather than in the loop is
+ * deliberate — it can only see the rows it is allowed to change.
+ */
+const ENHANCEMENT_QUEUE_STATUSES = ["selected", "inactive"];
+
 export function syncSelectedSkillSuggestions(db, { userId, profileId, selectedKeys = [] }) {
   const wanted = new Set((Array.isArray(selectedKeys) ? selectedKeys : []).map(profileSignalKey));
   const rows = db.prepare(`
     SELECT signal_key, status
     FROM profile_signal_suggestions
     WHERE user_id = ? AND profile_id = ? AND signal_kind = 'skill'
-  `).all(userId, profileId);
+      AND status IN (${ENHANCEMENT_QUEUE_STATUSES.map(() => "?").join(", ")})
+  `).all(userId, profileId, ...ENHANCEMENT_QUEUE_STATUSES);
   const update = db.prepare(`
     UPDATE profile_signal_suggestions
     SET status = ?, selected_at = CASE WHEN ? = 'selected' THEN unixepoch() ELSE NULL END

@@ -8,6 +8,7 @@ import {
   classifyMissingSignal,
   extractMissingSignals,
   markSelectedSuggestionsApplied,
+  syncSelectedSkillSuggestions,
 } from "../services/profileSignalAggregator.js";
 
 test("ATS missing signals classify structured profile facts separately from skills", () => {
@@ -161,6 +162,61 @@ test("buildSelectedEnhancementSkills hands back labels, which is what the marker
     userId: 7, profileId: 1, selectedLabels: selected.map(s => s.label),
   });
   assert.equal(statusOf(db, "kubernetes").status, "applied");
+});
+
+// ── syncSelectedSkillSuggestions must not move what it does not own ─────────────────────────────
+//
+// It reconciled EVERY skill row to selected-or-inactive, so unticking one box in "Selected For
+// Enhancement" downgraded every applied skill and withdrew every claim on the profile. A two-state
+// reconciliation over a four-state column destroys the states it has never heard of — and 'claimed'
+// was added by AG2, after this function was written, which is exactly how that happens.
+test("syncSelectedSkillSuggestions queues and unqueues, and leaves assertions alone", () => {
+  const db = suggestionsDb([
+    { key: "kubernetes", label: "Kubernetes", status: "applied" },
+    { key: "terraform", label: "Terraform", status: "claimed" },
+    { key: "graphql", label: "GraphQL", status: "selected" },
+    { key: "rust", label: "Rust", status: "inactive" },
+  ]);
+  db.prepare("UPDATE profile_signal_suggestions SET applied_at=1000 WHERE signal_key='kubernetes'").run();
+
+  // The user unticks GraphQL and ticks Rust. That is the whole interaction.
+  syncSelectedSkillSuggestions(db, { userId: 7, profileId: 1, selectedKeys: ["rust"] });
+
+  assert.equal(statusOf(db, "rust").status, "selected", "ticking queues it");
+  assert.equal(statusOf(db, "graphql").status, "inactive", "unticking unqueues it");
+  assert.equal(statusOf(db, "kubernetes").status, "applied",
+    "an applied skill is in domain_profiles.selected_tools — downgrading it splits the two stores");
+  assert.equal(statusOf(db, "kubernetes").applied_at, 1000, "and its applied_at is not orphaned");
+  assert.equal(statusOf(db, "terraform").status, "claimed",
+    "a claim is the candidate's assertion, not this control's queue state");
+});
+
+test("syncSelectedSkillSuggestions will not promote an assertion into the queue either", () => {
+  // The UI cannot ask for this — applied and claimed rows appear in neither the inactive nor the
+  // selected bucket — but a stale or hand-made request must not be able to demote an assertion to
+  // 'selected' and lose what it was.
+  const db = suggestionsDb([
+    { key: "kubernetes", label: "Kubernetes", status: "applied" },
+    { key: "terraform", label: "Terraform", status: "claimed" },
+  ]);
+  syncSelectedSkillSuggestions(db, { userId: 7, profileId: 1, selectedKeys: ["kubernetes", "terraform"] });
+
+  assert.equal(statusOf(db, "kubernetes").status, "applied");
+  assert.equal(statusOf(db, "terraform").status, "claimed");
+});
+
+test("syncSelectedSkillSuggestions still ignores verbs, and other profiles", () => {
+  const db = suggestionsDb([
+    { key: "architected", label: "Architected", kind: "action_verb", status: "selected" },
+    { key: "graphql", label: "GraphQL", status: "selected" },
+  ]);
+  syncSelectedSkillSuggestions(db, { userId: 7, profileId: 1, selectedKeys: [] });
+  assert.equal(statusOf(db, "architected").status, "selected", "verbs are not this function's business");
+  assert.equal(statusOf(db, "graphql").status, "inactive");
+
+  const other = suggestionsDb([{ key: "graphql", label: "GraphQL", status: "selected" }]);
+  syncSelectedSkillSuggestions(other, { userId: 999, profileId: 1, selectedKeys: [] });
+  assert.equal(statusOf(other, "graphql").status, "selected", "another user's row must not move");
 });
 
 test("adopting an enhanced resume is one transaction, so it cannot half-apply", () => {
