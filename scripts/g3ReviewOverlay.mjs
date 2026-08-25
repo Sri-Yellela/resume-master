@@ -22,6 +22,14 @@
  *   6. the overlay never submits, and nothing reaches the ATS
  *
  * Usage:  A1_RESUME=/path/to/any.pdf node scripts/g3ReviewOverlay.mjs
+ *
+ * AI2 — CHROME WEB STORE LISTING SCREENSHOTS
+ * `npm run store:screenshots` runs this same harness with --screenshots and writes three
+ * 1280x800, 24-bit, alpha-free PNGs to docs/store-screenshots/. Under that flag the whole run
+ * happens on /gated/form?presentation=1 — the identical form with its didactic trap captions
+ * removed — so the assertions below are made against the page that is photographed. The candidate
+ * is the synthetic Ada Lovelace fixture, and every capture is checked against the developer's real
+ * profile values before it is written.
  */
 
 import fs from 'node:fs';
@@ -37,6 +45,7 @@ import { resolveBrowserExecutable } from '../services/browserLauncher.js';
 import applyRoutes from '../routes/apply.js';
 import { MIGRATIONS } from './migrations.js';
 import { buildGatePacket } from '../services/applyGatePacket.js';
+import { toStorePng, readPngHeader, decodeToRgb, encodeRgbPng, compositeRgb } from '../services/pngTruecolor.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(os.tmpdir(), 'g3-review-overlay');
@@ -49,22 +58,124 @@ const OUT_DIR = path.join(os.tmpdir(), 'g3-review-overlay');
 // renders and does not work; one taken at this point in this run cannot be, because the assertions
 // above and below it have to pass for the run to be green.
 const SHOTS = process.argv.includes('--screenshots');
-const SHOT_DIR = path.join(ROOT, 'extension', 'submission', 'screenshots');
+const SHOT_DIR = path.join(ROOT, 'docs', 'store-screenshots');
 // The Chrome Web Store accepts 1280x800 or 640x400. 1280x800 for all three.
 const SHOT_SIZE = { width: 1280, height: 800 };
+
+// AI2. What a store screenshot must never contain, checked against the TEXT OF THE SURFACE at the
+// moment it is captured rather than against the fixture's intent.
+//
+// - The owner's real details. The review overlay shows a home address, phone, email and
+//   eligibility answers, and the fixture profile is synthetic (Ada Lovelace, example.com, a 555
+//   number) — but "the fixture is synthetic" is a claim about the seed, not about the pixels. The
+//   real values are read out of the developer's own database and looked for in what was rendered.
+// - The trap captions. fakeAts names its traps in the markup on purpose; a reviewer seeing
+//   "TRAP: sponsorship_inversion" reads a test rig. ?presentation=1 removes the captions and
+//   nothing else, and this is the check that it worked.
+const FORBIDDEN_IN_SHOTS = [/TRAP:/i, /sponsorship_inversion/i, /label-only match/i,
+                            /required_unmapped/i, /name_ambiguity/i, /lowercase_yes/i, /G3-TRAPS/i,
+                            // The fixture's other tell: /ashby-spa narrates its own mechanism
+                            // ("Rendered by JavaScript 0ms after load ... transcribed from a live
+                            // Ashby posting"), the right caption for a harness and a test rig to a
+                            // reviewer.
+                            /rendered by JavaScript/i, /as every real ATS does/i, /transcribed from/i,
+                            // And a REAL EMPLOYER'S BRAND. /ashby-spa's shape was transcribed from
+                            // a live posting, so the fixture inherited that company's name and role
+                            // title. Putting another company in our own store listing is a
+                            // different kind of wrong from an ugly caption, and worth its own line.
+                            /\bOpenAI\b/, /Agent Productivity/i];
+let REAL_VALUES = [];
+function loadRealProfileValues() {
+  // The developer's own database. Absent on a clean checkout, which is fine — but it must SAY so
+  // rather than report a vacuous pass on an assertion whose whole job is to catch a real leak.
+  const real = path.join(ROOT, 'data', 'resume_master.db');
+  if (!fs.existsSync(real)) {
+    console.log('  note  no data/resume_master.db — the "no real personal data" check has no values to look for');
+    return [];
+  }
+  const rdb = new Database(real, { readonly: true, fileMustExist: true });
+  try {
+    const rows = rdb.prepare('SELECT full_name, first_name, last_name, email, phone, location FROM user_profile').all();
+    const vals = new Set();
+    for (const r of rows) for (const v of Object.values(r)) {
+      const s = String(v ?? '').trim();
+      // Short values ("MA", a blank) match everywhere and would fail every run on noise.
+      if (s.length >= 5) vals.add(s);
+    }
+    return [...vals];
+  } finally { rdb.close(); }
+}
+
 let shotCount = 0;
+const shotReport = [];
+/**
+ * Capture, VALIDATE, then write — in that order.
+ *
+ * Nothing reaches disk until the image has been proved 1280x800 and alpha-free, because a silently
+ * wrong file discovered by hand at the dashboard is the failure this exists to prevent. On any
+ * failure it throws: the run dies, and the file that would have been wrong is simply not there.
+ */
 async function shoot(page, name, note) {
   if (!SHOTS) return;
-  fs.mkdirSync(SHOT_DIR, { recursive: true });
   const file = path.join(SHOT_DIR, `${name}.png`);
   await page.setViewport({ ...SHOT_SIZE, deviceScaleFactor: 1 });
   await sleep(500);
-  await page.screenshot({ path: file, clip: { x: 0, y: 0, ...SHOT_SIZE } });
+
+  const text = await page.evaluate(() => document.body?.innerText || '');
+  for (const re of FORBIDDEN_IN_SHOTS) {
+    if (re.test(text)) throw new Error(`${name}: a trap caption is visible in the capture — ${re}`);
+  }
+  for (const v of REAL_VALUES) {
+    if (text.includes(v)) throw new Error(`${name}: REAL personal data is visible in the capture — ${JSON.stringify(v)}`);
+  }
+
+  const raw = await page.screenshot({ clip: { x: 0, y: 0, ...SHOT_SIZE } });
+  return writeShot(name, note, Buffer.from(raw));
+}
+
+/**
+ * Validate an already-captured PNG buffer and write it. Split out of shoot() so the composited
+ * popup shot goes through the SAME gate — a second write path is how one of the three ends up
+ * unchecked.
+ */
+function writeShot(name, note, buffer) {
+  const file = path.join(SHOT_DIR, `${name}.png`);
+  const { png, width, height, nonOpaque } = toStorePng(buffer);
+
+  // Asserted on the ENCODED BYTES, not on what the capture was asked for. A viewport that did not
+  // take, a device scale factor, a clip clamped by a shorter page — each produces a wrongly sized
+  // image from a correct-looking request, and the header is the only thing that settles it.
+  const h = readPngHeader(png);
+  if (h.width !== SHOT_SIZE.width || h.height !== SHOT_SIZE.height) {
+    throw new Error(`${name}: captured ${h.width}x${h.height}, the store needs ${SHOT_SIZE.width}x${SHOT_SIZE.height}`);
+  }
+  if (h.hasAlpha || h.colorType !== 2) throw new Error(`${name}: PNG colour type ${h.colorType} carries alpha`);
+  if (h.bitDepth !== 8 || h.bitsPerPixel !== 24) throw new Error(`${name}: ${h.bitsPerPixel}-bit, the store needs 24-bit`);
+
+  fs.mkdirSync(SHOT_DIR, { recursive: true });
+  fs.writeFileSync(file, png);
+
+  // Re-read from disk. Everything above validated a buffer; this validates the FILE, which is the
+  // artefact that gets uploaded.
+  const onDisk = readPngHeader(fs.readFileSync(file));
+  if (onDisk.width !== width || onDisk.height !== height || onDisk.hasAlpha) {
+    throw new Error(`${name}: the file on disk does not match what was validated`);
+  }
+
   shotCount++;
-  console.log(`  shot  ${path.relative(ROOT, file)} — ${note}`);
+  shotReport.push({ name, file: path.relative(ROOT, file).replace(/\\/g, '/'),
+    width: onDisk.width, height: onDisk.height, colorType: onDisk.colorType,
+    bits: onDisk.bitsPerPixel, bytes: png.length, nonOpaque, note });
+  console.log(`  shot  ${path.relative(ROOT, file)} — ${width}x${height}, 24-bit, no alpha — ${note}`);
 }
 const ATS_PORT = 4599;
 const PORTAL = `http://localhost:${ATS_PORT}`;
+// AI2. Under --screenshots the WHOLE run happens on the presentation variant of the form, not just
+// the capture. Same fields, same names, same traps — only the didactic captions differ (see
+// gatedForm() in fakeAts.js). Running the assertions on the page that gets photographed is what
+// makes the screenshot evidence rather than decoration: the image cannot be of an overlay that
+// renders and does not work, because the run is only green if it worked on this exact page.
+const FORM_URL = `${PORTAL}/gated/form${SHOTS ? '?presentation=1' : ''}`;
 const RESUME_PDF = process.env.A1_RESUME;
 if (!RESUME_PDF || !fs.existsSync(RESUME_PDF)) {
   console.error('Set A1_RESUME to an existing PDF path.'); process.exit(1);
@@ -241,6 +352,18 @@ async function main() {
   const resolution = await resolveBrowserExecutable();
   if (!resolution) { console.error('No Chrome binary.'); process.exit(1); }
 
+  if (SHOTS) {
+    // Deterministic and re-runnable: the directory is emptied first, so a shot that fails to be
+    // produced this run cannot be silently satisfied by last run's file. Combined with shoot()
+    // writing nothing until it has validated, a failed run leaves an obviously incomplete
+    // directory rather than a plausible and stale one.
+    fs.rmSync(SHOT_DIR, { recursive: true, force: true });
+    fs.mkdirSync(SHOT_DIR, { recursive: true });
+    REAL_VALUES = loadRealProfileValues();
+    console.log(`  store screenshots -> ${path.relative(ROOT, SHOT_DIR)} ` +
+      `(guarding ${REAL_VALUES.length} real profile value(s), ${FORBIDDEN_IN_SHOTS.length} trap captions)`);
+  }
+
   const { db, server: apiServer } = await startApi();
   const apiOrigin = `http://127.0.0.1:${apiServer.address().port}`;
 
@@ -252,9 +375,33 @@ async function main() {
   if (!alive) {
     ats = spawn(process.execPath, [path.join(ROOT, 'scripts', 'fakeAts.js')],
       { env: { ...process.env, PORT: String(ATS_PORT) }, stdio: 'ignore' });
-    await sleep(1500);
+    // Polled rather than slept. A fixed 1500ms was enough on a warm machine and not on a cold one,
+    // and the failure it produced was an ECONNREFUSED from the next line up — a confusing way to
+    // learn that the fixture had simply not finished booting.
+    const deadline = Date.now() + 15000;
+    let up = false;
+    while (Date.now() < deadline && !up) {
+      up = await fetch(`${PORTAL}/gated/form`).then(r => r.ok).catch(() => false);
+      if (!up) await sleep(200);
+    }
+    if (!up) throw new Error(`fakeAts did not come up on ${PORTAL} within 15s`);
   }
   await fetch(`${PORTAL}/_reset`, { method: 'POST' }).catch(() => {});
+
+  // The harness REUSES a fakeAts already listening on this port rather than starting its own. A
+  // server started before ?presentation=1 existed answers that URL with the trap captions still in
+  // it, and the run would go on to photograph them. So the fixture is asked what it actually
+  // serves, and the run dies here if it is the wrong one — before a browser is launched.
+  if (SHOTS) {
+    const served = await fetch(FORM_URL).then(r => r.text());
+    if (/TRAP:/.test(served)) {
+      throw new Error(`the fakeAts on ${PORTAL} still serves trap captions at ?presentation=1 — it predates the ` +
+        `presentation flag. Stop it and re-run so this harness starts a current one.`);
+    }
+    if (!/authorized_no_sponsorship/.test(served) || !/job_application\[requires_sponsorship\]/.test(served)) {
+      throw new Error('the presentation form is missing the traps — the screenshot would not depict real behaviour');
+    }
+  }
 
   // A profile that answers the eligibility questions and the label-only one, so the overlay has
   // something in every band.
@@ -266,14 +413,14 @@ async function main() {
       },
       handler_map: {}, custom_answers: {},
     },
-    applyUrl: `${PORTAL}/gated/form`, jobId: 'g3job', runId: 1, runJobId: 1, resumeArtifactId: 1,
+    applyUrl: FORM_URL, jobId: 'g3job', runId: 1, runJobId: 1, resumeArtifactId: 1,
     gateReason: 'login_required',
   });
   db.prepare(`INSERT INTO apply_gate_packets
     (user_id, run_id, run_job_id, job_id, apply_url, expected_origin, gate_reason, answers_json,
      resume_artifact_id, token_hash, expires_at)
     VALUES (1,1,1,'g3job',?,?,'login_required',?,1,'unminted:seed',0)`)
-    .run(`${PORTAL}/gated/form`, PORTAL, JSON.stringify(packet));
+    .run(FORM_URL, PORTAL, JSON.stringify(packet));
 
   const ext = buildTestExtension(apiOrigin);
   const profile = path.join(OUT_DIR, 'profile');
@@ -292,7 +439,7 @@ async function main() {
     await control.goto(`chrome-extension://${extensionId}/options.html`);
 
     const page = (await browser.pages())[0];
-    await page.goto(`${PORTAL}/gated/form`, { waitUntil: 'domcontentloaded' });
+    await page.goto(FORM_URL, { waitUntil: 'domcontentloaded' });
     await page.bringToFront();
     await sleep(400);
 
@@ -423,7 +570,7 @@ async function main() {
       // the tab behind the popup is a genuine application page rather than a mock-up. The popup is
       // rendered from the extension's own popup.html by the extension itself.
       const posting = await browser.newPage();
-      await posting.goto(`${PORTAL}/ashby-spa?delay=0`, { waitUntil: 'domcontentloaded' });
+      await posting.goto(`${PORTAL}/ashby-spa?delay=0&presentation=1`, { waitUntil: 'domcontentloaded' });
       await sleep(800);
 
       // ORDER MATTERS. popup.js asks the service worker for the ACTIVE TAB and only offers to
@@ -437,11 +584,101 @@ async function main() {
       await sleep(300);
       await popup.goto(`chrome-extension://${extensionId}/popup.html`);
       await sleep(1200);
-      await shoot(popup, '2-popup', 'the popup, with a real posting as the active tab');
 
+      // ── The popup OVER the posting ──────────────────────────────────────────
+      //
+      // Chrome cannot capture a toolbar popup together with the page beneath it — the popup is a
+      // separate top-level surface, and a page capture does not contain it. Photographing the
+      // popup alone produced a 244px panel on a 1280x800 field of white, which shows the popup and
+      // not what using it looks like. So the two REAL captures are placed in the relationship the
+      // user sees: the posting as served, and the popup as the extension rendered it having
+      // genuinely resolved that posting as the active tab. Neither half is mocked or redrawn.
+      // MEASURED AT A SMALL VIEWPORT, then applied. Measuring scrollWidth while the tab is still
+      // 1280 wide reports 1280 — the body stretches to the viewport — and the popup ends up
+      // photographed at Chrome's 800px clamp, four times its real width, covering the posting it
+      // is supposed to be sitting over. popup.html declares `width: 260px`, so the intrinsic size
+      // is only visible once the viewport is smaller than the content it should shrink to.
+      await popup.bringToFront();
+      await popup.setViewport({ width: 420, height: 720, deviceScaleFactor: 1 });
+      await sleep(300);
+      const popupBox = await popup.evaluate(() => {
+        const r = document.body.getBoundingClientRect();
+        const cs = getComputedStyle(document.body);
+        return {
+          w: Math.ceil(r.width + parseFloat(cs.marginLeft) + parseFloat(cs.marginRight)),
+          h: Math.ceil(r.height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom)),
+        };
+      });
+      // Chrome clamps a toolbar popup to 800x600; the real one is nowhere near either bound.
+      const pw = Math.min(Math.max(popupBox.w, 240), 800);
+      const ph = Math.min(Math.max(popupBox.h, 160), 600);
+      // Chrome does not composite a backgrounded tab, so a resize-then-capture on one hangs in
+      // Page.captureScreenshot until the protocol times out — which is why the popup was brought
+      // to the front above, only to be photographed. init() had already run and resolved the
+      // posting; foregrounding does not re-run it, and the assertion below re-reads the popup after
+      // the move so a state that DID change would fail rather than be photographed.
+      await popup.setViewport({ width: pw, height: ph, deviceScaleFactor: 1 });
+      await sleep(500);
+
+      const popupText = await popup.evaluate(() => document.body?.innerText || '');
+      for (const v of REAL_VALUES) {
+        if (popupText.includes(v)) throw new Error(`2-popup: REAL personal data in the popup — ${JSON.stringify(v)}`);
+      }
+      // The popup only offers to capture when the service worker reports a posting in the active
+      // tab. If it is showing anything else, the image would claim a state the run did not reach.
+      if (!/Capture job/i.test(popupText)) {
+        throw new Error(`2-popup: the popup is not in its capture state — it reads ${JSON.stringify(popupText.slice(0, 120))}`);
+      }
+
+      const popupShot = decodeToRgb(Buffer.from(await popup.screenshot({ clip: { x: 0, y: 0, width: pw, height: ph } })));
+      await posting.bringToFront();
+      await posting.setViewport({ ...SHOT_SIZE, deviceScaleFactor: 1 });
+      await sleep(400);
+      const postingText = await posting.evaluate(() => document.body?.innerText || '');
+      for (const re of FORBIDDEN_IN_SHOTS) {
+        if (re.test(postingText)) throw new Error(`2-popup: a trap caption is visible on the posting — ${re}`);
+      }
+      const base = decodeToRgb(Buffer.from(await posting.screenshot({ clip: { x: 0, y: 0, ...SHOT_SIZE } })));
+
+      // Top right, below where the toolbar would be — where Chrome actually anchors it.
+      const merged = compositeRgb(base, popupShot, SHOT_SIZE.width - pw - 28, 16);
+      writeShot('2-popup', 'the popup as the extension rendered it, over the posting it resolved',
+        encodeRgbPng(merged));
+
+      // BOTH shortcuts, with real keys in them (AI2 shot 3). options.js builds these rows from
+      // chrome.commands.getAll(), and a command Chrome declined to bind renders as "Not set" —
+      // which is a true rendering of a real state and a bad listing image, so it fails the run
+      // rather than shipping. Read out of the DOM, so the assertion is about what the picture
+      // shows and not about what the manifest declares.
       await control.bringToFront();
+      await sleep(400);
+      const shortcuts = await control.evaluate(() =>
+        [...document.querySelectorAll('.shortcut-row')].map(r => ({
+          label: r.querySelector('label')?.textContent?.trim() || '',
+          key: r.querySelector('input')?.value?.trim() || '',
+        })));
+      check('the options page lists both shortcuts', shortcuts.length === 2,
+        shortcuts.map(s => `${s.label}=${s.key}`).join(' | '));
+      check('both shortcuts show a real key, not "Not set"',
+        shortcuts.length === 2 && shortcuts.every(s => s.key && !/not set/i.test(s.key)),
+        shortcuts.map(s => s.key).join(' | '));
+      check('and they came from chrome.commands.getAll(), not a hand-kept list',
+        /chrome\.commands\.getAll\(\)/.test(fs.readFileSync(path.join(ROOT, 'extension', 'options.js'), 'utf8')));
+
       await shoot(control, '3-options', 'the options page — both shortcuts, and who submits');
-      console.log(`  ${shotCount} screenshot(s) in ${path.relative(ROOT, SHOT_DIR)}`);
+
+      // The store wants exactly three, and a run that produced two is a run that failed. Asserted
+      // rather than left to whoever opens the directory.
+      check('all three store screenshots were produced', shotCount === 3, `${shotCount} of 3`);
+      const onDisk = fs.readdirSync(SHOT_DIR).filter(f => f.endsWith('.png')).sort();
+      check('the directory holds exactly the three, and nothing stale',
+        onDisk.length === 3 && onDisk.join(',') === '1-review-overlay.png,2-popup.png,3-options.png',
+        onDisk.join(', '));
+      console.log('');
+      for (const s of shotReport) {
+        console.log(`  ${s.file}  ${s.width}x${s.height}  colour type ${s.colorType} (24-bit truecolour, no alpha)  ` +
+          `${s.bytes} bytes  ${s.nonOpaque} non-opaque source pixels flattened`);
+      }
     }
 
   } finally {

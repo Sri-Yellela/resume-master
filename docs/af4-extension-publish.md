@@ -67,8 +67,13 @@ test/publishExtension.test.js
 
 ## 4. Screenshots — produced
 
-Four listing items were outstanding; three images now exist, at the Chrome Web Store's 1280×800, in
-`extension/submission/screenshots/`.
+Four listing items were outstanding; three images now exist, at the Chrome Web Store's 1280×800.
+
+> **Superseded by AI2 — see `docs/ai2-store-screenshots.md`.** They now live in
+> `docs/store-screenshots/`, are produced by `npm run store:screenshots`, are re-encoded to 24-bit
+> with no alpha channel (the dashboard rejects alpha on screenshots), and are captured over neutral
+> fixture pages so no trap caption or third-party brand appears. The three cosmetic limits recorded
+> below were addressed there.
 
 They are captured by `scripts/g3ReviewOverlay.mjs --screenshots` rather than by a script of their
 own, and that choice is the point: **a listing screenshot of the review overlay is a claim about what

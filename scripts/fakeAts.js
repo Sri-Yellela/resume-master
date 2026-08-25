@@ -361,7 +361,15 @@ function ashbyForm() {
 //                  thing left standing between a guess and a real employer. That gate had no live
 //                  coverage: this is what reaches it (AF3 requirement 4).
 const EEOC_PREFIX = '41056061-f039-4b0f-8310-713131d11bda';
-function ashbySpaForm({ delayMs, answerable = false, autofillTrap = false, deadSubmit = false, fuzzyLabel = false } = {}) {
+// AI2: `presentation` replaces the real employer's brand and the harness caption, and nothing else.
+//
+// The shape here was transcribed from a LIVE Ashby posting, so the fixture inherited that
+// employer's company name and role title. That is fine for a harness and wrong for a Chrome Web
+// Store listing twice over: it puts another company's brand in our marketing material, and the
+// caption underneath ("Shape transcribed from a live Ashby posting … Rendered by JavaScript 0ms
+// after load") tells a reviewer they are looking at a test rig. Every field, name, id, label and
+// EEOC option is untouched — only the two lines a human reads at the top.
+function ashbySpaForm({ delayMs, answerable = false, autofillTrap = false, deadSubmit = false, fuzzyLabel = false, presentation = false } = {}) {
   const d = Number.isFinite(delayMs) ? delayMs : 2500;
   // Kept as data so the radio groups below are one loop rather than four hand-written blocks, and so
   // the option labels stay exactly as measured.
@@ -416,10 +424,14 @@ function ashbySpaForm({ delayMs, answerable = false, autofillTrap = false, deadS
     ? ` aria-label="Upload your resume here to autofill key application fields"`
     : '';
 
-  return page('Software Engineer, Agent Productivity — OpenAI', `
-  <h1>Software Engineer, Agent Productivity</h1>
-  <p style="font-size:13px;color:#666">Shape transcribed from a live Ashby posting
-  (scripts/ae1Diagnose.mjs). Rendered by JavaScript ${d}ms after load, in two chunks.</p>
+  return page(
+    presentation ? 'Senior Backend Engineer — Northwind Systems'
+                 : 'Software Engineer, Agent Productivity — OpenAI', `
+  <h1>${presentation ? 'Senior Backend Engineer' : 'Software Engineer, Agent Productivity'}</h1>
+  <p style="font-size:13px;color:#666">${presentation
+    ? 'Northwind Systems &middot; Remote &mdash; United States &middot; Full-time'
+    : `Shape transcribed from a live Ashby posting
+  (scripts/ae1Diagnose.mjs). Rendered by JavaScript ${d}ms after load, in two chunks.`}</p>
   <div id="app"><p id="boot">Loading application form…</p></div>
   <script>
   (function(){
@@ -674,10 +686,31 @@ function gatedCaptcha() {
 //                                          what makes it a guess the overlay must ask about
 //   authorized_no_sponsorship              the INVERSION trap: same words, opposite sense. Nothing
 //                                          may fill this from a `requires_sponsorship` answer.
-function gatedForm() {
-  return page('G3-TRAPS Senior Engineer — Application', `
+//
+// AI2: `presentation` strips the DIDACTIC CAPTIONS, and NOTHING ELSE.
+//
+// The Chrome Web Store listing screenshots are taken over this form. A store reviewer reading
+// "TRAP: sponsorship_inversion" above a checkbox sees a page that looks like a test rig, which is a
+// rejection risk and reads as unserious. But the traps are the reason the review overlay is worth
+// looking at, and store policy requires a screenshot to depict ACTUAL functionality — so the traps
+// themselves stay, byte for byte.
+//
+// What changes is only what a human reads: the legends become the section names a real ATS uses,
+// the explanatory paragraph goes, and the page title loses its harness prefix. Every `name`, `id`,
+// label, option and `required` is IDENTICAL in both variants, so the extension discovers the same
+// fields, fills the same ones, and still refuses the inversion trap. The screenshot shows the real
+// behaviour on a page that does not announce the test.
+//
+// The presentation location is deliberately NOT a city. The screenshot harness refuses to write an
+// image containing any value from the developer's own user_profile, and `location` is one of those
+// columns — so a fixture naming a real city fails the run on a coincidence and teaches nothing.
+function gatedForm({ presentation = false } = {}) {
+  const legend = (teaching, neutral) => presentation ? neutral : teaching;
+  return page(
+    presentation ? 'Senior Engineer — Application — Northwind Systems'
+                 : 'G3-TRAPS Senior Engineer — Application', `
   <h1>Senior Engineer</h1>
-  <p>Signed in. Complete your application.</p>
+  <p>${presentation ? 'Northwind Systems · Remote — United States · Complete your application.' : 'Signed in. Complete your application.'}</p>
   <form method="POST" action="/_submit/gated" enctype="multipart/form-data">
     ${field('First Name', `<input name="first_name" required>`, true)}
     ${field('Last Name',  `<input name="last_name" required>`, true)}
@@ -685,7 +718,7 @@ function gatedForm() {
     ${field('Phone',      `<input name="phone" type="tel">`)}
     ${field('Resume', `<input type="file" name="resume" accept=".pdf" required>`, true)}
 
-    <fieldset><legend>TRAP: label-only match</legend>
+    <fieldset><legend>${legend('TRAP: label-only match', 'Employment')}</legend>
       ${field('Current Company', `<input name="org">`)}
     </fieldset>
 
@@ -700,10 +733,10 @@ function gatedForm() {
          </select>`, true)}
     </fieldset>
 
-    <fieldset><legend>TRAP: sponsorship_inversion</legend>
-      <p style="font-size:13px;color:#666">Same words as the question above, opposite sense. A
+    <fieldset><legend>${legend('TRAP: sponsorship_inversion', 'Voluntary Disclosures')}</legend>
+      ${presentation ? '' : `<p style="font-size:13px;color:#666">Same words as the question above, opposite sense. A
       <code>requires_sponsorship: "No"</code> answer placed here would attest the opposite of the
-      truth. Nothing may fill it.</p>
+      truth. Nothing may fill it.</p>`}
       ${field('I am authorized to work without sponsorship',
         `<input type="checkbox" name="authorized_no_sponsorship">`)}
     </fieldset>
@@ -967,6 +1000,8 @@ const server = http.createServer(async (req, res) => {
       const q = url.searchParams.get('delay');
       return send(200, ashbySpaForm({
         delayMs:      q === null ? undefined : Number(q),
+        // ?presentation=1 — neutral brand and caption, for the store screenshots. See ashbySpaForm.
+        presentation: url.searchParams.get('presentation') === '1',
         answerable:   url.searchParams.get('answerable') === '1',
         autofillTrap: url.searchParams.get('autofilltrap') === '1',
         deadSubmit:   url.searchParams.get('deadsubmit') === '1',
@@ -990,7 +1025,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (path === '/gated/signin')  return send(200, gatedSignin());
     // The form the candidate reaches after crossing the gate themselves — G2 fills it, G3 reviews it.
-    if (path === '/gated/form')    return send(200, gatedForm());
+    // ?presentation=1 serves the SAME form with the didactic trap captions removed, for the Chrome
+    // Web Store listing screenshots. Same fields, same names, same behaviour — see gatedForm().
+    if (path === '/gated/form')    return send(200, gatedForm({ presentation: url.searchParams.get('presentation') === '1' }));
     if (path === '/gated/captcha') return send(200, gatedCaptcha());
     if (path === '/gated/mixed')   return send(200, gatedMixed());
     if (path === '/multistep')       return send(200, multistepStep1());
