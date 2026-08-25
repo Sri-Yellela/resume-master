@@ -6568,23 +6568,57 @@ app.patch("/api/profile/skills", requireAuth, (req, res) => {
 });
 
 // PATCH /api/jobs/interact -- unified star/dislike/status persist for board jobs
+/**
+ * Star or dislike a job from a card that has no parent handler.
+ *
+ * THIS ENDPOINT HAS NEVER ONCE SUCCEEDED. It was added in a55151d selecting a `status` column that
+ * user_jobs has never had, in any migration, so every call threw SqliteError("no such column:
+ * status") and returned 500. JobCard's caller wraps it in `catch (e) { console.warn(...) }`, so the
+ * failure was invisible: the star filled in optimistically and reverted on the next load.
+ *
+ * It is reachable. JobsPanel passes onStar so the board uses its own handler, but BOTH JobCard call
+ * sites in DatabasePanel pass only onDislike — so starring on the Database panel, and unstarring a
+ * job in Saved Jobs, fell through to here and did nothing.
+ *
+ * WHAT `status` WAS FOR: nothing. It was read into `newStatus`, which was never referenced again
+ * and was never written to any column. The request body's `status`, `title`, `company` and `source`
+ * were all accepted and silently discarded in the same way. Dead input is removed rather than
+ * wired up, because there is no column for it and inventing one to justify a parameter nobody
+ * sends would be the wrong direction.
+ *
+ * THE JOB IS RESOLVED, NEVER INVENTED. The old insert used the URL as the job_id, and every other
+ * writer of this table uses a real job_id — so simply deleting the `status` reference would have
+ * traded a loud crash for a silent one: a second, URL-keyed row for the same job, which no board
+ * query joins to and no user could ever see. A URL is accepted (the card has one to hand) but it is
+ * resolved against scraped_jobs; a job we do not know is a 404, not a phantom row.
+ */
 app.patch("/api/jobs/interact", requireAuth, (req, res) => {
-  const { url, title, company, source, starred, disliked, status } = req.body || {};
-  if (!url) return res.status(400).json({ error: "url required" });
+  const { jobId, url, starred, disliked } = req.body || {};
+  if (!jobId && !url) return res.status(400).json({ error: "jobId or url required" });
+  if (starred == null && disliked == null) {
+    return res.status(400).json({ error: "nothing to change: send starred or disliked" });
+  }
   try {
+    // jobId first — the caller usually has it, and it needs no lookup. A URL is matched against
+    // both columns because scraped_jobs stores the posting URL and the apply URL separately and a
+    // card carries whichever it has.
+    const resolved = jobId
+      ? db.prepare("SELECT job_id FROM scraped_jobs WHERE job_id=?").get(String(jobId))
+      : db.prepare("SELECT job_id FROM scraped_jobs WHERE url=? OR apply_url=? LIMIT 1").get(url, url);
+    if (!resolved?.job_id) return res.status(404).json({ error: "Job not found" });
+    const resolvedJobId = resolved.job_id;
+
     const existing = db.prepare(
-      "SELECT starred, disliked, status FROM user_jobs WHERE user_id=? AND job_id=?"
-    ).get(req.user.id, url);
+      "SELECT starred, disliked FROM user_jobs WHERE user_id=? AND job_id=?"
+    ).get(req.user.id, resolvedJobId);
 
     const newStarred  = starred  != null ? (starred  ? 1 : 0) : (existing?.starred  ?? 0);
     const newDisliked = disliked != null ? (disliked ? 1 : 0) : (existing?.disliked ?? 0);
-    const newStatus   = status   != null ? status              : (existing?.status   ?? null);
 
-    // Resolve a domain_profile_id for the interaction row
-    const activeProfile = db.prepare(
-      "SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1 LIMIT 1"
-    ).get(req.user.id);
-    const profileId = activeProfile?.id || null;
+    // The SAME resolution the sibling endpoints use (/api/jobs/:id/starred and /disliked), rather
+    // than a looser "whatever profile is active" lookup of its own. The board filters on
+    // domain_profile_id, so a row written under a different one is a star the user cannot see.
+    const profileId = resolveUserJobDomainProfileId(req.user.id, resolvedJobId);
 
     db.prepare(`
       INSERT INTO user_jobs (user_id, job_id, domain_profile_id, starred, disliked, updated_at)
@@ -6593,10 +6627,15 @@ app.patch("/api/jobs/interact", requireAuth, (req, res) => {
         starred    = excluded.starred,
         disliked   = excluded.disliked,
         updated_at = unixepoch()
-    `).run(req.user.id, url, profileId, newStarred, newDisliked);
+    `).run(req.user.id, resolvedJobId, profileId, newStarred, newDisliked);
 
-    res.json({ success: true, starred: !!newStarred, disliked: !!newDisliked });
+    // Same as the siblings: other tabs showing this job update instead of going stale. AH2 made
+    // several tabs on one session an ordinary thing to do, which makes this worth more than it was.
+    emitToUser(req.user.id, { type: "job_flag", jobId: resolvedJobId, starred: !!newStarred });
+
+    res.json({ success: true, jobId: resolvedJobId, starred: !!newStarred, disliked: !!newDisliked });
   } catch (err) {
+    console.error(`[jobs/interact] ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });

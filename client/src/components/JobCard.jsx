@@ -374,20 +374,26 @@ export default function JobCard({
   // auth-context token is per tab, so whenever those two disagreed — two accounts open in one
   // browser — starring a job in one tab wrote the star onto the OTHER account, silently. Every
   // other call site already routes through api(); this one was the hole.
+  //
+  // Sends the jobId, which the card always has. It used to send the URL plus title/company/source;
+  // the endpoint keyed the row on the URL — where every other writer of user_jobs uses a job_id —
+  // and discarded the other three entirely. It still accepts a URL and resolves it, for a caller
+  // that only has one, but there is no reason for this caller to be that one.
   async function interact(patch) {
     try {
       await api("/api/jobs/interact", {
         method: "PATCH",
         body: JSON.stringify({
+          jobId: job.jobId || job.id,
           url: job.url || job.applyUrl,
-          title: job.title,
-          company: job.company,
-          source: job.source,
           ...patch,
         }),
       });
     } catch (e) {
-      console.warn("[JobCard] interact", e);
+      // Kept as a warn rather than surfaced: a star is not worth a toast. But the endpoint 500'd on
+      // EVERY call for its whole life and this line is why nobody noticed, so the failure is now
+      // loud in the console rather than a bare object.
+      console.warn(`[JobCard] interact failed for ${job.jobId || job.id}: ${e.message}`);
     }
   }
 
