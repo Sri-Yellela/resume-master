@@ -31,10 +31,112 @@ const MIN_CONFIDENCE_TO_CHECK_AGAINST = 0.5;
 //   <  SUGGEST_FIX_MIN_OVERLAP      -> flag (no real unit resembles this claim)
 const SUGGEST_FIX_MIN_OVERLAP = 0.4;
 
+/**
+ * How similar the nearest KB unit must be before the flag is willing to NAME it (AH4).
+ *
+ * The flag used to name `best.org_unit` whatever it scored, and best is chosen by `score >
+ * bestScore` starting at -1 — so when every candidate ties at zero, the FIRST unit iterated wins.
+ * Measured against Stripe's real KB (14 units clear the confidence gate): "Bangalore",
+ * "San Francisco", "Remote" and "Quantum Basket Weaving" all scored EXACTLY 0.000 and all four
+ * were reported as closest to the same arbitrary unit. That is not a threshold set too low; it is
+ * a suggestion with no similarity behind it at all, and a suggestion no human would make costs
+ * trust in every other finding on the page.
+ *
+ * A genuinely informative near-miss clears this easily: "Payments Infrastructure" against
+ * "Payments" scores 0.500. Below the floor the finding still fires — the claim really does not
+ * match anything — it just stops inventing a nearest neighbour to name.
+ */
+const NAME_CLOSEST_MIN_SIMILARITY = 0.2;
+
 const SENIORITY_WORDS = new Set([
   'senior', 'sr', 'junior', 'jr', 'staff', 'principal', 'lead', 'entry', 'associate',
   'ii', 'iii', 'iv', 'i',
 ]);
+
+/**
+ * PLACES ARE NOT TEAMS (AH4).
+ *
+ * The observed false flag: "Stripe | Payments Infrastructure, Bangalore" produced
+ * `'Bangalore' doesn't match any team we've seen in Stripe's job postings`. Bangalore is the
+ * LOCATION. extractTeamClaim took the last comma-separated segment, and in the overwhelmingly
+ * common "Title, Team, Location" and "Title, Location" shapes the last segment is where the place
+ * lives — so the check was systematically aimed at the one part of the line that could never be a
+ * team. Worse, in the three-part shape the REAL team was never checked at all, because the
+ * location shadowed it.
+ *
+ * This is the costly error the KB rules name explicitly: a false "this doesn't match" against a
+ * claim that is TRUE. The candidate did work in Bangalore.
+ *
+ * The vocabulary is READ FROM THE DATA WE ALREADY HAVE rather than hand-listed: every distinct
+ * scraped_jobs.location, split on the separators those values use. On this corpus that is 147
+ * distinct parts from 1,291 postings, and it already contains "bangalore", "bengaluru",
+ * "san francisco", "dublin", "singapore" and the rest. A hand-written city list would be a second
+ * source of truth that goes stale the first time the board learns a new market.
+ *
+ * SHAPES cover the tail the corpus cannot: workplace types (scraped_jobs.workplace_type is
+ * remote/hybrid/onsite), the "Remote - X" and "US-X" prefixes those values use, and bare
+ * two-letter state or country codes.
+ */
+const WORKPLACE_TYPE_WORDS = new Set(['remote', 'hybrid', 'onsite', 'on site', 'in office', 'in person']);
+
+const LOCATION_SHAPES = [
+  /^(remote|hybrid|onsite|on-?site|in-?office|in-?person)\b/i,
+  /\b(remote|hybrid|onsite)$/i,
+  /^[a-z]{2}$/i,                                  // a bare state or country code: CA, NY, UK, IN
+  /^(us|usa|uk|emea|apac|amer|latam|na|eu)\b/i,   // region prefixes the feeds use
+];
+
+let _locationVocabulary = null;
+function locationVocabulary(db) {
+  if (_locationVocabulary) return _locationVocabulary;
+  const vocab = new Set();
+  try {
+    const rows = db.prepare(
+      `SELECT DISTINCT location FROM scraped_jobs WHERE location IS NOT NULL AND TRIM(location) <> ''`
+    ).all();
+    for (const row of rows) {
+      // The same separators the stored values use: "CA • New York", "US - Remote", "Dublin, Ireland".
+      for (const part of String(row.location).split(/[,;/|•]|\s+-\s+|\bor\b|\band\b/i)) {
+        const key = normalizeOrgUnitKey(part);
+        // Single letters and empty fragments would match everything; two characters is the
+        // shortest a real place name gets ("NY" is handled by LOCATION_SHAPES anyway).
+        if (key && key.length >= 3) vocab.add(key);
+      }
+    }
+  } catch { /* no scraped_jobs, or a schema without location — the shapes still apply */ }
+  _locationVocabulary = vocab;
+  return vocab;
+}
+
+/** Test seam — the vocabulary is memoised, and a test that swaps databases needs it rebuilt. */
+function resetLocationVocabulary() { _locationVocabulary = null; }
+
+/** One place, with no conjunction in it: a workplace type, a corpus location, or a location shape. */
+function isLocationAtom(db, key) {
+  if (!key) return false;
+  return WORKPLACE_TYPE_WORDS.has(key)
+    || locationVocabulary(db).has(key)
+    || LOCATION_SHAPES.some(re => re.test(key));
+}
+
+function looksLikeLocation(db, segment) {
+  const key = normalizeOrgUnitKey(segment);
+  if (!key) return false;
+  // Shapes are checked against the RAW segment too, because "US - Remote" loses its hyphen to
+  // normalisation and the prefix rule is written against what the feeds actually store.
+  if (LOCATION_SHAPES.some(re => re.test(String(segment).trim()))) return true;
+
+  // A CONJUNCTION OF PLACES IS STILL A PLACE, and a dangling conjunction is a fragment of one.
+  // The board stores "London OR Dublin", "Chicago and NYC", "San Francisco or Seattle" — 16 of the
+  // 145 distinct location strings in this corpus are alternatives like that, and after the first
+  // pass of this fix all 16 were still being flagged as teams because the vocabulary holds
+  // "london" and "dublin" separately and never the phrase.
+  //
+  // EVERY part must be a place. "Payments or Risk" is two teams, and this must not swallow it.
+  // A single part is the ordinary case and falls out of the same rule.
+  const parts = key.split(/\b(?:or|and)\b/).map(s => s.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every(part => isLocationAtom(db, part));
+}
 
 function stripSeniority(text) {
   return String(text || '')
@@ -48,10 +150,17 @@ function stripSeniority(text) {
 // "Senior Engineer, Payments Platform" or "Senior Engineer — Payments Platform" shape. The
 // LAST comma/dash-separated segment is the team/org candidate (the title comes first);
 // entries with no such separator make no team claim at all (nothing to check — silent).
-function extractTeamClaim(entry) {
+function extractTeamClaim(entry, db = null) {
   const candidates = [entry?.role, entry?.meta].filter(Boolean);
   for (const text of candidates) {
-    const parts = String(text).split(/,| — | – | - /).map(s => s.trim()).filter(Boolean);
+    let parts = String(text).split(/,| — | – | - /).map(s => s.trim()).filter(Boolean);
+    // AH4: drop trailing places before choosing the team. "Title, Team, Location" leaves the team;
+    // "Title, Location" leaves only the title, which is NOT a team claim and must produce no
+    // finding at all. Only TRAILING segments are dropped — a unit legitimately named after a place
+    // ("Bangalore Finance" is a real Stripe org unit) is not at the end and survives.
+    if (db) {
+      while (parts.length && looksLikeLocation(db, parts[parts.length - 1])) parts = parts.slice(0, -1);
+    }
     if (parts.length >= 2) {
       const claim = stripSeniority(parts[parts.length - 1]);
       if (claim && claim.split(/\s+/).length <= 6) return claim;
@@ -157,7 +266,7 @@ function validateResumeClaims(db, html) {
     const company = entry.company?.trim();
     if (!company) continue;
 
-    const teamClaim = extractTeamClaim(entry);
+    const teamClaim = extractTeamClaim(entry, db);
     if (!teamClaim) continue; // no team claim in this entry — nothing to check
 
     const claimKey = normalizeOrgUnitKey(teamClaim);
@@ -188,11 +297,15 @@ function validateResumeClaims(db, html) {
         evidence,
       });
     } else {
+      // AH4: name the nearest unit only when there IS one. Below the floor the best candidate is
+      // whatever happened to be iterated first among a field of zeroes, and "(closest: X)" then
+      // reads as a considered judgement about a pairing nothing connects.
+      const named = bestScore >= NAME_CLOSEST_MIN_SIMILARITY ? ` (closest: "${best.org_unit}")` : '';
       findings.push({
         type: 'flag',
         severity: 'review',
         company,
-        message: `"${teamClaim}" doesn't match any team we've seen in ${company}'s job postings (closest: "${best.org_unit}").`,
+        message: `"${teamClaim}" doesn't match any team we've seen in ${company}'s job postings${named}.`,
         evidence,
       });
     }
@@ -229,4 +342,5 @@ function checkCandidateConsistency(db, company, resumeText) {
 export {
   validateResumeClaims, checkCandidateConsistency, extractTeamClaim, extractStackClaim,
   jaccardOverlap, levenshteinSimilarity, similarity,
+  looksLikeLocation, resetLocationVocabulary, NAME_CLOSEST_MIN_SIMILARITY,
 };

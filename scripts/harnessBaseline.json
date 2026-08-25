@@ -50,6 +50,9 @@
   "ah3TermQuality": {
     "pass": 23
   },
+  "ah4LocationClaims": {
+    "pass": 15
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },
