@@ -6947,29 +6947,43 @@ async function adoptEnhancedProfileResume(req, res) {
     LIMIT 1
   `).get(req.user.id, profile.id);
 
-  db.prepare(`
-    UPDATE profile_base_resumes
-    SET content = enhanced_content, updated_at = unixepoch()
-    WHERE profile_id = ? AND user_id = ?
-  `).run(profile.id, req.user.id);
-  upsertSimpleApplyProfile(db, {
-    userId: req.user.id,
-    profileId: profile.id,
-  }, row.enhanced_content);
-  if (latestEnhancement?.id) {
+  // ADOPTING IS ONE ACT, so it is one transaction.
+  //
+  // These four writes used to run loose, in this order, with the destructive one first. When
+  // markSelectedSuggestionsApplied threw — it called an undefined symbol and did so for every
+  // adoption that had skills selected, which is every adoption the UI can reach — the base resume
+  // had ALREADY been replaced. The candidate got a 500 for an operation that had half happened:
+  // their resume overwritten, the suggestions still sitting at 'selected'.
+  //
+  // The symbol is fixed, but the ordering was what turned a typo into data loss. All of this is
+  // synchronous better-sqlite3 work, so a transaction is available and nothing here can half-apply
+  // again.
+  const adopt = db.transaction(() => {
     db.prepare(`
-      UPDATE profile_resume_enhancements
-      SET adopted_at = unixepoch()
-      WHERE id = ?
-    `).run(latestEnhancement.id);
-  }
-  markSelectedSuggestionsApplied(db, {
-    userId: req.user.id,
-    profileId: profile.id,
-    selectedLabels: (() => {
-      try { return JSON.parse(latestEnhancement?.selected_skills_json || "[]"); } catch { return []; }
-    })(),
+      UPDATE profile_base_resumes
+      SET content = enhanced_content, updated_at = unixepoch()
+      WHERE profile_id = ? AND user_id = ?
+    `).run(profile.id, req.user.id);
+    upsertSimpleApplyProfile(db, {
+      userId: req.user.id,
+      profileId: profile.id,
+    }, row.enhanced_content);
+    if (latestEnhancement?.id) {
+      db.prepare(`
+        UPDATE profile_resume_enhancements
+        SET adopted_at = unixepoch()
+        WHERE id = ?
+      `).run(latestEnhancement.id);
+    }
+    markSelectedSuggestionsApplied(db, {
+      userId: req.user.id,
+      profileId: profile.id,
+      selectedLabels: (() => {
+        try { return JSON.parse(latestEnhancement?.selected_skills_json || "[]"); } catch { return []; }
+      })(),
+    });
   });
+  adopt();
 
   const userId = req.user.id;
   const profileId = profile.id;

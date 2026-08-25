@@ -417,8 +417,27 @@ export function buildSelectedEnhancementSkills(db, { userId, profileId, limit = 
   }));
 }
 
+/**
+ * Move the skills an enhancement actually used from 'selected' to 'applied'.
+ *
+ * `selectedLabels` are LABELS, straight out of profile_resume_enhancements.selected_skills_json,
+ * which stores what buildSelectedEnhancementSkills returned. profileSignalKey cleans its input on
+ * the way through, so it is the whole derivation — the same one that wrote signal_key in the first
+ * place.
+ *
+ * This called an undefined `signalKey` until 2026-08-25 and threw a ReferenceError. It survived
+ * because the only caller passes an empty array when nothing is selected, and `.map` never runs its
+ * callback on an empty array — so it was silent right up to the moment someone used the feature.
+ * By then POST /adopt had already overwritten profile_base_resumes.content, so the throw landed
+ * mid-route: the base resume was replaced, the suggestions were not marked, and the caller got a
+ * 500 for an operation that had partly happened.
+ */
 export function markSelectedSuggestionsApplied(db, { userId, profileId, selectedLabels = [] }) {
-  const wanted = new Set((selectedLabels || []).map(label => signalKey(label)));
+  const wanted = new Set(
+    (Array.isArray(selectedLabels) ? selectedLabels : [selectedLabels])
+      .map(label => profileSignalKey(label))
+      .filter(Boolean),
+  );
   const update = db.prepare(`
     UPDATE profile_signal_suggestions
     SET status = 'applied', applied_at = unixepoch(), updated_at = unixepoch()
