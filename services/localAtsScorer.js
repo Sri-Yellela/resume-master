@@ -33,8 +33,14 @@ import { actionVerbVocabularyTerms, companyStackTerms, skillVocabularyTerms } fr
  *
  * Anything comparing against this must import it rather than spell it, so a future bump cannot
  * leave a stale reader behind.
+ *
+ * BUMPED AGAIN TO v3 FOR AH3, for the same reason and with the same consequence. A v2 report files
+ * "problem decomposition" under SKILLS MISSING, pads SKILLS MATCHED with "provided" and "science",
+ * and lists "Manage" as a gap. Those reports are cached against every job already scored, so
+ * leaving the version alone would have fixed the report only for postings nobody had opened —
+ * which is exactly how AG1's fragment fix appeared to work and did not (e566dbc).
  */
-export const LOCAL_ATS_SOURCE = "local_ats_v2";
+export const LOCAL_ATS_SOURCE = "local_ats_v3";
 
 const STOP_WORDS = new Set([
   "about","above","across","after","again","against","also","and","any","are","around",
@@ -58,6 +64,66 @@ const ACTION_VERB_HINTS = [
   "integrate","launch","lead","manage","migrate","model","negotiate","optimize",
   "profile","refactor","resolve","scale","ship","streamline","test","validate",
 ];
+
+/**
+ * Real action verbs that name a RELATIONSHIP TO WORK rather than a specific act (AH3).
+ *
+ * Distinct from WEAK_ACTION_VERBS above, which are not action verbs at all ("help", "ensure",
+ * "use") and are dropped from the vocabulary entirely. These are genuine verbs a resume can use —
+ * they are just claimable by almost anyone in almost any role, so listing them under MISSING
+ * asserts a gap that is not real. "Your resume is missing Manage" tells an engineer nothing.
+ *
+ * They are GROUPED, not suppressed. The posting does use this language, and saying "these are
+ * generic" is information; deleting them silently is not.
+ *
+ * THE CRITERION IS STATED, NOT MEASURED, and that is deliberate. Document frequency across the
+ * corpus does not separate them: Managed appears in 44% of the 1,291 postings and Delivered in 42%,
+ * which puts them mid-pack, BELOW Built (93%), Designed (72%) and Developed (58%) — verbs whose
+ * absence from a resume is worth saying. A frequency threshold would sweep up the useful ones and
+ * keep these, so it is the wrong instrument. The distinction is semantic: "Automated",
+ * "Instrumented", "Refactored", "Migrated", "Debugged" name a thing that was done; "Managed",
+ * "Delivered", "Owned", "Drove", "Supported" name a stance toward work that anyone can assert.
+ */
+const GENERIC_ACTION_VERB_WORDS = [
+  "coordinate", "deliver", "drive", "execute", "grow", "manage", "oversee", "own",
+  "partner", "report", "secure", "track",
+];
+// STEMMED through the same function the index is keyed by, never spelled as raw infinitives.
+// Written out by hand, the first version of this set matched only "deliver": the stemmer turns
+// "Managed" into "manag", "Coordinated" into "coordinat" and "Drove" into "driv", so eleven of the
+// twelve entries silently matched nothing and the verbs went on being reported as gaps. A set whose
+// keys are produced by a different rule than the keys it is tested against is not a set.
+// Built lazily: normaliseActionVerb reads IRREGULAR_VERB_STEMS, which is a const declared further
+// down, so stemming at module scope here is a temporal-dead-zone ReferenceError at import time.
+let _genericVerbStems = null;
+function genericVerbStems() {
+  if (!_genericVerbStems) {
+    _genericVerbStems = new Set(GENERIC_ACTION_VERB_WORDS.map(normaliseActionVerb).filter(Boolean));
+  }
+  return _genericVerbStems;
+}
+
+/**
+ * Terms in the shipped registries that describe a QUALITY rather than a skill (AH3).
+ *
+ * The registries are overwhelmingly concrete — engineering.keywords is "distributed systems",
+ * "CI/CD", "concurrency", "observability" — but a handful of entries, mostly from the non-technical
+ * domains, are competencies wearing a keyword's clothes. Measured document frequency over the
+ * corpus, as the scorer itself sees these postings: communication 55%, strategy 43%,
+ * cross-functional collaboration 39%, cross-functional 38%, leadership 27%. A term over half the
+ * job market states is not a differentiator, and it is not a skill either.
+ *
+ * These are not dropped. They move to the competencies bucket, where being widely wanted is
+ * expected rather than embarrassing, and where the reader can judge them as qualities.
+ */
+const COMPETENCY_REGISTRY_TERMS = new Set([
+  "communication", "written communication", "verbal communication", "executive communication",
+  "collaboration", "cross-functional", "cross-functional collaboration", "cross functional",
+  "leadership", "technical leadership", "team leadership", "people leadership",
+  "strategy", "strategic thinking", "problem solving", "problem-solving",
+  "stakeholder management", "relationship building", "attention to detail",
+  "mentoring", "mentorship", "coaching", "ownership", "adaptability", "culture",
+]);
 
 /**
  * Words that make a phrase prose rather than a term, when they sit at either END of it.
@@ -269,35 +335,111 @@ function stripLinks(text) {
     .replace(/\b[\w-]+\.(?:com|org|net|io|ai|co|gov|edu)\b\S*/gi, " ");
 }
 
-function candidateTermsFromJob(jobText, runtimeBasis, { company = "", jobSkills = [] } = {}) {
+/**
+ * The posting's terms, split into SKILLS and COMPETENCIES.
+ *
+ * WHAT BELONGS IN EACH BUCKET (AH3)
+ *   SKILL       — a named tool, technology, platform or domain technique. Checkable: either the
+ *                 resume shows it or it does not. typescript, node, kubernetes, distributed
+ *                 systems, A/B testing.
+ *   COMPETENCY  — a quality or way of working. Real, wanted, and not checkable the same way.
+ *                 problem decomposition, intellectual curiosity, cross-functional collaboration.
+ *
+ * A term reaches SKILLS only from a source that already knows what a skill is: the shipped
+ * registries, this employer's stack, or the posting's enrichment-typed HARD skills. This is the
+ * closed set skillVocabulary.js's own header argues for, now applied to the last source that was
+ * bypassing it.
+ *
+ * THAT BYPASS WAS THE "NOISE IN MATCHED" DEFECT. The candidate's profile skills used to be pushed
+ * in unconditionally, and those are resume-extracted tokens, not a curated list. Reproduced on the
+ * real fixture profile against the Notion New Grad posting, SKILLS MATCHED read:
+ *
+ *   engineering | provided | science | bachelor | current | environment | skills | specific
+ *
+ * Eight of nine "matched skills" were ordinary English words that happened to appear in both
+ * documents. That is worse than the reported "systems" and "time", and it inflates the score as
+ * well as the report, because every one of them counts as a match.
+ *
+ * The candidate's own terms still come FIRST — they order the budget and preserve the user's own
+ * wording — but ordering is all they do now. They can no longer admit a term.
+ */
+function candidateTermsFromJob(jobText, runtimeBasis, { company = "", jobSkills = { hard: [], soft: [] } } = {}) {
   const searchText = stripLinks(jobText);
   const normJob = ` ${normaliseAtsTerm(searchText)} `;
   const rejectTerm = buildTermRejector(searchText, company);
-  const terms = [];
 
-  // 1. What the candidate already claims, where this posting also asks for it. Listed first so the
-  //    28-term budget is spent on the overlap that actually decides the score.
-  for (const sourceTerm of runtimeBasis.skills || []) {
-    const key = normaliseAtsTerm(sourceTerm);
-    if (key && normJob.includes(` ${key} `)) terms.push(sourceTerm);
-  }
-
-  // 2. What the enrichment model extracted for THIS posting. Same source the board's skill chips
-  //    and skills_include filtering read, so the panel agrees with the card beside it.
-  for (const skill of jobSkills) terms.push(skill);
-
-  // 3. This employer's own stack, where the posting states it.
+  // The closed set: every term this posting could legitimately be said to ask for as a SKILL.
+  // Keyed by normalised form so the candidate's wording and the registry's resolve to one entry.
+  const admissible = new Map();
+  const admit = (term) => {
+    const key = normaliseAtsTerm(term);
+    if (key && !admissible.has(key)) admissible.set(key, term);
+  };
+  // What the enrichment typed SOFT for this posting can never be admitted as a skill, whatever
+  // else names it. The registry is a global list and inevitably overlaps: "data analysis" and
+  // "project management" are keywords in it AND are typed soft by the enrichment on postings that
+  // use them as competencies. Without this, the registry pass re-admitted them and 170 soft-typed
+  // terms across the corpus were still landing in the skills bucket after the split. The
+  // per-posting judgement is the more specific one, so it wins.
+  const softKeys = new Set((jobSkills.soft || []).map(normaliseAtsTerm).filter(Boolean));
+  const admitUnlessSoft = (term) => {
+    const key = normaliseAtsTerm(term);
+    if (key && !softKeys.has(key)) admit(term);
+  };
+  for (const skill of jobSkills.hard || []) admitUnlessSoft(skill);
   for (const term of companyStackTerms(company)) {
     const key = normaliseAtsTerm(term);
-    if (key && normJob.includes(` ${key} `)) terms.push(term);
+    if (key && normJob.includes(` ${key} `)) admitUnlessSoft(term);
   }
-
-  // 4. The shipped domain registries, where the posting states the term.
   for (const [key, label] of skillIndex()) {
-    if (normJob.includes(` ${key} `)) terms.push(label);
+    if (normJob.includes(` ${key} `)) admitUnlessSoft(label);
   }
 
-  return compactUnique(terms.filter(term => !rejectTerm(term)), 28);
+  const skills = [];
+  const competencies = [];
+  const taken = new Set();
+  const place = (term) => {
+    const key = normaliseAtsTerm(term);
+    if (!key || taken.has(key) || rejectTerm(term)) return;
+    taken.add(key);
+    (COMPETENCY_REGISTRY_TERMS.has(key) ? competencies : skills).push(term);
+  };
+
+  // 1. The candidate's own wording, for the terms already admitted above. Ordering only.
+  for (const sourceTerm of runtimeBasis.skills || []) {
+    const key = normaliseAtsTerm(sourceTerm);
+    if (key && admissible.has(key)) place(sourceTerm);
+  }
+  // 2. Everything else the posting asks for.
+  for (const term of admissible.values()) place(term);
+  // 3. The posting's competencies, which the enrichment already typed as soft.
+  const fromPosting = [];
+  for (const term of jobSkills.soft || []) {
+    const key = normaliseAtsTerm(term);
+    if (!key || taken.has(key) || rejectTerm(term)) continue;
+    taken.add(key);
+    fromPosting.push(term);
+  }
+
+  // PRECISION OVER RECALL, applied within the bucket. The registry's generic "problem solving" and
+  // the posting's own "thoughtful problem-solving" are one idea in two wordings, and showing both
+  // is the padding this task is about. Where the posting says something more specific, its wording
+  // wins and the registry's shorter version is dropped — a strict WHOLE-WORD subset only, so
+  // "communication" goes when "written communication" is present but "data" would never swallow
+  // "data pipelines" in the other direction.
+  const postingWords = fromPosting.map(t => new Set(normaliseAtsTerm(t).split(" ").filter(Boolean)));
+  const isSubsumed = (term) => {
+    const words = normaliseAtsTerm(term).split(" ").filter(Boolean);
+    if (!words.length) return false;
+    return postingWords.some(set => set.size > words.length && words.every(w => set.has(w)));
+  };
+
+  return {
+    skills: compactUnique(skills, 28),
+    // A smaller budget than skills, on purpose. Competencies are the softer half of the report and
+    // a long list of them is what makes a panel read as padding.
+    competencies: compactUnique([...competencies.filter(t => !isSubsumed(t)), ...fromPosting], 12),
+  };
 }
 
 /** Every verb stem this posting actually uses, as whole standalone words. */
@@ -328,18 +470,30 @@ function candidateActionVerbsFromJob(jobText, runtimeBasis) {
     verbs.push(label);
   };
 
+  const generic = [];
+  // AH3: a verb that names a stance toward work rather than a specific act is set aside here
+  // instead of joining the gap list. See GENERIC_ACTION_VERBS for why the criterion is semantic
+  // and not a frequency threshold.
+  const takeGeneric = (stem, label) => {
+    if (taken.has(stem)) return;
+    taken.add(stem);
+    generic.push(label);
+  };
+  const generics = genericVerbStems();
+  const route = (stem, label) => (generics.has(stem) ? takeGeneric : take)(stem, label);
+
   // The candidate's own verbs first, so the report shows them in the wording they chose.
   for (const verb of runtimeBasis.actionVerbs || []) {
     const stem = normaliseActionVerb(verb);
     // Vocabulary membership is the whole check: a token is emitted because it IS an action verb,
     // never because it sat next to one or happened to end in -ed/-ing.
-    if (stem && index.has(stem) && stems.has(stem)) take(stem, verb);
+    if (stem && index.has(stem) && stems.has(stem)) route(stem, verb);
   }
   for (const [stem, label] of index) {
-    if (stems.has(stem)) take(stem, label);
+    if (stems.has(stem)) route(stem, label);
   }
 
-  return compactUnique(verbs, 16);
+  return { verbs: compactUnique(verbs, 16), generic: compactUnique(generic, 10) };
 }
 
 /**
@@ -375,15 +529,37 @@ function normaliseActionVerb(value) {
  * from the feed adapters, {skill,type} objects from enrichJob and Jobo — and may arrive parsed or
  * still encoded. Read all of them rather than making the caller normalise.
  */
+/**
+ * The posting's enrichment-extracted skills, SPLIT BY THE TYPE THE ENRICHMENT ALREADY GAVE THEM.
+ *
+ * AH3's miscategorisation, in one line: this function used to read `entry.skill` and throw
+ * `entry.type` away. So the Notion New Grad posting, whose skills_json is
+ *
+ *   {TypeScript, hard} {Node.js, hard} {Python, hard}
+ *   {impact-driven approach to technology, soft} {thoughtful problem-solving, soft}
+ *   {problem decomposition, soft} {collaboration, soft}
+ *
+ * produced ONE list, and "thoughtful problem-solving" and "problem decomposition" were shown as
+ * SKILLS MISSING beside typescript and node. They read as verbs mis-filed as skills because they
+ * are neither — they are competencies, and the model had already said so.
+ *
+ * Measured across the 1,291 enriched postings in the corpus: 10,389 hard entries and 7,377 soft,
+ * with ZERO untyped. The judgement was there for every term; nothing had to be invented to use it.
+ */
 function jobSkillTerms(job) {
   const raw = job?.skills_json ?? job?.skills;
   const list = typeof raw === "string" ? parseJsonArray(raw) : (Array.isArray(raw) ? raw : []);
-  const out = [];
+  const hard = [];
+  const soft = [];
   for (const entry of list) {
     const value = typeof entry === "string" ? entry : entry?.skill;
-    if (typeof value === "string" && value.trim()) out.push(value.trim());
+    if (typeof value !== "string" || !value.trim()) continue;
+    // A bare string, or an unrecognised type, counts as hard. An untyped term is one we have no
+    // judgement about, and the skills bucket is where it has always gone — silently reclassifying
+    // it as a competency would be inventing a judgement to fill a gap.
+    (entry?.type === "soft" ? soft : hard).push(value.trim());
   }
-  return out;
+  return { hard, soft };
 }
 
 function hasTerm(haystack, term) {
@@ -439,14 +615,16 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   ].filter(Boolean).join("\n");
   const matchText = [basis.resumeText, basis.skills.join(" "), basis.titles.join(" "), basis.actionVerbs.join(" ")].join("\n");
 
-  const jobTerms = candidateTermsFromJob(jobText, basis, {
+  const { skills: jobTerms, competencies: jobCompetencies } = candidateTermsFromJob(jobText, basis, {
     company: job.company || "",
     jobSkills: jobSkillTerms(job),
   });
   const matchedSkills = jobTerms.filter(term => hasTerm(matchText, term));
   const missingSkills = jobTerms.filter(term => !hasTerm(matchText, term));
+  const matchedCompetencies = jobCompetencies.filter(term => hasTerm(matchText, term));
+  const missingCompetencies = jobCompetencies.filter(term => !hasTerm(matchText, term));
 
-  const jobVerbs = candidateActionVerbsFromJob(jobText, basis);
+  const { verbs: jobVerbs, generic: genericVerbs } = candidateActionVerbsFromJob(jobText, basis);
   const matchedVerbs = jobVerbs.filter(verb => hasVerb(matchText, verb));
   const missingVerbs = jobVerbs.filter(verb => !hasVerb(matchText, verb));
 
@@ -466,8 +644,23 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
       };
   const hardMisses = hardConstraintMisses(jobText, basis.structuredFacts);
 
-  const skillScore = ratio(matchedSkills.length, jobTerms.length) * 50;
-  const verbScore = ratio(matchedVerbs.length, jobVerbs.length) * 15;
+  // THE SCORE IS COMPUTED OVER THE UNION, NOT OVER THE BUCKETS.
+  //
+  // AH3 split the report into skills, competencies and generic language. That is a change to how
+  // the report READS, and it must not quietly re-weight what the number MEANS: the posting asks for
+  // "collaboration" and for "Managed" whether or not we file them under a softer heading, and a
+  // score that dropped them would move every ATS gate in the product — including the auto-apply
+  // threshold that was calibrated against this scorer three commits ago.
+  //
+  // The score DOES move for a different reason, and that one is intended: the skills bucket is now
+  // a closed set, so resume-extracted words like "provided" and "science" no longer count as
+  // matches. They were inflating both the numerator and the report.
+  const scoredTerms = jobTerms.length + jobCompetencies.length;
+  const scoredMatches = matchedSkills.length + matchedCompetencies.length;
+  const scoredVerbs = jobVerbs.length + genericVerbs.length;
+  const scoredVerbMatches = matchedVerbs.length + genericVerbs.filter(v => hasVerb(matchText, v)).length;
+  const skillScore = ratio(scoredMatches, scoredTerms) * 50;
+  const verbScore = ratio(scoredVerbMatches, scoredVerbs) * 15;
   const experienceScore = experienceFit.fit ? 25 : requiredYears == null ? 22 : 8;
   const hardScore = Math.max(0, 10 - hardMisses.length * 5);
   const score = Math.max(0, Math.min(100, Math.round(skillScore + verbScore + experienceScore + hardScore)));
@@ -477,8 +670,15 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
     score,
     tier1_matched: compactUnique(matchedSkills, 40),
     tier1_missing: compactUnique(missingSkills, 40),
+    // AH3's third bucket. Competencies are real and wanted, but they are qualities, not skills —
+    // "problem decomposition" belongs beside "intellectual curiosity", not beside typescript.
+    competencies_matched: compactUnique(matchedCompetencies, 12),
+    competencies_missing: compactUnique(missingCompetencies, 12),
     action_verbs_matched: compactUnique(matchedVerbs, 24),
     action_verbs_missing: compactUnique(missingVerbs, 24),
+    // Verbs the posting uses that almost any candidate could claim. Shown as language, never as a
+    // gap: "your resume is missing Manage" asserts a shortfall that is not real.
+    action_verbs_generic: compactUnique(genericVerbs, 10),
     experience: experienceFit,
     hard_constraint_misses: hardMisses,
   };

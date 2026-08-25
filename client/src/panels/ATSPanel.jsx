@@ -208,6 +208,10 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   // term is in `matched` precisely because it found it in the resume — so nothing is re-derived.
   const evidencedLookup = new Set([
     ...(activeReport.tier1_matched || []),
+    // AH3 moved competencies into their own bucket. They are matched by the same rule and are
+    // evidenced by the same resume, so leaving them out here would show a term as unevidenced in
+    // one section that the section above it has just marked as matched.
+    ...(activeReport.competencies_matched || []),
     ...(activeReport.action_verbs_matched || []),
   ].map(profileSignalKey).filter(Boolean));
 
@@ -284,6 +288,34 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
           theme={theme}/>
       )}
 
+      {/* Competencies — AH3's third bucket.
+          "problem decomposition" and "thoughtful problem-solving" used to sit under Skills Missing
+          beside typescript and node, where they read as verbs mis-filed as skills. They are neither.
+          They are qualities, the enrichment model had already typed them `soft`, and this is their
+          honest home: still claimable, still worth knowing the posting asked for them, but not
+          pretending to be a checkable technology. */}
+      {activeReport.competencies_matched?.length > 0 && (
+        <TagSection title="✓ Competencies Matched"
+          subtitle="Qualities this job asked for that your resume already shows."
+          bg={"#0a1f0a"} fg={"#22c55e"} border={"color-mix(in srgb, #22c55e 20%, transparent)"}
+          items={activeReport.competencies_matched}
+          evidencedLookup={evidencedLookup}/>
+      )}
+
+      {activeReport.competencies_missing?.length > 0 && (
+        <TagSection title="◇ Competencies Missing"
+          subtitle="Ways of working this job asked for. These are qualities, not technologies — claim the ones that are true of you."
+          bg={"#1a1226"} fg={"#a78bfa"} border={"color-mix(in srgb, #a78bfa 20%, transparent)"}
+          items={activeReport.competencies_missing}
+          onToggleClaim={clickableProfileId ? (item, claimed) => toggleClaim("skill", item, claimed) : null}
+          pendingItems={addedItems}
+          claimedLookup={claimLookup}
+          lockedLookup={lockedSkillLookup}
+          evidencedLookup={evidencedLookup}
+          kind="skill"
+          theme={theme}/>
+      )}
+
       {/* Action verbs matched */}
       {activeReport.action_verbs_matched?.length > 0 && (
         <TagSection title="⚡ Verbs Matched"
@@ -307,6 +339,18 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
           evidencedLookup={evidencedLookup}
           kind="action_verb"
           theme={theme}/>
+      )}
+
+      {/* Generic language — AH3. NOT a gap, and deliberately not claimable.
+          "Deliver" and "Manage" were being listed under Verbs Missing, which asserts a shortfall
+          that is not real: almost any engineer could claim them, so their absence says nothing.
+          They are not suppressed either — the posting does use this language and that is worth
+          seeing. It is just reported as language rather than as something to go and fix. */}
+      {activeReport.action_verbs_generic?.length > 0 && (
+        <TagSection title="○ Generic Language"
+          subtitle="This job uses these, but almost any candidate could claim them — they are not a gap."
+          bg={"var(--color-surface-offset)"} fg={"var(--color-text-muted)"} border={"var(--color-border)"}
+          items={activeReport.action_verbs_generic}/>
       )}
 
       {activeReport.experience && (

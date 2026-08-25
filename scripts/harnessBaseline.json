@@ -41,8 +41,14 @@
   "ag2ClaimsUi": {
     "pass": 17
   },
+  "ag4PdfDuplication": {
+    "pass": 6
+  },
   "ah1SessionIdentity": {
     "pass": 67
+  },
+  "ah3TermQuality": {
+    "pass": 23
   },
   "e2CaptureConvergence": {
     "pass": 15
