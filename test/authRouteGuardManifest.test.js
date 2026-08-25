@@ -218,6 +218,9 @@ const AUTHENTICATED = new Set([
   "GET /api/apply/questions",
   "POST /api/apply/answers",
   "POST /api/apply/close/:jobId",
+  // RETIRED, and still guarded: both answer 410. They kept requireAuth for the same reason
+  // /api/scrape did — a retired route is not a public one, and the guard is what keeps it out of
+  // the PUBLIC list where nobody would look at it again.
   "POST /api/apply/session/save",
   "GET /api/apply/session/:domain",
 ]);
@@ -388,7 +391,8 @@ test("every authenticated route taking an id from the request derives the owner 
   const REVIEWED = new Set([
     "server.js: GET /api/domain-metadata/:key",                    // a static registry file
     "server.js: POST /api/auth/provider/:provider",                // pre-auth, by definition
-    "routes/apply.js: GET /api/apply/session/:domain",             // returns {exists:false}, a stub
+    // Retired: answers 410 and reads nothing at all, so there is no owner to scope to.
+    "routes/apply.js: GET /api/apply/session/:domain",
     "routes/domainProfiles.js: GET /metadata/:domain",             // the same static registry
     // Company KB, addressed by company NAME. company_* tables are a shared knowledge base with no
     // user column, so there is no owner to scope to; every signed-in user sees the same answer.

@@ -2886,11 +2886,36 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     res.json({ ok: true });
   });
 
-  app.post("/api/apply/session/save", requireAuth, (_req, res) => {
-    res.json({ ok: true });
-  });
-
-  app.get("/api/apply/session/:domain", requireAuth, (_req, res) => {
-    res.json({ exists: false });
-  });
+  /**
+   * RETIRED — the server does not keep your portal sessions, deliberately.
+   *
+   * WHAT THESE WERE. In the server-side-Playwright era (ebeb9ae) POST /save wrote a Playwright
+   * `storageState` — the cookies and localStorage of the candidate's LOGGED-IN session on an
+   * employer's portal — to data/sessions/<userId>_<domain>.json in plaintext, and GET /:domain
+   * reported whether that file existed. c818b9c replaced that architecture and left both as stubs.
+   *
+   * WHY THEY ARE NOT BEING IMPLEMENTED. A gated portal is now handled by handing the application to
+   * the candidate's OWN browser: detectGate runs before any fill so a sign-in wall is never typed
+   * into, no credential control is ever answered (g6CredentialGuard), and `login_required` becomes
+   * a portal batch resolved by one real sign-in whose grant survives every same-origin navigation
+   * (G0). The session lives where it should — in the browser the person is sitting at. Restoring
+   * these would put a live authenticated session to a third party back on our disk, which is the
+   * single most sensitive thing this product could hold and is exactly what that architecture
+   * removed. data/sessions/ no longer exists.
+   *
+   * WHY 410 RATHER THAN DELETION, and rather than leaving the stubs. The stubs were the worse of
+   * the three: `{ok:true}` tells a caller its session was saved when nothing was written, and
+   * `{exists:false}` answers "do you have my session?" with a confident no that is true only by
+   * accident. Both are the wired-to-a-no-op shape this codebase keeps finding. 410 follows the
+   * /api/scrape and extension save-job precedent — a caller that still exists learns what happened
+   * and what to do instead, rather than getting a 404 it reads as a bug.
+   */
+  const SESSION_RETIRED = {
+    error: "gone",
+    message: "Portal sessions are no longer stored on the server. A portal that wants you signed " +
+      "in is handed to your own browser: sign in once there and every application queued behind " +
+      "that portal continues.",
+  };
+  app.post("/api/apply/session/save", requireAuth, (_req, res) => res.status(410).json(SESSION_RETIRED));
+  app.get("/api/apply/session/:domain", requireAuth, (_req, res) => res.status(410).json(SESSION_RETIRED));
 }
