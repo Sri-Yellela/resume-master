@@ -444,6 +444,20 @@ async function main() {
               aborted:   live ? HISTORY_GROUPS.aborted   : [] };
         return req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
       }
+      // AH6: the panel now asks ONE cheap question on mount — what is the date of your most recent
+      // activity — and opens on that day if there is one. This fixture answers NULL on purpose, so
+      // everything below is the NO-HISTORY resting state: a user with no runs has no most-recent
+      // day, and AD1's "pick a date" is exactly right for them. The AH6 default, where a date IS
+      // returned, is driven by scripts/ah6RecentRunDefault.mjs.
+      //
+      // Stubbed EXPLICITLY rather than left to FALLBACK. Falling through to a body with no `date`
+      // key made the resting-state checks below pass because the endpoint was silent — which would
+      // also have been true if the panel had stopped asking, or if the endpoint had broken. A check
+      // that passes for a reason it did not intend is not a check.
+      if (url.pathname === '/api/apply/history/latest') {
+        historyRequests.push(url.pathname + url.search);
+        return req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify({ date: null }) });
+      }
       if (url.pathname.startsWith('/api/apply/history/months')) {
         historyRequests.push(url.pathname + url.search);
         return req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(HISTORY_MONTHS) });
@@ -512,13 +526,19 @@ async function main() {
     // the one AD1 is most explicit about. It is a NETWORK check rather than a DOM one: "Initial
     // render issues NO listing query — verify in the network tab." The only honest way to verify
     // that is to watch what the page asked for.
-    console.log('── AD1: the resting state — no listing query, no counts, three tabs ──');
+    console.log('── AD1: the resting state (NO HISTORY) — no listing query, no counts, three tabs ──');
 
     const restingText = await page.evaluate(() => document.body.innerText);
 
+    // AH6 narrowed this: the mount now asks /api/apply/history/latest, which returns a DATE and
+    // never a listing. The rule AD1 was protecting is unchanged and is what is checked — no day's
+    // applications are shipped to a panel that did not ask for a day.
     check('AD1  the panel\'s initial render issues NO listing request',
-      ![...served].some(p => p.startsWith('/api/apply/history')),
-      `history paths requested on load: ${[...served].filter(p => p.startsWith('/api/apply/history')).join(', ') || 'none'}`);
+      ![...served].some(p => p.startsWith('/api/apply/history?')),
+      `listing paths requested on load: ${[...served].filter(p => p.startsWith('/api/apply/history?')).join(', ') || 'none'}`);
+    check('AH6  and the one thing it DOES ask for is the latest date, not rows',
+      served.has('/api/apply/history/latest'),
+      `history paths on load: ${[...served].filter(p => p.startsWith('/api/apply/history')).join(', ') || 'none'}`);
 
     const restingTabs = await page.evaluate(() => [...document.querySelectorAll('[data-rm-subtab]')]
       .map(b => ({ id: b.dataset.rmSubtab, active: b.dataset.rmSubtabActive === '1',

@@ -141,9 +141,15 @@ test("AD1 requirement 3: no effect anywhere loads the listing", () => {
   // The real proof is a network check and scripts/abPanelUi.mjs makes it. What is asserted here is
   // the structural reason that stays true, because a loader effect added later would break the
   // requirement silently and a source check names the thing not to add.
+  // AH6 added exactly ONE loader effect: the mount asks /api/apply/history/latest, which returns a
+  // DATE and never rows, and opens on that day if there is one. Requirement 3 is about what is
+  // FETCHED, and no listing is fetched for a day nobody named — which is the part that has not
+  // changed and is what is asserted. See test/autoApplyRecentDefault.test.js for the rest.
+  const loaders = [...ctx.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[/g)]
+    .filter(m => /loadHistory\b/.test(m[1]));
+  assert.equal(loaders.length, 1, "only AH6's latest-date bootstrap may load the history");
+  assert.match(loaders[0][1], /\/api\/apply\/history\/latest/);
   for (const effectBody of ctx.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[/g)) {
-    assert.ok(!/loadHistory\b/.test(effectBody[1]),
-      "an effect calls loadHistory — the panel now issues a listing query on render");
     assert.ok(!/selectHistoryGroup\b/.test(effectBody[1]),
       "an effect switches sub-tab — which fetches, if a date is already selected");
   }

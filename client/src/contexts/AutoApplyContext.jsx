@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { api, authContextQuery } from "../lib/api.js";
 import { A_PLUS_TOOL, GENERATE_TOOL } from "../lib/applyTools.js";
 // AD1: the outcome partition, shared with routes/apply.js so the sub-tab a request asks for and the
@@ -334,6 +334,24 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   // not asked yet", an empty payload is "nothing happened on that day" (requirement 6). Collapsing
   // them into one falsy state is how "no applications on this date" becomes a permanent spinner.
   //
+  // ── TASK AH6: WHICH DAY, WORKED OUT RATHER THAN ASKED FOR ─────────────────────────────────
+  //
+  // AD1's inversion was right that the panel must not silently ship a day's applications you never
+  // asked for. It was wrong about what to do instead: it opened on a blank board with "pick a
+  // date", and the commonest reason to open Auto Apply is to see what happened on the last run —
+  // which is almost never today. The panel was making the reader answer a question it could
+  // answer itself.
+  //
+  // So the mount asks ONE cheap question — what is the date of your most recent activity — and it
+  // returns a DATE, not a listing. If there is one, that day is selected and loaded through the
+  // ordinary loadHistory path, so there is still exactly one way a day's rows arrive. If there is
+  // none, AD1's resting state is exactly right and is what still renders: a user with no runs has
+  // no most-recent day, and inventing today for them would be the empty board all over again.
+  //
+  // `historyAuto` records that the panel chose the date rather than the user. The control row reads
+  // it to say WHY this day is on screen, which is the difference between a default and a surprise.
+  const [historyAuto, setHistoryAuto] = useState(false);
+
   // ── TASK AD1: THE SUB-TAB IS PART OF THE QUERY ────────────────────────────────────────────
   //
   // AD1 turns the three outcome groups into sub-tabs and makes the rule explicit: "Switching
@@ -365,9 +383,13 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
    * @param {string} date  "YYYY-MM-DD"
    * @param {string} [group] one of OUTCOME; defaults to whichever sub-tab is active
    */
-  const loadHistory = useCallback(async (date, group) => {
+  const loadHistory = useCallback(async (date, group, { auto = false } = {}) => {
     const wanted = group || historyGroup;
     if (group) setHistoryGroup(group);
+    // AH6: the "your most recent activity" label describes a choice the PANEL made. The moment the
+    // user picks a day themselves it stops being true, so the flag is cleared on every load that
+    // did not come from the mount.
+    setHistoryAuto(auto);
     if (!date) { setHistoryDate(null); setHistory(null); setHistoryMsg(""); return; }
     setHistoryDate(date);
     setHistoryLoading(true);
@@ -388,6 +410,41 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       setHistoryLoading(false);
     }
   }, [historyGroup]);
+
+  /**
+   * AH6: open on the day something last happened.
+   *
+   * ONE request, and it returns a date rather than a listing — so the thing AD1 forbade (shipping a
+   * day's applications nobody asked for) still cannot happen by accident, and the thing it cost
+   * (landing on a blank board) does not.
+   *
+   * Runs once per signed-in user, and only while nothing is selected: a remount that already has a
+   * date must not drag the reader back to the most recent day they were not looking at.
+   */
+  const bootstrappedFor = useRef(null);
+  // The live value of historyDate, for the async bootstrap to read without re-running on it.
+  const historyDateRef = useRef(null);
+  useEffect(() => { historyDateRef.current = historyDate; }, [historyDate]);
+  useEffect(() => {
+    if (!user?.id) return;
+    if (bootstrappedFor.current === user.id) return;
+    bootstrappedFor.current = user.id;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { date } = await api(`/api/apply/history/latest?tzOffset=${tzOffset()}`);
+        // No runs at all: AD1's resting state is the right answer and is left exactly as it was.
+        // Inventing today for a user with no history is the blank board with extra steps.
+        if (cancelled || !date) return;
+        // A date the USER picked while this was in flight outranks the one it was about to choose
+        // for them. Read through a ref rather than a state updater: an updater that calls
+        // loadHistory is not pure, and React double-invokes updaters in development.
+        if (historyDateRef.current) return;
+        loadHistory(date, undefined, { auto: true });
+      } catch { /* the panel still works; it just opens on the resting state */ }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, loadHistory]);
 
   /**
    * Switch sub-tab (AD1 requirement 3).
@@ -610,6 +667,8 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       // AD1: `historyGroup` is the active SUB-TAB, and selectHistoryGroup is the only way to change
       // it — so a tab switch is always one refetch of one group, never three.
       historyDate, historyGroup, history, historyLoading, historyMsg, setHistoryMsg,
+      // AH6: true when the PANEL chose this day, so the control row can say why it is on screen.
+      historyAuto,
       historyMarkers, historyBusyId,
       loadHistory, selectHistoryGroup, loadHistoryMonth, abortRunJob, hideRunJob,
       // The single number the JOBS-adjacent chrome needs: how many things are waiting on a human.

@@ -78,6 +78,7 @@ export function AutoApplyPanel() {
     historyDate, historyGroup = OUTCOME.PENDING, history, historyLoading, historyMsg,
     historyMarkers, historyBusyId,
     loadHistory, selectHistoryGroup, loadHistoryMonth, abortRunJob, hideRunJob,
+    historyAuto,
   } = useAutoApply();
 
   const nothingYet =
@@ -339,6 +340,15 @@ export function AutoApplyPanel() {
     return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
   };
 
+  // AH6: today, as the panel's own YYYY-MM-DD. Built from LOCAL parts for the same reason
+  // localDateLabel is — toISOString() would hand back the UTC day, which west of Greenwich is
+  // tomorrow for most of the evening.
+  const todayIso = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const isToday = (iso) => iso === todayIso();
+
   // The calendar popover's open/closed state and its anchor rect used to be three pieces of local
   // state here. They moved INTO DateFilterButton with the rest of the control (AD1), because they
   // were chrome that both panels were keeping their own copy of — and the Database panel's copy was
@@ -572,6 +582,20 @@ export function AutoApplyPanel() {
         }))}
       />
 
+      {/* ── AH6: WHAT THIS TAB MEANS, VISIBLY ────────────────────────────────────────────────
+          The three notes already existed — "sent to the employer", "queued, in flight, or waiting
+          on you", "ended without being sent" — and every one of them was in a `title` attribute.
+          A tooltip is invisible: it needs a mouse, a hover, and a second of patience, and it does
+          not exist at all on a touch screen. A first-time reader looking at COMPLETED / PENDING /
+          ABORTED has to guess what an application does to move between them, and "Aborted" in
+          particular reads as failure when three of its four statuses are not failures.
+          One line, for the tab you are actually on. */}
+      <div data-rm-tab-note={historyGroup}
+           style={{ fontSize: 11.5, color: theme.textMuted, padding: "0 2px", marginTop: -4 }}>
+        <span style={{ fontWeight: 700, color: theme.text }}>{OUTCOME_LABELS[historyGroup].label}</span>
+        {` — ${OUTCOME_LABELS[historyGroup].note}.`}
+      </div>
+
       {/* ── The control row ──────────────────────────────────────────────────────────────────
           Search, then the date filter. THE CALENDAR IS THE PRIMARY NAVIGATION here, which is the
           inversion AD1 asks for: the panel does not show you a default day's worth of applications
@@ -616,6 +640,29 @@ export function AutoApplyPanel() {
         </span>
       </div>
 
+      {/* ── AH6: SAY WHY THIS DAY IS ON SCREEN ───────────────────────────────────────────────
+          A date the reader did not choose needs to explain itself, or it is indistinguishable from
+          a date they chose and forgot. This appears only when the PANEL picked it, and it names
+          the alternative — today — because the whole point is that the two are usually different
+          and the panel has quietly shown you the more useful one. */}
+      {historyAuto && historyDate && (
+        <div data-rm-auto-date={historyDate}
+             style={{ fontSize: 11.5, color: theme.textMuted, padding: "0 2px" }}>
+          Showing <span style={{ fontWeight: 700, color: theme.text }}>{localDateLabel(historyDate)}</span>
+          {" — your most recent activity."}
+          {!isToday(historyDate) && (
+            <>
+              {" "}
+              <button onClick={() => loadHistory(todayIso(), historyGroup)}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer",
+                         color: theme.accent, font: "inherit", textDecoration: "underline" }}>
+                Show today instead
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── AD1: THE STANDING WORK, ON THE PENDING TAB ───────────────────────────────────────
           Everything from here to the end of this block is what is WAITING ON A HUMAN RIGHT NOW,
           and it is deliberately NOT behind the date picker.
@@ -638,6 +685,19 @@ export function AutoApplyPanel() {
           until a date is picked. */}
       {historyGroup === OUTCOME.PENDING && (
         <>
+        {/* AH6: SAY THAT THIS BAND IS NOT THE DATE'S. The split between "what needs you" and "what
+            did I queue that day" is the right one and was invisible: a reader who has just picked a
+            date reasonably reads every count below it as belonging to that date. It does not, and
+            it cannot — a portal batch spans the days its applications were queued on. Rendered only
+            when there IS standing work, so an empty tab does not explain a section that is absent. */}
+        {(applyInFlight.length > 0 || needsYouCount > 0) && (
+          <div data-rm-standing-scope="all-time"
+               style={{ fontSize: 11.5, color: theme.textMuted, padding: "0 2px" }}>
+            Waiting on you right now — whatever day it was queued, so this is not filtered by the
+            date above.
+          </div>
+        )}
+
         {/* ── IN FLIGHT ────────────────────────────────────────────────────────────────────────
             NOT one of AB4's three outcome sections, and deliberately placed ABOVE them rather than
             made a fourth. A queued or running application has no outcome yet — it is neither

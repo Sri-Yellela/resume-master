@@ -1737,12 +1737,42 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   };
 
   /**
+   * THE DATE OF THE MOST RECENT ACTIVITY (AH6). One row, one MAX, no listing.
+   *
+   * AD1 made the panel open on nothing and ask which day you mean, and that inversion was right
+   * about one thing and wrong about another. Right: the panel must not silently ship a day's worth
+   * of applications you did not ask for. Wrong: it landed on a blank board with a prompt, and the
+   * commonest reason to open Auto Apply is to see what happened on the last run — which was almost
+   * never today. So the answer to "which day?" was one the panel could have worked out.
+   *
+   * This is the cheap half of that. It returns a DATE, not a listing: the caller then asks for that
+   * day through the ordinary /api/apply/history path, so there is still exactly one way to load a
+   * day's rows and the counts still come from the same partition as the rows.
+   *
+   * Keyed on created_at like the day filter itself — WHEN YOU QUEUED IT, not when it finished — so
+   * "your most recent activity" means the same thing here as it does on the calendar.
+   */
+  app.get("/api/apply/history/latest", requireAuth, (req, res) => {
+    const row = db.prepare(`
+      SELECT MAX(created_at) AS latest FROM apply_run_jobs
+      WHERE user_id=? AND hidden_at IS NULL
+    `).get(req.user.id);
+    if (!row?.latest) return res.json({ date: null });
+    // Rendered in the CALLER'S day, for the same reason dayRangeUtc takes an offset: a run queued
+    // at 9pm in Boston belongs to that Boston day, not to the UTC one it lands in.
+    const off = Number.isFinite(Number(req.query.tzOffset)) ? Number(req.query.tzOffset) : 0;
+    const local = new Date((row.latest - off * 60) * 1000);
+    const date = `${local.getUTCFullYear()}-${String(local.getUTCMonth() + 1).padStart(2, "0")}-${String(local.getUTCDate()).padStart(2, "0")}`;
+    res.json({ date });
+  });
+
+  /**
    * One day's applications, in three groups — or, since AD1, ONE group of them plus the counts of
    * all three.
    *
    * Nothing here loads unless a date is asked for — there is no "recent" default and no implicit
-   * today, because requirement 2 is that the panel's initial render issues no history query at all,
-   * and an endpoint with a sensible default invites a caller to hit it on mount.
+   * today. AH6 gives the PANEL a default (the date above) but not this endpoint: a caller still has
+   * to name the day it wants, so an accidental mount cannot ship a listing.
    *
    * ── TASK AD1: `group`, AND WHY THE COUNTS ARE NOT A SECOND REQUEST ─────────────────────────
    *

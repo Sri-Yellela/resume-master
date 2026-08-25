@@ -556,12 +556,34 @@ test("AC4 requirement 2: nothing loads until a date is selected", () => {
   // Every other feed in the context is loaded by a useEffect on `user`. The history must not be.
   assert.match(ctx, /const \[historyDate, setHistoryDate\] = useState\(null\)/);
   assert.match(ctx, /const \[history, setHistory\] = useState\(null\)/);
-  for (const effectBody of ctx.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[/g)) {
-    assert.ok(!/loadHistory\b/.test(effectBody[1]),
-      "an effect calls loadHistory — the panel now issues a history query on render");
-  }
+
+  // ── AH6 NARROWED THIS REQUIREMENT, AND IT IS WORTH SAYING WHICH PART ────────────────────────
+  //
+  // AC4 forbade a loader effect outright. AH6 adds exactly one: a mount that asks
+  // /api/apply/history/latest — a DATE, never rows — and opens on that day if there is one. The
+  // rule AC4 was protecting is unchanged and is what is asserted now: no day's applications are
+  // shipped to a panel that did not ask for a day, and there is still no implicit TODAY.
+  //
+  // Why the change was right: AC4's inversion left the panel on a blank board with "pick a date",
+  // and the commonest reason to open Auto Apply is to see what happened on the last run, which is
+  // almost never today. The panel was making the reader answer a question it could answer itself.
+  // A user with NO runs still gets AC4's resting state exactly as it was — that case is driven by
+  // scripts/abPanelUi.mjs, and the AH6 default by scripts/ah6RecentRunDefault.mjs.
+  const loaderEffects = [...ctx.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[/g)]
+    .filter(m => /loadHistory\b/.test(m[1]));
+  assert.equal(loaderEffects.length, 1,
+    "exactly one effect may load the history — AH6's latest-date bootstrap, and nothing else");
+  const bootstrap = loaderEffects[0][1];
+  assert.match(bootstrap, /\/api\/apply\/history\/latest/,
+    "the one loader effect must ask for a DATE, not for a day's rows");
+  assert.match(bootstrap, /if \(cancelled \|\| !date\) return;/,
+    "no date means no history call at all — AC4's resting state, untouched");
+  assert.match(bootstrap, /\{ auto: true \}/,
+    "a date the panel chose must be marked as such, so the UI can say why it is on screen");
+
+  // The prohibition that has NOT changed: there is no implicit today anywhere.
   assert.ok(!/loadHistory\(\s*new Date\(\)|loadHistory\(\s*today/.test(ctx),
-    "the history defaults to today somewhere — requirement 2 says nothing loads until a date is picked");
+    "the history defaults to today somewhere — AH6 defaults to the LAST RUN, never to today");
 });
 
 test("AC4 -> AD1: 'not asked yet', 'nothing happened' and 'nothing in this tab' are THREE states", () => {

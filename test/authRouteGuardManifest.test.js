@@ -199,6 +199,9 @@ const AUTHENTICATED = new Set([
   "POST /api/apply/run-jobs/:runJobId/abort",
   "DELETE /api/apply/run-jobs/:runJobId",
   "GET /api/apply/history",
+  // AH6: the date of your most recent activity. One MAX, no rows — the cheap question the panel
+  // asks on mount so it can open on the day something last happened instead of on a blank board.
+  "GET /api/apply/history/latest",
   "GET /api/apply/history/months/:month",
   "GET /api/apply/gate-packets",
   "POST /api/apply/gate-packets/:packetId/token",

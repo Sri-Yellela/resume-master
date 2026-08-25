@@ -52,6 +52,7 @@ const EXCLUDED = {
   ah3TermPanelShots:   "screenshots; the ATS panel half of ah3TermQuality, which stays in the suite",
   ah4FindingShots:     "screenshots; the finding-strip half of ah4LocationClaims, which stays in the suite",
   ah5FillLogShots:     "screenshots; the panel half of ah5ReuseAndFillLog, which stays in the suite",
+  ah6RecentRunDefault: "screenshots; drives the real panel in a browser, like abPanelUi which covers the no-history case",
   ae1Diagnose:         "instrument, not a harness",
   ae1LiveVerify:       "points at a REAL EMPLOYER — never automated",
   g0ActiveTabSpike:    "spike; needs a manually loaded unpacked extension",
