@@ -44,6 +44,6 @@ Operations professionals design and manage processes, supply chains, logistics n
 
 Managed, Optimised, Reduced (cost/waste/defects/cycle time), Improved (throughput/OEE/OTIF), Designed, Implemented, Standardised, Trained, Coordinated, Sourced, Negotiated, Forecasted, Procured, Commissioned, Automated, Streamlined, Audited, Reported, Drove (cost savings/efficiency), Scaled, Troubleshot, Mitigated, Led (kaizen/process improvement)
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the operations function (supply chain/manufacturing/logistics/quality/procurement). Name the ERP or planning system and the improvement methodology most prominent in the JD. Close with cost or throughput outcome language.
+Open as Layer 1 requires — the candidate's own role title and years — then the operations function (supply chain/manufacturing/logistics/quality/procurement). Name the ERP or planning system and the improvement methodology most prominent in the JD. Close with cost or throughput outcome language.<!--ENDIF-->

@@ -40,6 +40,6 @@ Extract and classify entirely from the JD:
 
 Managed, Developed, Delivered, Coordinated, Facilitated, Improved, Implemented, Analysed, Communicated, Reported, Trained, Designed, Evaluated, Resolved, Maintained, Supported, Organised, Monitored, Presented, Negotiated, Collaborated, Guided, Assessed, Reduced, Increased, Standardised, Documented, Initiated, Reviewed, Supervised
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and their years from the runtime inputs, never the JD's. Identify two or three capabilities that directly match the JD requirements — use the JD's own vocabulary. Close with one sentence signalling fit for the specific business context of the hiring organisation, using language taken directly from the JD. Avoid industry jargon not present in the JD.
+Open as Layer 1 requires — the candidate's own role title and their years from the runtime inputs, never the JD's. Identify two or three capabilities that directly match the JD requirements — use the JD's own vocabulary. Close with one sentence signalling fit for the specific business context of the hiring organisation, using language taken directly from the JD. Avoid industry jargon not present in the JD.<!--ENDIF-->

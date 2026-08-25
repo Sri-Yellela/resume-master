@@ -140,7 +140,10 @@ ${base.content}`;
 const CONTROL = process.argv.includes("--control");
 
 loadAllPrompts();
-const { systemBlocks } = assemblePrompt("general", "TAILORED", runtimeInputs);
+// AI1 made the summary opt-in and default OFF. This harness is ABOUT the summary's years rule,
+// so it asks for one explicitly — without the flag the prompt would carry no summary rules and
+// every assertion below about the summary would pass or fail for the wrong reason.
+const { systemBlocks } = assemblePrompt("general", "TAILORED", runtimeInputs, { SUMMARY: true });
 // The layer-1 rules must actually be in the assembled system prompt, or this verifies nothing.
 check("the assembled prompt carries the AF2 rules",
   systemBlocks.some(b => /never from the JD/i.test(typeof b === "string" ? b : (b?.text || ""))));

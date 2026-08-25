@@ -46,6 +46,6 @@ Finance professionals model, analyse, forecast, and communicate financial perfor
 
 Modelled, Forecasted, Analysed, Structured, Valued, Negotiated, Executed, Closed, Underwritten, Syndicated, Hedged, Optimised, Reported, Reconciled, Audited, Assessed, Stress-tested, Presented, Advised, Delivered, Quantified, Benchmarked, Monitored, Governed, Consolidated, Reviewed, Approved
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the finance function (investment banking/FP&A/credit/asset management/accounting). Name the primary modelling or analytical tools from the JD. Close with deal type, reporting function, or business outcome language matching the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the finance function (investment banking/FP&A/credit/asset management/accounting). Name the primary modelling or analytical tools from the JD. Close with deal type, reporting function, or business outcome language matching the JD.<!--ENDIF-->

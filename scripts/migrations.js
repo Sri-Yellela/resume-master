@@ -2614,4 +2614,25 @@ export const MIGRATIONS = [
           ON resumes(user_id, job_id, domain_profile_id, updated_at DESC);
       `,
     },
+    {
+      // AI1. The summary section becomes a per-profile choice, and its default is OFF.
+      //
+      // WHY A COLUMN AND NOT A SETTINGS BLOB
+      // domain_profiles has no settings JSON to extend — every preference on it is its own typed
+      // column (seniority, target_titles, selected_*). A blob added for one boolean would be the
+      // odd one out and the first place a later setting hid from a query.
+      //
+      // DEFAULT 0 CHANGES WHAT EXISTING USERS GET, ON PURPOSE, AND THE UI SAYS SO.
+      // Every resume generated before this had a summary, so a default of 0 means the next resume
+      // an existing candidate generates will not. Backfilling 1 for existing rows was the other
+      // option and was rejected: it would leave two populations with different defaults and no way
+      // to tell them apart, and the product decision is that a summary is opt-in for everyone.
+      // The cost of the change is a section the candidate can turn back on in one click; the cost
+      // of hiding it is a resume that silently differs from the last one they read. So the toggle
+      // states in the UI that it changes the next generated resume, rather than leaving it found.
+      id: "092_profile_summary_opt_in",
+      sql: `
+        ALTER TABLE domain_profiles ADD COLUMN include_summary INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
   ];

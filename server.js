@@ -2971,6 +2971,27 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON resumes(user_id, job_id, domain_profile_id, updated_at DESC);
       `,
     },
+    {
+      // AI1. The summary section becomes a per-profile choice, and its default is OFF.
+      //
+      // WHY A COLUMN AND NOT A SETTINGS BLOB
+      // domain_profiles has no settings JSON to extend — every preference on it is its own typed
+      // column (seniority, target_titles, selected_*). A blob added for one boolean would be the
+      // odd one out and the first place a later setting hid from a query.
+      //
+      // DEFAULT 0 CHANGES WHAT EXISTING USERS GET, ON PURPOSE, AND THE UI SAYS SO.
+      // Every resume generated before this had a summary, so a default of 0 means the next resume
+      // an existing candidate generates will not. Backfilling 1 for existing rows was the other
+      // option and was rejected: it would leave two populations with different defaults and no way
+      // to tell them apart, and the product decision is that a summary is opt-in for everyone.
+      // The cost of the change is a section the candidate can turn back on in one click; the cost
+      // of hiding it is a resume that silently differs from the last one they read. So the toggle
+      // states in the UI that it changes the next generated resume, rather than leaving it found.
+      id: "092_profile_summary_opt_in",
+      sql: `
+        ALTER TABLE domain_profiles ADD COLUMN include_summary INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -7400,8 +7421,14 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
     ? listProfileClaims(db, { userId, profileId: activeDomainProfile.id })
     : null;
 
+  // AI1. The summary is opt-in per job profile and defaults OFF, so a profile that predates the
+  // column (or a generation with no active profile at all) gets no summary — the documented
+  // default, not an accident of a NULL. The flag reaches the MODEL, not a post-processor: with it
+  // off the SUMMARY rules are absent from the assembled prompt, so no summary is generated to
+  // strip. Both tools route through here, so A+ and Generate honour it identically.
+  const includeSummary = activeDomainProfile?.include_summary === 1;
   const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, promptMode, employers, activeDomainProfile, profileClaims);
-  const { systemBlocks } = assemblePrompt(domainModuleKey, promptMode, runtimeInputs);
+  const { systemBlocks } = assemblePrompt(domainModuleKey, promptMode, runtimeInputs, { SUMMARY: includeSummary });
 
   const genStart = Date.now();
   const resumeMsg = await callModel({
@@ -7515,10 +7542,22 @@ RULES:
   // activeDomainProfile carries the seniority the candidate chose for this profile, which is the
   // authority on their level — without it the guard falls back to the base resume's wording, which
   // most resumes never state, and refuses every seniority word in the output.
-  assertResumeClaims({
+  //
+  // AI1. With the summary opt-in, the shape of the document this reads is no longer fixed, so what
+  // the guard INSPECTED is logged next to what it found. The inflation check reads the whole
+  // document and is unaffected by the summary's absence; the under-claim check reads the headline
+  // region, which is the summary when there is one and the header block when there is not.
+  // assertResumeClaims itself throws when the document text is empty, so "no violation" can never
+  // mean "nothing was read".
+  const claimCheck = assertResumeClaims({
     html: formattedHtml, profile, baseResumeText: authoritativeResumeText,
     domainProfile: activeDomainProfile,
   });
+  console.log(
+    `[generate] claim guard: inspected ${claimCheck.checked.inspected.documentChars} chars, ` +
+    `headline region "${claimCheck.checked.inspected.headlineRegion}" ` +
+    `(${claimCheck.checked.inspected.headlineChars} chars), summary ${includeSummary ? "on" : "off"}`
+  );
 
   const resumeStripped = stripResumeHtml(formattedHtml);
   const activeProfile = getOrRepairActiveProfile(userId);
@@ -8324,8 +8363,14 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     } catch {}
 
     const fakeJob = { title: "Role", company: "Company", description: jdText, category: "", stack: "" };
+    // AI1. Standalone has no account and therefore no job profile to hold the preference, so the
+    // request carries it and the DEFAULT IS THE SAME as the per-profile column's: off. Anything
+    // else would give the two entry points different resumes for the same candidate. The value is
+    // read strictly — only an explicit true turns the section on, so a client that omits the field
+    // or sends something unexpected lands on the documented default rather than on a guess.
+    const includeSummary = req.body?.include_summary === true || req.body?.include_summary === "true";
     const runtimeInputs = buildRuntimeInputs({}, fakeJob, resumeText, "GENERATE", []);
-    const { systemBlocks } = assemblePrompt(domainModuleKey, "GENERATE", runtimeInputs);
+    const { systemBlocks } = assemblePrompt(domainModuleKey, "GENERATE", runtimeInputs, { SUMMARY: includeSummary });
 
     const resumeMsg = await callModel({
       anthropic, db, purpose: "standalone_generate", userId: SYSTEM_USER_ID,

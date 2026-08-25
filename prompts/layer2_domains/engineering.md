@@ -84,6 +84,6 @@ Use this registry to verify company-authentic tool placement. Only assign a tool
 
 Built, Designed, Reduced, Migrated, Refactored, Automated, Optimised, Deployed, Implemented, Instrumented, Architected, Containerised, Provisioned, Debugged, Profiled, Benchmarked, Scaled, Integrated, Modularised, Secured, Monitored, Orchestrated, Sharded, Replicated, Partitioned, Load-tested, Diagnosed, Shipped, Merged, Released, Validated, Verified, Traced, Ported, Stabilised
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and their years from the runtime inputs, never the JD's. Name the primary language/stack and the system class (distributed systems, ML platform, data infrastructure, firmware, embedded software, drivers, platform software, validation, etc.). Use infrastructure, systems, hardware, or debug vocabulary native to the JD. Close with a sentence about the business domain or product area the candidate has most experience in, framed using the JD's functional language.
+Open as Layer 1 requires — the candidate's own role title and their years from the runtime inputs, never the JD's. Name the primary language/stack and the system class (distributed systems, ML platform, data infrastructure, firmware, embedded software, drivers, platform software, validation, etc.). Use infrastructure, systems, hardware, or debug vocabulary native to the JD. Close with a sentence about the business domain or product area the candidate has most experience in, framed using the JD's functional language.<!--ENDIF-->

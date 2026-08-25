@@ -45,6 +45,6 @@ IT project managers deliver technology initiatives: system implementations, migr
 
 Delivered, Governed, Coordinated, Tracked, Escalated, Facilitated, Managed, Reported, Communicated, Mitigated, Planned, Baselined, Transitioned, Onboarded, Trained, Deployed, Migrated, Integrated, Consolidated, Maintained, Documented, Evaluated, Negotiated, Socialised, Steered
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the delivery methodology (waterfall/agile/hybrid). Name two frameworks or certifications prominent in the JD. Close with stakeholder and governance vocabulary from the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the delivery methodology (waterfall/agile/hybrid). Name two frameworks or certifications prominent in the JD. Close with stakeholder and governance vocabulary from the JD.<!--ENDIF-->

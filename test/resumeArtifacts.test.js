@@ -64,7 +64,10 @@ test("cached artifacts reuse stored ATS reports and deterministic formatting by 
 
 test("prompt assembler caches stable mode overlays", () => {
   const assembler = fs.readFileSync("services/promptAssembler.js", "utf8");
-  assert.match(assembler, /\.\.\.\(layer3Text \? \{ cache_control: \{ type: "ephemeral" \} \} : \{\}\)/);
+  // Reads layer3Resolved, not layer3Text: AI1 resolves the prompt-file conditionals before the
+  // block is built, so the text that is cached is the text that is SENT. Asserting against the
+  // raw file variable would pass while a resolved-but-uncached block went out on every call.
+  assert.match(assembler, /\.\.\.\(layer3Resolved \? \{ cache_control: \{ type: "ephemeral" \} \} : \{\}\)/);
 });
 
 test("admin job review remains narrow to classification reassignment", () => {

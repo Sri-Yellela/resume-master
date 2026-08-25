@@ -43,6 +43,6 @@ Designers create interfaces, systems, and experiences that help users accomplish
 
 Designed, Prototyped, Researched, Tested, Iterated, Facilitated, Developed (design system), Mapped (user journeys), Reduced (friction/error rate), Improved (completion rate/satisfaction), Documented, Collaborated, Presented, Advocated (accessibility), Shipped, Validated, Synthesised, Defined, Established (design tokens/standards), Conducted (user interviews)
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the design function (product design/UX research/design systems/visual design). Name the primary tool and design system context. Close with user or business outcome language matching the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the design function (product design/UX research/design systems/visual design). Name the primary tool and design system context. Close with user or business outcome language matching the JD.<!--ENDIF-->

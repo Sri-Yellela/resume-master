@@ -49,6 +49,6 @@ Construction project managers plan, budget, schedule, and coordinate multi-trade
 
 Managed, Coordinated, Procured, Negotiated, Scheduled, Delivered, Supervised, Commissioned, Tracked, Resolved, Prepared, Reviewed, Approved, Executed, Mitigated, Forecasted, Administered, Inspected, Facilitated, Closed out, Value-engineered, Bid-levelled, Escalated, Monitored, Reported
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the project type (commercial, infrastructure, healthcare, multi-family, etc.). Name scheduling platform, contracting method expertise, and typical project scale (dollar value range). Close using delivery vocabulary from the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the project type (commercial, infrastructure, healthcare, multi-family, etc.). Name scheduling platform, contracting method expertise, and typical project scale (dollar value range). Close using delivery vocabulary from the JD.<!--ENDIF-->

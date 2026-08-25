@@ -322,7 +322,9 @@ ${JOB.description}
 ${base.content}`;
 
   loadAllPrompts();
-  const { systemBlocks } = assemblePrompt("general", "TAILORED", runtimeInputs);
+  // AI1: the summary is opt-in and defaults OFF; this harness asserts on the summary, so it
+  // requests one. See the same note in af2ClaimVerify.mjs.
+  const { systemBlocks } = assemblePrompt("general", "TAILORED", runtimeInputs, { SUMMARY: true });
 
   console.log(`\n  calling ${MODEL_SONNET} ...`);
   const anthropic = new Anthropic({ apiKey: key });

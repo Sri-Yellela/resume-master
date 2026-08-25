@@ -46,6 +46,6 @@ Data professionals build pipelines, models, and platforms that enable data-drive
 
 Built, Modelled, Forecasted, Identified, Surfaced, Quantified, Evaluated, Analysed, Synthesised, Mapped, Instrumented, Engineered, Optimised, Reduced (latency/cost), Improved (accuracy/coverage), Deployed, Designed, Automated, Monitored, Validated, Standardised, Migrated, Federated, Governed, Catalogued, Partitioned
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the data function (data engineering/analytics/data science/ML engineering). Name the primary platform and language. Close with business or product outcome language from the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the data function (data engineering/analytics/data science/ML engineering). Name the primary platform and language. Close with business or product outcome language from the JD.<!--ENDIF-->

@@ -71,8 +71,46 @@ export function loadAllPrompts() {
   }
 }
 
+/**
+ * Prompt-file conditionals, so an opt-out section's RULES never reach the model (AI1 requirement 3).
+ *
+ * WHY NOT STRIP THE OUTPUT INSTEAD
+ * Generating a summary and deleting it downstream pays for tokens that are thrown away, and leaves
+ * a stripping step that fails OPEN — one regex that stops matching and the section the candidate
+ * turned off is on their resume, silently. The rule coming out of the prompt has no such failure
+ * mode: the model is never told to write the section, so there is nothing to remove.
+ *
+ * WHY MARKERS IN THE MARKDOWN RATHER THAN A SECOND PROMPT FILE
+ * The SUMMARY rules are not one contiguous block — the output contract lists the section, the
+ * STRUCTURE rules normalise its label and fix its position, and the final silent check names its
+ * length. A parallel copy of layer 1 would be four places to keep in step and one place to forget.
+ * Markers keep the two variants adjacent to each other and to the rules they qualify.
+ *
+ * Syntax, deliberately HTML comments so the files stay readable markdown:
+ *   <!--IF:SUMMARY-->kept when the flag is on<!--ENDIF-->
+ *   <!--IFNOT:SUMMARY-->kept when the flag is off<!--ENDIF-->
+ * Spans may be inline or span lines. An unknown flag name is treated as OFF rather than ignored:
+ * a typo that silently kept a rule would defeat the point of removing it.
+ */
+const CONDITIONAL_RE = /<!--\s*(IF|IFNOT):([A-Z_]+)\s*-->([\s\S]*?)<!--\s*ENDIF\s*-->/g;
+
+export function applyPromptConditionals(text, flags = {}) {
+  return String(text ?? "").replace(CONDITIONAL_RE, (_m, kind, name, body) => {
+    const on = flags[name] === true;
+    return (kind === "IF") === on ? body : "";
+  })
+    // A removed block leaves the blank lines that framed it; three or more in a row become two so
+    // the assembled prompt reads as prose rather than as something with holes cut in it.
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/(\r\n){3,}/g, "\r\n\r\n");
+}
+
 // mode accepts active labels ("GENERATE" | "A_PLUS") and legacy DB labels.
-export function assemblePrompt(domainModuleKey, mode, runtimeInputs) {
+//
+// `flags` gates the prompt-file conditionals above. SUMMARY defaults to FALSE — the same default
+// as the per-profile preference it carries, so a caller that forgets to pass it gets the documented
+// product default rather than a quietly different resume.
+export function assemblePrompt(domainModuleKey, mode, runtimeInputs, flags = {}) {
   if (!_layer1Cache.text) {
     throw new Error("Prompt assembler not initialised - call loadAllPrompts() at startup");
   }
@@ -89,23 +127,34 @@ export function assemblePrompt(domainModuleKey, mode, runtimeInputs) {
     console.warn(`[prompt] Mode overlay for "${modeKey}" not found - proceeding without it`);
   }
 
+  // Resolved against the CACHED file text, never written back to the cache — the same process
+  // serves users whose preferences differ, and a resolved copy in _layer1Cache would leak one
+  // user's setting into the next request.
+  //
+  // Prompt caching still works: SUMMARY has two values, so there are two stable variants of each
+  // block rather than one, and each is byte-identical call to call.
+  const resolvedFlags = { SUMMARY: flags.SUMMARY === true };
+  const layer1Resolved = applyPromptConditionals(_layer1Cache.text, resolvedFlags);
+  const layer2Resolved = applyPromptConditionals(layer2Text, resolvedFlags);
+  const layer3Resolved = applyPromptConditionals(layer3Text, resolvedFlags);
+
   const systemBlocks = [
     {
       type: "text",
-      text: _layer1Cache.text,
+      text: layer1Resolved,
       cache_control: { type: "ephemeral" },
     },
     {
       type: "text",
-      text: layer2Text,
+      text: layer2Resolved,
       cache_control: { type: "ephemeral" },
     },
     {
       type: "text",
-      text: layer3Text,
-      ...(layer3Text ? { cache_control: { type: "ephemeral" } } : {}),
+      text: layer3Resolved,
+      ...(layer3Resolved ? { cache_control: { type: "ephemeral" } } : {}),
     },
   ];
 
-  return { systemBlocks, userMessage: runtimeInputs };
+  return { systemBlocks, userMessage: runtimeInputs, flags: resolvedFlags };
 }

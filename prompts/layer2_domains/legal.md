@@ -42,6 +42,6 @@ Legal professionals advise on regulatory compliance, negotiate and draft contrac
 
 Drafted, Negotiated, Advised, Reviewed, Analysed, Managed, Structured, Executed, Coordinated, Researched, Mitigated, Documented, Filed, Litigated, Argued, Settled, Evaluated, Assessed, Governed, Ensured (compliance), Responded, Represented, Closed, Supervised, Interpreted
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the practice area (corporate/M&A, employment, IP, litigation, compliance, in-house general counsel). Name the transaction or regulatory framework most prominent in the JD. Close with business risk or transaction outcome language.
+Open as Layer 1 requires — the candidate's own role title and years — then the practice area (corporate/M&A, employment, IP, litigation, compliance, in-house general counsel). Name the transaction or regulatory framework most prominent in the JD. Close with business risk or transaction outcome language.<!--ENDIF-->

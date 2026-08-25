@@ -755,11 +755,28 @@ ${section.rows.map(row => `  <li>${row.label ? `<strong>${renderInlineRichText(r
 ${section.entries.map(renderEntry).join("\n")}`;
 }
 
+/** True when a section would render as a heading over nothing. */
+function isEmptySection(section) {
+  if (section.type === "summary") return !String(section.text || "").trim();
+  if (section.type === "skills")  return !(section.rows || []).length;
+  return !(section.entries || []).length;
+}
+
 export function renderStructuredResume(structure) {
   const normalized = normalizeStructure(structure);
   const orderedSections = SECTION_ORDER
     .map(title => normalized.sections.find(section => section.title === title))
-    .filter(Boolean);
+    .filter(Boolean)
+    // A section with nothing in it renders as a title and a rule line over blank space, which is
+    // worse than not being there — it reads to a human as a section the candidate forgot to fill
+    // in, and to an ATS as an empty field. Absent means ABSENT (AI1 requirement 2), and the
+    // sections beneath reflow because the layout is document flow with no reserved slots.
+    //
+    // THIS IS NOT WHAT ENFORCES THE SUMMARY TOGGLE. That is the prompt: with the summary off the
+    // rules to write one are not in the model's context, so there is no summary here to drop. A
+    // stripping step is exactly what AI1 requirement 3 rules out, because it fails open. This
+    // drops EMPTY sections, of any kind, which was always the right thing to do with one.
+    .filter(section => !isEmptySection(section));
   const body = [
     renderHeader(normalized.header),
     ...orderedSections.map(renderSection),

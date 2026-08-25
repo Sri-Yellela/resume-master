@@ -45,6 +45,6 @@ Healthcare project managers deliver clinical, operational, or technology initiat
 
 Coordinated, Implemented, Standardised, Trained, Evaluated, Monitored, Reported, Facilitated, Aligned, Documented, Transitioned, Piloted, Assessed, Mitigated, Communicated, Designed, Deployed, Audited, Credentialed, Governed, Improved, Measured, Streamlined, Reduced (wait times/readmissions/cost)
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the setting (acute care, health plan, health IT, public health). Name the regulatory framework and/or EHR system most prominent in the JD. Close with patient outcome or operational improvement language from the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the setting (acute care, health plan, health IT, public health). Name the regulatory framework and/or EHR system most prominent in the JD. Close with patient outcome or operational improvement language from the JD.<!--ENDIF-->

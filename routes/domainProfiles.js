@@ -80,6 +80,9 @@ function cleanStringArray(value, limit = 20) {
 function parseProfileRow(row) {
   return {
     ...row,
+    // AI1. Sent as a boolean rather than the stored 0/1, because the client renders it as a
+    // checkbox and `0` is truthy once it has been through JSON and a `||` somewhere.
+    include_summary: row.include_summary === 1,
     target_titles: JSON.parse(row.target_titles || "[]"),
     selected_keywords: JSON.parse(row.selected_keywords || "[]"),
     selected_verbs: JSON.parse(row.selected_verbs || "[]"),
@@ -210,12 +213,21 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
     if (!profile) return res.status(404).json({ error: "Profile not found" });
 
     const allowed = ["profile_name","role_family","domain","seniority",
-                     "target_titles","selected_keywords","selected_verbs","selected_tools"];
+                     "target_titles","selected_keywords","selected_verbs","selected_tools",
+                     "include_summary"];
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
     if (!Object.keys(updates).length) return res.status(400).json({ error: "No fields to update" });
+
+    // AI1. The column is NOT NULL, and the client sends a boolean — coerced here so a stray
+    // string, null or number cannot reach the INSERT. Anything that is not an affirmative is OFF,
+    // which is also the default, so a malformed request can only ever fail towards no summary.
+    if (updates.include_summary !== undefined) {
+      updates.include_summary =
+        (updates.include_summary === true || updates.include_summary === 1 || updates.include_summary === "true") ? 1 : 0;
+    }
 
     // JSON-encode array fields
     for (const arrKey of ["target_titles","selected_keywords","selected_verbs","selected_tools"]) {

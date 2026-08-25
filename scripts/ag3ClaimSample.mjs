@@ -161,14 +161,16 @@ ${tier.description}
 ${baseText}`;
 }
 
-const { systemBlocks: probeBlocks } = assemblePrompt("general", "TAILORED", buildRuntimeInputs(TIERS[0], ANCHORED));
+// AI1: the summary is opt-in and defaults OFF; this harness measures the summary's years figure
+// across 12 generations, so it requests one. See the same note in af2ClaimVerify.mjs.
+const { systemBlocks: probeBlocks } = assemblePrompt("general", "TAILORED", buildRuntimeInputs(TIERS[0], ANCHORED), { SUMMARY: true });
 preflight("the assembled prompt carries the AF2 rules",
   probeBlocks.some(b => /never from the JD/i.test(typeof b === "string" ? b : (b?.text || ""))));
 if (preflightFailed) { console.error("\npreflight failed — not spending tokens on a run that proves nothing"); process.exit(2); }
 
 async function generateOnce(tier, condition, baseText, run) {
   const runtimeInputs = buildRuntimeInputs(tier, baseText);
-  const { systemBlocks } = assemblePrompt("general", "TAILORED", runtimeInputs);
+  const { systemBlocks } = assemblePrompt("general", "TAILORED", runtimeInputs, { SUMMARY: true });
   const msg = await callModel({
     anthropic, db, purpose: "ag3_claim_sample", userId: profile.user_id,
     model: MODEL_SONNET,

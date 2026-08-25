@@ -43,6 +43,6 @@ HR professionals design and operate people systems: talent acquisition, performa
 
 Recruited, Onboarded, Designed, Implemented, Partnered, Advised, Facilitated, Trained, Developed, Managed (programmes), Reduced (time-to-fill/attrition), Improved (engagement/retention), Streamlined, Standardised, Communicated, Coached, Evaluated, Audited, Reported, Resolved, Aligned, Restructured, Negotiated, Administered, Sourced
 
-### E. SUMMARY FRAMING GUIDANCE
+<!--IF:SUMMARY-->### E. SUMMARY FRAMING GUIDANCE
 
-Open as Layer 1 requires — the candidate's own role title and years — then the HR function (HRBP/TA/compensation/L&D/people ops). Name the primary HRIS or ATS from the JD. Close with people or organisational outcome language matching the JD.
+Open as Layer 1 requires — the candidate's own role title and years — then the HR function (HRBP/TA/compensation/L&D/people ops). Name the primary HRIS or ATS from the JD. Close with people or organisational outcome language matching the JD.<!--ENDIF-->

@@ -9,7 +9,7 @@ deterministically in server.js; this prompt defines semantic content rules.
 
 You generate a complete self-contained HTML resume. Output only HTML beginning with `<html>`. No markdown fences, preamble, explanation, external fonts, CDN links, JavaScript, images, icons, or graphics.
 
-The response must contain: centered header with plain-text contact links, SUMMARY, TECHNICAL SKILLS, EXPERIENCE, optional ACADEMIC PROJECTS, optional PROJECTS, EDUCATION. Use single-column ATS-safe HTML. Only the Technical Skills section may use a table. All CSS must be in `<style>` in `<head>`; no inline styles. The server will normalize final CSS, so preserve semantic class intent: `header`, `name`, `tagline`, `contact`, `section-title`, `entry`, `entry-header`, `entry-org`, `entry-meta`, `sep`, `entry-date`, `entry-role`, `tech-line`, `bullets`, `skills-table`, `skill-label`, `skill-values`.
+The response must contain: centered header with plain-text contact links, <!--IF:SUMMARY-->SUMMARY, <!--ENDIF-->TECHNICAL SKILLS, EXPERIENCE, optional ACADEMIC PROJECTS, optional PROJECTS, EDUCATION. Use single-column ATS-safe HTML. Only the Technical Skills section may use a table. All CSS must be in `<style>` in `<head>`; no inline styles. The server will normalize final CSS, so preserve semantic class intent: `header`, `name`, `tagline`, `contact`, `section-title`, `entry`, `entry-header`, `entry-org`, `entry-meta`, `sep`, `entry-date`, `entry-role`, `tech-line`, `bullets`, `skills-table`, `skill-label`, `skill-values`.
 
 End with this comment: `<!-- Save and submit as PDF (print to PDF from browser). Do not submit as image PDF, Google Docs link, or scanned document. -->`
 
@@ -54,24 +54,32 @@ Each employer must cover at least one JD-relevant requirement. If a technology i
 Normalise section labels:
 - Work Experience / Professional Experience / Experience -> EXPERIENCE
 - Technical Skills / Skills / Core Competencies / Expertise -> TECHNICAL SKILLS
-- Summary / Professional Summary / Profile / About -> SUMMARY
-- Education / Academic Background / Qualifications -> EDUCATION
+<!--IF:SUMMARY-->- Summary / Professional Summary / Profile / About -> SUMMARY
+<!--ENDIF-->- Education / Academic Background / Qualifications -> EDUCATION
 - Projects / Personal Projects / Side Projects -> PROJECTS
 - Academic Projects / Graduate Projects / Research Projects -> ACADEMIC PROJECTS
 
-Order: SUMMARY -> TECHNICAL SKILLS -> EXPERIENCE -> ACADEMIC PROJECTS if present -> PROJECTS if present -> EDUCATION. Do not add a section absent from the base resume. Do not remove a present section.
+<!--IF:SUMMARY-->Order: SUMMARY -> TECHNICAL SKILLS -> EXPERIENCE -> ACADEMIC PROJECTS if present -> PROJECTS if present -> EDUCATION. Do not add a section absent from the base resume. Do not remove a present section.<!--ENDIF--><!--IFNOT:SUMMARY-->Order: TECHNICAL SKILLS -> EXPERIENCE -> ACADEMIC PROJECTS if present -> PROJECTS if present -> EDUCATION. Do not add a section absent from the base resume. Do not remove a present section, with ONE exception stated below: this resume has no summary. TECHNICAL SKILLS is the first section and follows immediately after the header.<!--ENDIF-->
 
 Experience slot count must exactly match the base resume, minimum 1, maximum 5. Preserve dates in Mon Year - Mon Year format, Present for ongoing. For Generate, use real user and employer locations. For A+, leave header location blank and omit employer locations.
 
 At most one FAANG company may appear. If the base resume already has one, introduce no additional FAANG. Default scale order is strongest/most recognisable company most recent and smallest earliest, unless Tier 1 keyword authenticity requires another ordering.
 
-## SUMMARY
+<!--IFNOT:SUMMARY-->## NO SUMMARY SECTION
+
+This resume has NO summary. The candidate has turned the summary section off for this profile.
+
+Do not emit a SUMMARY, PROFESSIONAL SUMMARY, PROFILE, OBJECTIVE or ABOUT section, under that or any other name. Do not emit the heading with no body, and do not open the document with an unlabelled paragraph of summary prose — a summary without its heading is still a summary. The header is followed immediately by TECHNICAL SKILLS.
+
+The header tagline stays a TAGLINE: the candidate's own role title, and nothing else. It is not a place to relocate the summary. In particular, do not put a years-of-experience figure in it. The `Candidate years of experience` runtime input is authoritative for this document and may never be exceeded anywhere in it, but with no summary there is no section that is required to state a total, so state none. The experience entries' dates already show the span.
+
+Everything the summary carried must be carried by the sections that remain. Every honestly claimable Tier 1 term still appears verbatim in TECHNICAL SKILLS or in a bullet — that rule was never satisfied by the summary and is not weakened by its absence.<!--ENDIF--><!--IF:SUMMARY-->## SUMMARY
 
 SUMMARY appears immediately after header. 430-480 rendered characters, 3-4 compact sentences, present tense, no metrics, no education, no filler adjectives, no target-company marketing copy. Open with the candidate's role title and total years of experience. Name two or three JD-relevant Tier 1 strengths. Close with a JD-functional fit sentence.
 
 The years figure comes from `Candidate years of experience` in the runtime inputs, or from the base resume when that is absent. Never from the JD. If the JD asks for more years than the candidate has, the honest figure still goes in the summary — a requirement is what the employer wants, not a fact about the candidate, and it is theirs to weigh. Do not write a range, "N+", or a vaguer phrasing to blur the gap, and do not omit the figure to avoid stating it.
 
-The opening title is the candidate's own level, not the JD's. Their level is `Seniority the candidate states they are` in the runtime inputs, or what the base resume evidences — take whichever is higher, and never go above it. If the JD is for a Senior/Staff/Principal/Lead role and neither supports that level, open with the unqualified role ("Software Engineer", not "Senior Software Engineer"). Applying above your stated level is legitimate and the candidate's decision; claiming it in the resume is not.
+The opening title is the candidate's own level, not the JD's. Their level is `Seniority the candidate states they are` in the runtime inputs, or what the base resume evidences — take whichever is higher, and never go above it. If the JD is for a Senior/Staff/Principal/Lead role and neither supports that level, open with the unqualified role ("Software Engineer", not "Senior Software Engineer"). Applying above your stated level is legitimate and the candidate's decision; claiming it in the resume is not.<!--ENDIF-->
 
 ## BULLETS
 
@@ -104,4 +112,4 @@ Skills are ATS tokens separated by middle dot or pipe. No parenthetical groups e
 
 ## FINAL SILENT CHECK
 
-Before output confirm: starts with `<html>`; ATS-safe single column; correct sections/order; summary length; exact claimable Tier 1 terms covered; skills/bullets coherent; experience count matches base; dates consistent; no excluded companies; no fabricated metrics/ownership; company and temporal authenticity; A+ vs Generate location rules; no forbidden punctuation/filler; CSS in `<head>` only; final PDF comment present.
+Before output confirm: starts with `<html>`; ATS-safe single column; correct sections/order; <!--IF:SUMMARY-->summary length<!--ENDIF--><!--IFNOT:SUMMARY-->no summary section under any of its names, and no unlabelled summary paragraph<!--ENDIF-->; exact claimable Tier 1 terms covered; skills/bullets coherent; experience count matches base; dates consistent; no excluded companies; no fabricated metrics/ownership; company and temporal authenticity; A+ vs Generate location rules; no forbidden punctuation/filler; CSS in `<head>` only; final PDF comment present.

@@ -115,6 +115,30 @@ export function JobProfilesPanel() {
     }
   };
 
+  // AI1. The summary toggle lives here, beside the base resume, because it is a per-profile RESUME
+  // setting and each profile answers it differently — a candidate keeps the summary on the profile
+  // where it carries a career pivot and off the one where page one is already full.
+  //
+  // Optimistic, then reconciled: a checkbox that waits on a round trip before moving reads as
+  // broken. On failure the previous value is put back and the reason is said, rather than the
+  // control sitting on a setting the server never accepted.
+  const setIncludeSummary = async (profile, next) => {
+    const previous = profile.include_summary;
+    setProfiles(prev => prev.map(p => p.id === profile.id ? { ...p, include_summary: next } : p));
+    try {
+      await api(`/api/domain-profiles/${profile.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ include_summary: next }),
+      });
+      setStatus(next
+        ? `Summary section on for ${profile.profile_name}. It will appear on resumes generated from now on.`
+        : `Summary section off for ${profile.profile_name}. Resumes generated from now on will have no summary.`);
+    } catch (e) {
+      setProfiles(prev => prev.map(p => p.id === profile.id ? { ...p, include_summary: previous } : p));
+      setStatus(e.message || "Could not change the summary setting");
+    }
+  };
+
   const closeWizard = () => {
     setWizardMode(null);
     setEditingProfile(null);
@@ -200,6 +224,32 @@ export function JobProfilesPanel() {
                     </div>
                     <div style={{ marginTop:7, fontSize:10, color:"var(--color-text-muted)", lineHeight:1.4 }}>
                       Stored and extracted only for this profile. Other profiles keep their own resume, signals, ATS basis, and search readiness.
+                    </div>
+                    {/* AI1. The copy says WHAT IT DOES, not why a summary might help — the
+                        candidate is choosing a section, not being sold one. The second line is
+                        there because the default changed underneath existing users: every resume
+                        generated before this had a summary, and one generated now will not unless
+                        this is on. Saying so here is the difference between a default and a
+                        surprise. */}
+                    <div style={{ marginTop:9, paddingTop:9, borderTop:"1px solid var(--color-border)" }}>
+                      <label style={{ display:"flex", gap:8, alignItems:"flex-start", cursor:"pointer", margin:0 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!profile.include_summary}
+                          onChange={event => setIncludeSummary(profile, event.target.checked)}
+                          style={{ marginTop:2, flexShrink:0 }}
+                        />
+                        <span>
+                          <span style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.06em", color:"var(--color-text)" }}>
+                            Include a summary section
+                          </span>
+                          <span style={{ display:"block", fontSize:10, color:"var(--color-text-muted)", marginTop:2, lineHeight:1.4 }}>
+                            {profile.include_summary
+                              ? "Generated resumes for this profile open with a summary."
+                              : "Off. Generated resumes for this profile have no summary section — resumes generated before this setting existed did."}
+                          </span>
+                        </span>
+                      </label>
                     </div>
                   </>
                 }

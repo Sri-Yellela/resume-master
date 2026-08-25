@@ -156,6 +156,49 @@ export function extractSummaryText(html) {
 }
 
 /**
+ * The region of the document that carries the candidate's HEADLINE experience figure, named.
+ *
+ * WHY THIS EXISTS (AI1)
+ * The summary is now opt-in, and default OFF. The under-claim check above was scoped to the
+ * summary because that is where the section rules put the total-years figure — so on a document
+ * generated with the summary OFF, extractSummaryText returns "" and the check silently inspects
+ * nothing. A check that has nothing to look at reports no violation, which reads identically to a
+ * check that looked and found the document honest. That is the failure this function prevents.
+ *
+ * With no summary, the headline figure's only remaining home is the header block — the name,
+ * tagline and contact line that open every resume we emit. A tagline reading "Software Engineer |
+ * 8 Years Experience" is exactly the claim the summary used to carry, in a different place. So the
+ * region is the summary when there is one and the header block when there is not, and the caller
+ * is TOLD WHICH, so "no violation" can be distinguished from "nothing was read".
+ *
+ * The header block is the lines before the first NAMED section heading. Two details of that are
+ * load-bearing:
+ *
+ * - KNOWN_HEADING, not isSectionHeading. The looser test also calls anything short, shouted and
+ *   wordless a heading, which is the right call when deciding where the SUMMARY stops and exactly
+ *   wrong here: the candidate's name is short, shouted and wordless, so the header would end
+ *   before its first line and the region would come back empty on every real resume.
+ * - No known heading means region "none", never "the whole document". Falling back to the whole
+ *   document would read a scoped "3 years of Python" in a skills line as a claim to three years of
+ *   career and refuse an honest resume — the false positive extractSummaryText exists to avoid.
+ *   A generated resume always has TECHNICAL SKILLS and EXPERIENCE, so "none" means the document is
+ *   malformed, and the caller learns that from the region name rather than from a wrong verdict.
+ *
+ * @returns {{text: string, region: "summary"|"header"|"none"}}
+ */
+export function extractHeadlineRegion(html) {
+  const summary = extractSummaryText(html);
+  if (summary) return { text: summary, region: "summary" };
+
+  const lines = htmlToLines(html);
+  const firstHeading = lines.findIndex(line => KNOWN_HEADING.test(line));
+  if (firstHeading === -1) return { text: "", region: "none" };
+  const header = lines.slice(0, firstHeading).join(" ").trim();
+  if (header) return { text: header, region: "header" };
+  return { text: "", region: "none" };
+}
+
+/**
  * Every years-of-experience quantity the text asserts, largest first.
  *
  * A RANGE RESOLVES TO ITS TOP ("5-7 years" claims seven), because the top is what an employer reads
@@ -261,20 +304,28 @@ export function checkResumeClaims({ html, profile, baseResumeText = "", domainPr
   // direction was written from something other than the candidate's own facts. Under-claiming
   // costs them the screen they qualified for, silently, on an unattended run they never read.
   //
-  // Scoped to the SUMMARY's figure for the reason extractSummaryText explains. A resume that
-  // states no total at all is not caught here: that is a different defect (omission, not
-  // disagreement), and the section rules are what require the figure.
+  // Scoped to the HEADLINE REGION for the reason extractSummaryText explains — the summary when
+  // the document has one, the header block when it does not (AI1 made the summary opt-in, and a
+  // region-less check is a silent one; see extractHeadlineRegion). A resume that states no total
+  // at all is not caught here: that is a different defect (omission, not disagreement), and the
+  // section rules are what require the figure.
+  const headline = extractHeadlineRegion(html);
+  const headlineYears = maxYearsClaim(headline.text);
+  // Preserved under its original name: `summaryYears` is the summary's figure specifically, and
+  // callers and tests read it as such. It is null on a document with no summary, which is now an
+  // ordinary state rather than a malformed one — headlineYears is what the check below uses.
   const summaryYears = maxYearsClaim(extractSummaryText(html));
-  if (hasProfileYears && summaryYears !== null && summaryYears < profileYears) {
+  if (hasProfileYears && headlineYears !== null && headlineYears < profileYears) {
+    const where = headline.region === "summary" ? "summary" : "header";
     violations.push({
       kind: "years_below_profile",
-      claimed: summaryYears,
+      claimed: headlineYears,
       allowed: profileYears,
-      evidence: extractYearsClaims(extractSummaryText(html))
-        .filter(c => c.years === summaryYears)
+      evidence: extractYearsClaims(headline.text)
+        .filter(c => c.years === headlineYears)
         .map(c => c.text),
       message:
-        `The generated resume's summary claims ${summaryYears} years of experience; the profile ` +
+        `The generated resume's ${where} claims ${headlineYears} years of experience; the profile ` +
         `states ${profileYears}. The profile is the authority on this number, and the resume ` +
         `disagreeing with it in either direction means it was not written from the candidate's ` +
         `own facts.`,
@@ -338,9 +389,27 @@ export function checkResumeClaims({ html, profile, baseResumeText = "", domainPr
     checked: {
       claimedYears,
       summaryYears,
+      headlineYears,
       profileYears: hasProfileYears ? profileYears : null,
       claimedSeniority: maxSeniority(text)?.word ?? null,
       supportedSeniority: baseText.trim() ? (maxSeniority(baseText)?.word ?? null) : null,
+      // ── WHAT WAS READ, not merely what was found (AI1 requirement 4) ─────────────────────────
+      //
+      // `ok: true` has two causes that look the same from outside: the checks read the document
+      // and it was honest, or the checks had nothing to read. Before the summary became opt-in
+      // those were the same thing in practice, because every generated resume had a summary. Now
+      // they are not, and a caller that cannot tell them apart cannot notice the day this guard
+      // stops guarding. So the inspection itself is reported.
+      //
+      // documentChars is the whole-document over-claim check's input — the AF2 inflation check,
+      // which is the one that stands between a JD's demand and a false claim to an employer. Zero
+      // means it inspected nothing, and no caller should accept that as a pass.
+      inspected: {
+        documentChars: text.length,
+        headlineRegion: headline.region,
+        headlineChars: headline.text.length,
+        seniorityCeilingKnown: hasDeclaration || !!baseText.trim(),
+      },
     },
   };
 }
@@ -356,11 +425,29 @@ export class ResumeClaimError extends Error {
   }
 }
 
+/** Thrown when the guard was handed nothing to inspect — see assertResumeClaims. */
+export class ResumeClaimNotInspectedError extends Error {
+  constructor(checked) {
+    super("resume_claim_not_inspected: the claim guard was given no document text to inspect");
+    this.name = "ResumeClaimNotInspectedError";
+    this.code = "resume_claim_not_inspected";
+    this.checked = checked;
+  }
+}
+
 /**
  * The generation-time assertion. Throws on violation — see "WHY A FAILURE AND NOT A WARNING".
+ *
+ * IT ALSO THROWS WHEN IT READ NOTHING (AI1 requirement 4).
+ * The over-claim check is the one AF2 exists for, and it reads the whole document. If that text is
+ * empty the check cannot fire, and `ok: true` would mean "we did not look" while reading as "the
+ * resume is honest". Since the summary became opt-in, the shape of a generated document is no
+ * longer fixed, so the guard verifies its own input rather than assuming it. A generation that
+ * reaches here with no text is already broken; failing loudly is how it stops being silent.
  */
 export function assertResumeClaims(args) {
   const result = checkResumeClaims(args);
+  if (!result.checked.inspected.documentChars) throw new ResumeClaimNotInspectedError(result.checked);
   if (!result.ok) throw new ResumeClaimError(result);
   return result;
 }

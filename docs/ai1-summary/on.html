@@ -1,0 +1,93 @@
+<html><head><style>
+:root {
+  --color-bg: #ffffff;
+  --color-text: #1a1a1a;
+  --color-muted: #3d3d3d;
+  --color-rule: #6b6b6b;
+  --fs-body: 8.5pt;
+  --fs-name: 9pt;
+  --fs-section: 8pt;
+  --page-w: 8.5in;
+  --margin-x: 0.55in;
+  --margin-top: 0.45in;
+  --margin-bot: 0.45in;
+  --gap-section: 9pt;
+  --gap-entry: 6pt;
+  --gap-inline: 2pt;
+  --lh-body: 1.42;
+  --lh-bullets: 1.38;
+}
+body { background: var(--color-bg); color: var(--color-text); font-family: 'Garamond','EB Garamond',Georgia,serif; font-size: var(--fs-body); line-height: var(--lh-body); margin: var(--margin-top) var(--margin-x) var(--margin-bot); max-width: var(--page-w); }
+.header { text-align: center; margin-bottom: 6pt; }
+.header .name { font-size: var(--fs-name); font-weight: bold; text-transform: none; letter-spacing: normal; line-height: 1.1; }
+.header .tagline { color: var(--color-muted); letter-spacing: 0.01em; font-size: var(--fs-body); }
+.header .contact { font-size: var(--fs-body); letter-spacing: normal; }
+.header .contact a { color: inherit; text-decoration: none; }
+.section-title { font-size: var(--fs-section); font-weight: bold; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text); border-bottom: 0.5pt solid var(--color-rule); padding-bottom: 1pt; margin-top: var(--gap-section); margin-bottom: 4pt; }
+.entry { margin-bottom: var(--gap-entry); page-break-inside: avoid; }
+.entry-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8pt; }
+.entry-org { font-weight: bold; }
+.entry-meta { font-style: normal; color: var(--color-text); font-weight: normal; }
+.sep { font-style: normal; font-weight: normal; color: var(--color-muted); }
+.entry-date { color: var(--color-muted); white-space: nowrap; margin-left: 8pt; flex-shrink: 0; font-size: var(--fs-body); }
+.entry-role { font-style: italic; color: var(--color-muted); margin-bottom: var(--gap-inline); }
+.tech-line { font-size: calc(var(--fs-body) - 0.4pt); color: var(--color-muted); margin-bottom: var(--gap-inline); }
+ul.bullets { list-style: disc outside; padding-left: 1.1em; margin: var(--gap-inline) 0 0 0; }
+ul.bullets li { font-size: var(--fs-body); line-height: var(--lh-bullets); margin: 0 0 1.6pt 0; padding-left: 0.1em; text-align: left; }
+.skills-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
+.skill-label { font-weight: bold; white-space: nowrap; padding-right: 12pt; width: 1%; vertical-align: top; padding: 1.2pt 12pt 1.2pt 0; }
+.skill-values { color: var(--color-text); padding: 1.2pt 0; }
+@media print {
+  body { margin: var(--margin-top) var(--margin-x) var(--margin-bot); }
+  .entry { page-break-inside: avoid; }
+  .section-title { page-break-after: avoid; }
+}
+</style></head><body>
+<div class="header">
+  <div class="name">John Doe</div>
+  <div class="tagline">Backend Software Engineer</div>
+  <div class="contact">Boston, MA | +1 617 555 0142 | johndoe.a5test@gmail.com | linkedin.com/in/johndoe | github.com/johndoe</div>
+</div>
+<div class="section-title">SUMMARY</div>
+<div>Backend software engineer with hands-on experience building and maintaining distributed systems, internal tooling, and infrastructure for university-scale technical operations. Skilled in <strong>Java</strong>, <strong>C++</strong>, and systems troubleshooting across multi-user environments. Experienced managing file servers, client-facing systems, and collaborative technical support workflows under production constraints. Brings a strong foundation in debugging cross-stack issues and a collaborative, user-first approach to delivering reliable backend systems for high-growth teams.</div>
+<div class="section-title">TECHNICAL SKILLS</div>
+<ul class="bullets">
+  <li><strong>Languages</strong> <strong>Java</strong> &amp;middot; <strong>C++</strong> &amp;middot; JavaScript &amp;middot; HTML &amp;middot; CSS</li>
+  <li><strong>Systems &amp; Infrastructure</strong> File Server Administration &amp;middot; Windows Server Environments &amp;middot; Client-Server Systems &amp;middot; Systems Troubleshooting</li>
+  <li><strong>Tools &amp; Platforms</strong> Visual Studio &amp;middot; Windows 7 &amp;middot; Windows 10 &amp;middot; Microsoft Office Suite</li>
+  <li><strong>Practices</strong> Cross-team Collaboration &amp;middot; Technical Support Operations &amp;middot; Team Coordination &amp;middot; Documentation Maintenance</li>
+  <li><strong>Familiar With</strong> Adobe Photoshop &amp;middot; Adobe Dreamweaver</li>
+</ul>
+<div class="section-title">EXPERIENCE</div>
+<div class="entry">
+  <div class="entry-header">
+    <div><span class="entry-org">College of Engineering, University Near You</span> <span class="entry-meta"><span class="sep">|</span> Technical Assistant | Jul 2016 - Present</span></div>
+    
+  </div>
+  <div class="entry-role">Technical Assistant</div>
+  
+  
+  <ul class="bullets">
+  <li>Coordinated technical support delivery for large-scale annual events, managing system uptime and troubleshooting requests across multiple concurrent workstreams to ensure reliable service for hundreds of attendees.</li>
+  <li>Directed and mentored a rotating team of student workers and volunteers, assigning tasks and reviewing work quality to maintain consistent technical support standards during high-traffic periods.</li>
+  <li>Diagnosed and resolved recurring hardware and software issues on <strong>Windows 7</strong> and <strong>Windows 10</strong> systems, reducing repeat support tickets by standardizing common fixes into a reusable troubleshooting checklist.</li>
+  <li>Collaborated with the Director&#39;s office to prioritize competing administrative and technical requests, balancing short-term event support needs against longer-term departmental system maintenance.</li>
+</ul>
+</div>
+<div class="entry">
+  <div class="entry-header">
+    <div><span class="entry-org">College of Engineering, University Near You</span> <span class="entry-meta"><span class="sep">|</span> Volunteer Intern, Assistant Systems Administrator | Jan 2016 - Jul 2016</span></div>
+    
+  </div>
+  <div class="entry-role">Volunteer Intern, Assistant Systems Administrator</div>
+  
+  
+  <ul class="bullets">
+  <li>Maintained and sustained a departmental file server, monitoring storage capacity and access permissions to ensure consistent uptime for faculty and student users.</li>
+  <li>Rebuilt and reconfigured decommissioned computers for redistribution, extending hardware lifecycle and reducing replacement costs for the department.</li>
+  <li>Updated the College of Engineering IT support website to align with current university standards, improving documentation clarity for incoming support requests.</li>
+  <li>Partnered with fellow systems administration team members to divide troubleshooting workload across client machines, applying structured problem-solving to resolve technical issues efficiently.</li>
+</ul>
+</div>
+<!-- Save and submit as PDF (print to PDF from browser). Do not submit as image PDF, Google Docs link, or scanned document. -->
+</body></html>
