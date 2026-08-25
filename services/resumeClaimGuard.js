@@ -24,6 +24,29 @@ const SPELLED = new Map(Object.entries({
 }));
 
 /**
+ * The four values domain_profiles.seniority can hold, on the same rank scale as SENIORITY_RANK.
+ *
+ * THIS IS THE CANDIDATE'S OWN DECLARATION, and it is the authority on their level.
+ * It is written only by the profile wizard and the profile editor — services/classifier.js produces
+ * a seniority for search-query building but nothing writes that into the column. So when it says
+ * "senior", a person chose "senior" about themselves.
+ *
+ * Kept as its own map rather than folded into SENIORITY_RANK: that map's keys also become the
+ * regex that decides what counts as a seniority claim IN THE DOCUMENT, and "executive" is a word
+ * resumes use in prose ("executive communication", "executive stakeholders"). The declaration
+ * vocabulary is an enum; the document vocabulary is English. They are different alphabets.
+ *
+ * The enum itself lives in shared/jobFilterOptions.js (PROFILE_SENIORITY). A test asserts every
+ * option there has a rank here, so adding a fifth cannot silently fall through to "no claim".
+ */
+const DECLARED_SENIORITY_RANK = new Map(Object.entries({
+  junior: 1,
+  mid: 3,
+  senior: 4,
+  executive: 7,
+}));
+
+/**
  * Seniority, ranked so two titles can be compared. Only words that assert a LEVEL are here — a bare
  * "Software Engineer" asserts none and is rank 0, which is why an unranked title can never be the
  * thing that trips the check. "Architect" is deliberately absent: it names a role, not a level.
@@ -206,7 +229,7 @@ export function maxSeniority(text) {
  * @param {string}  o.baseResumeText   the base resume, which is what supports a seniority claim
  * @returns {{ok: boolean, violations: Array, checked: object}}
  */
-export function checkResumeClaims({ html, profile, baseResumeText = "" }) {
+export function checkResumeClaims({ html, profile, baseResumeText = "", domainProfile = null }) {
   const violations = [];
   const text = htmlToText(html);
   const profileYears = Number(profile?.years_of_experience);
@@ -259,24 +282,52 @@ export function checkResumeClaims({ html, profile, baseResumeText = "" }) {
   }
 
   // ── Seniority ──────────────────────────────────────────────────────────────
-  // Supported by the BASE RESUME, which is the record of what the candidate actually held. With no
-  // base resume there is nothing to check against, and guessing would be the very fault being
-  // guarded — so it is skipped rather than assumed.
+  //
+  // THE CANDIDATE DECIDES THEIR LEVEL; WE MAY NOT STRETCH IT.
+  //
+  // This used to take the BASE RESUME's wording as the only authority, and refuse anything above
+  // it. That was too tight in the ordinary case and wrong about who gets to decide. Most resumes
+  // never write a level down — two roles both titled "Software Development Engineer" state none —
+  // so the supported rank was 0 and NO seniority word was permitted anywhere in the output. A
+  // candidate who had chosen "Senior" in their own profile still could not have "Senior" on their
+  // resume. Measured: against a JD titled "Senior Platform Engineer", six of eight generations were
+  // refused on this rule.
+  //
+  // The ceiling is now the HIGHER of what the candidate declared and what the base resume already
+  // evidences. Declaring is a deliberate act in the profile wizard, and it is theirs to make — the
+  // same reasoning AG2 applies to skills, and the same shape as the years rule, where
+  // user_profile.years_of_experience is the authority rather than the dates.
+  //
+  // What is still refused is the generator reaching past that ceiling — a JD's title is not a
+  // promotion, and neither is a claimed skill. That is the "we" in "we don't stretch it": the
+  // constraint is on this system, not on the person.
   const baseText = String(baseResumeText || "");
-  if (baseText.trim()) {
+  const declaredWord = String(domainProfile?.seniority || "").trim().toLowerCase();
+  const declaredRank = DECLARED_SENIORITY_RANK.get(declaredWord);
+  const hasDeclaration = declaredRank !== undefined;
+  const supported = baseText.trim() ? maxSeniority(baseText) : null;
+  const supportedRank = supported ? supported.rank : 0;
+
+  // With neither a declaration nor a base resume there is nothing to check against, and guessing
+  // would be the very fault being guarded — so it is skipped rather than assumed.
+  if (hasDeclaration || baseText.trim()) {
     const claimed = maxSeniority(text);
-    const supported = maxSeniority(baseText);
-    const supportedRank = supported ? supported.rank : 0;
-    if (claimed && claimed.rank > supportedRank) {
+    const ceiling = Math.max(hasDeclaration ? declaredRank : 0, supportedRank);
+    if (claimed && claimed.rank > ceiling) {
+      const allowed = hasDeclaration && declaredRank >= supportedRank
+        ? `"${declaredWord}" (the level you chose on this profile)`
+        : supported ? `"${supported.word}" (what the base resume shows)` : "no seniority claim";
       violations.push({
         kind: "seniority_unsupported",
         claimed: claimed.word,
-        allowed: supported ? supported.word : "(no seniority stated)",
+        allowed: hasDeclaration && declaredRank >= supportedRank
+          ? declaredWord
+          : (supported ? supported.word : "(no seniority stated)"),
         evidence: [claimed.word],
         message:
-          `The generated resume claims "${claimed.word}" seniority; the base resume supports ` +
-          `${supported ? `"${supported.word}"` : "no seniority claim"}. A JD's title is not a ` +
-          `promotion.`,
+          `The generated resume claims "${claimed.word}" seniority; this profile allows up to ` +
+          `${allowed}. A JD's title is not a promotion — change the level on your profile if it is ` +
+          `wrong.`,
       });
     }
   }
@@ -319,8 +370,8 @@ export function assertResumeClaims(args) {
  * contradicts the candidate's own profile alongside one that contradicts a company's KB. Same rule,
  * turned inward: flag, never rewrite.
  */
-export function profileContradictionFindings({ html, profile, baseResumeText = "" }) {
-  const { violations } = checkResumeClaims({ html, profile, baseResumeText });
+export function profileContradictionFindings({ html, profile, baseResumeText = "", domainProfile = null }) {
+  const { violations } = checkResumeClaims({ html, profile, baseResumeText, domainProfile });
   return violations.map(v => ({
     type: "flag",
     severity: "review",

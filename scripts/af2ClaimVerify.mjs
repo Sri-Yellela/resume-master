@@ -101,7 +101,7 @@ check("the prompt forbids the JD setting a quantity",
 
 const domainProfileBlock = dp ? `
 **User domain profile:** ${dp.profile_name}
-**Seniority the user is TARGETING (an aspiration, not a level to claim):** ${dp.seniority}
+**Seniority the candidate states they are (their own declaration — you may use it, and may not exceed it):** ${dp.seniority}
 **Profile keywords:** ${JSON.parse(dp.selected_keywords || "[]").join(", ") || "—"}
 **Profile tools:** ${JSON.parse(dp.selected_tools || "[]").join(", ") || "—"}
 **Profile action verbs:** ${JSON.parse(dp.selected_verbs || "[]").join(", ") || "—"}
@@ -207,7 +207,10 @@ if (CONTROL) {
   // And the pre-fix runtime inputs, which stated no authoritative years figure at all.
   const preFixInputs = runtimeInputs
     .replace(/\*\*Candidate years of experience \(AUTHORITATIVE[^\n]*\n/, "")
-    .replace(/\*\*Seniority the user is TARGETING \(an aspiration, not a level to claim\):\*\*/,
+    // Matched loosely on the label's opening words: the line's parenthetical has been reworded once
+    // already (it used to call the level an aspiration), and a control that silently stops reverting
+    // is worse than no control at all.
+    .replace(/\*\*Seniority the candidate states they are[^\n]*?:\*\*/,
       "**Target seniority:**");
 
   const cMsg = await callModel({

@@ -237,6 +237,92 @@ test("a seniority claim ABOVE what the base resume supports is not", () => {
   assert.equal(r.violations[0].allowed, "senior");
 });
 
+// ── The candidate's declared level is the authority ─────────────────────────────────────────────
+//
+// The base resume was the only authority before, and most resumes never write a level down — this
+// fixture's two roles are both "Software Development Engineer", which states none. So the ceiling
+// was rank 0 and NO seniority word was permitted anywhere in the output, however the candidate
+// described themselves on their own profile. Measured against a JD titled "Senior Platform
+// Engineer": six of eight real generations refused. Choosing a level is a deliberate act in the
+// profile wizard, and it is the candidate's to make.
+const DECLARED = level => ({ seniority: level });
+
+test("SENIORITY: the level the candidate chose on their profile is allowed", () => {
+  const html = resume("Senior Software Engineer with 4 years building payment systems.");
+  // Without the declaration this is refused — the base resume states no level at all.
+  assert.equal(checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME }).ok, false);
+  // With it, it is the candidate's own word for themselves.
+  const r = checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME, domainProfile: DECLARED("senior") });
+  assert.equal(r.ok, true, r.violations.map(v => v.message).join(" | "));
+});
+
+test("SENIORITY: the generator may not reach ABOVE the declared level", () => {
+  const html = resume("Principal Software Engineer with 4 years building payment systems.");
+  const r = checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME, domainProfile: DECLARED("senior") });
+  assert.equal(r.ok, false);
+  assert.equal(r.violations[0].kind, "seniority_unsupported");
+  assert.equal(r.violations[0].claimed, "principal");
+  assert.equal(r.violations[0].allowed, "senior");
+  assert.match(r.violations[0].message, /change the level on your profile/);
+});
+
+test("SENIORITY: declaring 'mid' still refuses a JD's senior title", () => {
+  // The exact case that was refusing six of eight generations — and it should still refuse, because
+  // this candidate chose mid. "Up to the candidate" is not "up to the job description".
+  const html = resume("Senior Platform Engineer with 4 years building scalable systems.");
+  const r = checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME, domainProfile: DECLARED("mid") });
+  assert.equal(r.ok, false);
+  assert.equal(r.violations[0].claimed, "senior");
+  assert.equal(r.violations[0].allowed, "mid");
+});
+
+test("SENIORITY: the ceiling is the HIGHER of the declaration and the base resume", () => {
+  const staffResume = BASE_RESUME.replace(/Software Development Engineer/g, "Staff Software Engineer");
+  // Declared mid, but the base resume evidences staff — a real promotion the profile is stale about.
+  // Evidence must not be thrown away by a lower declaration.
+  const html = resume("Staff Software Engineer with 4 years building payment systems.");
+  assert.equal(
+    checkResumeClaims({ html, profile: PROFILE, baseResumeText: staffResume, domainProfile: DECLARED("mid") }).ok,
+    true,
+  );
+  // And the declaration lifts the ceiling when the base resume is the silent one.
+  assert.equal(
+    checkResumeClaims({
+      html: resume("Senior Software Engineer with 4 years."),
+      profile: PROFILE, baseResumeText: BASE_RESUME, domainProfile: DECLARED("senior"),
+    }).ok,
+    true,
+  );
+});
+
+test("SENIORITY: every value the profile can hold has a rank", async () => {
+  // shared/jobFilterOptions.js owns the enum. A fifth option added there and not here would fall
+  // through to "no declaration" and silently restore the over-refusal this fixed.
+  const { PROFILE_SENIORITY } = await import("../shared/jobFilterOptions.js");
+  const html = resume("Senior Software Engineer with 4 years.");
+  for (const opt of PROFILE_SENIORITY.options) {
+    const r = checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME, domainProfile: { seniority: opt.value } });
+    // "senior" and above allow it; "junior"/"mid" do not. Either way the value must be RECOGNISED —
+    // an unknown value would behave exactly like junior, which is the failure being guarded.
+    const expectAllowed = ["senior", "executive"].includes(opt.value);
+    assert.equal(r.ok, expectAllowed, `${opt.value} (${opt.label}) behaved unexpectedly`);
+  }
+});
+
+test("SENIORITY: an unrecognised or empty declaration falls back to the base resume", () => {
+  const html = resume("Senior Software Engineer with 4 years.");
+  for (const seniority of [null, "", "  ", "wizard", undefined]) {
+    const r = checkResumeClaims({ html, profile: PROFILE, baseResumeText: BASE_RESUME, domainProfile: { seniority } });
+    assert.equal(r.ok, false, `${JSON.stringify(seniority)} must not be read as a declaration`);
+  }
+});
+
+test("SENIORITY: with a declaration but no base resume, the declaration still governs", () => {
+  const html = resume("Senior Software Engineer with 4 years.");
+  assert.equal(checkResumeClaims({ html, profile: PROFILE, baseResumeText: "", domainProfile: DECLARED("senior") }).ok, true);
+  assert.equal(checkResumeClaims({ html, profile: PROFILE, baseResumeText: "", domainProfile: DECLARED("junior") }).ok, false);
+});
+
 test("the claim is caught wherever it appears, not only in the summary", () => {
   // The summary is the usual place, but an inflated EXPERIENCE title is the same lie.
   const html = resume("Fullstack Software Engineer with 4 years of experience.", "Staff Software Engineer");
@@ -327,9 +413,19 @@ test("the runtime inputs carry the profile's years, marked authoritative", () =>
     "without this the JD's demand is the only quantity in context");
   assert.match(server, /derive from the base resume dates only, never from the JD/,
     "and the unset case must say where to look instead");
-  // A target is not a fact.
-  assert.match(server, /Seniority the user is TARGETING \(an aspiration, not a level to claim\)/);
-  assert.doesNotMatch(server, /\*\*Target seniority:\*\*/);
+  // The seniority line is the candidate's own declaration now, not a target — and the guard's
+  // ceiling is that declaration. The old wording ("an aspiration, not a level to claim") matched a
+  // guard that took the base resume as the only authority and therefore refused every seniority
+  // word in the output.
+  //
+  // ASSERTED AGAINST THE PROMPT STRING, not the file. The previous version of this test searched
+  // all of server.js for the old label, and kept passing after the label changed because the
+  // sentence explaining the change quotes it in a comment — a test matching its own changelog.
+  const block = server.slice(server.indexOf("let domainProfileBlock"), server.indexOf("**Target role / job title:**"));
+  assert.match(block, /Seniority the candidate states they are \(their own declaration — you may use it, and may not exceed it\)/);
+  assert.doesNotMatch(block, /\*\*Target seniority:\*\*/);
+  assert.doesNotMatch(block, /aspiration, not a level to claim/,
+    "the prompt must not still tell the model the level is unclaimable");
 });
 
 test("the assertion runs in coreGenerateResume, BEFORE the artifact is persisted", () => {
@@ -348,7 +444,10 @@ test("the assertion runs in coreGenerateResume, BEFORE the artifact is persisted
 
   // It must be the shared kernel, so BOTH the HTTP handler and the apply worker are covered — under
   // full-auto no human reads the resume, so a check only on the HTTP path protects nobody.
-  assert.match(body, /assertResumeClaims\(\{ html: formattedHtml, profile, baseResumeText: authoritativeResumeText \}\)/);
+  // The domainProfile argument is load-bearing, not decoration: it carries the seniority the
+  // candidate chose, and without it the guard falls back to the base resume's wording and refuses
+  // every seniority word in the output.
+  assert.match(body, /assertResumeClaims\(\{\s*html: formattedHtml, profile, baseResumeText: authoritativeResumeText,\s*domainProfile: activeDomainProfile,\s*\}\)/);
 });
 
 // ── AG3 item 1: no generation path reaches persistence without the guard ────────────────────────

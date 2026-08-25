@@ -129,7 +129,7 @@ preflight("the prompt forbids the JD setting a quantity", /never from the JD/i.t
 function buildRuntimeInputs(tier, baseText) {
   const domainProfileBlock = dp ? `
 **User domain profile:** ${dp.profile_name}
-**Seniority the user is TARGETING (an aspiration, not a level to claim):** ${dp.seniority}
+**Seniority the candidate states they are (their own declaration — you may use it, and may not exceed it):** ${dp.seniority}
 **Profile keywords:** ${JSON.parse(dp.selected_keywords || "[]").join(", ") || "—"}
 **Profile tools:** ${JSON.parse(dp.selected_tools || "[]").join(", ") || "—"}
 **Profile action verbs:** ${JSON.parse(dp.selected_verbs || "[]").join(", ") || "—"}

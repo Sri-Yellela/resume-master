@@ -64,6 +64,17 @@ const RUN_TAG = new Date().toISOString().replace(/[:.]/g, "-");
 const NO_CLAIMS = process.argv.includes("--no-claims");
 
 /**
+ * `--declare <junior|mid|senior|executive>` — run as if the candidate had chosen that level.
+ *
+ * The level a candidate declares on their profile is the guard's ceiling, so it decides whether a
+ * "Senior ..." headline is their own word for themselves or the JD's title borrowed. This sets it
+ * for the run and puts it back afterwards, which is the only honest way to demonstrate the
+ * difference without editing a real profile and leaving it edited.
+ */
+const declareAt = process.argv.indexOf("--declare");
+const DECLARE = declareAt > -1 ? String(process.argv[declareAt + 1] || "").trim() : null;
+
+/**
  * Where a term sits in the document, read from the MARKUP.
  *
  * WHY NOT FROM THE FLATTENED TEXT — this is the bug that made this script cry wolf.
@@ -199,7 +210,19 @@ check("all three claims are readable back from the store",
  * mind — which is right for a person and wrong for a script. These terms were never seen in a job
  * description; this run invented them. So rows that did not exist beforehand are deleted outright.
  */
+const declaredBefore = dp.seniority;
+if (DECLARE) {
+  db.prepare("UPDATE domain_profiles SET seniority=? WHERE id=? AND user_id=?")
+    .run(DECLARE, dp.id, profile.user_id);
+  dp.seniority = DECLARE;
+  console.log(`  declared level: ${declaredBefore} -> ${DECLARE} (restored at the end)`);
+}
+
 function restore() {
+  if (DECLARE) {
+    db.prepare("UPDATE domain_profiles SET seniority=? WHERE id=? AND user_id=?")
+      .run(declaredBefore, dp.id, profile.user_id);
+  }
   const del = db.prepare(`
     DELETE FROM profile_signal_suggestions WHERE user_id = ? AND profile_id = ? AND signal_key = ?
   `);
@@ -278,7 +301,7 @@ You will own our internal developer platform and its Salesforce integrations.`,
 **Candidate years of experience (AUTHORITATIVE — the JD may not change this):** ${Number(profile.years_of_experience)}
 
 **User domain profile:** ${dp.profile_name}
-**Seniority the user is TARGETING (an aspiration, not a level to claim):** ${dp.seniority}
+**Seniority the candidate states they are (their own declaration — you may use it, and may not exceed it):** ${dp.seniority}
 **Profile keywords:** ${JSON.parse(dp.selected_keywords || "[]").join(", ") || "—"}
 **Profile tools:** ${JSON.parse(dp.selected_tools || "[]").join(", ") || "—"}
 **Profile action verbs:** ${JSON.parse(dp.selected_verbs || "[]").join(", ") || "—"}
@@ -350,7 +373,7 @@ ${base.content}`;
   // Platform Engineer" and the model routinely copies the target title into the header tagline
   // under the candidate's name, which the AF2 seniority rule refuses. Whether the claims block
   // makes that MORE likely is what --no-claims exists to answer.
-  const verdict = checkResumeClaims({ html, profile, baseResumeText: base.content });
+  const verdict = checkResumeClaims({ html, profile, baseResumeText: base.content, domainProfile: dp });
   console.log(`  tagline / seniority  : ${verdict.checked.claimedSeniority || "none claimed"}`);
   console.log(`  summary years        : ${verdict.checked.summaryYears} (profile ${verdict.checked.profileYears})`);
   console.log(`  GUARD[${NO_CLAIMS ? "control" : "claims "}]: ${verdict.ok ? "pass" : verdict.violations.map(v => v.kind).join(",")}`);

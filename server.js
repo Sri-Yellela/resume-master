@@ -3819,6 +3819,14 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
     : `**Candidate years of experience:** not stated — derive from the base resume dates only, never from the JD\n`;
 
   // Domain profile block â€” injected when user has an active profile
+  //
+  // THE SENIORITY LINE CHANGED MEANING, ON PURPOSE.
+  // It used to read "Seniority the user is TARGETING (an aspiration, not a level to claim)", which
+  // matched a guard that took the BASE RESUME's wording as the only authority on level. Most base
+  // resumes never write a level down, so that combination refused every seniority word in the
+  // output — a candidate who had chosen "Senior" in their own profile could not have "Senior" on
+  // their resume. The level is theirs to declare, so the prompt now says so, and the guard's
+  // ceiling is the declaration. What neither permits is going ABOVE it because a JD asked.
   let domainProfileBlock = "";
   if (domainProfile) {
     const kw    = JSON.parse(domainProfile.selected_keywords || "[]").join(", ");
@@ -3826,7 +3834,7 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
     const verbs = JSON.parse(domainProfile.selected_verbs    || "[]").join(", ");
     domainProfileBlock = `
 **User domain profile:** ${domainProfile.profile_name}
-**Seniority the user is TARGETING (an aspiration, not a level to claim):** ${domainProfile.seniority}
+**Seniority the candidate states they are (their own declaration — you may use it, and may not exceed it):** ${domainProfile.seniority}
 **Profile keywords:** ${kw || "â€”"}
 **Profile tools:** ${tools || "â€”"}
 **Profile action verbs:** ${verbs || "â€”"}
@@ -7215,7 +7223,13 @@ RULES:
   // the /api/generate handler where a human reads the result, and the apply worker where under
   // full-auto nobody does. A violation throws — see services/resumeClaimGuard.js on why this is a
   // failure and not a warning. The artifact is never written, so no later step can pick it up.
-  assertResumeClaims({ html: formattedHtml, profile, baseResumeText: authoritativeResumeText });
+  // activeDomainProfile carries the seniority the candidate chose for this profile, which is the
+  // authority on their level — without it the guard falls back to the base resume's wording, which
+  // most resumes never state, and refuses every seniority word in the output.
+  assertResumeClaims({
+    html: formattedHtml, profile, baseResumeText: authoritativeResumeText,
+    domainProfile: activeDomainProfile,
+  });
 
   const resumeStripped = stripResumeHtml(formattedHtml);
   const activeProfile = getOrRepairActiveProfile(userId);
@@ -7451,7 +7465,9 @@ app.post("/api/generate", requireAuth, async (req, res) => {
         ? getBaseResumeRecord(db, { userId: req.user.id, profileId: activeDomainProfile.id })
         : null;
       findings = findings.concat(
-        profileContradictionFindings({ html, profile, baseResumeText: base?.content || "" })
+        profileContradictionFindings({
+          html, profile, baseResumeText: base?.content || "", domainProfile: activeDomainProfile,
+        })
       );
     } catch (e) { console.warn('[kb-failsafe] profile contradiction check failed:', e.message); }
     return findings;
