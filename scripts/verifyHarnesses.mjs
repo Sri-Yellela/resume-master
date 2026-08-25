@@ -57,6 +57,7 @@ const EXCLUDED = {
   ingestLca:           "utility, downloads a dataset",
   runEnrichment:       "utility, spends model tokens",
   af2ClaimVerify:      "REAL generation — spends model tokens on every run; run it by hand",
+  ag2ClaimsGeneration: "REAL generation — spends model tokens on every run; run it by hand",
   ag3ClaimSample:      "REAL generation x12 — spends model tokens on every run; run it by hand",
   fakeAts:             "the fixture server itself",
   verifyHarnesses:     "this runner",

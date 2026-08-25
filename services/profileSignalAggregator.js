@@ -38,6 +38,16 @@ export const ENHANCEMENT_SELECTED_THRESHOLD = 5;
 export const ENHANCEMENT_SELECTED_CAP = 8;
 export const ATS_SIGNAL_PROMOTION_THRESHOLD = 2;
 
+/**
+ * The statuses that mean THE CANDIDATE SAID SO (AG2).
+ *
+ * 'inactive' and 'selected' are emphatically not here. 'inactive' is the system having noticed a
+ * term in job descriptions — nobody has claimed anything — and treating it as a claim is how the
+ * panel came to show auto-ingested terms as already-added, locked green chips the user never
+ * chose. The system may suggest; only the user may claim.
+ */
+export const CLAIM_STATUSES = new Set(["claimed", "applied"]);
+
 export function classifyMissingSignal(rawValue) {
   const label = cleanProfileSignalLabel(rawValue);
   if (!label) return null;
@@ -110,6 +120,91 @@ export function listProfileSignalSuggestions(db, { userId, profileId }) {
     selectedActionVerbs: promoted.filter(item => item.kind === "action_verb" && item.status === "selected" && item.promotable),
     appliedActionVerbs: promoted.filter(item => item.kind === "action_verb" && item.status === "applied"),
     structuredFacts: promoted.filter(item => item.kind === "structured_fact" && item.promotable),
+    // AG2. Deliberately NOT filtered by `promotable`: that threshold decides whether the system is
+    // confident enough to SUGGEST a term (it wants to have seen it in two postings). A term the
+    // candidate has claimed is not a suggestion any more — it is something they said about
+    // themselves, and hiding it because only one job asked for it would lose their answer.
+    //
+    // 'applied' is included because it is also a claim: it is a term the user clicked on an ATS
+    // chip under the old one-way flow, which was them asserting it just the same.
+    claimedSkills: promoted.filter(item => item.kind === "skill" && CLAIM_STATUSES.has(item.status)),
+    claimedActionVerbs: promoted.filter(item => item.kind === "action_verb" && CLAIM_STATUSES.has(item.status)),
+  };
+}
+
+/**
+ * A CLAIM (AG2) — the candidate asserting that a suggested term is true of them.
+ *
+ * WHY A NEW STATUS AND NOT 'selected' OR 'applied'
+ * The three statuses already here mean other things, and reusing one would have made opting in do
+ * something the user did not ask for:
+ *   'inactive' — the system noticed this term in job descriptions. Nobody has said anything.
+ *   'selected' — queued for the base-resume ENHANCEMENT flow, which rewrites
+ *                profile_base_resumes.content. Opting in must never rewrite the source of truth.
+ *   'applied'  — already written into domain_profiles.selected_tools/selected_verbs.
+ * 'claimed' is the candidate's own assertion, and it is REVERSIBLE. status is a plain TEXT column
+ * with no CHECK constraint, so this needs no migration.
+ *
+ * WHY IT DOES NOT WRITE domain_profiles
+ * buildRuntimeAtsBasis folds selected_tools/selected_keywords straight into the text the ATS report
+ * scores the resume against. Writing a claim there would mean ticking a box raised your own score
+ * with no resume evidence behind it — which is exactly the "add this to improve your score"
+ * incentive this feature must not create. A claim informs GENERATION; it never scores itself.
+ *
+ * @returns the same shape listProfileSignalSuggestions returns, so callers refresh in one round trip.
+ */
+export function setProfileSignalClaim(db, { userId, profileId, kind = "skill", label, claimed = true }) {
+  const allowedKind = kind === "action_verb" ? "action_verb" : "skill";
+  const nextLabel = cleanProfileSignalLabel(label);
+  const nextKey = profileSignalKey(nextLabel);
+  if (!nextLabel || !nextKey) return listProfileSignalSuggestions(db, { userId, profileId });
+
+  if (claimed) {
+    // Created on claim if absent: the term may have come straight off the report for a job the
+    // scrape-time aggregator never saw, and a claim the user made must be recorded either way.
+    db.prepare(`
+      INSERT INTO profile_signal_suggestions
+        (profile_id, user_id, signal_key, signal_label, signal_kind, structured_field, frequency, status, first_seen_at, last_seen_at, selected_at)
+      VALUES (?, ?, ?, ?, ?, NULL, ?, 'claimed', unixepoch(), unixepoch(), unixepoch())
+      ON CONFLICT(profile_id, signal_key) DO UPDATE SET
+        signal_label = excluded.signal_label,
+        signal_kind = excluded.signal_kind,
+        status = 'claimed',
+        selected_at = COALESCE(profile_signal_suggestions.selected_at, excluded.selected_at),
+        last_seen_at = excluded.last_seen_at,
+        updated_at = unixepoch()
+    `).run(profileId, userId, nextKey, nextLabel, allowedKind, ATS_SIGNAL_PROMOTION_THRESHOLD);
+  } else {
+    // Withdrawn, not deleted. The row goes back to being a suggestion the system has seen, which is
+    // what it was before the user touched it — and the frequency history is not the user's to lose.
+    //
+    // Only a 'claimed' row is withdrawable. An 'applied' one also lives in
+    // domain_profiles.selected_tools, and silently un-claiming it here would leave the two stores
+    // disagreeing; that legacy path has never had a remove and this is not the place to add one.
+    db.prepare(`
+      UPDATE profile_signal_suggestions
+      SET status = 'inactive', selected_at = NULL, updated_at = unixepoch()
+      WHERE user_id = ? AND profile_id = ? AND signal_key = ? AND status = 'claimed'
+    `).run(userId, profileId, nextKey);
+  }
+  console.log(`[profile-claims] ${claimed ? "claimed" : "withdrew"} ${allowedKind} "${nextLabel}" on profile ${profileId} for user ${userId}`);
+  return listProfileSignalSuggestions(db, { userId, profileId });
+}
+
+/**
+ * Every term the candidate has claimed on a profile, for injection into generation.
+ * Ordered so the same profile always produces the same prompt.
+ */
+export function listProfileClaims(db, { userId, profileId }) {
+  const rows = db.prepare(`
+    SELECT signal_label, signal_kind
+    FROM profile_signal_suggestions
+    WHERE user_id = ? AND profile_id = ? AND status IN ('claimed', 'applied')
+    ORDER BY signal_kind ASC, signal_label COLLATE NOCASE ASC
+  `).all(userId, profileId);
+  return {
+    skills: rows.filter(r => r.signal_kind === "skill").map(r => r.signal_label),
+    actionVerbs: rows.filter(r => r.signal_kind === "action_verb").map(r => r.signal_label),
   };
 }
 

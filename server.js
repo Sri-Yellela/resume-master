@@ -76,11 +76,13 @@ import {
   buildSelectedEnhancementSkills,
   computeEnhancementStatus,
   insertProfileEnhancementHistory,
+  listProfileClaims,
   listProfileEnhancementHistory,
   markSelectedSuggestionsApplied,
 } from "./services/profileSignalAggregator.js";
 import {
   buildRuntimeAtsBasis,
+  LOCAL_ATS_SOURCE,
   scoreAtsLocally,
 } from "./services/localAtsScorer.js";
 import {
@@ -3793,7 +3795,7 @@ cron.schedule("0 2 * * *", () => {
 // â”€â”€ Prompt injection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // domainProfile is the active domain_profiles row (or null).
 // When supplied, profile keywords/verbs/tools are injected as Tier 1 signal.
-function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainProfile = null) {
+function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainProfile = null, claims = null) {
   const isAPlus = mode === "CUSTOM_SAMPLER" || mode === "A_PLUS";
   const isGenerate = mode === "TAILORED" || mode === "GENERATE";
   const userLocation = isAPlus ? "" : (profile?.location||"");
@@ -3831,6 +3833,30 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
 `;
   }
 
+  // AG2. Terms the CANDIDATE has claimed from an ATS report — "yes, I have this".
+  //
+  // These are candidate-supplied facts, and the distinction from the block above matters: profile
+  // keywords are a targeting preference, whereas a claim is an assertion about the person, made by
+  // the person, which they will have to defend at interview. So they are named as such.
+  //
+  // The qualifier is not decoration. A claimed skill says the candidate HAS the skill; it says
+  // nothing about where they used it, for how long, or to what result — and a model handed a bare
+  // list will happily invent a bullet that supplies all three. The base resume remains the only
+  // source for what they actually did, which is the same rule §7 and the AF2 years guard enforce.
+  let claimsBlock = "";
+  const claimedSkills = (claims?.skills || []).join(", ");
+  const claimedVerbs = (claims?.actionVerbs || []).join(", ");
+  if (claimedSkills || claimedVerbs) {
+    claimsBlock = `
+**Skills the CANDIDATE has claimed (candidate-supplied — they assert these are true of them):** ${claimedSkills || "—"}
+**Action verbs the CANDIDATE has claimed:** ${claimedVerbs || "—"}
+**How to use the claims above:** they license WORDING, never HISTORY. You may use these terms where
+the base resume already supports the work being described. You may NOT invent an employer, a
+project, a duration, a metric or a responsibility to justify one, and you may NOT add a claimed
+term to a role that did not involve it. A claim the base resume cannot carry is simply not used.
+`;
+  }
+
   return `## RUNTIME INPUTS
 
 **Mode:** ${displayModeForPrompt(mode)}
@@ -3840,7 +3866,7 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
 **LinkedIn URL:** ${profile?.linkedin_url||""}
 **GitHub URL:** ${profile?.github_url||""}
 **User location (City, State):** ${userLocation}
-${yearsBlock}${employerBlock}${domainProfileBlock}
+${yearsBlock}${employerBlock}${domainProfileBlock}${claimsBlock}
 **Target role / job title:** ${job.title}
 **Target industry / domain:** ${job.category && job.category !== "Other" ? job.category : job.title || "Technology"}
 **Target company:** ${job.company}
@@ -7060,7 +7086,13 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
     }
   }
 
-  const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, promptMode, employers, activeDomainProfile);
+  // AG2. Read fresh on every generation, so a claim made after an earlier resume was produced
+  // affects the NEXT one and never reaches back into an artifact already saved.
+  const profileClaims = activeDomainProfile
+    ? listProfileClaims(db, { userId, profileId: activeDomainProfile.id })
+    : null;
+
+  const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, promptMode, employers, activeDomainProfile, profileClaims);
   const { systemBlocks } = assemblePrompt(domainModuleKey, promptMode, runtimeInputs);
 
   const genStart = Date.now();

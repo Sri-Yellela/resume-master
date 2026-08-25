@@ -12,12 +12,10 @@ import { useTheme } from "../styles/theme.jsx";
 import { api } from "../lib/api.js";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import {
-  addSkillToProfile,
-  addVerbToProfile,
-  buildProfileSuggestionLookup,
+  buildProfileClaimLookup,
   emitProfileSuggestionsUpdated,
-  hasProfileSuggestion,
   PROFILE_SUGGESTIONS_UPDATED_EVENT,
+  setProfileClaim,
 } from "../lib/profileSuggestions.js";
 import { profileSignalKey } from "../../../shared/profileSignals.js";
 
@@ -30,12 +28,21 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   const [profileSuggestions, setProfileSuggestions] = useState(null);
   const [profileSelections, setProfileSelections] = useState({ activeSkills: [], activeVerbs: [] });
 
-  // Reset local state when the selected job changes
+  // Reset local state when the selected job changes — OR the profile does.
+  //
+  // addedItems is an optimistic echo of claims made in this session, and claims are PER PROFILE.
+  // Keyed on jobId alone it survived a profile switch, so terms claimed on one profile rendered as
+  // ticked on another that had never claimed them. Only on screen — the store was right, and a
+  // reload cleared it — which is exactly the kind of wrong that gets believed.
+  //
+  // Keyed on the activeProfileId PROP rather than the derived clickableProfileId below: a dep array
+  // is evaluated during render, and naming a const declared further down would read it in its
+  // temporal dead zone. The prop is what changes when the user switches profile anyway.
   useEffect(() => {
     setLocalReport(null);
     setKwError(false);
     setAddedItems(new Set());
-  }, [jobId]);
+  }, [jobId, activeProfileId]);
 
   // Fetch keyword analysis when no generated-resume report exists
   useEffect(() => {
@@ -100,25 +107,30 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
     },
   });
 
-  const addSuggestion = async (kind, label) => {
+  /**
+   * The candidate claiming, or withdrawing, a term (AG2).
+   *
+   * Reversible. The old handler wrote straight into domain_profiles.selected_tools and there was
+   * no un-add anywhere in the product, so a misclick was permanent — and a permanent "yes" is not
+   * an opt-in. A term already written by that old path (status 'applied') still reads as claimed,
+   * because it was a claim; it just cannot be taken back here, which is what `locked` marks.
+   */
+  const toggleClaim = async (kind, label, claimed) => {
     if (!clickableProfileId || !label) return;
-    const existingInProfile = kind === "action_verb"
-      ? (profileSelections.activeVerbs || []).some(value => profileSignalKey(value) === profileSignalKey(label))
-      : (profileSelections.activeSkills || []).some(value => profileSignalKey(value) === profileSignalKey(label));
-    if (existingInProfile || hasProfileSuggestion(profileSuggestions, kind, label)) return;
     const key = `${kind}:${label}`;
-    setAddedItems(prev => new Set([...prev, key]));
+    setAddedItems(prev => {
+      const next = new Set(prev);
+      if (claimed) next.add(key); else next.delete(key);
+      return next;
+    });
     try {
-      const next = kind === "action_verb"
-        ? await addVerbToProfile(clickableProfileId, label)
-        : await addSkillToProfile(clickableProfileId, label);
+      const next = await setProfileClaim(clickableProfileId, kind, label, claimed);
       setProfileSuggestions(next || null);
-      await loadProfileSuggestions(clickableProfileId);
       emitProfileSuggestionsUpdated(clickableProfileId, next || null);
     } catch {
       setAddedItems(prev => {
         const next = new Set(prev);
-        next.delete(key);
+        if (claimed) next.delete(key); else next.add(key);
         return next;
       });
     }
@@ -184,9 +196,20 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   const circumference = 2 * Math.PI * R;
   const pct = Math.max(0, Math.min(100, activeReport.score ?? score ?? 0));
   const scoreColor = pct >= 80 ? "#22c55e" : pct >= 60 ? "var(--color-warning)" : "#ef4444";
-  const suggestionLookup = buildProfileSuggestionLookup(profileSuggestions || {});
-  const selectedSkillLookup = new Set((profileSelections.activeSkills || []).map(profileSignalKey).filter(Boolean));
-  const selectedVerbLookup = new Set((profileSelections.activeVerbs || []).map(profileSignalKey).filter(Boolean));
+  // AG2. CLAIMED, not merely suggested. The old lookup unioned every status, so a term the
+  // scrape-time aggregator had written unprompted rendered as an already-added chip the user could
+  // not click — an auto-opt-in the user never made. Only what the candidate said counts here.
+  const claimLookup = buildProfileClaimLookup(profileSuggestions || {});
+  // Terms already written into the profile's own lists. Those are claims too, made through the
+  // old one-way path or typed in by hand, but there is no un-add for them so they show as locked.
+  const lockedSkillLookup = new Set((profileSelections.activeSkills || []).map(profileSignalKey).filter(Boolean));
+  const lockedVerbLookup = new Set((profileSelections.activeVerbs || []).map(profileSignalKey).filter(Boolean));
+  // Provenance: what the base resume already evidences. The scorer has already decided this — a
+  // term is in `matched` precisely because it found it in the resume — so nothing is re-derived.
+  const evidencedLookup = new Set([
+    ...(activeReport.tier1_matched || []),
+    ...(activeReport.action_verbs_matched || []),
+  ].map(profileSignalKey).filter(Boolean));
 
   return (
     // No scroller and no height:100% of its own any more. This used to be handed a fixed-height
@@ -240,19 +263,23 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
       {/* Skills matched */}
       {activeReport.tier1_matched?.length > 0 && (
         <TagSection title="✓ Skills Matched"
+          subtitle="This job asked for these, and your resume already evidences them."
           bg={"#0a1f0a"} fg={"#22c55e"} border={"color-mix(in srgb, #22c55e 20%, transparent)"}
-          items={activeReport.tier1_matched}/>
+          items={activeReport.tier1_matched}
+          evidencedLookup={evidencedLookup}/>
       )}
 
       {/* Skills missing */}
       {activeReport.tier1_missing?.length > 0 && (
         <TagSection title="✗ Skills Missing"
+          subtitle="This job asked for these and your resume does not show them. Claim any that are true of you."
           bg={"#1f0a0a"} fg={"#ef4444"} border={"color-mix(in srgb, #ef4444 20%, transparent)"}
           items={activeReport.tier1_missing}
-          onItemClick={clickableProfileId ? item => addSuggestion("skill", item) : null}
-          addedItems={addedItems}
-          addedLookup={suggestionLookup}
-          selectedLookup={selectedSkillLookup}
+          onToggleClaim={clickableProfileId ? (item, claimed) => toggleClaim("skill", item, claimed) : null}
+          pendingItems={addedItems}
+          claimedLookup={claimLookup}
+          lockedLookup={lockedSkillLookup}
+          evidencedLookup={evidencedLookup}
           kind="skill"
           theme={theme}/>
       )}
@@ -260,19 +287,24 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
       {/* Action verbs matched */}
       {activeReport.action_verbs_matched?.length > 0 && (
         <TagSection title="⚡ Verbs Matched"
+          subtitle="Your resume already uses this job's language for these."
           bg={"#0a1525"} fg={"#38bdf8"} border={"color-mix(in srgb, #38bdf8 20%, transparent)"}
-          items={activeReport.action_verbs_matched}/>
+          items={activeReport.action_verbs_matched}
+          kind="action_verb"
+          evidencedLookup={evidencedLookup}/>
       )}
 
       {/* Action verbs missing */}
       {activeReport.action_verbs_missing?.length > 0 && (
         <TagSection title="⚠ Verbs Missing"
+          subtitle="This job's language for work you may already have done. Claim the ones that describe you."
           bg={"#1f1500"} fg={"var(--color-warning)"} border={"color-mix(in srgb, var(--color-warning) 20%, transparent)"}
           items={activeReport.action_verbs_missing}
-          onItemClick={clickableProfileId ? item => addSuggestion("action_verb", item) : null}
-          addedItems={addedItems}
-          addedLookup={suggestionLookup}
-          selectedLookup={selectedVerbLookup}
+          onToggleClaim={clickableProfileId ? (item, claimed) => toggleClaim("action_verb", item, claimed) : null}
+          pendingItems={addedItems}
+          claimedLookup={claimLookup}
+          lockedLookup={lockedVerbLookup}
+          evidencedLookup={evidencedLookup}
           kind="action_verb"
           theme={theme}/>
       )}
@@ -300,45 +332,81 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   );
 }
 
+/**
+ * A row of terms, each of which the candidate may CLAIM (AG2).
+ *
+ * THE COPY IS THE FEATURE. Clicking one of these asserts "I have this" — it is the candidate
+ * making a claim they will have to defend in an interview, which is the only direction this can
+ * safely run. So the chip must never read as "add this to improve your score": that invites
+ * someone to tick things because a number goes up, and the number is not the thing being decided.
+ * Hence "is true of you" / "You claimed this", and a line saying in plain words that claiming does
+ * not move the score. It does not: claims are deliberately kept out of the scoring basis, so a
+ * claim cannot flatter its own number.
+ *
+ * NOTHING IS PRE-SELECTED. `claimedLookup` holds only what the person actually claimed.
+ */
 function TagSection({
   title,
+  subtitle = null,
   bg,
   fg,
   border,
   items,
-  onItemClick = null,
-  addedItems = new Set(),
-  addedLookup = { skillKeys: new Set(), verbKeys: new Set() },
-  selectedLookup = new Set(),
+  onToggleClaim = null,
+  pendingItems = new Set(),
+  claimedLookup = { skillKeys: new Set(), verbKeys: new Set() },
+  lockedLookup = new Set(),
+  evidencedLookup = new Set(),
   kind = "skill",
   theme,
 }) {
+  const claimedKeys = kind === "action_verb" ? claimedLookup.verbKeys : claimedLookup.skillKeys;
   return (
     <div>
       <div className="rm-section-label" style={{ color:fg }}>{title}</div>
+      {subtitle && (
+        <div style={{ fontSize:11, color:"var(--color-text-muted)", marginBottom:6, lineHeight:1.5 }}>
+          {subtitle}
+        </div>
+      )}
       <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
         {items.map(k => {
           const itemKey = profileSignalKey(k);
-          const alreadyAdded = kind === "action_verb"
-            ? selectedLookup.has(itemKey) || addedLookup.verbKeys.has(itemKey) || addedItems.has(`${kind}:${k}`)
-            : selectedLookup.has(itemKey) || addedLookup.skillKeys.has(itemKey) || addedItems.has(`${kind}:${k}`);
+          const locked = lockedLookup.has(itemKey);
+          const claimed = locked || claimedKeys.has(itemKey) || pendingItems.has(`${kind}:${k}`);
+          const evidenced = evidencedLookup.has(itemKey);
+          const interactive = !!onToggleClaim && !locked;
+          const provenance = evidenced
+            ? "Your resume already shows this"
+            : claimed
+              ? "You claimed this — the job description asked for it"
+              : "This job asked for it. Your resume does not show it.";
           return (
           <button key={k} type="button" className="rm-badge"
-            onClick={() => onItemClick?.(k)}
-            disabled={!onItemClick || alreadyAdded}
-            title={onItemClick ? `Add "${k}" to this profile as an inactive suggestion` : undefined}
+            onClick={interactive ? () => onToggleClaim(k, !claimed) : undefined}
+            disabled={!interactive}
+            aria-pressed={interactive ? claimed : undefined}
+            title={interactive
+              ? (claimed
+                  ? `You claimed "${k}". Click to withdraw it.`
+                  : `Claim "${k}" — only if it is true of you. It informs future resumes; it does not change this score.`)
+              : provenance}
             style={{
-              background:alreadyAdded ? "#0a1f0a" : bg,
-              color:alreadyAdded ? "#22c55e" : fg,
-              border:`1px solid ${alreadyAdded ? "color-mix(in srgb, #22c55e 20%, transparent)" : border}`,
-              cursor:alreadyAdded ? "default" : (onItemClick ? "pointer" : "default"),
-              opacity:alreadyAdded ? 1 : 1,
-              pointerEvents:alreadyAdded ? "none" : "auto",
+              background:claimed ? "#0a1f0a" : bg,
+              color:claimed ? "#22c55e" : fg,
+              border:`1px solid ${claimed ? "color-mix(in srgb, #22c55e 20%, transparent)" : border}`,
+              cursor:interactive ? "pointer" : "default",
             }}>
-            {alreadyAdded ? `Added: ${k}` : k}
+            {claimed ? `✓ ${k}` : k}
           </button>
         )})}
       </div>
+      {onToggleClaim && (
+        <div style={{ fontSize:10, color:"var(--color-text-muted)", marginTop:6, fontStyle:"italic" }}>
+          Claiming a term says it is true of you. It is used in resumes generated from now on, and
+          never rewrites one you already have. It does not change this score.
+        </div>
+      )}
     </div>
   );
 }

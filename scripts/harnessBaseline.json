@@ -38,6 +38,9 @@
   "ag1AtsPanelUi": {
     "pass": 7
   },
+  "ag2ClaimsUi": {
+    "pass": 17
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

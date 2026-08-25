@@ -19,19 +19,25 @@ test("profile suggestion additions use shared normalized helpers on both server 
   assert.match(wizard, /new Set\(mergeUniqueSignalLabels\(\[\.\.\.prev, value\]\)\)/);
 });
 
-test("ATS missing chips stay visible, turn green when already added, and react to profile suggestion updates", () => {
+// RENAMED FOR A REAL CHANGE, not to re-baseline a failure. AG2 replaced the one-way "add" with a
+// two-way claim, so `alreadyAdded` is now `claimed` and "Added: X" is "✓ X". One assertion is
+// deliberately INVERTED rather than updated: the chip used to get pointerEvents:"none" once added,
+// which is what made the decision permanent. A claimed chip must stay clickable, because that click
+// is how the candidate takes the claim back.
+test("ATS missing chips stay visible, turn green when claimed, and react to profile suggestion updates", () => {
   const atsPanel = fs.readFileSync("client/src/panels/ATSPanel.jsx", "utf8");
 
   assert.match(atsPanel, /PROFILE_SUGGESTIONS_UPDATED_EVENT/);
-  assert.match(atsPanel, /buildProfileSuggestionLookup/);
+  assert.match(atsPanel, /buildProfileClaimLookup/);
   assert.match(atsPanel, /emitProfileSuggestionsUpdated/);
   // theme.successMuted was replaced with literal greens (#0a1f0a background, #22c55e text). The
-  // behaviour this test is named for — the chip turns green once added — is unchanged; only the
-  // token went. Asserting the conditional, so the green stays tied to `alreadyAdded`.
-  assert.match(atsPanel, /background:alreadyAdded \? "#0a1f0a" : bg/);
-  assert.match(atsPanel, /color:alreadyAdded \? "#22c55e" : fg/);
-  assert.match(atsPanel, /pointerEvents:alreadyAdded \? "none" : "auto"/);
-  assert.match(atsPanel, /alreadyAdded \? `Added: \$\{k\}` : k/);
+  // behaviour this test is named for — the chip turns green — is unchanged; only the token went,
+  // and now the trigger is the candidate's claim rather than an irreversible add.
+  assert.match(atsPanel, /background:claimed \? "#0a1f0a" : bg/);
+  assert.match(atsPanel, /color:claimed \? "#22c55e" : fg/);
+  assert.match(atsPanel, /claimed \? `✓ \$\{k\}` : k/);
+  assert.doesNotMatch(atsPanel, /pointerEvents:\s*claimed/,
+    "a claimed chip must stay clickable — that click is how the claim is withdrawn");
 });
 
 test("jobs search button uses two-step local then scrape flow and pagination supports direct page jumps", () => {

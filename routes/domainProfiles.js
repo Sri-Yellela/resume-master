@@ -20,6 +20,7 @@ import {
   computeEnhancementStatus,
   listProfileEnhancementHistory,
   listProfileSignalSuggestions,
+  setProfileSignalClaim,
   syncSelectedSkillSuggestions,
 } from "../services/profileSignalAggregator.js";
 import { mergeUniqueSignalLabels } from "../shared/profileSignals.js";
@@ -452,6 +453,33 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
       suggestions = kind === "action_verb"
         ? addVerbToProfile(db, { userId: req.user.id, profileId: profile.id, label })
         : addSkillToProfile(db, { userId: req.user.id, profileId: profile.id, label });
+    });
+    res.json({
+      ...suggestions,
+      enhancement: computeEnhancementStatus(db, { userId: req.user.id, profileId: profile.id }),
+    });
+  });
+
+  /**
+   * POST /:id/claims — the candidate asserting, or withdrawing, a claim on a suggested term (AG2).
+   *
+   * Distinct from POST /:id/suggestions, which is one-way and writes domain_profiles.selected_*.
+   * A claim is REVERSIBLE and touches only profile_signal_suggestions, so the same click can be
+   * taken back and nothing the user did not ask for is written to their profile.
+   *
+   * Body: { kind: "skill" | "action_verb", label: string, claimed?: boolean }
+   */
+  router.post("/:id/claims", (req, res) => {
+    const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
+      .get(req.params.id, req.user.id);
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    const label = typeof req.body?.label === "string" ? req.body.label : "";
+    if (!label.trim()) return res.status(400).json({ error: "label required" });
+    const kind = req.body?.kind === "action_verb" ? "action_verb" : "skill";
+    // Absent means claim. Withdrawing is the deliberate act and has to say so.
+    const claimed = req.body?.claimed !== false;
+    const suggestions = setProfileSignalClaim(db, {
+      userId: req.user.id, profileId: profile.id, kind, label, claimed,
     });
     res.json({
       ...suggestions,

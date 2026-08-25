@@ -260,23 +260,85 @@ test("AG1: an unrecognised posting yields a short report rather than an invented
   }
 });
 
-test("ATS missing chips add profile-scoped inactive suggestions without mutating base metadata", () => {
+// This test used to pin the one-way "add" contract: ATSPanel called addSkillToProfile /
+// addVerbToProfile, which POSTed { kind, labels: [label] } and wrote straight into
+// domain_profiles.selected_*. AG2 replaces that flow with a reversible claim, so the contract it
+// pinned is deliberately gone. What still matters is pinned below.
+test("AG2: the ATS chips claim through the reversible route, not the one-way add", () => {
   const routes = fs.readFileSync("routes/domainProfiles.js", "utf8");
   const panel = fs.readFileSync("client/src/panels/ATSPanel.jsx", "utf8");
-  const profilePanel = fs.readFileSync("client/src/panels/ProfilePanel.jsx", "utf8");
-
-  assert.match(routes, /router\.post\("\/:id\/suggestions"/);
-  assert.match(routes, /addProfileSignalSuggestions/);
-  assert.doesNotMatch(routes, /profile_base_resumes[\s\S]{0,120}suggestions/);
-  // The { kind, labels: [label] } request body moved out of ATSPanel into the shared
-  // client/src/lib/profileSuggestions.js helpers (addSkillToProfile / addVerbToProfile), which
-  // the panel now calls. Asserting the payload where it is actually built, so the contract with
-  // POST /:id/suggestions is still pinned rather than dropped.
   const suggestionsLib = fs.readFileSync("client/src/lib/profileSuggestions.js", "utf8");
-  assert.match(suggestionsLib, /body: JSON\.stringify\(\{ kind, labels: \[label\] \}\)/);
-  assert.match(panel, /await addVerbToProfile\(clickableProfileId, label\)/);
-  assert.match(panel, /await addSkillToProfile\(clickableProfileId, label\)/);
-  assert.match(panel, /addSuggestion\("skill", item\)/);
-  assert.match(panel, /addSuggestion\("action_verb", item\)/);
+
+  assert.match(routes, /router\.post\("\/:id\/claims"/, "the claim route must exist");
+  assert.match(routes, /setProfileSignalClaim/);
+  // The route must still not reach into the base resume — a claim is not an edit to the record of
+  // what the candidate actually did.
+  assert.doesNotMatch(routes, /profile_base_resumes[\s\S]{0,120}claims/);
+
+  assert.match(suggestionsLib, /body: JSON\.stringify\(\{ kind, label, claimed \}\)/);
+  assert.match(panel, /await setProfileClaim\(clickableProfileId, kind, label, claimed\)/);
+  assert.match(panel, /toggleClaim\("skill", item, claimed\)/);
+  assert.match(panel, /toggleClaim\("action_verb", item, claimed\)/);
+
+  // The superseded one-way helpers must be gone from the client, so there is one way to do this.
+  for (const dead of ["addSkillToProfile", "addVerbToProfile", "buildProfileSuggestionLookup"]) {
+    assert.ok(!new RegExp(`export (async )?function ${dead}\\b`).test(suggestionsLib),
+      `${dead} should no longer be exported — AG2 replaced it with a reversible claim`);
+    assert.doesNotMatch(panel, new RegExp(`\\b${dead}\\(`), `${dead} still called from the panel`);
+  }
+});
+
+test("AG2: nothing is pre-selected — only what the candidate claimed reads as claimed", () => {
+  const panel = fs.readFileSync("client/src/panels/ATSPanel.jsx", "utf8");
+  const suggestionsLib = fs.readFileSync("client/src/lib/profileSuggestions.js", "utf8");
+  const aggregator = fs.readFileSync("services/profileSignalAggregator.js", "utf8");
+
+  // The claim lookup reads the claimed buckets ONLY. Scrape-time aggregation writes 'inactive'
+  // rows with no user involvement, so including those is an auto-opt-in.
+  assert.match(suggestionsLib, /skillKeys: new Set\(keysOf\(suggestions\.claimedSkills\)\)/);
+  assert.match(suggestionsLib, /verbKeys: new Set\(keysOf\(suggestions\.claimedActionVerbs\)\)/);
+  for (const notAClaim of ["inactiveSkills", "selectedSkills", "inactiveActionVerbs", "selectedActionVerbs"]) {
+    assert.doesNotMatch(suggestionsLib, new RegExp(`claimKeys[\\s\\S]{0,200}${notAClaim}`));
+  }
+  assert.match(aggregator, /CLAIM_STATUSES = new Set\(\["claimed", "applied"\]\)/);
+
+  // A claim must never be a score lever: claims are not written into domain_profiles.selected_*,
+  // which is what buildRuntimeAtsBasis scores the resume against.
+  //
+  // Checked against the code with COMMENTS STRIPPED. The comment explaining why the copy must not
+  // say "add this to improve your score" contains that phrase, and matching it there would fail on
+  // the very sentence that documents the rule.
+  const visible = panel.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  assert.doesNotMatch(visible, /improve your score|boost your score|increase your score/i);
+  assert.match(visible, /It does not change this score/,
+    "the panel must say plainly that claiming does not move the number");
+  assert.match(visible, /is true of you|You claimed this/,
+    "the copy must read as the candidate claiming, not as the product advising");
+});
+
+test("AG2: a claim informs FUTURE generation and never rewrites an existing resume", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const aggregator = fs.readFileSync("services/profileSignalAggregator.js", "utf8");
+
+  // Read per generation, from the live table — so a claim made today cannot reach yesterday's
+  // artifact, and tomorrow's generation sees it without anything being replayed.
+  assert.match(server, /listProfileClaims\(db, \{ userId, profileId: activeDomainProfile\.id \}\)/);
+  const build = server.slice(server.indexOf("function buildRuntimeInputs"), server.indexOf("// â”€â”€ PDF generation"));
+  assert.match(build, /Skills the CANDIDATE has claimed \(candidate-supplied/);
+  assert.match(build, /they license WORDING, never HISTORY/,
+    "the prompt must bound what a claim authorises");
+  assert.match(build, /may NOT invent an employer, a\nproject, a duration, a metric or a responsibility/);
+
+  // The claim store is separate from the profile's own term lists, which are what the ATS scorer
+  // reads. Writing claims there would let a claim inflate its own score.
+  const claimFn = aggregator.slice(aggregator.indexOf("export function setProfileSignalClaim"),
+    aggregator.indexOf("export function listProfileClaims"));
+  assert.doesNotMatch(claimFn, /UPDATE domain_profiles/,
+    "claiming must not write the profile's scored term lists");
+  assert.match(claimFn, /status = 'inactive', selected_at = NULL/, "a claim must be withdrawable");
+});
+
+test("ProfilePanel still surfaces ATS-suggested action verbs", () => {
+  const profilePanel = fs.readFileSync("client/src/panels/ProfilePanel.jsx", "utf8");
   assert.match(profilePanel, /Inactive ATS-Suggested Action Verbs/);
 });
