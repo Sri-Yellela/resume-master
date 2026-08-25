@@ -1522,6 +1522,93 @@ export function normalisePolicyDecision(decision, fillable) {
 }
 
 /**
+ * Every discovered field this run did NOT fill, and WHY (AH5).
+ *
+ * Read off the POST-FILL discovery pass, so it is the ACTUAL STATE OF THE FORM rather than the
+ * gate's opinion of it. That distinction is the whole point: a run reports "Autofilled 7 fields"
+ * and holds for review, and the candidate is left to work out which 7 and what is still empty by
+ * reading the form themselves.
+ *
+ * INCLUDES OPTIONAL FIELDS, unlike the two gates above, which filter on `is_required` because they
+ * are deciding whether to stop. This is not deciding anything — it is the record — and "we left
+ * your salary expectation blank on purpose" is exactly the kind of thing a fill log exists to say.
+ *
+ * THE REASONS ARE THE THREE THE RESOLVER CAN ACTUALLY DISTINGUISH, and no more:
+ *   low_confidence  a value was produced and policy refused to type it. `refusals` on a skipped
+ *                   answer, or an entry in `rejectedAnswers` — the two ways the policy says no.
+ *   needs_you       an ELIGIBILITY question — sponsorship, work authorisation, clearance. We
+ *                   recognise it perfectly well and decline to answer it, because a wrong answer
+ *                   here is a false statement to an employer about the candidate's status.
+ *   no_answer       a rule matched this field and the profile had nothing to put in it.
+ *   unmatched       no rule produced a candidate at all; the field was seen and never understood.
+ *
+ * `needs_you` is separated from `unmatched` because buildAnswers emits NOTHING for an eligibility
+ * field the profile cannot answer — no value and no refusal — so by the rule above it would fall
+ * through to "we did not recognise the field". Measured on the fixture form, that mislabelled both
+ * of Greenhouse's eligibility questions. We classify them (eligibilityClassOf names them), so
+ * saying we did not recognise them is untrue, and it is untrue in the direction that makes the
+ * product look broken rather than careful.
+ *
+ * A fourth, `fill_failed`, is separated out deliberately: the resolver had a value, policy allowed
+ * it, and the field is STILL empty. That is our bug rather than the candidate's missing data, and
+ * folding it into `no_answer` would hide it in the one record built to expose it.
+ */
+export function buildBlanks({ fields = [], resolvedAnswers = [], rejectedAnswers = [] } = {}) {
+  const refusals = new Map();
+  const attempted = new Set();
+  const seenByResolver = new Set();
+  const keysOf = (a) => [a.field_id, a.name, a.label, a.field].filter(v => v != null).map(String);
+
+  for (const a of resolvedAnswers) {
+    for (const k of keysOf(a)) {
+      seenByResolver.add(k);
+      if (a.skipped) { if (a.refusals?.length) refusals.set(k, a.refusals); }
+      else attempted.add(k);
+    }
+  }
+  const declined = new Map();
+  for (const r of rejectedAnswers) for (const k of keysOf(r)) declined.set(k, r);
+
+  const lookup = (map, f) => {
+    for (const k of [f.field_id, f.name, f.label].filter(v => v != null).map(String)) {
+      if (map.has(k)) return map.get(k);
+    }
+    return null;
+  };
+  const known = (set, f) =>
+    [f.field_id, f.name, f.label].filter(v => v != null).map(String).some(k => set.has(k));
+
+  return fields
+    .filter(f => f.current_value === '' || f.current_value == null)
+    .map(f => {
+      const refusal = lookup(refusals, f);
+      const decline = lookup(declined, f);
+      const eligibility = eligibilityClassOf(`${f.label || ''} ${f.name || ''}`);
+      const reason = refusal ? 'low_confidence'
+        : decline ? 'low_confidence'
+        : known(attempted, f) ? 'fill_failed'
+        : eligibility ? 'needs_you'
+        : known(seenByResolver, f) ? 'no_answer'
+        : 'unmatched';
+      return {
+        field: f.field_id ?? f.name ?? null,
+        label: f.label ?? null,
+        type: f.type ?? null,
+        required: !!f.is_required,
+        reason,
+        // What the policy actually objected to, when it objected. "We would not guess your
+        // sponsorship answer" is a different statement from "this is blank".
+        eligibility: eligibility || undefined,
+        detail: refusal ? refusal.join('; ')
+          : decline ? `declined a ${decline.provenance || 'low-confidence'} guess` +
+              (decline.confidence != null ? ` (confidence ${decline.confidence})` : '')
+          : eligibility ? `an eligibility question (${eligibility}) — only you can answer this`
+          : null,
+      };
+    });
+}
+
+/**
  * Turn a hold into an answerable question set — the validation-correction loop.
  *
  * `missingRequired` on its own ends a run: it is a list of label strings with no type, no options
@@ -2745,6 +2832,9 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // unattended gate's locals because these do NOT stop the run — they are attached to a result
     // whose status is `awaiting_user`.
     let semiMissingRequired = null, semiOpenQuestions = null;
+    // AH5's fill-log half for semi, declared here for the same reason: it is attached to an
+    // `awaiting_user` result rather than stopping the run.
+    let semiBlanks = null;
     if (isUnattended) {
       // Completeness gate: re-discover all frames; hold if any required non-file field is still empty.
       const postFillFields = (await Promise.all(
@@ -2778,6 +2868,8 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
           flowState:        'form_ready',
           fieldsFilled:     totalFilled,
           missingRequired,
+          // AH5: the whole post-fill form state, not just the required blanks the gate stopped on.
+          blanks:           buildBlanks({ fields: postFillFields, resolvedAnswers, rejectedAnswers }),
           openQuestions:    buildOpenQuestions({ missingFields }),
           answers:          resolvedAnswers,
           platform:         detected,
@@ -3041,6 +3133,9 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       }
       semiMissingRequired = semiMissingFields.map(f => f.label || f.field_id || '(unknown)');
       semiOpenQuestions   = buildOpenQuestions({ missingFields: semiMissingFields });
+      // AH5: the fill log's blank half, from the SAME pass — actual form state, including the
+      // optional fields the gates ignore because they are not deciding anything.
+      semiBlanks          = buildBlanks({ fields: semiFields, resolvedAnswers, rejectedAnswers });
       console.log(`[autoApply] semi: ${semiMissingRequired.length} required field(s) are yours to answer` +
         (semiMissingRequired.length ? ` — ${semiMissingRequired.join(', ')}` : ''));
 
@@ -3083,6 +3178,10 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       // this used to return, which the review surface could only read as "no information".
       ...(semiMissingRequired ? { missingRequired: semiMissingRequired } : {}),
       ...(semiOpenQuestions?.length ? { openQuestions: semiOpenQuestions } : {}),
+      // AH5. Present on a semi run whether or not anything is blank, for the same reason
+      // missingRequired is: an empty array means "we looked at every field and none is empty",
+      // which is a fact, and an absent key is how the silence went unnoticed before.
+      ...(semiBlanks ? { blanks: semiBlanks } : {}),
       // AF5: the DENOMINATOR. Two hold branches already reported this and the terminal path did not,
       // so the run that actually completes — the only kind a semi campaign produces — could report
       // "12 fields filled" with no way to know whether 12 was most of the form or a tenth of it.

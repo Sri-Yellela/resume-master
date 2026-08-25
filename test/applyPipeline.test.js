@@ -127,11 +127,21 @@ test("coreGenerateResume is extracted and callable from generateResumeForApply",
 });
 
 test("generateResumeForApply reuses existing artifact without triggering a new generation", () => {
-  // If artifact already in DB → return immediately without a new API call
+  // If a CURRENT artifact is already in the DB → return immediately without a new API call.
+  //
+  // AH5 replaced the inline `existing.html` lookup with services/resumeCurrency.js, shared with
+  // processRunJob's CASE A. Both sites used to run their own differently-written query for the
+  // same decision, and neither checked whether the stored artifact was still the right one — so an
+  // artifact built under a different job profile, or from a base resume the candidate had since
+  // rewritten, was reused silently. The reuse itself is unchanged, and is what this pins.
   const fn = server.slice(server.indexOf("function generateResumeForApply"), server.indexOf("\napp.post(\"/api/generate\""));
-  assert.match(fn, /existing\.html/, "must check for existing artifact");
+  assert.match(fn, /artifactCurrency\(db, \{ userId, jobId, tool \}\)/, "must ask the shared currency rule");
+  assert.match(fn, /if \(currency\.current\)/, "must reuse when the artifact is current");
+  assert.match(fn, /currency\.artifact\.html/, "must return the stored html rather than regenerating");
   assert.match(fn, /Promise\.resolve\(/, "must return resolved promise for cache hit");
   assert.match(fn, /fromCache: true/, "cache hit must be flagged");
+  // And a STALE artifact must fall through to generation rather than being served anyway.
+  assert.match(fn, /regenerating job=/, "must say why it is rebuilding");
 });
 
 test("generateResumeForApply attaches to in-flight HTTP generation instead of duplicating", () => {

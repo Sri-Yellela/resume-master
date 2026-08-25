@@ -112,6 +112,7 @@ import { FILTER_DIMENSIONS, invalidEntries, ageDaysMap } from "./shared/jobFilte
 import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
 import { assertResumeClaims, profileContradictionFindings } from "./services/resumeClaimGuard.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
+import { artifactCurrency, currencySentence, modeForTool } from "./services/resumeCurrency.js";
 
 console.log("[boot] server module loaded");
 
@@ -299,8 +300,11 @@ function parseJsonMaybe(text, fallback = null) {
   try { return JSON.parse(text || "null"); } catch { return fallback; }
 }
 
+// Delegates to services/resumeCurrency.js, which needs the same mapping to decide whether a stored
+// artifact was built by the tool this run wants. Two copies of it would drift the first time a
+// third tool is added, and the currency rule would then quietly stop matching anything.
 function legacyModeForTool(tool) {
-  return tool === "a_plus_resume" ? "CUSTOM_SAMPLER" : "TAILORED";
+  return modeForTool(tool);
 }
 
 function promptModeForTool(tool) {
@@ -2938,6 +2942,33 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE auth_contexts ADD COLUMN session_sid TEXT;
         CREATE INDEX IF NOT EXISTS idx_auth_contexts_session
           ON auth_contexts(session_sid, revoked_at);
+      `,
+    },
+    {
+      // AH5. Two columns, for the two halves of "say what happened".
+      //
+      // apply_run_jobs.blanks_json — every discovered field the run did NOT fill, with why
+      //   (low_confidence / no_answer / unmatched / fill_failed). Read off the POST-FILL discovery
+      //   pass, so it is the state of the form and not a gate's opinion of it. answers_json has
+      //   always held the filled half with its provenance; the blank half had nowhere to live, so a
+      //   run could say "Autofilled 7 fields" and hold for review with no way to learn which 7 or
+      //   what was still empty. missingRequired existed but only inside an apply_job_logs event,
+      //   which no surface reads.
+      //
+      // resumes.domain_profile_id — which job profile an artifact was generated under.
+      //   processRunJob reuses any `resumes` row for (user, job), newest first, and that is the
+      //   right instinct: regenerating work already done costs a model call and minutes of the
+      //   candidate's time. But with no record of the profile it also reuses an artifact built for
+      //   a DIFFERENT profile, and there was no way to tell. Stamping it makes "is this current?"
+      //   a question the code can answer instead of assume. NULL means an artifact written before
+      //   this migration, and the reuse rule treats that as unknown-but-usable rather than
+      //   forcing a regeneration of every existing artifact.
+      id: "091_fill_log_and_artifact_provenance",
+      sql: `
+        ALTER TABLE apply_run_jobs ADD COLUMN blanks_json TEXT;
+        ALTER TABLE resumes ADD COLUMN domain_profile_id INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_resumes_currency
+          ON resumes(user_id, job_id, domain_profile_id, updated_at DESC);
       `,
     },
   ];
@@ -7471,12 +7502,15 @@ RULES:
   db.prepare("INSERT INTO resume_versions (user_id,job_id,company,role,category,html,ats_score,ats_report,tool_type,is_kept,version,ats_cache_key,ats_prompt_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .run(userId, String(jobId), job.company, job.title, job.category, formattedHtml, atsScore, JSON.stringify(atsReport), tool, 0, version, atsCacheKey, ATS_SCORE_PROMPT_VERSION);
   if (!keptExists) {
-    db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,ats_cache_key,ats_prompt_version,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
+    // AH5: domain_profile_id is STAMPED, so "was this artifact built for the profile that is
+    // active now?" becomes a question the reuse rule can answer instead of assume.
+    db.prepare(`INSERT INTO resumes (user_id,job_id,company,role,category,apply_mode,html,ats_score,ats_report,ats_cache_key,ats_prompt_version,domain_profile_id,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,unixepoch(),unixepoch())
       ON CONFLICT(user_id,job_id) DO UPDATE SET html=excluded.html,role=excluded.role,category=excluded.category,
       apply_mode=excluded.apply_mode,ats_score=excluded.ats_score,ats_report=excluded.ats_report,
-      ats_cache_key=excluded.ats_cache_key,ats_prompt_version=excluded.ats_prompt_version,updated_at=excluded.updated_at`)
-      .run(userId, String(jobId), job.company, job.title, job.category, mode, formattedHtml, atsScore, JSON.stringify(atsReport), atsCacheKey, ATS_SCORE_PROMPT_VERSION);
+      ats_cache_key=excluded.ats_cache_key,ats_prompt_version=excluded.ats_prompt_version,
+      domain_profile_id=excluded.domain_profile_id,updated_at=excluded.updated_at`)
+      .run(userId, String(jobId), job.company, job.title, job.category, mode, formattedHtml, atsScore, JSON.stringify(atsReport), atsCacheKey, ATS_SCORE_PROMPT_VERSION, activeDomainProfile?.id ?? null);
   }
 
   const userJobProfileId = resolveUserJobDomainProfileId(userId, String(jobId));
@@ -7505,15 +7539,24 @@ RULES:
 // share the same in-flight Promise to prevent duplicate generation.
 function generateResumeForApply(userId, jobId, toolType) {
   const tool = toolType === "a_plus_resume" ? "a_plus_resume" : "generate";
-  const mode = legacyModeForTool(tool);
   const key  = `${userId}:${String(jobId)}:${tool}`;
 
-  // 1. Existing artifact in DB â€” reuse immediately
-  const existing = db.prepare(
-    "SELECT id, ats_score, html FROM resumes WHERE user_id=? AND job_id=? ORDER BY CASE WHEN apply_mode=? THEN 0 ELSE 1 END, updated_at DESC LIMIT 1"
-  ).get(userId, String(jobId), mode);
-  if (existing?.html) {
-    return Promise.resolve({ html: existing.html, atsScore: existing.ats_score ?? null, resumeId: existing.id, fromCache: true });
+  // 1. Existing artifact in DB — reused only when it is still CURRENT (AH5). It used to be reused
+  //    unconditionally, so an artifact built for another profile, or before the base resume was
+  //    rewritten, was silently sent to an employer.
+  const currency = artifactCurrency(db, { userId, jobId, tool });
+  if (currency.current) {
+    return Promise.resolve({
+      html: currency.artifact.html,
+      atsScore: currency.artifact.ats_score ?? null,
+      resumeId: currency.artifact.id,
+      fromCache: true,
+      reuse: { reused: true, reason: currency.reason },
+    });
+  }
+  if (currency.artifact) {
+    console.log(`[generateResumeForApply] regenerating job=${jobId}: ${currency.reason}` +
+      (currency.detail ? ` (${currency.detail})` : ""));
   }
 
   // 2. In-flight Promise from another worker call â€” share it

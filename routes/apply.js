@@ -16,6 +16,9 @@ import {
   recordFormSchema, formSchemaSummary, hostOf,
 } from "../services/kb/formSchemaLayer.js";
 import { probeBrowserAvailability } from "../services/browserLauncher.js";
+// AH5: the one definition of "is this stored resume still the right one". Shared with server.js's
+// generateResumeForApply so the two reuse sites cannot drift apart again.
+import { artifactCurrency, currencySentence } from "../services/resumeCurrency.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
 import { classifyRuntimeError } from "../shared/failureAttribution.js";
 import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
@@ -319,6 +322,9 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // 088, AF5's campaign record. Resolved against the live schema like the rest, so a missing one
     // costs only itself.
     "fields_discovered",
+    // 091, AH5's fill log. The BLANK half of what the run did — answers_json has always held the
+    // filled half. Without it the record could say "7 fields filled" and nothing about the rest.
+    "blanks_json",
   ];
 
   // corrections_json is written OUTSIDE persistAudit — the human's edits arrive after the audit row
@@ -487,6 +493,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // reconstructable reference is the resumes row it was rendered from (requirement 3).
     let usedArtifactId = null;
     let usedAtsScore   = null;
+    // AH5: whether this run reused the candidate's existing resume or rebuilt it, and why. Read
+    // back by the fill log, so "no regeneration happened" is a fact the surface can state rather
+    // than something the candidate has to trust.
+    let reuseDecision  = null;
     // Set when resume generation fails, so the run's terminal reason can name GENERATION rather
     // than inheriting whatever failed last. Resume generation runs in parallel with the browser,
     // so without this the browser's outcome silently wins the attribution race.
@@ -629,14 +639,30 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
       const toolType = run.tool_type || "generate";
 
-      const artifact = db.prepare(
-        "SELECT id, ats_score, html FROM resumes WHERE user_id=? AND job_id=? ORDER BY updated_at DESC LIMIT 1"
-      ).get(userId, String(jobId));
+      /**
+       * AH5: reuse what the candidate already generated — but only while it is still CURRENT.
+       *
+       * This used to be its own `SELECT ... FROM resumes ORDER BY updated_at DESC`, a second query
+       * with no rule beside generateResumeForApply's. Both reused unconditionally, so an artifact
+       * built under a different job profile, or from a base resume the candidate had since
+       * rewritten, was sent to an employer with nothing saying so. services/resumeCurrency.js is
+       * now the one definition; a stale artifact falls through to CASE B/C, which regenerate.
+       *
+       * The decision is LOGGED either way. "Queued a job I already generated for and it
+       * regenerated" and "it reused a resume I had replaced" are both things the candidate can only
+       * find out if the run says so.
+       */
+      const currency = artifactCurrency(db, { userId, jobId, tool: toolType });
+      reuseDecision = { reused: currency.current, reason: currency.reason, detail: currency.detail ?? null };
+      logEvent(runId, runJobId, userId, jobId,
+        currency.current ? "resume_reused" : "resume_regenerating",
+        currencySentence(currency), reuseDecision);
+      const artifact = currency.current ? currency.artifact : null;
 
       let result;
 
       if (artifact?.html) {
-        // CASE A: existing artifact — ATS gate, then PDF convert and apply
+        // CASE A: a current artifact — ATS gate, then PDF convert and apply
         usedArtifactId = artifact.id ?? null;
         usedAtsScore   = artifact.ats_score ?? null;
         const atsScore = artifact.ats_score ?? null;
@@ -752,6 +778,11 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           submit_evidence: null,
           open_questions_json: Array.isArray(result.openQuestions) && result.openQuestions.length
             ? JSON.stringify(result.openQuestions) : null,
+          // AH5: semi is the mode this task is about — the run returns with the browser open and
+          // the candidate reading the form, so the record of what was left blank is the whole
+          // value of the run.
+          blanks_json: Array.isArray(result.blanks) ? JSON.stringify(result.blanks) : null,
+          fields_discovered: Number.isFinite(result.fieldsDiscovered) ? result.fieldsDiscovered : null,
         });
         // ── AE6: SAY WHAT IS STILL THEIRS TO ANSWER ────────────────────────────────────────
         // A semi run runs neither the completeness gate nor the low-confidence gate, so the human's
@@ -931,6 +962,9 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         // AF5: the denominator for "N fields filled". Null rather than 0 when the run never got to
         // discovery — "we did not look" and "we looked and found nothing" are different facts.
         fields_discovered: Number.isFinite(result.fieldsDiscovered) ? result.fieldsDiscovered : null,
+        // AH5. An EMPTY array is a real answer — "we looked at every discovered field and none is
+        // empty" — and is a different fact from null, which means the run never got to look.
+        blanks_json: Array.isArray(result.blanks) ? JSON.stringify(result.blanks) : null,
       });
 
       // The durable record, independent of schema state. The columns are a queryable projection of
@@ -1309,6 +1343,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // a resume was ever produced.
     resumeAvailable: r.resume_artifact_id != null,
     screenshotAvailable: !!r.screenshot_path,
+    // AH5: a hold reading "Required fields were left empty" that does not say WHICH is a hold the
+    // candidate cannot act on. Named here, on the row every surface already renders, rather than
+    // behind a second request.
+    missingRequired: parseJson(r.blanks_json, [])
+      .filter(b => b?.required).map(b => b.label || b.field).filter(Boolean),
+    // Whether there is a fill log worth asking for. The log itself is on demand — it is a record
+    // you go and read, not something every row should carry.
+    fillLogAvailable: r.blanks_json != null || r.answers_json != null,
     submitVerified: r.submit_verified === 1,
     submitEvidence: r.submit_evidence ?? null,
     startedAt: toMs(r.started_at),
@@ -1492,7 +1534,80 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         verified: rj.submit_verified === 1,
         evidence: rj.submit_evidence ?? null,
       },
+      // AH5: a hold that says "required fields were left empty" and does not say WHICH is a hold
+      // the candidate cannot act on — the same defect class as the old unscoped review modal. The
+      // list existed; it lived in an apply_job_logs event that no surface reads.
+      missingRequired: parseJson(rj.blanks_json, [])
+        .filter(b => b?.required).map(b => b.label || b.field).filter(Boolean),
       screenshotAvailable: !!rj.screenshot_path,
+      fillLogAvailable: rj.blanks_json != null || rj.answers_json != null,
+    });
+  });
+
+  /**
+   * THE FILL LOG (AH5) — what this run put in the form, and what it did not.
+   *
+   * ON DEMAND, and text. AB1/AE4 removed the "What we filled" screenshot correctly: it was a dead
+   * snapshot of a browser context that had already closed. What was needed instead is a record you
+   * can read, and every part of it was already being written — answers_json since A2 carries each
+   * filled field with the rule that produced it, fields_discovered and corrections_json since AF5,
+   * blanks_json since AH5. This composes them; it stores nothing of its own, so there is no second
+   * copy to drift.
+   *
+   * The BLANK half is read off the post-fill discovery pass, so it is the actual state of the form
+   * rather than a gate's opinion of it. That matters most in semi, where neither gate runs at all:
+   * a fill log built from gate output would faithfully report the same silence the gates do.
+   */
+  app.get("/api/apply/run-jobs/:runJobId/fill-log", requireAuth, (req, res) => {
+    const rj = ownedRunJob(req.params.runJobId, req.user.id);
+    if (!rj) return res.status(404).json({ error: "not_found" });
+
+    const answers = parseJson(rj.answers_json, []);
+    const blanks = parseJson(rj.blanks_json, null);
+    const corrections = parseJson(rj.corrections_json, []);
+
+    const filled = answers
+      .filter(a => !a?.skipped)
+      .map(a => ({
+        field: a.field_id ?? a.name ?? null,
+        label: a.label || a.name || a.field_id || null,
+        value: a.value ?? null,
+        provenance: a.provenance ?? null,
+        confidence: a.confidence ?? null,
+      }));
+
+    // The reuse decision is recorded as a run event rather than a column: it is a fact about the
+    // RUN, and apply_job_logs is where the run's own account of itself already lives.
+    const reuse = (() => {
+      try {
+        const row = db.prepare(`
+          SELECT event, message, details_json FROM apply_job_logs
+          WHERE run_job_id=? AND event IN ('resume_reused','resume_regenerating')
+          ORDER BY id DESC LIMIT 1
+        `).get(rj.id);
+        if (!row) return null;
+        const d = parseJson(row.details_json, {}) || {};
+        return { reused: row.event === "resume_reused", reason: d.reason ?? null, summary: row.message };
+      } catch { return null; }
+    })();
+
+    res.json({
+      runJobId: rj.id,
+      jobId: rj.job_id,
+      status: rj.status,
+      reasonCode: rj.reason_code,
+      // null means the run never reached discovery. 0 would claim it looked and found nothing.
+      fieldsDiscovered: rj.fields_discovered ?? null,
+      filled,
+      // null and [] are different answers: "we never looked at the form" vs "we looked at every
+      // field and none is empty".
+      blanks,
+      corrections,
+      resume: {
+        artifactId: rj.resume_artifact_id ?? null,
+        atsScore: rj.resume_ats_score ?? null,
+        reuse,
+      },
     });
   });
 

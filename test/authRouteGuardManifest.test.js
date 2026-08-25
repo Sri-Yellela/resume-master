@@ -191,6 +191,9 @@ const AUTHENTICATED = new Set([
   "GET /api/apply/runs/:runId",
   "GET /api/apply/review",
   "GET /api/apply/run-jobs/:runJobId/review",
+  // AH5: the fill log — what this run put in the form and what it did not. On demand, so it is
+  // its own endpoint rather than weight on every row of the review list.
+  "GET /api/apply/run-jobs/:runJobId/fill-log",
   "GET /api/apply/run-jobs/:runJobId/resume",
   "GET /api/apply/run-jobs/:runJobId/screenshot",
   "POST /api/apply/run-jobs/:runJobId/abort",

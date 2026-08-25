@@ -51,7 +51,7 @@ const SCHEMA = `
     -- one best-effort statement the ENTIRE audit row was silently lost while the run still reported
     -- success. Same failure mode as an un-migrated deployment.
     open_questions_json TEXT,
-    ats_score INTEGER, attempt_count INTEGER NOT NULL DEFAULT 0, fields_discovered INTEGER, corrections_json TEXT, gate_review_json TEXT, hidden_at INTEGER, locked_at INTEGER, resume_file TEXT, resume_id INTEGER, UNIQUE(run_id, job_id));
+    ats_score INTEGER, attempt_count INTEGER NOT NULL DEFAULT 0, fields_discovered INTEGER, corrections_json TEXT, blanks_json TEXT, gate_review_json TEXT, hidden_at INTEGER, locked_at INTEGER, resume_file TEXT, resume_id INTEGER, UNIQUE(run_id, job_id));
   CREATE TABLE apply_job_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, run_job_id INTEGER,
     user_id INTEGER, job_id TEXT, level TEXT DEFAULT 'info', event TEXT, message TEXT,
     details_json TEXT, created_at INTEGER DEFAULT (unixepoch()));

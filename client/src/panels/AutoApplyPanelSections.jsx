@@ -7,7 +7,9 @@
 // Every row here names an obstacle and an action. Never a status code. The vocabulary lives in
 // lib/applyObstacles.js, which the board's own chip reads too, so the two surfaces cannot describe
 // the same application differently.
+import { useState } from "react";
 import { useTheme } from "../styles/theme.jsx";
+import { api } from "../lib/api.js";
 import { describeApplication, attemptStatusChip, PREREQUISITE_LABELS } from "../lib/applyObstacles.js";
 import { TileCard, TilePill } from "../components/ui/TileCard.jsx";
 import { companyLabel } from "../../../shared/atsHosts.js";
@@ -615,6 +617,125 @@ export function PrerequisiteCards({ missing, queuedCount, theme, onGo }) {
  * Collapsing without this would lose the audit trail, which is the one thing a user needs when an
  * interview lands — so the attempts stay, one click away, rather than being summarised out.
  */
+/**
+ * THE FILL LOG (AH5), fetched when asked for and not before.
+ *
+ * AB1/AE4 removed the "What we filled" screenshot correctly — it was a dead snapshot of a browser
+ * context that had already closed. What was missing afterwards was any account at all of what the
+ * run put in the form. This is that account, in text: every field with the rule that produced it
+ * and how confident that rule was, and every blank with the reason it is blank.
+ *
+ * ON DEMAND because it is a record you go and read, not a thing every row in a list should carry.
+ */
+function FillLog({ runJobId, theme }) {
+  const [state, setState] = useState({ status: "idle", data: null, error: null });
+
+  const load = async () => {
+    setState({ status: "loading", data: null, error: null });
+    try {
+      const data = await api(`/api/apply/run-jobs/${runJobId}/fill-log`);
+      setState({ status: "ready", data, error: null });
+    } catch (e) {
+      setState({ status: "error", data: null, error: e.message || "Could not load the fill log" });
+    }
+  };
+
+  if (state.status === "idle") {
+    return (
+      <button onClick={e => { e.stopPropagation(); load(); }}
+        title="Every field this run filled, where each answer came from, and every field left blank with the reason."
+        style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                 border: `1px solid ${theme.border}`, background: theme.surfaceHigh,
+                 color: theme.text, cursor: "pointer", whiteSpace: "nowrap" }}>
+        What was filled
+      </button>
+    );
+  }
+  if (state.status === "loading") {
+    return <span style={{ fontSize: 10, color: theme.textMuted }}>reading the record…</span>;
+  }
+  if (state.status === "error") {
+    return <span style={{ fontSize: 10, color: "#ef4444" }}>{state.error}</span>;
+  }
+
+  const d = state.data;
+  const REASON = {
+    low_confidence: "we would not send a guess",
+    needs_you:      "only you can answer this",
+    no_answer:      "your profile has no answer for it",
+    unmatched:      "we did not recognise the field",
+    fill_failed:    "we had an answer and could not enter it",
+  };
+  const mono = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" };
+  return (
+    <div data-rm-fill-log={runJobId} onClick={e => e.stopPropagation()} style={{
+      width: "100%", border: `1px solid ${theme.border}`, borderRadius: 6,
+      background: theme.surfaceHigh, padding: "8px 10px", display: "flex",
+      flexDirection: "column", gap: 6, fontSize: 10.5,
+    }}>
+      {/* Whether anything was regenerated. This is the answer to "I already generated a resume for
+          this job — did queueing it do that work again?" and it is stated rather than implied. */}
+      {d.resume?.reuse && (
+        <div style={{ color: d.resume.reuse.reused ? "#16a34a" : theme.textMuted, fontWeight: 600 }}>
+          {d.resume.reuse.summary}
+        </div>
+      )}
+      <div style={{ color: theme.textDim }}>
+        {d.filled.length} filled
+        {d.blanks == null
+          ? " · the form was never reached, so nothing is recorded about what is blank"
+          : ` · ${d.blanks.length} left blank`}
+        {d.fieldsDiscovered != null && ` · ${d.fieldsDiscovered} fields discovered`}
+      </div>
+
+      {d.filled.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {d.filled.map((f, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "baseline", ...mono }}>
+              <span style={{ color: theme.text, minWidth: 0, flex: "0 1 38%", overflow: "hidden",
+                             textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.label}</span>
+              <span style={{ color: theme.textMuted, flex: "1 1 auto", minWidth: 0, overflow: "hidden",
+                             textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {f.value === "" || f.value == null ? "—" : String(f.value)}
+              </span>
+              {/* The provenance is the point: a label_fuzzy answer is a guess and an exact one is
+                  not, and only this line tells them apart. */}
+              <span style={{ color: theme.textDim, flexShrink: 0 }}>
+                {f.provenance || "unknown"}{f.confidence != null ? ` ${f.confidence}` : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {Array.isArray(d.blanks) && d.blanks.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2,
+                      borderTop: `1px solid ${theme.border}`, paddingTop: 5 }}>
+          {d.blanks.map((b, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "baseline", ...mono }}>
+              <span style={{ color: b.required ? "#d97706" : theme.textMuted, flex: "0 1 38%",
+                             minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
+                             whiteSpace: "nowrap" }}>
+                {b.label || b.field}{b.required ? " *" : ""}
+              </span>
+              <span style={{ color: theme.textDim, flex: "1 1 auto" }}>
+                {b.detail || REASON[b.reason] || b.reason}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {d.corrections?.length > 0 && (
+        <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 5, color: theme.textMuted }}>
+          You corrected {d.corrections.length} field{d.corrections.length === 1 ? "" : "s"} by hand:{" "}
+          {d.corrections.map(c => c.field).filter(Boolean).join(", ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AttemptRow({ job, theme, artifactUrl, packetFor, onHandoff, onRerun }) {
   // The status pill's words and colour come from the shared vocabulary, not from a chain of
   // ternaries here. They used to be written inline in the modal — a second copy of a mapping the
@@ -670,6 +791,15 @@ export function AttemptRow({ job, theme, artifactUrl, packetFor, onHandoff, onRe
               ATS {job.atsScore}
             </span>
           )}
+        </div>
+      )}
+
+      {/* AH5: NAME THE FIELDS. "Required fields were left empty" is a hold the candidate cannot act
+          on — the same defect class as the old unscoped review modal. The list was always computed;
+          it lived in an apply_job_logs event that no surface reads. */}
+      {job.missingRequired?.length > 0 && (
+        <div data-rm-missing-required={job.id} style={{ fontSize: 10.5, color: "#d97706" }}>
+          Still yours to answer: <span style={{ fontWeight: 700 }}>{job.missingRequired.join(", ")}</span>
         </div>
       )}
 
@@ -749,6 +879,7 @@ export function AttemptRow({ job, theme, artifactUrl, packetFor, onHandoff, onRe
             {job.submitVerified ? "submission verified" : "unverified submit"}
           </span>
         )}
+        {job.fillLogAvailable && <FillLog runJobId={job.id} theme={theme}/>}
       </div>
 
       {/* apply URL */}

@@ -53,6 +53,9 @@
   "ah4LocationClaims": {
     "pass": 15
   },
+  "ah5ReuseAndFillLog": {
+    "pass": 24
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

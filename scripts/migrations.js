@@ -2587,4 +2587,31 @@ export const MIGRATIONS = [
           ON auth_contexts(session_sid, revoked_at);
       `,
     },
+    {
+      // AH5. Two columns, for the two halves of "say what happened".
+      //
+      // apply_run_jobs.blanks_json — every discovered field the run did NOT fill, with why
+      //   (low_confidence / no_answer / unmatched / fill_failed). Read off the POST-FILL discovery
+      //   pass, so it is the state of the form and not a gate's opinion of it. answers_json has
+      //   always held the filled half with its provenance; the blank half had nowhere to live, so a
+      //   run could say "Autofilled 7 fields" and hold for review with no way to learn which 7 or
+      //   what was still empty. missingRequired existed but only inside an apply_job_logs event,
+      //   which no surface reads.
+      //
+      // resumes.domain_profile_id — which job profile an artifact was generated under.
+      //   processRunJob reuses any `resumes` row for (user, job), newest first, and that is the
+      //   right instinct: regenerating work already done costs a model call and minutes of the
+      //   candidate's time. But with no record of the profile it also reuses an artifact built for
+      //   a DIFFERENT profile, and there was no way to tell. Stamping it makes "is this current?"
+      //   a question the code can answer instead of assume. NULL means an artifact written before
+      //   this migration, and the reuse rule treats that as unknown-but-usable rather than
+      //   forcing a regeneration of every existing artifact.
+      id: "091_fill_log_and_artifact_provenance",
+      sql: `
+        ALTER TABLE apply_run_jobs ADD COLUMN blanks_json TEXT;
+        ALTER TABLE resumes ADD COLUMN domain_profile_id INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_resumes_currency
+          ON resumes(user_id, job_id, domain_profile_id, updated_at DESC);
+      `,
+    },
   ];
