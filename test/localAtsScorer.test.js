@@ -325,9 +325,16 @@ test("AG2: a claim informs FUTURE generation and never rewrites an existing resu
   assert.match(server, /listProfileClaims\(db, \{ userId, profileId: activeDomainProfile\.id \}\)/);
   const build = server.slice(server.indexOf("function buildRuntimeInputs"), server.indexOf("// â”€â”€ PDF generation"));
   assert.match(build, /Skills the CANDIDATE has claimed \(candidate-supplied/);
-  assert.match(build, /they license WORDING, never HISTORY/,
+  assert.match(build, /they are SKILLS AND VERBS ONLY/,
     "the prompt must bound what a claim authorises");
-  assert.match(build, /may NOT invent an employer, a\nproject, a duration, a metric or a responsibility/);
+  assert.match(build, /an employer, a project, a duration, a metric or a responsibility/);
+
+  // MEASURED, not stylistic. The block first said claims "license WORDING", and against a JD titled
+  // "Senior Platform Engineer" 6 of 8 real generations put that title in the tagline of a candidate
+  // with no seniority in their base resume — 0 of 6 did so with the block removed. The carve-out is
+  // what closed that, so it is pinned by name.
+  assert.match(build, /They are NOT a title, a level or a headline/);
+  assert.match(build, /never change the candidate's tagline, role\ntitles or seniority because of a claim/);
 
   // The claim store is separate from the profile's own term lists, which are what the ATS scorer
   // reads. Writing claims there would let a claim inflate its own score.

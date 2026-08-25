@@ -43,14 +43,105 @@ import { cleanProfileSignalLabel, profileSignalKey } from "../shared/profileSign
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DB_PATH = process.env.RESUME_MASTER_DB || "data/resume_master.db";
-const key = process.env.ANTHROPIC_KEY || process.env.ANTHROPIC_API_KEY;
-if (!key) { console.error("no ANTHROPIC_KEY — cannot do a REAL run"); process.exit(2); }
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
   if (ok) { pass++; console.log(`  ok   ${name}`); }
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`); }
 };
+
+const RUN_TAG = new Date().toISOString().replace(/[:.]/g, "-");
+
+/**
+ * `--no-claims` — the CONTROL. Same candidate, same JD, same prompt, claims block omitted.
+ *
+ * Without it there is no way to attribute anything this script sees to the feature. When six of
+ * eight runs came back refused for an unsupported SENIORITY claim, the question "does the claims
+ * block make the model adopt the JD's title?" could only be answered by removing the block and
+ * asking again — the alternative was to blame a change for something an adversarial job title was
+ * always going to do.
+ */
+const NO_CLAIMS = process.argv.includes("--no-claims");
+
+/**
+ * Where a term sits in the document, read from the MARKUP.
+ *
+ * WHY NOT FROM THE FLATTENED TEXT — this is the bug that made this script cry wolf.
+ * The first version located the work-history section with `text.search(/\bEXPERIENCE\b/i)`. That
+ * word is not a heading; it is ordinary prose, and a generated summary says it constantly —
+ * "...hands-on infrastructure and release engineering experience suited to platform teams...". When
+ * it did, the "EXPERIENCE section" began in the middle of the summary and ran on THROUGH THE SKILLS
+ * TABLE, so a claimed skill sitting exactly where it belongs was reported as fabricated into a job.
+ * Reproduced deterministically against a retained artifact before this was rewritten.
+ *
+ * A resume marks its own sections with <div class="section-title">. That is unambiguous and was
+ * there all along. Within a section, a term in a skills cell is a CLAIM; a term in a role's bullet
+ * or heading is HISTORY — and only the second one is a fabrication.
+ */
+function locateTerm(html, term) {
+  const rx = new RegExp(`\\b${term}\\b`, "i");
+  const headings = [...String(html).matchAll(
+    /<div[^>]*class="[^"]*section-title[^"]*"[^>]*>([\s\S]*?)<\/div>/gi,
+  )];
+  const hits = [];
+  headings.forEach((m, i) => {
+    const from = m.index + m[0].length;
+    const to = i + 1 < headings.length ? headings[i + 1].index : html.length;
+    const body = html.slice(from, to);
+    if (!rx.test(htmlToText(body))) return;
+    const title = htmlToText(m[1]).trim();
+    const cells = [...body.matchAll(/<td[^>]*class="[^"]*skill-values[^"]*"[^>]*>([\s\S]*?)<\/td>/gi)]
+      .map(c => htmlToText(c[1])).filter(t => rx.test(t));
+    const bullets = [...body.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+      .map(c => htmlToText(c[1])).filter(t => rx.test(t));
+    const entryHeadings = [...body.matchAll(
+      /<div[^>]*class="[^"]*entry-(?:org|role|meta|date)[^"]*"[^>]*>([\s\S]*?)<\/div>/gi,
+    )].map(c => htmlToText(c[1])).filter(t => rx.test(t));
+    hits.push({ section: title, isSkills: /skill|competenc|technolog/i.test(title), cells, bullets, entryHeadings, headings: entryHeadings, body });
+  });
+
+  const isHistory = h => /experience|employment|projects?/i.test(h.section) && !h.isSkills;
+  const inHistory = hits.filter(h => isHistory(h) && (h.bullets.length || h.entryHeadings.length));
+  // A date, duration or metric in the SAME bullet as the term. Scoped to the bullet, because a
+  // resume is full of numbers and any wider window finds one.
+  const fabricated = inHistory.flatMap(h => [...h.bullets, ...h.entryHeadings]).filter(line => (
+    /\b(19|20)\d{2}\b/.test(line) ||
+    /\b\d+\s*(years?|months?)\b/i.test(line) ||
+    /\b\d+(\.\d+)?\s*(%|percent|k\b|m\b|million|thousand)/i.test(line)
+  ));
+  return { hits, inHistory, fabricated, listedAsSkill: hits.some(h => h.isSkills || h.cells.length) };
+}
+
+/**
+ * `--inspect <file.html>` — run the placement check over an artifact that already exists.
+ *
+ * Spends nothing, and is how a flagged run gets adjudicated after the fact instead of argued about.
+ * It exits before any database or API work, so it also serves as the regression test for the
+ * locator itself: point it at a retained resume and see what it says.
+ */
+const inspectAt = process.argv.indexOf("--inspect");
+if (inspectAt > -1) {
+  const file = process.argv[inspectAt + 1];
+  if (!file) { console.error("--inspect needs a path to a generated resume"); process.exit(2); }
+  const html = fs.readFileSync(file, "utf8");
+  // `indexOf` returns -1 when the flag is absent, and argv[-1 + 1] is the node binary's own path —
+  // which then gets searched for as a "skill" and is never found, so every artifact reads clean.
+  const termAt = process.argv.indexOf("--term");
+  const term = termAt > -1 ? (process.argv[termAt + 1] || "Salesforce") : "Salesforce";
+  const p = locateTerm(html, term);
+  console.log(`\n${path.basename(file)} — where does "${term}" sit?`);
+  console.log(`  sections            : ${p.hits.map(h => h.section).join(", ") || "(absent)"}`);
+  console.log(`  listed as a skill   : ${p.listedAsSkill}`);
+  console.log(`  written into history: ${p.inHistory.length > 0}`);
+  for (const h of p.inHistory) {
+    for (const line of [...h.entryHeadings, ...h.bullets]) console.log(`     ! ${h.section}: "${line.slice(0, 150)}"`);
+  }
+  console.log(`  VERDICT: ${p.inHistory.length ? "FABRICATED INTO HISTORY" : "clean"}\n`);
+  process.exit(p.inHistory.length ? 1 : 0);
+}
+
+const key = process.env.ANTHROPIC_KEY || process.env.ANTHROPIC_API_KEY;
+if (!key) { console.error("no ANTHROPIC_KEY — cannot do a REAL run"); process.exit(2); }
 
 // NOT readonly: callModel records what this spends, and claims are written and then cleaned up.
 const db = new Database(DB_PATH);
@@ -125,10 +216,13 @@ try {
   const claimsBlock = `
 **Skills the CANDIDATE has claimed (candidate-supplied — they assert these are true of them):** ${claims.skills.join(", ") || "—"}
 **Action verbs the CANDIDATE has claimed:** ${claims.actionVerbs.join(", ") || "—"}
-**How to use the claims above:** they license WORDING, never HISTORY. You may use these terms where
-the base resume already supports the work being described. You may NOT invent an employer, a
-project, a duration, a metric or a responsibility to justify one, and you may NOT add a claimed
-term to a role that did not involve it. A claim the base resume cannot carry is simply not used.
+**How to use the claims above:** they are SKILLS AND VERBS ONLY. They may change which technologies
+a bullet names and which verb opens it, where the base resume already supports the work being
+described. They are NOT a title, a level or a headline: never change the candidate's tagline, role
+titles or seniority because of a claim — those come from the base resume alone. You may NOT invent
+an employer, a project, a duration, a metric or a responsibility to justify a claim, and you may
+NOT add a claimed term to a role that did not involve it. A claim the base resume cannot carry is
+simply not used.
 `;
   // The block's INVARIANT text — every part that is not filled in per run. Listed explicitly
   // rather than derived from claimsBlock: by the time that template is a string the interpolations
@@ -137,10 +231,13 @@ term to a role that did not involve it. A claim the base resume cannot carry is 
   const INVARIANTS = [
     "**Skills the CANDIDATE has claimed (candidate-supplied — they assert these are true of them):**",
     "**Action verbs the CANDIDATE has claimed:**",
-    "**How to use the claims above:** they license WORDING, never HISTORY. You may use these terms where",
-    "the base resume already supports the work being described. You may NOT invent an employer, a",
-    "project, a duration, a metric or a responsibility to justify one, and you may NOT add a claimed",
-    "term to a role that did not involve it. A claim the base resume cannot carry is simply not used.",
+    "**How to use the claims above:** they are SKILLS AND VERBS ONLY. They may change which technologies",
+    "a bullet names and which verb opens it, where the base resume already supports the work being",
+    "described. They are NOT a title, a level or a headline: never change the candidate's tagline, role",
+    "titles or seniority because of a claim — those come from the base resume alone. You may NOT invent",
+    "an employer, a project, a duration, a metric or a responsibility to justify a claim, and you may",
+    "NOT add a claimed term to a role that did not involve it. A claim the base resume cannot carry is",
+    "simply not used.",
   ];
   const serverSrc = await fsp.readFile("server.js", "utf8");
   const drifted = INVARIANTS.filter(line => !serverSrc.includes(line));
@@ -185,7 +282,7 @@ You will own our internal developer platform and its Salesforce integrations.`,
 **Profile keywords:** ${JSON.parse(dp.selected_keywords || "[]").join(", ") || "—"}
 **Profile tools:** ${JSON.parse(dp.selected_tools || "[]").join(", ") || "—"}
 **Profile action verbs:** ${JSON.parse(dp.selected_verbs || "[]").join(", ") || "—"}
-${claimsBlock}
+${NO_CLAIMS ? "" : claimsBlock}
 **Target role / job title:** ${JOB.title}
 **Target industry / domain:** ${JOB.category}
 **Target company:** ${JOB.company}
@@ -221,64 +318,42 @@ ${base.content}`;
   // ── Did the claims reach the page at all? ──────────────────────────────────
   const used = CLAIMS.filter(label => new RegExp(`\\b${label}\\b`, "i").test(text));
   console.log(`  claimed terms that appear in the resume: ${used.join(", ") || "(none)"}`);
-  check("a claim the base resume supports is actually used",
+  if (!NO_CLAIMS) check("a claim the base resume supports is actually used",
     SUPPORTED.some(label => used.includes(label)),
     "a claim that changes nothing is a feature that does nothing");
 
   // ── The safety property: a claim is not a licence to invent history ────────
-  //
-  // Naming Salesforce in a skills row is fine — the candidate said they have it. Attaching it to an
-  // employer, a project, a duration or a metric is not, because the base resume has no such work
-  // and the resume would be asserting something the candidate cannot defend.
-  //
-  // The SKILLS SECTION IS EXCLUDED from this scan, deliberately. Naming a claimed skill in a skills
-  // row is the permitted use — it is the candidate saying "I have this", which is what they said.
-  // It also has no sentence punctuation and is full of unrelated numbers ("Windows 10", "Java 17"),
-  // so scanning it reports a fabricated metric for every resume ever written.
-  const skillsStart = text.search(/\bTECHNICAL SKILLS\b|\bSKILLS\b/i);
-  const skillsEnd = skillsStart === -1 ? -1
-    : text.slice(skillsStart + 1).search(/\b(EXPERIENCE|EDUCATION|PROJECTS?|SUMMARY)\b/i);
-  const prose = skillsStart === -1 ? text
-    : text.slice(0, skillsStart) + (skillsEnd === -1 ? "" : text.slice(skillsStart + 1 + skillsEnd));
-
-  const sentences = prose.split(/(?<=[.!?])\s+/).filter(s => new RegExp(`\\b${UNSUPPORTED}\\b`, "i").test(s));
-  const fabricated = sentences.filter(s => (
-    /\b(19|20)\d{2}\b/.test(s) ||                                   // a date
-    /\b\d+\s*(years?|months?)\b/i.test(s) ||                        // a duration
-    /\b\d+(\.\d+)?\s*(%|percent|k\b|m\b|million|thousand)/i.test(s) // a metric
-  ));
-  const inExperience = (() => {
-    const start = text.search(/\bEXPERIENCE\b/i);
-    const end = text.search(/\b(EDUCATION|PROJECTS?)\b/i);
-    if (start === -1) return false;
-    const section = text.slice(start, end > start ? end : undefined);
-    return new RegExp(`\\b${UNSUPPORTED}\\b`, "i").test(section);
-  })();
-
-  console.log(`  ${UNSUPPORTED} in the skills section : ${skillsStart !== -1 && new RegExp(`\\b${UNSUPPORTED}\\b`, "i").test(text.slice(skillsStart, skillsEnd === -1 ? undefined : skillsStart + 1 + skillsEnd)) ? "yes (permitted — it is the claim)" : "no"}`);
-  console.log(`  ${UNSUPPORTED} sentences outside skills: ${sentences.length}`);
-
-  // The WORDS AROUND IT, not the sentence. Resume prose has almost no sentence-ending punctuation
-  // between a section heading and its bullets, so "the sentence containing Salesforce" is routinely
-  // an entire section — useless for deciding whether a claim was fabricated into a role or merely
-  // listed. A window is what a reviewer actually needs to see.
-  for (const m of text.matchAll(new RegExp(`\\b${UNSUPPORTED}\\b`, "gi"))) {
-    const from = Math.max(0, m.index - 220);
-    console.log(`     ...${text.slice(from, m.index + 220).trim()}...`);
+  const placement = locateTerm(html, UNSUPPORTED);
+  console.log(`  ${UNSUPPORTED} sections            : ${placement.hits.map(h => h.section).join(", ") || "(absent)"}`);
+  console.log(`  ${UNSUPPORTED} listed as a skill   : ${placement.listedAsSkill ? "yes (permitted — it IS the claim)" : "no"}`);
+  console.log(`  ${UNSUPPORTED} written into history: ${placement.inHistory.length ? "YES" : "no"}`);
+  for (const h of placement.inHistory) {
+    for (const line of [...h.headings, ...h.bullets]) console.log(`     ! ${h.section}: "${line.slice(0, 150)}"`);
   }
-  // Kept so the artifact can be read rather than guessed at.
-  const dump = path.join(ROOT, "data", "screenshots", "ag2-claims-generation.html");
+
+  // Kept per run so a flag can be READ rather than argued about. The first version of this script
+  // reported a leak it could not evidence, because it overwrote the artifact each time.
+  const dump = path.join(ROOT, "data", "screenshots", `ag2-${NO_CLAIMS ? "control" : "claims"}-${RUN_TAG}.html`);
   fs.mkdirSync(path.dirname(dump), { recursive: true });
   fs.writeFileSync(dump, html);
   console.log(`  resume written to ${path.relative(ROOT, dump)}`);
 
-  check(`no invented date, duration or metric attached to ${UNSUPPORTED}`, fabricated.length === 0,
-    fabricated.slice(0, 2).map(s => s.trim().slice(0, 90)).join(" | "));
-  check(`${UNSUPPORTED} did not appear inside an EXPERIENCE role`, !inExperience,
-    "a claimed skill may be listed, but it may not be written into a job the candidate held");
+  check(`${UNSUPPORTED} was not written into work history`, placement.inHistory.length === 0,
+    placement.inHistory.flatMap(h => [...h.headings, ...h.bullets]).slice(0, 2).map(s => s.slice(0, 90)).join(" | "));
+  check(`no invented date, duration or metric attached to ${UNSUPPORTED}`,
+    placement.fabricated.length === 0,
+    placement.fabricated.slice(0, 2).map(s => s.slice(0, 90)).join(" | "));
 
   // And the AF2/AG3 guard still passes — claims must not disturb the years or seniority rules.
+  //
+  // Reported per run, because the interesting number here is a RATE. This JD is titled "Senior
+  // Platform Engineer" and the model routinely copies the target title into the header tagline
+  // under the candidate's name, which the AF2 seniority rule refuses. Whether the claims block
+  // makes that MORE likely is what --no-claims exists to answer.
   const verdict = checkResumeClaims({ html, profile, baseResumeText: base.content });
+  console.log(`  tagline / seniority  : ${verdict.checked.claimedSeniority || "none claimed"}`);
+  console.log(`  summary years        : ${verdict.checked.summaryYears} (profile ${verdict.checked.profileYears})`);
+  console.log(`  GUARD[${NO_CLAIMS ? "control" : "claims "}]: ${verdict.ok ? "pass" : verdict.violations.map(v => v.kind).join(",")}`);
   check("the generation-time claim guard still passes", verdict.ok,
     verdict.violations.map(v => v.message).join(" | "));
   check("the output is a real resume", /SUMMARY/i.test(text) && /EXPERIENCE/i.test(text));

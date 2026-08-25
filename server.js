@@ -3843,6 +3843,14 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
   // nothing about where they used it, for how long, or to what result — and a model handed a bare
   // list will happily invent a bullet that supplies all three. The base resume remains the only
   // source for what they actually did, which is the same rule §7 and the AF2 years guard enforce.
+  //
+  // THE TITLE CARVE-OUT IS LOAD-BEARING, AND WAS ADDED AFTER MEASURING.
+  // The first version of this block said the claims "license WORDING, never HISTORY". Against a JD
+  // titled "Senior Platform Engineer", 6 of 8 real generations then put SENIOR PLATFORM ENGINEER in
+  // the header tagline of a candidate whose base resume supports no seniority at all — and the AF2
+  // guard refused all six. The same prompt with this block removed did it 0 times in 6. "Wording"
+  // was read as licence to adopt the JD's language generally, including its title. So the scope is
+  // now stated as skills and verbs, and titles are ruled out by name.
   let claimsBlock = "";
   const claimedSkills = (claims?.skills || []).join(", ");
   const claimedVerbs = (claims?.actionVerbs || []).join(", ");
@@ -3850,10 +3858,13 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
     claimsBlock = `
 **Skills the CANDIDATE has claimed (candidate-supplied — they assert these are true of them):** ${claimedSkills || "—"}
 **Action verbs the CANDIDATE has claimed:** ${claimedVerbs || "—"}
-**How to use the claims above:** they license WORDING, never HISTORY. You may use these terms where
-the base resume already supports the work being described. You may NOT invent an employer, a
-project, a duration, a metric or a responsibility to justify one, and you may NOT add a claimed
-term to a role that did not involve it. A claim the base resume cannot carry is simply not used.
+**How to use the claims above:** they are SKILLS AND VERBS ONLY. They may change which technologies
+a bullet names and which verb opens it, where the base resume already supports the work being
+described. They are NOT a title, a level or a headline: never change the candidate's tagline, role
+titles or seniority because of a claim — those come from the base resume alone. You may NOT invent
+an employer, a project, a duration, a metric or a responsibility to justify a claim, and you may
+NOT add a claimed term to a role that did not involve it. A claim the base resume cannot carry is
+simply not used.
 `;
   }
 
