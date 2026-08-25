@@ -112,7 +112,12 @@ function run(name) {
     const started = Date.now();
     const p = spawn(process.execPath, [path.join(ROOT, "scripts", `${name}.mjs`)], {
       cwd: ROOT,
-      env: { ...process.env, A1_RESUME: RESUME },
+      // NOBODY IS WATCHING. ab1HeldHandoff delivers a real OS keypress, and when Windows refuses
+      // foreground it used to print "press Ctrl+Shift+Y manually, 45s" and wait — which is right
+      // interactively and, here, burns 45s per attempt and then fails thirteen assertions about a
+      // handoff nobody invoked. Any harness with a human-in-the-loop path reads this and takes the
+      // other branch: report the environment once, verify nothing, and say so.
+      env: { ...process.env, A1_RESUME: RESUME, RM_UNATTENDED: '1' },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";

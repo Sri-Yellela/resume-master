@@ -274,6 +274,41 @@ function sendHotkey(browserPid) {
   return { ok: `${r.stdout || ''}`.includes('SENT'), out: `${r.stdout || ''}${r.stderr || ''}`.trim() };
 }
 
+/**
+ * IS ANYONE THERE?
+ *
+ * This harness delivers a REAL Ctrl+Shift+Y, because chrome.commands + activeTab only grants on a
+ * genuine user gesture and a synthetic one would grant nothing — that is the property under test,
+ * so it cannot be stubbed. Windows can refuse SetForegroundWindow (the foreground lock), and when
+ * it does, the script below used to print "press Ctrl+Shift+Y manually, 45s" and WAIT.
+ *
+ * Interactively that is the right behaviour. Inside verifyHarnesses there is nobody to press it, so
+ * the run burned 45s per invoke and then failed thirteen downstream assertions — which read as the
+ * handoff being broken. Measured once: 128s and 13 failures in the suite, 35/35 and 16s alone.
+ * A harness that blames the product for the absence of a human is worse than one that does not run.
+ *
+ * verifyHarnesses sets RM_UNATTENDED so every harness with a human-in-the-loop path can tell.
+ */
+const UNATTENDED = process.env.RM_UNATTENDED === '1' || !process.stdout.isTTY;
+
+/**
+ * Press it, and mean it. The PowerShell side already escalates through three ways of taking
+ * foreground WITHIN one call; this retries the whole call, because a foreground lock is usually
+ * transient and a fresh bringToFront between attempts is what clears it.
+ */
+async function pressHandoffKey(browser, page) {
+  let last = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await page.bringToFront().catch(() => {});
+    await sleep(attempt === 1 ? 400 : 900);
+    const key = sendHotkey(browser.process().pid);
+    if (key.ok) return { ok: true, attempts: attempt };
+    last = key.out;
+    if (attempt < 3) console.log(`  hotkey attempt ${attempt} failed (${key.out}) — retrying`);
+  }
+  return { ok: false, out: last };
+}
+
 // ── Run ──────────────────────────────────────────────────────────────────────────────────────
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -407,12 +442,17 @@ async function main() {
     if (!bound?.shortcut) throw new Error('no keyboard binding — no gesture can be delivered');
 
     const page = (await browser.pages())[0];
+    // Distinguishable from `null`. `null` means the gesture was delivered and the extension did
+    // nothing — a real finding. FOCUS_FAILED means the gesture never happened, which is a fact
+    // about this machine and must never be reported as a fact about the product.
+    const FOCUS_FAILED = Symbol('focus_failed');
     const invoke = async () => {
       await control.evaluate(() => chrome.storage.session.remove('lastGatedHandoff'));
-      await page.bringToFront();
-      await sleep(400);
-      const key = sendHotkey(browser.process().pid);
-      if (!key.ok) console.log(`  hotkey failed (${key.out}) — press Ctrl+Shift+Y manually, 45s`);
+      const key = await pressHandoffKey(browser, page);
+      if (!key.ok) {
+        if (UNATTENDED) return FOCUS_FAILED;
+        console.log(`  hotkey failed (${key.out}) — press Ctrl+Shift+Y manually, 45s`);
+      }
       const deadline = Date.now() + (key.ok ? 15000 : 45000);
       while (Date.now() < deadline) {
         const r = (await control.evaluate(() => chrome.storage.session.get('lastGatedHandoff')))?.lastGatedHandoff;
@@ -421,6 +461,22 @@ async function main() {
       }
       return null;
     };
+    /**
+     * ONE failure, naming the environment, instead of every dependent assertion naming the product.
+     *
+     * Stage B's remaining checks all read the result of a gesture that never happened, so asserting
+     * them would produce thirteen confident statements about a handoff nobody invoked. Throwing
+     * stops the stage; the run still FAILS (this counts a failure, and the pass count lands under
+     * the baseline, which verifyHarnesses reports as truncated) — but it fails saying the one true
+     * thing.
+     */
+    const requireGesture = (r) => {
+      if (r !== FOCUS_FAILED) return r;
+      check('B  the browser window could be brought to the foreground to receive the real hotkey',
+        false, 'Windows refused foreground after 3 attempts — the gesture was never delivered, so ' +
+        'Stage B verified NOTHING. Re-run with the desktop unlocked and no window stealing focus.');
+      throw new Error('FOCUS_UNAVAILABLE');
+    };
     const consumedAt = () => db.prepare('SELECT consumed_at c FROM apply_gate_packets WHERE id=?')
       .get(livePacket.packetId).c;
 
@@ -428,7 +484,7 @@ async function main() {
     // would fail and the cause would be invisible.
     console.log('\n  origin mismatch');
     await page.goto(`http://127.0.0.1:${ATS_PORT}/lever`, { waitUntil: 'domcontentloaded' });
-    const mismatch = await invoke();
+    const mismatch = requireGesture(await invoke());
     check('B1  a mismatched origin refuses BECAUSE OF THE ORIGIN, not for some other reason',
       mismatch?.ok === false && mismatch.reason === 'origin_mismatch',
       mismatch ? `${mismatch.reason}: ${mismatch.message}` : 'no result');
@@ -451,7 +507,7 @@ async function main() {
     // B2 — the real handoff.
     console.log('\n  the real handoff');
     await page.goto(`${PORTAL}${FORM_PATH}`, { waitUntil: 'domcontentloaded' });
-    const result = await invoke();
+    const result = requireGesture(await invoke());
     check('B2  the handoff ran', result?.ok === true,
       result ? `${result.reason || ''} ${result.message || ''}`.trim() : 'no result');
     check('B2  fields were filled', (result?.filled?.length || 0) > 0, `${result?.filled?.length} filled`);
@@ -538,6 +594,12 @@ async function main() {
     await page.screenshot({ path: after, fullPage: true });
     console.log(`      screenshot: ${after}`);
 
+  } catch (e) {
+    // FOCUS_UNAVAILABLE has already reported itself as one clear FAIL line naming the environment.
+    // Re-raising it would bury that under a stack trace and invite the reader to hunt for a product
+    // bug. Every other error is genuinely unexpected and is re-raised.
+    if (e?.message !== 'FOCUS_UNAVAILABLE') throw e;
+    console.log('\n  Stage B stopped: the real gesture could not be delivered on this machine.');
   } finally {
     if (browser) await browser.close().catch(() => {});
     apiServer.close();
