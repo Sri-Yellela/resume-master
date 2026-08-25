@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import Database from "better-sqlite3";
+import { MIGRATIONS } from "../scripts/migrations.js";
 import { profileSignalKey } from "../shared/profileSignals.js";
 import {
   buildSelectedEnhancementSkills,
@@ -61,26 +62,36 @@ test("profile enhancement architecture is wired through server routes and profil
 // empty array. So the function was silent right up to the moment the feature was used.
 //
 // These tests CALL it. That is the whole difference.
+/**
+ * A database built by RUNNING THE MIGRATIONS, not by hand-writing the schema.
+ *
+ * The hand-written version drifted the moment migration 089 split `status` into queue_state and
+ * assertion: the fixture kept describing a table the product no longer has, so these tests would
+ * have gone on passing against a schema that existed nowhere else. 96 migrations against :memory:
+ * costs about 50ms and cannot drift, because it IS the schema.
+ *
+ * Rows are seeded on the two axes. `status` is written too, as the product writes it — the legacy
+ * projection — so a fixture can never assert a combination the product cannot produce.
+ */
 function suggestionsDb(rows = []) {
   const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE profile_signal_suggestions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      profile_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
-      signal_key TEXT NOT NULL, signal_label TEXT NOT NULL, signal_kind TEXT NOT NULL,
-      structured_field TEXT, frequency INTEGER NOT NULL DEFAULT 1,
-      status TEXT NOT NULL DEFAULT 'inactive',
-      first_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      selected_at INTEGER, applied_at INTEGER,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      UNIQUE(profile_id, signal_key));
-  `);
+  for (const m of MIGRATIONS) db.exec(m.sql);
+  // The real schema turns foreign keys ON, so the parents have to exist. The hand-written fixture
+  // never needed these, which is another way of saying it was not the real schema.
+  db.prepare("INSERT INTO users (id, username, password_hash) VALUES (7, 'fixture', 'x')").run();
+  db.prepare(`INSERT INTO domain_profiles (id, user_id, profile_name, role_family, domain)
+              VALUES (1, 7, 'Fixture', 'engineering', 'software')`).run();
   const ins = db.prepare(`
-    INSERT INTO profile_signal_suggestions (profile_id,user_id,signal_key,signal_label,signal_kind,status,frequency)
-    VALUES (1,7,?,?,?,?,?)
+    INSERT INTO profile_signal_suggestions
+      (profile_id,user_id,signal_key,signal_label,signal_kind,queue_state,assertion,status,frequency)
+    VALUES (1,7,?,?,?,?,?,?,?)
   `);
-  for (const r of rows) ins.run(r.key, r.label, r.kind || "skill", r.status || "selected", r.frequency ?? 3);
+  for (const r of rows) {
+    const queueState = r.queued ? "queued" : "none";
+    const assertion = r.assertion || "none";
+    const status = assertion !== "none" ? assertion : (r.queued ? "selected" : "inactive");
+    ins.run(r.key, r.label, r.kind || "skill", queueState, assertion, status, r.frequency ?? 3);
+  }
   return db;
 }
 const statusOf = (db, key) =>
@@ -103,9 +114,9 @@ test("markSelectedSuggestionsApplied marks the skills an adoption used", () => {
 
 test("markSelectedSuggestionsApplied leaves rows the adoption did not use alone", () => {
   const db = suggestionsDb([
-    { key: "kubernetes", label: "Kubernetes" },
-    { key: "terraform", label: "Terraform" },
-    { key: "graphql", label: "GraphQL", status: "inactive" },
+    { key: "kubernetes", label: "Kubernetes", queued: true },
+    { key: "terraform", label: "Terraform", queued: true },
+    { key: "graphql", label: "GraphQL" },
   ]);
   markSelectedSuggestionsApplied(db, { userId: 7, profileId: 1, selectedLabels: ["Kubernetes"] });
 
@@ -128,7 +139,7 @@ test("markSelectedSuggestionsApplied derives the key the same way the row was wr
 });
 
 test("markSelectedSuggestionsApplied survives the shapes the caller can actually produce", () => {
-  const db = suggestionsDb([{ key: "kubernetes", label: "Kubernetes" }]);
+  const db = suggestionsDb([{ key: "kubernetes", label: "Kubernetes", queued: true }]);
   // The caller JSON.parses a column that defaults to '[]' and falls back to [] on malformed JSON,
   // so an empty list is normal and must be a no-op rather than a throw.
   assert.doesNotThrow(() => markSelectedSuggestionsApplied(db, { userId: 7, profileId: 1, selectedLabels: [] }));
@@ -144,7 +155,7 @@ test("markSelectedSuggestionsApplied survives the shapes the caller can actually
 });
 
 test("markSelectedSuggestionsApplied is scoped to the user and profile", () => {
-  const db = suggestionsDb([{ key: "kubernetes", label: "Kubernetes" }]);
+  const db = suggestionsDb([{ key: "kubernetes", label: "Kubernetes", queued: true }]);
   markSelectedSuggestionsApplied(db, { userId: 999, profileId: 1, selectedLabels: ["Kubernetes"] });
   assert.equal(statusOf(db, "kubernetes").status, "selected", "another user's row must not move");
   markSelectedSuggestionsApplied(db, { userId: 7, profileId: 999, selectedLabels: ["Kubernetes"] });
@@ -154,7 +165,7 @@ test("markSelectedSuggestionsApplied is scoped to the user and profile", () => {
 test("buildSelectedEnhancementSkills hands back labels, which is what the marker expects", () => {
   // The two halves of the round trip: what the enhance step persists, and what adopt reads back.
   // A shape change on either side reintroduces a silent no-op rather than an error.
-  const db = suggestionsDb([{ key: "kubernetes", label: "Kubernetes", frequency: 5 }]);
+  const db = suggestionsDb([{ key: "kubernetes", label: "Kubernetes", queued: true, frequency: 5 }]);
   const selected = buildSelectedEnhancementSkills(db, { userId: 7, profileId: 1 });
   assert.deepEqual(selected.map(s => s.label), ["Kubernetes"]);
 
@@ -172,10 +183,10 @@ test("buildSelectedEnhancementSkills hands back labels, which is what the marker
 // was added by AG2, after this function was written, which is exactly how that happens.
 test("syncSelectedSkillSuggestions queues and unqueues, and leaves assertions alone", () => {
   const db = suggestionsDb([
-    { key: "kubernetes", label: "Kubernetes", status: "applied" },
-    { key: "terraform", label: "Terraform", status: "claimed" },
-    { key: "graphql", label: "GraphQL", status: "selected" },
-    { key: "rust", label: "Rust", status: "inactive" },
+    { key: "kubernetes", label: "Kubernetes", assertion: "applied" },
+    { key: "terraform", label: "Terraform", assertion: "claimed" },
+    { key: "graphql", label: "GraphQL", queued: true },
+    { key: "rust", label: "Rust" },
   ]);
   db.prepare("UPDATE profile_signal_suggestions SET applied_at=1000 WHERE signal_key='kubernetes'").run();
 
@@ -196,8 +207,8 @@ test("syncSelectedSkillSuggestions will not promote an assertion into the queue 
   // selected bucket — but a stale or hand-made request must not be able to demote an assertion to
   // 'selected' and lose what it was.
   const db = suggestionsDb([
-    { key: "kubernetes", label: "Kubernetes", status: "applied" },
-    { key: "terraform", label: "Terraform", status: "claimed" },
+    { key: "kubernetes", label: "Kubernetes", assertion: "applied" },
+    { key: "terraform", label: "Terraform", assertion: "claimed" },
   ]);
   syncSelectedSkillSuggestions(db, { userId: 7, profileId: 1, selectedKeys: ["kubernetes", "terraform"] });
 
@@ -207,16 +218,76 @@ test("syncSelectedSkillSuggestions will not promote an assertion into the queue 
 
 test("syncSelectedSkillSuggestions still ignores verbs, and other profiles", () => {
   const db = suggestionsDb([
-    { key: "architected", label: "Architected", kind: "action_verb", status: "selected" },
-    { key: "graphql", label: "GraphQL", status: "selected" },
+    { key: "architected", label: "Architected", kind: "action_verb", queued: true },
+    { key: "graphql", label: "GraphQL", queued: true },
   ]);
   syncSelectedSkillSuggestions(db, { userId: 7, profileId: 1, selectedKeys: [] });
   assert.equal(statusOf(db, "architected").status, "selected", "verbs are not this function's business");
   assert.equal(statusOf(db, "graphql").status, "inactive");
 
-  const other = suggestionsDb([{ key: "graphql", label: "GraphQL", status: "selected" }]);
+  const other = suggestionsDb([{ key: "graphql", label: "GraphQL", queued: true }]);
   syncSelectedSkillSuggestions(other, { userId: 999, profileId: 1, selectedKeys: [] });
   assert.equal(statusOf(other, "graphql").status, "selected", "another user's row must not move");
+});
+
+test("migration 089 is present, additive, and byte-identical in both migration paths", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const script = fs.readFileSync("scripts/migrations.js", "utf8");
+  const block = (src) => {
+    const i = src.indexOf('id: "089_profile_signal_queue_and_assertion"');
+    assert.ok(i > 0, "migration 089 must exist");
+    return src.slice(i, src.indexOf("\n    },", i));
+  };
+  const a = block(server), b = block(script);
+  assert.equal(a, b, "the migration must be byte-identical in server.js and scripts/migrations.js");
+
+  assert.doesNotMatch(a, /DROP\s+TABLE|DROP\s+COLUMN|ALTER\s+TABLE\s+\w+\s+RENAME/i, "additive only");
+  // status is KEPT. Dropping it would strand anything still reading it mid-deploy, and SQLite would
+  // need a table rebuild to do it — the opposite of an additive migration.
+  assert.match(a, /ADD COLUMN queue_state TEXT NOT NULL DEFAULT 'none'/);
+  assert.match(a, /ADD COLUMN assertion TEXT NOT NULL DEFAULT 'none'/);
+  assert.match(a, /ADD COLUMN claimed_at INTEGER/);
+
+  // Every legacy value has a backfill. A missing one would silently land on the 'none' defaults and
+  // read as a row nobody had ever touched.
+  assert.match(a, /SET queue_state = 'queued' WHERE status = 'selected'/);
+  assert.match(a, /SET assertion = 'applied' WHERE status = 'applied'/);
+  assert.match(a, /SET assertion = 'claimed', claimed_at = selected_at, selected_at = NULL/,
+    "a claim's timestamp must MOVE to claimed_at, not be left on the queue's column");
+});
+
+test("migration 089 backfills every legacy status onto the right axes", () => {
+  // Run the real migration against rows in all four pre-089 states. The assertions above prove the
+  // SQL says the right words; this proves it does the right thing.
+  const db = new Database(":memory:");
+  for (const m of MIGRATIONS) {
+    if (m.id === "089_profile_signal_queue_and_assertion") break;
+    db.exec(m.sql);
+  }
+  db.exec(`
+    INSERT INTO users (id, username, password_hash) VALUES (7, 'f', 'x');
+    INSERT INTO domain_profiles (id, user_id, profile_name, role_family, domain)
+      VALUES (1, 7, 'F', 'engineering', 'software');
+  `);
+  const ins = db.prepare(`INSERT INTO profile_signal_suggestions
+    (profile_id,user_id,signal_key,signal_label,signal_kind,status,selected_at,applied_at)
+    VALUES (1,7,?,?,'skill',?,?,?)`);
+  ins.run("a", "Inactive", "inactive", null, null);
+  ins.run("b", "Queued", "selected", 111, null);
+  ins.run("c", "Claimed", "claimed", 222, null);   // pre-089, selected_at held the CLAIM time
+  ins.run("d", "Applied", "applied", null, 333);
+
+  db.exec(MIGRATIONS.find(m => m.id === "089_profile_signal_queue_and_assertion").sql);
+
+  const rows = Object.fromEntries(
+    db.prepare("SELECT * FROM profile_signal_suggestions").all().map(r => [r.signal_label, r]));
+  assert.deepEqual(
+    ["Inactive", "Queued", "Claimed", "Applied"].map(k => [rows[k].queue_state, rows[k].assertion]),
+    [["none", "none"], ["queued", "none"], ["none", "claimed"], ["none", "applied"]]);
+  assert.equal(rows.Claimed.claimed_at, 222, "the claim time moved to its own column");
+  assert.equal(rows.Claimed.selected_at, null, "and no longer masquerades as a queue timestamp");
+  assert.equal(rows.Queued.selected_at, 111, "a real queue timestamp is left alone");
+  assert.equal(rows.Applied.applied_at, 333);
 });
 
 test("adopting an enhanced resume is one transaction, so it cannot half-apply", () => {

@@ -7,48 +7,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
+import { MIGRATIONS } from "../scripts/migrations.js";
 import {
-  CLAIM_STATUSES,
+  CLAIM_ASSERTIONS,
   addProfileSignalSuggestions,
+  buildSelectedEnhancementSkills,
   listProfileClaims,
   listProfileSignalSuggestions,
   setProfileSignalClaim,
+  syncSelectedSkillSuggestions,
 } from "../services/profileSignalAggregator.js";
 
-/** The two tables the claim path touches, exactly as migration 052 and 013 define them. */
+/**
+ * The real schema, built by RUNNING THE MIGRATIONS.
+ *
+ * This used to hand-write the two tables "exactly as migration 052 and 013 define them" — which
+ * they did, right up until migration 089 split `status` into queue_state and assertion. Then the
+ * copy described a table the product no longer has, and these tests would have gone on passing
+ * against a schema that existed nowhere else. A transcribed schema is a second source of truth that
+ * only looks correct on the day it is written.
+ */
 function freshDb() {
   const db = new Database(":memory:");
+  for (const m of MIGRATIONS) db.exec(m.sql);
   db.exec(`
-    CREATE TABLE users (id INTEGER PRIMARY KEY);
-    CREATE TABLE domain_profiles (
-      id INTEGER PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      profile_name TEXT,
-      target_titles JSON NOT NULL DEFAULT '[]',
-      selected_keywords JSON NOT NULL DEFAULT '[]',
-      selected_verbs JSON NOT NULL DEFAULT '[]',
-      selected_tools JSON NOT NULL DEFAULT '[]',
-      updated_at INTEGER
-    );
-    CREATE TABLE profile_signal_suggestions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      profile_id INTEGER NOT NULL REFERENCES domain_profiles(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      signal_key TEXT NOT NULL,
-      signal_label TEXT NOT NULL,
-      signal_kind TEXT NOT NULL,
-      structured_field TEXT,
-      frequency INTEGER NOT NULL DEFAULT 1,
-      status TEXT NOT NULL DEFAULT 'inactive',
-      first_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      selected_at INTEGER,
-      applied_at INTEGER,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      UNIQUE(profile_id, signal_key)
-    );
-    INSERT INTO users (id) VALUES (7), (8);
-    INSERT INTO domain_profiles (id, user_id, profile_name) VALUES (1, 7, 'Backend'), (2, 7, 'Data');
+    INSERT INTO users (id, username, password_hash) VALUES (7, 'fixture7', 'x'), (8, 'fixture8', 'x');
+    INSERT INTO domain_profiles (id, user_id, profile_name, role_family, domain)
+      VALUES (1, 7, 'Backend', 'engineering', 'software'), (2, 7, 'Data', 'data', 'analytics');
   `);
   return db;
 }
@@ -147,16 +132,92 @@ test("AG2: a claim on a term seen only once is still shown", () => {
 test("AG2: a term applied through the old one-way path still reads as a claim", () => {
   const db = freshDb();
   setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes" });
-  db.prepare("UPDATE profile_signal_suggestions SET status='applied' WHERE signal_label='Kubernetes'").run();
+  db.prepare("UPDATE profile_signal_suggestions SET assertion='applied', status='applied' WHERE signal_label='Kubernetes'").run();
 
   // It was the user clicking an ATS chip, which was them asserting the skill just the same.
-  assert.ok(CLAIM_STATUSES.has("applied"));
+  assert.ok(CLAIM_ASSERTIONS.has("applied"));
   assert.deepEqual(listProfileClaims(db, ctx).skills, ["Kubernetes"]);
 
   // But it is not withdrawable here: it also lives in domain_profiles.selected_tools, and removing
   // it from only one of the two stores would leave them disagreeing.
   setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes", claimed: false });
   assert.deepEqual(listProfileClaims(db, ctx).skills, ["Kubernetes"]);
+});
+
+// ── Migration 089: the two axes are independent ─────────────────────────────────────────────────
+//
+// The whole point of splitting `status` is that a row can now be queued for the enhancement rewrite
+// AND asserted by the candidate at the same time. One column could only ever hold one of those, so
+// every writer had to overwrite whatever the other one had put there.
+test("089: claiming a skill does not disturb its enhancement queue state", () => {
+  const db = freshDb();
+  addProfileSignalSuggestions(db, { ...ctx, kind: "skill", labels: ["Kubernetes"] });
+  syncSelectedSkillSuggestions(db, { ...ctx, selectedKeys: ["kubernetes"] });
+  assert.equal(db.prepare("SELECT queue_state FROM profile_signal_suggestions").get().queue_state, "queued");
+
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes" });
+  const row = db.prepare("SELECT queue_state, assertion FROM profile_signal_suggestions").get();
+  assert.equal(row.assertion, "claimed", "the claim is recorded");
+  assert.equal(row.queue_state, "queued", "and the queue state it already had survives it");
+
+  // Still queued for the rewrite, which is what buildSelectedEnhancementSkills reads.
+  assert.deepEqual(buildSelectedEnhancementSkills(db, ctx).map(s => s.label), ["Kubernetes"]);
+});
+
+test("089: withdrawing a claim leaves the queue state alone", () => {
+  const db = freshDb();
+  addProfileSignalSuggestions(db, { ...ctx, kind: "skill", labels: ["Kubernetes"] });
+  syncSelectedSkillSuggestions(db, { ...ctx, selectedKeys: ["kubernetes"] });
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes" });
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes", claimed: false });
+
+  const row = db.prepare("SELECT queue_state, assertion, status FROM profile_signal_suggestions").get();
+  assert.equal(row.assertion, "none");
+  assert.equal(row.queue_state, "queued", "withdrawing a claim is not unqueueing");
+  assert.equal(row.status, "selected", "and the legacy projection says so too");
+});
+
+test("089: unqueueing a skill does not withdraw the claim on it", () => {
+  const db = freshDb();
+  addProfileSignalSuggestions(db, { ...ctx, kind: "skill", labels: ["Kubernetes"] });
+  syncSelectedSkillSuggestions(db, { ...ctx, selectedKeys: ["kubernetes"] });
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes" });
+
+  // The exact interaction that used to wipe claims: one untick in "Selected For Enhancement".
+  syncSelectedSkillSuggestions(db, { ...ctx, selectedKeys: [] });
+
+  const row = db.prepare("SELECT queue_state, assertion, status FROM profile_signal_suggestions").get();
+  assert.equal(row.queue_state, "none");
+  assert.equal(row.assertion, "claimed", "the candidate's answer survives an unrelated untick");
+  assert.equal(row.status, "claimed", "the projection prefers the assertion, which is why it is lossy");
+  assert.deepEqual(listProfileClaims(db, ctx).skills, ["Kubernetes"]);
+});
+
+test("089: the legacy status column stays in step with both axes", () => {
+  const db = freshDb();
+  addProfileSignalSuggestions(db, { ...ctx, kind: "skill", labels: ["Kubernetes"] });
+  const statusNow = () => db.prepare("SELECT status FROM profile_signal_suggestions").get().status;
+
+  assert.equal(statusNow(), "inactive");
+  syncSelectedSkillSuggestions(db, { ...ctx, selectedKeys: ["kubernetes"] });
+  assert.equal(statusNow(), "selected");
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes" });
+  assert.equal(statusNow(), "claimed", "an assertion outranks the queue in the projection");
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes", claimed: false });
+  assert.equal(statusNow(), "selected", "and it falls back to the queue state underneath");
+  syncSelectedSkillSuggestions(db, { ...ctx, selectedKeys: [] });
+  assert.equal(statusNow(), "inactive");
+});
+
+test("089: a claimed skill is not offered back as a suggestion to tick", () => {
+  const db = freshDb();
+  addProfileSignalSuggestions(db, { ...ctx, kind: "skill", labels: ["Kubernetes", "Rust"] });
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes" });
+
+  const listed = listProfileSignalSuggestions(db, ctx);
+  assert.deepEqual(listed.inactiveSkills.map(s => s.label), ["Rust"],
+    "a claimed term must not reappear in the list of things to claim");
+  assert.deepEqual(listed.claimedSkills.map(s => s.label), ["Kubernetes"]);
 });
 
 test("AG2: an empty or whitespace label is not a claim", () => {

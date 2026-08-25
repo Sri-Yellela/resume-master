@@ -2876,6 +2876,38 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE apply_run_jobs ADD COLUMN corrections_json TEXT;
       `,
     },
+    {
+      // profile_signal_suggestions.status was doing two independent jobs at once.
+      //
+      //   QUEUE      is this skill queued for the base-resume enhancement rewrite?
+      //   ASSERTION  has the candidate said this is true of them?
+      //
+      // One column cannot hold two orthogonal facts, so every value crowded out the others.
+      // 'claimed' (added by AG2) and 'applied' had to pretend they were not queued, and
+      // syncSelectedSkillSuggestions — which reconciles the QUEUE — reconciled the whole column and
+      // silently withdrew claims it had never heard of. That was patched by teaching it which
+      // values to avoid, which is a guard around a modelling error rather than a fix for it. The
+      // next value added would have needed the same guard, in every reader, forever.
+      //
+      // status is KEPT and still written, derived from the two new columns, so anything reading it
+      // — an old process mid-deploy, a manual query — keeps working. It is lossy by construction:
+      // a row that is both queued AND claimed can only say one of those, and assertion wins. That
+      // lossiness is the whole reason for the split, so the new columns are the source of truth and
+      // status is a legacy projection.
+      id: "089_profile_signal_queue_and_assertion",
+      sql: `
+        ALTER TABLE profile_signal_suggestions ADD COLUMN queue_state TEXT NOT NULL DEFAULT 'none';
+        ALTER TABLE profile_signal_suggestions ADD COLUMN assertion TEXT NOT NULL DEFAULT 'none';
+        ALTER TABLE profile_signal_suggestions ADD COLUMN claimed_at INTEGER;
+        UPDATE profile_signal_suggestions SET queue_state = 'queued' WHERE status = 'selected';
+        UPDATE profile_signal_suggestions SET assertion = 'applied' WHERE status = 'applied';
+        UPDATE profile_signal_suggestions
+           SET assertion = 'claimed', claimed_at = selected_at, selected_at = NULL
+         WHERE status = 'claimed';
+        CREATE INDEX IF NOT EXISTS idx_profile_signal_suggestions_axes
+          ON profile_signal_suggestions(profile_id, signal_kind, queue_state, assertion, frequency DESC);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

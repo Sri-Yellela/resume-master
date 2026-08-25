@@ -300,7 +300,10 @@ test("AG2: nothing is pre-selected — only what the candidate claimed reads as 
   for (const notAClaim of ["inactiveSkills", "selectedSkills", "inactiveActionVerbs", "selectedActionVerbs"]) {
     assert.doesNotMatch(suggestionsLib, new RegExp(`claimKeys[\\s\\S]{0,200}${notAClaim}`));
   }
-  assert.match(aggregator, /CLAIM_STATUSES = new Set\(\["claimed", "applied"\]\)/);
+  // Migration 089 moved this off `status` onto its own column, so the constant names the ASSERTION
+  // values rather than statuses. The set is unchanged — both still mean the candidate said so.
+  assert.match(aggregator, /CLAIM_ASSERTIONS = new Set\(\[ASSERTIONS\.CLAIMED, ASSERTIONS\.APPLIED\]\)/);
+  assert.match(aggregator, /ASSERTIONS = \{ NONE: "none", CLAIMED: "claimed", APPLIED: "applied" \}/);
 
   // A claim must never be a score lever: claims are not written into domain_profiles.selected_*,
   // which is what buildRuntimeAtsBasis scores the resume against.
@@ -342,7 +345,15 @@ test("AG2: a claim informs FUTURE generation and never rewrites an existing resu
     aggregator.indexOf("export function listProfileClaims"));
   assert.doesNotMatch(claimFn, /UPDATE domain_profiles/,
     "claiming must not write the profile's scored term lists");
-  assert.match(claimFn, /status = 'inactive', selected_at = NULL/, "a claim must be withdrawable");
+  // Withdrawal clears the ASSERTION axis. Since migration 089 that no longer resets the row — its
+  // enhancement queue state is a separate answer to a separate question, and survives.
+  //
+  // That the queue is left alone is asserted BEHAVIOURALLY, in profileSignalClaims.test.js
+  // ("089: withdrawing a claim leaves the queue state alone"), not here. The withdrawal SQL reads
+  // queue_state to compute the legacy status projection, so no source-text rule can tell that read
+  // apart from a write — and a source assertion that cannot make the distinction it claims to make
+  // is worse than none.
+  assert.match(claimFn, /SET assertion = 'none'/, "a claim must be withdrawable");
 });
 
 test("ProfilePanel still surfaces ATS-suggested action verbs", () => {

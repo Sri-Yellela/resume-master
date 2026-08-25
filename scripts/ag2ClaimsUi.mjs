@@ -57,6 +57,7 @@ import Database from 'better-sqlite3';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
 import { buildRuntimeAtsBasis, scoreAtsLocally } from '../services/localAtsScorer.js';
+import { MIGRATIONS } from './migrations.js';
 import {
   addProfileSignalSuggestions,
   listProfileClaims,
@@ -92,43 +93,23 @@ async function waitFor(fn, timeout = 15000, interval = 100) {
 
 // ── The claim store: the real schema, in memory ───────────────────────────────────────────────
 /**
- * The two tables the claim path touches, exactly as migrations 052 and 013 define them — copied
- * from test/profileSignalClaims.test.js so the harness and the unit suite cannot drift apart on
- * what "the schema" means. Two profiles, one owner: the profile switch has to have somewhere to go.
+ * The real schema, built by RUNNING THE MIGRATIONS.
+ *
+ * This used to transcribe the two tables "exactly as migrations 052 and 013 define them", copied
+ * from test/profileSignalClaims.test.js on the theory that one copy could not drift from another.
+ * It could: migration 089 split `status` into queue_state and assertion, and all THREE copies —
+ * two test files and this harness — went on describing a table the product no longer has. Copying a
+ * schema does not make it shared; running the migrations does.
+ *
+ * Two profiles, one owner: the profile switch has to have somewhere to go.
  */
 function freshDb() {
   const db = new Database(':memory:');
+  for (const m of MIGRATIONS) db.exec(m.sql);
   db.exec(`
-    CREATE TABLE users (id INTEGER PRIMARY KEY);
-    CREATE TABLE domain_profiles (
-      id INTEGER PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      profile_name TEXT,
-      target_titles JSON NOT NULL DEFAULT '[]',
-      selected_keywords JSON NOT NULL DEFAULT '[]',
-      selected_verbs JSON NOT NULL DEFAULT '[]',
-      selected_tools JSON NOT NULL DEFAULT '[]',
-      updated_at INTEGER
-    );
-    CREATE TABLE profile_signal_suggestions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      profile_id INTEGER NOT NULL REFERENCES domain_profiles(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      signal_key TEXT NOT NULL,
-      signal_label TEXT NOT NULL,
-      signal_kind TEXT NOT NULL,
-      structured_field TEXT,
-      frequency INTEGER NOT NULL DEFAULT 1,
-      status TEXT NOT NULL DEFAULT 'inactive',
-      first_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      last_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      selected_at INTEGER,
-      applied_at INTEGER,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      UNIQUE(profile_id, signal_key)
-    );
-    INSERT INTO users (id) VALUES (7), (8);
-    INSERT INTO domain_profiles (id, user_id, profile_name) VALUES (1, 7, 'Backend'), (2, 7, 'Data');
+    INSERT INTO users (id, username, password_hash) VALUES (7, 'fixture7', 'x'), (8, 'fixture8', 'x');
+    INSERT INTO domain_profiles (id, user_id, profile_name, role_family, domain)
+      VALUES (1, 7, 'Backend', 'engineering', 'software'), (2, 7, 'Data', 'data', 'analytics');
   `);
   return db;
 }

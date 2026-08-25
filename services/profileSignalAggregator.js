@@ -39,14 +39,36 @@ export const ENHANCEMENT_SELECTED_CAP = 8;
 export const ATS_SIGNAL_PROMOTION_THRESHOLD = 2;
 
 /**
- * The statuses that mean THE CANDIDATE SAID SO (AG2).
+ * The two axes a suggestion row moves on, since migration 089 gave each its own column.
  *
- * 'inactive' and 'selected' are emphatically not here. 'inactive' is the system having noticed a
- * term in job descriptions — nobody has claimed anything — and treating it as a claim is how the
- * panel came to show auto-ingested terms as already-added, locked green chips the user never
- * chose. The system may suggest; only the user may claim.
+ * QUEUE — is this skill queued for the base-resume enhancement rewrite? Owned by
+ * syncSelectedSkillSuggestions, which is the "Selected For Enhancement" list in ProfilePanel.
+ *
+ * ASSERTION — has the candidate said this is true of them? 'claimed' is an ATS-report opt-in;
+ * 'applied' is the older one-way chip click that also wrote domain_profiles.selected_tools. Both
+ * mean the person said so, which is why both count as a claim.
+ *
+ * 'none' on either axis is the system's own state: it noticed a term in job descriptions and
+ * nobody has done anything about it. Treating that as an assertion is how the panel once showed
+ * auto-ingested terms as locked green chips the user never chose. The system may suggest; only the
+ * user may claim.
  */
-export const CLAIM_STATUSES = new Set(["claimed", "applied"]);
+export const QUEUE_STATES = { NONE: "none", QUEUED: "queued" };
+export const ASSERTIONS = { NONE: "none", CLAIMED: "claimed", APPLIED: "applied" };
+export const CLAIM_ASSERTIONS = new Set([ASSERTIONS.CLAIMED, ASSERTIONS.APPLIED]);
+
+/**
+ * The legacy `status` column, projected from the two axes.
+ *
+ * Kept written so anything still reading it keeps working. It cannot represent a row that is both
+ * queued and asserted, so the assertion wins — that collision is exactly what the split exists to
+ * end, and the projection is where it is now confined instead of being the schema.
+ */
+function legacyStatus(queueState, assertion) {
+  if (assertion === ASSERTIONS.APPLIED) return "applied";
+  if (assertion === ASSERTIONS.CLAIMED) return "claimed";
+  return queueState === QUEUE_STATES.QUEUED ? "selected" : "inactive";
+}
 
 export function classifyMissingSignal(rawValue) {
   const label = cleanProfileSignalLabel(rawValue);
@@ -96,7 +118,11 @@ function promoteSignalRow(row) {
     label: row.signal_label,
     kind: row.signal_kind,
     field: row.structured_field || null,
-    status: row.status || "inactive",
+    queueState: row.queue_state || QUEUE_STATES.NONE,
+    assertion: row.assertion || ASSERTIONS.NONE,
+    // The legacy projection, still handed to callers that read `status`. Derived rather than read
+    // from the column so a row can never disagree with itself.
+    status: legacyStatus(row.queue_state || QUEUE_STATES.NONE, row.assertion || ASSERTIONS.NONE),
     frequency: Number(row.frequency || 0),
     firstSeenAt: row.first_seen_at || null,
     lastSeenAt: row.last_seen_at || null,
@@ -106,29 +132,37 @@ function promoteSignalRow(row) {
 
 export function listProfileSignalSuggestions(db, { userId, profileId }) {
   const rows = db.prepare(`
-    SELECT signal_key, signal_label, signal_kind, structured_field, status, frequency, first_seen_at, last_seen_at
+    SELECT signal_key, signal_label, signal_kind, structured_field, queue_state, assertion,
+           frequency, first_seen_at, last_seen_at
     FROM profile_signal_suggestions
     WHERE user_id = ? AND profile_id = ?
     ORDER BY frequency DESC, last_seen_at DESC, signal_label COLLATE NOCASE ASC
   `).all(userId, profileId);
   const promoted = rows.map(promoteSignalRow);
+
+  // The buckets the UI renders are UNASSERTED rows only, split by queue state. A claimed term is
+  // not offered back as a suggestion to tick — it is something the candidate has already answered —
+  // so asserting a row takes it out of both lists and into claimedSkills. Reading the assertion
+  // axis explicitly is the point of the split; before it, "not claimed" was implied by the absence
+  // of a value that could equally have been overwritten.
+  const unasserted = item => item.assertion === ASSERTIONS.NONE;
+  const queued = item => item.queueState === QUEUE_STATES.QUEUED;
+  const ofKind = kind => item => item.kind === kind;
+
   return {
-    inactiveSkills: promoted.filter(item => item.kind === "skill" && item.status === "inactive" && item.promotable),
-    selectedSkills: promoted.filter(item => item.kind === "skill" && item.status === "selected" && item.promotable),
-    appliedSkills: promoted.filter(item => item.kind === "skill" && item.status === "applied"),
-    inactiveActionVerbs: promoted.filter(item => item.kind === "action_verb" && item.status === "inactive" && item.promotable),
-    selectedActionVerbs: promoted.filter(item => item.kind === "action_verb" && item.status === "selected" && item.promotable),
-    appliedActionVerbs: promoted.filter(item => item.kind === "action_verb" && item.status === "applied"),
-    structuredFacts: promoted.filter(item => item.kind === "structured_fact" && item.promotable),
+    inactiveSkills: promoted.filter(i => ofKind("skill")(i) && unasserted(i) && !queued(i) && i.promotable),
+    selectedSkills: promoted.filter(i => ofKind("skill")(i) && unasserted(i) && queued(i) && i.promotable),
+    appliedSkills: promoted.filter(i => ofKind("skill")(i) && i.assertion === ASSERTIONS.APPLIED),
+    inactiveActionVerbs: promoted.filter(i => ofKind("action_verb")(i) && unasserted(i) && !queued(i) && i.promotable),
+    selectedActionVerbs: promoted.filter(i => ofKind("action_verb")(i) && unasserted(i) && queued(i) && i.promotable),
+    appliedActionVerbs: promoted.filter(i => ofKind("action_verb")(i) && i.assertion === ASSERTIONS.APPLIED),
+    structuredFacts: promoted.filter(i => ofKind("structured_fact")(i) && i.promotable),
     // AG2. Deliberately NOT filtered by `promotable`: that threshold decides whether the system is
     // confident enough to SUGGEST a term (it wants to have seen it in two postings). A term the
     // candidate has claimed is not a suggestion any more — it is something they said about
     // themselves, and hiding it because only one job asked for it would lose their answer.
-    //
-    // 'applied' is included because it is also a claim: it is a term the user clicked on an ATS
-    // chip under the old one-way flow, which was them asserting it just the same.
-    claimedSkills: promoted.filter(item => item.kind === "skill" && CLAIM_STATUSES.has(item.status)),
-    claimedActionVerbs: promoted.filter(item => item.kind === "action_verb" && CLAIM_STATUSES.has(item.status)),
+    claimedSkills: promoted.filter(i => ofKind("skill")(i) && CLAIM_ASSERTIONS.has(i.assertion)),
+    claimedActionVerbs: promoted.filter(i => ofKind("action_verb")(i) && CLAIM_ASSERTIONS.has(i.assertion)),
   };
 }
 
@@ -162,29 +196,37 @@ export function setProfileSignalClaim(db, { userId, profileId, kind = "skill", l
   if (claimed) {
     // Created on claim if absent: the term may have come straight off the report for a job the
     // scrape-time aggregator never saw, and a claim the user made must be recorded either way.
+    // Only the ASSERTION axis is touched. Whether the row is queued for enhancement is a separate
+    // fact and stays exactly as it was — before migration 089 a claim had to overwrite it.
     db.prepare(`
       INSERT INTO profile_signal_suggestions
-        (profile_id, user_id, signal_key, signal_label, signal_kind, structured_field, frequency, status, first_seen_at, last_seen_at, selected_at)
-      VALUES (?, ?, ?, ?, ?, NULL, ?, 'claimed', unixepoch(), unixepoch(), unixepoch())
+        (profile_id, user_id, signal_key, signal_label, signal_kind, structured_field, frequency,
+         queue_state, assertion, status, first_seen_at, last_seen_at, claimed_at)
+      VALUES (?, ?, ?, ?, ?, NULL, ?, 'none', 'claimed', 'claimed', unixepoch(), unixepoch(), unixepoch())
       ON CONFLICT(profile_id, signal_key) DO UPDATE SET
         signal_label = excluded.signal_label,
         signal_kind = excluded.signal_kind,
+        assertion = 'claimed',
         status = 'claimed',
-        selected_at = COALESCE(profile_signal_suggestions.selected_at, excluded.selected_at),
+        claimed_at = COALESCE(profile_signal_suggestions.claimed_at, excluded.claimed_at),
         last_seen_at = excluded.last_seen_at,
         updated_at = unixepoch()
     `).run(profileId, userId, nextKey, nextLabel, allowedKind, ATS_SIGNAL_PROMOTION_THRESHOLD);
   } else {
-    // Withdrawn, not deleted. The row goes back to being a suggestion the system has seen, which is
-    // what it was before the user touched it — and the frequency history is not the user's to lose.
+    // Withdrawn, not deleted. The assertion goes back to 'none' — the frequency history the system
+    // gathered is not the user's to lose by changing their mind. Its queue state is untouched: if
+    // they had also queued it for enhancement, that is a different answer to a different question.
     //
-    // Only a 'claimed' row is withdrawable. An 'applied' one also lives in
+    // Only a CLAIMED row is withdrawable. An 'applied' one also lives in
     // domain_profiles.selected_tools, and silently un-claiming it here would leave the two stores
     // disagreeing; that legacy path has never had a remove and this is not the place to add one.
     db.prepare(`
       UPDATE profile_signal_suggestions
-      SET status = 'inactive', selected_at = NULL, updated_at = unixepoch()
-      WHERE user_id = ? AND profile_id = ? AND signal_key = ? AND status = 'claimed'
+      SET assertion = 'none',
+          status = CASE WHEN queue_state = 'queued' THEN 'selected' ELSE 'inactive' END,
+          claimed_at = NULL,
+          updated_at = unixepoch()
+      WHERE user_id = ? AND profile_id = ? AND signal_key = ? AND assertion = 'claimed'
     `).run(userId, profileId, nextKey);
   }
   console.log(`[profile-claims] ${claimed ? "claimed" : "withdrew"} ${allowedKind} "${nextLabel}" on profile ${profileId} for user ${userId}`);
@@ -199,7 +241,7 @@ export function listProfileClaims(db, { userId, profileId }) {
   const rows = db.prepare(`
     SELECT signal_label, signal_kind
     FROM profile_signal_suggestions
-    WHERE user_id = ? AND profile_id = ? AND status IN ('claimed', 'applied')
+    WHERE user_id = ? AND profile_id = ? AND assertion IN ('claimed', 'applied')
     ORDER BY signal_kind ASC, signal_label COLLATE NOCASE ASC
   `).all(userId, profileId);
   return {
@@ -321,26 +363,34 @@ export function addVerbToProfile(db, { userId, profileId, label }) {
  * destroys the states it has never heard of. Restricting it in SQL rather than in the loop is
  * deliberate — it can only see the rows it is allowed to change.
  */
-const ENHANCEMENT_QUEUE_STATUSES = ["selected", "inactive"];
-
 export function syncSelectedSkillSuggestions(db, { userId, profileId, selectedKeys = [] }) {
   const wanted = new Set((Array.isArray(selectedKeys) ? selectedKeys : []).map(profileSignalKey));
   const rows = db.prepare(`
-    SELECT signal_key, status
+    SELECT signal_key, queue_state, assertion
     FROM profile_signal_suggestions
     WHERE user_id = ? AND profile_id = ? AND signal_kind = 'skill'
-      AND status IN (${ENHANCEMENT_QUEUE_STATUSES.map(() => "?").join(", ")})
-  `).all(userId, profileId, ...ENHANCEMENT_QUEUE_STATUSES);
+  `).all(userId, profileId);
+  // Writes ONE axis. Before migration 089 this had to be told which status values to keep its hands
+  // off — a guard around the fact that queue and assertion shared a column. With them separated
+  // there is nothing to avoid: reconciling the queue cannot touch what the candidate asserted, so
+  // every skill row is fair game again and a claimed skill can be queued like any other.
   const update = db.prepare(`
     UPDATE profile_signal_suggestions
-    SET status = ?, selected_at = CASE WHEN ? = 'selected' THEN unixepoch() ELSE NULL END
+    SET queue_state = ?,
+        status = CASE
+          WHEN assertion = 'applied' THEN 'applied'
+          WHEN assertion = 'claimed' THEN 'claimed'
+          WHEN ? = 'queued' THEN 'selected'
+          ELSE 'inactive' END,
+        selected_at = CASE WHEN ? = 'queued' THEN unixepoch() ELSE NULL END,
+        updated_at = unixepoch()
     WHERE user_id = ? AND profile_id = ? AND signal_key = ?
   `);
   const tx = db.transaction(() => {
     rows.forEach(row => {
-      const nextStatus = wanted.has(row.signal_key) ? "selected" : "inactive";
-      if ((row.status || "inactive") !== nextStatus) {
-        update.run(nextStatus, nextStatus, userId, profileId, row.signal_key);
+      const next = wanted.has(row.signal_key) ? QUEUE_STATES.QUEUED : QUEUE_STATES.NONE;
+      if ((row.queue_state || QUEUE_STATES.NONE) !== next) {
+        update.run(next, next, next, userId, profileId, row.signal_key);
       }
     });
   });
@@ -428,7 +478,7 @@ export function buildSelectedEnhancementSkills(db, { userId, profileId, limit = 
   return db.prepare(`
     SELECT signal_label, frequency
     FROM profile_signal_suggestions
-    WHERE user_id = ? AND profile_id = ? AND signal_kind = 'skill' AND status = 'selected'
+    WHERE user_id = ? AND profile_id = ? AND signal_kind = 'skill' AND queue_state = 'queued'
     ORDER BY frequency DESC, last_seen_at DESC, signal_label COLLATE NOCASE ASC
     LIMIT ?
   `).all(userId, profileId, limit).map(row => ({
@@ -460,7 +510,7 @@ export function markSelectedSuggestionsApplied(db, { userId, profileId, selected
   );
   const update = db.prepare(`
     UPDATE profile_signal_suggestions
-    SET status = 'applied', applied_at = unixepoch(), updated_at = unixepoch()
+    SET assertion = 'applied', status = 'applied', applied_at = unixepoch(), updated_at = unixepoch()
     WHERE user_id = ? AND profile_id = ? AND signal_kind = 'skill' AND signal_key = ?
   `);
   const tx = db.transaction(() => {
