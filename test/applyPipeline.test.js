@@ -52,11 +52,26 @@ test("apply queue duplicate list uses the defined variable consistently", () => 
 });
 
 test("auto apply gates ATS below threshold into review instead of submitting", () => {
-  // Threshold was lowered to 65 (was 80) — null ATS no longer blocks runs
-  assert.match(applyRoute, /ATS_AUTO_APPLY_THRESHOLD = 65/);
+  // WHAT THIS PINS IS THE BEHAVIOUR, NOT THE NUMBER.
+  //
+  // It used to assert the literal `ATS_AUTO_APPLY_THRESHOLD = 65`, and its own comment recorded
+  // that 65 had replaced 80 — so the test had already been re-baselined once and would be again.
+  // A test that copies whatever constant it finds cannot fail for a reason anyone cares about; it
+  // just makes the number harder to change. What must not silently break is that a below-threshold
+  // job is HELD FOR A HUMAN rather than sent, and that the number is tunable without a deploy.
+  assert.match(applyRoute, /ATS_AUTO_APPLY_THRESHOLD = envInt\("ATS_AUTO_APPLY_THRESHOLD", (\d+)\)/,
+    "the threshold must be env-configurable, like every other limit beside it");
   assert.match(applyRoute, /ats_below_threshold/);
   assert.match(applyRoute, /status='held_review'/);
   assert.match(applyRoute, /result\.status === "submitted"/);
+
+  // The default is a judgement call, but it is bounded: 0 would auto-send everything and 100 would
+  // auto-send nothing, and both are ways of having no gate at all.
+  const dflt = Number(applyRoute.match(/ATS_AUTO_APPLY_THRESHOLD", (\d+)\)/)[1]);
+  assert.ok(dflt > 0 && dflt < 100, `implausible default threshold ${dflt}`);
+
+  // And it is still a gate on the UNATTENDED path only — manual review can send anything.
+  assert.match(applyRoute, /mode === "auto" && atsScore !== null && atsScore < ATS_AUTO_APPLY_THRESHOLD/);
 });
 
 test("manual apply uses semi automation and records review state", () => {

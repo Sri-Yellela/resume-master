@@ -37,6 +37,22 @@ the trailing 24h; `APPLY_MAX_ACTIVE_RUNS_PER_USER` (default 1) stops stacked run
 reason `daily_cap_reached`, visible in `/api/apply/review`, never silently dropped. Semi mode is
 deliberately exempt: a human submits those.
 
+**2b. The ATS gate, also configurable now** — `ATS_AUTO_APPLY_THRESHOLD` (default **50**, was a
+hardcoded 65) is the score at or above which an application is sent unattended. Below it the job is
+**held for review** with an early handoff, not discarded, so the candidate can still send it by hand.
+
+The default moved because 65 was calibrated against a scorer that has since been fixed: the old ATS
+report mined 1–3 word windows out of the job description and counted every sentence fragment as a
+*missing* skill, so the denominator was full of terms no resume could match and every score was
+depressed. Measured over 1291 real postings with the corrected scorer — median **48**, p75 **54**,
+p90 **61** — a threshold of 65 admitted **6%**. A gate that holds 94% of everything is an off switch,
+not a threshold. 50 sits just above the median and admits ~44%.
+
+Two caveats worth keeping in mind. The distribution is **candidate-specific** — it was measured for
+one profile, and a different base resume moves it. And this gate governs *whether* something is sent,
+never *what it says*: `services/resumeClaimGuard.js` still refuses any artifact that overstates years
+or seniority, before it can be persisted or attached.
+
 **3. Audit trail** — on the `apply_run_jobs` row itself: `answers_json` (A2's provenance and
 confidence, values included), `resume_artifact_id` + `resume_ats_score` (the temp PDF is deleted, so
 the reconstructable reference is the `resumes` row it was rendered from), `screenshot_path`, and

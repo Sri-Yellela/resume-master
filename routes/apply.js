@@ -165,7 +165,37 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   const APPLY_WORKER_LIMIT   = envInt("APPLY_WORKER_LIMIT", 2);
   const APPLY_DAILY_CAP      = envInt("APPLY_DAILY_CAP", 25);
   const APPLY_MAX_ACTIVE_RUNS = envInt("APPLY_MAX_ACTIVE_RUNS_PER_USER", 1);
-  const ATS_AUTO_APPLY_THRESHOLD = 65;
+  /**
+   * The score at or above which an application is sent UNATTENDED. Below it the job is not
+   * discarded — it becomes held_review with an early handoff, so the candidate still gets to send
+   * it by hand.
+   *
+   * 65 -> 50, AND CONFIGURABLE. Two reasons, one of which is a correction:
+   *
+   * 65 was calibrated against a scorer that has since been fixed. The old ATS report mined 1-3 word
+   * windows out of the job description and counted every sentence fragment it produced as a MISSING
+   * skill, so the denominator was full of terms no resume could ever match and every score was
+   * pushed down. Across 1291 real postings the corrected scorer gives median 48, p75 54, p90 61 —
+   * and at 65 only 6% of postings could ever auto-send. A gate that holds 94% of everything is not
+   * a safety threshold, it is an off switch nobody chose.
+   *
+   * 50 sits just above that median: roughly average-or-better matches go unattended (44%), the rest
+   * queue for a human. It is a deliberate throughput decision, made by the owner with the
+   * distribution in front of them, not a number inherited from a broken scale.
+   *
+   * Configurable because the comment above says every limit here is; this one was the exception,
+   * and it is the one most likely to want tuning as the scorer or the candidate's profile changes.
+   * It is also candidate-specific — that distribution was measured for one profile.
+   *
+   * Nothing here relaxes what may be SAID: services/resumeClaimGuard.js still refuses an artifact
+   * that overstates years or seniority, before it can be persisted or sent.
+   *
+   * NOTE ON 0: envInt only accepts n > 0, so ATS_AUTO_APPLY_THRESHOLD=0 falls back to the default
+   * rather than meaning "send everything". That is the shared behaviour of every limit here and it
+   * is the safe direction to be wrong in, but it does mean the gate cannot be switched off this
+   * way — use the kill switch (app_settings.apply_full_auto_disabled) to stop unattended sending.
+   */
+  const ATS_AUTO_APPLY_THRESHOLD = envInt("ATS_AUTO_APPLY_THRESHOLD", 50);
   let activeWorkers = 0;
 
   const getSetting = (key) => {
