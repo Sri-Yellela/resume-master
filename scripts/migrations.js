@@ -2562,4 +2562,29 @@ export const MIGRATIONS = [
           ON profile_signal_suggestions(profile_id, signal_kind, queue_state, assertion, frequency DESC);
       `,
     },
+    {
+      // AH1 root cause: signing out did not sign you out.
+      //
+      // /api/auth/logout revoked the presenting tab's auth-context token and RETURNED EARLY,
+      // leaving the connect.sid session — the durable, 7-day, rolling credential — alive in
+      // sessions.db. Any request without a token then re-authenticated off that cookie, and a new
+      // tab sends no token because sessionStorage is per-tab and starts empty. That is the
+      // long-standing "a hard refresh auto-authenticates" report: not a refresh bug, a sign-out
+      // that only ever signed out one tab's fallback credential.
+      //
+      // Revoking the browser's tokens on sign-out means knowing WHICH browser a token belongs to,
+      // so one browser profile signing out cannot revoke another's. session_sid is the connect.sid
+      // the context was issued under.
+      //
+      // NULL session_sid means either a row predating this migration or a deliberately
+      // session-less credential (the extension token, which the user revokes separately via
+      // /api/auth/revoke-extension-token). Neither is swept by a browser sign-out — a sign-out
+      // revokes the presented token plus its session siblings, never an unattributable row.
+      id: "090_auth_context_session_binding",
+      sql: `
+        ALTER TABLE auth_contexts ADD COLUMN session_sid TEXT;
+        CREATE INDEX IF NOT EXISTS idx_auth_contexts_session
+          ON auth_contexts(session_sid, revoked_at);
+      `,
+    },
   ];

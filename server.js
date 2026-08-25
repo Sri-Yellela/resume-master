@@ -332,7 +332,14 @@ const INDUSTRY_CATEGORIES = [
 
 // â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH   = path.join(__dirname, "data", "resume_master.db");
+// RM_DATA_DIR exists so the auth stack can be exercised end to end against a THROWAWAY database.
+// Sessions, auth contexts and requireAuth only exist as a whole — passport, the session store and
+// bindAuthContext are wired together here in server.js and cannot be mounted piecemeal on a bare
+// express app the way routes/*.js can. Verifying them therefore means booting this file, and
+// booting this file used to mean writing to the developer's real database. Defaults to exactly the
+// previous path, so nothing changes unless something asks it to.
+const DATA_DIR  = process.env.RM_DATA_DIR || path.join(__dirname, "data");
+const DB_PATH   = path.join(DATA_DIR, "resume_master.db");
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 console.log(`[boot] data directory ready: ${path.dirname(DB_PATH)}`);
 
@@ -2908,6 +2915,31 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON profile_signal_suggestions(profile_id, signal_kind, queue_state, assertion, frequency DESC);
       `,
     },
+    {
+      // AH1 root cause: signing out did not sign you out.
+      //
+      // /api/auth/logout revoked the presenting tab's auth-context token and RETURNED EARLY,
+      // leaving the connect.sid session — the durable, 7-day, rolling credential — alive in
+      // sessions.db. Any request without a token then re-authenticated off that cookie, and a new
+      // tab sends no token because sessionStorage is per-tab and starts empty. That is the
+      // long-standing "a hard refresh auto-authenticates" report: not a refresh bug, a sign-out
+      // that only ever signed out one tab's fallback credential.
+      //
+      // Revoking the browser's tokens on sign-out means knowing WHICH browser a token belongs to,
+      // so one browser profile signing out cannot revoke another's. session_sid is the connect.sid
+      // the context was issued under.
+      //
+      // NULL session_sid means either a row predating this migration or a deliberately
+      // session-less credential (the extension token, which the user revokes separately via
+      // /api/auth/revoke-extension-token). Neither is swept by a browser sign-out — a sign-out
+      // revokes the presented token plus its session siblings, never an unattributable row.
+      id: "090_auth_context_session_binding",
+      sql: `
+        ALTER TABLE auth_contexts ADD COLUMN session_sid TEXT;
+        CREATE INDEX IF NOT EXISTS idx_auth_contexts_session
+          ON auth_contexts(session_sid, revoked_at);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -4158,7 +4190,9 @@ function buildAutofillPayload(profile, mode, company = null) {
 
 // â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SQLiteStore = SQLiteStoreFactory(session);
-const SStore = new SQLiteStore({ db:"sessions.db", dir:path.join(__dirname,"data") });
+// Same DATA_DIR as the main database: a throwaway boot must not share the real sessions.db, or the
+// session-revocation assertions would be destroying the developer's own sessions.
+const SStore = new SQLiteStore({ db:"sessions.db", dir:DATA_DIR });
 
 passport.use(new LocalStrategy((username, password, done) => {
   const login = String(username || "").trim();
@@ -4236,8 +4270,8 @@ function issueAuthContext(userId, req, options = {}) {
   const now = Math.floor(Date.now() / 1000);
   db.prepare("DELETE FROM auth_contexts WHERE expires_at <= ? OR revoked_at IS NOT NULL").run(now - 86400);
   db.prepare(`
-    INSERT INTO auth_contexts (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO auth_contexts (token_hash, user_id, created_at, last_seen_at, expires_at, user_agent, session_sid)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     authContextHash(token),
     userId,
@@ -4245,8 +4279,79 @@ function issueAuthContext(userId, req, options = {}) {
     now,
     now + 7 * 24 * 60 * 60,
     options.userAgent || req.get("user-agent") || null,
+    // The browser session this token belongs to, so signing out of THIS browser revokes this
+    // browser's tokens and nobody else's. sessionLess:true is for the extension token, which is
+    // deliberately not tied to a browser session and is revoked on its own endpoint.
+    options.sessionLess ? null : (req.sessionID || null),
   );
   return token;
+}
+
+// Revoke every credential belonging to ONE browser: the token the request presented, plus every
+// other auth context issued under the same connect.sid. A different browser profile has a
+// different sid and is untouched, which is the whole point of keying on it.
+//
+// Deliberately does NOT sweep session_sid IS NULL rows: those are extension tokens and pre-090
+// rows, and revoking on a NULL match would revoke every such row for every browser at once.
+function revokeBrowserAuthContexts(sid, presentedToken) {
+  const now = Math.floor(Date.now() / 1000);
+  if (presentedToken) {
+    db.prepare("UPDATE auth_contexts SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL")
+      .run(now, authContextHash(presentedToken));
+  }
+  if (!sid) return;
+  db.prepare("UPDATE auth_contexts SET revoked_at=? WHERE session_sid=? AND revoked_at IS NULL")
+    .run(now, sid);
+}
+
+// Revoke EVERYTHING for a user, across every browser and the extension: every auth context, and
+// every cookie session in the session store that deserialises to them.
+//
+// A password change is the one moment a user is telling us a credential may be compromised, so
+// leaving a 7-day rolling cookie and a fleet of tokens alive is the opposite of what they asked
+// for.
+//
+// The store's public all() is unusable here: connect-sqlite3 returns `rows.map(r => JSON.parse(
+// r.sess))` and so DROPS the sid, which is the one thing destroy() needs. So the sid comes from a
+// SELECT on the store's own connection — deliberately not a second better-sqlite3 handle on
+// sessions.db, which connect-sqlite3 opens without WAL and would give us SQLITE_BUSY writes.
+// Deletion still goes through the store's destroy() so the table name stays its business.
+//
+// AWAITED by its callers, deliberately. The token revocation below is a synchronous better-sqlite3
+// write, but the cookie sweep runs on the store's async node-sqlite3 connection — so returning
+// before it finished would answer "your password is changed" while the old session was still, for a
+// few milliseconds, a working credential. On this path that window is the whole point of the call.
+function revokeAllUserSessions(userId, reason) {
+  const now = Math.floor(Date.now() / 1000);
+  const revoked = db.prepare(
+    "UPDATE auth_contexts SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL"
+  ).run(now, userId).changes;
+  return new Promise((resolve) => {
+    const done = (destroyed) => {
+      console.log(`[auth] revoked all credentials for user ${userId} (${reason}): ${revoked} tokens, ${destroyed} cookie sessions`);
+      resolve({ revokedTokens: revoked, destroyedSessions: destroyed });
+    };
+    try {
+      SStore.db.all(`SELECT sid, sess FROM ${SStore.table}`, (err, rows) => {
+        if (err || !Array.isArray(rows)) {
+          console.warn("[auth] session sweep query failed:", err?.message || "no rows");
+          return done(0);
+        }
+        const mine = rows.filter(row => {
+          try { return Number(JSON.parse(row.sess)?.passport?.user) === Number(userId); }
+          catch { return false; }
+        });
+        if (!mine.length) return done(0);
+        let outstanding = mine.length;
+        for (const row of mine) {
+          SStore.destroy(row.sid, () => { if (--outstanding === 0) done(mine.length); });
+        }
+      });
+    } catch(e) {
+      console.warn("[auth] session sweep failed:", e.message);
+      done(0);
+    }
+  });
 }
 
 function getRequestAuthContextToken(req) {
@@ -5283,7 +5388,7 @@ app.post("/api/auth/password-reset/request", async (req, res) => {
   res.json(generic);
 });
 
-app.post("/api/auth/password-reset/confirm", (req, res) => {
+app.post("/api/auth/password-reset/confirm", async (req, res) => {
   const result = consumePasswordReset(db, {
     token: req.body?.token,
     otp: req.body?.otp,
@@ -5292,17 +5397,45 @@ app.post("/api/auth/password-reset/confirm", (req, res) => {
     pepper: PASSWORD_RESET_SECRET,
   });
   if (!result.ok) return res.status(400).json({ error: result.error });
+  // A password reset is a statement that the old credential may be compromised. Changing the hash
+  // while leaving the 7-day rolling cookie and every issued token alive would have changed nothing
+  // for whoever was already signed in.
+  await revokeAllUserSessions(result.userId, "password_reset");
   res.json({ ok: true });
 });
 
+// Signing out signs out THIS BROWSER.
+//
+// The old handler revoked the presenting tab's token and returned early, so the connect.sid
+// session survived. The cookie is the durable credential: it is what a reopened tab, a hard
+// refresh, or any request with an empty sessionStorage authenticates with. Leaving it alive meant
+// "Sign out" only ever discarded the fallback, and the next page load signed the user straight
+// back in — for up to seven more days, because the session is rolling.
+//
+// There is no coherent middle ground here. The cookie is shared by every tab in the browser
+// profile, so a sign-out either destroys it (and signs the profile's tabs out) or it does not
+// (and signs nobody out). Signing out is a deliberate act at a machine, so it takes the machine:
+// the cookie session, and every auth context issued under it.
+//
+// A DIFFERENT browser profile keeps its own cookie jar and its own sid, so it is unaffected —
+// that is the guarantee that matters, not per-tab scoping within one profile.
 app.post("/api/auth/logout", (req, res) => {
   const token = getRequestAuthContextToken(req);
-  if (token) {
-    db.prepare("UPDATE auth_contexts SET revoked_at=unixepoch() WHERE token_hash=?")
-      .run(authContextHash(token));
-    return res.json({ ok:true, scoped:true });
-  }
-  req.logout(() => res.json({ ok:true }));
+  // req.logout() regenerates the session, so read the sid we are revoking against BEFORE it runs.
+  const sid = req.sessionID;
+  revokeBrowserAuthContexts(sid, token);
+  req.logout(() => {
+    // Destroy rather than leave the regenerated-but-empty session behind, so nothing survives
+    // this request that could be replayed.
+    req.session?.destroy?.(() => {
+      res.clearCookie("connect.sid", {
+        httpOnly:true,
+        secure:process.env.NODE_ENV === "production",
+        sameSite:process.env.NODE_ENV === "production" ? "none" : "lax",
+      });
+      res.json({ ok:true, scope:"browser" });
+    });
+  });
 });
 
 app.get("/api/auth/me", (req, res) =>
@@ -5312,7 +5445,9 @@ app.get("/api/auth/me", (req, res) =>
 );
 
 app.get("/api/auth/extension-token", requireAuth, (req, res) => {
-  const token = issueAuthContext(req.user.id, req, { userAgent: "resume-master-extension" });
+  // sessionLess: the extension is not a tab of this browser profile, so signing out of the
+  // browser must not silently kill it. It has its own revoke endpoint below.
+  const token = issueAuthContext(req.user.id, req, { userAgent: "resume-master-extension", sessionLess: true });
   res.json({ token });
 });
 
@@ -5466,13 +5601,17 @@ app.delete("/api/admin/users/:id", requireAdmin, (req, res) => {
   db.prepare("DELETE FROM users WHERE id=?").run(id);
   res.json({ ok:true });
 });
-app.patch("/api/admin/users/:id/password", requireAdmin, (req, res) => {
+app.patch("/api/admin/users/:id/password", requireAdmin, async (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error:"password required" });
   const passwordError = validatePassword(password);
   if (passwordError) return res.status(400).json({ error:passwordError });
+  const targetId = parseInt(req.params.id);
   db.prepare("UPDATE users SET password_hash=? WHERE id=?")
-    .run(hashPassword(password), parseInt(req.params.id));
+    .run(hashPassword(password), targetId);
+  // Same reasoning as the self-service reset: an admin resetting someone's password is locking an
+  // account, and it does not lock anything if the existing sessions keep working.
+  await revokeAllUserSessions(targetId, "admin_password_change");
   res.json({ ok:true });
 });
 app.patch("/api/admin/users/:id/plan", requireAdmin, (req, res) => {
@@ -7695,8 +7834,15 @@ app.get("/api/resumes/:jobId/versions", requireAuth, (req, res) => {
   res.json(rows.map(r=>({...r,atsReport:JSON.parse(r.ats_report||"null")})));
 });
 app.delete("/api/resumes/:jobId", requireAuth, (req, res) => {
-  db.prepare("DELETE FROM resumes WHERE user_id=? AND job_id=?").run(req.user.id, req.params.jobId);
-  db.prepare("DELETE FROM resume_versions WHERE user_id=? AND job_id=?").run(req.user.id, req.params.jobId);
+  // The DELETE was always correctly SCOPED — it could never remove another user's resume. What it
+  // did do was answer {ok:true} for a job_id it had not touched, so a request aimed at somebody
+  // else's resume was indistinguishable from a successful deletion of your own. Nothing leaked, but
+  // nothing said so either, and "did that work?" is exactly the question an ownership check answers.
+  const removed = db.prepare("DELETE FROM resumes WHERE user_id=? AND job_id=?")
+    .run(req.user.id, req.params.jobId).changes;
+  const removedVersions = db.prepare("DELETE FROM resume_versions WHERE user_id=? AND job_id=?")
+    .run(req.user.id, req.params.jobId).changes;
+  if (!removed && !removedVersions) return res.status(404).json({ error:"Resume not found" });
   res.json({ ok:true });
 });
 app.get("/api/history", requireAuth, (req, res) => {
@@ -7778,12 +7924,17 @@ app.patch("/api/applications/:jobId", requireAuth, (req, res) => {
   if (!updates.length) return res.status(400).json({ error:"No editable fields provided" });
   const set  = updates.map(([k]) => `${k}=?`).join(",");
   const vals = updates.map(([,v]) => v||null);
-  db.prepare(`UPDATE job_applications SET ${set} WHERE user_id=? AND job_id=?`)
-    .run(...vals, req.user.id, req.params.jobId);
+  // Same reasoning as DELETE /api/resumes/:jobId — scoped all along, but silent about whether the
+  // row it was scoped to actually exists.
+  const changed = db.prepare(`UPDATE job_applications SET ${set} WHERE user_id=? AND job_id=?`)
+    .run(...vals, req.user.id, req.params.jobId).changes;
+  if (!changed) return res.status(404).json({ error:"Application not found" });
   res.json({ ok:true });
 });
 app.delete("/api/applications/:jobId", requireAuth, (req, res) => {
-  db.prepare("DELETE FROM job_applications WHERE user_id=? AND job_id=?").run(req.user.id, req.params.jobId);
+  const removed = db.prepare("DELETE FROM job_applications WHERE user_id=? AND job_id=?")
+    .run(req.user.id, req.params.jobId).changes;
+  if (!removed) return res.status(404).json({ error:"Application not found" });
   res.json({ ok:true });
 });
 

@@ -12,7 +12,12 @@ test("server supports tab-scoped auth contexts over the browser cookie session",
   assert.match(server, /app\.use\(bindAuthContext\)/);
   assert.match(server, /authContext:issueAuthContext\(user\.id, req\)/);
   assert.match(server, /authContext:issueAuthContext\(newUser\.id, req\)/);
-  assert.match(server, /UPDATE auth_contexts SET revoked_at=unixepoch\(\)/);
+  // AH1 moved revocation out of the logout handler and into revokeBrowserAuthContexts, which
+  // revokes the presented token AND its session siblings with a parameterised timestamp. The old
+  // assertion here pinned the inline `revoked_at=unixepoch()` write that WAS the defect: it revoked
+  // the token and returned, leaving the cookie session alive. See test/authCredentialLifecycle.test.js.
+  assert.match(server, /function revokeBrowserAuthContexts/);
+  assert.match(server, /UPDATE auth_contexts SET revoked_at=\? WHERE session_sid=\?/);
 });
 
 test("client request and realtime layers send the tab auth context", () => {

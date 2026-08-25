@@ -41,6 +41,9 @@
   "ag2ClaimsUi": {
     "pass": 17
   },
+  "ah1SessionIdentity": {
+    "pass": 67
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

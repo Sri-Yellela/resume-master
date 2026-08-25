@@ -6,6 +6,7 @@ import { useTheme } from "../styles/theme.jsx";
 import CompanyViewModal from "./CompanyViewModal.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { boardApplicationChip } from "../lib/applyObstacles.js";
+import { api } from "../lib/api.js";
 import CompanyIcon from "./ui/CompanyIcon.jsx";
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -336,13 +337,18 @@ export default function JobCard({
     setStarred(job._user?.starred  ?? job.starred  ?? false);
   }, [job._user, job.starred]);
 
-  // Persist interact (star/dislike) when no parent callback provided
+  // Persist interact (star/dislike) when no parent callback provided.
+  //
+  // Goes through api() rather than a bare fetch. This was the ONE /api call site in the client that
+  // sent only `credentials: "include"` and no X-RM-Auth-Context header, so it was authenticated by
+  // the connect.sid cookie alone. The cookie is shared by every tab in a browser profile while the
+  // auth-context token is per tab, so whenever those two disagreed — two accounts open in one
+  // browser — starring a job in one tab wrote the star onto the OTHER account, silently. Every
+  // other call site already routes through api(); this one was the hole.
   async function interact(patch) {
     try {
-      await fetch("/api/jobs/interact", {
+      await api("/api/jobs/interact", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           url: job.url || job.applyUrl,
           title: job.title,

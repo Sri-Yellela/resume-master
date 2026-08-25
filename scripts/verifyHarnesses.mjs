@@ -47,6 +47,7 @@ const EXCLUDED = {
   af5CampaignReport:   "read-only campaign report against the real database",
   a5Rehearsal:         "waits for a HUMAN to submit the form",
   a5SeedFixture:       "mutates the developer's database",
+  ah1IdentityShots:    "screenshots; creates a user in the developer's database and needs a built client",
   ae1Diagnose:         "instrument, not a harness",
   ae1LiveVerify:       "points at a REAL EMPLOYER — never automated",
   g0ActiveTabSpike:    "spike; needs a manually loaded unpacked extension",

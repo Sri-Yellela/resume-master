@@ -1,7 +1,7 @@
 // SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/pages/admin/DBInspector.jsx — Admin DB diagnostic tool
 import { useState, useEffect, useRef, useCallback } from "react";
-import { api, authHeaders } from "../../lib/api.js";
+import { api, authHeaders, authContextQuery } from "../../lib/api.js";
 import { useTheme } from "../../styles/theme.jsx";
 
 const ACCENT = "#F5E642";
@@ -738,7 +738,12 @@ function SchemaExplorerTab({ theme }) {
               <span style={{ fontSize:16, fontWeight:900 }}>{selected.name}</span>
               <span style={{ fontSize:11, color:theme.textMuted }}>{fmt(selected.rowCount)} rows</span>
               <div style={{ flex:1 }}/>
-              <a href={`/api/admin/db/export/${selected.name}`}
+              {/* A plain <a> navigation cannot carry the X-RM-Auth-Context header, so it would be
+                  authenticated by the shared cookie alone — the wrong identity in a browser with a
+                  second account signed in, and a 403 download in an admin tab whose cookie belongs
+                  to a non-admin. The token goes in the query string, which bindAuthContext accepts
+                  for exactly this case. */}
+              <a href={`/api/admin/db/export/${selected.name}${authContextQuery() ? `?${authContextQuery()}` : ""}`}
                 style={{ fontSize:11, color:ACCENT, textDecoration:"none", fontWeight:700 }}>
                 Export CSV ↓
               </a>
