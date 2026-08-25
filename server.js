@@ -6884,6 +6884,40 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
 });
 
 // â”€â”€ Pending jobs (resume generated but not yet applied or disliked) â”€â”€
+// GET /api/jobs/by-id/:jobId — resolve ONE posting, for a deep link.
+//
+// AH2 made a job detail addressable (/app/jobs?job=<id>), which needs a way to answer "give me that
+// one job" for a tab that was opened straight onto the link. The board's own query cannot do it: it
+// is paginated, profile-scoped and filtered, so whether a given posting is in the response depends
+// on which page and which filters the tab happens to have restored. A deep link that resolves only
+// when the job is coincidentally on the current page is the "wired to a no-op" failure mode, so it
+// gets its own read.
+//
+// DELIBERATELY NOT profile-scoped and NOT is_active-filtered. The caller has named a specific
+// posting; refusing it because the active profile classifies it into a different role, or because
+// the listing has since closed, would answer a question nobody asked. mapJobRow exposes isActive so
+// the panel can label a closed posting as closed. The user's own flags still come from the
+// user_jobs row for the ACTIVE profile, which is the same join the board uses.
+//
+// `by-id` rather than /api/jobs/:id so it cannot be confused with the interaction routes that
+// already own that shape (/api/jobs/:id/starred, /:id/visited, /:id/keywords).
+app.get("/api/jobs/by-id/:jobId", requireAuth, (req, res) => {
+  const userId  = req.user.id;
+  const jobId   = String(req.params.jobId || "");
+  if (!jobId) return res.status(400).json({ error: "jobId required" });
+  const profile = getOrRepairActiveProfile(userId);
+  const row = db.prepare(`
+    SELECT ${buildSelectColumns(req.query.include_fields)},
+           uj.visited, uj.applied, uj.starred, uj.disliked
+    FROM scraped_jobs sj
+    LEFT JOIN user_jobs uj
+      ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
+    WHERE sj.job_id = ?
+  `).get(userId, profile?.id ?? null, jobId);
+  if (!row) return res.status(404).json({ error: "Job not found" });
+  res.json({ success: true, job: { ...mapJobRow(row), scrapedAt: row.scraped_at } });
+});
+
 app.get("/api/jobs/pending", requireAuth, (req, res) => {
   const userId = req.user.id;
   const activeProfile = getOrRepairActiveProfile(userId);

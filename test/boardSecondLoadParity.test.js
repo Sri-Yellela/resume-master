@@ -56,14 +56,25 @@ function loadPersistence() {
     sliceFn("function readProfileUiCache(profileId) {"),
     sliceFn("function writeProfileUiCache(profileId, snapshot) {"),
   ].join("\n");
-  const store = {};
-  const localStorage = {
-    getItem: (k) => (k in store ? store[k] : null),
-    setItem: (k, v) => { store[k] = String(v); },
-    removeItem: (k) => { delete store[k]; },
+  // TWO stores now, because the persistence is two-tiered (AH2): sessionStorage is this tab's
+  // authoritative copy and localStorage is the seed a brand-new tab starts from. Handing the
+  // functions one store would test a shape the app no longer has.
+  const makeStore = () => {
+    const store = {};
+    return {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+      _raw: store,
+    };
   };
-  return new Function("localStorage", `${src}
-    return { defaultFilterSnapshot, readProfileUiCache, writeProfileUiCache };`)(localStorage);
+  const localStorage = makeStore();
+  // A "tab" is a sessionStorage. Returning a factory lets a test open a SECOND tab against the
+  // same localStorage, which is the only way to assert they do not clobber each other.
+  const build = (sessionStorage) => new Function("localStorage", "sessionStorage", `${src}
+    return { defaultFilterSnapshot, readProfileUiCache, writeProfileUiCache };`)(localStorage, sessionStorage);
+  const first = build(makeStore());
+  return { ...first, localStorage, openTab: () => build(makeStore()) };
 }
 
 // The four non-filter board keys writeProfileUiCache persists alongside the filter set.
@@ -182,6 +193,57 @@ test("the restore is scoped to its own profile, so a second load cannot inherit 
   assert.equal(readProfileUiCache(6).localSearch, "six");
   assert.equal(readProfileUiCache(7), null,
     "an unknown profile must restore nothing, not another profile's board");
+});
+
+// ── AH2: two tabs on the board are two views, and neither is the other's ─────────────────────
+
+test("a second tab does not overwrite the first tab's page, search or filters", () => {
+  // This was the defect, executed rather than described: rm_jobs_profile_ui_v1 was localStorage
+  // only, keyed by profile, so the newest write won. Opening a second tab replaced tab one's
+  // currentPage/localSearch/filters with tab two's, and tab one lost its place the next time it
+  // re-read the cache. currentPage cannot be shared by construction — two tabs looking at the same
+  // board are looking at different pages, which is why there are two.
+  const first = loadPersistence();
+  const second = first.openTab();          // same localStorage, its own sessionStorage
+  const defaults = first.defaultFilterSnapshot();
+
+  first.writeProfileUiCache(5, { ...defaults, currentPage: 7, localSearch: "stripe", boardTab: "saved" });
+  second.writeProfileUiCache(5, { ...defaults, currentPage: 1, localSearch: "airbnb", boardTab: "all" });
+
+  const a = first.readProfileUiCache(5);
+  const b = second.readProfileUiCache(5);
+  assert.equal(a.currentPage, 7, "tab one's page was overwritten by tab two");
+  assert.equal(a.localSearch, "stripe", "tab one's search was overwritten by tab two");
+  assert.equal(a.boardTab, "saved");
+  assert.equal(b.currentPage, 1);
+  assert.equal(b.localSearch, "airbnb");
+});
+
+test("a brand-new tab is seeded from the origin-wide copy, so persistence still crosses a restart", () => {
+  // sessionStorage dies with the tab, so if it were the ONLY store then "come back tomorrow and
+  // your filters are still applied" would stop working — a regression traded for the fix.
+  const first = loadPersistence();
+  const defaults = first.defaultFilterSnapshot();
+  first.writeProfileUiCache(5, { ...defaults, currentPage: 4, localSearch: "seeded" });
+
+  const fresh = first.openTab();           // empty sessionStorage, same localStorage
+  const restored = fresh.readProfileUiCache(5);
+  assert.ok(restored, "a new tab restored nothing — it would start from defaults");
+  assert.equal(restored.localSearch, "seeded");
+  assert.equal(restored.currentPage, 4);
+});
+
+test("the tab's own copy wins over the seed, not the other way round", () => {
+  // Reading localStorage first would make the shared copy authoritative again and reintroduce the
+  // clobbering, while still passing both tests above.
+  const tab = loadPersistence();
+  const defaults = tab.defaultFilterSnapshot();
+  tab.writeProfileUiCache(5, { ...defaults, localSearch: "mine" });
+  // Somebody else's tab writes the seed afterwards.
+  const raw = JSON.parse(tab.localStorage.getItem("rm_jobs_profile_ui_v1"));
+  raw["5"].localSearch = "theirs";
+  tab.localStorage.setItem("rm_jobs_profile_ui_v1", JSON.stringify(raw));
+  assert.equal(tab.readProfileUiCache(5).localSearch, "mine");
 });
 
 // ── 3. X2 provenance has to survive the reload too ───────────────────────────────────────────

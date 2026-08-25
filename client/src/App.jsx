@@ -303,6 +303,14 @@ function AppDashboard({ authUser, setAuthUser }) {
     setAuthUser(null);
   }, [setAuthUser]);
 
+  // AH2: the ONE tab -> path mapping, read by both the click handler below and by the href the tab
+  // row now renders. It has to be one function: a nav that navigates somewhere its own href does
+  // not point is a nav where left-click and middle-click disagree, which is worse than no href.
+  const pathForTab = useCallback((tab) => {
+    if (tab === "jobs" || tab === "console") return consolePath;
+    return NAVIGABLE_TABS.has(tab) ? `/app/${tab}` : null;
+  }, [consolePath, NAVIGABLE_TABS]);
+
   const handlePanelChange = useCallback((tab) => {
     if (tab === "jobs" || tab === "console") {
       if (activeTab !== "console") setJobBoardRefreshKey(k => k + 1);
@@ -425,6 +433,7 @@ function AppDashboard({ authUser, setAuthUser }) {
             tabs={appTabs}
             activeTab={activeTab}
             onTabChange={handlePanelChange}
+            hrefForTab={pathForTab}
             onLogout={handleLogout}
             onUserChange={setAuthUser}
             onProfileActivate={handleProfileActivate}

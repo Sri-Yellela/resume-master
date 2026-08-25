@@ -222,6 +222,9 @@ test("the AUTO APPLY needs-review count survived the move", () => {
   // It is a ReactNode substituted for the tab's LABEL, which is why TopBar renders {t.label} rather
   // than a string — the badge could not travel any other way without the bar knowing about it.
   assert.match(app, /label: \(/);
-  assert.match(topBarCode, /\}\}>\{t\.label\}<\/button>/);
+  // The element is an <a> since AH2 (a <button> cannot be opened in a new tab by any means a
+  // browser offers). What this assertion is actually pinning is unchanged: the tab renders
+  // {t.label} as a NODE, so the badge still travels inside it.
+  assert.match(topBarCode, /\}\}>\{t\.label\}<\/a>/);
   assert.match(app, /<AppTopBar/, "the decorator is defined but never rendered");
 });

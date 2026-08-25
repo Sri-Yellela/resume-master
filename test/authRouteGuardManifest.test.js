@@ -113,6 +113,9 @@ const AUTHENTICATED = new Set([
   "GET /api/jobs/facets",
   "GET /api/jobs/suggest",
   "GET /api/jobs/pending",
+  // AH2: resolves ONE posting for a job-detail deep link. User-scoped in the sense that matters —
+  // the user_jobs flags on the row are the caller's own — over a global postings table.
+  "GET /api/jobs/by-id/:jobId",
   "GET /api/jobs/poll",
   "POST /api/jobs/search",
   "PATCH /api/jobs/interact",

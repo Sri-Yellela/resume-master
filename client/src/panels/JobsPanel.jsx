@@ -32,6 +32,8 @@ import {
   POSTING_AGE, VISITED, ageDaysMap,
 } from "../../../shared/jobFilterOptions.js";
 import CompanyIcon from "../components/ui/CompanyIcon.jsx";
+// AH2: the job-detail address, shared with JobCard so the href and the param cannot disagree.
+import { JOB_URL_PARAM, jobIdFromSearch } from "../lib/jobUrl.js";
 
 // The three extension-bridge stubs that stood here (getLinkedInExtensionInstallUrl,
 // isLinkedInExtensionInstalled, sendExtensionRequest) are gone with cleanup 5.3. They returned
@@ -63,31 +65,56 @@ function normalizeApiJob(job) {
 const USER_TEXT   = "#0f0f0f";   // black text on accent
 const PROFILE_UI_CACHE_KEY = "rm_jobs_profile_ui_v1";
 
+// AH2: this snapshot is PER TAB, not per origin.
+//
+// What it holds is transient VIEW state — boardTab, localSearch, sortBy, currentPage and every
+// filter. In localStorage alone, two tabs on the board shared one slot per profile and the last
+// write won: open a second tab and the first tab's page number, search text and filters were
+// replaced by the second tab's defaults, so going back to tab one and letting it re-read the cache
+// lost the user's place. currentPage in particular cannot be shared by construction — two tabs
+// looking at the same board are looking at different pages, that is the point of two tabs.
+//
+// sessionStorage is per tab, so it is the authoritative copy for THIS tab. localStorage is kept as
+// the SEED: sessionStorage dies with the tab, and "come back tomorrow and your filters are still
+// applied" is a real behaviour that only the origin-wide copy can provide. So a brand-new tab
+// starts from whatever was last used anywhere, and from then on it is on its own.
 function readProfileUiCache(profileId) {
   if (profileId == null) return null;
+  const key = String(profileId);
+  try {
+    const mine = JSON.parse(sessionStorage.getItem(PROFILE_UI_CACHE_KEY) || "{}");
+    if (mine[key]) return mine[key];
+  } catch {}
   try {
     const all = JSON.parse(localStorage.getItem(PROFILE_UI_CACHE_KEY) || "{}");
-    return all[String(profileId)] || null;
+    return all[key] || null;
   } catch { return null; }
 }
 
 function writeProfileUiCache(profileId, snapshot) {
   if (profileId == null || !snapshot) return;
-  try {
-    const all = JSON.parse(localStorage.getItem(PROFILE_UI_CACHE_KEY) || "{}");
-    // The persisted key set is DERIVED from defaultFilterSnapshot() plus the four non-filter board
-    // keys, instead of being spelled out. It used to be a hand-written list of 15 names that stopped
-    // at ageFilter, so every filter added after it — salary, work models, experience levels, skills,
-    // sponsor-friendly, providers, tiers — was silently dropped on reload: the board came back
-    // unfiltered while the drawer had claimed the filter was applied.
-    const persisted = { cachedAt: Date.now() };
-    for (const key of ["boardTab", "localSearch", "sortBy", "currentPage",
-                       ...Object.keys(defaultFilterSnapshot())]) {
-      persisted[key] = snapshot[key];
-    }
-    all[String(profileId)] = persisted;
-    localStorage.setItem(PROFILE_UI_CACHE_KEY, JSON.stringify(all));
-  } catch {}
+  // The persisted key set is DERIVED from defaultFilterSnapshot() plus the four non-filter board
+  // keys, instead of being spelled out. It used to be a hand-written list of 15 names that stopped
+  // at ageFilter, so every filter added after it — salary, work models, experience levels, skills,
+  // sponsor-friendly, providers, tiers — was silently dropped on reload: the board came back
+  // unfiltered while the drawer had claimed the filter was applied.
+  const persisted = { cachedAt: Date.now() };
+  for (const key of ["boardTab", "localSearch", "sortBy", "currentPage",
+                     ...Object.keys(defaultFilterSnapshot())]) {
+    persisted[key] = snapshot[key];
+  }
+  // Two independent writes, each in its own try. The tab's own copy is the one read back, so a
+  // failure on the shared seed (a full localStorage quota, a browser with it disabled) must not be
+  // able to take it down with it — which one shared try block would have done.
+  const put = (store) => {
+    try {
+      const all = JSON.parse(store.getItem(PROFILE_UI_CACHE_KEY) || "{}");
+      all[String(profileId)] = persisted;
+      store.setItem(PROFILE_UI_CACHE_KEY, JSON.stringify(all));
+    } catch {}
+  };
+  put(sessionStorage);   // authoritative for THIS tab
+  put(localStorage);     // seed for the next brand-new tab, and across a browser restart
 }
 
 // Upstream scrape requests are profile-driven on the server.
@@ -1253,6 +1280,27 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // never reset the pane, closing the panels left the board still empty until the user found the
   // bottom-nav "Jobs" button. On a narrow viewport the panel is a full-screen overlay (see
   // usePanelHost's fallback) and the board simply stays where it is underneath it.
+
+  // AH2: the job this tab was OPENED to show, captured at first render.
+  //
+  // It is read here and never from the URL again, because the sync effect further down rewrites the
+  // query string — anything consulting window.location afterwards would be reading this component's
+  // own overwrite rather than the address the user arrived on. The reasoning for the whole
+  // arrangement is with those effects, near handleJobSelect.
+  const deepLinkedJobIdRef = useRef(jobIdFromSearch());
+  const [deepLinkedJob, setDeepLinkedJob] = useState(null);
+  // Called from every path that legitimately ends the deep-linked selection: the panel's close
+  // button, Escape, picking a different card, and a real profile switch. Once it has run, the
+  // reconcile effect below stops re-opening the panel and the URL sync is free to drop the param.
+  //
+  // This is deliberately an EXPLICIT signal rather than a timing guess. The first attempt cleared
+  // the ref as soon as it saw the selection match, which raced the profile-cache restore: within
+  // the render where activeProfileKey arrives, the restore's setSelectedJob(null) has been queued
+  // but this effect's closure still holds the OLD selection, so it saw a match, cleared, and the
+  // null landed the next render with nothing left to re-apply it. Intermittently — which is how it
+  // passed once and failed the next run on the same build.
+  const clearDeepLink = useCallback(() => { deepLinkedJobIdRef.current = null; }, []);
+
   const openSandbox = useCallback((entry) => {
     setSandbox(entry);
     setSandboxOpen(true);
@@ -1288,10 +1336,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   // generated from. Above capacity 1 nothing here applies — eviction is still by focus recency —
   // and JD open on its own is unaffected either way.
   const panelDescriptors = useMemo(() => ([
-    { id: "jd",  open: !!selectedJob,   close: () => setSelectedJob(null) },
+    { id: "jd",  open: !!selectedJob,   close: () => { clearDeepLink(); setSelectedJob(null); } },
     { id: "ats", open: rightPanelOpen,  close: () => setRightPanelOpen(false) },
     { id: "pdf", open: sandboxOpen,     close: () => { setSandboxOpen(false); setSandbox(null); } },
-  ]), [selectedJob, sandboxOpen, rightPanelOpen, setSelectedJob]);
+  ]), [selectedJob, sandboxOpen, rightPanelOpen, setSelectedJob, clearDeepLink]);
   const {
     visible: visiblePanels, dockWidth, focusPanel,
     beginResize, resizeBy, endResize,
@@ -1822,6 +1870,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
       setProfileCache?.(prevKey, latestSnapshotRef.current);
     }
 
+    // A real profile SWITCH ends the deep link — the user has changed what board they are looking
+    // at, and re-opening a job from the previous profile would be the app arguing with them. The
+    // FIRST arrival of a profile key (prevKey null) is not a switch and must not clear it: that is
+    // the restore this whole arrangement exists to survive.
+    if (prevKey) deepLinkedJobIdRef.current = null;
     switchingProfileRef.current = true;
     const cached = getProfileCache?.(nextKey);
     if (cached) {
@@ -1855,6 +1908,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
 
   // -- Split-view: job selection ---------------------------------
   const handleJobSelect = useCallback((job) => {
+    clearDeepLink();   // the user is driving the panel now
     setSelectedJob(prev => {
       if (prev?.jobId === job.jobId) return null; // toggle off
       return job;
@@ -1865,11 +1919,70 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── AH2: the open job detail lives IN THE URL ────────────────────────────────────────────────
+  //
+  // selectedJob was React state and nothing else, so a job detail had no address. It could not be
+  // linked, could not be reopened where you left it, and — one selectedJob per mounted panel — two
+  // of them could not be on screen at once by any means the app offered. /app/jobs/<id> was worse
+  // than nothing: routeKey is not in NAVIGABLE_TABS, so it silently redirected to the bare board.
+  //
+  // A QUERY PARAM, not a path segment. The console already owns /app/jobs, so ?job= names a detail
+  // without inventing a route the panel switcher would have to learn — and it composes with the
+  // board's other URL state instead of replacing it. replaceState rather than navigate() for the
+  // same reason App.jsx strips ?authContext that way: the address has to be copyable, but toggling
+  // a side panel is not a step the Back button should have to unwind.
+  //
+  // A tab opened straight onto a link has no board row for that job — it may be on another page,
+  // filtered out, classified under a different profile, or closed — so it is fetched BY ID. A deep
+  // link that resolves only when the job is coincidentally on the current page is the no-op
+  // failure mode this codebase keeps finding.
+  useEffect(() => {
+    const wanted = deepLinkedJobIdRef.current;
+    if (!wanted) return;
+    let cancelled = false;
+    api(`/api/jobs/by-id/${encodeURIComponent(wanted)}`)
+      .then(d => { if (!cancelled && d?.job) setDeepLinkedJob(normalizeApiJob(d.job)); })
+      // An unknown or stale id leaves the board exactly as it is, and stops the insistence below.
+      .catch(() => { deepLinkedJobIdRef.current = null; });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Applying it takes more than one setSelectedJob, and that is not a hack — it is the profile-cache
+  // restore above, which fires when activeProfileKey first arrives and resets the selection to
+  // whatever THAT PROFILE last had open. For a tab opened on a link that is nothing, so a single
+  // set was silently undone a few hundred milliseconds later: the panel flashed open and closed and
+  // the URL went back to a bare /app/jobs. Measured exactly that way before this.
+  //
+  // Effects run in declaration order, so on the render where the profile key lands the restore runs
+  // first and this re-applies after it. Once the selection has stuck AND the profile key is known,
+  // the ref clears and this stops caring — from then on the panel belongs to the user, and
+  // reopening it after they close it would be the app arguing with them.
+  useEffect(() => {
+    if (!deepLinkedJob || !deepLinkedJobIdRef.current) return;
+    if (selectedJob?.jobId === deepLinkedJob.jobId) return;
+    setSelectedJob(deepLinkedJob);
+  }, [deepLinkedJob, selectedJob?.jobId, activeProfileKey, setSelectedJob]);
+
+  // state -> URL, so the address is copyable and survives a reload.
+  useEffect(() => {
+    const next = selectedJob?.jobId || null;
+    // Never strip the param out from under a deep link that has not landed yet. This effect runs on
+    // the first commit, when the selection is still null, and stripping there would erase the
+    // address the tab was opened with before anything had a chance to read it.
+    if (!next && deepLinkedJobIdRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if ((params.get(JOB_URL_PARAM) || null) === next) return;
+    if (next) params.set(JOB_URL_PARAM, next); else params.delete(JOB_URL_PARAM);
+    const qs = params.toString();
+    window.history.replaceState({}, "",
+      `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+  }, [selectedJob?.jobId]);
+
   // Keyboard nav: Escape closes, ArrowUp/Down navigates
   useEffect(() => {
     if (!selectedJob) return;
     const handler = (e) => {
-      if (e.key === "Escape") { setSelectedJob(null); return; }
+      if (e.key === "Escape") { clearDeepLink(); setSelectedJob(null); return; }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         setSelectedJob(prev => {

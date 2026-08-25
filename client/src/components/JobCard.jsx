@@ -7,7 +7,36 @@ import CompanyViewModal from "./CompanyViewModal.jsx";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { boardApplicationChip } from "../lib/applyObstacles.js";
 import { api } from "../lib/api.js";
+import { jobDetailHref } from "../lib/jobUrl.js";
 import CompanyIcon from "./ui/CompanyIcon.jsx";
+
+// AH2: a job's title is a LINK to that job's own address.
+//
+// The detail panel used to be React state and nothing else — there was no URL that named a job, so
+// no card could offer "open in a new tab" and no two job details could be on screen at once. Now
+// that /app/jobs?job=<id> resolves a specific posting, the title carries it, and the browser's own
+// affordances (ctrl/cmd-click, middle-click, the context menu) work with no extra icon on an
+// already dense card.
+//
+// A PLAIN left-click is deliberately not handled: it only suppresses the browser's navigation and
+// then keeps bubbling to the card's own onClick, so opening a detail in the current tab behaves
+// exactly as it did. A MODIFIED click stops there — the browser is opening a new tab, and selecting
+// the job in THIS tab too would be a second thing the user did not ask for.
+function JobTitleLink({ job, isLoggedOut, style, children }) {
+  const href = jobDetailHref(job.jobId || job.id);
+  if (isLoggedOut || !href) return <div style={style}>{children}</div>;
+  return (
+    <a href={href}
+      title={`${job.title} — ctrl/cmd-click to open in a new tab`}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) { e.stopPropagation(); return; }
+        e.preventDefault();
+      }}
+      style={{ color: "inherit", textDecoration: "none", display: "block", ...style }}>
+      {children}
+    </a>
+  );
+}
 
 // ── Helpers ─────────────────────────────────────────────────────
 // Compute elapsed time since posting.
@@ -551,10 +580,11 @@ export default function JobCard({
               )}
             </div>
             {/* Row 2: job title */}
-            <div style={{ fontSize:11, color:"var(--color-text-muted)",
-                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            <JobTitleLink job={job} isLoggedOut={isLoggedOut}
+              style={{ fontSize:11, color:"var(--color-text-muted)",
+                       overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
               {job.title}
-            </div>
+            </JobTitleLink>
           </div>
         </div>
       )}
@@ -587,10 +617,11 @@ export default function JobCard({
                                 padding:"1px 6px", borderRadius:999 }}>visited</span>
               )}
             </div>
-            <div style={{ fontSize:12, color:"var(--color-text-muted)", marginBottom:6,
-                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            <JobTitleLink job={job} isLoggedOut={isLoggedOut}
+              style={{ fontSize:12, color:"var(--color-text-muted)", marginBottom:6,
+                       overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
               {job.title}
-            </div>
+            </JobTitleLink>
             <div style={{ display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" }}>
               <WorkBadge t={job.workType} theme={theme}/>
               {/* Explicit `=== false`: isActive is absent on live-search results, and absent must

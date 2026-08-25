@@ -69,11 +69,16 @@ export function JobBoardProvider({ children }) {
   const deleteProfileCache = useCallback((profileId) => {
     if (profileId == null) return;
     profileCacheRef.current.delete(String(profileId));
-    try {
-      const all = JSON.parse(localStorage.getItem(PROFILE_UI_CACHE_KEY) || "{}");
-      delete all[String(profileId)];
-      localStorage.setItem(PROFILE_UI_CACHE_KEY, JSON.stringify(all));
-    } catch {}
+    // BOTH stores. JobsPanel's view snapshot is per tab in sessionStorage with localStorage as the
+    // seed (AH2), so clearing only the seed left a deleted profile's board state alive in whichever
+    // tab had been looking at it.
+    for (const store of [sessionStorage, localStorage]) {
+      try {
+        const all = JSON.parse(store.getItem(PROFILE_UI_CACHE_KEY) || "{}");
+        delete all[String(profileId)];
+        store.setItem(PROFILE_UI_CACHE_KEY, JSON.stringify(all));
+      } catch {}
+    }
   }, []);
 
   return (

@@ -425,6 +425,18 @@ export default function TopBar({
   // cannot navigate to somewhere the menu cannot, and neither can drift onto its own list.
   tabs = [],
   activeTab,
+  // AH2: the tab row is made of REAL LINKS now, and this is where their href comes from.
+  //
+  // It used to be `<button onClick={onTabChange}>`, which meant the application's primary
+  // navigation could not be opened in a second tab by any means a browser offers — no ctrl/cmd
+  // click, no middle click, no "Open link in new tab" in the context menu, nothing for a screen
+  // reader to report as a link. The panels themselves were always deep-linkable (/app/auto-apply
+  // renders fine when you reach it), so "I can't have Jobs in one tab and Auto Apply in another"
+  // was never a state bug — it was the absence of any affordance to get the second tab.
+  //
+  // Supplied by AppDashboard's pathForTab, the same function its click handler routes through, so
+  // the href and the click can never point at different places.
+  hrefForTab,
 }) {
   const { theme } = useTheme();
 
@@ -580,9 +592,20 @@ export default function TopBar({
             overflowX: "auto", scrollbarWidth: "none", msOverflowStyle: "none",
           }}>
             {(tabs || []).map(t => (
-              <button key={t.id} onClick={() => onTabChange?.(t.id)}
+              <a key={t.id}
+                href={hrefForTab?.(t.id) || undefined}
+                // Plain left-click stays an SPA navigation — preventDefault and route in-app, so
+                // nothing about single-tab behaviour changes. Every MODIFIED click is left to the
+                // browser: ctrl/cmd (new tab), shift (new window), middle-click, and the context
+                // menu, which needs no handler at all now that there is an href to act on.
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  onTabChange?.(t.id);
+                }}
                 aria-current={activeTab === t.id ? "page" : undefined}
                 style={{
+                  display: "inline-block", textDecoration: "none",
                   padding: "8px 14px",
                   background: activeTab === t.id ? "rgba(255,255,255,0.06)" : "transparent",
                   border: activeTab === t.id ? "1px solid var(--color-primary)" : "1px solid transparent",
@@ -591,7 +614,7 @@ export default function TopBar({
                   fontSize: 12, fontWeight: 600, cursor: "pointer",
                   textTransform: "uppercase", letterSpacing: "0.08em",
                   whiteSpace: "nowrap", flexShrink: 0,
-                }}>{t.label}</button>
+                }}>{t.label}</a>
             ))}
           </nav>
         </div>
