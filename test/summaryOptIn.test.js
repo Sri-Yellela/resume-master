@@ -315,6 +315,26 @@ test("coreGenerateResume reads the per-profile preference and passes it to the P
   assert.doesNotMatch(body, /stripSummary|removeSummary/);
 });
 
+test("--from-file verifies externally-produced artifacts, and says what it cannot know", () => {
+  // The mode exists so the two documents can be produced without spending on a billed key — but a
+  // verification path that quietly reports a weaker result as a full pass is worse than no path.
+  // What is asserted here is the honesty, not the plumbing.
+  const h = fs.readFileSync("scripts/ai1SummaryVerify.mjs", "utf8");
+  assert.match(h, /const FROM_FILE = process\.argv\.includes\("--from-file"\);/);
+  // It goes through the SAME normaliser, guard and PDF as a real run — only the HTML's origin differs.
+  assert.match(h, /html = normalizeResumeHtml\(raw\);\n    console\.log\(`  --from-file:/);
+  // The two sources are mutually exclusive; silently preferring one would misreport provenance.
+  assert.match(h, /--from-file and --render-only are different sources; pick one/);
+  // A missing or wrong path fails loudly rather than falling back to a model call.
+  assert.match(h, /--from-file needs AI1_\$\{label\.toUpperCase\(\)\}_HTML to point at an existing file/);
+  // And the closing report refuses to claim model obedience.
+  assert.match(h, /PARTLY verified/);
+  assert.match(h, /cannot know whether their author was blind to what/);
+  assert.match(h, /For evidence about MODEL OBEDIENCE, re-run with no flag/);
+  // The AF2 inflation check must RUN in this mode — those artifacts face the 8-year JD.
+  assert.match(h, /It runs under --from-file, because those\n  \/\/ artifacts were produced against this JD/);
+});
+
 test("the standalone path honours it, with the same default", () => {
   const server = fs.readFileSync("server.js", "utf8");
   const body = server.slice(server.indexOf('app.post("/api/standalone/generate"'),

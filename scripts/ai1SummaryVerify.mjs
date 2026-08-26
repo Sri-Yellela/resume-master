@@ -43,8 +43,39 @@ import { launchBrowser } from "../services/browserLauncher.js";
 const DB_PATH = process.env.RESUME_MASTER_DB || "data/resume_master.db";
 const OUT = "docs/ai1-summary";
 const RENDER_ONLY = process.argv.includes("--render-only");
+
+/**
+ * --from-file: verify artifacts produced SOMEWHERE ELSE, through this exact pipeline.
+ *
+ * WHY IT EXISTS
+ * The two model calls cost about seven cents, which is not the problem — the problem is a billed
+ * key that may be empty when you need the answer. This mode lets the two documents be produced by
+ * any model, through any surface (including a Claude Code session on a subscription), and then run
+ * through the IDENTICAL guard, renderer, PDF and section assertions. Nothing about the verification
+ * is weakened; only the provenance of the HTML changes.
+ *
+ * WHAT IT DOES NOT PROVE, AND THE RUN SAYS SO
+ * If the person supplying the artifacts knows what is being tested, "the model omitted the summary"
+ * is not evidence about models — it is evidence about that author. This mode is honest about the
+ * pipeline and silent about model obedience, and the closing summary spells out which is which.
+ *
+ * Usage: AI1_OFF_HTML=<path> AI1_ON_HTML=<path> node scripts/ai1SummaryVerify.mjs --from-file
+ */
+const FROM_FILE = process.argv.includes("--from-file");
+const FROM_FILE_PATHS = { off: process.env.AI1_OFF_HTML, on: process.env.AI1_ON_HTML };
+if (FROM_FILE) {
+  if (RENDER_ONLY) { console.error("--from-file and --render-only are different sources; pick one"); process.exit(2); }
+  for (const [label, p] of Object.entries(FROM_FILE_PATHS)) {
+    if (!p || !fs.existsSync(p)) {
+      console.error(`--from-file needs AI1_${label.toUpperCase()}_HTML to point at an existing file (got ${p || "unset"})`);
+      process.exit(2);
+    }
+  }
+}
+
+const NO_MODEL = RENDER_ONLY || FROM_FILE;
 const key = process.env.ANTHROPIC_KEY || process.env.ANTHROPIC_API_KEY;
-if (!key && !RENDER_ONLY) { console.error("no ANTHROPIC_KEY — cannot do a REAL run"); process.exit(2); }
+if (!key && !NO_MODEL) { console.error("no ANTHROPIC_KEY — cannot do a REAL run"); process.exit(2); }
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = "") => {
@@ -164,7 +195,14 @@ async function generate(label, includeSummary) {
   const systemBlocks = verifyPrompt(includeSummary);
 
   let html;
-  if (RENDER_ONLY) {
+  if (FROM_FILE) {
+    const src = FROM_FILE_PATHS[label];
+    const raw = fs.readFileSync(src, "utf8");
+    // normalizeResumeHtml, exactly as the live path applies it to a model's raw output — so the
+    // renderer, the section ordering and the empty-section drop are all genuinely exercised.
+    html = normalizeResumeHtml(raw);
+    console.log(`  --from-file: ${src} (${raw.length} chars, normalised to ${html.length})`);
+  } else if (RENDER_ONLY) {
     html = fixtureArtifact(includeSummary);
     console.log(`  --render-only: rendered a REAL prior artifact ${includeSummary ? "as generated" : "with its summary section removed from the structure"} (${html.length} chars)`);
   } else {
@@ -232,9 +270,10 @@ async function generate(label, includeSummary) {
       htmlToText(firstBody).length < 60, htmlToText(firstBody).slice(0, 120));
   }
 
-  // AF2's own subject matter: the JD demands 8 years and the candidate has fewer. Only meaningful
-  // on a REAL generation — under --render-only the artifact was written against a different JD, so
-  // asserting it here would be checking the fixture rather than the change.
+  // AF2's own subject matter: the JD demands 8 years and the candidate has fewer. Skipped only
+  // under --render-only, where the artifact was written against a DIFFERENT JD and asserting this
+  // would be checking the fixture rather than the change. It runs under --from-file, because those
+  // artifacts were produced against this JD and the inflation question is live for them.
   if (!RENDER_ONLY) {
     const eight = /\b(8|eight)\s*\+?\s*(years?|yrs?)\b/i.exec(text);
     check(`${label}: no "8 years" anywhere in the document`, !eight, eight?.[0]);
@@ -337,6 +376,13 @@ if (RENDER_ONLY) {
   console.log(`  NOT verified: whether the MODEL obeys the prompt. --render-only made no model call,`);
   console.log(`            so the OFF document has no summary because the fixture was built without one,`);
   console.log(`            not because a model declined to write one. Re-run without --render-only.`);
+} else if (FROM_FILE) {
+  console.log(`  PARTLY verified: the documents were written by a model against the real prompt, and`);
+  console.log(`            everything above is a real result on real model output. But they were supplied`);
+  console.log(`            by --from-file, so this run cannot know whether their author was blind to what`);
+  console.log(`            is being tested. An author who knew would comply, and "the summary is absent"`);
+  console.log(`            would then be evidence about the author rather than about the prompt.`);
+  console.log(`            For evidence about MODEL OBEDIENCE, re-run with no flag: two blind Sonnet calls.`);
 } else {
   console.log(`            Both documents came from real ${MODEL_SONNET} calls.`);
 }

@@ -44,48 +44,104 @@ ul.bullets li { font-size: var(--fs-body); line-height: var(--lh-bullets); margi
 }
 </style></head><body>
 <div class="header">
-  <div class="name">John Doe</div>
-  <div class="tagline">Backend Software Engineer</div>
-  <div class="contact">Boston, MA | +1 617 555 0142 | johndoe.a5test@gmail.com | linkedin.com/in/johndoe | github.com/johndoe</div>
+  <div class="name">SRI BALAJI YELLELA</div>
+  <div class="tagline">Fullstack Software Engineer</div>
+  <div class="contact">+1 (402) 500-0033 | yellelasribalaji@gmail.com | linkedin.com/in/sriyellela | github.com/Sri-Yellela | Boston, MA</div>
 </div>
 <div class="section-title">TECHNICAL SKILLS</div>
 <ul class="bullets">
-  <li><strong>Languages</strong> <strong>Java</strong> &amp;middot; <strong>C++</strong> &amp;middot; JavaScript &amp;middot; HTML &amp;middot; CSS</li>
-  <li><strong>Systems &amp; Infrastructure</strong> File Server Administration &amp;middot; Windows Server Environments &amp;middot; Client-Server Systems &amp;middot; Systems Troubleshooting</li>
-  <li><strong>Tools &amp; Platforms</strong> Visual Studio &amp;middot; Windows 7 &amp;middot; Windows 10 &amp;middot; Microsoft Office Suite</li>
-  <li><strong>Practices</strong> Cross-team Collaboration &amp;middot; Technical Support Operations &amp;middot; Team Coordination &amp;middot; Documentation Maintenance</li>
-  <li><strong>Familiar With</strong> Adobe Photoshop &amp;middot; Adobe Dreamweaver</li>
+  <li><strong>Languages</strong> <strong>Go</strong> &amp;middot; Java &amp;middot; Python &amp;middot; C# &amp;middot; TypeScript &amp;middot; JavaScript &amp;middot; <strong>SQL</strong></li>
+  <li><strong>Backend &amp; Distributed</strong> <strong>Distributed systems</strong> &amp;middot; <strong>Microservices</strong> &amp;middot; REST APIs &amp;middot; gRPC &amp;middot; Spring Boot &amp;middot; Node.js &amp;middot; .NET &amp;middot; Event streaming</li>
+  <li><strong>Data Stores</strong> <strong>PostgreSQL</strong> &amp;middot; DynamoDB &amp;middot; SQL Server &amp;middot; Azure SQL Database &amp;middot; CosmosDB &amp;middot; MySQL</li>
+  <li><strong>Infrastructure</strong> <strong>Kubernetes</strong> &amp;middot; Docker &amp;middot; Terraform &amp;middot; CI/CD pipelines &amp;middot; AWS &amp;middot; GCP &amp;middot; Microsoft Azure</li>
+  <li><strong>Testing</strong> JUnit &amp;middot; Mockito &amp;middot; Jest &amp;middot; Cypress &amp;middot; Selenium &amp;middot; Integration testing</li>
+  <li><strong>Practices</strong> Agile/Scrum &amp;middot; Test-driven development &amp;middot; Object-oriented design &amp;middot; Code review</li>
+  <li><strong>Transferable to target stack</strong> GCP Pub/Sub and AWS SQS (durable message brokers, equivalent role to <strong>Kafka</strong>) &amp;middot; EKS (managed <strong>Kubernetes</strong>)</li>
 </ul>
 <div class="section-title">EXPERIENCE</div>
 <div class="entry">
   <div class="entry-header">
-    <div><span class="entry-org">College of Engineering, University Near You</span> <span class="entry-meta"><span class="sep">|</span> Technical Assistant | Jul 2016 - Present</span></div>
-    
+    <div><span class="entry-org">Stripe</span> <span class="entry-meta"><span class="sep">|</span> Payments Infrastructure, Bangalore</span></div>
+    <div class="entry-date">Aug 2022 - Dec 2023</div>
   </div>
-  <div class="entry-role">Technical Assistant</div>
+  <div class="entry-role">Software Development Engineer</div>
   
   
   <ul class="bullets">
-  <li>Coordinated technical support delivery for large-scale annual events, managing system uptime and troubleshooting requests across multiple concurrent workstreams to ensure reliable service for hundreds of attendees.</li>
-  <li>Directed and mentored a rotating team of student workers and volunteers, assigning tasks and reviewing work quality to maintain consistent technical support standards during high-traffic periods.</li>
-  <li>Diagnosed and resolved recurring hardware and software issues on <strong>Windows 7</strong> and <strong>Windows 10</strong> systems, reducing repeat support tickets by standardizing common fixes into a reusable troubleshooting checklist.</li>
-  <li>Collaborated with the Director&#39;s office to prioritize competing administrative and technical requests, balancing short-term event support needs against longer-term departmental system maintenance.</li>
+  <li>Engineered payment authorisation services in <strong>Python</strong> and <strong>Go</strong> that sustained <strong>1M+ daily transactions</strong> at <strong>99.9% uptime</strong>, keeping settlement accurate during peak merchant load.</li>
+  <li>Partitioned a monolithic reconciliation job into <strong>microservices</strong> coordinated through <strong>GCP Pub/Sub</strong>, clearing message backlogs that had been breaking settlement for <strong>12 downstream services</strong>.</li>
+  <li>Tuned <strong>REST API</strong> request paths and connection pooling to hold <strong>sub-100ms p99 latency</strong> across <strong>200K+ merchant integrations</strong>, which kept checkout responsive as volume grew.</li>
+  <li>Chose at-least-once delivery with idempotency keys over exactly-once semantics after weighing operational cost, accepting duplicate handling in exchange for a simpler failure mode the on-call team could reason about.</li>
+  <li>Instrumented tracing and alerting across critical payment paths, cutting <strong>mean time to recovery by 35%</strong> and giving merchant support a shared signal to triage against.</li>
 </ul>
 </div>
 <div class="entry">
   <div class="entry-header">
-    <div><span class="entry-org">College of Engineering, University Near You</span> <span class="entry-meta"><span class="sep">|</span> Volunteer Intern, Assistant Systems Administrator | Jan 2016 - Jul 2016</span></div>
-    
+    <div><span class="entry-org">Amazon</span> <span class="entry-meta"><span class="sep">|</span> Supply Chain &amp; Internal Developer Tools, Hyderabad</span></div>
+    <div class="entry-date">Jan 2021 - Jul 2022</div>
   </div>
-  <div class="entry-role">Volunteer Intern, Assistant Systems Administrator</div>
+  <div class="entry-role">Software Development Engineer</div>
   
   
   <ul class="bullets">
-  <li>Maintained and sustained a departmental file server, monitoring storage capacity and access permissions to ensure consistent uptime for faculty and student users.</li>
-  <li>Rebuilt and reconfigured decommissioned computers for redistribution, extending hardware lifecycle and reducing replacement costs for the department.</li>
-  <li>Updated the College of Engineering IT support website to align with current university standards, improving documentation clarity for incoming support requests.</li>
-  <li>Partnered with fellow systems administration team members to divide troubleshooting workload across client machines, applying structured problem-solving to resolve technical issues efficiently.</li>
+  <li>Operated cloud-native services on <strong>AWS</strong> (<strong>Lambda</strong>, <strong>SQS</strong>, S3, <strong>EKS</strong>) serving <strong>500K+ daily queries</strong> at <strong>98% availability</strong> for warehouse planners.</li>
+  <li>Diagnosed and resolved <strong>PostgreSQL</strong> and <strong>DynamoDB</strong> query bottlenecks that were stalling <strong>150K+ daily inventory operations</strong>, restoring same-day stock accuracy.</li>
+  <li>Shipped weekly zero-downtime rolling updates on <strong>Kubernetes</strong>, replacing a maintenance-window release that had blocked fulfilment during deploys.</li>
+  <li>Refactored core ordering modules onto consistent <strong>object-oriented design</strong> patterns, reducing module-level defect rates by approximately <strong>30%</strong> and shortening review cycles.</li>
+  <li>Presented service design proposals at technical review and guided incoming engineers through the supply chain domain, which shortened their first-commit time.</li>
 </ul>
+</div>
+<div class="section-title">ACADEMIC PROJECTS</div>
+<div class="entry">
+  <div class="entry-header">
+    <div><span class="entry-org">Distributed Key-Value Store with Consensus Protocol</span> <span class="entry-meta"><span class="sep">|</span> Graduate coursework</span></div>
+    <div class="entry-date">Spring 2024</div>
+  </div>
+  
+  <div class="tech-line">Java, Raft consensus, gRPC, Docker, JUnit</div>
+  
+  <ul class="bullets">
+  <li>Implemented a <strong>distributed</strong> key-value store on the <strong>Raft consensus</strong> algorithm with leader election and log replication, holding linearisable reads across a 5-node cluster under simulated network partitions.</li>
+  <li>Measured <strong>12K ops/sec</strong> read throughput under load with concurrent failure injection, validating the replication design against the course fault model.</li>
+</ul>
+</div>
+<div class="entry">
+  <div class="entry-header">
+    <div><span class="entry-org">Cloud-Native ETL Pipeline on GCP</span> <span class="entry-meta"><span class="sep">|</span> Graduate coursework</span></div>
+    <div class="entry-date">Fall 2024</div>
+  </div>
+  
+  <div class="tech-line">Python, Apache Beam, GCP Dataflow, BigQuery, Pub/Sub, Terraform</div>
+  
+  <ul class="bullets">
+  <li>Delivered a streaming ETL pipeline moving <strong>100M+ records</strong> from <strong>Pub/Sub</strong> into <strong>BigQuery</strong> with schema validation and failure alerting, holding data loss under <strong>0.1%</strong>.</li>
+  <li>Codified the pipeline environment in <strong>Terraform</strong>, cutting full redeployment from 45 minutes to under 4 minutes for each grading iteration.</li>
+</ul>
+</div>
+<div class="section-title">PROJECTS</div>
+<div class="entry">
+  <div class="entry-header">
+    <div><span class="entry-org">Full-Stack Scalable Web Platform</span></div>
+    <div class="entry-date">2024 - 2025</div>
+  </div>
+  
+  <div class="tech-line">React, TypeScript, Spring Boot, PostgreSQL, Docker, JWT, OpenAPI</div>
+  
+  <ul class="bullets">
+  <li>Built a <strong>REST API</strong> backend in <strong>Spring Boot</strong> over <strong>PostgreSQL</strong> with a React and <strong>TypeScript</strong> client, holding sub-200ms average response for 200 concurrent users.</li>
+  <li>Covered the service layer with <strong>JUnit</strong>, Mockito and RestAssured suites, catching contract regressions before they reached the deployed environment.</li>
+</ul>
+</div>
+<div class="section-title">EDUCATION</div>
+<div class="entry">
+  <div class="entry-header">
+    <div><span class="entry-org">Northeastern University</span> <span class="entry-meta"><span class="sep">|</span> Boston, MA</span></div>
+    <div class="entry-date">Jan 2024 - Dec 2025</div>
+  </div>
+  <div class="entry-role">Master of Science, Computer Science</div>
+  
+  
+  
 </div>
 <!-- Save and submit as PDF (print to PDF from browser). Do not submit as image PDF, Google Docs link, or scanned document. -->
 </body></html>

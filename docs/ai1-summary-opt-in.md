@@ -198,21 +198,61 @@ Screenshots: `docs/ai1-summary/ui-1-toggle.png` (both states side by side),
 - `node scripts/ai1SummaryVerify.mjs --render-only` — **29/29.** Prompt, renderer, PDF and guard.
 - UI in a real Chrome against the real panel — **12/12.**
 
-### What is NOT verified
+### The `--from-file` run (2026-08-25)
 
-**Whether the model obeys the prompt.** The Anthropic key on this machine has no credit
-(`400 invalid_request_error: Your credit balance is too low`), so the two real Sonnet calls could
-not be made. `scripts/ai1SummaryVerify.mjs` without `--render-only` is written and ready to make
-them; `--render-only` substitutes a **real prior artifact** out of `resume_versions`, rendered both
-ways (the OFF variant with the summary removed from the parsed *structure*, not string-stripped from
-the finished HTML), and says so loudly in its own output.
+The Anthropic key has no credit (`400 invalid_request_error: Your credit balance is too low`), so
+the two blind Sonnet calls still have not been made. `scripts/ai1SummaryVerify.mjs` gained a
+`--from-file` mode so the documents can be produced on a subscription instead of a billed key and
+then run through the **identical** pipeline — same `normalizeResumeHtml`, same claim guard, same PDF
+renderer, same section assertions. Only the HTML's origin changes.
 
-So: the prompt provably no longer contains the rules, and the renderer, PDF, layout and guard are
-verified on real content. That a model handed the no-summary prompt writes no summary is
-**unverified**. Re-run `node scripts/ai1SummaryVerify.mjs` once the key has credit.
+Both documents were written against the real assembled prompts (dumped verbatim from
+`assemblePrompt`, 19,372 chars OFF / 19,863 ON) and verified: **31 passed, 0 failed.**
 
-### Pre-existing defect observed, not fixed (out of scope)
+| | OFF | ON |
+|---|---|---|
+| sections | `TECHNICAL SKILLS → EXPERIENCE → ACADEMIC PROJECTS → PROJECTS → EDUCATION` | `SUMMARY → …` (same five after it) |
+| guard inspected | 4404 chars, region `header` (160 chars) | 4874 chars, region `summary` (461 chars) |
+| PDF first line after contact | `TECHNICAL SKILLS` | `SUMMARY` |
+| `SUMMARY` heading in the PDF | **no** | yes |
+| any "8 years" claim | no | no |
+| years stated | none (correct — with no summary, no section is required to state a total) | `4 years` |
+| claims "Senior" | no | no |
 
-The stored artifact contains `&amp;middot;` — double-escaped — so the skills separators render as
-the literal text `&middot;` in both the HTML and the PDF. Visible in both screenshots. Present in
-the artifact as generated, before this change, and unrelated to it.
+The AF2 inflation check **ran and passed in both** — unlike `--render-only`, these artifacts were
+produced against the JD demanding 8 years, so the question was live. The summary is 461 rendered
+characters, inside the prompt's 430–480 rule.
+
+### What is STILL not verified
+
+**Whether a model obeys the prompt when it does not know it is being tested.** The `--from-file`
+documents were written by a model against the real prompt, so everything above is a real result on
+real model output — but the author knew what was under test, and an author who knows will comply.
+"The summary is absent" is then evidence about the author, not about the prompt. The failure mode
+this check exists to catch is a prompt *ambiguous enough that an uncontexted model still writes a
+summary*, and that remains untested.
+
+The harness says so itself rather than reporting a full pass:
+
+```
+PARTLY verified: ... this run cannot know whether their author was blind to what
+        is being tested. An author who knew would comply ...
+        For evidence about MODEL OBEDIENCE, re-run with no flag: two blind Sonnet calls.
+```
+
+Cost of the real thing, measured rather than estimated: ~5k input + ~2.5k output tokens per call,
+two calls, at Sonnet 5's $2/$10 per MTok — **about $0.07**. `usage_events` records $0.00 against
+`ai1_summary_verify` across nine attempts; every one 400'd before any tokens were spent.
+
+### Pre-existing defect, now CONFIRMED reproducible — not fixed (out of scope)
+
+Skills separators render as the literal text `&middot;` in both the HTML and the PDF, visible in
+every screenshot here.
+
+Originally recorded as a bad stored artifact. The `--from-file` run settles it: the input HTML was
+written fresh with ordinary `&middot;` entities, and the renderer still emitted `&amp;middot;`. So
+`renderInlineRichText` is escaping the `&` of text that is already entity-encoded — a **renderer
+bug**, not bad data, and it reaches every generated resume that uses middot separators.
+
+Out of scope for AI1 and left alone deliberately, but it is a real defect on the document an
+employer receives, and worth its own change.
