@@ -244,15 +244,23 @@ Cost of the real thing, measured rather than estimated: ~5k input + ~2.5k output
 two calls, at Sonnet 5's $2/$10 per MTok — **about $0.07**. `usage_events` records $0.00 against
 `ai1_summary_verify` across nine attempts; every one 400'd before any tokens were spent.
 
-### Pre-existing defect, now CONFIRMED reproducible — not fixed (out of scope)
+### Pre-existing defect found here, FIXED in a follow-up
 
-Skills separators render as the literal text `&middot;` in both the HTML and the PDF, visible in
-every screenshot here.
+Skills separators rendered as the literal text `&middot;` in both the HTML and the PDF.
 
-Originally recorded as a bad stored artifact. The `--from-file` run settles it: the input HTML was
-written fresh with ordinary `&middot;` entities, and the renderer still emitted `&amp;middot;`. So
-`renderInlineRichText` is escaping the `&` of text that is already entity-encoded — a **renderer
-bug**, not bad data, and it reaches every generated resume that uses middot separators.
+Originally recorded as a bad stored artifact. The `--from-file` run settled it: the input was
+written fresh with ordinary `&middot;` entities and the renderer still emitted `&amp;middot;`. The
+cause was `decodeHtmlEntities` knowing only nine entity names — anything else survived the parse as
+literal text, and `escapeHtml` on the render side then escaped its `&`. Since layer 1 tells the
+model to separate skills with a middle dot, **every generated resume carried a row of them into the
+document an employer opens.**
 
-Out of scope for AI1 and left alone deliberately, but it is a real defect on the document an
-employer receives, and worth its own change.
+Fixed by decoding the whole class rather than the one name: all Latin-1 named entities, common
+punctuation and symbol names, HTML5's ASCII names (`&percnt;`, `&num;`), and any numeric reference
+in decimal or hex. House normalisations (em dash → hyphen, curly → straight quotes) now apply to
+whatever the decoder produces, so `&#8212;` and `&mdash;` can no longer disagree. Unrecognised
+entities are left verbatim rather than turned into a replacement character, and the render side
+still escapes everything, so decoding is not an injection route.
+
+Side effect worth noting: the sample resume dropped from **two pages to one**. `&middot;` is eight
+characters where `·` is one, and the inflated skills rows had been pushing content over the break.

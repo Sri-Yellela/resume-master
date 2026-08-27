@@ -102,19 +102,105 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * The Latin-1 supplement's named entities, in codepoint order from 160 to 255.
+ *
+ * Written as two ordered lists rather than a hand-keyed map because that is what they ARE — the
+ * names for U+00A0 to U+00FF, contiguous and in order. A map would be 96 lines to review for
+ * transcription errors; this is two lines whose correctness a reader can check by counting.
+ * `middot` sits at 183, which is the separator the resume prompt actually asks the model for.
+ */
+const LATIN1_PUNCTUATION_ENTITIES =
+  "nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr " +
+  "deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest";
+const LATIN1_LETTER_ENTITIES =
+  "Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml " +
+  "ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig " +
+  "agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml " +
+  "eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml";
+
+const NAMED_ENTITIES = new Map();
+LATIN1_PUNCTUATION_ENTITIES.split(" ").forEach((n, i) => NAMED_ENTITIES.set(n, String.fromCharCode(160 + i)));
+LATIN1_LETTER_ENTITIES.split(" ").forEach((n, i) => NAMED_ENTITIES.set(n, String.fromCharCode(192 + i)));
+for (const [name, char] of Object.entries({
+  ast: "*", bull: "•", bullet: "•", hellip: "…", ndash: "–", mdash: "—",
+  lsquo: "‘", rsquo: "’", sbquo: "‚", ldquo: "“", rdquo: "”", bdquo: "„",
+  dagger: "†", Dagger: "‡", permil: "‰", prime: "′", Prime: "″",
+  lsaquo: "‹", rsaquo: "›", oline: "‾", frasl: "⁄", euro: "€",
+  trade: "™", larr: "←", uarr: "↑", rarr: "→", darr: "↓", harr: "↔",
+  minus: "−", asymp: "≈", ne: "≠", le: "≤", ge: "≥",
+  ensp: " ", emsp: " ", thinsp: " ", zwnj: "‌", zwj: "‍",
+  circ: "ˆ", tilde: "˜",
+  // HTML5 also names most ASCII punctuation. A model usually just types the character, but when it
+  // does not, "Cut latency by 30&percnt;" is the same visible defect as the middot one — the names
+  // are cheap to know and expensive to meet in a PDF. `apos` belongs here rather than in the
+  // chain-owned set because escapeHtml re-escapes the decoded "'" to &#39; anyway.
+  apos: "'", percnt: "%", num: "#", commat: "@", dollar: "$", excl: "!", quest: "?",
+  sol: "/", bsol: "\\", colon: ":", semi: ";", equals: "=", plus: "+", lowbar: "_",
+  verbar: "|", vert: "|", lpar: "(", rpar: ")", lbrack: "[", rbrack: "]",
+  lbrace: "{", rbrace: "}", period: ".", comma: ",", grave: "`", Hat: "^",
+})) NAMED_ENTITIES.set(name, char);
+
+/**
+ * Characters this renderer deliberately REWRITES rather than reproduces.
+ *
+ * These are not decodings — U+2014 is an em dash and "-" is not. They are the house style: the
+ * prompt forbids em and en dashes outright, and the resume typography uses straight quotes. The
+ * named forms were already normalised this way; applying the same map to whatever the generic
+ * decoder produces is what stops `&#8212;` and `&mdash;` from disagreeing about the same character.
+ */
+// Escaped rather than written literally: four of these keys are different invisible spaces, and
+// no reviewer can tell U+00A0 from U+2009 by looking at them.
+const CHARACTER_NORMALISATIONS = new Map(Object.entries({
+  "\u00a0": " ", "\u2002": " ", "\u2003": " ", "\u2009": " ",  // nbsp, ensp, emsp, thinsp
+  "\u2013": "-", "\u2014": "-", "\u2212": "-",                  // en dash, em dash, minus
+  "\u201c": '"', "\u201d": '"', "\u201e": '"',                  // curly and low double quotes
+  "\u2018": "'", "\u2019": "'", "\u201a": "'",                  // curly and low single quotes
+  "\u200c": "", "\u200d": "",                                  // zero-width non-joiner / joiner
+}));
+
+/**
+ * The five entity spellings the explicit chain below still owns, skipped by the generic pass.
+ *
+ * Left alone on purpose: that chain's ordering has defined semantics for double-encoded input
+ * (`&amp;lt;`), and re-homing it would change what an already-shipped path produces for a case
+ * unrelated to this fix.
+ */
+const CHAIN_OWNED = new Set(["amp", "lt", "gt", "quot", "#39"]);
+
 // CHANGE 3: added common HTML entities the LLM outputs; &amp; kept last so
 // it does not double-encode entities decoded earlier in the chain
+//
+// GENERIC DECODING ADDED AFTER A REAL DEFECT (AI1 follow-up).
+// This used to be a fixed list of nine names, and an entity outside it survived as literal text —
+// at which point escapeHtml() on the render side turned its "&" into "&amp;" and the reader saw
+// "&middot;" printed on the page. `&middot;` is not an obscure case: the prompt tells the model to
+// separate skills with a middle dot, so EVERY generated resume carried a row of them into the PDF
+// an employer opens. Reproduced from clean input, so it is a renderer defect and not bad data.
+//
+// Fixing the one name would have left `&#183;`, `&eacute;` in a candidate's name, `&hellip;` and
+// the rest queued behind it, so the whole class is handled: every named entity in the Latin-1
+// supplement plus common punctuation, and any numeric reference, decimal or hex.
 function decodeHtmlEntities(value) {
   return String(value || "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&ast;/gi, "*")
-    .replace(/&bull;/gi, "•")
-    .replace(/&mdash;/gi, "-")
-    .replace(/&ndash;/gi, "-")
-    .replace(/&ldquo;/gi, '"')
-    .replace(/&rdquo;/gi, '"')
-    .replace(/&lsquo;/gi, "'")
-    .replace(/&rsquo;/gi, "'")
+    .replace(/&(#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z][a-zA-Z0-9]{1,31});/g, (match, body) => {
+      if (CHAIN_OWNED.has(body) || CHAIN_OWNED.has(body.toLowerCase())) return match;
+      let char;
+      if (body[0] === "#") {
+        const code = body[1] === "x" || body[1] === "X"
+          ? parseInt(body.slice(2), 16)
+          : parseInt(body.slice(1), 10);
+        // Surrogates and out-of-range values would produce lone surrogates or throw; an
+        // unrecognisable reference is left exactly as written rather than turned into a replacement
+        // character, because the literal text is at least honest about what the model emitted.
+        if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return match;
+        char = String.fromCodePoint(code);
+      } else {
+        char = NAMED_ENTITIES.get(body) ?? NAMED_ENTITIES.get(body.toLowerCase());
+        if (char === undefined) return match;
+      }
+      return CHARACTER_NORMALISATIONS.get(char) ?? char;
+    })
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")

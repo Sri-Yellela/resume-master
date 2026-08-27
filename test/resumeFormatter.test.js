@@ -174,3 +174,100 @@ test("ATS text extraction from deterministic HTML remains clean and selectable-t
   assert.doesNotMatch(pdfFn, /page\.screenshot\(/);
   assert.doesNotMatch(pdfFn, /canvas/i);
 });
+
+// ── HTML entities survive the parse/render round trip ───────────────────────────────────────────
+//
+// THE DEFECT THIS LOCKS OUT, which reached real PDFs:
+// decodeHtmlEntities knew nine entity names. Anything else survived the parse as literal text, and
+// escapeHtml on the render side then turned its "&" into "&amp;" — so the reader saw "&middot;"
+// printed on the page. That is not an edge case: layer1_global_rules.md tells the model to separate
+// skills with a middle dot, so every generated resume carried a row of them into the document an
+// employer opens. Reproduced from clean input, which is what proved it a renderer bug and not bad
+// stored data.
+
+const skills = body => normalizeResumeHtml(`<html><body>
+  <div class="header"><div class="name">A B</div></div>
+  <div class="section-title">TECHNICAL SKILLS</div><ul><li>${body}</li></ul>
+  <div class="section-title">EXPERIENCE</div>
+  <div class="entry"><div class="entry-org">Acme</div><ul class="bullets"><li>Did work.</li></ul></div>
+</body></html>`);
+const skillLine = body => (skills(body).match(/<li>([\s\S]*?)<\/li>/) || [])[1].trim();
+
+test("the middot separator reaches the document as a middot, not as its own entity name", () => {
+  assert.equal(skillLine("Java &middot; Go &middot; SQL"), "Java · Go · SQL");
+  assert.doesNotMatch(skills("Java &middot; Go"), /&amp;middot;/,
+    "an entity the decoder does not know gets its ampersand escaped and printed verbatim");
+});
+
+test("the same character decodes identically however it is written", () => {
+  // A model may emit any of these for one separator; three spellings must not give three results.
+  for (const form of ["&middot;", "&#183;", "&#xB7;", "&#Xb7;"]) {
+    assert.equal(skillLine(`Java ${form} Go`), "Java · Go", form);
+  }
+});
+
+test("accented letters in a candidate's own name survive", () => {
+  // The failure here is a person's name misspelled on their resume, which is worse than a separator.
+  const html = normalizeResumeHtml(`<html><body>
+    <div class="header"><div class="name">Jos&eacute; Garc&iacute;a-M&uuml;ller</div></div>
+    <div class="section-title">EXPERIENCE</div>
+    <div class="entry"><div class="entry-org">Acme</div><ul class="bullets"><li>Did work.</li></ul></div>
+  </body></html>`);
+  assert.match(html, /José García-Müller/);
+  assert.doesNotMatch(html, /&amp;/);
+});
+
+test("the house normalisations hold, and agree across spellings", () => {
+  // These are rewrites, not decodings: layer 1 forbids em and en dashes outright, so an entity that
+  // decodes to one must still come out as a hyphen — whichever way the model wrote it.
+  assert.equal(skillLine("A &mdash; B"), "A - B");
+  assert.equal(skillLine("A &#8212; B"), "A - B", "the numeric form must not disagree with the named one");
+  assert.equal(skillLine("A &ndash; B"), "A - B");
+  // Escaped on the way out, as every rendered value is — this is `"x" 'y'` on the page.
+  assert.equal(skillLine("&ldquo;x&rdquo; &lsquo;y&rsquo;"), "&quot;x&quot; &#39;y&#39;");
+  assert.equal(skillLine("a&nbsp;b"), "a b");
+});
+
+test("ASCII-named entities decode too — 30&percnt; is the middot defect in another costume", () => {
+  assert.equal(skillLine("Cut cost 30&percnt;"), "Cut cost 30%");
+  assert.equal(skillLine("C&num; and F&num;"), "C# and F#");
+});
+
+test("a genuine ampersand still escapes, and is not read as an entity", () => {
+  assert.equal(skillLine("R&amp;D"), "R&amp;D", "the OUTPUT is escaped; it renders as R&D");
+  assert.match(stripResumeHtml(skills("R&amp;D")), /R&D/, "and the ATS text sees the real character");
+});
+
+test("an entity the decoder does not recognise is left verbatim rather than guessed at", () => {
+  // A replacement character would be a silent corruption; the literal text is at least honest.
+  assert.equal(skillLine("&notarealentity; here"), "&amp;notarealentity; here");
+  assert.equal(skillLine("&#99999999; here"), "&amp;#99999999; here", "out of range");
+  assert.equal(skillLine("&#xD800; here"), "&amp;#xD800; here", "a lone surrogate must not be produced");
+});
+
+test("decoding never becomes an injection route — the render side still escapes", () => {
+  // Decoding runs on the PARSE side and every rendered value goes back through escapeHtml, so a
+  // tag arriving in any encoding comes out inert. Asserted because "decode more" is exactly the
+  // kind of change that quietly opens this up.
+  for (const form of ["&lt;script&gt;alert(1)&lt;/script&gt;", "&#60;script&#62;alert(1)&#60;/script&#62;"]) {
+    const out = skills(form);
+    assert.doesNotMatch(out, /<script/i, form);
+    assert.match(out, /&lt;script/i, form);
+  }
+});
+
+test("the Latin-1 entity tables are the right length, so the codepoint offsets line up", () => {
+  // They are indexed by position from 160 and 192. A single missing or extra name silently shifts
+  // every entity after it to the wrong character, which no individual case above would catch.
+  const src = fs.readFileSync("services/resumeFormatter.js", "utf8");
+  // `;\r?\n` — this file is CRLF, and a bare `;\n` matches nothing and throws on the null.
+  const names = (re) => {
+    const m = src.match(re);
+    assert.ok(m, `table not found: ${re}`);
+    return (m[1].match(/[a-zA-Z0-9]+/g) || []).length;
+  };
+  assert.equal(names(/const LATIN1_PUNCTUATION_ENTITIES =\s*([\s\S]*?);\r?\n/), 32, "U+00A0 to U+00BF");
+  assert.equal(names(/const LATIN1_LETTER_ENTITIES =\s*([\s\S]*?);\r?\n/), 64, "U+00C0 to U+00FF");
+  // Spot-check both ends and the middle of each range against known codepoints.
+  assert.equal(skillLine("&nbsp;|&iquest;|&Agrave;|&yuml;|&times;|&divide;"), "|¿|À|ÿ|×|÷");
+});
