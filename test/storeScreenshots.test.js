@@ -209,6 +209,21 @@ test("the harness stays out of verify:harness, with a stated reason", () => {
 
 // ── The committed images ────────────────────────────────────────────────────────────────────────
 
+test("the pre-AI2 screenshots are GONE, and there is only one place to upload from", () => {
+  // extension/submission/screenshots/ held the AF4 captures, taken before ?presentation=1 existed.
+  // They were 1280x800 and alpha-free, so nothing about them looked wrong — but they were shot on
+  // the trap fixture and showed "TRAP: label-only match" on the form. Left in a directory called
+  // `submission/`, which is exactly where someone reaches when filling in the dashboard, they were
+  // a rejection waiting to be uploaded by mistake. Two candidate directories is the whole problem;
+  // this asserts there is one.
+  assert.equal(fs.existsSync("extension/submission/screenshots"), false,
+    "the superseded capture directory must not come back");
+  const stale = fs.existsSync("extension/submission")
+    ? fs.readdirSync("extension/submission").filter(f => /\.(png|jpe?g)$/i.test(f))
+    : [];
+  assert.deepEqual(stale, [], "no loose listing images beside the submission docs either");
+});
+
 test("the three committed screenshots are 1280x800, 24-bit, and carry no alpha", () => {
   const present = fs.existsSync(SHOT_DIR) ? fs.readdirSync(SHOT_DIR).filter(f => f.endsWith(".png")).sort() : [];
   assert.deepEqual(present, SHOTS.map(s => `${s}.png`),

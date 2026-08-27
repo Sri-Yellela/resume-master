@@ -132,9 +132,20 @@ overlay worth looking at are present and unfilled in the photographed run.
 
 ### 5. Deterministic and re-runnable
 
-One command, overwriting cleanly. Verified: three separate runs produced **byte-identical files**
-(`53c68c54…`, `f396f4d7…`, `a62cb22c…` each time). The directory is emptied at the start of a
-screenshot run, so a shot that fails to be produced cannot be silently satisfied by last run's file.
+One command, overwriting cleanly. The directory is emptied at the start of a screenshot run, so a
+shot that fails to be produced cannot be silently satisfied by last run's file.
+
+**Byte-identical within a session, near-identical across sessions.** Consecutive runs produce the
+same bytes — verified three times in one session, and again twice in a later one. Across sessions
+two of the three shifted by **~1,300 of 1,024,000 pixels (0.13%)**, in a single ~35px band each:
+the native `<select>` on the review overlay's form and the date input behind the popup. Cropped and
+compared side by side, the two versions are visually indistinguishable; it is sub-pixel
+antialiasing on OS-drawn form controls under different GPU/font state, not a content change.
+
+Worth stating plainly because the earlier version of this document claimed "byte-identical" without
+that qualifier. If you ever diff these images, **a sub-1% delta confined to a form control is
+noise** — the same lesson as the accent-colour variance in the panel harnesses. A content change
+looks nothing like it.
 
 ### 6. Fail loudly and write nothing
 
@@ -181,6 +192,19 @@ browser** if it is the wrong one.
 | Other harnesses using `/gated/form` or `/ashby-spa` | Unaffected — they pass no `presentation` param and get the existing pages. `verify:harness` 30/30 confirms. |
 | `services/pngTruecolor.js` | New. No existing caller. |
 | `docs/af4-extension-publish.md` | Updated: the old screenshot path is marked superseded, and its cosmetic limits 1 and 2 are recorded as addressed. |
+| `extension/submission/screenshots/` | **Deleted.** See below. |
+
+## The superseded set is gone, not just superseded
+
+`extension/submission/screenshots/` still held the AF4 captures, tracked in git. Nothing about them
+looked wrong — 1280×800, colour type 2, no alpha, they would have passed every check this harness
+makes. But they were shot before `?presentation=1` existed, so `1-review-overlay.png` showed
+**"TRAP: label-only match"** on the form, and the posting behind the popup still carried a real
+employer's brand.
+
+Sitting in a directory called `submission/`, which is exactly where someone reaches when filling in
+the dashboard, that is a rejection waiting to be uploaded by mistake. Two candidate directories was
+the whole problem, so there is now one, and a test asserts the old path stays gone.
 
 ## Not done
 
