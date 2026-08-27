@@ -7662,6 +7662,39 @@ function generateResumeForApply(userId, jobId, toolType) {
   const jobRow = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(String(jobId));
   if (!jobRow) return Promise.resolve({ error: "job_not_found" });
 
+  // PER-USER GENERATION LIMIT, on the apply path too.
+  //
+  // checkLimit's LIMIT_MAP has carried `resume_generate` (daily_resumes / monthly_resumes) all
+  // along, but it had exactly ONE call site — the HTTP /api/generate route — and this function
+  // calls coreGenerateResume directly. coreGenerateResume's own header says it does no rate-limit
+  // checks because "those live in the caller", and on this path the caller did not. So the apply
+  // pipeline was the one generation path a user's plan limits did not apply to, and queueing is
+  // what makes that expensive: a queued job generates a resume AND a cover letter before anything
+  // is submitted or even approved.
+  //
+  // Deliberately placed AFTER the reuse and in-flight checks above: reusing a current artifact
+  // costs nothing and must never be refused, and attaching to a generation already running is not
+  // a new generation either. Only a genuinely new model call is metered.
+  //
+  // Returned in the SAME structured shape as an upstream failure, with errorPermanent:true — a
+  // limit does not clear on retry the way a 529 does. processRunJob reads errorCode/errorDetail
+  // into genFailure and files the job as held_review, so the run reports "you are at your limit"
+  // against the job it happened to, instead of dying as a browser or generator error.
+  const applyLimit = checkLimit(db, userId, "resume_generate");
+  if (!applyLimit.allowed) {
+    console.warn(`[generateResumeForApply] limit reached for user=${userId} job=${jobId}: ${applyLimit.reason}`);
+    return Promise.resolve({
+      error: applyLimit.reason,
+      errorCode: "generation_limit_reached",
+      errorDetail: applyLimit.reason,
+      errorPermanent: true,
+      limitReached: true,
+      limitCurrent: applyLimit.current ?? null,
+      limitValue: applyLimit.limit ?? null,
+      limitPeriod: applyLimit.period ?? null,
+    });
+  }
+
   console.log(`[generateResumeForApply] starting background generation for user=${userId} job=${jobId} tool=${tool}`);
   const p = coreGenerateResume({ userId, jobId: String(jobId), job: jobRow, tool })
     .then(r => ({ html: r.html, atsScore: r.atsScore, resumeId: r.resumeId, fromCache: false }))

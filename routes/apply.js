@@ -169,6 +169,20 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   const APPLY_DAILY_CAP      = envInt("APPLY_DAILY_CAP", 25);
   const APPLY_MAX_ACTIVE_RUNS = envInt("APPLY_MAX_ACTIVE_RUNS_PER_USER", 1);
   /**
+   * The ceiling on queue attempts per 24h — the limit that bounds MODEL SPEND rather than
+   * submissions. See queuedLast24h() for why APPLY_DAILY_CAP could not do this job.
+   *
+   * 40, not 25. It has to sit ABOVE APPLY_DAILY_CAP: every submission needs a queue first, so a
+   * queue cap at or below the submission cap would make the submission cap unreachable. The 15 of
+   * headroom is for the legitimate re-queues — the answers path and a retry after a hold both come
+   * back through startRun and each is a fresh generation.
+   *
+   * It is deliberately NOT generous. At two model calls per queued job (resume + cover letter),
+   * 40 is already ~80 calls a day for one user, and the cheapest way to spend money in this
+   * product is to queue jobs nobody ever approves.
+   */
+  const APPLY_DAILY_QUEUE_CAP = envInt("APPLY_DAILY_QUEUE_CAP", 40);
+  /**
    * The score at or above which an application is sent UNATTENDED. Below it the job is not
    * discarded — it becomes held_review with an early handoff, so the candidate still gets to send
    * it by hand.
@@ -224,6 +238,42 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       return db.prepare(`
         SELECT COUNT(*) AS n FROM apply_run_jobs
         WHERE user_id=? AND status='submitted' AND COALESCE(finished_at, 0) >= unixepoch() - 86400
+      `).get(userId).n;
+    } catch { return 0; }
+  }
+
+  /**
+   * Queue attempts that can TRIGGER GENERATION, for this user, in the trailing 24h.
+   *
+   * WHY THIS EXISTS ALONGSIDE submittedLast24h. APPLY_DAILY_CAP counts status='submitted', and
+   * since an 'auto' run now PREVIEWS by default (approval_mode='required'), nothing reaches
+   * 'submitted' until a human approves. So `used` sat at 0 essentially always and the admission
+   * check read `0 + N > 25` — which 25 jobs pass, and passes again on the next run, and the next.
+   * APPLY_MAX_ACTIVE_RUNS only serialises runs; it is a rate limiter, not a ceiling.
+   *
+   * Meanwhile processRunJob spends money per job at QUEUE time, not at submit time: a preview runs
+   * generateResumeForApply AND generateCoverLetterForApply and stops short only of the click. So
+   * the one cost that scales with queueing was the one cost nothing bounded.
+   *
+   * COUNTS ROWS, NOT SUBMISSIONS, and counts them by created_at regardless of what status they
+   * reached — a job that generated and then held for review cost exactly as much as one that
+   * submitted, so for this purpose they are the same event.
+   *
+   * EXCLUDES approval_mode='approved' RUNS. That is the run the approve endpoint creates to send an
+   * already-previewed application, and it reuses the artifact the preview just generated
+   * (artifactCurrency finds it current, CASE A) rather than generating again. Counting it would
+   * make the normal flow cost two against the cap per application and turn this guard into a
+   * refusal to submit work the user has already reviewed — the opposite of the intent.
+   */
+  function queuedLast24h(userId) {
+    try {
+      return db.prepare(`
+        SELECT COUNT(*) AS n
+        FROM apply_run_jobs rj
+        JOIN apply_runs r ON r.id = rj.run_id
+        WHERE rj.user_id=?
+          AND COALESCE(r.approval_mode, '') != 'approved'
+          AND COALESCE(rj.created_at, 0) >= unixepoch() - 86400
       `).get(userId).n;
     } catch { return 0; }
   }
@@ -1230,6 +1280,27 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     if (filtered.length === 0)
       return respond(400, { error: "All selected jobs are already applied or in progress" });
 
+    // QUEUE CAP. The cost gate: bounds generations, which the submission cap below does not (see
+    // queuedLast24h). Checked before it because it is the limit a queue-heavy caller hits first,
+    // and refused with the same explicit shape as every other limit here.
+    //
+    // Skipped for approval_mode='approved' — the approve endpoint is releasing work already
+    // reviewed and already generated, and this guard exists to stop unreviewed generation, not to
+    // stand between a human decision and the submission it authorises.
+    if (resolvedApproval !== "approved") {
+      const queuedUsed = queuedLast24h(userId);
+      if (queuedUsed + filtered.length > APPLY_DAILY_QUEUE_CAP) {
+        return respond(429, {
+          error: "queue_cap_exceeded",
+          message: `Daily queue limit reached: ${queuedUsed} of ${APPLY_DAILY_QUEUE_CAP} applications queued in the last 24h, ${filtered.length} requested. Each queued application generates a resume, so this limit protects your usage.`,
+          queuedLast24h: queuedUsed,
+          requested: filtered.length,
+          limit: APPLY_DAILY_QUEUE_CAP,
+          remaining: Math.max(0, APPLY_DAILY_QUEUE_CAP - queuedUsed),
+        });
+      }
+    }
+
     // DAILY CAP (requirement 2). Checked here so the caller gets a clear error rather than a run
     // that quietly holds most of its jobs. processRunJob re-checks before each submit, because a
     // long run can cross the cap after it was admitted.
@@ -1276,6 +1347,12 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       queued: filtered,
       totalJobs: filtered.length,
       dailyCap: { limit: APPLY_DAILY_CAP, submittedLast24h: used, remaining: Math.max(0, APPLY_DAILY_CAP - used - filtered.length) },
+      // The cost budget, reported alongside the submission budget so a caller can show how much
+      // generation it has left rather than discovering the ceiling by being refused at it.
+      queueCap: (() => {
+        const q = queuedLast24h(userId);
+        return { limit: APPLY_DAILY_QUEUE_CAP, queuedLast24h: q, remaining: Math.max(0, APPLY_DAILY_QUEUE_CAP - q) };
+      })(),
     });
   }
 
