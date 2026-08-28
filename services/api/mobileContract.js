@@ -56,8 +56,17 @@ import {
 } from "../../shared/jobFilterOptions.js";
 import { OUTCOME, OUTCOME_STATUSES } from "../../shared/applyOutcomeGroups.js";
 
-/** Bumped only for a BREAKING change. Additive fields do not bump it — see contract/README.md. */
-export const CONTRACT_VERSION = "1.0.0";
+/**
+ * Semver. MAJOR is breaking; MINOR is additive. The rules, and why removing a field is
+ * deliberately awkward, are in contract/README.md.
+ *
+ * 1.1.0 — keyset pagination on GET /api/jobs: the `cursor` query parameter, and `nextCursor` /
+ *         `paging` on the feed response. Additive: `page`/`pageSize` are unchanged, so client/ and
+ *         extension/ need no release. A minor bump rather than none, because the mobile repos pin
+ *         a checksum and need a reason to re-copy.
+ * 1.0.0 — initial contract.
+ */
+export const CONTRACT_VERSION = "1.1.0";
 
 // ------------------------------------------------------------------------------------------------
 // THE JOB SHAPE — derived by executing mapJobRow, not by reading it

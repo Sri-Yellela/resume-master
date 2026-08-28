@@ -101,6 +101,11 @@ import {
   FACET_DIMENSIONS,
 } from "./services/jobs/jobQuery.js";
 import { mapJobRow } from "./services/jobs/mapJobRow.js";
+// Board ordering AND keyset pagination, generated from one key-list declaration so the ORDER BY
+// and the cursor's resume predicate cannot disagree. See services/jobs/jobCursor.js.
+import {
+  buildOrderKeys, orderByClause, cursorProjection, cursorPredicate, encodeCursor, decodeCursor,
+} from "./services/jobs/jobCursor.js";
 import { deriveAutomationTier } from "./services/jobs/automationTier.js";
 import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
@@ -6008,6 +6013,9 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       starred        = '',
       domain         = '',
       applied        = '',
+      // Keyset pagination, opt-in. When present it REPLACES page/OFFSET; when absent this endpoint
+      // behaves exactly as it always has, which is what keeps client/ and extension/ working.
+      cursor: rawCursor = '',
     } = req.query;
 
     // NOTE: bare `q` is not consumed here — no existing caller sends it (checked: the
@@ -6206,114 +6214,54 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
 
     const cacheCount = db.prepare("SELECT COUNT(*) as n FROM scraped_jobs WHERE is_active = 1").get()?.n || 0;
     if (cacheCount > 0) {
-      // "compHigh"/"compLow" ("Pay high to low"/"Pay low to high") are existing options in
-      // JobsPanel's sort <select> (client already sends sort=compHigh/compLow via
-      // buildParams) that this ternary never had a case for — they silently fell through to
-      // the recency default, so picking "Pay high to low" did nothing. This is that fix, not
-      // a new feature. Sorts by the same salary_min/salary_max columns the client displays
-      // (mapJobRow's salaryMin/salaryMax) rather than the enrichment-only
-      // salary_min_usd/salary_max_usd — sorting by a field the UI doesn't show would look
-      // broken whenever they disagree, and the *_usd columns depend on enrichment having run
-      // (Task 5's LLM pass), which isn't guaranteed for every row. Caveat carried over from
-      // the source columns themselves: unnormalized currency, so a listing quoted in a weaker
-      // currency can rank above a stronger one at the same face value — a real cross-currency
-      // fix belongs on salary_min_usd/salary_max_usd once enrichment coverage is reliable
-      // enough to sort by, not invented here. NULL salaries always sort last in both
-      // directions rather than being treated as zero.
-      // Every sort ended in `sj.scraped_at DESC` with nothing after it, and a crawl writes its
-      // whole batch within a second or two — so on a real board scraped_at has a handful of
-      // distinct values across thousands of rows and cannot order them. Two consequences, one
-      // visible and one silent:
+      // ── ORDERING AND PAGINATION ────────────────────────────────────────────────────────────
       //
-      //   - The tie group comes back in query-plan order, i.e. roughly insert order, so whichever
-      //     employer the crawler happened to write first owns the top of the board. Observed in
-      //     production: 1,275 rows across 9 companies sharing 2 distinct scraped_at values, 505 of
-      //     them OpenAI — at the default page size of 10 that is up to 50 consecutive pages of one
-      //     employer before any other appears. The other 770 jobs were never missing, just buried.
-      //   - SQLite guarantees no consistent order between separate queries when rows tie, so
-      //     LIMIT/OFFSET paging could return the same row on two pages and skip others entirely.
-      //     Nothing surfaces that as an error; the board just quietly lies.
-      //
-      // posted_at breaks the tie with something meaningful rather than arbitrary — within a crawl
-      // batch the genuinely newest postings lead, which is what "Newest" claims to mean, and it
-      // interleaves employers as a side effect because posting dates vary. NULLs sort last instead
-      // of counting as epoch 0 and hiding real postings beneath undated ones. job_id is the final
-      // key: it is the primary key, so the order is total and paging is reproducible.
-      //
-      // The leading key is discovered_at (first seen), NOT scraped_at (last touched by a writer).
-      // These are different facts and the column names say so: upsertCanonicalJob writes
-      // `scraped_at: now` on EVERY write, while deliberately preserving `discovered_at` as
-      // first-seen. So the nightly 04:00 crawl rewrites scraped_at on all ~1,250 crawled rows, and
-      // any job that did not arrive in that batch sinks below all of them — regardless of how new
-      // it actually is.
-      //
-      // A user-imported job is exactly that job. Measured on the reproduction board: an import made
-      // minutes earlier ranked LAST, page 34 of 34, under 1,252 crawled rows the crawl had merely
-      // re-touched. "Newest" was sorting by when we last looked at a posting, which is a fact about
-      // our crawler, not about the posting — and it buried the one row the user had personally put
-      // there. discovered_at is what the label already claims to mean, and it is the same column the
-      // NEW<24h pill and the discovered_after filter already trust.
-      //
-      // COALESCE onto scraped_at because rows CAN lack discovered_at (production carries 10 adzuna
-      // orphans from the pre-pivot architecture), matching what the discovered_after filter does
-      // rather than dropping those rows to the bottom forever.
-      //
-      // Deliberate consequence: a re-crawled posting no longer jumps to the top just because the
-      // crawler touched it again. That was never information the user asked to be ranked by.
-      const RECENCY = 'COALESCE(sj.discovered_at, sj.scraped_at) DESC, (sj.posted_at IS NULL) ASC, sj.posted_at DESC, sj.job_id';
-      // "Oldest" is a real option in the sort <select> (value "dateAsc") that had no case here, so
-      // it fell through to the default and rendered identically to "Newest" — the same silent
-      // fall-through that compHigh/compLow suffered before, fixed there and missed here. Undated
-      // postings stay last in BOTH directions: they have no date, so leading the "oldest" list with
-      // them would be an ordering by absence rather than by age.
-      // Mirrors RECENCY's leading key for the same reason — "Oldest" must mean the posting we have
-      // known about longest, not the one our crawler happened to touch least recently.
-      const OLDEST = 'COALESCE(sj.discovered_at, sj.scraped_at) ASC, (sj.posted_at IS NULL) ASC, sj.posted_at ASC, sj.job_id';
-      // NULLs last on every keyed sort, matching what the salary sorts already did. Without it a
-      // column that is only partly populated ranks its unscored rows among the scored ones, and a
-      // column that is entirely NULL makes the sort a silent no-op that looks like a broken control.
-      // "Exp low to high" / "Exp high to low" were dead too. The obvious column, min_years_exp, is
-      // the one the YoE FILTERS use — but nothing on the ATS crawl path ever writes it (it comes
-      // from the extension capture), so sorting on it alone would have left both controls doing
-      // nothing on any crawled board. experience_level IS populated, by enrichment, from a fixed
-      // ordered vocabulary — so rank that, and let min_years_exp win wherever the precise number
-      // exists. NULLs last on both keys.
-      const LEVEL_RANK = `CASE sj.experience_level
-        WHEN 'intern' THEN 0 WHEN 'entry' THEN 1 WHEN 'mid' THEN 2
-        WHEN 'senior' THEN 3 WHEN 'lead' THEN 4 WHEN 'executive' THEN 5 END`;
-      const EXP = (dir) =>
-        `(sj.min_years_exp IS NULL) ASC, sj.min_years_exp ${dir}, ` +
-        `((${LEVEL_RANK}) IS NULL) ASC, (${LEVEL_RANK}) ${dir}, ${RECENCY}`;
+      // The sorts themselves live in services/jobs/jobCursor.js, declared as KEY LISTS rather than
+      // as ORDER BY strings, because two things now have to agree about them: the ORDER BY, and the
+      // keyset cursor's resume predicate. Written twice they would drift, and a cursor that
+      // disagrees with its ORDER BY does not raise an error — it silently returns the wrong rows.
+      // So both are generated from one declaration. That module also documents why the leading key
+      // is discovered_at rather than scraped_at, why NULLs sort last on every keyed sort, and why
+      // every sort must end in sj.job_id.
+      // buildOrderKeys decides for itself whether the relevance prefix applies — "relevance leads
+      // the DEFAULT order only" is one rule, and it lives with the keys it governs rather than
+      // being re-decided at each call site.
+      const orderKeys = buildOrderKeys(sort, richFilters.rank.keys);
+      const order     = orderByClause(orderKeys);
+      // Projects each sort key into the SELECT as __cursor_kN, so the DATABASE computes the values
+      // the cursor carries. Re-deriving COALESCE(discovered_at, scraped_at) or the experience-level
+      // CASE in JavaScript would be a second copy of the ordering — the thing this design exists to
+      // avoid.
+      const cursorCols = cursorProjection(orderKeys);
 
-      const chosenSort = sort === 'atsScore'       ? `(sj.ats_score IS NULL) ASC, sj.ats_score DESC, ${RECENCY}`
-                    : sort === 'applicantCount'  ? `(sj.applicant_count IS NULL) ASC, sj.applicant_count ASC, ${RECENCY}`
-                    : sort === 'compHigh'        ? `(sj.salary_max IS NULL) ASC, sj.salary_max DESC, ${RECENCY}`
-                    : sort === 'compLow'         ? `(sj.salary_min IS NULL) ASC, sj.salary_min ASC, ${RECENCY}`
-                    : sort === 'yoeLow'          ? EXP('ASC')
-                    : sort === 'yoeHigh'         ? EXP('DESC')
-                    : sort === 'dateAsc'         ? OLDEST
-                    :                             RECENCY;
-
-      // Profile relevance leads the DEFAULT order only — the same user-set-vs-derived rule the
-      // filters now follow, applied to ordering.
+      // KEYSET vs OFFSET. `?cursor=` is opt-in and `page`/`pageSize` are untouched, so client/ and
+      // extension/ keep working exactly as before.
       //
-      // Picking "Pay high to low" is a user-set instruction about ORDER, so it wins outright: a
-      // derived relevance key in front of it would put an in-band $80k role above an out-of-band
-      // $300k one and read as a broken control, which is exactly the complaint the compHigh/compLow
-      // fix above existed to settle. Leaving the sort alone is not an instruction, so the derived
-      // ranking may lead there.
-      //
-      // 'dateDesc' counts as "left alone": the client always sends a sort (JobsPanel's buildParams
-      // does `p.set("sort", sortBy)`) and its initial value is 'dateDesc', which is also the value
-      // that falls through this ternary to RECENCY. So absence and 'dateDesc' are the same state and
-      // both have to be treated as the default, or relevance would never apply to anyone.
-      const sortIsDefault = !sort || sort === 'dateDesc';
-      const rankPrefix = (sortIsDefault && richFilters.rank.sql) ? `${richFilters.rank.sql}, ` : '';
-      const orderBy = `${rankPrefix}${chosenSort}`;
-      // Bound to ORDER BY, so they sit after every WHERE param and before LIMIT/OFFSET — placeholder
-      // binding is positional in SQL text order, and the COUNT/facet queries below carry no ORDER BY
-      // and therefore must NOT receive these.
-      const orderArgs = rankPrefix ? richFilters.rank.params : [];
+      // Offset paging assumes a stable result set. The board is not stable: a dislike sets
+      // disliked=1 and the default board EXCLUDES disliked rows, so the set shrinks BEHIND the
+      // reader. Swipe away four rows on page 1 and page 2 starts four rows further down than it
+      // should — those four are never shown, the total still counts them, and nothing reports it.
+      // A cursor anchors to the last row's own sort VALUES instead of to a position, so deletions
+      // behind the anchor cannot move it.
+      let cursorClause = { sql: "", params: [] };
+      if (rawCursor) {
+        const decoded = decodeCursor(rawCursor, orderKeys);
+        if (!decoded.ok) {
+          // A cursor issued under a different ordering (the user changed the sort, or their
+          // profile's derived relevance changed) would otherwise resume against keys that no longer
+          // mean the same thing and return an arbitrary slice, with no error. Saying so lets the
+          // client do the one correct thing: ask for the first page again.
+          return res.status(400).json({
+            success: false,
+            error: decoded.error === "cursor_sort_mismatch"
+              ? "This cursor was issued for a different sort or profile. Request the first page again."
+              : "Malformed cursor.",
+            code: decoded.error,
+            jobs: [], total: 0,
+          });
+        }
+        cursorClause = cursorPredicate(orderKeys, decoded.values);
+      }
       const offset  = (pg - 1) * ps;
 
       // The role_key join is what makes this board profile-scoped, and it is an INNER JOIN — so it
@@ -6371,7 +6319,32 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       const whereClause = whereClauseFor(richFilters);
       const baseArgs    = argsFor(richFilters);
 
-      const rows  = db.prepare(`SELECT ${selectCols}, uj.visited, uj.applied, uj.starred, uj.disliked ${joinClause} ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...baseArgs, ...orderArgs, ps, offset);
+      // ONE EXTRA ROW. Fetching ps+1 and trimming is what makes `hasMore` a fact rather than an
+      // inference: comparing rows.length to ps cannot distinguish "exactly a full last page" from
+      // "a full page with more behind it", and a cursor feed that guesses wrong either stops one
+      // page early or offers a next page that returns nothing.
+      //
+      // PARAMETER ORDER IS SQL TEXT ORDER, and this statement now has four param groups instead of
+      // two. Placeholder binding is positional, so they must be passed exactly as they appear:
+      // SELECT (cursor projection) -> JOIN/WHERE (baseArgs) -> AND cursor predicate -> ORDER BY
+      // (rank params) -> LIMIT. Getting this wrong does not throw; it returns plausible wrong rows.
+      const cursorSql = cursorClause.sql ? `AND ${cursorClause.sql}` : "";
+      const fetched = db.prepare(
+        `SELECT ${selectCols}, uj.visited, uj.applied, uj.starred, uj.disliked${cursorCols.sql}
+         ${joinClause} ${whereClause} ${cursorSql} ORDER BY ${order.sql} LIMIT ?${rawCursor ? "" : " OFFSET ?"}`
+      ).all(
+        ...cursorCols.params,
+        ...baseArgs,
+        ...cursorClause.params,
+        ...order.params,
+        ps + 1,
+        ...(rawCursor ? [] : [offset]),
+      );
+      const hasMore = fetched.length > ps;
+      const rows    = hasMore ? fetched.slice(0, ps) : fetched;
+      // Issued from the LAST ROW ACTUALLY RETURNED, so it is valid whether the caller paged by
+      // cursor or by offset — an offset-paging client can adopt cursors mid-feed without a reset.
+      const nextCursor = hasMore && rows.length ? encodeCursor(orderKeys, rows[rows.length - 1]) : null;
       const total = db.prepare(`SELECT COUNT(*) as n ${joinClause} ${whereClause}`).get(...baseArgs)?.n || 0;
 
       console.log(JSON.stringify({ msg: '[jobs]', profile: sessionActiveProfile.profile_name, sort, total, returned: rows.length }));
@@ -6385,6 +6358,18 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         totalPages: Math.ceil(total / ps),
         sources:    ['scraped_jobs'],
         fromCache:  true,
+        // ALWAYS emitted, on both paging modes. A client that never sends `cursor` simply ignores
+        // it, and one that wants to switch to keyset paging can adopt the cursor from any page it
+        // already has rather than restarting the feed.
+        //
+        // null means THIS IS THE LAST PAGE, established by fetching ps+1 rows rather than by
+        // comparing a count — see the query above.
+        nextCursor,
+        // `page` and `totalPages` describe OFFSET paging and are meaningless while paging by
+        // cursor: there is no page number to be on. Said in the body rather than left for a client
+        // to infer from a number that looks valid — rendering "page 1 of 34" on every cursor page
+        // is precisely the kind of quietly-wrong surface this codebase keeps finding.
+        paging: rawCursor ? 'cursor' : 'offset',
       };
 
       // Curation disclosure — now a statement about ORDER, not about a withheld remainder.
@@ -6468,6 +6453,11 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       sources:    ['scraped_jobs'],
       fromCache:  true,
       reason:     'cache_empty',
+      // Shaped identically to a populated answer, deliberately. An empty board is a NORMAL state,
+      // and a client that reads `nextCursor` unconditionally must not have to special-case it —
+      // null already means "no more", which is the truth here.
+      nextCursor: null,
+      paging:     rawCursor ? 'cursor' : 'offset',
     });
   } catch (err) {
     console.error('[GET /api/jobs] Error:', err.message);

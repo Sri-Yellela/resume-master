@@ -1,6 +1,6 @@
 /**
  * Resume Master — Mobile API types.
- * Contract version 1.0.0.
+ * Contract version 1.1.0.
  *
  * GENERATED — DO NOT EDIT. Regenerate with `node scripts/generateMobileContract.mjs`.
  *
@@ -260,11 +260,16 @@ export interface JobFeedResponse {
   facets: Record<string, unknown> | null;
   fromCache: boolean;
   jobs: Job[];
+  /** Opaque. Pass it back as ?cursor= for the next page. **null means this is the last page** — established by over-fetching one row, not by comparing a count, so it is a fact rather than an inference. Emitted on BOTH paging modes, so an offset client can adopt cursors mid-feed without restarting the feed. */
+  nextCursor: string | null;
   page: number;
   pageSize: number;
+  /** 'cursor' or 'offset' — which mode answered THIS request. When it is 'cursor', `page` and `totalPages` are meaningless: there is no page number to be on. Rendering 'page 1 of 34' on every cursor page is the quietly-wrong surface this field exists to prevent. */
+  paging: string;
   reason: string | null;
   sources: string[];
   success: boolean;
+  /** The count of matching rows AT THIS MOMENT. On a swipe feed it shrinks as the user swipes, so it is a progress denominator, not a promise about how many more are coming. */
   total: number;
   totalPages: number;
 }

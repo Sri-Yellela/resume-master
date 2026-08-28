@@ -36,9 +36,9 @@ export const ERROR_SHAPES = Object.freeze({
   NotFound:          { status: 404, shape: { error: "string" }, example: { error: "Job not found" },
                        description: "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure." },
   BadRequest:        { status: 400, shape: { error: "string" }, example: { error: "jobIds array required" } },
-  FeedBadRequest:    { status: 400, shape: { success: "boolean", error: "string", jobs: "Job[]", total: "number" },
-                       example: { success: false, error: "Unknown value 'mid level' for experience_levels", jobs: [], total: 0 },
-                       description: "GET /api/jobs validates enumerated filter values BEFORE querying, so an unknown value is a 400 rather than a silently empty board. The body still carries jobs:[] and total:0 so a client that renders the list unconditionally does not throw on top of the error." },
+  FeedBadRequest:    { status: 400, shape: { success: "boolean", error: "string", code: "string", jobs: "Job[]", total: "number" },
+                       example: { success: false, error: "This cursor was issued for a different sort or profile. Request the first page again.", code: "cursor_sort_mismatch", jobs: [], total: 0 },
+                       description: "GET /api/jobs validates enumerated filter values BEFORE querying, so an unknown value is a 400 rather than a silently empty board. The body still carries jobs:[] and total:0 so a client that renders the list unconditionally does not throw on top of the error. `code` is present only on cursor rejections — `cursor_sort_mismatch` (the cursor belongs to a different ordering; start the feed over) or `cursor_malformed`. A filter-validation 400 carries `error` alone." },
   Conflict:          { status: 409, shape: { error: "string", message: "string" },
                        example: { error: "no_approvable_jobs", message: "None of those applications are awaiting approval." } },
   Gone:              { status: 410, shape: { error: "string" },
@@ -127,6 +127,7 @@ export const MOBILE_ENDPOINTS = Object.freeze([
     group: "feed", method: "GET", path: "/api/jobs", auth: AUTH.BEARER,
     summary: "The board: the paged, profile-scoped, filtered job feed. The swipe feed's source.",
     query: {
+      cursor: "string",
       page: "number", pageSize: "number", q: "string", location: "string", sort: "enum:sort",
       experience_levels: "enum:experienceLevel[]", work_models: "enum:workplaceType[]",
       employment_type: "enum:employmentType[]",
@@ -137,9 +138,19 @@ export const MOBILE_ENDPOINTS = Object.freeze([
     response: "JobFeedResponse",
     errors: ["FeedBadRequest", "Unauthorized", "ServerError"],
     mobileNotes:
-      "OFFSET PAGINATION (page/pageSize), which is not what a swipe feed wants — see " +
-      "x-mobile-gaps.pagination in the generated document. Send include_fields to drop `description` " +
-      "from feed rows; it is the largest field by far and a card never shows it. " +
+      "A SWIPE FEED MUST PAGE BY `cursor`, NOT BY `page`. Offset paging assumes a stable result " +
+      "set; this one is not. A dislike sets disliked=1 and the default board EXCLUDES disliked " +
+      "rows, so the set shrinks BEHIND the reader: swipe four rows away on page 1 and page 2 " +
+      "starts four rows further down than it should. Those four are never shown, `total` still " +
+      "counts them, and nothing reports the loss. Measured on a 25-job board with 3 swipes per " +
+      "page: offset paging skipped 6 jobs, the cursor skipped 0. " +
+      "Omit `cursor` for the first page, then follow `nextCursor` until it is null. " +
+      "A cursor is bound to the ordering it was issued under — change `sort` (or switch domain " +
+      "profile, which changes the derived relevance keys) and it answers 400 " +
+      "`cursor_sort_mismatch` rather than silently returning an arbitrary slice. Start over. " +
+      "`page`/`pageSize` still work unchanged for a paged list view. " +
+      "Send include_fields to drop `description` from feed rows; it is the largest field by far " +
+      "and a card never shows it. " +
       "`reason: 'cache_empty'` on an empty body means the pool is empty, NOT that the filters " +
       "matched nothing — a client must not render 'no results, try widening' for it.",
   },
@@ -413,19 +424,33 @@ export const RETIRED_ENDPOINTS = Object.freeze([
  */
 export const MOBILE_GAPS = Object.freeze({
   pagination: {
-    severity: "blocking-at-scale",
-    what: "GET /api/jobs pages by OFFSET (page/pageSize). A swipe feed needs a cursor.",
+    severity: "RESOLVED",
+    what: "GET /api/jobs paged by OFFSET, which silently skipped jobs on a swipe feed. FIXED — " +
+      "it now supports a keyset cursor. Kept in this list rather than deleted, so a mobile team " +
+      "reading an older copy of the contract learns the fix exists instead of building the " +
+      "client-side workaround this entry used to recommend.",
     why:
       "Offset pagination assumes a stable result set. A swipe feed mutates the set it is paging " +
       "through: every dislike sets disliked=1, and the default board EXCLUDES disliked rows. So " +
-      "each swipe shortens the list behind the cursor, every subsequent row shifts up by one, and " +
-      "page 2 SKIPS as many jobs as the user swiped away on page 1. The user never sees them and " +
-      "nothing reports the loss. A desktop board does not hit this because it does not mutate " +
-      "membership while paging.",
-    workaround:
-      "Request page=1 repeatedly with a large pageSize and de-duplicate by id client-side, " +
-      "accepting the re-query cost. This is correct but wasteful, and it is a workaround, not a fix.",
-    fix: "A keyset cursor over the existing ORDER BY, opaque to the client. Server-side change.",
+      "each swipe shortened the list behind the reader, every subsequent row shifted up by one, " +
+      "and page 2 SKIPPED as many jobs as the user swiped away on page 1 — never shown, still " +
+      "counted in `total`, with nothing reporting the loss. A desktop board never hit this because " +
+      "it does not mutate membership while paging.",
+    fix:
+      "DONE. Send `?cursor=` and follow `nextCursor` until it is null. The cursor anchors to the " +
+      "last row's own sort VALUES rather than to a position, so removals behind it cannot move it. " +
+      "Implemented in services/jobs/jobCursor.js, which generates the ORDER BY and the cursor's " +
+      "resume predicate from ONE key-list declaration — written twice they would drift, and a " +
+      "cursor that disagrees with its ORDER BY does not error, it returns the wrong rows.",
+    verified:
+      "test/jobsKeysetCursor.test.js asserts the DEFECT first (offset paging really does lose one " +
+      "row per removal on the fixture) and then that the cursor does not — without that half a " +
+      "cursor walk over an unchanging board would pass trivially. scripts/aj1MobileBearer.mjs " +
+      "repeats it over real HTTP: on a 25-job board with 3 swipes per page, offset paging skipped " +
+      "6 jobs and the cursor skipped 0.",
+    caveat:
+      "`total` is still a snapshot and shrinks as the user swipes. It is a progress denominator, " +
+      "not a promise about how many more are coming.",
   },
   reviewInboxPaging: {
     severity: "minor",

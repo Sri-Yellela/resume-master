@@ -4,10 +4,10 @@
 
 | Check | Result |
 |---|---|
-| `npm test` | **1936 passing, 0 failing** (+21 new). **Regressions introduced: 0.** |
-| `npm run verify:harness` | **31/31 green, 883 assertions** |
-| `scripts/aj1MobileBearer.mjs` | **116/116 checks**, bearer-only against a live server |
-| `generateMobileContract --check` | Contract current; regeneration is byte-identical |
+| `npm test` | **1948 passing, 0 failing** (+33 new). **Regressions introduced: 0.** |
+| `npm run verify:harness` | **31/31 green, 896 assertions** |
+| `scripts/aj1MobileBearer.mjs` | **129/129 checks**, bearer-only against a live server |
+| `generateMobileContract --check` | Contract current (**v1.1.0**); regeneration is byte-identical |
 
 `ah1SessionIdentity` passes **67/67** — the one that matters most, since this task changed
 `bindAuthContext`, which every authenticated request goes through.
@@ -40,6 +40,7 @@ deliverable is not a document — **it is a test that fails.**
 | Artefact | Role |
 |---|---|
 | `services/api/mobileContract.js` | The **derived** job shape + declared types + tier gating |
+| `services/jobs/jobCursor.js` | **Board ordering + keyset cursor, from one key-list declaration** (§12) |
 | `services/api/mobileEndpoints.js` | The 32-endpoint surface, retirements, and the gaps |
 | `services/api/mobileSchemas.js` | Declared response envelopes |
 | `services/api/buildMobileContract.js` | Deterministic OpenAPI 3.1 + TypeScript generator |
@@ -49,7 +50,8 @@ deliverable is not a document — **it is a test that fails.**
 | `contract/CHECKSUMS.json` | SHA-256 over LF-normalised content — what the mobile repos pin |
 | `contract/README.md` | Consumption strategy and versioning rules |
 | `test/mobileApiContract.test.js` | **21 tests. The actual deliverable.** |
-| `scripts/aj1MobileBearer.mjs` | **116 real-run checks** on a live server, bearer-only |
+| `test/jobsKeysetCursor.test.js` | 12 tests: the offset defect, then the cursor that fixes it |
+| `scripts/aj1MobileBearer.mjs` | **129 real-run checks** on a live server, bearer-only |
 
 ---
 
@@ -209,7 +211,7 @@ is earned by the bearer token alone**, which is all a native app will have.
 | 7. Retirements | All 6 answer **410** to a bearer client, each with prose a developer can act on. |
 
 **AH1's cross-user guarantees hold identically on the bearer path — measured, not assumed**, which
-is what the task asked for. Registered in `scripts/harnessBaseline.json` at `pass: 116`, so a
+is what the task asked for. Registered in `scripts/harnessBaseline.json` at `pass: 129`, so a
 truncated future run fails.
 
 ### 5.1 The declared half was wrong ELEVEN TIMES, and that is the most useful result here
@@ -344,20 +346,21 @@ Reported, not built — each is a server change with its own design. Published *
 as `x-mobile-gaps`, because a gap recorded only in this file is invisible to teams who consume
 `contract/` and may never read `docs/`.
 
-### 8.1 Pagination — the blocking one
+### 8.1 Pagination — ~~the blocking one~~ **RESOLVED, see §12**
 
-**`GET /api/jobs` pages by offset (`page`/`pageSize`). A swipe feed needs a cursor.**
+**`GET /api/jobs` paged by offset (`page`/`pageSize`), which silently skipped jobs on a swipe feed.**
 
 Offset pagination assumes a stable result set. **A swipe feed mutates the set it is paging
 through**: every dislike sets `disliked = 1`, and the default board *excludes* disliked rows. So
-each swipe shortens the list behind the cursor, every subsequent row shifts up by one, and **page 2
-skips as many jobs as the user swiped away on page 1.** The user never sees them and nothing
-reports the loss. A desktop board never hits this because it does not mutate membership while
-paging.
+each swipe shortened the list behind the reader, every subsequent row shifted up by one, and **page
+2 skipped as many jobs as the user swiped away on page 1.** The user never saw them, `total` still
+counted them, and nothing reported the loss. A desktop board never hits this because it does not
+mutate membership while paging.
 
-*Workaround:* re-request `page=1` with a large `pageSize` and de-duplicate by `id` client-side.
-Correct but wasteful — a workaround, not a fix.
-*Fix:* a keyset cursor over the existing `ORDER BY`, opaque to the client.
+**Fixed in §12.** Send `?cursor=` and follow `nextCursor` until it is null. The entry stays in
+`x-mobile-gaps` marked `severity: "RESOLVED"` rather than being deleted, so a mobile team reading an
+older copy of the contract learns the fix exists instead of building the client-side workaround this
+entry used to recommend.
 
 ### 8.2 Review-inbox paging — minor
 
@@ -440,3 +443,95 @@ implemented. Cursor pagination in particular is a real server change with its ow
 building it inside a contract task would be exactly the unbudgeted scope creep `MOBILE_STATE.md`
 warned about. Whether to do it before the mobile feed is built is the owner's call — but it should
 be made *before*, not after, because the workaround shapes the client's caching layer.
+
+---
+
+## 12. Keyset pagination — the §8.1 gap, closed
+
+Contract **1.1.0**. Additive: `page`/`pageSize` are unchanged, so `client/` and `extension/` need
+no release.
+
+```
+GET /api/jobs?pageSize=20               ->  { jobs: [...], nextCursor: "eyJ2Ijox...", paging: "offset" }
+GET /api/jobs?pageSize=20&cursor=eyJ…   ->  { jobs: [...], nextCursor: "eyJ2Ijox...", paging: "cursor" }
+                                        ->  nextCursor: null  means this is the last page
+```
+
+### The measurement
+
+Both halves are asserted, and the first is what makes the second mean anything — a cursor walk over
+an unchanging board passes trivially and would be measuring its own fixture. On a 25-job board with
+3 swipes per page:
+
+| | jobs skipped |
+|---|---|
+| offset paging | **6 of 25** — never shown, still counted in `total` |
+| keyset cursor | **0** |
+
+Asserted in `test/jobsKeysetCursor.test.js` against a fixture, and again in
+`scripts/aj1MobileBearer.mjs` over real HTTP through the real handler.
+
+### The design, and the one thing it is really protecting against
+
+The ORDER BY and the cursor's resume predicate **must** agree key-for-key and direction-for-
+direction. Written twice they drift, and the failure is silent — a mismatched cursor does not
+error, it returns the wrong rows. Same shape as every other defect in this repository's history.
+
+So `services/jobs/jobCursor.js` declares each sort **once**, as a list of `{sql, dir}` keys, and
+generates the ORDER BY, the SELECT projection and the cursor predicate from that one declaration.
+The eight sorts were verified to produce **character-identical SQL** to the strings they replaced,
+so board ordering did not change.
+
+Three details that each fix a real failure mode:
+
+- **Equality is `IS`, not `=`.** SQLite's `=` yields NULL when either side is NULL, so on a row with
+  no `posted_at` the lexicographic chain evaluates to NULL — falsy — and the feed *stops dead
+  partway down*, reporting the end of the board in the middle of it. A third of the test fixture is
+  NULL-dated for exactly this reason.
+- **The `(x IS NULL)` guards are cursor keys, not decoration.** They partition null from non-null
+  before the comparison on `x` is reached. Dropping them from the cursor while leaving them in the
+  ORDER BY resumes in the wrong partition.
+- **The cursor's values come from the database.** Each sort key is projected into the SELECT as
+  `__cursor_kN`, so SQLite reports the value it actually sorted by. Re-deriving
+  `COALESCE(discovered_at, scraped_at)` or the experience-level `CASE` in JavaScript would be a
+  second copy of the ordering by another name.
+
+`hasMore` is established by fetching `pageSize + 1` rows and trimming. Comparing `rows.length` to
+`pageSize` cannot tell a full last page from a full page with more behind it, and a feed that
+guesses either stops one page early or offers a next page that returns nothing.
+
+### Cursors are validated, not trusted
+
+A cursor carries a signature of the ordering it was issued under. Reuse it after changing `sort` —
+or after switching domain profile, which changes the derived relevance keys — and it answers **400
+`cursor_sort_mismatch`** instead of silently resuming against keys that no longer mean the same
+thing. A garbage cursor is **400 `cursor_malformed`**, never a 500. Both are asserted over HTTP.
+
+The relevance prefix participates in the cursor, and it carries bound params that appear in the
+SELECT, in the predicate (twice per key) and in the ORDER BY. Placeholder binding is positional, so
+a mis-ordered param list would not throw — it would return plausible wrong rows. That ordering has
+its own test.
+
+### What did NOT change, deliberately
+
+`page`/`pageSize`/`totalPages` still work exactly as before; removing OFFSET would break two shipped
+consumers to serve a third that does not exist yet. `nextCursor` is emitted on **both** modes, so an
+offset client can adopt cursors mid-feed without restarting.
+
+`paging: "cursor" | "offset"` says which mode answered. Under a cursor there is no page number to be
+on, and `page`/`totalPages` are meaningless — said in the body rather than left for a client to
+infer from a number that still looks valid.
+
+### Still true, and worth stating
+
+`total` remains a snapshot and shrinks as the user swipes. It is a progress denominator, not a
+promise about how many more are coming. §8.2–8.5 are unchanged and still open.
+
+### Two guard tests were re-pointed, not weakened
+
+`boardOrderingTieBreak` and `filterOptionContract` anchored on source strings in `server.js`
+(`const RECENCY =`, `const chosenSort = sort ===`) that no longer exist. Both now assert the same
+properties **structurally** against `SORT_KEYS`, which is stronger: "every sort ends in the primary
+key" is now a key-list comparison rather than a regex looking for the word `RECENCY` on the same
+line, and it would have passed for a sort that merely mentioned it in a comment. `jobCursor.js` also
+throws at module load if a sort is not totally ordered, so a bad sort cannot reach a request at all.

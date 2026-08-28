@@ -491,6 +491,18 @@ function buildJobFilters(params = {}, opts = {}) {
     sql: clauses.length ? `AND ${clauses.join(' AND ')}` : '',
     params: args,
     rank: {
+      // The INDIVIDUAL relevance expressions, each with its own params.
+      //
+      // The joined `sql` below is what the ORDER BY needs; a keyset cursor needs them SEPARATELY,
+      // because it compares one key at a time and cannot split a comma-joined string back apart
+      // without parsing SQL. `sql` is derived from this array rather than built alongside it, so
+      // the ordering and the cursor are guaranteed to be the same keys in the same order — a second
+      // assembly here is exactly how the two would come to disagree, and a cursor that disagrees
+      // with its ORDER BY does not error, it returns the wrong rows.
+      keys: rankSqls.map((s, i) => ({
+        sql: s,
+        params: ranks[rankedKeys[i]].params,
+      })),
       // ORDER BY keys. Every one sorts ASC (RANK_MATCH=0 first) — spelled out rather than left to
       // SQLite's default so that reordering or wrapping this fragment cannot silently invert it.
       sql: rankSqls.map(s => `(${s}) ASC`).join(', '),

@@ -401,6 +401,155 @@ try {
   }
 
   // ════════════════════════════════════════════════════════════════════════════════════════════
+  console.log("\n── 2b. KEYSET PAGINATION OVER REAL HTTP ────────────────────────────────────────");
+  //
+  // test/jobsKeysetCursor.test.js proves the cursor over a fixture database. It cannot prove that
+  // the ENDPOINT wires it correctly — that the projection, the predicate, the ORDER BY and the
+  // LIMIT get their bound parameters in SQL text order. Placeholder binding is positional, so a
+  // mis-ordered param list does not throw; it returns plausible wrong rows. Only a real request
+  // through the real handler can tell.
+  //
+  // The board needs three things seeded or it answers an empty list for reasons that have nothing
+  // to do with paging: rows in job_role_map under the profile's role key (the INNER JOIN that makes
+  // the board profile-scoped), a non-empty target_titles (an empty one is the "Showing 0 of 336"
+  // state), and titles that match it.
+  //
+  // SCOPED TO A PRIVATE ROLE KEY, and that is not tidiness — it is what makes this section
+  // deterministic. The server runs an ingest on boot, so real greenhouse rows land in this
+  // throwaway database WHILE the harness is running: an earlier version of this check walked a
+  // board that grew underneath it and reported 30 phantom "skipped" jobs that were simply crawled
+  // in mid-walk. roleKeyForProfile returns the profile's role_family verbatim, so giving alice a
+  // family nothing else uses gives her a board only this harness can write to. The ingest maps its
+  // rows under 'engineering' and can never appear here.
+  const FEED_N = 25;
+  const FEED_ROLE_KEY = "aj1feed";
+  (() => {
+    const d = writeDb();
+    d.prepare("UPDATE domain_profiles SET role_family=?, target_titles=? WHERE id=?")
+      .run(FEED_ROLE_KEY, JSON.stringify(["Engineer"]), seeded.profileId);
+    const insJob = d.prepare(`INSERT OR IGNORE INTO scraped_jobs
+      (job_id,search_query,title,company,url,_hash,discovered_at,scraped_at,posted_at,is_active)
+      VALUES (?,?,?,?,?,?,?,?,?,1)`);
+    const insMap = d.prepare("INSERT OR IGNORE INTO job_role_map (job_id, role_key) VALUES (?,?)");
+    for (let i = 0; i < FEED_N; i++) {
+      const id = `aj1feed::${String(i).padStart(3, "0")}`;
+      // Three distinct discovered_at values across 25 rows, mirroring a real crawl batch: the
+      // leading sort key TIES for most of the board, which is precisely where a cursor that
+      // compared only the leading key would loop or skip.
+      const t = 1786000000 + (i % 3);
+      insJob.run(id, "engineer", `Engineer ${i}`, `Co${i % 4}`, `https://example.invalid/f${i}`,
+                 `feedhash${i}`, t, t, i % 3 === 0 ? null : `2026-0${1 + (i % 9)}-1${i % 10}T00:00:00Z`);
+      insMap.run(id, FEED_ROLE_KEY);
+    }
+    d.close();
+  })();
+
+  const feedPage = (cursor) =>
+    call(`/api/jobs?pageSize=7${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { token: alice.token });
+
+  const firstPage = await feedPage(null);
+  check("the seeded feed is reachable and non-trivial",
+    firstPage.status === 200 && firstPage.json?.total >= FEED_N,
+    `status=${firstPage.status} total=${firstPage.json?.total}`);
+  check("an offset-paged response still carries page/totalPages and says paging:'offset'",
+    firstPage.json?.paging === "offset" && Number.isInteger(firstPage.json?.page),
+    `paging=${firstPage.json?.paging}`);
+  check("...and it hands back a cursor even though it was not asked by cursor",
+    typeof firstPage.json?.nextCursor === "string" && firstPage.json.nextCursor.length > 0,
+    "an offset client must be able to adopt cursors mid-feed without restarting");
+
+  // ── walk the whole feed by cursor ──────────────────────────────────────────────────────────
+  const walk = async () => {
+    const ids = [];
+    let cursor = null, pages = 0;
+    while (pages++ < 40) {
+      const r = await feedPage(cursor);
+      if (r.status !== 200) return { ids, error: `status ${r.status}`, pages };
+      ids.push(...(r.json.jobs || []).map(j => j.id));
+      if (pages > 1 && r.json.paging !== "cursor") return { ids, error: "paging mode not reported as cursor", pages };
+      if (!r.json.nextCursor) break;
+      cursor = r.json.nextCursor;
+    }
+    return { ids, pages };
+  };
+  const w = await walk();
+  check("a cursor walk reaches the end of the feed without error", !w.error, w.error || `${w.pages} pages`);
+  check("every job appears EXACTLY ONCE across the walk",
+    new Set(w.ids).size === w.ids.length, `${w.ids.length} rows, ${new Set(w.ids).size} distinct`);
+  check(`the walk returned the whole board (${w.ids.length} of ${firstPage.json?.total})`,
+    w.ids.length === firstPage.json?.total);
+
+  // Same board, same order, second walk — the cursor must be reproducible.
+  const w2 = await walk();
+  check("walking twice returns the identical sequence — the cursor is reproducible",
+    JSON.stringify(w2.ids) === JSON.stringify(w.ids));
+
+  // ── THE DEFECT, over HTTP ──────────────────────────────────────────────────────────────────
+  // Swipe rows away between pages, exactly as a phone would, and assert nothing is skipped.
+  // This is the whole reason the cursor exists.
+  const expectedOrder = w.ids.slice();
+  const dislike = (jobId) =>
+    call("/api/jobs/interact", { method: "PATCH", token: alice.token, body: { jobId, disliked: true } });
+  const clearDislikes = () => {
+    const d = writeDb();
+    d.prepare("UPDATE user_jobs SET disliked=0 WHERE job_id LIKE 'aj1feed::%'").run();
+    d.close();
+  };
+
+  // FIRST, THE BUG. Without this half the cursor half proves nothing: a walk over an unchanging
+  // board would pass trivially and the check would be measuring its own fixture. So page the SAME
+  // feed by OFFSET, with the same swipes, and confirm rows really do go missing.
+  const offsetSeen = [];
+  for (let p = 1; p <= 10; p++) {
+    const r = await call(`/api/jobs?pageSize=7&page=${p}`, { token: alice.token });
+    if (r.status !== 200) break;
+    const ids = (r.json.jobs || []).map(j => j.id);
+    if (!ids.length) break;
+    offsetSeen.push(...ids);
+    for (const id of ids.slice(0, 3)) await dislike(id);
+  }
+  const offsetMissed = expectedOrder.filter(id => !offsetSeen.includes(id));
+  check(`PRECONDITION — offset paging really does lose rows under the same swipes (${offsetMissed.length} skipped)`,
+    offsetMissed.length > 0,
+    offsetMissed.length ? `never shown: ${offsetMissed.slice(0, 6).join(", ")}` :
+      "offset paging lost nothing, so this board does not reproduce the defect and the cursor " +
+      "check below is vacuous");
+  clearDislikes();
+
+  const seenIds = [];
+  let cursor = null, pages = 0, walkError = null;
+  while (pages++ < 40) {
+    const r = await feedPage(cursor);
+    if (r.status !== 200) { walkError = `status ${r.status}`; break; }
+    const pageIds = (r.json.jobs || []).map(j => j.id);
+    seenIds.push(...pageIds);
+    // Swipe away the first three of every page BEFORE asking for the next one.
+    for (const id of pageIds.slice(0, 3)) await dislike(id);
+    if (!r.json.nextCursor) break;
+    cursor = r.json.nextCursor;
+  }
+  check("the swipe-while-paging walk completed", !walkError, walkError || `${pages} pages`);
+  check("no job was shown twice while the board mutated underneath",
+    new Set(seenIds).size === seenIds.length,
+    `${seenIds.length} rows, ${new Set(seenIds).size} distinct`);
+  const missed = expectedOrder.filter(id => !seenIds.includes(id));
+  check("NOTHING WAS SKIPPED — every job was shown despite the set shrinking behind the cursor",
+    missed.length === 0,
+    missed.length ? `${missed.length} never shown: ${missed.slice(0, 6).join(", ")}` : "all shown");
+
+  // ── the cursor as client input, through the endpoint ───────────────────────────────────────
+  const staleFor = (await feedPage(null)).json?.nextCursor;
+  const mismatched = await call(
+    `/api/jobs?pageSize=7&sort=compHigh&cursor=${encodeURIComponent(staleFor || "x")}`, { token: alice.token });
+  check("a cursor reused under a DIFFERENT sort is a 400, not an arbitrary slice",
+    mismatched.status === 400 && mismatched.json?.code === "cursor_sort_mismatch",
+    `status=${mismatched.status} code=${mismatched.json?.code}`);
+  const malformed = await call("/api/jobs?cursor=not-a-real-cursor", { token: alice.token });
+  check("a malformed cursor is a 400 with a code, never a 500",
+    malformed.status === 400 && malformed.json?.code === "cursor_malformed",
+    `status=${malformed.status} code=${malformed.json?.code}`);
+
+  // ════════════════════════════════════════════════════════════════════════════════════════════
   console.log("\n── 3. CROSS-USER ACCESS IS DENIED ON THE BEARER PATH ───────────────────────────");
   // AH1 proved this for a cookie session carrying a token. The task asks whether the SAME
   // guarantees hold on the bearer path with no cookie at all. They must, because requireAuth

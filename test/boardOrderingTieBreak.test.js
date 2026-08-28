@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import Database from "better-sqlite3";
 import { SORTS } from "../shared/jobFilterOptions.js";
+import { SORT_KEYS, RECENCY as RECENCY_KEYS, TOTAL_ORDER_COLUMN } from "../services/jobs/jobCursor.js";
 
 const serverSrc = fs.readFileSync("server.js", "utf8");
 
@@ -127,13 +128,40 @@ test("a posting with no date sorts last, rather than burying dated ones", () => 
 test("every board sort ends in the total-order tie-break, not a bare timestamp", () => {
   // atsScore/applicantCount/compHigh/compLow each ended in `sj.scraped_at DESC` too, so they had
   // the identical defect once their own key tied — and ATS scores and applicant counts tie a lot.
-  const orderBlock = serverSrc.slice(serverSrc.indexOf("const RECENCY ="),
-                                     serverSrc.indexOf("const offset  = (pg - 1) * ps;"));
-  assert.match(orderBlock, /sj\.job_id/, "job_id is the primary key and makes the order total");
-  const bareTail = orderBlock.match(/sj\.scraped_at DESC'/g) || [];
-  assert.equal(bareTail.length, 0, "no sort may end on a bare scraped_at");
-  for (const s of ["atsScore", "applicantCount", "compHigh", "compLow"]) {
-    assert.match(orderBlock, new RegExp(`${s}[^\\n]*RECENCY`), `${s} must reuse the shared tie-break`);
+  //
+  // ASSERTED STRUCTURALLY NOW, not by regex over server.js. The sorts moved into
+  // services/jobs/jobCursor.js as KEY LISTS when keyset pagination landed, because the ORDER BY and
+  // the cursor's resume predicate both have to be generated from one declaration. That makes this
+  // property checkable directly rather than by looking for the word "RECENCY" on the same source
+  // line — which was always a proxy for the real requirement and would have passed for a sort that
+  // mentioned RECENCY in a comment.
+  //
+  // The requirement is STRONGER than it was: the order must be total, which means ending in the
+  // primary key. jobCursor.js also throws at import time if this is violated, so this test is the
+  // second line of defence rather than the only one.
+  for (const [name, keys] of Object.entries(SORT_KEYS)) {
+    const last = keys[keys.length - 1];
+    assert.equal(last.sql, TOTAL_ORDER_COLUMN,
+      `sort "${name}" ends on ${last.sql}, not the primary key — its order is not total, so rows ` +
+      `tie, SQLite may return a tie group differently between queries, and BOTH offset and keyset ` +
+      `paging will repeat and skip rows with nothing surfacing it`);
+    assert.equal(last.dir, "ASC", `sort "${name}" must end on job_id ASC for a reproducible order`);
+  }
+
+  // Every keyed sort must still DELEGATE to the shared recency tail rather than inventing its own,
+  // which is what "reuse the shared tie-break" meant. Checked by tail comparison.
+  const tail = (keys) => keys.slice(-RECENCY_KEYS.length).map(k => `${k.sql} ${k.dir}`).join(", ");
+  const recencyTail = RECENCY_KEYS.map(k => `${k.sql} ${k.dir}`).join(", ");
+  for (const s of ["atsScore", "applicantCount", "compHigh", "compLow", "yoeLow", "yoeHigh"]) {
+    assert.equal(tail(SORT_KEYS[s]), recencyTail,
+      `sort "${s}" must fall back on the shared recency tie-break once its own key ties`);
+  }
+
+  // The original defect, kept as an explicit guard: no sort may lead on last-touched.
+  for (const [name, keys] of Object.entries(SORT_KEYS)) {
+    assert.ok(!/^sj\.scraped_at$/.test(keys[0].sql),
+      `sort "${name}" leads on scraped_at, which is when our CRAWLER last touched the row — a fact ` +
+      `about us, not about the posting`);
   }
 });
 
@@ -179,12 +207,13 @@ test("every sort value the client can send has its own case", () => {
     assert.ok(!options.includes(dbOnly), `"${dbOnly}" is declared server-only but is offered`);
   }
 
-  const block = serverSrc.slice(serverSrc.indexOf("const RECENCY ="),
-                               serverSrc.indexOf("const offset  = (pg - 1) * ps;"));
+  // Was a regex for `sort === 'x'` over server.js; now a key lookup, since the ternary chain became
+  // a table when the sorts moved to jobCursor.js. Same requirement, no longer dependent on how the
+  // dispatch happens to be written.
   for (const opt of options) {
-    if (opt === "dateDesc") continue;   // the default arm, correctly unnamed
-    assert.match(block, new RegExp(`sort === '${opt}'`),
-      `the sort <select> offers "${opt}" but the server has no case for it, so it silently does nothing`);
+    assert.ok(SORT_KEYS[opt],
+      `the sort <select> offers "${opt}" but jobCursor.js has no key list for it, so it silently ` +
+      `falls through to the default and reads to the user as a dead control`);
   }
 });
 

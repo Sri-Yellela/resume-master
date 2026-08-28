@@ -140,6 +140,12 @@ capture, resume editing, the anonymous `standalone/*` surface, and the SSE strea
 `x-mobile-gaps.pushNotifications`).
 
 Read `x-retired` before writing a single request: a greenfield client built from older
-documentation is exactly the client that will call a retired endpoint. Read `x-mobile-gaps` before
-designing the feed: **`GET /api/jobs` pages by offset, and a swipe feed mutates the set it is
-paging through**, so offset paging silently skips jobs.
+documentation is exactly the client that will call a retired endpoint.
+
+**Page the feed with `?cursor=`, not `?page=`.** A swipe feed mutates the set it is paging through —
+a dislike removes a row from the default board — so offset paging silently skips jobs: measured at
+6 of 25 with three swipes per page. Omit `cursor` for the first page, then follow `nextCursor` until
+it is null. A cursor is bound to the ordering it was issued under; change `sort` or switch domain
+profile and it answers 400 `cursor_sort_mismatch` rather than returning an arbitrary slice.
+`page`/`pageSize` still work unchanged for a paged list view. See `x-mobile-gaps` for what is still
+open — pagination is marked `RESOLVED` there, and the four remaining entries are not.

@@ -103,6 +103,20 @@ export const RESPONSE_SCHEMAS = Object.freeze({
       reason: "string|null",
       curation: "$Curation|null",
       facets: "object|null",
+      nextCursor: "string|null",
+      paging: "string",
+    },
+    fieldNotes: {
+      nextCursor: "Opaque. Pass it back as ?cursor= for the next page. **null means this is the " +
+        "last page** — established by over-fetching one row, not by comparing a count, so it is a " +
+        "fact rather than an inference. Emitted on BOTH paging modes, so an offset client can " +
+        "adopt cursors mid-feed without restarting the feed.",
+      paging: "'cursor' or 'offset' — which mode answered THIS request. When it is 'cursor', " +
+        "`page` and `totalPages` are meaningless: there is no page number to be on. Rendering " +
+        "'page 1 of 34' on every cursor page is the quietly-wrong surface this field exists to " +
+        "prevent.",
+      total: "The count of matching rows AT THIS MOMENT. On a swipe feed it shrinks as the user " +
+        "swipes, so it is a progress denominator, not a promise about how many more are coming.",
     },
   },
   Curation: {

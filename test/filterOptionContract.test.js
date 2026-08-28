@@ -23,6 +23,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { SORT_KEYS } from "../services/jobs/jobCursor.js";
 
 import {
   FILTER_DIMENSIONS, EXPERIENCE_LEVELS, DOMAINS, WORK_MODELS, EMPLOYMENT_TYPES,
@@ -240,17 +241,17 @@ test("automation tier: the control and automationTier.js are one list, in one or
 });
 
 test("sort: every option is an ordering the handler implements", () => {
-  const server = read("server.js");
-  // The chain is `chosenSort` now, not `orderBy`: X2 put a profile-relevance prefix in front of it
-  // for the default sort only, so the user's chosen ordering had to become a named thing the prefix
-  // could be composed with. The chain itself is unchanged, and this test still reads it whole.
-  const chain = server.slice(server.indexOf("const chosenSort = sort ==="),
-                             server.indexOf("      // Profile relevance leads the DEFAULT order"));
-  assert.ok(chain.length > 100, "the ORDER BY chain moved");
-  const implemented = new Set([...chain.matchAll(/sort === '([A-Za-z]+)'/g)].map(m => m[1]));
-  // dateDesc is the chain's FALL-THROUGH default, not a branch, so it is implemented without
-  // appearing as a comparison.
-  implemented.add(SORTS.default);
+  // The ternary chain became a TABLE. Keyset pagination needs the ORDER BY and the cursor's resume
+  // predicate generated from one declaration — written twice they drift, and a cursor that
+  // disagrees with its ORDER BY returns wrong rows without erroring — so the sorts moved to
+  // services/jobs/jobCursor.js as key lists.
+  //
+  // The requirement is unchanged and the check is now exact: a lookup in the table the handler
+  // actually dispatches on, rather than a regex for `sort === 'x'` over server.js. `implemented`
+  // no longer needs the default added by hand either — dateDesc is a real entry in the table, not
+  // an unnamed fall-through arm.
+  const implemented = new Set(Object.keys(SORT_KEYS));
+  assert.ok(implemented.size >= 8, "the sort table moved or shrank unexpectedly");
 
   for (const v of values(SORTS)) {
     assert.ok(implemented.has(v),
