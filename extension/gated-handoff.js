@@ -323,9 +323,17 @@ export async function clearBatchForTab(tabId) {
  */
 export async function portalQueueFor(serverUrl, origin, excludePacketId = null) {
   try {
-    const res = await api(serverUrl, '/api/apply/gate-packets');
+    // ?origin= asks the server the question this function actually has. It used to fetch every
+    // unconsumed packet and discard the ones for other portals — which was wrong, not just wasteful:
+    // the list is capped at 100, so a candidate with a long queue could have this portal's packets
+    // fall entirely outside the newest 100 and be told the batch was empty.
+    const res = await api(serverUrl, `/api/apply/gate-packets?origin=${encodeURIComponent(origin)}`);
     if (!res.ok) return { remaining: 0, next: null, packets: [], gateCrossing: false };
     const body = await res.json();
+    // The origin filter is ALSO kept client-side, deliberately. An extension ships and updates
+    // independently of the server it talks to, so this build must stay correct against a server
+    // that predates ?origin= and ignores it. Filtering twice costs nothing; assuming the server is
+    // new enough is how a version skew becomes a wrong-portal fill.
     const mine = (body.packets || [])
       .filter(p => p.expectedOrigin === origin && p.packetId !== excludePacketId && !p.stale)
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -380,7 +388,9 @@ export async function runGatedHandoff({ serverUrl, tab }) {
 
   let list;
   try {
-    const res = await api(serverUrl, '/api/apply/gate-packets');
+    // Scoped to this tab's origin — the target match below filters on exactly this, and the
+    // unscoped list is capped at 100 across every portal. See portalQueueFor for the full note.
+    const res = await api(serverUrl, `/api/apply/gate-packets?origin=${encodeURIComponent(origin)}`);
     if (res.status === 401) {
       return { ok: false, reason: 'not_signed_in', message: 'Sign in to Resume Master first.' };
     }

@@ -4,11 +4,12 @@
 
 | Check | Result |
 |---|---|
-| `npm test` | **1962 passing, 0 failing** (+47 new). **Regressions introduced: 0.** |
-| `npm run verify:harness` | **32/32 green, 912 assertions** |
+| `npm test` | **1973 passing, 0 failing** (+58 new). **Regressions introduced: 0.** |
+| `npm run verify:harness` | **32/32 green, 913 assertions** |
 | `scripts/aj1MobileBearer.mjs` | **129/129 checks**, bearer-only against a live server |
 | `generateMobileContract --check` | Contract current (**v1.1.0**); regeneration is byte-identical |
 | `scripts/aj2BoardCursor.mjs` | **16/16 checks** driving the real board in Chrome |
+| `scripts/abPanelUi.mjs` | **121/121 checks**; the truncation notice verified on screen |
 
 `ah1SessionIdentity` passes **67/67** — the one that matters most, since this task changed
 `bindAuthContext`, which every authenticated request goes through.
@@ -372,6 +373,10 @@ entry used to recommend.
 neither reporting truncation. Generous on desktop; a phone user reviewing in short bursts
 accumulates a backlog past the cap with no indication it exists.
 
+> **A third instance of this class — `GET /api/apply/gate-packets` — was found and fixed (§14),
+> where the truncation was making the extension stop a batch that still had work in it. These two
+> remain open.**
+
 ### 8.3 "Does a resume already exist for this job" — structurally absent
 
 `mapJobRow` maps a *job*; resume currency is a per-`(user, job, tool, profile)` question needing a
@@ -633,3 +638,96 @@ replaying a saved cursor would resume at a position that no longer means anythin
 
 `page`, `pageSize` and `totalPages` are untouched, the numbered pager still works, and a board with
 no cursor available simply pages the old way. The extension is not affected.
+
+---
+
+## 14. The gate-packet cap — a silent truncation, and the one that failed as a *completion*
+
+### First: there was nothing to wire in the extension
+
+Asked to apply §13's cursor work to the extension, I checked before building. **The extension never
+calls `/api/jobs`.** Six `fetch` calls exist in the whole tree:
+
+| Endpoint | Shape |
+|---|---|
+| `POST /api/import/job` | one job |
+| `GET /api/auth/me` | auth check |
+| `GET /api/apply/gate-packets` | a list — read whole, filtered by origin, `[0]` taken |
+| `POST /api/apply/gate-packets/{id}/token`, `/gate-packet/exchange`, `/gate-review` | one packet |
+| `GET`/`POST /api/apply/form-schema[/consent]` | one schema |
+
+`popup.js` renders no list at all, and `buildExtension.mjs` derives its file list from the manifest,
+so nothing else is bundled in. The only `cursor` matches in the extension are `cursor: pointer` in
+CSS. It is a capture-and-handoff tool with no feed, so there is no offset-skip to fix — and wiring a
+cursor in would have meant building a feed that does not exist.
+
+### What was actually broken
+
+`GET /api/apply/gate-packets` returned `ORDER BY created_at DESC LIMIT 100` over **every**
+unconsumed packet across **every** portal, with nothing in the body saying the list had been cut.
+
+**The extension's failure is the serious one.** All three of its call sites fetch that list and
+immediately discard every row whose `expectedOrigin` is not the tab's. They ask *"what is queued for
+THIS portal?"* and were answered with *"the newest 100 across all of them."* With a long queue, a
+portal whose packets all fall outside the newest 100 comes back empty — and `background.js` turns
+that into `batch_empty`, **stopping a run that has work left and telling the candidate there is
+nothing to do.** A cap failing as a *completion* is the worst shape it can take.
+
+**The panel's failure is milder and the same class.** It renders every portal from the same capped
+list, so past 100 it shows fewer portals than exist and every count on them is short — a queue
+surface that under-reports the queue.
+
+### The fix is both halves
+
+**`?origin=`** — the question every extension caller actually asks. The cap then applies to the set
+the caller cares about, where 100 packets for a *single* portal is a different order of magnitude.
+The filter is `AND`ed onto the existing ownership and unconsumed predicates, never substituted for
+them; a filter that replaced the scope rather than narrowing it would be a disclosure, and there is
+a test for exactly that.
+
+**`total` / `truncated` / `returned` / `limit`** — always present, on both scoped and unscoped
+responses. `rows.length` alone cannot distinguish a full list from a capped one, which is precisely
+what let a truncated answer read as an empty queue. `truncated` is derived from the count, not from
+whether `rows.length` happened to hit the limit.
+
+Both statements are built from one `origin` local, so the list and its count cannot be scoped
+differently — a `total` computed over a different scope than the rows would be worse than no total.
+
+### Measured
+
+`test/gatePacketsCap.test.js` builds a 140-packet queue where 20 packets for one portal are the
+**oldest**, so they fall entirely outside the newest 100. That is the reported failure, not a
+contrived one: a candidate works through recent portals while an older batch waits.
+
+```
+unscoped            100 of 140 returned; slowportal's packets: 0     <- reads as batch_empty
+?origin=slowportal   20 of  20 returned; truncated: false            <- all of them
+?origin=fastportal  100 of 120 returned; truncated: true             <- still capped, and says so
+```
+
+The panel notice is verified on screen by `scripts/abPanelUi.mjs`, whose fixture is deliberately
+truncated: *"Showing the 11 most recent of **137** queued handoffs."* It names the real total rather
+than merely saying some are hidden — "some are hidden" gives the candidate nothing to act on, "137
+queued" tells them the backlog is the problem. That the notice is *conditional* is asserted
+separately in the node test, since a browser check with a truncated fixture cannot prove a notice
+does not appear when it should not.
+
+### The extension still filters by origin itself
+
+Deliberately, and it is not redundancy for its own sake: **an extension ships and updates
+independently of the server it talks to.** A build that trusted `?origin=` to have been honoured
+would fill against the wrong portal on a server that predates the parameter. Filtering twice costs
+nothing; assuming version parity is how a skew becomes a wrong-portal fill.
+
+The submission zip was rebuilt, since `test/extensionSubmission.test.js` requires every file in it
+to be byte-identical to source. The manifest version is **not** bumped: v1.0.0 has never been
+submitted, so bumping would imply a released version existed, and it would invalidate the filename
+`STORE_LISTING.md` already cites.
+
+### Relationship to §8.2, stated precisely
+
+§8.2 named `/api/apply/pending` (capped at 100) and `/api/apply/questions` (capped at 50) as
+unpageable and silently truncating. `gate-packets` is a **third instance of the same class** that
+§8.2 did not name. It is now fixed; **those two are not.** Neither is consumed by the extension, and
+neither has the origin-shaped question that made this one cheap to fix properly — so they stay
+reported rather than quietly assumed handled.

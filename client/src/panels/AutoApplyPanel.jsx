@@ -58,6 +58,7 @@ export function AutoApplyPanel() {
     // W1's no-op callbacks. The context has exported it all along.
     applyQueue = [], applyQueueMsg, setApplyQueueMsg,
     applyRuns = [], applyReviewJobs = [], applyGatePortals = [],
+    applyGateTruncated = false, applyGateTotal = null,
     applyHandoffPackets = [], handoffPacketFor, openHandoff, handoffMsg, setHandoffMsg,
     applyInFlight = [], applySubmitted = [], applyStopped = [], applyGatedJobs = [],
     applyPrereqMissing = [],
@@ -756,6 +757,20 @@ export function AutoApplyPanel() {
                 releases every application queued behind that portal. Rendered as the hero because
                 "sign in once -> 4 ready" is a ten-second job priced as one, where the same thing shown
                 as four held rows is priced as four. */}
+            {/* THE QUEUE IS CAPPED, AND A CAPPED QUEUE MUST SAY SO. GET /api/apply/gate-packets
+                returns the newest 100 unconsumed packets; past that the portals below are a SUBSET
+                and every count on them is short. Without this the panel renders a truncated queue
+                exactly as it renders a complete one, which is the same failure the extension hit —
+                a cap that reads as an answer. */}
+            {applyGateTruncated && (
+              <div style={{ padding: "8px 12px", marginBottom: 8, borderRadius: 8,
+                            border: `1px solid ${theme.border}`, background: theme.surfaceHigh,
+                            fontSize: 12, color: theme.textMuted }}>
+                Showing the {applyHandoffPackets.length} most recent of{" "}
+                <strong>{applyGateTotal ?? "many"}</strong> queued handoffs. Clear some of these to
+                see the rest.
+              </div>
+            )}
             {applyGatePortals.map(p => {
               const isCaptcha = p.gateReasons?.includes("captcha_required");
               return (

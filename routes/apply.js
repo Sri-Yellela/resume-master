@@ -2143,16 +2143,52 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     });
   });
 
+  /**
+   * The unconsumed handoff queue.
+   *
+   * ?origin= — OPTIONAL, AND IT IS THE QUESTION EVERY EXTENSION CALLER ACTUALLY ASKS.
+   *
+   * All three extension call sites (background.js's batch continuation, gated-handoff.js's
+   * portalQueueFor and its target match) fetched this list whole and immediately threw away every
+   * row whose expectedOrigin was not the tab's. They ask "what is queued for THIS portal?" and were
+   * answered with "the newest 100 across all of them".
+   *
+   * That is not merely wasteful — the cap made it WRONG. With more than 100 unconsumed packets, a
+   * portal whose packets all fall outside the newest 100 comes back empty, and the extension reports
+   * `batch_empty` on a batch that is not empty: it stops mid-run and the candidate is told there is
+   * nothing left to do. A silent cap answering a question nobody asked.
+   *
+   * Filtering here puts the LIMIT on the set the caller cares about, where 100 packets for a SINGLE
+   * portal is a different order of magnitude, and `total` below makes the truncation visible in
+   * every case rather than leaving it to be inferred.
+   */
   app.get("/api/apply/gate-packets", requireAuth, (req, res) => {
+    // One local, used to build BOTH statements below, so the list and its count cannot disagree
+    // about what they are scoped to — a `total` computed over a different scope than the rows would
+    // be worse than no total at all.
+    const origin = String(req.query.origin || "").trim();
+    const where = origin ? "AND p.expected_origin = ?" : "";
+    const args = origin ? [req.user.id, origin] : [req.user.id];
+
+    const PACKET_LIST_LIMIT = 100;
     const rows = db.prepare(`
       SELECT p.id, p.job_id, p.run_id, p.run_job_id, p.apply_url, p.expected_origin, p.gate_reason,
              p.answers_json, p.resume_artifact_id, p.consumed_at, p.created_at,
              sj.title, sj.company
       FROM apply_gate_packets p
       LEFT JOIN scraped_jobs sj ON sj.job_id = p.job_id
-      WHERE p.user_id=? AND p.consumed_at IS NULL
-      ORDER BY p.created_at DESC LIMIT 100
-    `).all(req.user.id);
+      WHERE p.user_id=? AND p.consumed_at IS NULL ${where}
+      ORDER BY p.created_at DESC LIMIT ${PACKET_LIST_LIMIT}
+    `).all(...args);
+
+    // How many there REALLY are, over the same scope and before the cap. A list that has been cut
+    // must be able to say so: the previous shape was indistinguishable from a complete one, which
+    // is what let the extension read a truncated answer as an empty batch. Counted rather than
+    // inferred from rows.length, which cannot tell a full list from a capped one.
+    const total = db.prepare(`
+      SELECT COUNT(*) AS n FROM apply_gate_packets p
+      WHERE p.user_id=? AND p.consumed_at IS NULL ${where}
+    `).get(...args)?.n || 0;
 
     // ── Amortise the gate per PORTAL, not per application (TASK G5) ───────────
     // The architecture doc calls this the highest-leverage item in the design, and it is a
@@ -2191,6 +2227,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       .sort((a, b) => b.count - a.count);
 
     res.json({
+      // The scope this answer was computed over, echoed so a caller can tell a filtered response
+      // from a whole one without remembering what it asked for — and so a response cached or passed
+      // between contexts stays self-describing.
+      origin: origin || null,
+      // `total` is the count over that scope BEFORE the cap; `truncated` says the list was cut.
+      // Both are always present: a client that only learns about truncation when it happens has to
+      // discover the field's existence at the worst possible moment.
+      total,
+      returned: rows.length,
+      truncated: total > rows.length,
+      limit: PACKET_LIST_LIMIT,
       portals,
       packets: rows.map(r => {
         const body = parseJson(r.answers_json, {});

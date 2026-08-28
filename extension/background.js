@@ -289,7 +289,14 @@ async function advanceBatch(tabId) {
 
   // Re-read the queue rather than trusting the count the overlay was rendered with: the candidate may
   // have finished one of these in another tab since.
-  const res = await fetch(`${RESUME_MASTER_URL}/api/apply/gate-packets`, { credentials: 'include' })
+  // Scoped to the batch's origin. Unscoped, this list is the newest 100 unconsumed packets across
+  // EVERY portal — so a candidate with a long queue could have this batch's packets fall outside
+  // the cap entirely, and the filter below would find nothing. That reads as `batch_empty` and
+  // stops a run that has work left, which is the worst way for a cap to fail: silently, and as a
+  // completion.
+  const res = await fetch(
+    `${RESUME_MASTER_URL}/api/apply/gate-packets?origin=${encodeURIComponent(batch.origin)}`,
+    { credentials: 'include' })
     .catch(() => null);
   if (!res?.ok) return { ok: false, reason: 'unreachable' };
   const body = await res.json();

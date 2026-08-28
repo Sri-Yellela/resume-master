@@ -262,6 +262,16 @@ const FIXTURES = {
         count: 1, packetIds: [690], oldestAt: ago(3), gateReasons: ['captcha_required'] },
     ],
     packets: [...GATE_PACKETS, ...REVIEW_PACKETS],
+    // A TRUNCATED QUEUE. The server caps this list at 100 unconsumed packets, and past that the
+    // portals above are a SUBSET — every count on them short, with nothing on screen saying so.
+    // That is the same shape of failure the extension hit: a cap that reads as an answer. The
+    // fixture is deliberately truncated so the notice has to be there; the guard that it appears
+    // ONLY when truncated is test/gatePacketsCap.test.js, which asserts the JSX is conditional.
+    origin: null,
+    total: 137,
+    returned: GATE_PACKETS.length + REVIEW_PACKETS.length,
+    truncated: true,
+    limit: 100,
   },
   // A SHARED QUESTION (AC2). Deduplicated across jobs by the server and blocking two different
   // applications, so one answer really does release both. The other genuine co-resolution.
@@ -730,6 +740,13 @@ async function main() {
       && /Sign in to datadog\.avature\.net once/.test(text)
       && /4 applications ready/.test(text) && /3 applications ready/.test(text),
       'one action unblocking many is still grouped by obstacle');
+    // A CAPPED QUEUE SAYS IT IS CAPPED. Without this the panel renders a truncated queue exactly as
+    // it renders a complete one — fewer portals than the candidate has, every count short. The real
+    // total has to be on screen, not merely the fact of truncation: "some are hidden" gives the
+    // candidate nothing to act on, "137 queued" tells them the backlog is the problem.
+    check('the truncated handoff queue SAYS it is truncated, and names the real total',
+      /137/.test(text) && /queued handoffs/i.test(text),
+      /137/.test(text) ? 'notice present' : 'no truncation notice on a capped queue');
     // A VANISHED POSTING. AD1 moved where this is READ, not whether it is said: a held row whose
     // posting the cleanup removed is PENDING by status and ABORTED in reality, and the dated listing
     // applies that override — so the row is on the ABORTED tab, saying why it is there. The PENDING

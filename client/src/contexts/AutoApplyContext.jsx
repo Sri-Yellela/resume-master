@@ -32,6 +32,9 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   // Gated jobs, grouped by the portal you have to sign in to. One crossing releases the whole group,
   // which is a different offer from N separate reviews — see TASK G5.
   const [applyGatePortals, setApplyGatePortals] = useState([]);
+  // GET /api/apply/gate-packets caps its list; these say whether it was cut and by how much.
+  const [applyGateTruncated, setApplyGateTruncated] = useState(false);
+  const [applyGateTotal, setApplyGateTotal] = useState(null);
   // ── The prepared packets themselves, per application (TASK AB1) ─────────────────────────────
   // Only the portal GROUPING was ever read. The individual packets were fetched and thrown away,
   // which was survivable while the only packets were gate crossings — a batch is all you need to
@@ -117,7 +120,18 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       const gates = await api("/api/apply/gate-packets");
       setApplyGatePortals(Array.isArray(gates.portals) ? gates.portals : []);
       setApplyHandoffPackets(Array.isArray(gates.packets) ? gates.packets : []);
-    } catch { setApplyGatePortals([]); setApplyHandoffPackets([]); }
+      // The list is capped server-side. Without this the panel renders a TRUNCATED queue as if it
+      // were the whole one — fewer portals than the candidate actually has, with nothing saying so.
+      // A queue surface that under-reports the queue is the defect, not a display nicety.
+      //
+      // `?? false` rather than a bare read: an older server does not send these, and `undefined`
+      // must mean "no truncation reported", not "unknown, so warn".
+      setApplyGateTruncated(gates.truncated ?? false);
+      setApplyGateTotal(Number.isFinite(gates.total) ? gates.total : null);
+    } catch {
+      setApplyGatePortals([]); setApplyHandoffPackets([]);
+      setApplyGateTruncated(false); setApplyGateTotal(null);
+    }
   }, []);
 
   const loadApplyRunDetail = useCallback(async (runId) => {
@@ -637,7 +651,7 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   return (
     <AutoApplyContext.Provider value={{
       applyQueue, setApplyQueue,
-      applyRuns, applyReviewJobs, applyGatePortals,
+      applyRuns, applyReviewJobs, applyGatePortals, applyGateTruncated, applyGateTotal,
       applyHandoffPackets, handoffPacketFor, openHandoff, handoffMsg, setHandoffMsg,
       applyInFlight, applySubmitted, applyStopped, applyGatedJobs,
       applyPrereqMissing,
