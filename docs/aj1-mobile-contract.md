@@ -1,0 +1,442 @@
+# AJ1 — Publishing the mobile API contract
+
+**Baseline re-derived first: 1915 passing, 0 failing. Migration high-water `092_profile_summary_opt_in`.**
+
+| Check | Result |
+|---|---|
+| `npm test` | **1936 passing, 0 failing** (+21 new). **Regressions introduced: 0.** |
+| `npm run verify:harness` | **31/31 green, 883 assertions** |
+| `scripts/aj1MobileBearer.mjs` | **116/116 checks**, bearer-only against a live server |
+| `generateMobileContract --check` | Contract current; regeneration is byte-identical |
+
+`ah1SessionIdentity` passes **67/67** — the one that matters most, since this task changed
+`bindAuthContext`, which every authenticated request goes through.
+
+> A caveat on that harness suite. An earlier run reported three harnesses at "0 assertions,
+> exit 1". They were not regressions: I had been running `aj1MobileBearer.mjs` by hand at the same
+> time, and the contention starved them. Re-run alone they are 17/17, 32/32 and 24/24, and the clean
+> full-suite run above is 31/31. Recorded because "it was probably concurrency" is exactly the kind
+> of guess this repository's harness runner exists to stop anyone making.
+
+No mobile screens were built. This is the server side of a repository boundary.
+
+---
+
+## 0. The problem, restated in one paragraph
+
+The API now has **four consumers**: `client/`, `extension/`, and two mobile repositories outside
+this tree. Until this task, **nothing noticed when a published shape changed.** This repository's
+defect history is almost entirely contract mismatches that failed *silently* — `mapJobRow` vs
+`normalizeApiJob`, popup vs hotkey writing to different tables, three hardcoded tab lists,
+half-migrated model IDs, five of fourteen LLM call sites logging usage, `tool` vs `toolType`, mode
+`"manual"` coerced to `"auto"`. Every one was two sides of a contract that did not meet. Being in
+the same tree is what eventually made each findable; a separate repository removes that. So the
+deliverable is not a document — **it is a test that fails.**
+
+---
+
+## 1. What was built
+
+| Artefact | Role |
+|---|---|
+| `services/api/mobileContract.js` | The **derived** job shape + declared types + tier gating |
+| `services/api/mobileEndpoints.js` | The 32-endpoint surface, retirements, and the gaps |
+| `services/api/mobileSchemas.js` | Declared response envelopes |
+| `services/api/buildMobileContract.js` | Deterministic OpenAPI 3.1 + TypeScript generator |
+| `scripts/generateMobileContract.mjs` | Writes `contract/`; `--check` fails on staleness |
+| `contract/mobile-api.v1.json` | **The published contract** (OpenAPI 3.1 — 30 paths, 32 operations, 52 schemas) |
+| `contract/mobile-api.v1.d.ts` | Generated TypeScript declarations |
+| `contract/CHECKSUMS.json` | SHA-256 over LF-normalised content — what the mobile repos pin |
+| `contract/README.md` | Consumption strategy and versioning rules |
+| `test/mobileApiContract.test.js` | **21 tests. The actual deliverable.** |
+| `scripts/aj1MobileBearer.mjs` | **116 real-run checks** on a live server, bearer-only |
+
+---
+
+## 2. The contract is GENERATED, not written (requirement 2)
+
+`mapJobRow` is a field whitelist and the only shape `GET /api/jobs`, `GET /api/jobs/by-id/:jobId`
+and `routes/importJob.js` emit. It is therefore the binding constraint, and it is **executed**, not
+parsed:
+
+```js
+Object.keys(mapJobRow({}))   // → the 37 published job fields
+```
+
+Probing rather than regexing is deliberate: a regex agrees with the source *text*, calling the
+function agrees with the source *behaviour*, which is what a client actually receives.
+
+### The probe found something a hand-written contract would have got wrong
+
+Eight fields are plain pass-throughs with no null coalescing:
+
+```
+id  title  company  location  description  url  applyUrl  source
+```
+
+For a row whose column is NULL these evaluate to `undefined`, and **`JSON.stringify` deletes an
+undefined property**. They do not arrive as `null` — they do not arrive at all.
+
+A contract typing these as `string | null` would be wrong in a way that reads as correct. A Swift
+or Kotlin decoder distinguishes *null* from *missing*: a non-optional field that is merely absent
+throws at decode time even though it would tolerate an explicit null. **That is a store crash,
+found from a review.** They are emitted as optional (`?:` in the generated TypeScript, absent from
+`required` in the schema), and `test/mobileApiContract.test.js` asserts the split against what
+`JSON.stringify` actually does rather than against anyone's belief.
+
+### What could not be derived, and how it is kept honest
+
+Scalar types cannot be recovered by probing — `mapJobRow({}).title` is `undefined` whether the
+column is TEXT or INTEGER. So `JOB_FIELD_TYPES` declares them, and that declaration is reconciled
+against the derived key set **in both directions**, the `privacyReconciliation.test.js` pattern:
+
+- a `mapJobRow` field with no declared type → **fail** (it would ship untyped)
+- a declared type with no `mapJobRow` field → **fail** (the contract would promise a dead field)
+
+Enums are **imported** from `shared/jobFilterOptions.js` and `shared/applyOutcomeGroups.js`, never
+restated — a third copy of the tier list is precisely the bug this task exists to prevent. The
+apply-status vocabulary is derived from the outcome *partition*, so a status added without being
+filed into a group cannot reach the contract.
+
+---
+
+## 3. The contract test (requirement 4) — VERIFIED BY BREAKING IT
+
+The task asked that the test fail when a whitelisted field is removed from `mapJobRow`. It was
+removed and the test was run.
+
+`automationTier` deleted from `mapJobRow` → 37 fields became 36 → **2 of 21 tests failed**:
+
+```
+✖ REMOVING A FIELD FROM mapJobRow BREAKS THE BUILD — the join, in both directions
+  AssertionError: The contract declares field(s) that mapJobRow NO LONGER RETURNS. A mobile
+  client decoding this contract expects them, and will get undefined. Either restore the field
+  or bump the contract's MAJOR version and remove it here:
+    automationTier
+
+✖ the committed contract is not stale — regenerating changes nothing
+  AssertionError: contract/mobile-api.v1.json is STALE. The source of truth changed and the
+  contract was not regenerated. The two mobile repositories consume this file, so shipping it
+  stale is how they break silently.
+  Run: node scripts/generateMobileContract.mjs
+```
+
+The field was restored (`git checkout`), 37 fields confirmed, 21/21 green.
+
+**Note which test did *not* fail, because it is the design working.** "THE WHITELIST IS THE
+CONTRACT" compares derived-against-derived and always agrees — both sides move together. The
+catch comes from the *derived-against-declared* join. That is why the declared half exists.
+
+Generation is deterministic — asserted, and verified across separate processes. There is no
+timestamp, git sha or hostname in the output: a "generated at" line would make every regeneration a
+diff, which is how a drift check gets disabled for being noisy.
+
+---
+
+## 4. The two open auth decisions — RESOLVED SERVER-SIDE (requirement 6)
+
+### 6a. Sliding renewal — **implemented**
+
+Until now `expires_at` was set once at issue and never moved, so the 7-day *idle* window was
+really a **hard** window. A native app — which, unlike a browser, has no rolling `connect.sid`
+cookie to fall back on — was signed out every seventh day no matter how much it was used.
+
+**Decision: sliding renewal with an absolute cap.** Two windows, answering different questions:
+
+| | | |
+|---|---|---|
+| `AUTH_CONTEXT_IDLE_SECONDS` | 7 days | how long a token survives **unused** — unchanged |
+| `AUTH_CONTEXT_ABSOLUTE_SECONDS` | 90 days | how long it can live **at all**, however active |
+
+**Why not a refresh endpoint.** A refresh token is a *second credential kind* with its own
+rotation, replay and revocation story, and a second thing all four clients must implement
+correctly. Sliding renewal gets the same result by moving a column `bindAuthContext` **already
+writes on every request** (`last_seen_at`) — no new endpoint, no new token kind, nothing for a
+client to do, and the extension and browser benefit too.
+
+The clamp is the safety property: without it "active" means "immortal", and a leaked token in the
+hands of anything that polls would never expire. The write is guarded by `slidTo > row.expires_at`
+so renewal only ever moves the deadline **forward** — an unguarded `Math.min` could return a value
+*behind* the stored expiry and silently shorten a live session, which would be a worse bug than the
+one being fixed.
+
+Also removed: the bare `7 * 24 * 60 * 60` literal in `issueAuthContext`. A second copy is how the
+idle window and the renewal window come to disagree — the shape of the three hardcoded tab lists.
+
+### 6b. Session binding — **mobile uses the `sessionLess` path**
+
+`POST /api/auth/login` issues a token storing `session_sid = req.sessionID`. For a cookie-less
+caller that sid is a throwaway the client will never present again, so the binding is meaningless —
+and *worse* than meaningless, because `revokeBrowserAuthContexts()` revokes every token sharing a
+sid. A phone's credential would be filed under a session nobody can sign out of or audit. Same
+class of defect as a row written under the wrong `domain_profile_id`: self-consistent on both
+sides, joined to the wrong thing.
+
+**Added `GET /api/auth/mobile-token`** (`sessionLess: true`, `user_agent: 'resume-master-mobile'`)
+and **`POST /api/auth/revoke-mobile-token`**. Mobile signs in, exchanges, discards the login token —
+exactly the extension's flow.
+
+**Why a second endpoint rather than reusing the extension's.** The revoke keys on `user_agent`, so
+sharing would make "sign out my phone" also kill the extension. Two credentials a user manages
+separately must be separately revocable — **verified in the harness in both directions.**
+
+The two handlers are deliberately near-identical rather than folded into a helper:
+`test/authCredentialLifecycle.test.js` asserts the extension's guarantees as source strings *inside
+its route block*, and hiding them behind a shared helper would weaken an existing guard to save
+four lines. Both new routes were added to `test/authRouteGuardManifest.test.js`, which fails on any
+unclassified route.
+
+---
+
+## 5. Real-run verification (116 checks, all passing)
+
+`scripts/aj1MobileBearer.mjs` boots the real `server.js` against a throwaway `RM_DATA_DIR`.
+
+**It sends no cookie, ever.** `scripts/ah1SessionIdentity.mjs` drives a *browser* — a cookie jar
+**plus** a token — so a token-only regression would be invisible to it: the cookie would answer the
+request and the assertion would still pass. Here there is no cookie jar to send one from, and a
+check proves the omission is real by asserting an uncredentialed request is anonymous. **Every 200
+is earned by the bearer token alone**, which is all a native app will have.
+
+| Section | Result |
+|---|---|
+| 1. The mobile credential | Minted `sessionLess` (`session_sid` **NULL** confirmed in the DB), hashed at rest, distinct from the login token. A login-issued token confirmed **session-bound** — the reason mobile must not keep it. |
+| 2. Every contract endpoint on bearer | **29/29 reached** (3 skipped by name with a stated reason). A real `GET /api/jobs/by-id` response carries **every required field of the derived Job shape and no undocumented field.** |
+| 3. Cross-user denial | **19/19** user-scoped endpoints refuse a cross-user bearer (403/404). No content leaked; alice's rows survived; alice still reaches her own run. |
+| 4. Admin | **16/16** admin routes refuse a non-admin bearer. The admin *does* reach one — the 403s are about role, not a dead mount. |
+| 5. Sliding renewal | Six-day-old token still authenticates; `expires_at` moved **forward by 518400s**. An 89-day-old token renews to land **exactly on the cap**, 6 days short of the idle window — proof the clamp bound it. Past the cap: extends nothing, and never moves backwards. |
+| 6. Revocation independence | Revoking the extension leaves the phone signed in; revoking the phone leaves the extension signed in. |
+| 7. Retirements | All 6 answer **410** to a bearer client, each with prose a developer can act on. |
+
+**AH1's cross-user guarantees hold identically on the bearer path — measured, not assumed**, which
+is what the task asked for. Registered in `scripts/harnessBaseline.json` at `pass: 116`, so a
+truncated future run fails.
+
+### 5.1 The declared half was wrong ELEVEN TIMES, and that is the most useful result here
+
+The `Job` shape is **derived**, so it cannot be wrong. The response *envelopes* are **declared** —
+they are built inline in each handler, with no chokepoint to execute — and a declaration has
+nothing keeping it honest unless something compares it to a real body.
+
+I had written in `mobileSchemas.js` that the harness "asserts the top-level keys of what comes
+back." **It did not. I had claimed a check I had not built.** Building it found **eleven** wrong
+declarations in my own first draft:
+
+| Endpoint | I declared | It actually returns |
+|---|---|---|
+| `GET /api/domain-profiles` | `{ profiles: [...] }` | **a bare array** |
+| `GET /api/jobs/facets` | `{ facets: {...} }` | flat dimensions + `salaryRange`, `total` |
+| `GET /api/apply/status/{jobId}` | `{ applied, status }` | `{ status, application }` |
+| `POST /api/apply/approve` | `{ ok, runId, approved, queued }` | `{ ok, approved, skipped, run }` |
+| `POST /api/domain-profiles/{id}/activate` | `{ ok }` | the now-active profile row |
+| `GET /api/apply/runs` | `{ runs }` | + `review`, `gated`, `inFlight`, `submitted`, `stopped`, `statusCounts` |
+| `GET /api/apply/runs/{runId}` | `{ run, jobs }` | + `logs` |
+| `GET /api/apply/run-jobs/{id}/review` | nested under `runJob` | **flat**, 13 top-level keys |
+| `POST /api/apply/answers` | `{ ok, saved: number, retried }` | `saved` is a **string[]**, + `savedOverrides`, `unblocked` |
+| `GET /api/profile` | 38 columns | + 11 more (`id`, the split-name columns, `onboarded`, …) |
+| `GET /api/apply/history` | `{ history, outcome }` | requires `date`; returns **two different shapes** |
+
+`GET /api/domain-profiles` is the one to dwell on. A mobile client reading `response.profiles`
+against a bare array gets `undefined`, renders an empty list, and tells a user **who has four job
+profiles** that they have none. It would have looked like a data-loss bug on the phone and been
+debugged on the wrong side of the boundary for a day.
+
+**Direction matters, and the check is deliberately one-directional.** It asserts *real → declared*:
+every key the server actually sent must be documented. The reverse cannot be asserted here, because
+several fields are legitimately conditional — `curation` only when ranking demoted something,
+`reason` only on an empty board, `group`/`jobs` only when history was asked for a slice. Requiring
+them would fail on correct responses, and a check that cries wolf gets deleted. The direction that
+*can* be checked without false positives is the direction all eleven defects were in.
+
+**What this check does NOT cover, stated because a count alone would imply it did.** 22 of the 27
+JSON envelopes were verified against a live body. **Five were not**, and the harness names them
+rather than reporting only the 22:
+
+```
+NOTE  5 envelope(s) NOT shape-verified (no success body in this run):
+      PATCH /api/jobs/{id}/visited (404), POST /api/apply/runs (409),
+      POST /api/apply/approve (409), POST /api/apply/reject (409),
+      POST /api/apply/run-jobs/{runJobId}/abort (409)
+```
+
+They are the **write** paths, and each refuses for a correct reason this harness cannot remove
+cheaply: `runs` hits `startRun`'s prerequisite gate because a throwaway user has no integrations
+configured; `approve`/`reject`/`abort` have nothing in `held_review`, because reaching that state
+needs a real browser driving a real form. Seeding around those would mean asserting against a world
+that does not match production setup — worse than a stated gap. Their shapes were read directly off
+the handlers' `res.json()` calls, which is good evidence and is **not** the same as a live check.
+
+The last table row was caught differently, and is worth separating: the sweep reported `status=400` for
+`/api/apply/history`, which **passed the "not 401" bar while proving nothing had been exercised.**
+The harness now sends valid parameters for every endpoint that requires them and asserts **200**, so
+"reached" cannot again mean "rejected before doing any work". The contract also gained
+`GET /api/apply/history/months/{month}`, which a date picker needs.
+
+`HistoryRunJob` uses `extends: "RunJob"` and the generator emits `allOf` rather than restating
+RunJob's twenty fields — a second copy of a published shape is the thing this whole task is against.
+
+### 5.2 And two harness bugs, both mine, both instructive
+
+1. **Sliding renewal reported as broken when it worked.** The harness picked alice's mobile token
+   row by `user_agent`, but section 2 sweeps *every* contract endpoint — including
+   `GET /api/auth/mobile-token` — so alice legitimately held two. It aged one token and renewed a
+   different one. Now addressed by the SHA-256 of the specific token.
+2. **A good tombstone reported as unexplained.** The check read `error || message`, which
+   short-circuits on `SESSION_RETIRED`'s `error: "gone"` — a short machine code, with the sentence
+   in `message`. Both conventions are live in this API, so it now takes the longer of the two.
+   `RETIRED_ENDPOINTS` was corrected to record the real body shape.
+
+---
+
+## 6. Retirements a new client must not call (requirement 5)
+
+All six confirmed in source **and probed live**. Published as `x-retired` in the contract, because
+a greenfield client written from older documentation is exactly the client that will call them —
+and this repository has form: `docs/mobile-linkedin-import.md` is written in the present indicative
+about a mobile feature that has never existed.
+
+| Endpoint | Replacement |
+|---|---|
+| `POST /api/scrape` | `GET /api/jobs` |
+| `ALL /api/extension/save-job` | `POST /api/import/job` |
+| `ALL /api/imported-jobs/*` | `GET /api/jobs?starred=true` |
+| `POST /api/apply/session/save` | — (gated handoff replaced it) |
+| `GET /api/apply/session/:domain` | — |
+| `PATCH /api/settings/apply-mode` | — (plans control tool access) |
+
+410 rather than 404 deliberately: 404 reads as "wrong URL, check your typing"; 410 reads as "this
+is gone on purpose", which is the true statement. A client parsing a 410 must read **both**
+`error` and `message`.
+
+---
+
+## 7. Automation tier is in the job shape (requirement 7)
+
+`automationTier` is on every job, and `x-mobile-tier-gating` publishes the verdict per tier so the
+two mobile repos do not each invent their own answer:
+
+| Tier | Completable on mobile | Why |
+|---|---|---|
+| `direct` | ✅ | Single-page ATS apply. No account, no handoff. |
+| `guest` | ✅ | A guest path exists; the run may still hold for review. |
+| `account` | ❌ | Holds at `login_required`; a phone cannot resolve it. |
+| `gated` | ❌ | **Unresolvable from a phone.** |
+| `unknown` | ❌ | A promise in neither direction. |
+
+**A gated job cannot be completed on a phone, and there is no design that fixes it.** The gated
+handoff's security property *is* the desktop browser holding the portal session, borrowed for one
+gesture under the extension's `activeTab`. A phone has no extension, so a `held_gate` row queued
+from mobile is unresolvable. The only honest behaviours are to show it as desktop-only or to
+exclude it. Agrees with `docs/SWIPE_FEED_DESIGN.md` §2.5.
+
+The gating table is keyed off the tier vocabulary, so **a sixth tier added to
+`shared/jobFilterOptions.js` with no mobile verdict fails the contract test** rather than defaulting
+to "completable".
+
+`automationTier: null` means the row predates migration 078 and has not been recomputed. It must
+read exactly as `unknown` — never as `direct`.
+
+---
+
+## 8. What mobile needs that this API does not expose (requirement 8)
+
+Reported, not built — each is a server change with its own design. Published **inside** the contract
+as `x-mobile-gaps`, because a gap recorded only in this file is invisible to teams who consume
+`contract/` and may never read `docs/`.
+
+### 8.1 Pagination — the blocking one
+
+**`GET /api/jobs` pages by offset (`page`/`pageSize`). A swipe feed needs a cursor.**
+
+Offset pagination assumes a stable result set. **A swipe feed mutates the set it is paging
+through**: every dislike sets `disliked = 1`, and the default board *excludes* disliked rows. So
+each swipe shortens the list behind the cursor, every subsequent row shifts up by one, and **page 2
+skips as many jobs as the user swiped away on page 1.** The user never sees them and nothing
+reports the loss. A desktop board never hits this because it does not mutate membership while
+paging.
+
+*Workaround:* re-request `page=1` with a large `pageSize` and de-duplicate by `id` client-side.
+Correct but wasteful — a workaround, not a fix.
+*Fix:* a keyset cursor over the existing `ORDER BY`, opaque to the client.
+
+### 8.2 Review-inbox paging — minor
+
+`GET /api/apply/pending` caps at 100, `GET /api/apply/questions` at 50, neither pageable and
+neither reporting truncation. Generous on desktop; a phone user reviewing in short bursts
+accumulates a backlog past the cap with no indication it exists.
+
+### 8.3 "Does a resume already exist for this job" — structurally absent
+
+`mapJobRow` maps a *job*; resume currency is a per-`(user, job, tool, profile)` question needing a
+join to `resumes` and `profile_base_resumes`. A swipe card cannot show "already generated" without
+a second request per card. See `SWIPE_FEED_DESIGN.md` Finding 6.
+
+### 8.4 No trustworthy ATS badge — and a latent defect confirmed
+
+`sourcePlatform` *looks* like the ATS badge and is not. `mapJobRow` reads `j.sourcePlatform`
+(camelCase) while the column is `source_platform`, so for any DB row it resolves to `j.source` —
+**where the job was found, not what the candidate will face.** It looks right only because both
+current scrapers are named after the ATSes they scrape; add one aggregator source and the badge
+lies.
+
+This is documented **in the contract itself**, on the field, so a mobile developer reading the
+schema is told before building on it. `automationTier` *is* trustworthy — it is derived from
+`detectPlatformFromUrl(apply_url)`.
+
+### 8.5 No push transport
+
+Realtime is SSE at `GET /api/sync/events`, which requires a foregrounded process. A backgrounded
+iOS or Android app cannot hold one, so "your application needs approval" cannot reach a user who is
+not looking at the app — precisely when it matters. APNs/FCM registration plus a server-side sender
+is a real project.
+
+---
+
+## 9. One more finding: the swipe endpoint
+
+**`PATCH /api/jobs/{id}/starred` and `/disliked` TOGGLE** — they read the current value and write
+its opposite. A swipe is an *absolute* gesture ("save this"), and on a phone network a retried or
+double-sent toggle **silently undoes the user's swipe and returns 200.**
+
+`PATCH /api/jobs/interact` sets the value you send, so it is idempotent and safe to retry. **The
+toggle routes are deliberately absent from this contract**, and the note on `/api/jobs/interact`
+says why. `Idempotency-Key` is documented on all three write endpoints that support it.
+
+---
+
+## 10. Consumption strategy (requirement 3)
+
+**Recommendation: copy the files in, and assert the checksum.** Full reasoning in
+`contract/README.md`; the short version:
+
+- **A git submodule** would point at this whole server repository — large, private, carrying deploy
+  config a mobile CI job should not clone. Making it work means first splitting the contract into
+  its own repository: real ongoing infrastructure, for a version pin a checksum already gives.
+- **An npm package** only serves a JavaScript consumer. Per `MOBILE_STATE.md` §8 the platform
+  choice is unmade and Capacitor is close to ruled out (the web client is a desktop-shaped tiled
+  dock and is not responsive), so the likely outcome is **native Swift and Kotlin** — neither
+  consumes npm.
+- **Copy + checksum** is language-agnostic, needs no network at build time, and the pin is
+  reviewable in a diff. `mobile-api.v1.json` drives `openapi-generator` for both platforms.
+
+Checksums are computed over **LF-normalised** content, deliberately: this repo has
+`core.autocrlf=true` and no `.gitattributes`, so a raw-byte hash would fail on a fresh Windows
+checkout of byte-identical content — and a test that fails for the wrong reason gets deleted.
+Copy-paste checksum tests for XCTest and JUnit are in `contract/README.md`.
+
+Version `1.0.0`. The versioning table — including why *removing* a field is deliberately awkward —
+is in `contract/README.md`.
+
+---
+
+## 11. Scope held
+
+No mobile screens were built. The web client, the extension and every existing endpoint's behaviour
+are unchanged except for the two auth decisions, which are additive: two new routes, and a renewal
+that only ever extends an expiry.
+
+**Not done, and flagged rather than silently skipped:** the five gaps in §8 are reported, not
+implemented. Cursor pagination in particular is a real server change with its own design, and
+building it inside a contract task would be exactly the unbudgeted scope creep `MOBILE_STATE.md`
+warned about. Whether to do it before the mobile feed is built is the owner's call — but it should
+be made *before*, not after, because the workaround shapes the client's caching layer.

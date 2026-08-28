@@ -82,6 +82,10 @@ const ADMIN = new Set([
 const AUTHENTICATED = new Set([
   "GET /api/auth/extension-token",
   "POST /api/auth/revoke-extension-token",
+  // AJ1 6b. Exchanges a session-bound login token for a sessionLess one, so it needs the same
+  // guard as the extension's: you must already be authenticated to mint a durable credential.
+  "GET /api/auth/mobile-token",
+  "POST /api/auth/revoke-mobile-token",
   "GET /api/auth/active-profile",
   "PATCH /api/auth/complete-profile",
   "GET /api/sync/events",

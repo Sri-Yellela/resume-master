@@ -1,0 +1,4513 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Resume Master — Mobile API",
+    "version": "1.0.0",
+    "description": "The contract between this repository and the two mobile repositories (iOS, Android), which are native clients over this JSON API and live outside this tree.\n\nGENERATED — DO NOT HAND-EDIT. Regenerate with `node scripts/generateMobileContract.mjs`. The Job schema is produced by EXECUTING services/jobs/mapJobRow.js, so it cannot disagree with what the server actually emits. test/mobileApiContract.test.js fails the build if this file and the source ever disagree.\n\nOnly the endpoints a swipe feed and a review flow need are published. Anything absent is absent on purpose and is not a promise — see x-retired for what a greenfield client must not call, and x-mobile-gaps for what mobile needs that this API does not yet expose."
+  },
+  "servers": [
+    {
+      "url": "https://resumemaster.one",
+      "description": "Production"
+    }
+  ],
+  "tags": [
+    {
+      "name": "auth",
+      "description": "Sign-in and the durable mobile credential."
+    },
+    {
+      "name": "feed",
+      "description": "The profile-scoped job board a swipe feed pages through."
+    },
+    {
+      "name": "swipe",
+      "description": "Absolute-valued save/dislike. Idempotent by design."
+    },
+    {
+      "name": "apply",
+      "description": "Queue, preview, approve. Nothing is sent unpreviewed."
+    },
+    {
+      "name": "answers",
+      "description": "The questions blocking held applications."
+    },
+    {
+      "name": "profile",
+      "description": "Autofill identity, and the domain profile scoping the board."
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/apply/answers": {
+      "post": {
+        "operationId": "postApplyAnswers",
+        "tags": [
+          "answers"
+        ],
+        "summary": "Save answers, optionally retrying the applications they unblock.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "Answers are keyed by the EXACT question text captured from the form. `overrides` is keyed by company for per-employer answers. A retry re-enters the approval flow — answering unblocks the job, it does not authorise the submission.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Strongly recommended on mobile. A retry over a dropped connection otherwise repeats the write."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "answers": {
+                    "type": "object"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "overrides": {
+                    "type": "object"
+                  },
+                  "retryJobIds": {
+                    "type": "array",
+                    "items": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/approve": {
+      "post": {
+        "operationId": "postApplyApprove",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Approve previewed applications and submit them. THE moment of submission.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "Approved rows are SUPERSEDED rather than mutated, so the preview stays in the audit trail and a NEW runJobId carries the submission — do not expect the id you sent to become 'submitted'. 409 no_approvable_jobs means the rows are no longer awaiting a decision (already approved, rejected, or expired), which on a phone usually means another device got there first: re-fetch /api/apply/pending rather than showing an error.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Strongly recommended on mobile. A retry over a dropped connection otherwise repeats the write."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runJobIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorConflict"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/history": {
+      "get": {
+        "operationId": "getApplyHistory",
+        "tags": [
+          "apply"
+        ],
+        "summary": "One DAY of application history, partitioned into completed / pending / aborted.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "`date=YYYY-MM-DD` is REQUIRED — without it this is a 400 (`bad_date`), not a default to today. Send `tzOffset` (minutes) or the day is bucketed in UTC and a late-evening application lands on the wrong date for the user. THE RESPONSE IS TWO DIFFERENT SHAPES: with `group`, rows come back under `jobs`; without it, under `completed` / `pending` / `aborted`. A client must branch on which it asked for. `total` and `counts` are always the WHOLE DAY, never the asked-for slice — so an empty completed tab on a busy day does not claim the day was empty. An unrecognised `group` is a 400 rather than a silent fallback to all three. `abortable` on each row is decided by the SERVER: do not re-derive it, or the button's presence and the endpoint's guard will disagree.",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "aborted",
+                "completed",
+                "pending"
+              ]
+            }
+          },
+          {
+            "name": "tzOffset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyHistoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/history/months/{month}": {
+      "get": {
+        "operationId": "getApplyHistoryMonthsMonth",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Which dates in a month have activity, for a calendar marker.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "`month` is YYYY-MM; anything else is a 400 (`bad_month`). A count-per-day aggregate, not rows — cheap enough to call when a date picker opens.",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tzOffset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyHistoryMonthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/pending": {
+      "get": {
+        "operationId": "getApplyPending",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Applications previewed and awaiting the user's approval. The review inbox.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "Capped at 100 rows, newest first, with NO pagination parameter. See x-mobile-gaps.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/questions": {
+      "get": {
+        "operationId": "getApplyQuestions",
+        "tags": [
+          "answers"
+        ],
+        "summary": "Questions blocking held applications, de-duplicated across employers.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "`answered` means answered FOR EVERY employer still blocked on it — a template answered for one company does not unblock the same question at another, so do not treat it as a global flag. `needsOwnWords: true` marks a question the system will NEVER auto-answer however full the store gets; `draft` is a starting point to be edited, not an answer to submit. `eligibility: true` marks an attestation to an employer — present it as one.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/readiness": {
+      "get": {
+        "operationId": "getApplyReadiness",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Whether auto-apply can run at all right now.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "503 is a STATE, not a failure. Render it; do not retry it in a loop.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Auto-apply cannot run right now. Not an error in the client — a state to render.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnavailable"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/reject": {
+      "post": {
+        "operationId": "postApplyReject",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Reject previewed applications. Nothing is sent.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runJobIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RejectResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorConflict"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/run-jobs/{runJobId}/abort": {
+      "post": {
+        "operationId": "postApplyRunJobsRunJobIdAbort",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Cancel an in-flight or held application.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runJobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/run-jobs/{runJobId}/resume": {
+      "get": {
+        "operationId": "getApplyRunJobsRunJobIdResume",
+        "tags": [
+          "apply"
+        ],
+        "summary": "The generated resume PDF for this application.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "application/pdf, not JSON. Render it in a viewer; editing is not a mobile flow.",
+        "parameters": [
+          {
+            "name": "runJobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The generated resume.",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/run-jobs/{runJobId}/review": {
+      "get": {
+        "operationId": "getApplyRunJobsRunJobIdReview",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Everything shown before approving: answers, provenance, blanks, ATS score.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runJobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunJobReviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/run-jobs/{runJobId}/screenshot": {
+      "get": {
+        "operationId": "getApplyRunJobsRunJobIdScreenshot",
+        "tags": [
+          "apply"
+        ],
+        "summary": "The screenshot of the filled form, as evidence of what was about to be sent.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runJobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The filled-form screenshot, as evidence.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/runs": {
+      "post": {
+        "operationId": "postApplyRuns",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Queue jobs for an apply run. Max 25 per call.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "202 MEANS QUEUED, NOT SUBMITTED, and this is the single most dangerous thing for a mobile client to get wrong: showing 'Applied' here claims something that has not happened. By default the run PREVIEWS and parks in held_review for approval; nothing reaches an employer until POST /api/apply/approve. `queued` is the ids ACCEPTED — it is shorter than `jobIds` when duplicates were dropped, so report queued.length, never jobIds.length. Send Idempotency-Key: a retry on a flaky connection otherwise queues the run twice. approvalMode:'approved' is REJECTED with 400 — it is reserved for the approve endpoint, so no client can submit without previewing. Gate on automationTier before queueing at all (x-mobile-tier-gating).",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Strongly recommended on mobile. A retry over a dropped connection otherwise repeats the write."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "approvalMode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "jobIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "tool": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunQueuedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorConflict"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getApplyRuns",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Recent runs, newest first. Capped at 20.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/runs/{runId}": {
+      "get": {
+        "operationId": "getApplyRunsRunId",
+        "tags": [
+          "apply"
+        ],
+        "summary": "One run and its jobs.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/apply/status/{jobId}": {
+      "get": {
+        "operationId": "getApplyStatusJobId",
+        "tags": [
+          "apply"
+        ],
+        "summary": "Have I applied to this job? Answers about the CALLER.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "Answers 200 for any job id, including one you do not own — it is a question about you, not a request for an object, so it discloses nothing and a 404 would be the wrong answer.",
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/active-profile": {
+      "get": {
+        "operationId": "getAuthActiveProfile",
+        "tags": [
+          "auth"
+        ],
+        "summary": "The active domain profile: the scope EVERY board query is answered in.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "404 here is a PRECONDITION FAILURE, not an error to swallow. The board is scoped per domain profile, and with none active GET /api/jobs answers an empty list. Render 'create a job profile', not 'no jobs found'.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "postAuthLogin",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign in with username and password.",
+        "security": [],
+        "x-mobile-notes": "The token in `authContext` is SESSION-BOUND (session_sid = the throwaway sid of this request) and is NOT the credential a mobile app should keep. Exchange it immediately at GET /api/auth/mobile-token and discard it. Storing this one means your token is filed under a browser session that does not exist, and any browser sign-out sweeping that sid revokes it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "username": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "postAuthLogout",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign out. Revokes the presented token.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "getAuthMe",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Who the caller is. Answers 200 with authenticated:false rather than 401.",
+        "security": [],
+        "x-mobile-notes": "The correct cold-start call. It does not 401, so it distinguishes 'token expired' from 'network down' — which a 401-throwing endpoint cannot.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/mobile-token": {
+      "get": {
+        "operationId": "getAuthMobileToken",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Mint the durable, cookie-less mobile credential. THE mobile auth step.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "sessionLess: the returned token has session_sid NULL, so revokeBrowserAuthContexts never sweeps it and signing out of a browser cannot silently kill the phone. Its idle window slides on every authenticated request (idleSeconds) up to a hard ceiling from issue (absoluteSeconds), so an app in regular use is never signed out on a timer. Both numbers are returned rather than documented, so a client shows a real expiry instead of a hardcoded guess.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MobileTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "operationId": "postAuthRegister",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create an account. Returns the same authContext as login.",
+        "security": [],
+        "x-mobile-notes": "Same exchange requirement as login.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "profile": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "username": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/revoke-mobile-token": {
+      "post": {
+        "operationId": "postAuthRevokeMobileToken",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Revoke every mobile token for this user. 'Sign out all my devices'.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "Revokes MOBILE tokens only. The extension and the browser are untouched — that independence is why this is a separate endpoint from revoke-extension-token.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/domain-profiles": {
+      "get": {
+        "operationId": "getDomainProfiles",
+        "tags": [
+          "profile"
+        ],
+        "summary": "The user's domain profiles. Exactly one is active and scopes the board.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainProfileListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/domain-profiles/{id}/activate": {
+      "post": {
+        "operationId": "postDomainProfilesIdActivate",
+        "tags": [
+          "profile"
+        ],
+        "summary": "Switch the active profile. Changes what the whole board returns.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "Returns the NOW-ACTIVE profile row, not an { ok } acknowledgement. Discard every cached feed page after this: board rows, starred flags and visited flags are all per domain_profile_id, so a page fetched under the old profile is not merely stale — it is about a different scope.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "operationId": "getJobs",
+        "tags": [
+          "feed"
+        ],
+        "summary": "The board: the paged, profile-scoped, filtered job feed. The swipe feed's source.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "OFFSET PAGINATION (page/pageSize), which is not what a swipe feed wants — see x-mobile-gaps.pagination in the generated document. Send include_fields to drop `description` from feed rows; it is the largest field by far and a card never shows it. `reason: 'cache_empty'` on an empty body means the pool is empty, NOT that the filters matched nothing — a client must not render 'no results, try widening' for it.",
+        "parameters": [
+          {
+            "name": "applied",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "employment_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "full-time",
+                  "contract",
+                  "internship",
+                  "part-time"
+                ]
+              }
+            }
+          },
+          {
+            "name": "experience_levels",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "intern",
+                  "entry",
+                  "mid",
+                  "senior",
+                  "lead",
+                  "executive"
+                ]
+              }
+            }
+          },
+          {
+            "name": "include_facets",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dateDesc",
+                "dateAsc",
+                "compHigh",
+                "compLow",
+                "yoeLow",
+                "yoeHigh",
+                "atsScore"
+              ]
+            }
+          },
+          {
+            "name": "starred",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "tiers_exclude",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "direct",
+                  "guest",
+                  "account",
+                  "gated",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          {
+            "name": "tiers_include",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "direct",
+                  "guest",
+                  "account",
+                  "gated",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          {
+            "name": "visited",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "work_models",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "remote",
+                  "hybrid",
+                  "onsite"
+                ]
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobFeedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "GET /api/jobs validates enumerated filter values BEFORE querying, so an unknown value is a 400 rather than a silently empty board. The body still carries jobs:[] and total:0 so a client that renders the list unconditionally does not throw on top of the error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorFeedBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "ServerError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/by-id/{jobId}": {
+      "get": {
+        "operationId": "getJobsByIdJobId",
+        "tags": [
+          "feed"
+        ],
+        "summary": "One posting in full, with this caller's own starred/visited/disliked flags.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/facets": {
+      "get": {
+        "operationId": "getJobsFacets",
+        "tags": [
+          "feed"
+        ],
+        "summary": "Facet counts over the same filtered set, for filter-sheet badges.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FacetsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/interact": {
+      "patch": {
+        "operationId": "patchJobsInteract",
+        "tags": [
+          "swipe"
+        ],
+        "summary": "Set starred / disliked to an ABSOLUTE value. The endpoint a swipe must use.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "USE THIS, NOT PATCH /api/jobs/{id}/starred. The per-id routes TOGGLE: they read the current value and write its opposite. A swipe is an absolute gesture ('save this'), and on a phone network a retried or double-sent toggle silently UNDOES the user's swipe with a 200. This endpoint sets the value you send, so it is idempotent and safe to retry — which is why the toggle routes are not in this contract at all.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "disliked": {
+                    "type": "boolean"
+                  },
+                  "jobId": {
+                    "type": "string"
+                  },
+                  "starred": {
+                    "type": "boolean"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{id}/visited": {
+      "patch": {
+        "operationId": "patchJobsIdVisited",
+        "tags": [
+          "swipe"
+        ],
+        "summary": "Mark a posting as seen.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/profile": {
+      "get": {
+        "operationId": "getProfile",
+        "tags": [
+          "profile"
+        ],
+        "summary": "The autofill profile: the identity and eligibility answers used to fill forms.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "snake_case, unlike the job shape — it is the user_profile row returned directly. This is a genuine inconsistency in the API and it is documented rather than papered over, because a client that assumes camelCase here silently sends every field as null.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "postProfile",
+        "tags": [
+          "profile"
+        ],
+        "summary": "Write the autofill profile.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "authContextHeader": []
+          }
+        ],
+        "x-mobile-notes": "ABSENT IS NOT EMPTY, but ONLY for the two answer maps. custom_answers and custom_answer_overrides are PRESERVED when omitted; EVERY OTHER COLUMN IS OVERWRITTEN UNCONDITIONALLY, so a partial POST wipes the fields it left out. Read, merge, then write the whole object — there is no PATCH.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserProfileWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorUnauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The mobile credential, from GET /api/auth/mobile-token. Accepted on every authenticated route: bindAuthContext validates it before requireAuth, which admits either a Passport cookie session OR a valid token. A mobile client needs no cookie jar."
+      },
+      "authContextHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-RM-Auth-Context",
+        "description": "The same token by a different transport. Equivalent; use whichever is easier."
+      }
+    },
+    "schemas": {
+      "ActiveProfileResponse": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "profileId": {
+            "type": "number"
+          },
+          "targetRole": {
+            "type": "string"
+          }
+        },
+        "description": "The scope every board query is answered in. 404 means none is active."
+      },
+      "AnswersResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "retried": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Present only when retryJobIds was sent. Carries the started run, or a report of which requested jobs were not queued because they are still blocked."
+          },
+          "saved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "savedOverrides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedOverride"
+            }
+          },
+          "unblocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The job ids these answers actually unblocked. Answering does NOT authorise a submission — a retry re-enters the approval flow. Present as 'ready to try again', never as 'applied'."
+          }
+        },
+        "description": "`saved` is the list of QUESTION TEXTS stored, not a count."
+      },
+      "ApplyHistoryMonthResponse": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "object",
+            "description": "Keyed by YYYY-MM-DD, valued by the count for that day. Absent keys are zero."
+          },
+          "month": {
+            "type": "string"
+          }
+        },
+        "description": "Which days in the month have activity. A count-per-day aggregate, not rows."
+      },
+      "ApplyHistoryResponse": {
+        "type": "object",
+        "properties": {
+          "aborted": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HistoryRunJob"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "completed": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HistoryRunJob"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ApplyOutcomeCounts",
+            "description": "Also whole-day, and computed through the same partition the rows use, so a tab's number and that tab's contents cannot disagree."
+          },
+          "date": {
+            "type": "string"
+          },
+          "group": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "aborted",
+              "completed",
+              "pending",
+              null
+            ]
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HistoryRunJob"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "pending": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HistoryRunJob"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "total": {
+            "type": "number",
+            "description": "The WHOLE DAY's total, never the asked-for slice — so an empty completed tab on a busy day cannot claim the day itself was empty."
+          }
+        },
+        "description": "ONE DAY, in one of two shapes. Asked WITH `group`: rows arrive under `jobs` and `group` echoes what was asked. Asked WITHOUT: rows arrive under `completed` / `pending` / `aborted` and both `jobs` and `group` are absent. A client must branch on which request it made rather than probing for keys."
+      },
+      "ApplyOutcomeCounts": {
+        "type": "object",
+        "properties": {
+          "aborted": {
+            "type": "number"
+          },
+          "completed": {
+            "type": "number"
+          },
+          "pending": {
+            "type": "number"
+          }
+        },
+        "description": "Whole-day counts. Every run-job lands in exactly one of the three."
+      },
+      "ApplyStatusResponse": {
+        "type": "object",
+        "properties": {
+          "application": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The job_applications row, or null when the user has not applied."
+          },
+          "status": {
+            "type": "string",
+            "description": "'applied' or 'idle'. NOT a member of the apply-run status vocabulary — this is the user's own relationship to the posting, not a run's state."
+          }
+        },
+        "description": "About the CALLER, not about the job. Discloses nothing of another user's."
+      },
+      "ApproveResponse": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "The runJobIds actually approved — the ids you SENT, now superseded."
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunQueuedResponse",
+            "description": "The queued run, in the same shape POST /api/apply/runs returns. On a refusal (cap reached, kill switch) the refusal body is returned at ITS status with approved:[] instead."
+          },
+          "skipped": {
+            "type": "number",
+            "description": "How many of the ids you sent were not approvable (already decided, or expired). A non-zero value with ok:true is a partial success, not a failure: re-fetch /api/apply/pending rather than reporting an error."
+          }
+        },
+        "description": "202. Approval creates a NEW run carrying approval_mode='approved'; the ids you sent become 'superseded' and the submission lives on new runJobIds. The started run is NESTED under `run` — it is not flattened into this body."
+      },
+      "AuthLoginResponse": {
+        "type": "object",
+        "properties": {
+          "authContext": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          }
+        },
+        "description": "authContext is SESSION-BOUND. Exchange it at GET /api/auth/mobile-token."
+      },
+      "AuthMeResponse": {
+        "type": "object",
+        "properties": {
+          "authenticated": {
+            "type": "boolean"
+          },
+          "user": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicUser"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "Answers 200 in both cases. `user` is absent when authenticated is false."
+      },
+      "BinaryImage": {
+        "type": "string",
+        "format": "binary",
+        "description": "The filled-form screenshot, as evidence."
+      },
+      "BinaryPdf": {
+        "type": "string",
+        "format": "binary",
+        "description": "The generated resume."
+      },
+      "BlockingJob": {
+        "type": "object",
+        "properties": {
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "number"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Curation": {
+        "type": "object",
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "demoted": {
+            "type": "number"
+          },
+          "ranked": {
+            "type": "boolean"
+          },
+          "rankedKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "description": "A statement about ORDER, not about a withheld remainder. `demoted` rows ARE on the board, further down — a client must not render 'showing N of M', which was the old and untrue phrasing."
+      },
+      "DailyCap": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number"
+          },
+          "remaining": {
+            "type": "number"
+          },
+          "submittedLast24h": {
+            "type": "number"
+          }
+        },
+        "description": "The SUBMISSION budget."
+      },
+      "DomainProfile": {
+        "type": "object",
+        "properties": {
+          "base_resume_updated_at": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Absent (not null) when the profile has no base resume — it is a correlated subquery over a row that does not exist."
+          },
+          "created_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_base_resume": {
+            "type": "number",
+            "description": "0 or 1, computed by an EXISTS subquery. Both board prerequisites are 'a profile exists' AND 'it has a base resume': without the second, the board renders a correct job COUNT over an empty list."
+          },
+          "id": {
+            "type": "number"
+          },
+          "include_summary": {
+            "type": "boolean",
+            "description": "Sent as a real boolean, unlike its siblings, because the stored 0 is truthy once it has been through JSON and a `||`."
+          },
+          "is_active": {
+            "type": "number",
+            "description": "0 or 1, not a boolean — the raw SQLite column. Exactly one profile per user is 1."
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile_name": {
+            "type": "string"
+          },
+          "role_family": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "selected_keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selected_tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selected_verbs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "seniority": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_titles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parsed from JSON by the server, so it arrives as an array. An EMPTY array is why a board can report 'Showing 0 of 336' — it is not a filter fault."
+          },
+          "tracked_search": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The PARSED form of tracked_search_json. Both are sent; read this one and ignore the string, which is the raw column and is only present because the row is spread."
+          },
+          "tracked_search_json": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "user_id": {
+            "type": "number"
+          }
+        },
+        "description": "SNAKE_CASE — the handler spreads the whole domain_profiles row, so every column is listed here rather than a chosen subset. Listing a subset was tried and rejected: the contract would then be silent about keys the server really sends, and a strict decoder rejects an undeclared key."
+      },
+      "DomainProfileListResponse": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/DomainProfile"
+        },
+        "description": "A BARE ARRAY — there is no envelope and no `profiles` key. A client reading `response.profiles` gets undefined and renders an empty profile list, which presents as 'you have no job profile' to a user who has four."
+      },
+      "ErrorBadRequest": {
+        "type": "object",
+        "description": "",
+        "x-http-status": 400,
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "error": "jobIds array required"
+        }
+      },
+      "ErrorConflict": {
+        "type": "object",
+        "description": "",
+        "x-http-status": 409,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "error": "no_approvable_jobs",
+          "message": "None of those applications are awaiting approval."
+        }
+      },
+      "ErrorFeedBadRequest": {
+        "type": "object",
+        "description": "GET /api/jobs validates enumerated filter values BEFORE querying, so an unknown value is a 400 rather than a silently empty board. The body still carries jobs:[] and total:0 so a client that renders the list unconditionally does not throw on top of the error.",
+        "x-http-status": 400,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "example": {
+          "success": false,
+          "error": "Unknown value 'mid level' for experience_levels",
+          "jobs": [],
+          "total": 0
+        }
+      },
+      "ErrorForbidden": {
+        "type": "object",
+        "description": "Authenticated, but not permitted. Admin routes answer this to a non-admin; ownership failures answer 403 or 404 depending on the route.",
+        "x-http-status": 403,
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "error": "Forbidden."
+        }
+      },
+      "ErrorGone": {
+        "type": "object",
+        "description": "A RETIRED endpoint. See RETIRED_ENDPOINTS — a client written from stale documentation will hit these, and the body says what to call instead.",
+        "x-http-status": 410,
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorNotFound": {
+        "type": "object",
+        "description": "The object does not exist OR is not yours. The two are deliberately indistinguishable on user-scoped routes — telling a stranger that an id exists is itself a disclosure.",
+        "x-http-status": 404,
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "error": "Job not found"
+        }
+      },
+      "ErrorServerError": {
+        "type": "object",
+        "description": "",
+        "x-http-status": 500,
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorUnauthorized": {
+        "type": "object",
+        "description": "No valid cookie session and no valid bearer token. A mobile client must treat this as 'sign in again' — it is also what an expired or revoked token produces.",
+        "x-http-status": 401,
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "error": "Unauthorized."
+        }
+      },
+      "ErrorUnavailable": {
+        "type": "object",
+        "description": "Auto-apply cannot run right now. Not an error in the client — a state to render.",
+        "x-http-status": 503,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "example": {
+          "available": false,
+          "reason": "no_browser"
+        }
+      },
+      "FacetsResponse": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "object"
+          },
+          "employmentType": {
+            "type": "object"
+          },
+          "postedAge": {
+            "type": "object",
+            "description": "Bucketed '24h' / '3d' / '1w'."
+          },
+          "salaryRange": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalaryRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null when no row in the set stated a salary — which is NOT the same as a range of zero."
+          },
+          "total": {
+            "type": "number"
+          },
+          "workType": {
+            "type": "object"
+          }
+        },
+        "description": "Counts per dimension, FLAT — there is no `facets` wrapper. Each dimension is an object keyed by value and valued by count. Note this is a DIFFERENT shape from the optional `facets` block on GET /api/jobs?include_facets=, which is keyed by dimension and valued by an array of {value, count}. Two shapes for related data; do not share a parser."
+      },
+      "HistoryRunJob": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunJob"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "abortable": {
+                "type": "boolean",
+                "description": "Decided by the SERVER. Do not re-derive it: two copies of that rule is how a button appears for something the server will refuse."
+              },
+              "postingGone": {
+                "type": "boolean",
+                "description": "The posting was removed by the 7-day cleanup while the application survived. It is what moves a row that is PENDING by status into ABORTED in reality — there is no form left to open."
+              }
+            },
+            "description": "A RunJob plus the two fields only the dated history adds."
+          }
+        ],
+        "description": "A RunJob plus the two fields only the dated history adds."
+      },
+      "InteractResponse": {
+        "type": "object",
+        "properties": {
+          "disliked": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "starred": {
+            "type": "boolean"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "description": "Echoes the RESOLVED job id and the values now stored, so a client reconciles against what the server holds rather than against what it optimistically rendered."
+      },
+      "Job": {
+        "type": "object",
+        "description": "DERIVED FROM services/jobs/mapJobRow.js BY EXECUTING IT. Do not hand-edit: regenerate with `node scripts/generateMobileContract.mjs`. mapJobRow is a field whitelist and the only shape GET /api/jobs, GET /api/jobs/by-id and POST /api/import/job emit, which is what makes it the binding constraint on everything reaching a client.",
+        "properties": {
+          "applyUrl": {
+            "type": "string",
+            "description": "Apply destination. Falls back to url when no distinct apply link was captured.",
+            "format": "uri"
+          },
+          "automationTier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "direct",
+              "guest",
+              "account",
+              "gated",
+              "unknown",
+              null
+            ],
+            "description": "What the candidate will face at the apply destination, known at BROWSE time. null = the row predates migration 078 and has not been recomputed; read it exactly as 'unknown', never as 'direct'. THE MOBILE FEED MUST GATE ON THIS — see x-mobile-tier-gating.",
+            "x-empty-row-value": null
+          },
+          "bucketDomain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "bucketRole": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "bucketSeniority": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "company": {
+            "type": "string",
+            "description": "Employer name as posted."
+          },
+          "companyIconUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "x-empty-row-value": null
+          },
+          "contractType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "description": {
+            "type": "string",
+            "description": "Full posting body. Large — omit it from a feed request with include_fields."
+          },
+          "directApply": {
+            "type": "boolean",
+            "x-empty-row-value": false
+          },
+          "discoveredAt": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Unix seconds.",
+            "x-empty-row-value": null
+          },
+          "disliked": {
+            "type": "boolean",
+            "description": "Per (user, domain profile). Excluded from the default board.",
+            "x-empty-row-value": false
+          },
+          "experienceLevel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "intern",
+              "entry",
+              "mid",
+              "senior",
+              "lead",
+              "executive",
+              null
+            ],
+            "x-empty-row-value": null
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable job identifier. The value every other endpoint calls jobId."
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Whether the LISTING is live, not whether the row exists. Only the Saved tab can return false: an expired starred job is retired rather than deleted, so its owner is told it closed instead of being sent to apply for something that is gone.",
+            "x-empty-row-value": true
+          },
+          "isClearanceRequired": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "TRI-STATE. null = no signal yet.",
+            "x-empty-row-value": null
+          },
+          "isH1bSponsor": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "TRI-STATE. null = no signal yet. MUST render as absent, never as 'does not sponsor'.",
+            "x-empty-row-value": null
+          },
+          "location": {
+            "type": "string",
+            "description": "Free text, as posted. Not normalised, not geocoded."
+          },
+          "matchScore": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "postedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "As published by the source. Free text or ISO — not normalised.",
+            "x-empty-row-value": null
+          },
+          "remote": {
+            "type": "boolean",
+            "description": "Coerced with Boolean(); never null.",
+            "x-empty-row-value": false
+          },
+          "requiresWorkAuth": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "TRI-STATE. null = no signal yet.",
+            "x-empty-row-value": null
+          },
+          "salaryCurrency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO 4217 where stated. null means the posting gave no currency, NOT that it is USD.",
+            "x-empty-row-value": null
+          },
+          "salaryMax": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "salaryMin": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Always an array; [] means none extracted. Flattened from two stored shapes (plain strings, and {skill,type} objects).",
+            "x-empty-row-value": []
+          },
+          "source": {
+            "type": "string",
+            "description": "Where this row was INGESTED from (greenhouse, ashby, import). NOT the ATS the candidate will face."
+          },
+          "sourceLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "sourcePlatform": {
+            "type": "string",
+            "description": "KNOWN DEFECT — do not build an ATS badge on this. It reads j.sourcePlatform (camelCase) while the column is source_platform, so for any DB row it resolves to `source`: where we FOUND the job, not the ATS the candidate will face. See docs/SWIPE_FEED_DESIGN.md Finding 2a. Use automationTier instead.",
+            "x-empty-row-value": "direct"
+          },
+          "starred": {
+            "type": "boolean",
+            "description": "Per (user, domain profile). The Saved tab is starred=1.",
+            "x-empty-row-value": false
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "title": {
+            "type": "string",
+            "description": "Role title as posted."
+          },
+          "url": {
+            "type": "string",
+            "description": "The posting.",
+            "format": "uri"
+          },
+          "validThrough": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "via": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-empty-row-value": null
+          },
+          "visited": {
+            "type": "boolean",
+            "description": "Per (user, domain profile).",
+            "x-empty-row-value": false
+          },
+          "workplaceType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "remote",
+              "hybrid",
+              "onsite",
+              null
+            ],
+            "x-empty-row-value": null
+          }
+        },
+        "required": [
+          "automationTier",
+          "bucketDomain",
+          "bucketRole",
+          "bucketSeniority",
+          "companyIconUrl",
+          "contractType",
+          "directApply",
+          "discoveredAt",
+          "disliked",
+          "experienceLevel",
+          "isActive",
+          "isClearanceRequired",
+          "isH1bSponsor",
+          "matchScore",
+          "postedAt",
+          "remote",
+          "requiresWorkAuth",
+          "salaryCurrency",
+          "salaryMax",
+          "salaryMin",
+          "skills",
+          "sourceLabel",
+          "sourcePlatform",
+          "starred",
+          "summary",
+          "validThrough",
+          "via",
+          "visited",
+          "workplaceType"
+        ],
+        "additionalProperties": false,
+        "x-absent-when-null": "Fields NOT in `required` are plain pass-throughs in mapJobRow with no null coalescing. When their source column is NULL they are `undefined`, and JSON.stringify DELETES the key — so they arrive ABSENT, not null. A non-optional field in a Swift or Kotlin decoder throws on a missing key even though it tolerates an explicit null. Decode them as optional.",
+        "x-empty-row-note": "x-empty-row-value on each property is what mapJobRow returns for a row with nothing in it. null and false are NOT interchangeable: isH1bSponsor null means 'no signal yet', and rendering it as 'does not sponsor' is a false negative about somebody's visa status."
+      },
+      "JobDetailResponse": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "JobFeedResponse": {
+        "type": "object",
+        "properties": {
+          "curation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Curation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "facets": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "fromCache": {
+            "type": "boolean"
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "page": {
+            "type": "number"
+          },
+          "pageSize": {
+            "type": "number"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "number"
+          },
+          "totalPages": {
+            "type": "number"
+          }
+        },
+        "description": "The board page. `jobs` carries the derived $Job shape and nothing else."
+      },
+      "LogoutResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "description": "`scope` names what was actually ended, so a client never claims more than happened."
+      },
+      "MobileTokenResponse": {
+        "type": "object",
+        "properties": {
+          "absoluteSeconds": {
+            "type": "number"
+          },
+          "idleSeconds": {
+            "type": "number"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "description": "The durable, cookie-less mobile credential and the two windows that govern it."
+      },
+      "OkResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "description": "A bare acknowledgement. Some routes add fields; `ok` is the only guaranteed key."
+      },
+      "OpenQuestion": {
+        "type": "object",
+        "properties": {
+          "answered": {
+            "type": "boolean",
+            "description": "Answered FOR EVERY employer still blocked on it. A template answered for one company does not unblock the same question at another."
+          },
+          "blocking": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlockingJob"
+            }
+          },
+          "draft": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eligibility": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "needsOwnWords": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The system will never write this one for the candidate, however full the answer store gets. `draft` is a starting point to edit, not an answer to send."
+          },
+          "question": {
+            "type": "string"
+          },
+          "template": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PendingItem": {
+        "type": "object",
+        "properties": {
+          "answerCount": {
+            "type": "number"
+          },
+          "applyUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "guessCount": {
+            "type": "number",
+            "description": "How many answers came from a FUZZY label match rather than an exact one. Surfaced at list level so a reviewer sees which applications need attention without opening each. An exact mapping is not a guess; a fuzzy one is."
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "resume": {
+            "$ref": "#/components/schemas/PendingResume"
+          },
+          "runId": {
+            "type": "number"
+          },
+          "runJobId": {
+            "type": "number"
+          },
+          "screenshotAvailable": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "null when the posting expired after the application was created. The row still names jobId, so an application is never anonymous even once its target is gone."
+          }
+        },
+        "description": "One application previewed and awaiting a decision."
+      },
+      "PendingResponse": {
+        "type": "object",
+        "properties": {
+          "pending": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingItem"
+            }
+          }
+        }
+      },
+      "PendingResume": {
+        "type": "object",
+        "properties": {
+          "artifactId": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "atsScore": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "available": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PublicUser": {
+        "type": "object",
+        "properties": {
+          "allowedModes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "applyMode": {
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/UserCapabilities"
+          },
+          "domainProfileComplete": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "number"
+          },
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "planTier": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "description": "The user as every client is allowed to see them. Never carries a password hash or an email. `allowedModes` and `capabilities` are derived from planTier server-side — a client must gate its UI on these rather than on planTier, so a plan change needs no client release."
+      },
+      "QuestionsResponse": {
+        "type": "object",
+        "properties": {
+          "blockedJobs": {
+            "type": "number"
+          },
+          "eligibilityCount": {
+            "type": "number"
+          },
+          "ownWordsCount": {
+            "type": "number"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenQuestion"
+            }
+          }
+        }
+      },
+      "QueueCap": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number"
+          },
+          "queuedLast24h": {
+            "type": "number"
+          },
+          "remaining": {
+            "type": "number"
+          }
+        },
+        "description": "The GENERATION cost budget, reported so a client can show what is left rather than discovering the ceiling by being refused at it."
+      },
+      "ReadinessResponse": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RejectResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "rejected": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "Run": {
+        "type": "object",
+        "properties": {
+          "approvalMode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "failedCount": {
+            "type": "number"
+          },
+          "finishedAt": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "heldCount": {
+            "type": "number"
+          },
+          "id": {
+            "type": "number"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "submittedCount": {
+            "type": "number"
+          },
+          "toolType": {
+            "type": "string"
+          },
+          "totalJobs": {
+            "type": "number"
+          }
+        },
+        "description": "Timestamps are MILLISECONDS here; the database stores seconds and the route converts. A client that multiplies again renders a date in the year 57000."
+      },
+      "RunDetailResponse": {
+        "type": "object",
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunJob"
+            }
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunLogEntry"
+            }
+          },
+          "run": {
+            "$ref": "#/components/schemas/Run"
+          }
+        }
+      },
+      "RunJob": {
+        "type": "object",
+        "properties": {
+          "applyUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "atsScore": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "fillLogAvailable": {
+            "type": "boolean"
+          },
+          "finishedAt": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "number"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "missingRequired": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The LABELS of required fields left blank. A hold reading 'required fields were left empty' that does not say which is a hold the candidate cannot act on."
+          },
+          "mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasonDetail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resumeAvailable": {
+            "type": "boolean"
+          },
+          "runId": {
+            "type": "number"
+          },
+          "screenshotAvailable": {
+            "type": "boolean"
+          },
+          "startedAt": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "cancelled",
+              "dismissed",
+              "failed",
+              "held_gate",
+              "held_review",
+              "queued",
+              "running",
+              "submitted",
+              "superseded"
+            ]
+          },
+          "submitEvidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "submitVerified": {
+            "type": "boolean",
+            "description": "Whether the submission was OBSERVED to succeed, as opposed to merely claimed. Do not render 'Applied' on status alone when this is false."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "description": "One application within a run."
+      },
+      "RunJobReviewResponse": {
+        "type": "object",
+        "properties": {
+          "answers": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Every filled field WITH THE RULE THAT PRODUCED IT. A `label_fuzzy` provenance is a guess; `handler_exact` / `field_map_exact` / `custom_answer` are not. That distinction is the entire point of showing this — surface it, do not flatten it away."
+          },
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fillLogAvailable": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "missingRequired": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The LABELS of required fields left blank. A hold saying 'required fields were left empty' without saying which is a hold the candidate cannot act on."
+          },
+          "mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "openQuestions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "reasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasonDetail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resume": {
+            "$ref": "#/components/schemas/PendingResume"
+          },
+          "runId": {
+            "type": "number"
+          },
+          "runJobId": {
+            "type": "number"
+          },
+          "screenshotAvailable": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "cancelled",
+              "dismissed",
+              "failed",
+              "held_gate",
+              "held_review",
+              "queued",
+              "running",
+              "submitted",
+              "superseded"
+            ]
+          },
+          "submission": {
+            "$ref": "#/components/schemas/SubmissionEvidence"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "description": "Everything the user is shown before approving. This IS the product's promise: nothing is sent that was not previewed. FLAT — the run-job's fields are top-level here, NOT nested under a `runJob` key, so this is not interchangeable with the $RunJob shape the run endpoints return even though the field names overlap."
+      },
+      "RunListResponse": {
+        "type": "object",
+        "properties": {
+          "gated": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunJob"
+            },
+            "description": "held_gate — blocked on a login wall or CAPTCHA. ON MOBILE THESE ARE UNRESOLVABLE (no extension, so no activeTab). Render them as needing a desktop; do not offer a retry."
+          },
+          "inFlight": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunJob"
+            }
+          },
+          "review": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunJob"
+            }
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            },
+            "description": "The 20 most recent runs, newest first."
+          },
+          "statusCounts": {
+            "type": "object",
+            "description": "Keyed by apply status, valued by count, over ALL non-hidden run-jobs — not just the ones in the buckets above. Use it for badges, not to size the arrays."
+          },
+          "stopped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunJob"
+            }
+          },
+          "submitted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunJob"
+            }
+          }
+        },
+        "description": "Not just runs. The same request also returns the run-jobs PRE-BUCKETED by what the user has to do about them, so a review inbox needs one request rather than six. The buckets are disjoint, and `review` deliberately EXCLUDES applications awaiting approval — those have their own surface at GET /api/apply/pending, and listing them here showed every one twice."
+      },
+      "RunLogEntry": {
+        "type": "object",
+        "properties": {
+          "company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "event": {
+            "type": "string"
+          },
+          "id": {
+            "type": "number"
+          },
+          "jobId": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "description": "One event from apply_job_logs. `createdAt` is milliseconds, like every other timestamp on the apply surface."
+      },
+      "RunQueuedResponse": {
+        "type": "object",
+        "properties": {
+          "dailyCap": {
+            "$ref": "#/components/schemas/DailyCap"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "queueCap": {
+            "$ref": "#/components/schemas/QueueCap"
+          },
+          "queued": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "runId": {
+            "type": "number"
+          },
+          "toolType": {
+            "type": "string"
+          },
+          "totalJobs": {
+            "type": "number"
+          }
+        },
+        "description": "202. QUEUED, NOT SUBMITTED — see the endpoint note. `queued` is the ids accepted after duplicates were dropped and is the only correct count to report."
+      },
+      "SalaryRange": {
+        "type": "object",
+        "properties": {
+          "max": {
+            "type": "number"
+          },
+          "median": {
+            "type": "number"
+          },
+          "min": {
+            "type": "number"
+          }
+        }
+      },
+      "SavedOverride": {
+        "type": "object",
+        "properties": {
+          "company": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          }
+        },
+        "description": "A per-employer answer, keyed by company."
+      },
+      "SubmissionEvidence": {
+        "type": "object",
+        "properties": {
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "description": "Whether the submission was OBSERVED to succeed, as opposed to merely claimed. Do not render 'Applied' on status alone when `verified` is false."
+      },
+      "UserCapabilities": {
+        "type": "object",
+        "properties": {
+          "canUseAPlusResume": {
+            "type": "boolean"
+          },
+          "canUseGenerate": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UserProfileResponse": {
+        "type": "object",
+        "properties": {
+          "address_line1": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address_line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available_start_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "clearance_level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confirmed_skills": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current_company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current_job_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "custom_answer_overrides": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A JSON STRING keyed by company, for per-employer answers."
+          },
+          "custom_answers": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A JSON STRING, not an object — parse it. Keyed by the exact question text captured from the form."
+          },
+          "desired_salary": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "disability_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ethnicity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field_of_study": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "READ-ONLY through this endpoint — POST /api/profile writes `full_name` and does not name the split-name columns. They are set at registration and by PATCH /api/auth/complete-profile."
+          },
+          "full_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gender": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "github_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "graduation_year": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "has_clearance": {
+            "type": "number"
+          },
+          "highest_degree": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "number",
+            "description": "READ-ONLY. The row id; POST /api/profile does not write it."
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "linkedin_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "middle_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name_suffix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "onboarded": {
+            "type": "number",
+            "description": "READ-ONLY. 0 or 1."
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "portfolio_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requires_sponsorship": {
+            "type": "number",
+            "description": "0 or 1, not a boolean. SQLite has no boolean type and this row is returned unmapped."
+          },
+          "salary_currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seniority_level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sponsorship_need": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "null means NOT ASKED, and the resolver treats it as a refusal rather than guessing 'none' on the candidate's behalf. It is not a synonym for 'no'."
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_domains": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_locations": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_skills": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "university": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "user_id": {
+            "type": "number"
+          },
+          "veteran_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visa_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "website_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "willing_to_relocate": {
+            "type": "number"
+          },
+          "work_auth": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "years_of_experience": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "zip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "description": "SNAKE_CASE — the user_profile row returned directly, unlike the camelCase job shape. Listed here in full because a client that guesses camelCase sends every field null."
+      },
+      "UserProfileWrite": {
+        "type": "object",
+        "properties": {
+          "address_line1": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address_line2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available_start_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "clearance_level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confirmed_skills": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current_company": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current_job_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "custom_answer_overrides": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A JSON STRING keyed by company, for per-employer answers."
+          },
+          "custom_answers": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A JSON STRING, not an object — parse it. Keyed by the exact question text captured from the form."
+          },
+          "desired_salary": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "disability_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ethnicity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "field_of_study": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "READ-ONLY through this endpoint — POST /api/profile writes `full_name` and does not name the split-name columns. They are set at registration and by PATCH /api/auth/complete-profile."
+          },
+          "full_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gender": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "github_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "graduation_year": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "has_clearance": {
+            "type": "number"
+          },
+          "highest_degree": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "number",
+            "description": "READ-ONLY. The row id; POST /api/profile does not write it."
+          },
+          "last_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "linkedin_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "middle_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name_suffix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "onboarded": {
+            "type": "number",
+            "description": "READ-ONLY. 0 or 1."
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "portfolio_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requires_sponsorship": {
+            "type": "number",
+            "description": "0 or 1, not a boolean. SQLite has no boolean type and this row is returned unmapped."
+          },
+          "salary_currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seniority_level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sponsorship_need": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "null means NOT ASKED, and the resolver treats it as a refusal rather than guessing 'none' on the candidate's behalf. It is not a synonym for 'no'."
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_domains": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_locations": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_skills": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "university": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "user_id": {
+            "type": "number"
+          },
+          "veteran_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visa_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "website_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "willing_to_relocate": {
+            "type": "number"
+          },
+          "work_auth": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "years_of_experience": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "zip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "description": "The POST body. Same field names as the read shape. NOT a patch: every column except the two answer maps is overwritten unconditionally, so omitting a field CLEARS it.",
+        "x-same-fields-as": "UserProfileResponse"
+      }
+    }
+  },
+  "x-auth-model": {
+    "summary": "Cookie OR token, never cookie PLUS token. A mobile client uses the token alone.",
+    "flow": [
+      "POST /api/auth/login  ->  authContext (session-bound; do NOT persist this one)",
+      "GET  /api/auth/mobile-token  ->  token (sessionLess, durable; THIS is the credential)",
+      "every request thereafter: Authorization: Bearer <token>"
+    ],
+    "idleSeconds": 604800,
+    "absoluteSeconds": 7776000,
+    "renewal": "The idle window SLIDES on every authenticated request, clamped to the absolute window measured from issue. An app in regular use is never signed out on a timer; an abandoned token still dies in seven days; a leaked one cannot be kept alive past the absolute cap.",
+    "sessionBinding": "A login-issued token stores session_sid = req.sessionID, which is meaningless for a cookie-less client and is swept by revokeBrowserAuthContexts. The mobile mint stores NULL, which that sweep deliberately never touches.",
+    "crossUser": "requireAuth admits a token exactly as it admits a session, and every user-scoped handler derives its owner from req.user — which bindAuthContext sets from the token. So AH1's cross-user guarantees hold identically on the bearer path. VERIFIED, not assumed, by scripts/aj1MobileBearer.mjs against a real server."
+  },
+  "x-mobile-tier-gating": {
+    "summary": "automationTier is on every job for this reason: a gated job CANNOT be completed from a phone. The gated handoff's security property is the desktop browser holding the portal session, borrowed for one gesture under the extension's activeTab. A phone has no extension, so a held_gate row queued from mobile is unresolvable. Show it as desktop-only, or exclude it — there is no third option that keeps the security property.",
+    "tiers": {
+      "account": {
+        "completableOnMobile": false,
+        "reason": "Self-service account required at the destination. The run holds at login_required and a phone cannot resolve it."
+      },
+      "direct": {
+        "completableOnMobile": true,
+        "reason": "Single-page ATS apply. No account, no handoff."
+      },
+      "gated": {
+        "completableOnMobile": false,
+        "reason": "Account plus a CAPTCHA or identity check. Resolvable only through the desktop gated handoff, which requires the extension's activeTab. UNRESOLVABLE FROM A PHONE — show as desktop-only, or exclude."
+      },
+      "guest": {
+        "completableOnMobile": true,
+        "reason": "A guest path exists; the run may still hold for review."
+      },
+      "unknown": {
+        "completableOnMobile": false,
+        "reason": "Not looked at. A promise in NEITHER direction, so it must not be offered as one-tap apply."
+      }
+    },
+    "filtering": "Filter server-side with tiers_include / tiers_exclude on GET /api/jobs. Do NOT filter client-side: the server pages before the client filters, so hiding rows after the fact yields short pages and a count that disagrees with the list.",
+    "nullTier": "automationTier null means the row predates migration 078 and has not been recomputed. Read it exactly as 'unknown' — a promise in neither direction — never as 'direct'."
+  },
+  "x-retired": {
+    "summary": "RETIRED. Each answers 410 with a body naming its replacement. A greenfield client written from older documentation is precisely the client that will call these.",
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/scrape",
+        "status": 410,
+        "since": "E2",
+        "replacement": "GET /api/jobs",
+        "body": "External scraping has been removed. Job search now uses /api/jobs."
+      },
+      {
+        "method": "ALL",
+        "path": "/api/extension/save-job",
+        "status": 410,
+        "since": "E2",
+        "replacement": "POST /api/import/job",
+        "body": "Redirects callers to /api/import/job."
+      },
+      {
+        "method": "ALL",
+        "path": "/api/imported-jobs/*",
+        "status": 410,
+        "since": "E2",
+        "replacement": "GET /api/jobs?starred=true",
+        "body": "Imported jobs have been merged into the main board. Captured jobs appear under Saved."
+      },
+      {
+        "method": "POST",
+        "path": "/api/apply/session/save",
+        "status": 410,
+        "since": "AF",
+        "replacement": null,
+        "errorCode": "gone",
+        "body": "Portal sessions are no longer stored on the server. A portal that wants you signed in is handed to your own browser: sign in once there and every application queued behind that portal continues."
+      },
+      {
+        "method": "GET",
+        "path": "/api/apply/session/{domain}",
+        "status": 410,
+        "since": "AF",
+        "replacement": null,
+        "errorCode": "gone",
+        "body": "Portal sessions are no longer stored on the server. A portal that wants you signed in is handed to your own browser: sign in once there and every application queued behind that portal continues."
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/settings/apply-mode",
+        "status": 410,
+        "since": "entitlements",
+        "replacement": null,
+        "body": "Plans control tool access."
+      }
+    ]
+  },
+  "x-mobile-gaps": {
+    "atsPlatformBadge": {
+      "severity": "product",
+      "what": "No trustworthy field names the ATS a candidate will face.",
+      "why": "sourcePlatform LOOKS like it, and is not — it reads j.sourcePlatform (camelCase) against a source_platform column, so it always resolves to `source`, i.e. where the job was found. It happens to look right only because both current scrapers are named after the ATSes they scrape. Add one aggregator source and the badge lies. automationTier IS trustworthy and is derived from detectPlatformFromUrl(apply_url) — use it.",
+      "fix": "Persist detectPlatformFromUrl(apply_url) as a real field, or repair sourcePlatform."
+    },
+    "pagination": {
+      "severity": "blocking-at-scale",
+      "what": "GET /api/jobs pages by OFFSET (page/pageSize). A swipe feed needs a cursor.",
+      "why": "Offset pagination assumes a stable result set. A swipe feed mutates the set it is paging through: every dislike sets disliked=1, and the default board EXCLUDES disliked rows. So each swipe shortens the list behind the cursor, every subsequent row shifts up by one, and page 2 SKIPS as many jobs as the user swiped away on page 1. The user never sees them and nothing reports the loss. A desktop board does not hit this because it does not mutate membership while paging.",
+      "workaround": "Request page=1 repeatedly with a large pageSize and de-duplicate by id client-side, accepting the re-query cost. This is correct but wasteful, and it is a workaround, not a fix.",
+      "fix": "A keyset cursor over the existing ORDER BY, opaque to the client. Server-side change."
+    },
+    "pushNotifications": {
+      "severity": "product",
+      "what": "No push transport. Realtime is server-sent events at GET /api/sync/events.",
+      "why": "An SSE connection requires a foregrounded process. A backgrounded iOS or Android app cannot hold one, so 'your application needs approval' cannot reach a user who is not looking at the app — which is precisely when it matters.",
+      "fix": "APNs/FCM device registration and a server-side sender. A real project, not a field."
+    },
+    "resumeExistsOnJob": {
+      "severity": "product",
+      "what": "No field says whether a resume already exists for a job.",
+      "why": "Structurally absent from mapJobRow — it maps a JOB, and resume currency is a per (user, job, tool, profile) question needing a join to resumes and profile_base_resumes. A swipe card cannot show 'already generated' without a second request per card. Documented in docs/SWIPE_FEED_DESIGN.md Finding 6.",
+      "fix": "A joined boolean on the feed row, or a bulk endpoint taking many job ids at once."
+    },
+    "reviewInboxPaging": {
+      "severity": "minor",
+      "what": "GET /api/apply/pending is capped at 100 and GET /api/apply/questions at 50, neither pageable.",
+      "why": "A backlog past the cap is invisible with no indication that it was truncated. On desktop the caps are generous; on a phone, where a user reviews in short bursts, a backlog is normal.",
+      "fix": "A page parameter, or a total count so the client can say the list is truncated."
+    }
+  },
+  "x-enums": {
+    "applyOutcome": [
+      "aborted",
+      "completed",
+      "pending"
+    ],
+    "applyStatus": [
+      "cancelled",
+      "dismissed",
+      "failed",
+      "held_gate",
+      "held_review",
+      "queued",
+      "running",
+      "submitted",
+      "superseded"
+    ],
+    "automationTier": [
+      "direct",
+      "guest",
+      "account",
+      "gated",
+      "unknown"
+    ],
+    "employmentType": [
+      "full-time",
+      "contract",
+      "internship",
+      "part-time"
+    ],
+    "experienceLevel": [
+      "intern",
+      "entry",
+      "mid",
+      "senior",
+      "lead",
+      "executive"
+    ],
+    "sort": [
+      "dateDesc",
+      "dateAsc",
+      "compHigh",
+      "compLow",
+      "yoeLow",
+      "yoeHigh",
+      "atsScore"
+    ],
+    "workplaceType": [
+      "remote",
+      "hybrid",
+      "onsite"
+    ]
+  }
+}

@@ -4317,6 +4317,29 @@ function authContextHash(token) {
   return crypto.createHash("sha256").update(String(token || ""), "utf8").digest("hex");
 }
 
+// ── AUTH CONTEXT LIFETIME — AJ1 decision 6a ──────────────────────────────────────────────────
+//
+// TWO windows, not one, and they answer different questions.
+//
+//   IDLE       how long a token survives with NOBODY USING IT. Unchanged at 7 days, so an
+//              abandoned token still dies in a week exactly as before.
+//   ABSOLUTE   how long a token can live AT ALL, however active. New, and it is what makes the
+//              renewal below safe: a stolen token cannot be kept alive forever by using it.
+//
+// WHY THIS CHANGED. Until now expires_at was set once at issue and never moved, so the idle window
+// was really a HARD window: a user of a native mobile app — which, unlike a browser, has no rolling
+// connect.sid cookie to fall back on — was signed out every seventh day no matter how much they
+// used it. For the extension that is tolerable. For a phone it is the single worst thing an app
+// can do, and it would have been discovered from a store review.
+//
+// WHY SLIDING RENEWAL RATHER THAN A REFRESH ENDPOINT. A refresh endpoint means a SECOND credential
+// kind with its own rotation, replay and revocation story, and a second thing every one of the four
+// clients has to implement correctly. Sliding renewal gets the same result by moving a column that
+// bindAuthContext ALREADY WRITES on every request (last_seen_at) — no new endpoint, no new token
+// kind, nothing for a client to do, and it applies to the extension and the browser too.
+const AUTH_CONTEXT_IDLE_SECONDS = 7 * 24 * 60 * 60;        // 7 days without a request
+const AUTH_CONTEXT_ABSOLUTE_SECONDS = 90 * 24 * 60 * 60;   // 90 days from issue, whatever happens
+
 function issueAuthContext(userId, req, options = {}) {
   const token = crypto.randomBytes(32).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
@@ -4329,7 +4352,7 @@ function issueAuthContext(userId, req, options = {}) {
     userId,
     now,
     now,
-    now + 7 * 24 * 60 * 60,
+    now + AUTH_CONTEXT_IDLE_SECONDS,
     options.userAgent || req.get("user-agent") || null,
     // The browser session this token belongs to, so signing out of THIS browser revokes this
     // browser's tokens and nobody else's. sessionLess:true is for the extension token, which is
@@ -4439,7 +4462,7 @@ function bindAuthContext(req, _res, next) {
   try {
     const now = Math.floor(Date.now() / 1000);
     const row = db.prepare(`
-      SELECT ac.user_id
+      SELECT ac.user_id, ac.created_at, ac.expires_at
       FROM auth_contexts ac
       WHERE ac.token_hash = ?
         AND ac.revoked_at IS NULL
@@ -4459,7 +4482,24 @@ function bindAuthContext(req, _res, next) {
     }
     req.user = user;
     req.authContextToken = token;
-    db.prepare("UPDATE auth_contexts SET last_seen_at=? WHERE token_hash=?").run(now, authContextHash(token));
+    // AJ1 6a — SLIDING RENEWAL, in the write that was already happening.
+    //
+    // The new expiry is the idle window from now, CLAMPED to the absolute window from issue. The
+    // clamp is the whole safety property: without it "active" would mean "immortal", and a leaked
+    // token in the hands of anything that polls would never expire.
+    //
+    // Guarded by `> expires_at` so this only ever moves the deadline FORWARD. A clock skew or a
+    // token already past its absolute cap can therefore shorten nothing — Math.min could otherwise
+    // hand back a value BEHIND the stored one and quietly expire a live session early, which would
+    // be a worse bug than the one this fixes.
+    const slidTo = Math.min(now + AUTH_CONTEXT_IDLE_SECONDS,
+                            (row.created_at || now) + AUTH_CONTEXT_ABSOLUTE_SECONDS);
+    if (slidTo > row.expires_at) {
+      db.prepare("UPDATE auth_contexts SET last_seen_at=?, expires_at=? WHERE token_hash=?")
+        .run(now, slidTo, authContextHash(token));
+    } else {
+      db.prepare("UPDATE auth_contexts SET last_seen_at=? WHERE token_hash=?").run(now, authContextHash(token));
+    }
   } catch(e) {
     console.warn("[auth-context] bind failed:", e.message);
   }
@@ -5508,6 +5548,42 @@ app.post("/api/auth/revoke-extension-token", requireAuth, (req, res) => {
     UPDATE auth_contexts
     SET revoked_at=unixepoch()
     WHERE user_id=? AND revoked_at IS NULL AND user_agent='resume-master-extension'
+  `).run(req.user.id);
+  res.json({ ok: true });
+});
+
+// ── AJ1 decision 6b — THE MOBILE CREDENTIAL ──────────────────────────────────────────────────
+//
+// A native app is not a tab. It keeps no cookie jar, so the connect.sid session that a browser
+// falls back on does not exist for it, and the token IS the whole credential.
+//
+// THE DEFECT THIS AVOIDS. POST /api/auth/login issues a token bound to `req.sessionID`. For a
+// cookie-less caller that sid is a throwaway the client will never present again, so the binding
+// is meaningless — and worse than meaningless, because revokeBrowserAuthContexts() revokes every
+// token sharing a sid. A phone's token would be filed under a session nobody can sign out of and
+// nobody can audit. That is the same class of defect as a row written under the wrong
+// domain_profile_id: self-consistent on both sides, and joined to the wrong thing.
+//
+// So mobile does what the extension does: signs in once to get a session-bound token, exchanges it
+// HERE for a sessionLess one, and discards the first. sessionLess:true stores session_sid NULL,
+// which revokeBrowserAuthContexts deliberately never sweeps.
+//
+// WHY A SECOND ENDPOINT RATHER THAN REUSING THE EXTENSION'S. The revoke below keys on user_agent,
+// so a shared endpoint would mean "sign out my phone" also killing the extension, and vice versa.
+// Two independent credentials must be independently revocable. The two handlers are deliberately
+// near-identical rather than folded into one helper: test/authCredentialLifecycle.test.js asserts
+// the extension's guarantees as source strings INSIDE its route block, and hiding them behind a
+// shared helper would weaken a guard in order to save four lines.
+app.get("/api/auth/mobile-token", requireAuth, (req, res) => {
+  const token = issueAuthContext(req.user.id, req, { userAgent: "resume-master-mobile", sessionLess: true });
+  res.json({ token, idleSeconds: AUTH_CONTEXT_IDLE_SECONDS, absoluteSeconds: AUTH_CONTEXT_ABSOLUTE_SECONDS });
+});
+
+app.post("/api/auth/revoke-mobile-token", requireAuth, (req, res) => {
+  db.prepare(`
+    UPDATE auth_contexts
+    SET revoked_at=unixepoch()
+    WHERE user_id=? AND revoked_at IS NULL AND user_agent='resume-master-mobile'
   `).run(req.user.id);
   res.json({ ok: true });
 });

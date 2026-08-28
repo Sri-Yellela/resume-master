@@ -58,6 +58,7 @@ const EXCLUDED = {
   g0ActiveTabSpike:    "spike; needs a manually loaded unpacked extension",
   buildExtension:      "build tool",
   publishExtension:    "build tool",
+  generateMobileContract: "build tool — writes contract/; its --check mode already runs on every `npm test` via test/mobileApiContract.test.js",
   freePort:            "utility",
   importJobUrls:       "utility, writes to the database",
   ingestLca:           "utility, downloads a dataset",
