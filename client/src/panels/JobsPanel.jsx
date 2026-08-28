@@ -7,6 +7,7 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "reac
 import { api, printResume, dislikeJob, authHeaders, authContextQuery } from "../lib/api.js";
 import { TileGrid } from "../components/ui/TileCard.jsx";
 import { GENERATE_TOOL, A_PLUS_TOOL, TOOL_LABELS, normalizeTool } from "../lib/applyTools.js";
+import { planPageFetch, recordPageCursor } from "../lib/boardPaging.js";
 import { useAutoApply } from "../contexts/AutoApplyContext.jsx";
 import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
@@ -1560,6 +1561,36 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   const latestSnapshotRef = useRef(null);
   const jobsFetchSeqRef = useRef(0);
   const nextFetchPageRef = useRef(1);
+  // ── The cursor chain ────────────────────────────────────────────────────────────────────────
+  //
+  // WHY THE BOARD KEEPS BOTH PAGING MODES. This is a NUMBERED pager — Prev, 1 2 3 …, Next, and a
+  // "go to page" box. A keyset cursor cannot answer "page 17": it has no notion of position, which
+  // is exactly the property that makes it correct for stepping. So the two are used for what each
+  // is actually good at, rather than one replacing the other:
+  //
+  //   Next / Prev (a STEP)     -> cursor. Correct while the board mutates underneath.
+  //   page 17 / go-to-page     -> offset. The user asked for a POSITION; there is nothing else
+  //                               that can answer it, and a jump is not where the defect lives.
+  //
+  // THE DEFECT THIS FIXES ON THIS BOARD. Disliking a job removes it from the server's result set
+  // (the default board excludes disliked rows). Press Next after disliking four, and the offset has
+  // moved four rows further into a list that is four rows shorter — so four jobs are stepped over
+  // and never shown. The client hides this from itself: it re-injects session-disliked rows so the
+  // LIST does not visibly shrink, which makes the skip invisible on screen as well as in the data.
+  //
+  // `nextCursorRef` is the cursor the LAST response handed back — i.e. the one that fetches the
+  // page after the one on screen.
+  const nextCursorRef = useRef(null);
+  // Index (page - 1) holds the cursor that FETCHED that page; page 1 is null by definition. This is
+  // what makes Prev work without a backwards cursor: going back is re-running the request that
+  // produced the earlier page. It stays valid even when the row it was issued from has since been
+  // disliked, because a cursor carries sort VALUES, not a reference to a row.
+  const cursorStackRef = useRef([]);
+  // The querystring minus page/cursor. A cursor is bound to the ordering it was issued under, so
+  // any change to filters, sort or tab invalidates the whole chain. Derived from buildParams rather
+  // than from a hand-listed dependency array, so a filter added later cannot forget to invalidate
+  // it — that omission would not throw, it would silently resume against the wrong ordering.
+  const paramsKeyRef = useRef(null);
   const pendingIntentSearchRef = useRef(null);
   const searchIntentResolveRef = useRef(null);
   // Stable ref so startPollLoop (empty deps) can always call the latest fetchJobs
@@ -2004,9 +2035,17 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   }, [selectedJob]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Build query params from current filter state ----------
-  const buildParams = useCallback((page = 1, overrideStarred = null, overrides = {}) => {
+  const buildParams = useCallback((page = 1, overrideStarred = null, overrides = {}, cursor = null) => {
     const p = new URLSearchParams();
-    p.set("page", String(page));
+    // KEYSET vs OFFSET, decided here so there is still exactly one param builder.
+    //
+    // The two are mutually exclusive: the server ignores `page` when `cursor` is present, and
+    // sending both would put a page number in the querystring that has no bearing on the answer —
+    // which is the sort of thing that reads as meaningful in a network log for months.
+    //
+    // `pageSize` applies to both.
+    if (cursor) p.set("cursor", cursor);
+    else        p.set("page", String(page));
     p.set("pageSize", String(PAGE_SIZE));
     p.set("sort", sortBy);
     const effectiveRole = overrides.role ?? roleFilter;
@@ -2147,9 +2186,49 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     const requestSeq = ++jobsFetchSeqRef.current;
     setBgLoading(true);
     try {
-      const qs = buildParams(page, null, options.overrides || {});
-      const d = await api(`/api/jobs?${qs}`);
+      // Invalidate the cursor chain whenever the ORDERING could have changed. Computed from
+      // buildParams itself, so it cannot fall out of step with the querystring it is guarding.
+      const paramsKey = buildParams(1, null, options.overrides || {});
+      // A REFRESH RE-RUNS THE REQUEST THAT PRODUCED THE PAGE. Callers that reload the page the user
+      // is already on — after a resume is generated, after an application is recorded — go straight
+      // to fetchJobs without passing a cursor. Re-asking by OFFSET there would move the content
+      // under someone who has not navigated: if they disliked anything since, the same offset now
+      // points further down a shorter list and they get a different set of jobs than they were
+      // looking at. Reusing this page's own cursor keeps them where they are.
+      //
+      // `undefined` means "not a page in this chain" and falls through to offset. `null` is a real
+      // stack value meaning page 1, which IS offset — so the test is against undefined, not falsy.
+      const remembered = cursorStackRef.current[page - 1];
+      let cursor = options.cursor ?? (remembered !== undefined ? remembered : null);
+      if (paramsKey !== paramsKeyRef.current) {
+        paramsKeyRef.current = paramsKey;
+        cursorStackRef.current = [];
+        nextCursorRef.current = null;
+        cursor = null;            // a cursor from the previous ordering means nothing here
+      }
+
+      const qs = buildParams(page, null, options.overrides || {}, cursor);
+      let d;
+      try {
+        d = await api(`/api/jobs?${qs}`);
+      } catch (e) {
+        // The server rejects a cursor issued under a different ordering rather than silently
+        // resuming against one (400 cursor_sort_mismatch / cursor_malformed). It is telling us the
+        // chain is stale, and the only correct recovery is to ask again by position — so do that
+        // once, rather than surfacing an error the user cannot act on. Anything else rethrows.
+        const code = e?.payload?.code;
+        if (!cursor || e?.status !== 400 || !(code === "cursor_sort_mismatch" || code === "cursor_malformed")) throw e;
+        console.warn(`[board] cursor rejected (${code}) — falling back to offset for page ${page}`);
+        cursorStackRef.current = [];
+        nextCursorRef.current = null;
+        cursor = null;
+        d = await api(`/api/jobs?${buildParams(page, null, options.overrides || {})}`);
+      }
       if (requestProfileKey !== activeProfileKeyRef.current || requestSeq !== jobsFetchSeqRef.current) return;
+      // Record what fetched THIS page, and what will fetch the next one. Truncated at `page` so a
+      // Prev-then-a-different-Next cannot leave a stale entry further up the stack.
+      cursorStackRef.current = recordPageCursor(cursorStackRef.current, page, cursor);
+      nextCursorRef.current = d.nextCursor || null;
       // Normalize aggregator field names to legacy camelCase expected by JobCard/JobsPanel
       const incoming = (d.jobs || []).map(normalizeApiJob);
       // Capture attribution from aggregator response for footer rendering
@@ -3005,7 +3084,23 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
     // collapse — which never ran, because the progress it interpolated was permanently 0. With that
     // reader gone the flag was write-only, so the whole pin/unpin trio went with it.
     scrollToTopRef.current?.();      // scroll job list to top (not window)
-    await fetchJobs(p);
+
+    // ONE ENTRY POINT, TWO PAGING MODES — decided by planPageFetch rather than at the call sites,
+    // so Next, the numbered buttons and the go-to-page box all keep calling goPage(n) and none of
+    // them has to know which mode applies. The numbered button for the adjacent page IS the Next
+    // action and gets the same treatment, which it would not if the choice were made per-button.
+    // The policy and its reasoning live in client/src/lib/boardPaging.js, where it can be tested.
+    const plan = planPageFetch({
+      target: p,
+      currentPage,
+      nextCursor: nextCursorRef.current,
+      stack: cursorStackRef.current,
+    });
+    if (plan.resetChain) {
+      cursorStackRef.current = [];
+      nextCursorRef.current = null;
+    }
+    await fetchJobs(p, false, plan.cursor ? { cursor: plan.cursor } : {});
   };
 
   // -- Filter reset ------------------------------------------

@@ -59,6 +59,9 @@
   "aj1MobileBearer": {
     "pass": 129
   },
+  "aj2BoardCursor": {
+    "pass": 16
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

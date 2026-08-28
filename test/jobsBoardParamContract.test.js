@@ -211,6 +211,11 @@ const TRACKED_SEARCH_EXEMPT = new Map([
   // (applyTrackedSearch sets currentPage itself).
   ["page", "pagination"],
   ["pageSize", "pagination"],
+  // Pagination too, and the one it would be most damaging to restore. A cursor is bound to the
+  // ORDERING it was issued under, so replaying a saved one would resume someone else's feed at a
+  // position that no longer means anything — the server answers 400 cursor_sort_mismatch for
+  // exactly this. A saved search restores a FILTER SET and starts at the beginning.
+  ["cursor", "pagination, and bound to the ordering it was issued under"],
   // Derived from ageFilter, which IS restored — buildParams recomputes it from the same value, so
   // restoring it separately would be a second source of truth for one control.
   ["posted_after", "derived from ageFilter, which is restored"],

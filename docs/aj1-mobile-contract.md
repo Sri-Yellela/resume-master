@@ -4,10 +4,11 @@
 
 | Check | Result |
 |---|---|
-| `npm test` | **1948 passing, 0 failing** (+33 new). **Regressions introduced: 0.** |
-| `npm run verify:harness` | **31/31 green, 896 assertions** |
+| `npm test` | **1962 passing, 0 failing** (+47 new). **Regressions introduced: 0.** |
+| `npm run verify:harness` | **32/32 green, 912 assertions** |
 | `scripts/aj1MobileBearer.mjs` | **129/129 checks**, bearer-only against a live server |
 | `generateMobileContract --check` | Contract current (**v1.1.0**); regeneration is byte-identical |
+| `scripts/aj2BoardCursor.mjs` | **16/16 checks** driving the real board in Chrome |
 
 `ah1SessionIdentity` passes **67/67** — the one that matters most, since this task changed
 `bindAuthContext`, which every authenticated request goes through.
@@ -51,6 +52,9 @@ deliverable is not a document — **it is a test that fails.**
 | `contract/README.md` | Consumption strategy and versioning rules |
 | `test/mobileApiContract.test.js` | **21 tests. The actual deliverable.** |
 | `test/jobsKeysetCursor.test.js` | 12 tests: the offset defect, then the cursor that fixes it |
+| `client/src/lib/boardPaging.js` | **Which paging mode answers which navigation** (§13) |
+| `test/boardPagingCursor.test.js` | 14 tests over the paging decision table |
+| `scripts/aj2BoardCursor.mjs` | 16 real-browser checks: the board pages by cursor and skips nothing |
 | `scripts/aj1MobileBearer.mjs` | **129 real-run checks** on a live server, bearer-only |
 
 ---
@@ -432,17 +436,20 @@ is in `contract/README.md`.
 
 ---
 
-## 11. Scope held
+## 11. Scope held — as of the contract commit
 
-No mobile screens were built. The web client, the extension and every existing endpoint's behaviour
-are unchanged except for the two auth decisions, which are additive: two new routes, and a renewal
-that only ever extends an expiry.
+No mobile screens were built. At the point §1–§10 were written, the web client, the extension and
+every existing endpoint's behaviour were unchanged except for the two auth decisions, which are
+additive: two new routes, and a renewal that only ever extends an expiry.
 
-**Not done, and flagged rather than silently skipped:** the five gaps in §8 are reported, not
-implemented. Cursor pagination in particular is a real server change with its own design, and
-building it inside a contract task would be exactly the unbudgeted scope creep `MOBILE_STATE.md`
-warned about. Whether to do it before the mobile feed is built is the owner's call — but it should
-be made *before*, not after, because the workaround shapes the client's caching layer.
+**Not done at that point, and flagged rather than silently skipped:** the five gaps in §8 were
+reported, not implemented — cursor pagination in particular being a real server change with its own
+design, and building it inside a contract task would have been exactly the unbudgeted scope creep
+`MOBILE_STATE.md` warned about.
+
+> **Superseded for §8.1 only.** Pagination was then fixed on the server (**§12**) and wired into the
+> web board (**§13**), in that order, as separate pieces of work. §8.2–§8.5 remain open and remain
+> reported rather than built.
 
 ---
 
@@ -535,3 +542,94 @@ properties **structurally** against `SORT_KEYS`, which is stronger: "every sort 
 key" is now a key-list comparison rather than a regex looking for the word `RECENCY` on the same
 line, and it would have passed for a sort that merely mentioned it in a comment. `jobCursor.js` also
 throws at module load if a sort is not totally ordered, so a bad sort cannot reach a request at all.
+
+---
+
+## 13. The web client pages by cursor
+
+§12 fixed the API. The web board still paged by offset, and it has the same defect on its own
+dislike path — so this wires it up.
+
+### The board is a NUMBERED pager, and that decides the design
+
+Prev · 1 2 3 … · Next · "go to page N". A keyset cursor **cannot** answer "page 17" — it has no
+notion of position, which is exactly the property that makes it correct for stepping. Replacing the
+pager with a cursor would delete random page access, a working feature, to fix a defect that does
+not live there. So each mode answers what it is actually good at:
+
+| Navigation | Mode | Why |
+|---|---|---|
+| **Next / Prev** — a *step* | **cursor** | The board may have shrunk under the reader. This is the case a cursor can answer. |
+| **page 17 / go-to-page** — a *jump* | offset | The user asked for a **position**. Nothing else can answer one. |
+| Refresh of the page on screen | this page's own cursor | Re-asking by offset would move content under someone who has not navigated. |
+
+**Prev needs no backwards cursor.** Going back re-runs the request that produced the earlier page,
+from a stack of the cursors already used. That stays valid even when the row a cursor was issued
+from has since been disliked — a cursor carries sort **values**, not a reference to a row.
+
+### Why the skip survived this long on the web board
+
+It is invisible twice over. The list does not visibly shrink, because JobsPanel re-injects
+session-disliked rows so they stay on screen (faded); and `total` still counts the skipped rows, so
+the pager's arithmetic looks right. Nothing anywhere reports the loss.
+
+### Verified in a real browser
+
+`scripts/aj2BoardCursor.mjs` drives the real board in Chrome against a stub that implements a
+**real keyset cursor** — same ordering as the server, cursor holding the last row's sort values,
+resume strictly after them. A stub that just returned "page 2" on demand would echo whatever the
+client sent and prove nothing.
+
+60 jobs, page size 25. Pass on four jobs from page 1, then press Next:
+
+```
+page 1  (offset)          j00 … j24
+passed on                 j02, j05, j11, j19
+PRECONDITION — offset would skip:  j25, j26, j27, j28
+Next sent                 ?cursor=WzE3ODc5MzYyOTMsImoyNCJd   ( = [1787936293,"j24"] )
+page 2  (cursor)          j25 … j49        nothing skipped
+Prev                      back to j00, with the four passed jobs now gone
+jump to page 3            ?page=3   — offset, as it must be
+```
+
+The precondition is asserted **first**. Without it a cursor walk over an unchanging board passes
+trivially and the harness would be measuring its own fixture. 16 checks, all passing, screenshots
+confirming the board renders — not merely that text extraction succeeded.
+
+### The policy is extracted, because a decision in a click handler cannot be tested
+
+`client/src/lib/boardPaging.js` holds `planPageFetch` and `recordPageCursor`, out of a 3,800-line
+component. `test/boardPagingCursor.test.js` covers the decision table in 14 tests.
+
+Writing those tests changed the design once, which is the reason to write them: the obvious
+implementation makes a **Next with no cursor available** fall through to the jump branch and wipe
+the chain, purely because it happened to page the old way for one request. Nothing breaks, but the
+chain is rebuilt from scratch and the reason is invisible. A step is a step; only a jump is a jump.
+
+Two traps worth naming, both pinned by tests:
+
+- **`stack[0]` is `null`, and `null` is a real value** meaning "page 1 was fetched by offset". A
+  falsy check treats it as "no chain" and discards a good chain on every return to page 1. The test
+  is against `undefined`.
+- **The stack truncates on record.** Walk to page 3, go back to 2, take a different Next — without
+  truncation the stack still holds page 3's cursor from the abandoned branch, and a later Prev
+  replays a request belonging to a page the user never came from.
+
+### Invalidation, and recovery
+
+A cursor is bound to the ordering it was issued under, so any filter or sort change invalidates the
+chain. The key is derived from `buildParams` itself rather than a hand-listed dependency array — a
+filter added later cannot forget to invalidate it, and that omission would not throw, it would
+silently resume against the wrong ordering.
+
+If a stale cursor reaches the server anyway, the 400 `cursor_sort_mismatch` is a message to the
+*client*, not to the user: it retries once by offset and logs it. Surfacing "Request failed (400)"
+for a recoverable condition would be a dead end.
+
+`cursor` is exempt from the tracked-search param contract. A saved search restores a **filter set**;
+replaying a saved cursor would resume at a position that no longer means anything.
+
+### What did not change
+
+`page`, `pageSize` and `totalPages` are untouched, the numbered pager still works, and a board with
+no cursor available simply pages the old way. The extension is not affected.
