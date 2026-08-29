@@ -40,7 +40,44 @@ import { actionVerbVocabularyTerms, companyStackTerms, skillVocabularyTerms } fr
  * leaving the version alone would have fixed the report only for postings nobody had opened —
  * which is exactly how AG1's fragment fix appeared to work and did not (e566dbc).
  */
-export const LOCAL_ATS_SOURCE = "local_ats_v3";
+export const LOCAL_ATS_SOURCE = "local_ats_v4";
+
+/**
+ * The 100 points, and why they moved in AK1.
+ *
+ * Measured on the live board under the v3 split (skill 50 / verb 15 / experience 25 / hard 10):
+ *
+ *   component            sd across board     correlation with final score
+ *   skill                     2.01                    r = 0.21
+ *   experience                7.53                    r = 0.96
+ *   hard constraints          0.39                    r = -0.02
+ *
+ * The score was the experience flag wearing a skills costume. Two of the four components were doing
+ * no ranking work at all, and the one the product talks about — do you have the skills — was doing
+ * a fifth of it.
+ *
+ * VERBS LOST HALF THEIR BUDGET BECAUSE THEY ARE NEARLY CONSTANT. Across ten sampled postings the
+ * matched verb list was almost always the identical pair "Built, Collaborated" and the missing list
+ * was near-identical too. A component that returns the same value for every job cannot order
+ * anything, and holding 15 points made it pure additive noise. It keeps a small budget because a
+ * resume written entirely without action verbs is a real, if rare, weakness.
+ *
+ * EXPERIENCE KEPT ITS BUDGET BUT LOST ITS CLIFF. The 17-point step between "meets" and "does not"
+ * is what produced the bimodal distribution; experienceScoreFor now grades it. Same weight, honest
+ * shape.
+ *
+ * HARD CONSTRAINTS BECAME A PENALTY INSTEAD OF A BUDGET, AND THAT MATTERS MORE THAN IT SOUNDS.
+ * v3 awarded 10 points for having no clearance/citizenship/sponsorship problem, and experience paid
+ * out even when the posting stated no requirement. Between them a posting with ZERO skill overlap
+ * still collected ~33 of 100 for nothing but the absence of a detected problem, which is why the
+ * board's floor sat around 30 and why an obviously unqualified match could not score genuinely low.
+ * Not being disqualified is not evidence of fit. Constraints now only ever subtract.
+ */
+export const SKILL_POINTS = 70;
+export const VERB_POINTS = 8;
+export const EXPERIENCE_POINTS = 22;
+/** Each hard constraint the candidate fails. Subtracted, never awarded. */
+export const HARD_MISS_PENALTY = 15;
 
 const STOP_WORDS = new Set([
   "about","above","across","after","again","against","also","and","any","are","around",
@@ -195,7 +232,7 @@ function parseJsonArray(value) {
   try { return JSON.parse(value || "[]"); } catch { return []; }
 }
 
-export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, domainProfile = {} } = {}) {
+export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, domainProfile = {}, termWeights = null } = {}) {
   const profileKeywords = parseJsonArray(domainProfile.selected_keywords);
   const profileSkills = parseJsonArray(domainProfile.selected_tools);
   const profileVerbs = parseJsonArray(domainProfile.selected_verbs);
@@ -210,6 +247,10 @@ export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, doma
     actionVerbs: compactUnique(profileVerbs, 32),
     yearsExperience: signalProfile?.yearsExperience ?? null,
     structuredFacts,
+    // Corpus weights ride along on the basis so the four call sites in server.js load them once per
+    // request rather than once per job. Null is a supported state: the scorer falls back to
+    // unweighted counting, which is exactly v3's behaviour.
+    termWeights: termWeights || null,
   };
 }
 
@@ -562,20 +603,106 @@ function jobSkillTerms(job) {
   return { hard, soft };
 }
 
-function hasTerm(haystack, term) {
+/**
+ * How far apart the words of a multi-word term may sit and still count as that term.
+ *
+ * A phrase match is the honest case ("distributed systems" really appears). The slack exists only so
+ * that a reordering or one inserted word still matches — "design of distributed systems" for
+ * "distributed systems design" — because requiring an exact phrase would report real experience as
+ * a gap. Beyond this window the words are not a phrase, they are coincidence.
+ *
+ * 1 IS MEASURED, NOT PICKED. Sweeping the value against the live board and the coffee-machine probe:
+ *
+ *   slack   true adjacent matches   scattered artifacts   "machine learning" false-matched?
+ *     0             247                   0 (0.0%)                 no
+ *     1             247                   2 (0.8%)                 no
+ *     2             247                   2 (0.8%)                 no
+ *     3             247                   2 (0.8%)                 YES
+ *
+ * True matches are unaffected throughout — they take the exact-phrase path above. At 3 the window is
+ * wide enough to rejoin "learning ... coffee machine", which is the exact failure being fixed, so the
+ * usable range is 0-2 and 1 is the middle of it: one inserted or reordered word, and no more.
+ */
+const TERM_PROXIMITY_SLACK = 1;
+
+/**
+ * Pre-tokenised resume text. Built ONCE per score, for two reasons.
+ *
+ * Correctness: proximity needs token POSITIONS, and the old check had none.
+ * Cost: hasTerm re-normalised the entire resume on every one of ~40 terms per job, which is most of
+ * the measured 10.3 ms/job. The swipe feed scores on the critical path of a card, so this is not a
+ * micro-optimisation.
+ */
+function buildMatchIndex(haystack) {
+  const text = ` ${normaliseAtsTerm(haystack)} `;
+  const tokens = text.match(/[a-z0-9+#]+/g) || [];
+  const positions = new Map();
+  tokens.forEach((tok, i) => {
+    let list = positions.get(tok);
+    if (!list) { list = []; positions.set(tok, list); }
+    list.push(i);
+  });
+  return { text, positions };
+}
+
+/**
+ * Does the resume actually contain this term?
+ *
+ * THE BUG THIS REPLACES, BECAUSE IT WILL LOOK LIKE AN OVER-COMPLICATION OTHERWISE
+ * The previous fallback was `parts.every(part => text.includes(part))` — every word of the term
+ * appearing SOMEWHERE in the resume, in any order, at any distance. So a resume reading "I design
+ * learning materials for a coffee machine vendor" matched `machine learning`, and on the live board
+ * 22.8% of all multi-word matches were this artifact: `engineering management` credited to "business
+ * administration management", `state management` credited to "city state".
+ *
+ * That is the "confidently wrong" failure that costs the most trust — it does not merely inflate the
+ * number, it tells the candidate they have a skill they do not have. Adjacency, then a bounded
+ * window, and nothing further.
+ */
+function hasTerm(index, term) {
   const key = normaliseAtsTerm(term);
   if (!key) return false;
-  const text = ` ${normaliseAtsTerm(haystack)} `;
-  if (text.includes(` ${key} `)) return true;
+  if (index.text.includes(` ${key} `)) return true;
   const parts = key.split(" ").filter(Boolean);
-  if (parts.length > 1) return parts.every(part => text.includes(` ${part} `));
+  if (parts.length < 2) return false;
+
+  const lists = [];
+  for (const part of parts) {
+    const list = index.positions.get(part);
+    if (!list) return false;           // a word missing entirely settles it
+    lists.push(list);
+  }
+  // Smallest window containing one position from each list. Sweep the first word's occurrences and
+  // ask whether the others fall inside the allowed span; the lists are short, so this stays cheap.
+  const span = parts.length + TERM_PROXIMITY_SLACK;
+  for (const start of lists[0]) {
+    let lo = start;
+    let hi = start;
+    let ok = true;
+    for (let i = 1; i < lists.length; i++) {
+      let best = null;
+      let bestDist = Infinity;
+      for (const p of lists[i]) {
+        const dist = Math.max(hi, p) - Math.min(lo, p);
+        if (dist < bestDist) { bestDist = dist; best = p; }
+      }
+      if (best == null) { ok = false; break; }
+      lo = Math.min(lo, best);
+      hi = Math.max(hi, best);
+      if (hi - lo > span) { ok = false; break; }
+    }
+    if (ok && hi - lo <= span) return true;
+  }
   return false;
 }
 
-function hasVerb(haystack, verb) {
+function hasVerb(index, verb) {
   const wanted = normaliseActionVerb(verb);
   if (!wanted) return false;
-  return tokenise(haystack).some(token => normaliseActionVerb(token) === wanted);
+  for (const token of index.positions.keys()) {
+    if (normaliseActionVerb(token) === wanted) return true;
+  }
+  return false;
 }
 
 function experienceRequirement(jobText) {
@@ -603,8 +730,72 @@ function ratio(matched, total) {
   return total ? matched / total : 1;
 }
 
-export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null, signalProfile = null, domainProfile = null } = {}) {
+/**
+ * The weighted match ratio. Falls back to plain counting when there is no weight table, so an
+ * unweighted deployment scores exactly as it did before rather than not at all.
+ */
+function weightedRatio(matchedTerms, allTerms, termWeights) {
+  if (!allTerms.length) return null;
+  if (!termWeights || !termWeights.size) {
+    return matchedTerms.length / allTerms.length;
+  }
+  const weightOf = t => termWeights.get(normaliseAtsTerm(t)) ?? NEUTRAL_TERM_WEIGHT;
+  let total = 0;
+  let hit = 0;
+  for (const t of allTerms) total += weightOf(t);
+  for (const t of matchedTerms) hit += weightOf(t);
+  return total > 0 ? hit / total : matchedTerms.length / allTerms.length;
+}
+
+/**
+ * Mirrors atsTermWeights.NEUTRAL_WEIGHT. Duplicated as a literal rather than imported because this
+ * module must not depend on the weight module — see the one-way note in services/atsTermWeights.js.
+ */
+export const NEUTRAL_TERM_WEIGHT = 1.0;
+
+/**
+ * Below this many scored terms the posting has not told us enough to score it.
+ *
+ * WHY THIS EXISTS: ratio() returns 1 on an empty denominator, so a posting from which nothing was
+ * extracted used to score a full 50/50 on skills and emerge around 50 — a fabricated number
+ * indistinguishable from a real mediocre fit. "Not enough signal to score" is an honest answer and
+ * a better product than a confident 50.
+ */
+export const MIN_SCORABLE_TERMS = 4;
+
+/**
+ * Graded experience fit, replacing a 17-point binary cliff.
+ *
+ * THE CLIFF WAS THE WHOLE SCORE. Measured on the live board before this change, the experience
+ * component correlated r=0.96 with the final score while the skill component managed r=0.21; with
+ * the requirement satisfied the entire remaining spread was sd 2.87 on a 0-100 scale. A single
+ * boolean was doing the ranking and the skills were decoration.
+ *
+ * Two changes. The penalty is now GRADED by how far short the candidate falls — being one year
+ * under a 5-year ask is not the same as being eight years under, and the old code scored them
+ * identically. And being far OVER is now penalised too, mildly: a senior role far above the
+ * profile is a poor fit that pure term overlap would happily score high, which is exactly the
+ * adversarial case a swipe feed must not get wrong.
+ */
+function experienceScoreFor(requiredYears, candidateYears, maxPoints) {
+  if (requiredYears == null) return maxPoints * 0.85;   // unknown, not perfect and not punished
+  if (candidateYears == null) return maxPoints * 0.55;  // the profile, not the job, is incomplete
+  const gap = candidateYears - requiredYears;
+  if (gap >= 0) {
+    // Over-qualification is a soft signal, so the taper is gentle and floors at 70%.
+    const over = Math.max(0, gap - 4);
+    return maxPoints * Math.max(0.7, 1 - over * 0.06);
+  }
+  const short = -gap;
+  if (short <= 1) return maxPoints * 0.8;
+  if (short <= 2) return maxPoints * 0.6;
+  if (short <= 4) return maxPoints * 0.35;
+  return maxPoints * 0.1;
+}
+
+export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null, signalProfile = null, domainProfile = null, termWeights = null } = {}) {
   const basis = runtimeBasis || buildRuntimeAtsBasis({ resumeText, signalProfile, domainProfile });
+  const weights = termWeights || basis.termWeights || null;
   const jobText = [
     job.title,
     job.company,
@@ -614,19 +805,20 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
     job.skills,
   ].filter(Boolean).join("\n");
   const matchText = [basis.resumeText, basis.skills.join(" "), basis.titles.join(" "), basis.actionVerbs.join(" ")].join("\n");
+  const matchIndex = buildMatchIndex(matchText);
 
   const { skills: jobTerms, competencies: jobCompetencies } = candidateTermsFromJob(jobText, basis, {
     company: job.company || "",
     jobSkills: jobSkillTerms(job),
   });
-  const matchedSkills = jobTerms.filter(term => hasTerm(matchText, term));
-  const missingSkills = jobTerms.filter(term => !hasTerm(matchText, term));
-  const matchedCompetencies = jobCompetencies.filter(term => hasTerm(matchText, term));
-  const missingCompetencies = jobCompetencies.filter(term => !hasTerm(matchText, term));
+  const matchedSkills = jobTerms.filter(term => hasTerm(matchIndex, term));
+  const missingSkills = jobTerms.filter(term => !hasTerm(matchIndex, term));
+  const matchedCompetencies = jobCompetencies.filter(term => hasTerm(matchIndex, term));
+  const missingCompetencies = jobCompetencies.filter(term => !hasTerm(matchIndex, term));
 
   const { verbs: jobVerbs, generic: genericVerbs } = candidateActionVerbsFromJob(jobText, basis);
-  const matchedVerbs = jobVerbs.filter(verb => hasVerb(matchText, verb));
-  const missingVerbs = jobVerbs.filter(verb => !hasVerb(matchText, verb));
+  const matchedVerbs = jobVerbs.filter(verb => hasVerb(matchIndex, verb));
+  const missingVerbs = jobVerbs.filter(verb => !hasVerb(matchIndex, verb));
 
   const requiredYears = experienceRequirement(jobText);
   const candidateYears = basis.yearsExperience == null ? null : Number(basis.yearsExperience);
@@ -649,25 +841,54 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   // AH3 split the report into skills, competencies and generic language. That is a change to how
   // the report READS, and it must not quietly re-weight what the number MEANS: the posting asks for
   // "collaboration" and for "Managed" whether or not we file them under a softer heading, and a
-  // score that dropped them would move every ATS gate in the product — including the auto-apply
-  // threshold that was calibrated against this scorer three commits ago.
-  //
-  // The score DOES move for a different reason, and that one is intended: the skills bucket is now
-  // a closed set, so resume-extracted words like "provided" and "science" no longer count as
-  // matches. They were inflating both the numerator and the report.
-  const scoredTerms = jobTerms.length + jobCompetencies.length;
-  const scoredMatches = matchedSkills.length + matchedCompetencies.length;
+  // score that dropped them would move every ATS gate in the product.
+  const allScored = [...jobTerms, ...jobCompetencies];
+  const allMatched = [...matchedSkills, ...matchedCompetencies];
+  const scoredTerms = allScored.length;
   const scoredVerbs = jobVerbs.length + genericVerbs.length;
-  const scoredVerbMatches = matchedVerbs.length + genericVerbs.filter(v => hasVerb(matchText, v)).length;
-  const skillScore = ratio(scoredMatches, scoredTerms) * 50;
-  const verbScore = ratio(scoredVerbMatches, scoredVerbs) * 15;
-  const experienceScore = experienceFit.fit ? 25 : requiredYears == null ? 22 : 8;
-  const hardScore = Math.max(0, 10 - hardMisses.length * 5);
-  const score = Math.max(0, Math.min(100, Math.round(skillScore + verbScore + experienceScore + hardScore)));
+  const scoredVerbMatches = matchedVerbs.length + genericVerbs.filter(v => hasVerb(matchIndex, v)).length;
+
+  // AK1 — DECLINE TO SCORE RATHER THAN FABRICATE.
+  //
+  // ratio() returns 1 on an empty denominator, so a posting nothing could be extracted from used to
+  // take a full 50/50 on skills and emerge near 50 — a confident, entirely invented number that
+  // read exactly like a real mediocre fit. The three conditions below are the cases where the
+  // engine genuinely has no basis for an opinion, and saying so is the honest product.
+  // The conditions are about SIGNAL, not about length. An earlier draft declined any resume under
+  // 200 characters, which is the kind of arbitrary threshold that reads as rigour and is not: a
+  // short resume that matches nothing already scores low, honestly, and does not need a special
+  // case. What genuinely cannot be scored is a posting nothing was extracted from, or a profile
+  // with nothing on either side to match against.
+  const declineReasons = [];
+  if (scoredTerms < MIN_SCORABLE_TERMS) {
+    declineReasons.push(`Only ${scoredTerms} scorable term${scoredTerms === 1 ? "" : "s"} could be extracted from this posting.`);
+  }
+  if (!(basis.resumeText || "").trim() && !basis.skills.length && !basis.titles.length) {
+    declineReasons.push("No resume text and no profile skills to score against.");
+  }
+
+  // AK1 — WEIGHTED, so that matching `python` is worth more than matching `systems`.
+  // Weights are corpus-derived (services/atsTermWeights.js) and PASSED IN; when absent this is
+  // exactly the old unweighted ratio, so a deployment without a weight table is unchanged.
+  const skillRatio = weightedRatio(allMatched, allScored, weights);
+  const skillScore = (skillRatio == null ? 1 : skillRatio) * SKILL_POINTS;
+  const verbScore = ratio(scoredVerbMatches, scoredVerbs) * VERB_POINTS;
+  const experienceScore = experienceScoreFor(requiredYears, candidateYears, EXPERIENCE_POINTS);
+  const hardPenalty = hardMisses.length * HARD_MISS_PENALTY;
+  const score = declineReasons.length
+    ? null
+    : Math.max(0, Math.min(100, Math.round(skillScore + verbScore + experienceScore - hardPenalty)));
 
   return {
     source: LOCAL_ATS_SOURCE,
     score,
+    // Null score and the reason it is null, so a caller never has to infer "0 or missing?".
+    scorable: declineReasons.length === 0,
+    decline_reasons: declineReasons,
+    // Provenance of the weighting, so a reader can tell a weighted score from an unweighted one.
+    weighting: weights && weights.size
+      ? { applied: true, terms: weights.size }
+      : { applied: false, terms: 0 },
     tier1_matched: compactUnique(matchedSkills, 40),
     tier1_missing: compactUnique(missingSkills, 40),
     // AH3's third bucket. Competencies are real and wanted, but they are qualities, not skills —

@@ -2635,4 +2635,37 @@ export const MIGRATIONS = [
         ALTER TABLE domain_profiles ADD COLUMN include_summary INTEGER NOT NULL DEFAULT 0;
       `,
     },
+    {
+      // AK1. Corpus-derived term weights for the local ATS scorer.
+      //
+      // WHY A TABLE AND NOT A JSON FILE ON DISK
+      // The weights are DERIVED FROM scraped_jobs and go stale as the board is re-scraped. A file
+      // checked into data/ would be a snapshot of one machine's board pretending to be a constant,
+      // and every other deployment would score against a corpus it does not have. The table is
+      // recomputed from whatever board the deployment actually holds.
+      //
+      // computed_at AND corpus_size ARE NOT DECORATION.
+      // A weight table that ages silently is this project's most repeated defect shape, so the
+      // provenance is stored per row and the loader refuses weights older than
+      // MAX_WEIGHT_AGE_DAYS rather than scoring against a corpus that no longer exists. corpus_size
+      // is stored too because a weight is only interpretable against the N it was derived from.
+      //
+      // NO FOREIGN KEY TO scraped_jobs, ON PURPOSE. Rows here are aggregates over the whole corpus,
+      // not facts about one posting; a deleted job must not delete a weight, it must wait for the
+      // next recompute.
+      id: "093_ats_term_weights",
+      sql: `
+        CREATE TABLE IF NOT EXISTS ats_term_weights (
+          role_family TEXT    NOT NULL,
+          term        TEXT    NOT NULL,
+          df          INTEGER NOT NULL,
+          corpus_size INTEGER NOT NULL,
+          weight      REAL    NOT NULL,
+          computed_at INTEGER NOT NULL,
+          PRIMARY KEY (role_family, term)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ats_term_weights_family
+          ON ats_term_weights(role_family);
+      `,
+    },
   ];

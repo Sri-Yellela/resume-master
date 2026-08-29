@@ -172,16 +172,25 @@ test("near-duplicate competencies collapse onto the posting's own wording", () =
 
 test("the score is computed over the union, so splitting the report does not move every gate", () => {
   const src = fs.readFileSync("services/localAtsScorer.js", "utf8");
-  assert.match(src, /const scoredTerms = jobTerms\.length \+ jobCompetencies\.length/);
+  // AK1 renamed the locals when the score became weighted; the property under test is unchanged —
+  // the denominator is still the UNION of both buckets, not one of them.
+  assert.match(src, /const allScored = \[\.\.\.jobTerms, \.\.\.jobCompetencies\]/);
+  assert.match(src, /const scoredTerms = allScored\.length/);
   assert.match(src, /const scoredVerbs = jobVerbs\.length \+ genericVerbs\.length/);
   // A posting whose asks are ALL competencies must not score as though it asked for nothing.
+  //
+  // AK1 added a floor: below MIN_SCORABLE_TERMS the scorer DECLINES rather than returning a
+  // fabricated number, and three terms is below it. The fixture carries four so the assertion below
+  // still exercises what it always did — that competencies count toward the score — rather than
+  // silently becoming an assertion about null.
   const job = {
     title: "Lead", company: "Acme",
-    description: "We want collaboration and problem decomposition and thoughtful problem-solving.",
+    description: "We want collaboration and problem decomposition and thoughtful problem-solving and stakeholder management.",
     skills_json: JSON.stringify([
       { skill: "collaboration", type: "soft" },
       { skill: "problem decomposition", type: "soft" },
       { skill: "thoughtful problem-solving", type: "soft" },
+      { skill: "stakeholder management", type: "soft" },
     ]),
   };
   const missed = scoreAtsLocally({ job, runtimeBasis: basis() });
@@ -195,7 +204,10 @@ test("the score is computed over the union, so splitting the report does not mov
 test("the report version was bumped, or every cached report keeps the old categories", () => {
   // Reports are cached in four places and served whenever `source` matches. AG1's fragment fix
   // appeared to work and did not, for exactly this reason (e566dbc).
-  assert.equal(LOCAL_ATS_SOURCE, "local_ats_v3");
+  // v4: AK1 changed what the NUMBER means (weighted terms, graded experience, constraints as a
+  // penalty) and what the report carries (scorable / decline_reasons / weighting). Every cached v3
+  // report would otherwise keep being served with the old semantics behind the same field names.
+  assert.equal(LOCAL_ATS_SOURCE, "local_ats_v4");
   const server = fs.readFileSync("server.js", "utf8");
   assert.doesNotMatch(server, /"local_ats_v2"/, "no gate may still spell the superseded version");
 });

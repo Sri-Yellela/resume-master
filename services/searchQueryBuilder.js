@@ -35,6 +35,69 @@ function getAliasMap() {
   return _aliasMap;
 }
 
+/**
+ * Every phrase that implies a role family: the alias keys plus every canonical title, longest
+ * first. Memoised — roleFamilyForTitle runs once per posting over the whole board.
+ */
+let _aliasPhrases = null;
+function aliasPhrases() {
+  if (_aliasPhrases) return _aliasPhrases;
+  const seen = new Map();
+  for (const [alias, entry] of Object.entries(getAliasMap())) {
+    if (!entry || typeof entry !== "object" || !entry.roleFamily) continue;
+    const key = alias.toLowerCase();
+    if (!seen.has(key)) seen.set(key, entry);
+    const canonical = String(entry.canonical || "").toLowerCase();
+    if (canonical && !seen.has(canonical)) seen.set(canonical, entry);
+  }
+  _aliasPhrases = [...seen.entries()].sort((a, b) => b[0].length - a[0].length);
+  return _aliasPhrases;
+}
+
+/**
+ * The role family a job title belongs to — "engineering", "data", "pm", "design", ...
+ *
+ * WHY IT LIVES HERE AND NOT BESIDE THE SCORER
+ * ROLE_ALIAS_MAP.json already carries roleFamily on every entry and this module is already its only
+ * reader. The ATS term-weight table needs to scope weights per family ("kubernetes" is common in
+ * infra and rare in frontend, and one global weight is wrong for both), and the alternative was a
+ * second role vocabulary maintained separately from this one. There is no second vocabulary.
+ *
+ * MATCHING IS EXACT-THEN-LONGEST-ALIAS, NOT FUZZY. Board titles are long and specific
+ * ("Staff Software Engineer, Service Infrastructure"); the alias map is short and general ("swe").
+ * An exact hit wins; otherwise the longest alias appearing as a whole phrase inside the title wins,
+ * so "engineer" never beats "machine learning engineer" on a title containing both.
+ *
+ * Returns null when nothing matches. A guessed family is worse than no family: the caller falls
+ * back to the global weight table, which is merely less specific, where a wrong family would score
+ * a designer against infrastructure vocabulary.
+ */
+export function roleFamilyForTitle(rawTitle) {
+  const title = String(rawTitle || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!title) return null;
+  const map = getAliasMap();
+  if (map[title]?.roleFamily) return map[title].roleFamily;
+
+  let best = null;
+  let bestLen = 0;
+  // Aliases AND canonicals. The map is keyed by SHORTHAND ("swe", "mle"), so the full titles a job
+  // board actually uses — "software engineer", "data scientist" — appear only on the value side.
+  // Indexing keys alone matched 19.8% of this board and missed "software engineer" outright.
+  for (const [alias, entry] of aliasPhrases()) {
+    const family = entry?.roleFamily;
+    if (!family || alias.length <= bestLen) continue;
+    // Whole-phrase, word-bounded: "ios" must not match "audios", "ml" must not match "html".
+    const i = title.indexOf(alias);
+    if (i === -1) continue;
+    const before = i === 0 ? " " : title[i - 1];
+    const after = i + alias.length >= title.length ? " " : title[i + alias.length];
+    if (/[a-z0-9]/.test(before) || /[a-z0-9]/.test(after)) continue;
+    best = family;
+    bestLen = alias.length;
+  }
+  return best;
+}
+
 // Normalise raw user input to a canonical role title.
 // TO EXPAND ROLE COVERAGE: add entries to data/ROLE_ALIAS_MAP.json.
 // Do not add aliases here directly.

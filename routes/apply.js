@@ -200,6 +200,26 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
    * queue for a human. It is a deliberate throughput decision, made by the owner with the
    * distribution in front of them, not a number inherited from a broken scale.
    *
+   * ── AK1: THE SCALE MOVED AGAIN, AND 50 NO LONGER MEANS WHAT THE PARAGRAPH ABOVE SAYS ──
+   *
+   * The scorer was rebalanced (local_ats_v4): skills carry 70 of the 100 points instead of 50,
+   * experience is graded instead of a 17-point cliff, and hard constraints only subtract — v3 paid
+   * ~33 points for the mere absence of a detected problem, which is what held the floor near 30.
+   * Re-measured over the same 1291 postings with a realistic engineering resume, v4 gives
+   * median 28, p75 32, p90 38, max 63 — against v3's median 45.
+   *
+   * SO THIS THRESHOLD IS NOW MIS-CALIBRATED IN THE SAFE DIRECTION. At 50, roughly 2% of postings
+   * can auto-send rather than the 44% the owner chose; nearly everything queues for a human. That
+   * is a throughput regression, not a safety one, and it is deliberately being left for the owner
+   * to re-derive rather than quietly reset: moving this number DOWN sends more real applications
+   * unattended under a real candidate's name, and that is not a change to make on someone's behalf
+   * as a side effect of a scorer refactor.
+   *
+   * To restore the stated intent — "just above the median, roughly average-or-better goes
+   * unattended" — the equivalent v4 value is about 30. Set ATS_AUTO_APPLY_THRESHOLD to adopt it.
+   * Re-measure first: the distribution above is for ONE profile and one resume, and the whole point
+   * of the note below is that it moves with both.
+   *
    * Configurable because the comment above says every limit here is; this one was the exception,
    * and it is the one most likely to want tuning as the scorer or the candidate's profile changes.
    * It is also candidate-specific — that distribution was measured for one profile.
@@ -716,8 +736,20 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         usedArtifactId = artifact.id ?? null;
         usedAtsScore   = artifact.ats_score ?? null;
         const atsScore = artifact.ats_score ?? null;
-        if (mode === "auto" && atsScore !== null && atsScore < ATS_AUTO_APPLY_THRESHOLD) {
-          logEvent(runId, runJobId, userId, jobId, "ats_review", `ATS score ${atsScore} below threshold`, { atsScore });
+        // AK1 — AN UNKNOWN SCORE MUST HOLD, NOT PASS.
+        //
+        // This gate used to read `atsScore !== null && atsScore < THRESHOLD`, so a null score fell
+        // through and auto-submitted. That was already wrong for a never-scored artifact, and it
+        // became actively dangerous once the scorer gained the ability to DECLINE (returning null
+        // when there is too little signal to judge): the one case where the engine says "I cannot
+        // tell you if this is a good fit" was the one case that skipped the gate and applied on the
+        // candidate's behalf. An auto-submit gate may only open on a score it has actually seen.
+        if (mode === "auto" && (atsScore === null || atsScore < ATS_AUTO_APPLY_THRESHOLD)) {
+          logEvent(runId, runJobId, userId, jobId, "ats_review",
+            atsScore === null
+              ? "Held: no ATS score for this artifact — auto-apply does not submit on an unknown score"
+              : `ATS score ${atsScore} below threshold`,
+            { atsScore });
           db.prepare(`UPDATE apply_run_jobs SET status='held_review', reason_code='ats_below_threshold', finished_at=unixepoch() WHERE id=?`).run(runJobId);
           db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
           // Held on the score before the browser ran. The candidate may well decide to send it
@@ -899,10 +931,21 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           logEvent(runId, runJobId, userId, jobId, "generation_ready", "Resume generated", { atsScore: gen.atsScore });
           usedArtifactId = gen.resumeId ?? null;
           usedAtsScore   = gen.atsScore ?? null;
+          // AK1: the scorer may now DECLINE to score (null) when the posting or the resume carries
+          // too little signal to judge. That is not a zero. Both outcomes hold the job for review —
+          // the gate must never auto-submit on an unknown — but they are logged differently,
+          // because "Score 0 below threshold" for a job that was never scored sends whoever reads
+          // the run history looking for a resume problem that does not exist.
+          const unscorable = gen.atsScore == null;
           const atsScore = gen.atsScore ?? 0;
-          logEvent(runId, runJobId, userId, jobId, "ats_review", `ATS score: ${atsScore}`, { atsScore });
-          if (atsScore < ATS_AUTO_APPLY_THRESHOLD) {
-            logEvent(runId, runJobId, userId, jobId, "ats_below_threshold", `Score ${atsScore} below threshold ${ATS_AUTO_APPLY_THRESHOLD}`);
+          logEvent(runId, runJobId, userId, jobId, "ats_review",
+            unscorable ? "ATS score: not enough signal to score" : `ATS score: ${atsScore}`,
+            { atsScore: gen.atsScore ?? null });
+          if (unscorable || atsScore < ATS_AUTO_APPLY_THRESHOLD) {
+            logEvent(runId, runJobId, userId, jobId, "ats_below_threshold",
+              unscorable
+                ? "Held: not enough signal to score this posting against the resume"
+                : `Score ${atsScore} below threshold ${ATS_AUTO_APPLY_THRESHOLD}`);
             db.prepare(`UPDATE apply_run_jobs SET status='held_review', reason_code='ats_below_threshold', finished_at=unixepoch() WHERE id=?`).run(runJobId);
             db.prepare(`UPDATE apply_runs SET held_count=held_count+1 WHERE id=?`).run(runId);
             return null;

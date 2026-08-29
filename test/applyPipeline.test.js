@@ -71,7 +71,16 @@ test("auto apply gates ATS below threshold into review instead of submitting", (
   assert.ok(dflt > 0 && dflt < 100, `implausible default threshold ${dflt}`);
 
   // And it is still a gate on the UNATTENDED path only — manual review can send anything.
-  assert.match(applyRoute, /mode === "auto" && atsScore !== null && atsScore < ATS_AUTO_APPLY_THRESHOLD/);
+  //
+  // AK1 TIGHTENED THE NULL BRANCH, WHICH IS WHY THIS EXPRESSION CHANGED.
+  // It used to read `atsScore !== null && atsScore < THRESHOLD`, so an artifact with NO score fell
+  // straight through and auto-submitted. That was already wrong for a never-scored artifact, and it
+  // became worse when the scorer gained the ability to decline (returning null when there is too
+  // little signal to judge): the one case where the engine says "I cannot tell you whether this
+  // fits" was the one case that skipped the gate. An unknown score must hold, so the guard is now
+  // `atsScore === null || atsScore < THRESHOLD`. `mode === "auto"` is the part that carries this
+  // test's intent, and it is unchanged.
+  assert.match(applyRoute, /mode === "auto" && \(atsScore === null \|\| atsScore < ATS_AUTO_APPLY_THRESHOLD\)/);
 });
 
 test("manual apply uses semi automation and records review state", () => {

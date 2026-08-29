@@ -276,7 +276,14 @@ test("a term the summary was the ONLY carrier of is lost with it — which is wh
   assert.match(noSummaryBlock, /Every honestly claimable Tier 1 term still appears verbatim in TECHNICAL SKILLS or in a bullet/,
     "with no summary, the terms it used to carry must be required somewhere that remains");
 
-  const job = { title: "Backend Engineer", company: "N", description: "Java, distributed systems." };
+  // AK1: the scorer declines below MIN_SCORABLE_TERMS rather than fabricating a number, and a
+  // two-term posting is below it. The posting now names four skills so the pair below is a
+  // comparison of two SCORES, as it always was, and not of two nulls. "distributed systems" is
+  // still the term the summary alone carried, which is the thing under test.
+  const job = {
+    title: "Backend Engineer", company: "N",
+    description: "Java, distributed systems, Kubernetes, PostgreSQL.",
+  };
   const basis = t => ({ resumeText: t, skills: [], titles: [], actionVerbs: [] });
   const carried = scoreAtsLocally({ job, runtimeBasis: basis("TECHNICAL SKILLS Java, distributed systems EXPERIENCE Acme") }).score;
   const dropped = scoreAtsLocally({ job, runtimeBasis: basis("TECHNICAL SKILLS Java EXPERIENCE Acme") }).score;

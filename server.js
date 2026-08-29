@@ -85,6 +85,8 @@ import {
   LOCAL_ATS_SOURCE,
   scoreAtsLocally,
 } from "./services/localAtsScorer.js";
+import { loadTermWeights } from "./services/atsTermWeights.js";
+import { roleFamilyForTitle } from "./services/searchQueryBuilder.js";
 import {
   INTEGRATION_PROVIDERS,
   getAutomationReadiness,
@@ -2997,6 +2999,39 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE domain_profiles ADD COLUMN include_summary INTEGER NOT NULL DEFAULT 0;
       `,
     },
+    {
+      // AK1. Corpus-derived term weights for the local ATS scorer.
+      //
+      // WHY A TABLE AND NOT A JSON FILE ON DISK
+      // The weights are DERIVED FROM scraped_jobs and go stale as the board is re-scraped. A file
+      // checked into data/ would be a snapshot of one machine's board pretending to be a constant,
+      // and every other deployment would score against a corpus it does not have. The table is
+      // recomputed from whatever board the deployment actually holds.
+      //
+      // computed_at AND corpus_size ARE NOT DECORATION.
+      // A weight table that ages silently is this project's most repeated defect shape, so the
+      // provenance is stored per row and the loader refuses weights older than
+      // MAX_WEIGHT_AGE_DAYS rather than scoring against a corpus that no longer exists. corpus_size
+      // is stored too because a weight is only interpretable against the N it was derived from.
+      //
+      // NO FOREIGN KEY TO scraped_jobs, ON PURPOSE. Rows here are aggregates over the whole corpus,
+      // not facts about one posting; a deleted job must not delete a weight, it must wait for the
+      // next recompute.
+      id: "093_ats_term_weights",
+      sql: `
+        CREATE TABLE IF NOT EXISTS ats_term_weights (
+          role_family TEXT    NOT NULL,
+          term        TEXT    NOT NULL,
+          df          INTEGER NOT NULL,
+          corpus_size INTEGER NOT NULL,
+          weight      REAL    NOT NULL,
+          computed_at INTEGER NOT NULL,
+          PRIMARY KEY (role_family, term)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ats_term_weights_family
+          ON ats_term_weights(role_family);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -3666,6 +3701,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
               const report = scoreAtsLocally({
                 job: item,
                 runtimeBasis,
+                termWeights: atsTermWeightsForJob(item),
               });
               updateAts.run(report.score, JSON.stringify(report), item.jobId);
               if (domainProfile?.id) {
@@ -5074,6 +5110,36 @@ const app = express();
 // Active scrapes: key = "userId:profileId:query", value = { startedAt, done }
 // Polled by GET /api/jobs/poll to determine if a background scrape is still running.
 const activeScrapes = new Map();
+/**
+ * AK1 — the corpus term weights that apply to one posting, by its role family.
+ *
+ * Cached for the process lifetime and keyed by family, because the alternative is a SELECT per job
+ * and the scrape-time path scores the whole board in a loop. The cache is dropped whenever the
+ * weight table is recomputed (scripts/recomputeAtsTermWeights.js runs out of process, so a restart
+ * is what picks new weights up — a long-lived server keeps serving the weights it booted with,
+ * which is why loadTermWeights stamps and checks computed_at rather than trusting the cache).
+ *
+ * A STALE OR ABSENT TABLE RETURNS null, NOT OLD WEIGHTS. The scorer treats null as "score
+ * unweighted", which is exactly v3 behaviour — degraded, never wrong.
+ */
+const _atsWeightCache = new Map();
+function atsTermWeightsForJob(job) {
+  let family = null;
+  try {
+    family = roleFamilyForTitle(job?.normalized_title || job?.title || "");
+  } catch { family = null; }
+  const key = family || "__none__";
+  if (!_atsWeightCache.has(key)) {
+    let loaded = null;
+    try { loaded = loadTermWeights(db, family); } catch { loaded = null; }
+    if (loaded && loaded.stale && loaded.weights.size) {
+      console.warn(`[ats] term weights are stale (computed_at ${loaded.computedAt}); scoring unweighted. Run scripts/recomputeAtsTermWeights.js`);
+    }
+    _atsWeightCache.set(key, loaded && !loaded.stale && loaded.weights.size ? loaded.weights : null);
+  }
+  return _atsWeightCache.get(key);
+}
+
 const atsScoreQueue = [];
 let atsScoreQueueRunning = false;
 let anthropicAtsUnavailableUntil = 0;
@@ -7021,7 +7087,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
       signalProfile,
       domainProfile: activeProfile,
     });
-    const result = scoreAtsLocally({ job, runtimeBasis });
+    const result = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
 
     // Save to cache â€” INSERT OR REPLACE via ON CONFLICT
     db.prepare(`
@@ -7258,7 +7324,8 @@ ${originalText}` }],
           signalProfile: scoreSignalProfile,
           domainProfile: profile,
         });
-        return scoreAtsLocally({ job: { title: profile.profile_name, description: templateJd }, runtimeBasis });
+        return scoreAtsLocally({ job: { title: profile.profile_name, description: templateJd }, runtimeBasis,
+          termWeights: atsTermWeightsForJob({ title: profile.profile_name }) });
       } catch { return null; }
     };
 
@@ -7372,7 +7439,7 @@ async function adoptEnhancedProfileResume(req, res) {
         const batch = jobsToRescore.slice(i, i + 25);
         await Promise.all(batch.map(async job => {
           try {
-            const report = scoreAtsLocally({ job, runtimeBasis });
+            const report = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
             updateAts.run(report.score, JSON.stringify(report), job.job_id);
           } catch(e) {
             console.warn(`[adopt-enhanced] rescore failed for ${job.job_id}:`, e.message);
@@ -7635,7 +7702,7 @@ RULES:
     signalProfile,
     domainProfile: activeProfile,
   });
-  const atsReport = scoreAtsLocally({ job, runtimeBasis });
+  const atsReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
   const atsScore = atsReport.score;
   const atsCacheKey = buildAtsCacheKey(formattedHtml, job);
 
@@ -7961,7 +8028,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
         signalProfile,
         domainProfile: activeProfile,
       });
-      const freshReport = scoreAtsLocally({ job, runtimeBasis });
+      const freshReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
       const freshScoreVal = freshReport.score;
         db.prepare(
           "UPDATE resumes SET ats_score=?,ats_report=?,ats_cache_key=?,ats_prompt_version=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?"
