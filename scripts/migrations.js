@@ -2668,4 +2668,37 @@ export const MIGRATIONS = [
           ON ats_term_weights(role_family);
       `,
     },
+    {
+      // AK1 — record the ATS score AT THE MOMENT OF APPLYING, so it can be correlated with the
+      // outcome later.
+      //
+      // THIS IS THE ONLY HONEST TEST OF WHETHER THE SCORE PREDICTS ANYTHING, AND IT IS
+      // UNRECOVERABLE IF NOT CAPTURED AT THE TIME. Nobody can compute a true ATS score; the number
+      // is defensible only if applications that scored higher actually get more responses. That
+      // question needs (score, outcome) pairs, and the score half cannot be reconstructed
+      // afterwards — the resume changes, the profile changes, the corpus weights change, and the
+      // scorer itself changes. Re-scoring an old application next year answers a different
+      // question. n is ZERO today and no claim is being made from this; the fields exist so the
+      // data starts accumulating from the next application onward.
+      //
+      // ats_scorer_version IS NOT OPTIONAL, and AK1 is the proof. This very change moved the scale:
+      // the same fit that scored 45 under local_ats_v3 scores about 28 under v4, because skills went
+      // from 50 to 70 points, experience stopped being a cliff, and constraints stopped paying for
+      // the absence of a problem. Pooling scores across that boundary without knowing which scorer
+      // produced them would silently mix two scales and produce a confident, meaningless
+      // correlation. Every stored score carries the version that produced it.
+      //
+      // The full report is stored beside the number because "which TERMS were missing when this
+      // application got a response" is the more useful question, and it is the one targeted
+      // generation (Phase 4) would be tuned against.
+      id: "094_application_ats_provenance",
+      sql: `
+        ALTER TABLE job_applications ADD COLUMN ats_score_at_apply INTEGER;
+        ALTER TABLE job_applications ADD COLUMN ats_scorer_version TEXT;
+        ALTER TABLE job_applications ADD COLUMN ats_report_at_apply TEXT;
+        ALTER TABLE job_applications ADD COLUMN ats_scored_at INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_job_applications_ats_score
+          ON job_applications(ats_scorer_version, ats_score_at_apply);
+      `,
+    },
   ];

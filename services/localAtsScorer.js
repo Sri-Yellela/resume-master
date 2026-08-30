@@ -404,6 +404,33 @@ function stripLinks(text) {
  * The candidate's own terms still come FIRST — they order the budget and preserve the user's own
  * wording — but ordering is all they do now. They can no longer admit a term.
  */
+/**
+ * Skill names that are also ordinary English words, and cannot be admitted on a substring alone.
+ *
+ * DIAGNOSED FROM A REAL INVERSION. "Staff UX Researcher, Incubations (Mixed Methods)" scored 30
+ * against a backend resume — its third-highest engineering-ish score — and the reason was that the
+ * registry admitted `Go` because the posting contains the English word "go". The candidate lists Go,
+ * so it matched, and a UX research role collected skill credit for a programming language nobody
+ * mentioned.
+ *
+ * The registry pass is a SUBSTRING test against the posting, which is exactly the wrong instrument
+ * for a term like this. So for these, the substring is not enough: the term is admitted only when
+ * the enrichment's skills_json also names it — i.e. when something that actually READ the posting
+ * judged it a skill. Trust the reader, not the substring.
+ *
+ * Deliberately short and only the genuinely ambiguous cases. A long list here would start dropping
+ * real skills from real postings, which is the opposite failure.
+ */
+const AMBIGUOUS_SKILL_WORDS = new Set([
+  "go", "r", "c", "swift", "rust", "dart", "ruby", "scratch", "processing", "spring", "struts",
+  "unity", "shell", "bash", "spark", "hive", "pig", "storm", "kafka", "flink", "beam", "arrow",
+]);
+
+function isAmbiguousUncorroborated(key, enrichedKeys) {
+  if (!AMBIGUOUS_SKILL_WORDS.has(key)) return false;
+  return !enrichedKeys.has(key);
+}
+
 function candidateTermsFromJob(jobText, runtimeBasis, { company = "", jobSkills = { hard: [], soft: [] } } = {}) {
   const searchText = stripLinks(jobText);
   const normJob = ` ${normaliseAtsTerm(searchText)} `;
@@ -428,12 +455,18 @@ function candidateTermsFromJob(jobText, runtimeBasis, { company = "", jobSkills 
     if (key && !softKeys.has(key)) admit(term);
   };
   for (const skill of jobSkills.hard || []) admitUnlessSoft(skill);
+  const enrichedKeys = new Set([...(jobSkills.hard || []), ...(jobSkills.soft || [])]
+    .map(normaliseAtsTerm).filter(Boolean));
   for (const term of companyStackTerms(company)) {
     const key = normaliseAtsTerm(term);
-    if (key && normJob.includes(` ${key} `)) admitUnlessSoft(term);
+    if (key && normJob.includes(` ${key} `) && !isAmbiguousUncorroborated(key, enrichedKeys)) {
+      admitUnlessSoft(term);
+    }
   }
   for (const [key, label] of skillIndex()) {
-    if (normJob.includes(` ${key} `)) admitUnlessSoft(label);
+    if (normJob.includes(` ${key} `) && !isAmbiguousUncorroborated(key, enrichedKeys)) {
+      admitUnlessSoft(label);
+    }
   }
 
   const skills = [];
@@ -777,20 +810,23 @@ export const MIN_SCORABLE_TERMS = 4;
  * profile is a poor fit that pure term overlap would happily score high, which is exactly the
  * adversarial case a swipe feed must not get wrong.
  */
-function experienceScoreFor(requiredYears, candidateYears, maxPoints) {
-  if (requiredYears == null) return maxPoints * 0.85;   // unknown, not perfect and not punished
-  if (candidateYears == null) return maxPoints * 0.55;  // the profile, not the job, is incomplete
+function experienceRatio(requiredYears, candidateYears) {
+  // null means "this component carries no information", NOT "score it zero" and NOT "score it
+  // full". See the renormalisation note in scoreAtsLocally — a component with nothing to say is
+  // dropped from the average rather than voting.
+  if (requiredYears == null) return null;
+  if (candidateYears == null) return 0.55;  // the profile, not the job, is the incomplete one
   const gap = candidateYears - requiredYears;
   if (gap >= 0) {
     // Over-qualification is a soft signal, so the taper is gentle and floors at 70%.
     const over = Math.max(0, gap - 4);
-    return maxPoints * Math.max(0.7, 1 - over * 0.06);
+    return Math.max(0.7, 1 - over * 0.06);
   }
   const short = -gap;
-  if (short <= 1) return maxPoints * 0.8;
-  if (short <= 2) return maxPoints * 0.6;
-  if (short <= 4) return maxPoints * 0.35;
-  return maxPoints * 0.1;
+  if (short <= 1) return 0.8;
+  if (short <= 2) return 0.6;
+  if (short <= 4) return 0.35;
+  return 0.1;
 }
 
 export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null, signalProfile = null, domainProfile = null, termWeights = null } = {}) {
@@ -871,9 +907,33 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   // Weights are corpus-derived (services/atsTermWeights.js) and PASSED IN; when absent this is
   // exactly the old unweighted ratio, so a deployment without a weight table is unchanged.
   const skillRatio = weightedRatio(allMatched, allScored, weights);
+  const verbRatio = scoredVerbs ? scoredVerbMatches / scoredVerbs : null;
+  const expRatio = experienceRatio(requiredYears, candidateYears);
+
+  // AN UNKNOWN EXPERIENCE REQUIREMENT SCORES AT THE NEUTRAL RATE, AND THAT IS A MEASURED CHOICE.
+  //
+  // The obvious-looking alternative is to RENORMALISE — drop a component that carries no
+  // information from both numerator and denominator, so the remaining components are scored on
+  // their own scale. It was implemented and measured against the 30-posting judged set, and it made
+  // the ranking WORSE: Spearman rho 0.448 -> 0.242, Kendall 0.322 -> 0.176, mis-ordered pairs
+  // 33.6% -> 41.0%.
+  //
+  // The reason is worth keeping, because it is counter-intuitive and someone will try this again.
+  // Renormalising lowers the floor (a zero-overlap job correctly drops from 26 to 10) but it also
+  // amplifies the SKILL component's noise, and skill recall on this corpus is poor — postings
+  // describe requirements abstractly ("multiple programming languages", "full-stack software
+  // engineering") that no concrete resume matches lexically. So excellent matches collapsed too:
+  // "Software Engineer, Payments, Risk" 28 -> 12, "TechOps Integration Reliability" 23 -> 5. Worse,
+  // it handed the ranking back to the experience flag from the other direction — postings that DO
+  // state a satisfied year requirement kept a full component and floated to the top, which is how a
+  // Fraud Strategist and two Sales Manager roles came to outrank a backend engineering job.
+  //
+  // A constant under every score is a floor, which is a cosmetic problem. A component whose weight
+  // depends on whether the posting happened to mention years is a ranking problem, which is the one
+  // that matters. The flat rate stays until skill recall is good enough to carry the extra variance.
+  const experienceScore = (expRatio == null ? 0.85 : expRatio) * EXPERIENCE_POINTS;
   const skillScore = (skillRatio == null ? 1 : skillRatio) * SKILL_POINTS;
-  const verbScore = ratio(scoredVerbMatches, scoredVerbs) * VERB_POINTS;
-  const experienceScore = experienceScoreFor(requiredYears, candidateYears, EXPERIENCE_POINTS);
+  const verbScore = (verbRatio == null ? 1 : verbRatio) * VERB_POINTS;
   const hardPenalty = hardMisses.length * HARD_MISS_PENALTY;
   const score = declineReasons.length
     ? null

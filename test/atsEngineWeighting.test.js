@@ -366,7 +366,7 @@ test("migration 093 is byte-identical in both migration runners", () => {
     "the boot-time runner and the CLI runner must apply the same DDL");
 });
 
-test("093 is appended at the end and every migration id is unique", () => {
+test("the weight table migration is appended, and every migration id is unique", () => {
   const src = fs.readFileSync("scripts/migrations.js", "utf8");
   const ids = [...src.matchAll(/id: "(\d{3}_[a-z0-9_]+)"/g)].map(m => m[1]);
 
@@ -376,9 +376,14 @@ test("093 is appended at the end and every migration id is unique", () => {
   // asserting on the prefix instead would fail on a codebase that is actually correct.
   assert.equal(new Set(ids).size, ids.length, "a duplicate full id would silently skip a migration");
 
-  // Additive: the new one is last, so no applied migration was edited or reordered ahead of it.
-  assert.equal(ids[ids.length - 1], "093_ats_term_weights");
-  assert.ok(ids.every(id => Number(id.slice(0, 3)) <= 93), "093 is the high-water mark");
+  // ADDITIVE: 093 exists and nothing was inserted BEFORE it. Deliberately not asserting that it is
+  // the last entry — an earlier draft did, and 094 broke it one commit later. A test that fails
+  // every time a migration is legitimately appended is not protecting anything; the property worth
+  // pinning is that 093 was never moved or edited once applied.
+  const i = ids.indexOf("093_ats_term_weights");
+  assert.ok(i >= 0, "093 must still be present and un-renamed");
+  assert.ok(ids.slice(0, i).every(id => Number(id.slice(0, 3)) <= 93),
+    "no migration may be inserted ahead of an already-applied one");
 });
 
 // ── 8. The gate cannot auto-submit on a score it never saw ───────────────────────────────────────

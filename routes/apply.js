@@ -50,6 +50,44 @@ const GATE_TOKEN_SECRET =
 const GATE_EXCHANGE_MAX_ATTEMPTS = 20;
 const GATE_EXCHANGE_WINDOW_SEC = 10 * 60;
 
+/**
+ * AK1 — the ATS score to stamp on an application, and the scorer version that produced it.
+ *
+ * Reads an EXISTING report rather than scoring. Three sources, most-specific first:
+ *   1. resumes.ats_report      — the generated document that was actually sent
+ *   2. ats_only_reports        — the report the candidate saw on the board before applying
+ *   3. scraped_jobs.ats_report — the scrape-time score against the base resume
+ *
+ * The version is read out of the stored report's own `source` field rather than from the current
+ * LOCAL_ATS_SOURCE constant. Those two differ exactly when a cached report predates a scorer
+ * change, which is the case the version column exists to keep straight — stamping today's version
+ * onto a report produced by an older one would be the specific lie this field is meant to prevent.
+ *
+ * Returns nulls when nothing has scored this job. That is left as null: see the insert site.
+ */
+export function capturedAtsAtApply(db, userId, jobId) {
+  const empty = { score: null, version: null, report: null };
+  const pick = (row) => {
+    if (!row?.ats_report) return null;
+    let parsed;
+    try { parsed = JSON.parse(row.ats_report); } catch { return null; }
+    if (!parsed || typeof parsed !== "object") return null;
+    // A report the scorer DECLINED carries no score, and an application against it records that
+    // honestly rather than inventing one.
+    if (parsed.score == null) return null;
+    return { score: parsed.score, version: parsed.source || null, report: row.ats_report };
+  };
+  try {
+    return pick(db.prepare("SELECT ats_report FROM resumes WHERE user_id=? AND job_id=?").get(userId, jobId))
+      || pick(db.prepare("SELECT ats_report FROM ats_only_reports WHERE user_id=? AND job_id=?").get(userId, jobId))
+      || pick(db.prepare("SELECT ats_report FROM scraped_jobs WHERE job_id=?").get(jobId))
+      || empty;
+  } catch {
+    // Recording an application must never fail because a score could not be found for it.
+    return empty;
+  }
+}
+
 function publicApplication(row) {
   if (!row) return null;
   return {
@@ -66,6 +104,10 @@ function publicApplication(row) {
     appliedAt: row.applied_at,
     notes: row.notes,
     status: row.auto_status || "manual",
+    // AK1 provenance. Exposed as a pair because a score without the scorer that produced it cannot
+    // be compared with any other score — v3 and v4 disagree by roughly 17 points on the same fit.
+    atsScoreAtApply: row.ats_score_at_apply ?? null,
+    atsScorerVersion: row.ats_scorer_version ?? null,
   };
 }
 
@@ -95,10 +137,22 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       ? db.prepare("SELECT company, title, url, apply_url, source, location FROM scraped_jobs WHERE job_id=?").get(String(jobId))
       : null;
 
+    // AK1 — stamp the score that was true WHEN THE APPLICATION WENT OUT.
+    //
+    // Read from whichever report already exists rather than scoring here: this endpoint records an
+    // application the candidate has already sent, so the number that matters is the one they saw,
+    // and re-deriving it would answer a different question. The generated resume's report wins over
+    // the scrape-time one because it describes the document actually submitted.
+    //
+    // NULL IS AN HONEST ANSWER AND IS LEFT AS NULL. Manual applications to jobs that were never
+    // scored have no score; writing 0 would put a fabricated data point into the only dataset that
+    // can ever validate this number.
+    const atStamp = capturedAtsAtApply(db, req.user.id, resolvedJobId);
     db.prepare(`
       INSERT INTO job_applications
-        (user_id, job_id, company, role, job_url, source, location, apply_mode, resume_file, applied_at, notes, auto_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, unixepoch(), ?, 'manual')
+        (user_id, job_id, company, role, job_url, source, location, apply_mode, resume_file, applied_at, notes, auto_status,
+         ats_score_at_apply, ats_scorer_version, ats_report_at_apply, ats_scored_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'MANUAL', ?, unixepoch(), ?, 'manual', ?, ?, ?, ?)
       ON CONFLICT(user_id, job_id) DO UPDATE SET
         company=excluded.company,
         role=excluded.role,
@@ -109,7 +163,14 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         resume_file=excluded.resume_file,
         applied_at=excluded.applied_at,
         notes=excluded.notes,
-        auto_status='manual'
+        auto_status='manual',
+        -- COALESCE keeps the FIRST stamp. Re-recording an application must not overwrite the score
+        -- that was true when it was actually sent with today's, which is the whole point of the
+        -- column: the pair being collected is (score at the time, outcome), not (score now, outcome).
+        ats_score_at_apply=COALESCE(job_applications.ats_score_at_apply, excluded.ats_score_at_apply),
+        ats_scorer_version=COALESCE(job_applications.ats_scorer_version, excluded.ats_scorer_version),
+        ats_report_at_apply=COALESCE(job_applications.ats_report_at_apply, excluded.ats_report_at_apply),
+        ats_scored_at=COALESCE(job_applications.ats_scored_at, excluded.ats_scored_at)
     `).run(
       req.user.id,
       resolvedJobId,
@@ -120,6 +181,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       location || existingJob?.location || null,
       resumeFile,
       notes,
+      atStamp.score,
+      atStamp.version,
+      atStamp.report,
+      atStamp.score == null ? null : Math.floor(Date.now() / 1000),
     );
 
     if (jobId) {

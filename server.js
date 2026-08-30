@@ -20,7 +20,7 @@ import { fileURLToPath } from "url";
 import path           from "path";
 import fs             from "fs";
 import { createBackup, listBackups, restoreBackup } from "./scripts/backup.js";
-import applyRoutes from "./routes/apply.js";
+import applyRoutes, { capturedAtsAtApply } from "./routes/apply.js";
 import { createAccountRouter } from "./routes/account.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createAdminDbRouter } from "./routes/adminDb.js";
@@ -3030,6 +3030,39 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         );
         CREATE INDEX IF NOT EXISTS idx_ats_term_weights_family
           ON ats_term_weights(role_family);
+      `,
+    },
+    {
+      // AK1 — record the ATS score AT THE MOMENT OF APPLYING, so it can be correlated with the
+      // outcome later.
+      //
+      // THIS IS THE ONLY HONEST TEST OF WHETHER THE SCORE PREDICTS ANYTHING, AND IT IS
+      // UNRECOVERABLE IF NOT CAPTURED AT THE TIME. Nobody can compute a true ATS score; the number
+      // is defensible only if applications that scored higher actually get more responses. That
+      // question needs (score, outcome) pairs, and the score half cannot be reconstructed
+      // afterwards — the resume changes, the profile changes, the corpus weights change, and the
+      // scorer itself changes. Re-scoring an old application next year answers a different
+      // question. n is ZERO today and no claim is being made from this; the fields exist so the
+      // data starts accumulating from the next application onward.
+      //
+      // ats_scorer_version IS NOT OPTIONAL, and AK1 is the proof. This very change moved the scale:
+      // the same fit that scored 45 under local_ats_v3 scores about 28 under v4, because skills went
+      // from 50 to 70 points, experience stopped being a cliff, and constraints stopped paying for
+      // the absence of a problem. Pooling scores across that boundary without knowing which scorer
+      // produced them would silently mix two scales and produce a confident, meaningless
+      // correlation. Every stored score carries the version that produced it.
+      //
+      // The full report is stored beside the number because "which TERMS were missing when this
+      // application got a response" is the more useful question, and it is the one targeted
+      // generation (Phase 4) would be tuned against.
+      id: "094_application_ats_provenance",
+      sql: `
+        ALTER TABLE job_applications ADD COLUMN ats_score_at_apply INTEGER;
+        ALTER TABLE job_applications ADD COLUMN ats_scorer_version TEXT;
+        ALTER TABLE job_applications ADD COLUMN ats_report_at_apply TEXT;
+        ALTER TABLE job_applications ADD COLUMN ats_scored_at INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_job_applications_ats_score
+          ON job_applications(ats_scorer_version, ats_score_at_apply);
       `,
     },
   ];
@@ -8180,13 +8213,24 @@ app.post("/api/applications", requireAuth, (req, res) => {
   const { jobId,company,role,jobUrl,source,location,applyMode,resumeFile,notes } = req.body;
   if (!jobId||!company||!role) return res.status(400).json({ error:"jobId, company, role required" });
   try {
-    db.prepare(`INSERT INTO job_applications (user_id,job_id,company,role,job_url,source,location,apply_mode,resume_file,notes,applied_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,unixepoch())
+    // AK1 — the same stamp as the manual path in routes/apply.js. Both writers must record it, or
+    // the dataset that is supposed to validate the score has a hole shaped like whichever route the
+    // candidate happened to use.
+    const atsStamp = capturedAtsAtApply(db, req.user.id, jobId);
+    db.prepare(`INSERT INTO job_applications (user_id,job_id,company,role,job_url,source,location,apply_mode,resume_file,notes,applied_at,
+        ats_score_at_apply,ats_scorer_version,ats_report_at_apply,ats_scored_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,unixepoch(),?,?,?,?)
       ON CONFLICT(user_id,job_id) DO UPDATE SET
         resume_file=COALESCE(excluded.resume_file,resume_file),
         notes=COALESCE(excluded.notes,notes),
-        applied_at=excluded.applied_at`)
-      .run(req.user.id,jobId,company,role,jobUrl||null,source||null,location||null,applyMode||null,resumeFile||null,notes||null);
+        applied_at=excluded.applied_at,
+        ats_score_at_apply=COALESCE(job_applications.ats_score_at_apply,excluded.ats_score_at_apply),
+        ats_scorer_version=COALESCE(job_applications.ats_scorer_version,excluded.ats_scorer_version),
+        ats_report_at_apply=COALESCE(job_applications.ats_report_at_apply,excluded.ats_report_at_apply),
+        ats_scored_at=COALESCE(job_applications.ats_scored_at,excluded.ats_scored_at)`)
+      .run(req.user.id,jobId,company,role,jobUrl||null,source||null,location||null,applyMode||null,resumeFile||null,notes||null,
+        atsStamp.score, atsStamp.version, atsStamp.report,
+        atsStamp.score == null ? null : Math.floor(Date.now() / 1000));
     // Sync applied flag to user_jobs
     const userJobProfileId = resolveUserJobDomainProfileId(req.user.id, jobId);
     if (userJobProfileId) {

@@ -59,7 +59,9 @@ function setup() {
       created_at INTEGER NOT NULL DEFAULT (unixepoch()), PRIMARY KEY (user_id, idem_key));
     CREATE TABLE job_applications (user_id INTEGER, job_id TEXT, company TEXT, role TEXT, job_url TEXT,
       source TEXT, location TEXT, apply_mode TEXT, resume_file TEXT, applied_at INTEGER, notes TEXT,
-      auto_status TEXT, UNIQUE(user_id, job_id));
+      auto_status TEXT,
+      ats_score_at_apply INTEGER, ats_scorer_version TEXT, ats_report_at_apply TEXT, ats_scored_at INTEGER,
+      UNIQUE(user_id, job_id));
     CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER DEFAULT (unixepoch()));
     INSERT INTO users (id, username) VALUES (1, 'ada');
     INSERT INTO users (id, username) VALUES (2, 'grace');
