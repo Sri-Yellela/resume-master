@@ -26,6 +26,12 @@ import { canUseAPlusResume, normalisePlanTier } from "../services/entitlements.j
 // TASK AC4: the three outcome groups of the dated history. In shared/ because the panel renders
 // the same partition — a copy on each side is how "COMPLETED" comes to mean two things.
 import { OUTCOME, OUTCOME_STATUSES, outcomeGroupFor } from "../shared/applyOutcomeGroups.js";
+// AK1: the OTHER outcome axis — what the employer did, not what our pipeline did. The two are
+// deliberately separate vocabularies; see the header of shared/applicationResponse.js.
+import {
+  RESPONSE_OUTCOMES, RESPONSE_OUTCOME, RESPONSE_LABELS, MATURITY_DAYS,
+  mergeResponse, responseBucket, isResponse,
+} from "../shared/applicationResponse.js";
 
 // Must match services/applyAutomation.js SCREENSHOT_DIR — screenshot_path rows are absolute paths
 // written by takeScreenshot(), and this is the only directory they are ever allowed to resolve into.
@@ -108,6 +114,14 @@ function publicApplication(row) {
     // be compared with any other score — v3 and v4 disagree by roughly 17 points on the same fit.
     atsScoreAtApply: row.ats_score_at_apply ?? null,
     atsScorerVersion: row.ats_scorer_version ?? null,
+    // AK1 — the employer's half of the pair.
+    responseOutcome: row.response_outcome ?? null,
+    furthestStage: row.furthest_stage ?? null,
+    firstResponseAt: row.first_response_at ?? null,
+    outcomeAt: row.outcome_at ?? null,
+    // Derived, not stored: "nothing recorded" means different things at 2 days and at 2 months, and
+    // a caller that had to work that out itself would get it wrong the same way a naive query does.
+    responseBucket: responseBucket(row),
   };
 }
 
@@ -219,6 +233,115 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       LIMIT 100
     `).all(req.user.id);
     res.json({ applications: rows.map(publicApplication) });
+  });
+
+  // ── AK1: recording what the employer did ─────────────────────────────────────
+  //
+  // NO UI CONSUMES THIS YET. Nothing in client/src reads /api/apply/applications, so this is an
+  // API-only surface today and outcomes have to be recorded by a caller. That is stated rather than
+  // papered over: the alternative was building an applications view that does not exist, which is a
+  // much larger piece of work than the field this completes. The data cannot be backfilled later —
+  // that is the entire reason for adding it now — so the recording path exists ahead of the screen.
+  app.patch("/api/apply/applications/:jobId/response", requireAuth, (req, res) => {
+    const { outcome = null, respondedAt = null, source = "manual" } = req.body || {};
+    if (outcome != null && !RESPONSE_OUTCOMES.includes(outcome)) {
+      return res.status(400).json({
+        error: `unknown outcome "${outcome}"`,
+        allowed: RESPONSE_OUTCOMES,
+      });
+    }
+    const jobId = String(req.params.jobId);
+    const existing = db.prepare("SELECT * FROM job_applications WHERE user_id=? AND job_id=?")
+      .get(req.user.id, jobId);
+    // Scoped AND checked. A 404 for a job this user has not applied to is the same answer as for
+    // one that does not exist, so the endpoint cannot be used to probe another user's history.
+    if (!existing) return res.status(404).json({ error: "No application recorded for that job" });
+
+    let merged;
+    try {
+      merged = mergeResponse(existing, { outcome, respondedAt, source });
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+    db.prepare(`
+      UPDATE job_applications
+         SET response_outcome=?, furthest_stage=?, first_response_at=?, outcome_at=?, outcome_source=?
+       WHERE user_id=? AND job_id=?
+    `).run(
+      merged.response_outcome, merged.furthest_stage, merged.first_response_at,
+      merged.outcome_at, merged.outcome_source, req.user.id, jobId,
+    );
+
+    const row = db.prepare("SELECT * FROM job_applications WHERE user_id=? AND job_id=?")
+      .get(req.user.id, jobId);
+    res.json({ ok: true, application: publicApplication(row) });
+  });
+
+  /**
+   * AK1 — does the ATS score predict a response?
+   *
+   * The endpoint that makes the pair worth having. It exists so that the question is asked with the
+   * maturity window and the scorer-version split already applied, rather than by whoever writes the
+   * first ad-hoc query and forgets both.
+   *
+   * READ THE CAVEATS IT RETURNS. They are part of the response, not documentation:
+   *   - Applications younger than MATURITY_DAYS with nothing recorded are UNRESOLVED and are in no
+   *     denominator. Counting them as silence is what makes an early response rate read near zero.
+   *   - Scores are grouped BY SCORER VERSION and never pooled across one. v3 and v4 disagree by
+   *     roughly 17 points on the same fit, so a pooled correlation would be confident and meaningless.
+   *   - `sufficient` is false until there is enough data to say anything. n is zero today.
+   */
+  app.get("/api/apply/response-correlation", requireAuth, (req, res) => {
+    const rows = db.prepare(`
+      SELECT applied_at, ats_score_at_apply, ats_scorer_version,
+             response_outcome, furthest_stage, first_response_at
+        FROM job_applications
+       WHERE user_id=? AND ats_score_at_apply IS NOT NULL
+    `).all(req.user.id);
+
+    const byVersion = new Map();
+    let unresolved = 0;
+    for (const r of rows) {
+      const bucket = responseBucket(r);
+      if (bucket === "unresolved") { unresolved++; continue; }
+      const key = r.ats_scorer_version || "unknown";
+      if (!byVersion.has(key)) byVersion.set(key, { responded: [], silent: [] });
+      byVersion.get(key)[bucket === "responded" ? "responded" : "silent"].push(r.ats_score_at_apply);
+    }
+
+    const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+    const versions = [...byVersion.entries()].map(([version, g]) => {
+      const n = g.responded.length + g.silent.length;
+      const mr = mean(g.responded);
+      const ms = mean(g.silent);
+      return {
+        scorerVersion: version,
+        n,
+        responded: g.responded.length,
+        silent: g.silent.length,
+        responseRate: n ? Number((g.responded.length / n).toFixed(4)) : null,
+        meanScoreResponded: mr == null ? null : Number(mr.toFixed(2)),
+        meanScoreSilent: ms == null ? null : Number(ms.toFixed(2)),
+        // The headline: do applications that scored higher get more replies? Positive means yes.
+        scoreDelta: (mr == null || ms == null) ? null : Number((mr - ms).toFixed(2)),
+        // Deliberately conservative. Below this, a delta is noise and reporting it invites exactly
+        // the confident-and-wrong conclusion this whole task was about avoiding.
+        sufficient: g.responded.length >= 20 && g.silent.length >= 20,
+      };
+    });
+
+    res.json({
+      maturityDays: MATURITY_DAYS,
+      totalWithScore: rows.length,
+      unresolved,
+      versions,
+      // No caller should have to know to look for these.
+      caveats: [
+        `Applications younger than ${MATURITY_DAYS} days with no recorded outcome are excluded as unresolved (${unresolved} of ${rows.length}).`,
+        "Scores are never pooled across scorer versions — the scale changed between them.",
+        "A version with sufficient:false has too little data to support any conclusion.",
+      ],
+    });
   });
 
   // ── Queue infrastructure ─────────────────────────────────────────────────────

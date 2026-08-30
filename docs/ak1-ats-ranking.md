@@ -184,10 +184,46 @@ Three decisions worth stating:
 Both writers stamp it — `routes/apply.js` (manual) and `server.js` (auto) — asserted in a test,
 because a hole shaped like "whichever route the candidate used" would be invisible until analysis.
 
-**What is still missing for this to pay off: there is no response/outcome field anywhere.**
-`job_applications` records `auto_status` but nothing about whether the application got a reply. The
-score half is now captured; the outcome half is not, and correlating response rates needs both. That
-is outside AK1's scope and is the prerequisite for ever validating this engine.
+### The employer's half — migration 095
+
+The score half above was useless alone. `job_applications` recorded `auto_status` — whether *we*
+managed to submit — and nothing about whether anyone replied. Migration 095 adds the other half,
+with the vocabulary in `shared/applicationResponse.js`.
+
+**It is a different axis from `shared/applyOutcomeGroups.js`, and conflating them would be the
+obvious mistake.** That file answers "did we manage to submit?" and ends when the form is sent. This
+one answers "did the employer respond?". A run can be `submitted` and be ghosted; a run can be
+`held_review`, get sent by hand, and produce an interview. Neither derives from the other.
+
+Three columns, because they answer three questions and none derives from another:
+
+| column | question |
+|---|---|
+| `first_response_at` | Did they engage at all, and how fast? Set once, never moved. |
+| `furthest_stage` | How far did it get? Monotonic — `screen` → `interview` → `rejected` must not read as though it were rejected off the resume. |
+| `response_outcome` | How did it end? |
+
+Two calls worth stating because they are the ones that decide whether the eventual number means
+anything:
+
+- **A rejection counts as a response.** An ATS score is a resume-*screening* score; the only thing it
+  could plausibly predict is "did something read this and reply". Filing rejections with silence
+  would measure hiring outcomes instead, and make a resume that reliably draws rejections look
+  identical to one that vanishes.
+- **NULL is not "no response".** An application sent yesterday with nothing recorded is
+  **unresolved**, not a negative. `MATURITY_DAYS = 30` separates the two, and `responseBucket()`
+  applies it. Without this, an early response rate reads near zero — worst exactly when someone
+  first looks at it and concludes the resume is bad.
+
+`GET /api/apply/response-correlation` is the query that uses the pair, with the maturity window and
+a per-scorer-version split already applied, and it ships its caveats in the response body rather
+than in a doc nobody opens. It reports `sufficient: false` until there are ≥20 rows on each side.
+
+**Two honest gaps remain.** **n is zero** — nothing can be concluded until real applications
+accumulate. And **no UI consumes any of this**: nothing in `client/src` reads
+`/api/apply/applications`, so outcomes are recordable only over the API today. Building an
+applications view is a much larger piece of work than the field it would display, and the data
+cannot be backfilled later — which is why the recording path exists ahead of the screen.
 
 ## 6. Honest summary
 

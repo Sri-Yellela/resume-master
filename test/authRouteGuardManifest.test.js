@@ -189,6 +189,12 @@ const AUTHENTICATED = new Set([
   "POST /api/apply",
   "GET /api/apply/status/:jobId",
   "GET /api/apply/applications",
+  // AK1. Both are per-user history: one records what an employer did with YOUR application, the
+  // other correlates YOUR scores against YOUR outcomes. Each is scoped by user_id in its query and
+  // the PATCH 404s on a job the caller has not applied to, so neither can be used to read another
+  // account's application history.
+  "PATCH /api/apply/applications/:jobId/response",
+  "GET /api/apply/response-correlation",
   "GET /api/apply/readiness",
   "POST /api/apply/runs",
   "GET /api/apply/runs",

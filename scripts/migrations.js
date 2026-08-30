@@ -2701,4 +2701,41 @@ export const MIGRATIONS = [
           ON job_applications(ats_scorer_version, ats_score_at_apply);
       `,
     },
+    {
+      // AK1 — the other half of the pair: what the EMPLOYER did.
+      //
+      // 094 made the ATS score at the moment of applying recordable. That is one half. Without what
+      // came back, the score can never be validated against anything, and validating it is the only
+      // honest test of a number nobody can compute exactly. See shared/applicationResponse.js for
+      // the vocabulary and for why this is a different axis from shared/applyOutcomeGroups.js —
+      // that one says whether WE managed to submit, this one says whether THEY replied.
+      //
+      // THREE COLUMNS, NOT ONE, BECAUSE THEY ANSWER THREE QUESTIONS AND NONE DERIVES FROM ANOTHER:
+      //
+      //   first_response_at  Did they engage at all, and how fast? Set ONCE, never moved. This is
+      //                      the column the ATS score should actually be correlated against — a
+      //                      resume screening score can plausibly predict "did you get a reply",
+      //                      and has no business predicting whether you got the job.
+      //   furthest_stage     How far did it get? Monotonic. An application that goes screen ->
+      //                      interview -> rejected must not read as though it were rejected off the
+      //                      resume; the interview is the most informative fact on the row and a
+      //                      single current-state column would erase it.
+      //   response_outcome   How did it end? The current disposition.
+      //
+      // NULL IS NOT "NO RESPONSE". An application sent yesterday with nothing recorded is
+      // UNRESOLVED, not a negative — counting it as silence biases every early response-rate toward
+      // zero, which is exactly when someone will first look at this and conclude the resume is bad.
+      // MATURITY_DAYS in the shared module is what separates the two, and the analysis query
+      // applies it rather than trusting NULL.
+      id: "095_application_response_outcome",
+      sql: `
+        ALTER TABLE job_applications ADD COLUMN response_outcome TEXT;
+        ALTER TABLE job_applications ADD COLUMN furthest_stage TEXT;
+        ALTER TABLE job_applications ADD COLUMN first_response_at INTEGER;
+        ALTER TABLE job_applications ADD COLUMN outcome_at INTEGER;
+        ALTER TABLE job_applications ADD COLUMN outcome_source TEXT;
+        CREATE INDEX IF NOT EXISTS idx_job_applications_response
+          ON job_applications(user_id, response_outcome, applied_at);
+      `,
+    },
   ];
