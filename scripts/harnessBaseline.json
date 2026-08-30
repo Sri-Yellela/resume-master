@@ -62,6 +62,9 @@
   "aj2BoardCursor": {
     "pass": 16
   },
+  "ak2ApplicationsOutcomeUi": {
+    "pass": 21
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

@@ -250,9 +250,21 @@ test("the clipped panel popover is portalled out of its overflow:hidden ancestor
   // site, so the assertion follows it: one portal still written here (the per-row cell editor,
   // which is inside a scrolling table and has no shared pill to belong to) and one in the extracted
   // control this panel renders.
+  //
+  // RE-PINNED AGAIN FOR AK1, and again not relaxed. This panel now has TWO per-cell popovers, not
+  // one: the date calendar and the employer-outcome picker. Both sit inside the same scrolling,
+  // clipping table and both must be portalled for the same reason. The count moved 1 -> 2, so the
+  // count alone would now be satisfied by a build where the outcome picker is portalled and the
+  // calendar is not — the assertions below therefore name each one rather than trusting the total.
   assert.match(dbPanel, /import \{ DockPortal \} from "\.\.\/components\/DockPortal\.jsx";/);
-  assert.equal((dbPanel.match(/<DockPortal anchorRect=/g) || []).length, 1,
-    "the per-cell date popover must be portalled; it is inside a scrolling table");
+  assert.equal((dbPanel.match(/<DockPortal anchorRect=/g) || []).length, 2,
+    "the per-cell date and outcome popovers must both be portalled; they are inside a scrolling table");
+  const dateCell = dbPanel.slice(dbPanel.indexOf("if (c.isDate)"), dbPanel.indexOf("if (c.isAtsAtApply)"));
+  assert.match(dateCell, /<DockPortal anchorRect=\{calCell\.rect\}/,
+    "the date calendar is still portalled out of the table");
+  const outcomeCellSrc = dbPanel.slice(dbPanel.indexOf("if (c.isOutcome)"), dbPanel.indexOf('if (c.key === "ats_score")'));
+  assert.match(outcomeCellSrc, /<DockPortal anchorRect=\{outcomeCell\.rect\}/,
+    "the outcome picker is inside the same clipping table and must be portalled too");
   assert.match(dbPanel, /<DateFilterButton/,
     "the sheet-level date filter is gone from this panel entirely");
   const panelControls = read("client/src/components/ui/PanelControls.jsx");

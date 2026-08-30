@@ -17,6 +17,13 @@ import { DateCalendar } from "../components/ui/DateCalendar.jsx";
 // panel kept its own copy the extraction would be a clone with extra steps, and the two surfaces
 // would drift the first time either was touched.
 import { PanelSubTabs, PanelSearch, DateFilterButton } from "../components/ui/PanelControls.jsx";
+// AK1: the employer-response vocabulary, shared with the server so a cell cannot invent a label or
+// a value the API would reject. responseBucket is imported rather than reimplemented because "no
+// outcome recorded" means different things at two days and at two months, and a UI that worked that
+// out for itself would get it wrong the same way a naive query does.
+import {
+  RESPONSE_OUTCOME, RESPONSE_OUTCOMES, RESPONSE_LABELS, MATURITY_DAYS, responseBucket,
+} from "../../../shared/applicationResponse.js";
 
 // ── Calendar component ────────────────────────────────────────
 //
@@ -37,6 +44,18 @@ const APP_COLS = [
   { key:"source",     label:"Source",       editable:false, width:85,  sortable:true  },
   { key:"apply_mode", label:"Tool",         editable:false, width:105, sortable:true  },
   { key:"applied_at", label:"Date Applied", editable:true,  width:130, sortable:true, isDate:true },
+  // AK1 — THE PAIR, SIDE BY SIDE, AND THAT ADJACENCY IS THE POINT.
+  //
+  // The score the resume had at the moment it was sent, and what the employer did about it. Neither
+  // was recordable before AK1 and neither is useful alone: the score is unverifiable without the
+  // outcome, and the outcome cannot be attributed without the score. Putting them in one row is what
+  // makes "does this number predict anything" a question someone can look at rather than compute.
+  { key:"ats_score_at_apply", label:"ATS @ Apply", editable:false, width:110, sortable:true, isAtsAtApply:true },
+  // 200, not 150. At 150 the longest real value — "Rejected · via Interview", a row that reached an
+  // interview and was then turned down — rendered as "Rejected · via Inte…". That row is the entire
+  // reason furthest_stage is a separate column, so truncating it defeats the column. Measured in the
+  // browser, not guessed: scripts/ak2ApplicationsOutcomeUi.mjs screenshots this cell.
+  { key:"response_outcome",   label:"Outcome",     editable:false, width:200, sortable:true, isOutcome:true },
   { key:"resume_file",label:"Resume File",  editable:false, width:200, sortable:false },
   { key:"job_url",    label:"Job URL",      editable:false, width:60,  sortable:false },
   { key:"notes",      label:"Notes",        editable:true,  width:180, sortable:false },
@@ -256,6 +275,9 @@ export function DatabasePanel({ user }) {
   const [editCell,     setEditCell]     = useState(null);
   const [editVal,      setEditVal]      = useState("");
   const [calCell,      setCalCell]      = useState(null);
+  // AK1: which row's outcome picker is open, and where to anchor it. Same shape as calCell — the
+  // date cell established this pattern and an outcome cell is the same kind of thing.
+  const [outcomeCell,  setOutcomeCell]  = useState(null);
   const [flashRow,     setFlashRow]     = useState(null);
   const [search,       setSearch]       = useState("");
   const [sortCol,      setSortCol]      = useState("applied_at");
@@ -439,6 +461,43 @@ export function DatabasePanel({ user }) {
     setSaving(p => { const n={...p}; delete n[rowId]; return n; });
   };
 
+  /**
+   * AK1 — record what the employer did.
+   *
+   * NOT the generic PATCH /api/applications/:jobId that every other editable cell here uses. That
+   * endpoint writes whatever field it is handed, and these columns must not be written that way:
+   * first_response_at is set once and never moved, and furthest_stage only ever advances, so that
+   * screen -> interview -> rejected keeps the interview instead of reading as a resume rejection.
+   * Those rules live in mergeResponse on the server, and the dedicated endpoint is how they are
+   * enforced for every caller rather than re-implemented in a click handler.
+   *
+   * The response body is authoritative: the merge may legitimately return something other than what
+   * was sent (recording `screen` on a row that already reached `interview` leaves the stage alone),
+   * so the row is replaced with what came back rather than with what was clicked.
+   */
+  const handleOutcomePick = async (rowId, outcome) => {
+    setOutcomeCell(null);
+    setSaving(p => ({ ...p, [rowId]: true }));
+    try {
+      const res = await api(`/api/apply/applications/${encodeURIComponent(rowId)}/response`, {
+        method:"PATCH", body:JSON.stringify({ outcome }),
+      });
+      const a = res?.application;
+      if (a) {
+        setApps(prev => prev.map(r => r.job_id === rowId ? {
+          ...r,
+          response_outcome:  a.responseOutcome  ?? null,
+          furthest_stage:    a.furthestStage    ?? null,
+          first_response_at: a.firstResponseAt  ?? null,
+          outcome_at:        a.outcomeAt        ?? null,
+        } : r));
+      } else {
+        load();
+      }
+    } catch(e) { alert("Could not record outcome: " + e.message); load(); }
+    setSaving(p => { const n={...p}; delete n[rowId]; return n; });
+  };
+
   const deleteApp = async jobId => {
     if (!confirm("Remove this application from tracking?")) return;
     await api(`/api/applications/${encodeURIComponent(jobId)}`, { method:"DELETE" });
@@ -582,6 +641,10 @@ export function DatabasePanel({ user }) {
         />
       )}
 
+      {isApps && displayRows.length > 0 && (
+        <ResponseSummary rows={displayRows} theme={theme}/>
+      )}
+
       {/* ── Table (applications / resumes) ── */}
       {activeSheet !== "saved" && activeSheet !== "pending" && loading ? (
         <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center",
@@ -708,6 +771,100 @@ export function DatabasePanel({ user }) {
                           ) : "—"}
                         </td>
                       );
+
+                      if (c.isAtsAtApply) {
+                        // DELIBERATELY NOT COLOUR-BANDED like the ats_score column below.
+                        //
+                        // That one paints >=80 green / >=60 amber / else red. Under local_ats_v4 the
+                        // whole board runs median 28, p90 38, max 63 — every row would render red,
+                        // which reads as "every application was bad" when it is just a different
+                        // scale. And at rho=0.504 the ranking is honest but the absolute number does
+                        // not support a good/bad verdict anyway. So the number is shown plainly, with
+                        // the scorer that produced it on hover, because a score is only comparable to
+                        // another score from the same version.
+                        const ver = row.ats_scorer_version || null;
+                        return (
+                          <td key={c.key} style={{ padding:"12px 14px", fontSize:12,
+                                                   width:c.width, color:theme.text }}>
+                            {raw != null && raw !== "" ? (
+                              <span title={ver ? `Scored by ${ver} at the time of applying` : "Scorer version not recorded"}
+                                style={{ fontFamily:theme.fontMono, fontSize:12, color:theme.textMuted,
+                                         background:theme.surfaceHigh, border:`1px solid ${theme.border}`,
+                                         borderRadius:6, padding:"2px 8px", whiteSpace:"nowrap" }}>
+                                {raw}
+                              </span>
+                            ) : <span style={{ color:theme.textDim }}>—</span>}
+                          </td>
+                        );
+                      }
+
+                      if (c.isOutcome) {
+                        const bucket = responseBucket(row);
+                        const meta   = raw ? RESPONSE_LABELS[raw] : null;
+                        const isOpen = outcomeCell?.rowId === rowId;
+                        // The stage is shown only when it says something the outcome does not — a row
+                        // that reached an interview and was then rejected is the case this column
+                        // exists to keep legible.
+                        const stage  = row.furthest_stage && row.furthest_stage !== raw
+                          ? RESPONSE_LABELS[row.furthest_stage]?.label : null;
+                        return (
+                          <td key={c.key} style={{ padding:"12px 14px", fontSize:12,
+                                                   width:c.width, position:"relative", color:theme.text }}>
+                            <div style={{ position:"relative" }}>
+                              <button
+                                title={bucket === "unresolved" && !raw
+                                  ? `Nothing recorded yet — counted as unresolved until ${MATURITY_DAYS} days after applying`
+                                  : meta?.note || "Record what the employer did"}
+                                style={{ background:meta ? "transparent" : "transparent",
+                                         border:`1px ${meta ? "solid" : "dashed"} ${meta ? meta.color : theme.border}`,
+                                         borderRadius:8, color:meta ? meta.color : theme.textDim,
+                                         fontSize:11, padding:"3px 10px", cursor:"pointer",
+                                         whiteSpace:"nowrap", maxWidth:"100%", overflow:"hidden",
+                                         textOverflow:"ellipsis" }}
+                                onClick={e => setOutcomeCell(isOpen ? null : {
+                                  rowId, rect: e.currentTarget.getBoundingClientRect(),
+                                })}>
+                                {meta ? meta.label : <span style={{ color:theme.textDim }}>+ Set outcome</span>}
+                                {stage ? <span style={{ color:theme.textDim, marginLeft:5 }}>· via {stage}</span> : null}
+                                {isSaving ? <span style={{ color:theme.warning, marginLeft:4 }}>⏳</span> : null}
+                              </button>
+                              <AnimatePresence>
+                                {isOpen && outcomeCell?.rect && (
+                                  <DockPortal anchorRect={outcomeCell.rect} theme={theme}
+                                    onClose={() => setOutcomeCell(null)} style={{ minWidth:210, padding:6 }}>
+                                    <motion.div key="outcome"
+                                      initial={{ opacity:0, scale:0.96, y:-4 }}
+                                      animate={{ opacity:1, scale:1, y:0 }}
+                                      exit={{ opacity:0, scale:0.96, y:-4 }}
+                                      transition={{ duration:0.15 }}
+                                      style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                                      {RESPONSE_OUTCOMES.map(o => {
+                                        const m = RESPONSE_LABELS[o];
+                                        const active = raw === o;
+                                        return (
+                                          <button key={o} onClick={() => handleOutcomePick(rowId, o)}
+                                            style={{ display:"flex", alignItems:"baseline", gap:8,
+                                                     textAlign:"left", width:"100%",
+                                                     background:active ? theme.surfaceHigh : "transparent",
+                                                     border:"none", borderRadius:6, cursor:"pointer",
+                                                     padding:"6px 10px", color:theme.text, fontSize:12 }}>
+                                            <span style={{ width:7, height:7, borderRadius:"50%",
+                                                           background:m.color, flexShrink:0 }}/>
+                                            <span style={{ fontWeight:active ? 700 : 500 }}>{m.label}</span>
+                                            <span style={{ color:theme.textDim, fontSize:10, marginLeft:"auto" }}>
+                                              {m.note}
+                                            </span>
+                                          </button>
+                                        );
+                                      })}
+                                    </motion.div>
+                                  </DockPortal>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          </td>
+                        );
+                      }
 
                       if (c.key === "ats_score") return (
                         <td key={c.key} style={{ padding:"12px 14px", fontSize:12,
@@ -921,6 +1078,73 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasRe
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * AK1 — the payoff strip: what came back, and whether the score saw it coming.
+ *
+ * THREE COUNTS, NOT TWO, AND THE THIRD IS THE HONEST ONE. An application sent last week with
+ * nothing recorded is UNRESOLVED, not a rejection. Folding it into the denominator is what makes an
+ * early response rate read near zero — worst exactly when someone first opens this panel and
+ * concludes their resume is broken. So unresolved rows are counted, shown, and excluded.
+ *
+ * The mean-score comparison is shown only once BOTH sides have enough rows to be worth reading. The
+ * threshold is deliberately conservative: this whole feature exists to answer "does the score
+ * predict anything", and a difference computed over four applications would answer it confidently
+ * and wrongly, which is the failure the engine work was about avoiding in the first place.
+ */
+function ResponseSummary({ rows, theme }) {
+  let responded = 0, silent = 0, unresolved = 0;
+  const scoresResponded = [], scoresSilent = [];
+  for (const r of rows) {
+    const bucket = responseBucket(r);
+    const score = r.ats_score_at_apply;
+    if (bucket === "responded") { responded++; if (score != null) scoresResponded.push(score); }
+    else if (bucket === "silent") { silent++; if (score != null) scoresSilent.push(score); }
+    else unresolved++;
+  }
+  const decided = responded + silent;
+  const rate = decided ? Math.round((responded / decided) * 100) : null;
+  const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  const mr = mean(scoresResponded), ms = mean(scoresSilent);
+  // 8 a side is not statistical significance and is not claimed to be — it is the point below which
+  // a delta is visibly meaningless. The server's correlation endpoint holds a stricter bar (20).
+  const enough = scoresResponded.length >= 8 && scoresSilent.length >= 8;
+
+  const Stat = ({ label, value, color, title }) => (
+    <div title={title} style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+      <span style={{ fontSize:15, fontWeight:700, color:color || theme.text, fontFamily:theme.fontMono }}>{value}</span>
+      <span style={{ fontSize:10, color:theme.textDim, textTransform:"uppercase", letterSpacing:"0.06em" }}>{label}</span>
+    </div>
+  );
+
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:20, flexWrap:"wrap",
+                  padding:"10px 16px", borderBottom:`1px solid ${theme.border}`,
+                  background:theme.surfaceHigh }}>
+      <Stat label="replied" value={responded} color={theme.success}
+        title="A rejection counts here: something read the application and answered."/>
+      <Stat label="no reply" value={silent} color={theme.textMuted}
+        title={`Marked as no response, or applied over ${MATURITY_DAYS} days ago with nothing recorded.`}/>
+      <Stat label="too recent" value={unresolved} color={theme.textDim}
+        title={`Applied less than ${MATURITY_DAYS} days ago with nothing recorded — in no denominator yet.`}/>
+      {rate != null && (
+        <Stat label="reply rate" value={`${rate}%`} color={theme.accent}
+          title={`${responded} of ${decided} resolved applications. Excludes the ${unresolved} too recent to count.`}/>
+      )}
+      {enough ? (
+        <div style={{ marginLeft:"auto", fontSize:11, color:theme.textMuted }}>
+          mean ATS at apply:{" "}
+          <strong style={{ color:theme.success }}>{mr.toFixed(1)}</strong> when they replied vs{" "}
+          <strong style={{ color:theme.textMuted }}>{ms.toFixed(1)}</strong> when they did not
+        </div>
+      ) : (
+        <div style={{ marginLeft:"auto", fontSize:11, color:theme.textDim }}>
+          not enough outcomes yet to compare scores
+        </div>
+      )}
     </div>
   );
 }

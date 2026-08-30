@@ -219,11 +219,42 @@ anything:
 a per-scorer-version split already applied, and it ships its caveats in the response body rather
 than in a doc nobody opens. It reports `sufficient: false` until there are ≥20 rows on each side.
 
-**Two honest gaps remain.** **n is zero** — nothing can be concluded until real applications
-accumulate. And **no UI consumes any of this**: nothing in `client/src` reads
-`/api/apply/applications`, so outcomes are recordable only over the API today. Building an
-applications view is a much larger piece of work than the field it would display, and the data
-cannot be backfilled later — which is why the recording path exists ahead of the screen.
+### Recording it — the applications sheet
+
+The Database panel's **Applications** sheet is where outcomes are recorded. It already existed and
+already read the table; what it could not do was show or set any of this.
+
+> A correction worth recording, because it changed the shape of the work: an earlier note here said
+> "no UI consumes any of this — nothing in `client/src` reads `/api/apply/applications`". That was
+> true and misleading. There are **two** application endpoints — `/api/applications` in `server.js`,
+> which the panel has always used, and `/api/apply/applications` in `routes/apply.js`, which nothing
+> reads. Checking only the second one made an existing view look absent. Building a second
+> applications screen beside the real one would have been the wrong deliverable.
+
+Two columns were added, adjacent on purpose: **ATS @ Apply** and **Outcome**. Neither is useful
+alone — the score is unverifiable without the outcome, the outcome unattributable without the score
+— so putting them in one row is what makes "does this number predict anything" something a person
+can look at rather than compute.
+
+- The **Outcome** cell opens a picker offering exactly `RESPONSE_OUTCOMES`, and posts to the merge
+  endpoint rather than the generic field PATCH the table's other editable cells use. The merge rules
+  cannot live in a click handler.
+- A row that reached an interview and was then rejected renders **`Rejected · via Interview`** —
+  `furthest_stage` surviving is the whole reason it is a separate column.
+- **ATS @ Apply is not colour-banded.** The existing `ats_score` column paints ≥80 green / ≥60 amber
+  / else red; under v4 the board runs median 28, max 63, so those bands would render every row red
+  and read as "every application was bad" when it is only a different scale. The scorer version is
+  on hover, because a score is only comparable to another from the same version.
+- A **summary strip** shows replied / no reply / **too recent** / reply rate. The third count is the
+  honest one: applications inside the maturity window are shown, counted, and excluded from the
+  denominator. The mean-score comparison is withheld until both sides have enough rows.
+
+Verified by `scripts/ak2ApplicationsOutcomeUi.mjs` — 21 assertions driving the real panel in a real
+Chrome, clicking the picker and checking the row and the summary both update. It earned its keep
+immediately: every text assertion passed while the cell actually rendered `Rejected · via Inte…`,
+so the harness now measures `scrollWidth` against `clientWidth` and the column was widened.
+
+**One honest gap remains: n is zero.** Nothing can be concluded until real applications accumulate.
 
 ## 6. Honest summary
 

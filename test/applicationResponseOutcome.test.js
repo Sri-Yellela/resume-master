@@ -199,6 +199,74 @@ test("the response endpoint is scoped to the caller and rejects an unknown outco
     "a job the caller has not applied to must 404 rather than reveal anything");
 });
 
+// ── The panel ────────────────────────────────────────────────────────────────────────────────────
+//
+// These are CONTRACT checks, not rendering checks. What the column actually looks like is verified
+// by scripts/ak2ApplicationsOutcomeUi.mjs, which drives the real panel in a real Chrome and clicks
+// the picker — and which caught a truncated cell that every string assertion here would have passed
+// straight over. What is worth pinning in the node suite is the wiring these tests can actually
+// see: that the panel uses the shared vocabulary and the merge endpoint rather than reinventing
+// either.
+
+test("the panel records outcomes through the MERGE endpoint, not the generic field PATCH", () => {
+  const src = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
+  assert.match(src, /\/api\/apply\/applications\/\$\{encodeURIComponent\(rowId\)\}\/response/,
+    "the merge rules — set-once first_response_at, monotonic furthest_stage — live behind that endpoint");
+  // PATCH /api/applications writes whatever field it is handed. Sending a response column through
+  // it would bypass every one of those rules.
+  assert.doesNotMatch(src, /\/api\/applications\/[^\n]*response_outcome/,
+    "response columns must never go through the generic field PATCH");
+});
+
+test("the panel reuses the shared response vocabulary rather than hardcoding labels", () => {
+  const src = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
+  assert.match(src, /from "\.\.\/\.\.\/\.\.\/shared\/applicationResponse\.js"/);
+  assert.match(src, /RESPONSE_LABELS/, "a cell must not invent its own wording for a stored value");
+  assert.match(src, /RESPONSE_OUTCOMES\.map/, "the picker must offer exactly the values the API accepts");
+  assert.match(src, /responseBucket\(/,
+    "the maturity rule must be imported, not re-derived — a UI copy would get it wrong the same way a naive query does");
+});
+
+test("the panel shows the score and the outcome as adjacent columns", () => {
+  const src = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
+  const cols = src.slice(src.indexOf("const APP_COLS"), src.indexOf("const RES_COLS"));
+  const score = cols.indexOf("ats_score_at_apply");
+  const outcome = cols.indexOf("response_outcome");
+  assert.ok(score > 0 && outcome > 0, "both columns must exist");
+  assert.ok(outcome > score, "the pair reads score-then-outcome");
+  // The pair being visible in one row is the entire point; a column that is defined but never
+  // rendered would satisfy the two assertions above.
+  assert.match(src, /c\.isAtsAtApply/);
+  assert.match(src, /c\.isOutcome/);
+});
+
+test("the ATS-at-apply cell is NOT colour-banded on the old thresholds", () => {
+  // The existing ats_score column paints >=80 green / >=60 amber / else red. Under local_ats_v4 the
+  // board runs median 28, max 63, so those bands would render every single row red and read as
+  // "every application was bad" when it is only a different scale.
+  const src = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
+  const cell = src.slice(src.indexOf("if (c.isAtsAtApply)"), src.indexOf("if (c.isOutcome)"));
+  assert.ok(cell.length > 100, "the ats-at-apply renderer must exist");
+  // Comments stripped first: the renderer EXPLAINS the old bands in prose, and an assertion that
+  // reads prose as code fails on a file that is doing exactly the right thing. What must be absent
+  // is a threshold comparison against the value, not a sentence about one.
+  const code = cell.split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n");
+  assert.doesNotMatch(code, /raw\s*>=\s*\d+/,
+    "v3-era colour bands must not be applied to a v4-era score");
+  assert.match(cell, /ats_scorer_version/,
+    "a score is only comparable to another from the same scorer, so the version must be reachable");
+});
+
+test("the summary strip counts unresolved applications separately", () => {
+  const src = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
+  const fn = src.slice(src.indexOf("function ResponseSummary"), src.indexOf("function EmptyState"));
+  assert.ok(fn.length > 200, "the summary component must exist");
+  assert.match(fn, /unresolved/, "too-recent applications must be counted");
+  assert.match(fn, /decided = responded \+ silent/,
+    "and excluded from the denominator — including them is what makes an early rate read near zero");
+  assert.match(fn, /enough/, "the score comparison must be withheld until there is enough data");
+});
+
 // ── The routes, actually mounted and driven ──────────────────────────────────────────────────────
 //
 // Built on the REAL migrations rather than a hand-rolled schema. Eleven fixtures in this suite

@@ -237,11 +237,15 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
 
   // ── AK1: recording what the employer did ─────────────────────────────────────
   //
-  // NO UI CONSUMES THIS YET. Nothing in client/src reads /api/apply/applications, so this is an
-  // API-only surface today and outcomes have to be recorded by a caller. That is stated rather than
-  // papered over: the alternative was building an applications view that does not exist, which is a
-  // much larger piece of work than the field this completes. The data cannot be backfilled later —
-  // that is the entire reason for adding it now — so the recording path exists ahead of the screen.
+  // THE CALLER IS THE APPLICATIONS SHEET in client/src/panels/DatabasePanel.jsx — the Outcome
+  // column's picker posts here.
+  //
+  // It deliberately does NOT go through PATCH /api/applications/:jobId, which every other editable
+  // cell in that table uses. That endpoint writes whatever field it is handed, and these columns
+  // must not be written that way: first_response_at is set once and never moved, and furthest_stage
+  // only ever advances so that screen -> interview -> rejected keeps the interview instead of
+  // reading as a resume rejection. Those rules live in mergeResponse, and a dedicated endpoint is
+  // how they are enforced for every caller rather than re-implemented in a click handler.
   app.patch("/api/apply/applications/:jobId/response", requireAuth, (req, res) => {
     const { outcome = null, respondedAt = null, source = "manual" } = req.body || {};
     if (outcome != null && !RESPONSE_OUTCOMES.includes(outcome)) {
