@@ -52,6 +52,14 @@ export async function callModel({
   domainModule = null,
   atsScoreBefore = null,
   atsScoreAfter = null,
+  // AK1 — receives the usage_events row id once the call has been recorded.
+  //
+  // A CALLBACK RATHER THAN A RETURN VALUE, because callModel returns the model's message and every
+  // one of its ~20 call sites destructures that. Changing the return shape to hand back an id that
+  // exactly one caller wants would touch all of them. This fires from the same `finally` that
+  // records the row, so it runs on success AND on failure, and a throwing callback cannot escape
+  // into the caller's error path.
+  onTracked = null,
   ...params
 } = {}) {
   if (!purpose) throw new Error("callModel: `purpose` is required — it is how spend is attributed to a feature");
@@ -74,7 +82,7 @@ export async function callModel({
     // `finally` so a throw is still recorded, and so a tracking problem can never swallow the
     // model's own result or error — trackApiCall catches internally and counts its own failures.
     if (db) {
-      trackApiCall(db, {
+      const eventId = trackApiCall(db, {
         userId,
         // event_type keeps its existing vocabulary because limitEnforcer keys quotas on it;
         // purpose is the new, always-populated feature name. Sites that had no event_type before
@@ -93,6 +101,13 @@ export async function callModel({
         success,
         errorText,
       });
+      if (typeof onTracked === "function") {
+        // Swallowed on purpose. This is a measurement hook; it may not turn a successful
+        // generation into a failure, nor replace the model's own error with its own.
+        try { onTracked(eventId); } catch (hookError) {
+          console.error(`[modelCall] onTracked hook threw for ${purpose}: ${hookError.message}`);
+        }
+      }
     }
   }
 }

@@ -203,3 +203,23 @@ is outside AK1's scope and is the prerequisite for ever validating this engine.
 - For the swipe feed's free fit signal, the defensible presentation is a **coarse band** (strong /
   possible / weak) rather than a two-digit number. ρ = 0.504 supports three buckets; it does not
   support telling someone this job is a 43.
+
+## 7. The auto-apply threshold was re-derived onto this scale: 50 → 30
+
+`ATS_AUTO_APPLY_THRESHOLD` was calibrated against v3, whose comment recorded median 48 / p75 54. v4
+gives **median 28, p75 32, p90 38, max 63** for the same 1291 postings. At 50 on the new scale only
+~2% of postings could auto-send, against the 44% the owner had deliberately chosen — a gate holding
+almost everything, which is the same failure the earlier 65 → 50 change was made to fix.
+
+**30 restores the stated intent unchanged** — "just above the median; roughly average-or-better goes
+unattended, the rest queue for a human." Against a v4 median of 28 it sits where 50 sat against v3's
+median of 45. The policy did not change; the scale under it did.
+
+This does send more applications unattended than 50 did, which is the point, and it was adopted
+explicitly rather than as a side effect of the scorer work. It stays env-configurable, and the test
+covering it deliberately pins the *behaviour* (below-threshold holds for a human, and the number is
+tunable without a deploy) rather than the number — a test that copies whatever constant it finds
+cannot fail for a reason anyone cares about.
+
+**Re-measure before moving it again.** The distribution above is one profile and one resume, and it
+moves with both.

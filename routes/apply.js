@@ -265,7 +265,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
    * queue for a human. It is a deliberate throughput decision, made by the owner with the
    * distribution in front of them, not a number inherited from a broken scale.
    *
-   * ── AK1: THE SCALE MOVED AGAIN, AND 50 NO LONGER MEANS WHAT THE PARAGRAPH ABOVE SAYS ──
+   * ── AK1: 50 -> 30, BECAUSE THE SCALE MOVED, NOT BECAUSE THE POLICY DID ──
    *
    * The scorer was rebalanced (local_ats_v4): skills carry 70 of the 100 points instead of 50,
    * experience is graded instead of a 17-point cliff, and hard constraints only subtract — v3 paid
@@ -273,17 +273,23 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
    * Re-measured over the same 1291 postings with a realistic engineering resume, v4 gives
    * median 28, p75 32, p90 38, max 63 — against v3's median 45.
    *
-   * SO THIS THRESHOLD IS NOW MIS-CALIBRATED IN THE SAFE DIRECTION. At 50, roughly 2% of postings
-   * can auto-send rather than the 44% the owner chose; nearly everything queues for a human. That
-   * is a throughput regression, not a safety one, and it is deliberately being left for the owner
-   * to re-derive rather than quietly reset: moving this number DOWN sends more real applications
-   * unattended under a real candidate's name, and that is not a change to make on someone's behalf
-   * as a side effect of a scorer refactor.
+   * At 50 on the v4 scale, roughly 2% of postings could auto-send rather than the 44% the paragraph
+   * above chose deliberately. That is a throughput regression rather than a safety one — the gate
+   * was holding almost everything — but it is still a number that no longer means what it was set
+   * to mean.
    *
-   * To restore the stated intent — "just above the median, roughly average-or-better goes
-   * unattended" — the equivalent v4 value is about 30. Set ATS_AUTO_APPLY_THRESHOLD to adopt it.
-   * Re-measure first: the distribution above is for ONE profile and one resume, and the whole point
-   * of the note below is that it moves with both.
+   * 30 restores the STATED INTENT, unchanged: "just above the median, roughly average-or-better
+   * goes unattended, the rest queue for a human". Against a v4 median of 28 and p75 of 32, 30 sits
+   * exactly where 50 sat against v3's median of 45. The policy is the same policy; only the scale
+   * underneath it moved.
+   *
+   * THIS SENDS MORE APPLICATIONS UNATTENDED THAN 50 DID, and that is the point — 50 on this scale
+   * is an off switch nobody chose, which is the same failure the 65 -> 50 note above describes.
+   * The owner adopted 30 explicitly after the redistribution was measured.
+   *
+   * RE-MEASURE BEFORE MOVING IT AGAIN. That distribution is for ONE profile and one resume, and it
+   * moves with both — see the note below. The distribution and the inversion analysis behind this
+   * number are in docs/ak1-ats-ranking.md.
    *
    * Configurable because the comment above says every limit here is; this one was the exception,
    * and it is the one most likely to want tuning as the scorer or the candidate's profile changes.
@@ -297,7 +303,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
    * is the safe direction to be wrong in, but it does mean the gate cannot be switched off this
    * way — use the kill switch (app_settings.apply_full_auto_disabled) to stop unattended sending.
    */
-  const ATS_AUTO_APPLY_THRESHOLD = envInt("ATS_AUTO_APPLY_THRESHOLD", 50);
+  const ATS_AUTO_APPLY_THRESHOLD = envInt("ATS_AUTO_APPLY_THRESHOLD", 30);
   let activeWorkers = 0;
 
   const getSetting = (key) => {

@@ -88,6 +88,7 @@ export function trackApiCall(db, {
   domainModule = null,
   purpose = null,
 }) {
+  let eventId = null;
   try {
     const cost = calcCost(model, usage || {});
     const cacheReadTokens     = usage?.cache_read_input_tokens || 0;
@@ -95,7 +96,7 @@ export function trackApiCall(db, {
     const state = cacheState(usage || {});
     const cached = cacheReadTokens > 0 ? 1 : 0;
 
-    db.prepare(`INSERT INTO usage_events (
+    const inserted = db.prepare(`INSERT INTO usage_events (
       user_id, event_type, event_subtype, input_tokens,
       output_tokens, cache_read_tokens, cache_creation_tokens,
       cached, model, cost_usd, ats_score_before, ats_score_after,
@@ -112,6 +113,10 @@ export function trackApiCall(db, {
       success ? 1 : 0, errorText || null, purpose || null
     );
     trackingStats.recorded++;
+    // AK1: the row id, so a caller that only learns a value AFTER the call can fill it in.
+    // resume_generate is the case that needs it — the post-generation ATS score does not exist
+    // until ~100 lines after the model call that this row records. See recordAtsOutcome below.
+    eventId = Number(inserted.lastInsertRowid) || null;
 
     console.info("[usage] model_call", JSON.stringify({
       userId,
@@ -212,6 +217,44 @@ export function trackApiCall(db, {
         ? " — AND it could not be written to the database or the out-of-process sink, so this log " +
           "line is the only remaining record of it."
         : ""));
+  }
+  return eventId;
+}
+
+/**
+ * AK1 — fill in the ATS scores on a usage_events row after the fact.
+ *
+ * WHY THIS EXISTS AT ALL. usage_events has carried ats_score_before and ats_score_after since the
+ * table was created, routes/admin.js reads both to render an "avg before -> avg after" generation-
+ * lift panel, and every row had NULL in both — because the only caller that could supply them,
+ * resume_generate, computes the post-generation score about a hundred lines AFTER the model call
+ * that writes the row. The panel had therefore never shown anything, and "does generation actually
+ * improve the score?" was unanswerable in a system built to answer it.
+ *
+ * An UPDATE rather than deferring the INSERT: the row must exist the moment the call returns, so
+ * that spend is recorded even if everything downstream throws. Cost accounting is the row's first
+ * job; the lift measurement is a passenger and must not be able to delay or lose it.
+ *
+ * Never throws. A failed measurement update must not fail a generation the user is waiting for.
+ */
+export function recordAtsOutcome(db, eventId, { scoreBefore = null, scoreAfter = null } = {}) {
+  if (!db || !eventId) return false;
+  // A declined score is null, and null is the honest record. Writing 0 would put a fabricated
+  // data point into the only dataset that can ever show whether generation is worth its cost.
+  if (scoreBefore == null && scoreAfter == null) return false;
+  try {
+    db.prepare(
+      `UPDATE usage_events
+          SET ats_score_before = COALESCE(?, ats_score_before),
+              ats_score_after  = COALESCE(?, ats_score_after)
+        WHERE id = ?`
+    ).run(scoreBefore ?? null, scoreAfter ?? null, eventId);
+    return true;
+  } catch (e) {
+    trackingStats.failed++;
+    trackingStats.lastError = e.message;
+    console.error(`[usageTracker] could not record ATS outcome on event ${eventId}: ${e.message}`);
+    return false;
   }
 }
 

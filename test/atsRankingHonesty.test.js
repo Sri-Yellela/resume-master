@@ -5,6 +5,8 @@ import Database from "better-sqlite3";
 import { buildRuntimeAtsBasis, scoreAtsLocally, LOCAL_ATS_SOURCE } from "../services/localAtsScorer.js";
 import { MIGRATIONS } from "../scripts/migrations.js";
 import { capturedAtsAtApply } from "../routes/apply.js";
+import { trackApiCall, recordAtsOutcome } from "../services/usageTracker.js";
+import { callModel } from "../services/modelCall.js";
 
 /**
  * AK1 Phase 3 — the adversarial cases, asserted rather than described.
@@ -232,6 +234,96 @@ test("the version stamped is the report's OWN source, not today's constant", () 
   assert.equal(stamped.version, "local_ats_v3");
   assert.notEqual(stamped.version, LOCAL_ATS_SOURCE);
   db.close();
+});
+
+// ── Generation lift: the columns that existed, were read, and were never written ────────────────
+
+test("trackApiCall returns the row id it inserted", () => {
+  const db = new Database(":memory:");
+  for (const m of MIGRATIONS) db.exec(m.sql);
+  db.prepare("INSERT INTO users (id,username,password_hash) VALUES (1,'ada','x')").run();
+
+  const id = trackApiCall(db, {
+    userId: 1, eventType: "resume_generate", model: "claude-sonnet-5",
+    usage: { input_tokens: 100, output_tokens: 200 }, durationMs: 10,
+  });
+  assert.equal(typeof id, "number", "without the id, a value known only after the call cannot be filled in");
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM usage_events").get().c, 1);
+  db.close();
+});
+
+test("recordAtsOutcome fills in the lift after the fact, and records null as null", () => {
+  const db = new Database(":memory:");
+  for (const m of MIGRATIONS) db.exec(m.sql);
+  db.prepare("INSERT INTO users (id,username,password_hash) VALUES (1,'ada','x')").run();
+  const mk = () => trackApiCall(db, {
+    userId: 1, eventType: "resume_generate", model: "claude-sonnet-5",
+    usage: { input_tokens: 100, output_tokens: 200 }, durationMs: 10,
+  });
+
+  const id = mk();
+  assert.equal(recordAtsOutcome(db, id, { scoreBefore: 22, scoreAfter: 41 }), true);
+  const row = db.prepare("SELECT ats_score_before b, ats_score_after a FROM usage_events WHERE id=?").get(id);
+  assert.deepEqual({ b: row.b, a: row.a }, { b: 22, a: 41 },
+    "this is the pair the admin lift panel has always read and never had");
+
+  // A DECLINED score is null and stays null. A fabricated 0 here would corrupt the only dataset
+  // that can ever show whether generation is worth what it costs.
+  const id2 = mk();
+  recordAtsOutcome(db, id2, { scoreBefore: 30, scoreAfter: null });
+  const row2 = db.prepare("SELECT ats_score_before b, ats_score_after a FROM usage_events WHERE id=?").get(id2);
+  assert.equal(row2.b, 30);
+  assert.equal(row2.a, null, "a declined after-score must not become a zero");
+
+  // Nothing to record is a no-op, not a write.
+  assert.equal(recordAtsOutcome(db, id2, {}), false);
+  assert.equal(recordAtsOutcome(db, null, { scoreAfter: 5 }), false);
+  db.close();
+});
+
+test("recordAtsOutcome never throws — a measurement may not fail a generation", () => {
+  const db = new Database(":memory:");
+  // No usage_events table at all: the worst case this can meet.
+  assert.doesNotThrow(() => recordAtsOutcome(db, 1, { scoreBefore: 1, scoreAfter: 2 }));
+  assert.equal(recordAtsOutcome(db, 1, { scoreBefore: 1, scoreAfter: 2 }), false);
+  db.close();
+});
+
+test("the generation path measures the lift with the SAME scorer on both sides", () => {
+  const src = fs.readFileSync("server.js", "utf8");
+
+  // BEFORE is scored against the base resume, before the model call.
+  assert.match(src, /let atsScoreBefore = null;[\s\S]{0,900}?resumeText: authoritativeResumeText/,
+    "the before-score must come from the base resume");
+  // Same job, same corpus weights as the after-score — otherwise the delta compares two different
+  // measurements rather than a lift.
+  assert.match(src, /let atsScoreBefore = null;[\s\S]{0,900}?termWeights: atsTermWeightsForJob\(job\)/,
+    "the before-score must use the same weights the after-score uses");
+
+  // The id is captured at call time and the after-score written once it exists.
+  assert.match(src, /atsScoreBefore,\s*\n\s*onTracked: \(id\) => \{ usageEventId = id; \}/,
+    "the usage row id must be captured so the after-score can be filled in");
+  assert.match(src, /recordAtsOutcome\(db, usageEventId, \{ scoreBefore: atsScoreBefore, scoreAfter: atsScore \}\)/,
+    "both halves of the lift must reach the row");
+
+  // Ordering: the after-score must be computed before it is recorded.
+  assert.ok(src.indexOf("const atsScore = atsReport.score") < src.indexOf("recordAtsOutcome(db, usageEventId"),
+    "the after-score must exist before it is written");
+});
+
+test("the onTracked hook cannot break a generation", async () => {
+  const src = fs.readFileSync("services/modelCall.js", "utf8");
+  assert.match(src, /try \{ onTracked\(eventId\); \} catch/,
+    "a throwing measurement hook must not escape into the caller's error path");
+
+  // And prove it: a hook that throws must not change what callModel returns.
+  const fakeAnthropic = { messages: { create: async () => ({ content: [{ text: "ok" }], usage: {} }) } };
+  const msg = await callModel({
+    anthropic: fakeAnthropic, db: null, purpose: "test", model: "claude-sonnet-5",
+    onTracked: () => { throw new Error("boom"); },
+    messages: [{ role: "user", content: "hi" }],
+  });
+  assert.equal(msg.content[0].text, "ok");
 });
 
 test("both application writers stamp the score — neither route may leave a hole in the dataset", () => {

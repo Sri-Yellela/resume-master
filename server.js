@@ -34,6 +34,11 @@ import { runHiringSignalsRollup } from "./services/jobs/hiringSignals.js";
 // services/modelCall.js. trackApiCall is no longer imported here: server.js called it
 // directly at 4 of 14 call sites, which is how the other 10 went unrecorded.
 import { callModel, SYSTEM_USER_ID } from "./services/modelCall.js";
+// AK1: the ONE exception to "server.js does not touch the tracker directly", and it is not a
+// second recording path — recordAtsOutcome only fills ats_score_before/after on a row callModel
+// has already written. It cannot create a usage_events row, so the reason the note above exists
+// (call sites that recorded spend independently, and went unrecorded) does not apply to it.
+import { recordAtsOutcome } from "./services/usageTracker.js";
 import { drainInto as drainTrackingFailureSink } from "./services/trackingFailureSink.js";
 import { MODEL_SONNET, MODEL_HAIKU } from "./shared/anthropicModels.js";
 import { classifyGenerationError } from "./shared/failureAttribution.js";
@@ -7596,10 +7601,47 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
   const runtimeInputs = buildRuntimeInputs(profile, job, authoritativeResumeText, promptMode, employers, activeDomainProfile, profileClaims);
   const { systemBlocks } = assemblePrompt(domainModuleKey, promptMode, runtimeInputs, { SUMMARY: includeSummary });
 
+  // ── AK1: measure the LIFT, not just the spend ────────────────────────────────────────────────
+  //
+  // usage_events has carried ats_score_before/ats_score_after since the table existed and
+  // routes/admin.js renders an "avg before -> avg after" panel from them, but every row was NULL,
+  // so the panel had never shown anything and "does generation actually improve the score?" had no
+  // answer in a system built to answer it.
+  //
+  // BEFORE is scored HERE, against the base resume, before the model sees anything — the same
+  // scorer, same job, same corpus weights the generated document will be scored with 130 lines
+  // below. Anything else would make the delta a comparison of two different measurements rather
+  // than a lift. It is local and deterministic (~10ms, no model call), so it costs nothing.
+  //
+  // Wrapped: a measurement may never fail a generation the user is waiting for.
+  let atsScoreBefore = null;
+  try {
+    const beforeProfile = getOrRepairActiveProfile(userId);
+    atsScoreBefore = scoreAtsLocally({
+      job,
+      runtimeBasis: buildRuntimeAtsBasis({
+        resumeText: authoritativeResumeText,
+        signalProfile: beforeProfile
+          ? loadOrCreateSimpleApplyProfile(db, { userId, profileId: beforeProfile.id })
+          : null,
+        domainProfile: beforeProfile,
+      }),
+      termWeights: atsTermWeightsForJob(job),
+    }).score;
+  } catch (e) {
+    console.warn("[generate] could not score the base resume for lift measurement:", e.message);
+  }
+
+  // The row is written when the call returns; the AFTER score does not exist until the document
+  // has been formatted and claim-checked. Capture the id now, fill the score in later.
+  let usageEventId = null;
+
   const genStart = Date.now();
   const resumeMsg = await callModel({
     anthropic, db, purpose: "resume_generate", userId,
     eventType: "resume_generate", eventSubtype,
+    atsScoreBefore,
+    onTracked: (id) => { usageEventId = id; },
     jobId: String(jobId), company: job.company, domainModule: domainModuleKey,
     model: MODEL_SONNET,
     // See the enhance call site: Sonnet 5 thinks by default and max_tokens covers thinking +
@@ -7738,6 +7780,15 @@ RULES:
   const atsReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
   const atsScore = atsReport.score;
   const atsCacheKey = buildAtsCacheKey(formattedHtml, job);
+
+  // AK1: close the loop on the lift measurement opened before the model call. Both values now
+  // exist and were produced by the same scorer against the same job, so before -> after is a real
+  // delta. Either may legitimately be null (the scorer declines when a posting carries too little
+  // signal); null is recorded as null, because a fabricated 0 in this column would corrupt the one
+  // dataset that can show whether generation is worth what it costs.
+  recordAtsOutcome(db, usageEventId, { scoreBefore: atsScoreBefore, scoreAfter: atsScore });
+  console.log(`[generate] ATS lift: ${atsScoreBefore ?? "n/a"} -> ${atsScore ?? "n/a"}` +
+    (atsScoreBefore != null && atsScore != null ? ` (${atsScore - atsScoreBefore >= 0 ? "+" : ""}${atsScore - atsScoreBefore})` : ""));
 
   const version = (db.prepare("SELECT MAX(version) as v FROM resume_versions WHERE user_id=? AND job_id=?")
     .get(userId, String(jobId))?.v || 0) + 1;

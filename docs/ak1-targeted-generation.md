@@ -173,19 +173,32 @@ this fires on a few percent of the board.
 heavy gaps run 9.59 → 9.32 → 8.79 → 7.87 across the score bands 0-20, 20-30, 30-40, 40+. A high
 score does not mean few gaps. If this is ever built, gate it on the **gap list**, not the number.
 
-**It cannot be calibrated today, and this is the blocking finding of Phase 4:**
+**It could not be calibrated when this was written. That has since been fixed — the measurement is
+now running, and it needs time before it can answer anything.**
 
-> **The lift from generation has never been measured.** `usage_events` has `ats_score_before` and
+The blocking finding was:
+
+> **The lift from generation had never been measured.** `usage_events` has `ats_score_before` and
 > `ats_score_after`; `routes/admin.js:65` and `:160` read them and render an admin "avg before → avg
-> after" panel. **Zero rows are populated** — `callModel` at `server.js:7600` is never passed either
-> value, even though the post-generation score is computed 100 lines later at `server.js:7703`. The
-> dashboard has always shown nothing.
+> after" panel. **Zero rows were populated** — `callModel` was never passed either value, even
+> though the post-generation score is computed ~130 lines later. The dashboard had always shown
+> nothing.
 
-So the question "does generation improve the ATS score, and by how much?" has no answer in this
-system, and "when is the base resume good enough to skip generation?" is unanswerable until it does.
-Writing those two values at the existing call site is a small change and the prerequisite for this
-entire option. It is deliberately **not** made here — Phase 4 is design-only — but it is the single
-highest-value follow-up in this document.
+**Now wired** (follow-up commit, outside the design-only scope of this phase):
+
+- The **before** score is computed against the base resume immediately before the model call, using
+  the *same* scorer, the same job and the same corpus weights the generated document is scored with
+  afterwards — otherwise the delta compares two different measurements rather than a lift. It is
+  local and deterministic, so it adds no model cost.
+- `trackApiCall` now returns its row id and `callModel` exposes it through an `onTracked` hook, so
+  the **after** score can be written once it exists. The row is still inserted the moment the call
+  returns: cost accounting is its first job and must not wait on a measurement.
+- A declined score records as **null**, never 0. Both writes are non-throwing — a measurement may
+  not fail a generation someone is waiting for.
+
+**n is still zero.** Nothing can be concluded from this until real generations accumulate, and the
+threshold question below stays open until they do. What changed is that the data now starts
+existing; it was previously unrecoverable.
 
 ## 7. If it were built anyway — the design
 
