@@ -15,8 +15,8 @@ migration high-water **095**; mobile contract **v1.1.0** at `contract/mobile-api
 | 1 | Outcome UI | desktop | AF5's value | 2, 3 | ✅ **DONE** `10836c1` |
 | 2 | Corruption + defect-pattern sweep | **all three** | Android Phase 2 | 1, 3 | ✅ **desktop done**, mobile reported |
 | 3 | Web client offset paging | desktop | — | 1, 2 | ✅ **DONE** `54cae7a` |
-| 4 | ATS bands, not numbers | desktop | swipe feed design | — | ⛔ needs the owner's grading pass |
-| 5 | Cache-window batching | desktop | — | 4 | ⛔ needs API credit |
+| 4 | ATS bands, not numbers | desktop | swipe feed design | — | 🟡 **measurement done** `be94268` · thresholds ⛔ owner's grading pass |
+| 5 | Cache-window batching | desktop | — | 4 | 🟡 **assessment done** `761840f` · build ⛔ API credit, and sequence behind 7 |
 | 6 | Android Phase 2a | android | feed + review queue | 5 | ⛔ needs a JDK + Android SDK |
 | 7 | Generation deferral + free ATS at swipe | desktop | mobile feed | — | blocked on 4 |
 | 8 | **iOS Phase 1 audit** | **ios** | iOS Phase 2a | anything | in progress elsewhere |
@@ -38,10 +38,30 @@ migration high-water **095**; mobile contract **v1.1.0** at `contract/mobile-api
 >   Android SDK or Xcode exists on this machine, so the sweep's own "verified by an actual build"
 >   cannot be met, and both mobile repos had uncommitted work a commit would have swallowed.
 >
-> **What actually blocks 4, 5 and 6** — each is a real dependency, not a scheduling one:
-> task 4's requirement 5 forbids setting thresholds on self-graded data and asks for the owner's
-> pass over the same 30 postings; task 5's requirement 2 demands measured before/after cost from a
-> real run, and the Anthropic key is out of credit; task 6 cannot be built or verified here.
+> **Tasks 4 and 5 are PARTLY LANDED — each split cleanly into a half that needed nothing and a half
+> that needs the owner.** Do not re-run the finished halves.
+>
+> - **Task 4 — measurement done** (`be94268`, `docs/ak2-ats-band-distribution.md`). The real v4
+>   distribution is measured across all 1291 postings against the owner's real resume; candidate
+>   cutpoints are reported as populations. **No thresholds are set**, because requirement 5 forbids
+>   setting them on self-graded data. What remains needs the owner: **grade the 30 postings in
+>   `docs/ak2-ats-grading-set.md`** (1–5, engine score withheld; key in `ak2-ats-grading-key.json`).
+>   Then: ρ against that pass, fixed-vs-percentile bands decided on it, cutpoints set, surfaces
+>   converted. Two findings there change the design — the required fourth band holds 1 posting in
+>   1291, and a band is a fixed number while the score is resume-relative.
+> - **Task 5 — assessment done** (`761840f`, `docs/ak2-cache-batching-assessment.md`). Pricing
+>   verified live, cost model reconciled to the recorded $0.041600, the Batch API assessed against
+>   the semi path, and requirement 4's real hazard found and fixed: the untracked-call guard could
+>   not see `messages.batches.create`. What remains needs credit — requirement 2's measured
+>   before/after from a real run. **Two things to read before building it:** batching should be
+>   sequenced BEHIND task 7 (it wins by making apply's CASE A artifact path normal, which is what 7
+>   already does), and the largest saving is not in this task at all — `enrich_job` is 60% of
+>   recorded spend, cannot be cached at any prefix length, and wants the Batch API.
+>
+> **What actually blocks the rest** — each is a real dependency, not a scheduling one:
+> task 4's remaining half needs the owner's grading pass; task 5's needs API credit (exhausted
+> 2026-08-25, evidenced in `usage_events`) and should follow 7; task 6 cannot be built or verified
+> here. Full account of this session: `docs/ak2-session-report.md`.
 
 Owner-only, not agent work, running alongside: **AF5 semi campaign** · **extension submission**
 (blocked on `CWS_*` credentials) · **admin-panel build-flavour decision** · **Jobo renewal**.
