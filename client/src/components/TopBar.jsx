@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/TopBar.jsx — the app's single fixed nav (Lucy Brand)
 //
 // This header said "converges from full-width bar -> centered glassy pill on scroll" for as long as

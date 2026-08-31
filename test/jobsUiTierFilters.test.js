@@ -77,7 +77,14 @@ test("a saved search round-trips all four params", () => {
 });
 
 test("filter state, the staged snapshot and the commit path all know the four fields", () => {
-  const snapshot = panel.slice(panel.indexOf("function defaultFilterSnapshot"), panel.indexOf("// â\"€â\"€ Filters panel"));
+  // Both ends are asserted before slicing. indexOf returns -1 for a missing anchor and slice
+  // treats that as "one from the end", so a moved anchor does not fail here — it silently widens
+  // the range until the assertions below pass over the wrong region.
+  const snapStart = panel.indexOf("function defaultFilterSnapshot");
+  const snapEnd   = panel.indexOf("// ── Filters panel");
+  assert.ok(snapStart !== -1, "anchor moved: function defaultFilterSnapshot");
+  assert.ok(snapEnd   !== -1, "anchor moved: // ── Filters panel");
+  const snapshot = panel.slice(snapStart, snapEnd);
   for (const f of NEW_FIELDS) {
     assert.ok(snapshot.includes(f), `${f} missing from defaultFilterSnapshot — Reset All would not clear it`);
   }

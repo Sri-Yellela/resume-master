@@ -1,4 +1,4 @@
-﻿// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/components/JobCard.jsx — shared expandable job card
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";

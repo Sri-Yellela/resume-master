@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // services/platformDetector.js — ATS platform detection + per-platform selectors
 "use strict";
 

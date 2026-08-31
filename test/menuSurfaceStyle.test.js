@@ -248,3 +248,55 @@ test("critical UI copy has no mojibake literals", () => {
     assert.doesNotMatch(source, /â|Ã|Â|�/u, file);
   }
 });
+
+// ── Encoding integrity across the shipping tree ─────────────────────────────────────────────────
+//
+// The test above strips comments and names five files, so it could not see the corruption that was
+// actually there: 935 double-encoded sequences across server.js, JobsPanel.jsx and migrations.js,
+// a UTF-8 BOM on ten files, and six source files that were not valid UTF-8 at all. One of those
+// sequences was live — RESUME_STYLE_BLOCK set the resume bullet to "â€¢", so every generated PDF
+// rendered a mangled glyph. Comments are scanned here precisely because that is where it hid, and
+// because a divider comment is an anchor other tests slice on.
+//
+// test/ is excluded: the guards in this file hold mojibake literals on purpose. .cinematic/ holds
+// historical repair scripts whose lookup tables are mojibake by design, and client/src/lib/api.js
+// documents each corrupt sequence beside the regex that repairs it at runtime.
+test("shipping source is UTF-8, BOM-free and free of double-encoded text", () => {
+  const roots = ["client/src", "services", "routes", "shared", "contract", "scripts"];
+  const DELIBERATE = new Set(["client/src/lib/api.js"]);
+
+  // A cp1252 lead byte followed by a character cp1252 produces from a UTF-8 continuation byte.
+  // Narrow on purpose: bare /â/ would flag legitimate accented prose.
+  const MOJIBAKE = new RegExp(
+    "[\\u00e2\\u00c3\\u00c2\\u00f0]" +
+    "[\\u0080-\\u00bf\\u2013\\u2014\\u2018\\u2019\\u201a\\u201c\\u201d\\u201e" +
+    "\\u2020\\u2021\\u2022\\u2026\\u2030\\u2039\\u203a\\u20ac\\u0152\\u0153" +
+    "\\u0160\\u0161\\u0178\\u017d\\u017e\\u0192\\u02c6\\u02dc\\u2122\"']", "u");
+
+  const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+    const p = `${dir}/${e.name}`;
+    if (e.isDirectory()) return e.name === "node_modules" ? [] : walk(p);
+    return /\.(js|mjs|cjs|jsx|json|css|html)$/.test(e.name) ? [p] : [];
+  });
+
+  const files = ["server.js", ...roots.flatMap(walk)].filter(f => !DELIBERATE.has(f));
+  assert.ok(files.length > 100, `expected a real tree, walked ${files.length} files`);
+
+  for (const file of files) {
+    const source = fs.readFileSync(file, "utf8");
+    assert.ok(!source.startsWith("﻿"), `${file} starts with a UTF-8 BOM`);
+    // fs decodes as UTF-8 and substitutes U+FFFD, so an invalid byte never throws — it is only
+    // visible as the replacement character.
+    assert.ok(!source.includes("�"), `${file} is not valid UTF-8`);
+    assert.doesNotMatch(source, MOJIBAKE, `${file} contains double-encoded text`);
+  }
+});
+
+// The resume bullet is asserted on its own because it is the one corrupt sequence that reached a
+// user: it is rendered into every generated resume, and no test covered it.
+test("the generated resume bullet is a real bullet character", () => {
+  const server = fs.readFileSync("server.js", "utf8");
+  const rules = server.match(/ul\.bullets li::before \{ content: "(.)"/gu) ?? [];
+  assert.equal(rules.length, 2, "expected the style block and the formatter prompt to both set it");
+  for (const rule of rules) assert.match(rule, /content: "•"/u, rule);
+});

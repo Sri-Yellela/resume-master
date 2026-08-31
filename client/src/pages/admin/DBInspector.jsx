@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // client/src/pages/admin/DBInspector.jsx — Admin DB diagnostic tool
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api, authHeaders, authContextQuery } from "../../lib/api.js";

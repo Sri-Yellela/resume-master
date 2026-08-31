@@ -1,4 +1,4 @@
-﻿# Resume Master - Cross-Platform Sync
+# Resume Master - Cross-Platform Sync
 
 Last updated: 2026-05-08
 

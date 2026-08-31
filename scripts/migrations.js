@@ -362,7 +362,7 @@ export const MIGRATIONS = [
         );
       `,
     },
-    // â”€â”€ Phase 2A: Domain profiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 2A: Domain profiles ──────────────────────────────
     {
       id: "013_domain_profiles",
       sql: `
@@ -393,7 +393,7 @@ export const MIGRATIONS = [
         ALTER TABLE users ADD COLUMN domain_profile_complete INTEGER NOT NULL DEFAULT 0;
       `,
     },
-    // â”€â”€ Phase 5A: Standalone users â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 5A: Standalone users ─────────────────────────────
     {
       id: "015_standalone_users",
       sql: `
@@ -419,7 +419,7 @@ export const MIGRATIONS = [
           ON standalone_usage(session_id, service);
       `,
     },
-    // â”€â”€ Phase 6A: Profile-isolated job pools â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 6A: Profile-isolated job pools ──────────────────
     {
       id: "016_scraped_jobs_profile_tag",
       sql: `
@@ -433,7 +433,7 @@ export const MIGRATIONS = [
           ON user_jobs(user_id, domain_profile_id);
       `,
     },
-    // â”€â”€ Phase 6B: ATS scoring at scrape time â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 6B: ATS scoring at scrape time ──────────────────
     {
       id: "017_scraped_jobs_ats",
       sql: `
@@ -441,7 +441,7 @@ export const MIGRATIONS = [
         ALTER TABLE scraped_jobs ADD COLUMN ats_report TEXT;
       `,
     },
-    // â”€â”€ Phase 6C: Resume Enhancer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 6C: Resume Enhancer ────────────────────────────
     {
       id: "018_base_resume_enhance",
       sql: `
@@ -479,7 +479,7 @@ export const MIGRATIONS = [
         );
       `,
     },
-    // â”€â”€ Phase 7: Profile isolation backfill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 7: Profile isolation backfill ──────────────────
     {
       id: "021_backfill_profile_tags",
       sql: `
@@ -507,7 +507,7 @@ export const MIGRATIONS = [
         -- Remove user_jobs rows that could not be matched
         -- to any domain profile (domain_profile_id still NULL
         -- after backfill means no active profile exists for
-        -- that user â€” safe to clear, they will re-populate
+        -- that user — safe to clear, they will re-populate
         -- on next search with a profile set)
         DELETE FROM user_jobs
         WHERE domain_profile_id IS NULL
@@ -613,7 +613,7 @@ export const MIGRATIONS = [
           );
 
         -- Remove any remaining NULL-tagged user_jobs that couldn't be matched
-        -- and are not applied jobs (safe to drop â€” they'd never appear anyway).
+        -- and are not applied jobs (safe to drop — they'd never appear anyway).
         DELETE FROM user_jobs
         WHERE domain_profile_id IS NULL
           AND job_id NOT IN (
@@ -807,7 +807,7 @@ export const MIGRATIONS = [
           );
       `,
     },
-    // Add future migrations here â€” never edit existing ones
+    // Add future migrations here — never edit existing ones
     {
       id: "031_shared_job_role_map",
       sql: `
@@ -1319,7 +1319,7 @@ export const MIGRATIONS = [
       //   2. Adds role_key='engineering_embedded_firmware' for jobs whose title
       //      clearly indicates firmware/embedded work (title heuristic).
       //   3. Removes the stale role_key='engineering' entries that arrived via the
-      //      generic title_heuristic for those same jobs â€” so SWE users never see
+      //      generic title_heuristic for those same jobs — so SWE users never see
       //      them even if roleKeyForProfile returns 'engineering'.
       //   Jobs that were explicitly scraped under a SWE profile (matched_by =
       //   'profile_scrape') keep their 'engineering' entry so they remain visible
@@ -1396,7 +1396,7 @@ export const MIGRATIONS = [
       // Migration 038 already handled ML/AI/PM titles.  This migration extends that
       // repair to cover data-family specialty titles that were missed.
       //
-      // Only removes heuristic and profile-scrape engineering entries â€” manual_review
+      // Only removes heuristic and profile-scrape engineering entries — manual_review
       // entries are preserved (admin override must win).
       id: "046_data_specialty_role_repair",
       sql: `
@@ -1429,7 +1429,7 @@ export const MIGRATIONS = [
       `,
     },
     {
-      // 047 â€” Repair existing orphaned jobs that have no job_role_map entry.
+      // 047 — Repair existing orphaned jobs that have no job_role_map entry.
       //
       // These are jobs that were scraped without a domainProfile (admin scrapes,
       // profiles deleted post-scrape, or pre-046 legacy ingests) and therefore
@@ -1438,7 +1438,7 @@ export const MIGRATIONS = [
       // using the same high-confidence title patterns.
       //
       // Only assigns role_key when the title strongly matches a single family.
-      // Preserves manual_review entries â€” admin overrides are never touched.
+      // Preserves manual_review entries — admin overrides are never touched.
       id: "047_orphaned_job_classifier_repair",
       sql: `
         INSERT OR IGNORE INTO job_role_map
@@ -1559,12 +1559,12 @@ export const MIGRATIONS = [
       `,
     },
     {
-      // Migration 048 â€” Re-classify existing job_role_map entries that were assigned
+      // Migration 048 — Re-classify existing job_role_map entries that were assigned
       // role_key='engineering' via automated classifiers but whose title clearly indicates
       // firmware/embedded. Runs in two idempotent steps:
       //
       // Step 1: DELETE stale 'engineering' rows for jobs that already have an
-      //   'engineering_embedded_firmware' row â€” these are duplicates from migration 047,
+      //   'engineering_embedded_firmware' row — these are duplicates from migration 047,
       //   the ingest classifier, or a prior partial run of 048. Updating them would hit
       //   the UNIQUE(job_id, role_key) constraint. Deleting them is safe because the
       //   correct mapping already exists.

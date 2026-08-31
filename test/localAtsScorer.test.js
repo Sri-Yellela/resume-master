@@ -326,7 +326,14 @@ test("AG2: a claim informs FUTURE generation and never rewrites an existing resu
   // Read per generation, from the live table — so a claim made today cannot reach yesterday's
   // artifact, and tomorrow's generation sees it without anything being replayed.
   assert.match(server, /listProfileClaims\(db, \{ userId, profileId: activeDomainProfile\.id \}\)/);
-  const build = server.slice(server.indexOf("function buildRuntimeInputs"), server.indexOf("// â”€â”€ PDF generation"));
+  // Asserted before slicing: indexOf yields -1 for a missing anchor and slice reads that as
+  // "one from the end", so a moved anchor widens the slice instead of failing, and the matches
+  // below then pass over the whole file.
+  const buildStart = server.indexOf("function buildRuntimeInputs");
+  const buildEnd   = server.indexOf("// ── PDF generation");
+  assert.ok(buildStart !== -1, "anchor moved: function buildRuntimeInputs");
+  assert.ok(buildEnd   !== -1, "anchor moved: // ── PDF generation");
+  const build = server.slice(buildStart, buildEnd);
   assert.match(build, /Skills the CANDIDATE has claimed \(candidate-supplied/);
   assert.match(build, /they are SKILLS AND VERBS ONLY/,
     "the prompt must bound what a claim authorises");

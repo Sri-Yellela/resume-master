@@ -1,4 +1,4 @@
-﻿# LinkedIn Profile Import - Mobile
+# LinkedIn Profile Import - Mobile
 
 Resume Master supports importing your basic profile information from LinkedIn to pre-fill your resume on iOS and Android.
 

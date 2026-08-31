@@ -1,4 +1,4 @@
-﻿// client/src/lib/api.js
+// client/src/lib/api.js
 
 const AUTH_CONTEXT_KEY = "rm_auth_context";
 
@@ -119,7 +119,7 @@ export async function api(path, opts = {}) {
     // After server-side Fix 1 (requireAuth honors authContextToken), a 401 only
     // arrives when BOTH the Passport session AND the auth context are invalid.
     setAuthContext("");
-    // Signal the app shell to force-logout immediately â€” don't wait for the next
+    // Signal the app shell to force-logout immediately — don't wait for the next
     // visibilitychange event, which can leave the user stuck in a broken state.
     if (typeof window !== "undefined") {
       console.warn("[auth-debug] 401 response", { path });

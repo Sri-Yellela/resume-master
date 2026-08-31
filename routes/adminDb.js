@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // routes/adminDb.js — DB Inspector API routes for admin diagnostics
 import { Router } from "express";
 import fs from "fs";

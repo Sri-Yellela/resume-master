@@ -1,4 +1,4 @@
-﻿// client/src/panels/JobsPanel.jsx â€" Lucy Brand, shared job pool
+// client/src/panels/JobsPanel.jsx — Lucy Brand, shared job pool
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
@@ -125,7 +125,7 @@ function writeProfileUiCache(profileId, snapshot) {
 // had no call site left. The rule is kept here as a constraint on anyone re-adding an outbound
 // path — the server derives it from the profile; board filters stay out of it.
 
-// â"€â"€ Helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Helpers ───────────────────────────────────────────────────
 // The ageFilter -> days mapping, DERIVED rather than restated. It used to be a literal here and a
 // second literal in server.js's AGE_MAP, which is two copies of one definition; both now read the
 // shared POSTING_AGE table, so "past week" cannot come to mean two different things.
@@ -139,7 +139,7 @@ function ago(ts) {
   return `${Math.floor(d/86400000)}d`;
 }
 
-// â"€â"€ LinkedIn "in" logo (inline SVG) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── LinkedIn "in" logo (inline SVG) ──────────────────────────
 // Moved to client/src/lib/applyTools.js so AutoApplyContext can build the same apply-run request
 // from the same constants — two copies of a wire value is how a client and a server drift apart.
 
@@ -190,7 +190,7 @@ function LinkedInLogo({ size = 20 }) {
   );
 }
 
-// â"€â"€ Indeed logo (inline SVG) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Indeed logo (inline SVG) ──────────────────────────────────
 function IndeedLogo({ size = 20 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20" aria-label="Indeed" role="img">
@@ -201,7 +201,7 @@ function IndeedLogo({ size = 20 }) {
   );
 }
 
-// â"€â"€ Platform logo dispatcher â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Platform logo dispatcher ───────────────────────────────────
 function PlatformLogo({ platform, size = 20, theme }) {
   const p = (platform || "").toLowerCase();
   if (p === "linkedin") return <LinkedInLogo size={size}/>;
@@ -209,11 +209,11 @@ function PlatformLogo({ platform, size = 20, theme }) {
   return <span style={{ fontSize:size*0.5, color:theme?.textMuted||"#888" }}>◆</span>;
 }
 
-// â"€â"€ Company icon with monogram fallback â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Company icon with monogram fallback ───────────────────────
 
-// â"€â"€ Work type badge â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Work type badge ────────────────────────────────────────────
 function WorkBadge({ t, theme }) {
-  // Use semantic colors that work in both light/dark â€" the fg/bg are theme tokens
+  // Use semantic colors that work in both light/dark — the fg/bg are theme tokens
   const map = {
     Remote: { bg:"#e8f6fb", fg:"#1a6a8a" },
     Hybrid: { bg:"#f0f9ff", fg:"#0284c7" },
@@ -235,7 +235,7 @@ function WorkBadge({ t, theme }) {
   );
 }
 
-// â"€â"€ ATS badge â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── ATS badge ─────────────────────────────────────────────────
 function ATSBadge({ score, onClick }) {
   if (score == null) return null;
   const bg = score>=80 ? "#dcfce7" : score>=60 ? "#fef9c3" : "#fee2e2";
@@ -252,7 +252,7 @@ function ATSBadge({ score, onClick }) {
   );
 }
 
-// â"€â"€ Resume badge â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Resume badge ──────────────────────────────────────────────
 function ResumeBadge({ onClick, loading }) {
   return (
     <span
@@ -266,7 +266,7 @@ function ResumeBadge({ onClick, loading }) {
   );
 }
 
-// â"€â"€ Lucy button (rectangular â†' pill on hover, 1s) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Lucy button (rectangular → pill on hover, 1s) ─────────────
 function LucyBtn({ children, onClick, disabled, accent: accentProp,
                     style = {}, title }) {
   const [hov, setHov] = useState(false);
@@ -302,7 +302,7 @@ function LucyBtn({ children, onClick, disabled, accent: accentProp,
   );
 }
 
-// â"€â"€ Icon button â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Icon button ───────────────────────────────────────────────
 function IconBtn({ bg, onClick, title, children, disabled = false, size = 28 }) {
   const [hov, setHov] = useState(false);
   const { theme } = useTheme();
@@ -386,7 +386,7 @@ function defaultFilterSnapshot() {
   };
 }
 
-// â"€â"€ Filters panel (collapsible) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Filters panel (collapsible) ───────────────────────────────
 // The filters drawer's nav clearance.
 //
 // It used to be `position: fixed; inset: 0; zIndex: 500` — a raw number belonging to no tier, and
@@ -3265,7 +3265,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         flexShrink:0, flexWrap:"wrap",
       }}>
 
-        {/* â"€â"€ Row A â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+        {/* ── Row A ──────────────────────────────────── */}
         {/* Board tabs — superseded by TopBar Pill 2 */}
         {false && (
         <div style={{ display:"flex", flexShrink:0, overflow:"hidden",
@@ -3381,11 +3381,11 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
             install guard, and its action button called the no-op extension bridge. */}
 
       </div>
-      {/* Hidden file input â€" always mounted so TopBar resume upload button works even when toolbar is hidden */}
+      {/* Hidden file input — always mounted so TopBar resume upload button works even when toolbar is hidden */}
       <input ref={fileRef} type="file" accept=".txt,.html,.md,.docx,.pdf"
         onChange={handleFile} style={{ display:"none" }}/>
 
-      {/* â"€â"€ Resume Enhance modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+      {/* ── Resume Enhance modal ────────────────────────────── */}
       {/* Z.MODAL_SCRIM below, not the literal 600 this modal carried. 600 is Y2's DRAWER_SCRIM, so
           this modal and the filters drawer's scrim were at the SAME z and their order was decided by
           render order — the exact accident the named scale exists to remove. A resume-enhance modal
@@ -3474,7 +3474,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         </div>
       )}
 
-      {/* â"€â"€ Body: responsive layout â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+      {/* ── Body: responsive layout ─────────────────────────── */}
 
       {/* Company reuse modal (Task 6) */}
       {companyReuseTarget && (
@@ -3500,7 +3500,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         />
       )}
 
-      {/* â"€â"€ MOBILE / TABLET: single-pane + bottom nav â"€â"€ */}
+      {/* ── MOBILE / TABLET: single-pane + bottom nav ── */}
       {setupBlock ? (
         <SetupGateNotice theme={theme} {...setupBlock} />
       ) : isMobile && (
@@ -3574,7 +3574,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
         </div>
       )}
 
-      {/* â"€â"€ PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) â"€â"€ */}
+      {/* ── PORTRAIT / LAPTOP + WIDE: resizable panels (react-resizable-panels) ── */}
       {!setupBlock && (isWide || (isPortrait && !isMobile)) && (
         <div style={{ flex:1, minHeight:0, minWidth:0, overflow:"hidden", display:"flex" }}>
         <PanelGroup orientation="horizontal" style={{ flex: 1, minHeight:0, minWidth:0, overflow: "hidden" }}>
@@ -3683,7 +3683,7 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   );
 }
 
-// â"€â"€ Drag resize handle â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Drag resize handle ────────────────────────────────────────
 function ResizeHandle({ theme: themeProp }) {
   const { theme: t } = useTheme();
   const theme = themeProp || t;
@@ -3709,7 +3709,7 @@ function ResizeHandle({ theme: themeProp }) {
   );
 }
 
-// â"€â"€ Jobs column (shared across layout modes) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Jobs column (shared across layout modes) ──────────────────
 function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                       pollStatus, onRetryPoll,
                       generated, loading, applyMode, canUseGenerate, canUseAPlusResume,
@@ -4046,7 +4046,7 @@ function EmptyState({ theme }) {
   );
 }
 
-// â"€â"€ Empty state, filtered variant â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Empty state, filtered variant ────────────────────────────
 // Says WHICH empty this is and gives the one action that resolves it. Never "no jobs available" —
 // the jobs are there, the filter set is hiding them, and those are different problems with
 // different fixes. Excluding every provider or every tier lands here.
@@ -4201,7 +4201,7 @@ function SearchIntentDialog({ theme, prompt, onConfirm, onCancel }) {
 // button called back into that same function — an install prompt for a capability v1.2.0
 // deleted from the extension, which no install could ever satisfy.
 
-// â"€â"€ History list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── History list ──────────────────────────────────────────────
 function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
   const { theme: t } = useTheme();
   const theme = themeProp || t;
@@ -4249,7 +4249,7 @@ function HistoryList({ generated, onOpen, onExport, theme: themeProp }) {
   );
 }
 
-// â"€â"€ Company Reuse Modal â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Company Reuse Modal ────────────────────────────────────────
 function CompanyReuseModal({ company, onUseExisting, onGenerateNew, onCancel, theme }) {
   return (
     <div style={{

@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // routes/admin.js — Usage analytics and limits admin API
 import { Router } from "express";
 import { getTrackingStats } from "../services/usageTracker.js";

@@ -1,6 +1,6 @@
-﻿// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // ============================================================
-// server.js â€” Resume Master v5
+// server.js — Resume Master v5
 // ============================================================
 import "dotenv/config";
 import express        from "express";
@@ -128,7 +128,7 @@ import { artifactCurrency, currencySentence, modeForTool } from "./services/resu
 
 console.log("[boot] server module loaded");
 
-// â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Config ────────────────────────────────────────────────────
 const PORT           = process.env.PORT           || 3001;
 const ANTHROPIC_KEY  = process.env.ANTHROPIC_KEY  || "";
 // NOTE: There is NO server-level APIFY_TOKEN.
@@ -179,8 +179,8 @@ const OAUTH_PROVIDER_CONFIG = {
 const OAUTH_PROVIDERS = ["google", "linkedin", "github"];
 const CACHE_TTL_MS        = 12 * 60 * 60 * 1000;
 const MAX_JOBS_PER_REFRESH= 50;
-// 64-char hex â†’ 32-byte AES-256 key.  Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-// If not set, a random key is generated at startup (LinkedIn sessions won't survive restarts â€” acceptable for dev).
+// 64-char hex → 32-byte AES-256 key.  Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+// If not set, a random key is generated at startup (LinkedIn sessions won't survive restarts — acceptable for dev).
 const COOKIE_ENCRYPTION_KEY = Buffer.from(
   process.env.COOKIE_ENCRYPTION_KEY
     ? process.env.COOKIE_ENCRYPTION_KEY.replace(/\s/g,"").slice(0,64)
@@ -188,33 +188,33 @@ const COOKIE_ENCRYPTION_KEY = Buffer.from(
   "hex"
 );
 
-// â”€â”€ Scaling notes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Scaling notes ─────────────────────────────────────────────
 // Current: single Node.js process + SQLite + @sparticuz/chromium.
 // Appropriate for ~50-100 concurrent users.
 //
 // Migration order when scaling to SaaS:
 //
-// 1. PDF â†’ Gotenberg (see htmlToPdf() comment block above)
+// 1. PDF → Gotenberg (see htmlToPdf() comment block above)
 //    Add as Railway Docker sidecar: gotenberg/gotenberg:8
 //    Set GOTENBERG_URL env var. Zero per-call RAM overhead.
 //    Handles concurrent PDF exports natively.
 //
-// 2. SESSIONS â†’ Redis (connect-redis replaces connect-sqlite3)
+// 2. SESSIONS → Redis (connect-redis replaces connect-sqlite3)
 //    npm install connect-redis ioredis
 //    store: new RedisStore({ client: new Redis(process.env.REDIS_URL) })
 //
-// 3. DATABASE â†’ PostgreSQL (pg replaces better-sqlite3)
+// 3. DATABASE → PostgreSQL (pg replaces better-sqlite3)
 //    npm install pg
 //    All db.prepare().get/all/run() become async pool.query()
 //    Railway: add PostgreSQL plugin, use DATABASE_URL env var
 //    Migration runner pattern stays the same
 //
-// 4. JOB SCRAPING â†’ Queue (BullMQ + Redis)
+// 4. JOB SCRAPING → Queue (BullMQ + Redis)
 //    Move scrapeJobs() into a worker process
 //    API enqueues job, client polls for completion
 //    Prevents scrape timeouts on Railway's 30s request limit
 //
-// 5. STATIC FILES â†’ CDN
+// 5. STATIC FILES → CDN
 //    Push client/dist to Cloudflare R2 or S3
 //    Reduces Railway egress costs at scale
 
@@ -272,7 +272,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: 'Gara
 .tech-line { font-size: calc(var(--fs-body) - 0.4pt); color: var(--color-muted); margin-bottom: var(--gap-inline); }
 ul.bullets { list-style: none; padding-left: 0.9em; margin: var(--gap-inline) 0 0 0; }
 ul.bullets li { position: relative; font-size: var(--fs-body); line-height: var(--lh-bullets); margin-bottom: 1.6pt; text-align: justify; }
-ul.bullets li::before { content: "â€¢"; position: absolute; left: -0.85em; }
+ul.bullets li::before { content: "•"; position: absolute; left: -0.85em; }
 .skills-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
 .skill-label { font-weight: bold; white-space: nowrap; padding-right: 12pt; width: 1%; vertical-align: top; padding: 1.2pt 12pt 1.2pt 0; }
 .skill-values { color: var(--color-text); padding: 1.2pt 0; }
@@ -346,7 +346,7 @@ const INDUSTRY_CATEGORIES = [
   "Operations / Supply Chain","Legal / Compliance","Other",
 ];
 
-// â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Paths ─────────────────────────────────────────────────────
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // RM_DATA_DIR exists so the auth stack can be exercised end to end against a THROWAWAY database.
 // Sessions, auth contexts and requireAuth only exist as a whole — passport, the session store and
@@ -359,15 +359,15 @@ const DB_PATH   = path.join(DATA_DIR, "resume_master.db");
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 console.log(`[boot] data directory ready: ${path.dirname(DB_PATH)}`);
 
-// â”€â”€ DB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── DB ────────────────────────────────────────────────────────
 const db = new Database(DB_PATH);
 // WAL mode: allows concurrent readers alongside a single writer.
-// Critical for multi-user deployments â€” prevents SQLITE_BUSY lock errors.
+// Critical for multi-user deployments — prevents SQLITE_BUSY lock errors.
 db.pragma("journal_mode = WAL");
 db.pragma("busy_timeout = 5000");
 console.log(`[boot] database ready: ${DB_PATH}`);
 
-// â”€â”€ Inline migration runner (additive only â€” never drops data) â”€
+// ── Inline migration runner (additive only — never drops data) ─
 {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
     id TEXT PRIMARY KEY,
@@ -731,7 +731,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         );
       `,
     },
-    // â”€â”€ Phase 2A: Domain profiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 2A: Domain profiles ──────────────────────────────
     {
       id: "013_domain_profiles",
       sql: `
@@ -762,7 +762,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE users ADD COLUMN domain_profile_complete INTEGER NOT NULL DEFAULT 0;
       `,
     },
-    // â”€â”€ Phase 5A: Standalone users â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 5A: Standalone users ─────────────────────────────
     {
       id: "015_standalone_users",
       sql: `
@@ -788,7 +788,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON standalone_usage(session_id, service);
       `,
     },
-    // â”€â”€ Phase 6A: Profile-isolated job pools â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 6A: Profile-isolated job pools ──────────────────
     {
       id: "016_scraped_jobs_profile_tag",
       sql: `
@@ -802,7 +802,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON user_jobs(user_id, domain_profile_id);
       `,
     },
-    // â”€â”€ Phase 6B: ATS scoring at scrape time â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 6B: ATS scoring at scrape time ──────────────────
     {
       id: "017_scraped_jobs_ats",
       sql: `
@@ -810,7 +810,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE scraped_jobs ADD COLUMN ats_report TEXT;
       `,
     },
-    // â”€â”€ Phase 6C: Resume Enhancer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 6C: Resume Enhancer ────────────────────────────
     {
       id: "018_base_resume_enhance",
       sql: `
@@ -848,7 +848,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         );
       `,
     },
-    // â”€â”€ Phase 7: Profile isolation backfill â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Phase 7: Profile isolation backfill ──────────────────
     {
       id: "021_backfill_profile_tags",
       sql: `
@@ -876,7 +876,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         -- Remove user_jobs rows that could not be matched
         -- to any domain profile (domain_profile_id still NULL
         -- after backfill means no active profile exists for
-        -- that user â€” safe to clear, they will re-populate
+        -- that user — safe to clear, they will re-populate
         -- on next search with a profile set)
         DELETE FROM user_jobs
         WHERE domain_profile_id IS NULL
@@ -982,7 +982,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           );
 
         -- Remove any remaining NULL-tagged user_jobs that couldn't be matched
-        -- and are not applied jobs (safe to drop â€” they'd never appear anyway).
+        -- and are not applied jobs (safe to drop — they'd never appear anyway).
         DELETE FROM user_jobs
         WHERE domain_profile_id IS NULL
           AND job_id NOT IN (
@@ -1176,7 +1176,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           );
       `,
     },
-    // Add future migrations here â€” never edit existing ones
+    // Add future migrations here — never edit existing ones
     {
       id: "031_shared_job_role_map",
       sql: `
@@ -1688,7 +1688,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       //   2. Adds role_key='engineering_embedded_firmware' for jobs whose title
       //      clearly indicates firmware/embedded work (title heuristic).
       //   3. Removes the stale role_key='engineering' entries that arrived via the
-      //      generic title_heuristic for those same jobs â€” so SWE users never see
+      //      generic title_heuristic for those same jobs — so SWE users never see
       //      them even if roleKeyForProfile returns 'engineering'.
       //   Jobs that were explicitly scraped under a SWE profile (matched_by =
       //   'profile_scrape') keep their 'engineering' entry so they remain visible
@@ -1765,7 +1765,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       // Migration 038 already handled ML/AI/PM titles.  This migration extends that
       // repair to cover data-family specialty titles that were missed.
       //
-      // Only removes heuristic and profile-scrape engineering entries â€” manual_review
+      // Only removes heuristic and profile-scrape engineering entries — manual_review
       // entries are preserved (admin override must win).
       id: "046_data_specialty_role_repair",
       sql: `
@@ -1798,7 +1798,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       `,
     },
     {
-      // 047 â€” Repair existing orphaned jobs that have no job_role_map entry.
+      // 047 — Repair existing orphaned jobs that have no job_role_map entry.
       //
       // These are jobs that were scraped without a domainProfile (admin scrapes,
       // profiles deleted post-scrape, or pre-046 legacy ingests) and therefore
@@ -1807,7 +1807,7 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       // using the same high-confidence title patterns.
       //
       // Only assigns role_key when the title strongly matches a single family.
-      // Preserves manual_review entries â€” admin overrides are never touched.
+      // Preserves manual_review entries — admin overrides are never touched.
       id: "047_orphaned_job_classifier_repair",
       sql: `
         INSERT OR IGNORE INTO job_role_map
@@ -1928,12 +1928,12 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       `,
     },
     {
-      // Migration 048 â€” Re-classify existing job_role_map entries that were assigned
+      // Migration 048 — Re-classify existing job_role_map entries that were assigned
       // role_key='engineering' via automated classifiers but whose title clearly indicates
       // firmware/embedded. Runs in two idempotent steps:
       //
       // Step 1: DELETE stale 'engineering' rows for jobs that already have an
-      //   'engineering_embedded_firmware' row â€” these are duplicates from migration 047,
+      //   'engineering_embedded_firmware' row — these are duplicates from migration 047,
       //   the ingest classifier, or a prior partial run of 048. Updating them would hit
       //   the UNIQUE(job_id, role_key) constraint. Deleting them is safe because the
       //   correct mapping already exists.
@@ -3119,10 +3119,10 @@ console.log(`[boot] database ready: ${DB_PATH}`);
     try {
       db.exec(m.sql);
       db.prepare("INSERT INTO schema_migrations (id) VALUES (?)").run(m.id);
-      console.log(`[migrate] âœ“ ${m.id}`);
+      console.log(`[migrate] ✓ ${m.id}`);
       migrationCount++;
     } catch(e) {
-      console.error(`[migrate] âœ— FAILED ${m.id}:`, e.message);
+      console.error(`[migrate] ✗ FAILED ${m.id}:`, e.message);
       process.exit(1);
     }
   }
@@ -3173,7 +3173,7 @@ console.log("[boot] loading prompts");
 loadAllPrompts();
 console.log("[boot] prompts loaded");
 
-// â”€â”€ Backfill: split full_name into first_name / last_name â”€â”€â”€â”€â”€
+// ── Backfill: split full_name into first_name / last_name ─────
 {
   const rows = db.prepare("SELECT user_id, full_name FROM user_profile WHERE full_name IS NOT NULL AND first_name IS NULL").all();
   if (rows.length > 0) {
@@ -3190,7 +3190,7 @@ console.log("[boot] prompts loaded");
   }
 }
 
-// â”€â”€ Seed admin user â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Seed admin user ───────────────────────────────────────────
 // Cache cleanup — removes scraped_jobs older than 7 days, then re-warms if empty
 function runCacheCleanup() {
   try {
@@ -3212,13 +3212,13 @@ function runCacheCleanup() {
   }
 }
 
-// â”€â”€ Anthropic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Anthropic ─────────────────────────────────────────────────
 // Guard: if ANTHROPIC_KEY is missing, log a clear warning at startup
 // (endpoints that call Anthropic will return 500 with a descriptive error)
 // Declared here (before the ATS cache warm below) so cacheJobs() can pass it through for
 // background job-description enrichment (services/jobs/enrichJob.js) at every call site.
 if (!ANTHROPIC_KEY) {
-  console.error("[startup] WARNING: ANTHROPIC_KEY is not set in .env â€” PDF parsing and resume generation will fail.");
+  console.error("[startup] WARNING: ANTHROPIC_KEY is not set in .env — PDF parsing and resume generation will fail.");
 }
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
@@ -3254,14 +3254,14 @@ if (!adminExists) {
 // Historical cost calculations still use the price at insert time (stored in
 // usage_events.cost_usd), so changing pricing does not retroactively alter past records.
 
-// â”€â”€ Multer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Multer ────────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   preservePath: true,
 });
 
-// â”€â”€ ATS scoring system prompt (module-level, defined once) â”€â”€â”€â”€
+// ── ATS scoring system prompt (module-level, defined once) ────
 const ATS_SYSTEM_PROMPT = `You are an ATS (Applicant Tracking System) scoring engine.
 
 Score the provided resume against the provided job description.
@@ -3270,7 +3270,7 @@ Do not use prior knowledge, assumptions, or memory of other calls.
 Every keyword in tier1_matched and tier1_missing must appear verbatim
 in the job description text provided below.
 
-ACTION VERB RULES â€” critical:
+ACTION VERB RULES — critical:
 Only include STRONG, SPECIFIC action verbs in action_verbs_matched and action_verbs_missing.
 Strong action verbs are domain-specific and demonstrate concrete professional capability. What counts as strong depends on the role: Architecting and Deploying are strong for engineering; Negotiated, Structured, and Modelled are strong for finance; Procured, Commissioned, and Coordinated are strong for construction PM; Diagnosed, Administered, and Triaged are strong for healthcare. Apply the same principle: include verbs that signal specific professional capability in the domain of the job description. Exclude weak/generic verbs regardless of domain.
 
@@ -3292,12 +3292,12 @@ Use this exact schema:
   "action_verbs_missing": [<STRONG domain-specific action verbs from JD NOT in resume>],
   "strengths": [<2-4 specific strengths as short sentences>],
   "improvements": [<2-4 specific improvements as short sentences>],
-  "best_possible_score": <integer â€” highest achievable score given candidate background. Account for: cloud provider mismatches, domain gaps, missing certifications, seniority gaps>,
+  "best_possible_score": <integer — highest achievable score given candidate background. Account for: cloud provider mismatches, domain gaps, missing certifications, seniority gaps>,
   "best_possible_reason": "<one sentence: specific gaps preventing higher score>",
   "verdict": "<one sentence overall assessment>"
 }`;
 
-// â”€â”€ Helpers (extracted to services/jobNormalization.js) â”€â”€â”€â”€â”€â”€â”€
+// ── Helpers (extracted to services/jobNormalization.js) ───────
 // inferWorkType, jobHash, normaliseItem, isFullTimeNorm,
 // isEmploymentTypeWanted, parseYearsExperience, ghostJobScoreNorm,
 // isReposted are now imported from services/jobNormalization.js
@@ -3338,7 +3338,7 @@ Reply with the category name only. No explanation.` }],
   } catch { return "Other"; }
 }
 
-// â”€â”€ Company icon helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Company icon helpers ──────────────────────────────────────
 function extractDomain(url) {
   if (!url) return null;
   try { return new URL(url).hostname.replace(/^www\./, ""); }
@@ -3356,9 +3356,9 @@ async function fetchCompanyIcon(domain) {
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
 }
 
-// â”€â”€ Scraping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Scraping ──────────────────────────────────────────────────
 // Actor: harvestapi/linkedin-job-search
-// Returns real LinkedIn job IDs â€” INSERT OR IGNORE keeps first-write wins.
+// Returns real LinkedIn job IDs — INSERT OR IGNORE keeps first-write wins.
 async function scrapeHarvestAPI(query, token, scrapeParams = {}) {
   if (!token) throw new Error("No Apify token");
   const client = new ApifyClient({ token });
@@ -3415,7 +3415,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     : null;
   // Derive userId from domainProfileId for ATS scoring and usage tracking
   const userId = domainProfile?.user_id ?? null;
-  console.log(`[scrape] "${query}" â€” HarvestAPI (${profileTitles ? profileTitles.length + " profile titles" : "single query"})`);
+  console.log(`[scrape] "${query}" — HarvestAPI (${profileTitles ? profileTitles.length + " profile titles" : "single query"})`);
   let rawItems = [];
   try {
     rawItems = await scrapeHarvestAPI(query, apifyToken, scrapeParams);
@@ -3439,12 +3439,12 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   const filtered = combined.filter(item => {
     if (!item.title || !item.company || !item.jobId) { cntNoTitle++;  return false; }
     // Hard-drop: applyUrl is a LinkedIn-internal apply link (not an external ATS)
-    // noExternalApplyUrl (Easy Apply) is counted but NOT dropped â€” many valid roles (PM, etc.) use Easy Apply
+    // noExternalApplyUrl (Easy Apply) is counted but NOT dropped — many valid roles (PM, etc.) use Easy Apply
     if (item.applyUrl) {
       const applyDomain = extractDomain(item.applyUrl);
       if (applyDomain && applyDomain.includes("linkedin.com")) { cntNoApply++; return false; }
     }
-    // Post-scrape contract filter â€” catches what Apify's filter misses
+    // Post-scrape contract filter — catches what Apify's filter misses
     // (staffing agency postings often slip through the API's employmentType param)
     if (!employmentTypes.includes("contract") && !employmentTypes.includes("temporary")) {
       const textCheck = [
@@ -3594,7 +3594,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   const insertMany = db.transaction((jobs) => {
     let inserted = 0;
     jobs.forEach(item => {
-      const jobId   = item.jobId; // always a real LinkedIn job ID â€” synthetic IDs were removed
+      const jobId   = item.jobId; // always a real LinkedIn job ID — synthetic IDs were removed
       const hash    = jobHash(item);
       const yoe     = parseYearsExperience(item.description);
       const wt      = inferWorkType(
@@ -3647,7 +3647,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
         canonical.description || null,
         item.descriptionHtml || null,
         ghostJobScoreNorm({ ...item, url: item.applyUrl || item.url }),
-        yoe.min,          // years_experience (compat col â€” use min)
+        yoe.min,          // years_experience (compat col — use min)
         yoe.min,
         yoe.max,
         yoe.raw,
@@ -3695,7 +3695,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     inserted += insertMany(classifiedBatch);
   }
 
-  // â”€â”€ Conservative ingest-time classification for orphaned jobs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Conservative ingest-time classification for orphaned jobs ─────────────
   // Jobs scraped without a domainProfile (admin scrapes, deleted profiles, etc.)
   // have no job_role_map entry and are invisible to profile-based search flows.
   // Assign a role_key only when classifyForIngest() returns >= 0.75 confidence.
@@ -3731,9 +3731,9 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     }
   }
 
-  // â”€â”€ ATS scoring for newly inserted jobs (D1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── ATS scoring for newly inserted jobs (D1) ──────────────────────────────
   // Score new jobs against the user's base resume using Haiku.
-  // Non-fatal â€” job is still inserted if scoring fails.
+  // Non-fatal — job is still inserted if scoring fails.
   if (userId) {
     enqueueAtsScoreWork(`scrape:${userId}:${query}`, async () => {
       try {
@@ -3741,7 +3741,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
           ? getBaseResumeRecord(db, { userId, profileId: domainProfile.id })
           : null;
         const baseResumeText = baseResumeRow?.content;
-        if (!baseResumeText) return; // No base resume â€” skip scoring
+        if (!baseResumeText) return; // No base resume — skip scoring
         const profileTitles = domainProfile ? (() => {
           try { return JSON.parse(domainProfile.target_titles || "[]"); } catch { return []; }
         })() : [];
@@ -3815,7 +3815,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     });
   }
 
-  // â”€â”€ Async clearbit icon fallback (non-blocking, only for jobs without a logo) â”€â”€
+  // ── Async clearbit icon fallback (non-blocking, only for jobs without a logo) ──
   setImmediate(async () => {
     const updateIcon = db.prepare(
       "UPDATE scraped_jobs SET company_icon_url=? WHERE _hash=? AND company_icon_url IS NULL"
@@ -3839,7 +3839,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
       rawCount: combined.length,
     });
   }
-  console.log(`[scrape] âœ“ "${query}" â€” ${inserted} inserted, ${classified.length} classified, ${eligible.length} passed filter of ${combined.length} total`);
+  console.log(`[scrape] ✓ "${query}" — ${inserted} inserted, ${classified.length} classified, ${eligible.length} passed filter of ${combined.length} total`);
   return {
     classified,
     rawCount: rawItems.length,
@@ -3851,7 +3851,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
   };
 }
 
-// â”€â”€ Job expiry cleanup â€” runs at startup and daily at 03:00 â”€â”€â”€â”€â”€â”€
+// ── Job expiry cleanup — runs at startup and daily at 03:00 ──────
 // Extracts into a named function so it can be called at startup (to
 // catch any window missed if the server was down during the cron time)
 // and also scheduled daily.
@@ -3946,7 +3946,7 @@ function runExpiredJobsCleanup() {
   console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by DB age), retired ${retiredStarred.changes} starred jobs (kept, is_active=0), pruned ${orphans} orphaned rows`);
 }
 
-// â”€â”€ Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 â”€â”€
+// ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
 cron.schedule("0 3 * * *", runExpiredJobsCleanup);
 
 // Refresh ATS job cache daily at 04:00 ET
@@ -4024,7 +4024,7 @@ cron.schedule("0 2 * * *", () => {
 // it is still a working HarvestAPI crawl. Removing that is a product decision, not cleanup.
 // See docs/PIPELINE_DIAGNOSIS.md §5.12.
 
-// â”€â”€ Prompt injection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Prompt injection ──────────────────────────────────────────
 // domainProfile is the active domain_profiles row (or null).
 // When supplied, profile keywords/verbs/tools are injected as Tier 1 signal.
 function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainProfile = null, claims = null) {
@@ -4050,7 +4050,7 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
     ? `**Candidate years of experience (AUTHORITATIVE — the JD may not change this):** ${profileYears}\n`
     : `**Candidate years of experience:** not stated — derive from the base resume dates only, never from the JD\n`;
 
-  // Domain profile block â€” injected when user has an active profile
+  // Domain profile block — injected when user has an active profile
   //
   // THE SENIORITY LINE CHANGED MEANING, ON PURPOSE.
   // It used to read "Seniority the user is TARGETING (an aspiration, not a level to claim)", which
@@ -4067,9 +4067,9 @@ function buildRuntimeInputs(profile, job, resumeText, mode, employers, domainPro
     domainProfileBlock = `
 **User domain profile:** ${domainProfile.profile_name}
 **Seniority the candidate states they are (their own declaration — you may use it, and may not exceed it):** ${domainProfile.seniority}
-**Profile keywords:** ${kw || "â€”"}
-**Profile tools:** ${tools || "â€”"}
-**Profile action verbs:** ${verbs || "â€”"}
+**Profile keywords:** ${kw || "—"}
+**Profile tools:** ${tools || "—"}
+**Profile action verbs:** ${verbs || "—"}
 `;
   }
 
@@ -4134,19 +4134,19 @@ ${job.description||job.title}
 ${resumeText}`;
 }
 
-// â”€â”€ PDF generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── PDF generation ─────────────────────────────────────────────
 //
 // CURRENT: @sparticuz/chromium + puppeteer-core
 // Lightweight Chromium binary, single Railway service.
 // Per-call RAM spike: ~70MB. Safe for low-to-medium traffic.
 //
-// â”€â”€ FUTURE MIGRATION PATH â†’ Gotenberg â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── FUTURE MIGRATION PATH → Gotenberg ─────────────────────────
 // When scaling to SaaS (concurrent PDF exports, 100+ users):
-// Gotenberg runs Chromium as a persistent Docker sidecar â€” zero
+// Gotenberg runs Chromium as a persistent Docker sidecar — zero
 // per-call RAM spike, handles concurrency natively.
 //
 // Migration steps (when ready):
-//   1. In Railway: "+ New Service" â†’ Docker Image â†’ gotenberg/gotenberg:8
+//   1. In Railway: "+ New Service" → Docker Image → gotenberg/gotenberg:8
 //   2. Add env var to main service: GOTENBERG_URL=<railway internal URL>
 //   3. npm uninstall @sparticuz/chromium puppeteer-core
 //   4. npm install  (form-data is built into Node 18+ via FormData global)
@@ -4177,7 +4177,7 @@ ${resumeText}`;
 //
 //   6. Remove the chromium + puppeteer-core imports above
 //   7. Delete this comment block
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────
 
 async function htmlToPdf(html) {
   if (!html.trimStart().toLowerCase().startsWith("<!doctype")) {
@@ -4213,7 +4213,7 @@ async function htmlToPdf(html) {
   }
 }
 
-// â”€â”€ Field normalisers (server-side, mirrors client normalisers) â”€â”€
+// ── Field normalisers (server-side, mirrors client normalisers) ──
 function normalisePhone(raw) {
   if (!raw) return "";
   const digits = raw.replace(/\D/g, "");
@@ -4228,7 +4228,7 @@ function normaliseUrl(raw) {
   return t.startsWith("http://") || t.startsWith("https://") ? t : "https://" + t;
 }
 
-// â”€â”€ Autofill payload builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Autofill payload builder ──────────────────────────────────
 /**
  * @param {object} profile  the user_profile row
  * @param {string} mode     "APPLY" | "CUSTOM_SAMPLER"
@@ -4356,7 +4356,7 @@ function buildAutofillPayload(profile, mode, company = null) {
   };
 }
 
-// â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Auth ──────────────────────────────────────────────────────
 const SQLiteStore = SQLiteStoreFactory(session);
 // Same DATA_DIR as the main database: a throwaway boot must not share the real sessions.db, or the
 // session-revocation assertions would be destroying the developer's own sessions.
@@ -4397,9 +4397,9 @@ passport.deserializeUser((id, done) => {
     const user = db.prepare("SELECT id,username,is_admin,apply_mode,plan_tier,domain_profile_complete FROM users WHERE id=?").get(id);
     if (!user) {
       // User was deleted or session references a stale ID from another environment.
-      // done(null, false) cleanly de-authenticates â€” Passport calls req.logout() internally.
+      // done(null, false) cleanly de-authenticates — Passport calls req.logout() internally.
       // done(new Error(...)) would propagate to the global error handler and return 500.
-      console.warn(`[auth] deserializeUser: user id=${id} not found â€” session will be cleared`);
+      console.warn(`[auth] deserializeUser: user id=${id} not found — session will be cleared`);
       return done(null, false);
     }
     done(null, {
@@ -4412,7 +4412,7 @@ passport.deserializeUser((id, done) => {
     });
   } catch(e) {
     console.error("[auth] deserializeUser error:", e.message);
-    done(null, false); // safe fallback â€” don't crash the request
+    done(null, false); // safe fallback — don't crash the request
   }
 });
 
@@ -4588,7 +4588,7 @@ function bindAuthContext(req, _res, next) {
     if (!row) {
       // Token was sent but is expired, revoked, or unknown.
       // Log so we can diagnose "session expired" reports without leaking the token itself.
-      console.warn(`[auth-context] token not found/expired â€” ${req.method} ${req.path} | ua:${(req.get("user-agent")||"").slice(0,60)}`);
+      console.warn(`[auth-context] token not found/expired — ${req.method} ${req.path} | ua:${(req.get("user-agent")||"").slice(0,60)}`);
       return next();
     }
     const user = hydrateAuthUser(row.user_id);
@@ -5084,11 +5084,11 @@ function requirePlan(req, res, requiredTier) {
   return false;
 }
 
-// assertUserOwns â€” use this when fetching a record by ID WITHOUT user_id in the
+// assertUserOwns — use this when fetching a record by ID WITHOUT user_id in the
 // WHERE clause, then verifying ownership. Returns the row on success; sends the
 // appropriate error response and returns null if the check fails.
 // NOTE: Most routes in this file use the safer pattern:
-//   WHERE user_id=? AND id=?  â† returns null for both "not found" and "not yours"
+//   WHERE user_id=? AND id=?  ← returns null for both "not found" and "not yours"
 // which leaks no information about whether the record exists. assertUserOwns is
 // most useful for admin-adjacent lookups or any future route that must fetch a
 // shared resource then check whether the caller may mutate it.
@@ -5098,7 +5098,7 @@ function assertUserOwns(row, userId, res) {
   return row;
 }
 
-// Canonical role-key derivation â€” delegates to services/jobClassifier.js.
+// Canonical role-key derivation — delegates to services/jobClassifier.js.
 // To change the mapping logic, edit getRoleKeyForProfile() in that module.
 function roleKeyForProfile(profile) {
   const family = String(profile?.role_family || "").trim().toLowerCase();
@@ -5108,7 +5108,7 @@ function roleKeyForProfile(profile) {
   // so firmware profiles get their own isolated bucket in job_role_map and
   // never share the broad "engineering" key with standard SWE profiles.
   // engineering_systems_low_level and engineering_specialist intentionally
-  // stay on the shared "engineering" key â€” their title sets overlap too much
+  // stay on the shared "engineering" key — their title sets overlap too much
   // with SWE to warrant a separate bucket without a full re-scrape.
   if (family === "engineering" && domain === "engineering_embedded_firmware") {
     return "engineering_embedded_firmware";
@@ -5180,7 +5180,7 @@ function resolveUserJobDomainProfileId(userId, jobId) {
   return null;
 }
 
-// â”€â”€ Express â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Express ───────────────────────────────────────────────────
 const app = express();
 // Active scrapes: key = "userId:profileId:query", value = { startedAt, done }
 // Polled by GET /api/jobs/poll to determine if a background scrape is still running.
@@ -5295,7 +5295,7 @@ function emitToUser(userId, event) {
     catch(e) { clients.delete(res); }
   });
 }
-// trust proxy: required for Railway/Render â€” without this, secure: true cookies
+// trust proxy: required for Railway/Render — without this, secure: true cookies
 // fail behind their HTTPS reverse proxy and all sessions silently break.
 app.set("trust proxy", 1);
 app.use(cors({ origin:corsOrigin, credentials:true }));
@@ -5367,9 +5367,9 @@ app.get("/robots.txt", (req, res) => {
   ].join("\n"));
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // AUTH
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.post("/api/auth/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     if (err)   return next(err);
@@ -5745,12 +5745,12 @@ app.get("/api/auth/active-profile", requireAuth, (req, res) => {
   });
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // DOMAIN PROFILES
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// /api/domain-profiles        â€” CRUD + activate
-// /api/domain-profiles/metadata[/:domain]  â€” registry (no auth)
-// /api/domain-profiles/generate-chips      â€” AI chip generation
+// ═══════════════════════════════════════════════════════════════
+// /api/domain-profiles        — CRUD + activate
+// /api/domain-profiles/metadata[/:domain]  — registry (no auth)
+// /api/domain-profiles/generate-chips      — AI chip generation
 app.use("/api/domain-profiles", requireAuth, createDomainProfilesRouter(db, anthropic, emitToUser));
 app.use("/api/import", requireAuth, createImportJobRouter(db, anthropic));
 app.use("/api/company-kb", requireAuth, createCompanyKbRouter(db, requireAdmin));
@@ -5810,7 +5810,7 @@ app.all("/api/extension/save-job",
 // imported_jobs. The single-job save-job endpoint above is now retired too (E2), so nothing
 // writes to imported_jobs at all.
 
-// Metadata is also public â€” mount without requireAuth at a sub-path so
+// Metadata is also public — mount without requireAuth at a sub-path so
 // the chip registry is accessible from the wizard before login
 app.get("/api/domain-metadata",       (_req, res) => res.redirect(307, "/api/domain-profiles/metadata"));
 app.get("/api/domain-metadata/:key",  (req, res) => res.redirect(307, `/api/domain-profiles/metadata/${req.params.key}`));
@@ -5828,9 +5828,9 @@ function insertNotification(userId, type, message, payload = null) {
   }
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // ADMIN BACKUP / RESTORE
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.get("/api/admin/backups", requireAdmin, (_req, res) => {
   try { res.json(listBackups()); } catch(e) { res.status(500).json({ error:e.message }); }
 });
@@ -5849,9 +5849,9 @@ app.post("/api/admin/backups/restore", requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // ADMIN USER MANAGEMENT
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.get("/api/admin/users", requireAdmin, (req, res) => {
   res.json(db.prepare("SELECT id,username,is_admin,apply_mode,plan_tier,created_at FROM users ORDER BY created_at DESC").all());
 });
@@ -5966,7 +5966,7 @@ app.get("/api/admin/users/:id/profile", requireAdmin, (req, res) => {
 app.get("/api/admin/users/:id/applications", requireAdmin, (req, res) => {
   res.json(db.prepare("SELECT * FROM job_applications WHERE user_id=? ORDER BY applied_at DESC").all(parseInt(req.params.id)));
 });
-// (quota reset routes removed â€” no refresh cap)
+// (quota reset routes removed — no refresh cap)
 
 // Analytics admin routes (usage tracking, limits, timeseries)
 app.use("/api/admin/analytics", createAdminRouter(db));
@@ -5994,8 +5994,8 @@ app.use(createAccountRouter({
   INDUSTRY_CATEGORIES,
 }));
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// â”€â”€ /api/jobs/facets â€” live counts for filter UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ═══════════════════════════════════════════════════════════════
+// ── /api/jobs/facets — live counts for filter UI ──────────────
 // Returns grouped counts over the current user's job pool (7-day window,
 // non-disliked, non-applied). Used to show "Remote (23)" labels and hide
 // zero-count filter options. Re-fetch after each scrape completes.
@@ -6082,8 +6082,8 @@ app.get("/api/jobs/suggest", requireAuth, (req, res) => {
   }
 });
 
-// JOBS â€” shared pool with pagination, filters, sort
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// JOBS — shared pool with pagination, filters, sort
+// ═══════════════════════════════════════════════════════════════
 /**
  * Reject a filter value the vocabulary does not contain — LOUDLY.
  *
@@ -6978,7 +6978,7 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
   }));
 
   if (!stillScraping && scrapeState?.done) {
-    // [poll] profile query scrape done â€” keep this diagnostic shape searchable in tests.
+    // [poll] profile query scrape done — keep this diagnostic shape searchable in tests.
     console.log(`[poll] ${JSON.stringify({
       userId,
       profileId: activeProfile.id,
@@ -7037,7 +7037,7 @@ function isAnthropicCreditError(err) {
       || msg.includes("quota exceeded");
 }
 
-// Map UI workType string â†’ Apify workplaceType array
+// Map UI workType string → Apify workplaceType array
 function mapWorkplaceTypes(workType) {
   const map = { Remote:"remote", Hybrid:"hybrid", Onsite:"office", "On-site":"office",
                 remote:"remote", hybrid:"hybrid", office:"office" };
@@ -7046,7 +7046,7 @@ function mapWorkplaceTypes(workType) {
   return mapped ? [mapped] : ["remote","hybrid","office"];
 }
 
-// Map UI ageFilter string â†’ Apify postedLimit
+// Map UI ageFilter string → Apify postedLimit
 function mapPostedLimit(ageFilter) {
   const map = { "1d":"24h","2d":"24h","3d":"24h","1w":"1w","1m":"1m","1mo":"1m" };
   return map[ageFilter] || "24h";
@@ -7107,7 +7107,7 @@ app.get("/api/jobs/:id/recruiter", requireAuth, (_req, res) => {
   res.json({ comingSoon: true, available: false });
 });
 
-// â”€â”€ Keyword analysis for a job (no generated resume needed) â”€â”€â”€â”€â”€â”€
+// ── Keyword analysis for a job (no generated resume needed) ──────
 app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   if (!requirePlan(req, res, "PLUS")) return;
   const userId = req.user.id;
@@ -7164,7 +7164,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
     });
     const result = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
 
-    // Save to cache â€” INSERT OR REPLACE via ON CONFLICT
+    // Save to cache — INSERT OR REPLACE via ON CONFLICT
     db.prepare(`
       INSERT INTO ats_only_reports (user_id, job_id, ats_report, ats_score)
       VALUES (?, ?, ?, ?)
@@ -7181,7 +7181,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   }
 });
 
-// â”€â”€ Pending jobs (resume generated but not yet applied or disliked) â”€â”€
+// ── Pending jobs (resume generated but not yet applied or disliked) ──
 // GET /api/jobs/by-id/:jobId — resolve ONE posting, for a deep link.
 //
 // AH2 made a job detail addressable (/app/jobs?job=<id>), which needs a way to answer "give me that
@@ -7242,9 +7242,9 @@ app.get("/api/jobs/pending", requireAuth, (req, res) => {
 
 app.get("/api/categories", requireAuth, (_req,res) => res.json(INDUSTRY_CATEGORIES));
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // BASE RESUME
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.get("/api/base-resume", requireAuth, (req, res) => {
   const activeProfile = getOrRepairActiveProfile(req.user.id);
   if (!activeProfile) return res.json({ content: null, profileId: null });
@@ -7537,12 +7537,12 @@ app.get("/api/base-resume/enhance-status", requireAuth, (req, res) => {
   sendEnhanceStatus(req, res);
 });
 
-// POST /api/base-resume/enhance â€” legacy wrapper for the active profile
+// POST /api/base-resume/enhance — legacy wrapper for the active profile
 app.post("/api/base-resume/enhance", requireAuth, async (req, res) => {
   return await enhanceProfileResume(req, res);
 });
 
-// PATCH /api/base-resume/adopt-enhanced â€” legacy wrapper for the active profile
+// PATCH /api/base-resume/adopt-enhanced — legacy wrapper for the active profile
 app.patch("/api/base-resume/adopt-enhanced", requireAuth, async (req, res) => {
   return await adoptEnhancedProfileResume(req, res);
 });
@@ -7582,17 +7582,17 @@ app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) 
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // GENERATE
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 const generationInFlight = new Set();
-// Tracks in-flight apply-worker-triggered generations: key â†’ Promise<{html,atsScore,resumeId}|{error}>
+// Tracks in-flight apply-worker-triggered generations: key → Promise<{html,atsScore,resumeId}|{error}>
 const pendingGenerationPromises = new Map();
 
-// â”€â”€ coreGenerateResume â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── coreGenerateResume ─────────────────────────────────────────────────────────
 // Shared generation kernel used by the HTTP /api/generate handler AND the apply
 // worker via generateResumeForApply().  Does NOT do HTTP req/res or rate-limit
-// checks â€” those live in the caller.  Throws on error; returns artifact on success.
+// checks — those live in the caller.  Throws on error; returns artifact on success.
 async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", employers = [] }) {
   const mode         = legacyModeForTool(tool);
   const promptMode   = promptModeForTool(tool);
@@ -7610,7 +7610,7 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
   let domainModuleKey = "general";
   if (activeDomainProfile) {
     domainModuleKey = getDomainModuleKey(null, activeDomainProfile.role_family, activeDomainProfile.domain);
-    console.log(`[generate] domain from profile: ${activeDomainProfile.profile_name} â†’ ${domainModuleKey}`);
+    console.log(`[generate] domain from profile: ${activeDomainProfile.profile_name} → ${domainModuleKey}`);
   } else {
     try {
       const classifierResult = await classify(anthropic, authoritativeResumeText, job.description || "", {
@@ -7694,13 +7694,13 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
   let formattedHtml = normalizeResumeHtml(html);
   if (process.env.RESUME_MASTER_LLM_FORMAT === "1") {
     try {
-      const FORMATTING_SYSTEM = `You are a resume HTML formatter. You receive a resume in any HTML format and reformat it to exactly match the design specification below. You output ONLY the final HTML â€” no commentary, no markdown fences, no explanation.
+      const FORMATTING_SYSTEM = `You are a resume HTML formatter. You receive a resume in any HTML format and reformat it to exactly match the design specification below. You output ONLY the final HTML — no commentary, no markdown fences, no explanation.
 
 DESIGN SPECIFICATION:
 
 All CSS lives in a <style> block in <head>. No inline styles. No external fonts, CDN links, or JavaScript. Include @media print block.
 
-CSS variables (use these â€” no hardcoded hex):
+CSS variables (use these — no hardcoded hex):
 :root {
   --color-bg: #ffffff;
   --color-text: #1a1a1a;
@@ -7720,7 +7720,7 @@ CSS variables (use these â€” no hardcoded hex):
   --lh-bullets: 1.38;
 }
 
-Font: font-family: 'Garamond','EB Garamond',Georgia,serif â€” all text, no exceptions.
+Font: font-family: 'Garamond','EB Garamond',Georgia,serif — all text, no exceptions.
 
 body { background: var(--color-bg); color: var(--color-text); font-family: 'Garamond','EB Garamond',Georgia,serif; font-size: var(--fs-body); line-height: var(--lh-body); margin: var(--margin-top) var(--margin-x) var(--margin-bot); max-width: var(--page-w); }
 
@@ -7743,7 +7743,7 @@ body { background: var(--color-bg); color: var(--color-text); font-family: 'Gara
 
 ul.bullets { list-style: none; padding-left: 0.9em; margin: var(--gap-inline) 0 0 0; }
 ul.bullets li { position: relative; font-size: var(--fs-body); line-height: var(--lh-bullets); margin-bottom: 1.6pt; text-align: justify; }
-ul.bullets li::before { content: "â€¢"; position: absolute; left: -0.85em; }
+ul.bullets li::before { content: "•"; position: absolute; left: -0.85em; }
 
 .skills-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
 .skill-label { font-weight: bold; white-space: nowrap; padding-right: 12pt; width: 1%; vertical-align: top; padding: 1.2pt 12pt 1.2pt 0; }
@@ -7756,10 +7756,10 @@ ul.bullets li::before { content: "â€¢"; position: absolute; left: -0.85em; }
 }
 
 RULES:
-- Preserve ALL content exactly â€” every word, number, company name, date, bullet, skill
-- Only restructure the HTML and CSS â€” never change the text content
+- Preserve ALL content exactly — every word, number, company name, date, bullet, skill
+- Only restructure the HTML and CSS — never change the text content
 - Apply the class names above to the correct elements
-- Entry headers must be a single flex row â€” company on left, date on right
+- Entry headers must be a single flex row — company on left, date on right
 - Output only the complete HTML file, nothing else`;
 
       const fmtStart = Date.now();
@@ -7864,7 +7864,7 @@ RULES:
   return { html: formattedHtml, atsScore, atsReport, version, resumeId: savedResume?.id ?? null };
 }
 
-// â”€â”€ generateResumeForApply â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── generateResumeForApply ─────────────────────────────────────────────────────
 // Called by the apply worker to resolve or trigger a resume artifact in the
 // background.  Returns a Promise that resolves to { html, atsScore, resumeId }
 // or { error: string }.  Multiple callers for the same (userId, jobId, tool)
@@ -7891,10 +7891,10 @@ function generateResumeForApply(userId, jobId, toolType) {
       (currency.detail ? ` (${currency.detail})` : ""));
   }
 
-  // 2. In-flight Promise from another worker call â€” share it
+  // 2. In-flight Promise from another worker call — share it
   if (pendingGenerationPromises.has(key)) return pendingGenerationPromises.get(key);
 
-  // 3. HTTP handler is already generating (generationInFlight) â€” poll DB until done
+  // 3. HTTP handler is already generating (generationInFlight) — poll DB until done
   if (generationInFlight.has(key)) {
     console.log(`[generateResumeForApply] attaching to in-flight HTTP generation for key=${key}`);
     const waitP = new Promise(resolve => {
@@ -8060,7 +8060,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
   }
   const PLACEHOLDER_PATTERNS = [/your name/i, /your\.email@example/i, /\[your name\]/i, /YOUR NAME/];
   if (PLACEHOLDER_PATTERNS.some(p => p.test(resumeTrimmed.slice(0, 300)))) {
-    return res.status(400).json({ error:"Base resume data failed to load â€” placeholder text detected. Please re-upload your resume and try again." });
+    return res.status(400).json({ error:"Base resume data failed to load — placeholder text detected. Please re-upload your resume and try again." });
   }
 
   const existing = db.prepare("SELECT * FROM resumes WHERE user_id=? AND job_id=?").get(req.user.id, String(jobId));
@@ -8198,9 +8198,9 @@ app.post("/api/generate", requireAuth, async (req, res) => {
 });
 
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // SANDBOX + PDF
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.post("/api/resumes/:jobId/html", requireAuth, (req, res) => {
   const { html, tool, version } = req.body;
   if (!html) return res.status(400).json({ error:"html required" });
@@ -8246,9 +8246,9 @@ app.get("/api/resumes/:jobId/pdf", requireAuth, (_req, res) => {
   res.status(503).json({ error: "Server-side PDF export is not available. Use client-side print instead.", useClientSide: true });
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // RESUME HISTORY
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.get("/api/resumes", requireAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT r.id, r.user_id, r.job_id, r.company, r.role, r.category,
@@ -8294,9 +8294,9 @@ app.get("/api/history", requireAuth, (req, res) => {
   res.json(rows);
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // JOB APPLICATIONS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.post("/api/applications", requireAuth, (req, res) => {
   const { jobId,company,role,jobUrl,source,location,applyMode,resumeFile,notes } = req.body;
   if (!jobId||!company||!role) return res.status(400).json({ error:"jobId, company, role required" });
@@ -8391,9 +8391,9 @@ app.delete("/api/applications/:jobId", requireAuth, (req, res) => {
   res.json({ ok:true });
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // EXCEL EXPORT
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.get("/api/export/excel", requireAuth, async (req, res) => {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Resume Master";
@@ -8453,9 +8453,9 @@ app.get("/api/export/excel", requireAuth, async (req, res) => {
   res.end();
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // SMART SEARCH
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.post("/api/smart-search", requireAuth, async (req, res) => {
   const { resumeText } = req.body;
   if (!resumeText) return res.status(400).json({ error: "resumeText required" });
@@ -8481,17 +8481,17 @@ app.post("/api/smart-search", requireAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // LINKEDIN SESSION COOKIES (AES-256-GCM encrypted at rest)
 // Future: use stored cookies to skip re-auth in HarvestAPI actor
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // APPLY AUTOMATION (Playwright)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply);
 
-// â”€â”€ Contact form (public â€” no auth required) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Contact form (public — no auth required) ──────────────────
 app.post("/api/contact", (req, res) => {
   const { name, email, subject, message } = req.body || {};
   if (!name?.trim() || !email?.trim() || !message?.trim())
@@ -8512,11 +8512,11 @@ app.patch("/api/admin/contact-messages/:id/read", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// STANDALONE TOOL PAGES â€” AUTH INFRASTRUCTURE (Phase 5B)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
+// STANDALONE TOOL PAGES — AUTH INFRASTRUCTURE (Phase 5B)
+// ═══════════════════════════════════════════════════════════════
 // Placeholder OTP store (in-memory; replace with Redis/DB in production)
-const _otpStore = new Map(); // contact â†’ { otp, expiresAt }
+const _otpStore = new Map(); // contact → { otp, expiresAt }
 
 app.post("/api/standalone/auth/google", (_req, res) => {
   // TODO: validate Google ID token with google-auth-library
@@ -8604,11 +8604,11 @@ function standaloneRateLimit(service, anonMax, userMax) {
 // Multer for standalone uploads
 const standaloneUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // STANDALONE TOOL API ROUTES (Phase 5C)
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 
-// POST /api/standalone/ats â€” ATS scoring (no main-app auth required)
+// POST /api/standalone/ats — ATS scoring (no main-app auth required)
 // Uses same ATS_SYSTEM_PROMPT and Haiku call as main app.
 app.post("/api/standalone/ats", standaloneRateLimit("ats", 1, 3), standaloneUpload.single("resume"), async (req, res) => {
   const jdText = req.body?.jd_text || "";
@@ -8636,7 +8636,7 @@ app.post("/api/standalone/ats", standaloneRateLimit("ats", 1, 3), standaloneUplo
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/standalone/generate â€” Generate resume (no main-app auth)
+// POST /api/standalone/generate — Generate resume (no main-app auth)
 app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), standaloneUpload.single("resume"), async (req, res) => {
   const jdText = req.body?.jd_text || "";
   if (!req.file || !jdText.trim()) return res.status(400).json({ error: "resume PDF and jd_text required" });
@@ -8648,7 +8648,7 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     const resumeText = parsed.text?.trim();
     if (!resumeText || resumeText.length < 50) return res.status(400).json({ error: "Could not extract text from PDF" });
 
-    // No domain profile for standalone users â€” use classifier
+    // No domain profile for standalone users — use classifier
     let domainModuleKey = "general";
     try {
       // Was the third classify() caller and the only one that passed no tracking context, so
@@ -8699,7 +8699,7 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/standalone/apply â€” auto-apply (requires standalone auth)
+// POST /api/standalone/apply — auto-apply (requires standalone auth)
 app.post("/api/standalone/apply",
   (req, res, next) => { if (!req.session?.standaloneUserId) return res.status(401).json({ error: "Authentication required" }); next(); },
   standaloneRateLimit("apply", 0, 2),
@@ -8711,7 +8711,7 @@ app.post("/api/standalone/apply",
   }
 );
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // ── Cover Letter Generation ────────────────────────────────────────────────────
 app.post("/api/cover-letter/generate", requireAuth, async (req, res) => {
   const { resumeText, jobDescription, tone = "professional", jobTitle, company } = req.body;
@@ -8771,11 +8771,11 @@ REQUIREMENTS:
 });
 
 // HEALTH + SPA
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 app.get("/api/health", (_req,res) => res.json({ ok:true, time:new Date().toISOString() }));
 
 
-// â”€â”€ Profile isolation diagnostic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Profile isolation diagnostic ─────────────────────────────
 app.get("/api/debug/verify-isolation", requireAuth, (req, res) => {
   const userId  = req.user.id;
   const profile = db.prepare(
@@ -8813,8 +8813,8 @@ app.listen(PORT, () => {
   // returns a cached result without delay on first user request.
   console.log("[boot] scheduling background browser probe");
   probeBrowserAvailability().then(r => {
-    if (r.available) console.log(`[server] browser ready â€” source=${r.source}`);
-    else console.warn(`[server] browser unavailable â€” ${r.reasonCode}: ${r.error}`);
+    if (r.available) console.log(`[server] browser ready — source=${r.source}`);
+    else console.warn(`[server] browser unavailable — ${r.reasonCode}: ${r.error}`);
   }).catch(() => {});
   // Run startup cleanup to expire any stale jobs that accumulated while server was
   // down and the 03:00 cron window was missed.

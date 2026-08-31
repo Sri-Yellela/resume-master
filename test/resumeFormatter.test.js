@@ -169,7 +169,13 @@ test("ATS text extraction from deterministic HTML remains clean and selectable-t
   assert.doesNotMatch(text, /<strong>/);
 
   const server = fs.readFileSync("server.js", "utf8");
-  const pdfFn = server.slice(server.indexOf("async function htmlToPdf"), server.indexOf("// â”€â”€ Field normalisers"));
+  // Asserted before slicing: a missing anchor gives -1, which slice reads as "one from the end",
+  // so the doesNotMatch checks below would run against nearly the whole file rather than htmlToPdf.
+  const pdfStart = server.indexOf("async function htmlToPdf");
+  const pdfEnd   = server.indexOf("// ── Field normalisers");
+  assert.ok(pdfStart !== -1, "anchor moved: async function htmlToPdf");
+  assert.ok(pdfEnd   !== -1, "anchor moved: // ── Field normalisers");
+  const pdfFn = server.slice(pdfStart, pdfEnd);
   assert.match(pdfFn, /page\.pdf\(/);
   assert.doesNotMatch(pdfFn, /page\.screenshot\(/);
   assert.doesNotMatch(pdfFn, /canvas/i);

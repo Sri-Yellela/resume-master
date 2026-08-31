@@ -1,4 +1,4 @@
-﻿import { getBaseResumeRecord } from "./simpleApplyProfile.js";
+import { getBaseResumeRecord } from "./simpleApplyProfile.js";
 import { getSourceStatus } from "./jobs/aggregator.js";
 
 export const INTEGRATION_PROVIDERS = new Set(["gmail", "google", "linkedin"]);
