@@ -1,0 +1,31 @@
+# Line endings, made explicit.
+#
+# This repository has always stored text as LF — all 612 tracked text blobs were verified LF-only
+# when this file was added — but it achieved that through every clone happening to have
+# core.autocrlf=true. Nothing in the repository said so, so a clone with autocrlf=false would
+# commit CRLF and no one would notice until a diff came back entirely rewritten.
+#
+# text=auto makes that guarantee the repository's own, independent of each developer's git config:
+# git normalises to LF on commit and converts to the platform convention on checkout. Because
+# storage is already LF, adding this renormalises nothing.
+#
+# This matters beyond tidiness here. Three files carried MIXED endings in the working tree, and
+# mixed endings have already produced a silent no-op edit in this project: a revert regex written
+# against \n did not match a CRLF file, and a test briefly looked verified when it was not. The
+# sibling mobile repos are CRLF working trees, which is why resume-master-android hashes
+# CHECKSUMS.json over LF-normalised content rather than raw bytes.
+* text=auto
+
+# Binary assets: never touch these, and never try to diff them as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.zip   binary
+*.db    binary
+*.sqlite binary
