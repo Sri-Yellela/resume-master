@@ -10,16 +10,38 @@ migration high-water **095**; mobile contract **v1.1.0** at `contract/mobile-api
 - `resume-master-android`
 - `resume-master-ios`
 
-| # | Task | Repo | Blocks | Parallel-safe with |
-|---|---|---|---|---|
-| 1 | Outcome UI | desktop | AF5's value | 2, 3 |
-| 2 | Corruption + defect-pattern sweep | **all three** | Android Phase 2 | 1, 3 |
-| 3 | Web client offset paging | desktop | — | 1, 2 |
-| 4 | ATS bands, not numbers | desktop | swipe feed design | — |
-| 5 | Cache-window batching | desktop | — | 4 |
-| 6 | Android Phase 2a | android | feed + review queue | 5 |
-| 7 | Generation deferral + free ATS at swipe | desktop | mobile feed | — |
-| 8 | **iOS Phase 1 audit** | **ios** | iOS Phase 2a | anything |
+| # | Task | Repo | Blocks | Parallel-safe with | Status |
+|---|---|---|---|---|---|
+| 1 | Outcome UI | desktop | AF5's value | 2, 3 | ✅ **DONE** `10836c1` |
+| 2 | Corruption + defect-pattern sweep | **all three** | Android Phase 2 | 1, 3 | ✅ **desktop done**, mobile reported |
+| 3 | Web client offset paging | desktop | — | 1, 2 | ✅ **DONE** `54cae7a` |
+| 4 | ATS bands, not numbers | desktop | swipe feed design | — | ⛔ needs the owner's grading pass |
+| 5 | Cache-window batching | desktop | — | 4 | ⛔ needs API credit |
+| 6 | Android Phase 2a | android | feed + review queue | 5 | ⛔ needs a JDK + Android SDK |
+| 7 | Generation deferral + free ATS at swipe | desktop | mobile feed | — | blocked on 4 |
+| 8 | **iOS Phase 1 audit** | **ios** | iOS Phase 2a | anything | in progress elsewhere |
+
+> **STATUS AS OF 2026-08-30 — re-derived from the repo, not from this table.**
+>
+> This table was written before tasks 1 and 3 landed and described both as pending. Anyone reading
+> it cold would have rebuilt work that already exists — which is the failure mode the standing
+> conventions call out, so the status column is now part of the table.
+>
+> - **Task 1** landed in `10836c1`. The deliverable was not a new screen: there are TWO application
+>   endpoints, and the Database panel's Applications sheet already read the other one. It became two
+>   columns (`ATS @ Apply`, `Outcome`) on the sheet that existed.
+> - **Task 3** landed in `54cae7a`, with requirement 4 answered rather than assumed — the board is a
+>   NUMBERED pager, so a step uses a cursor and a jump uses offset. Re-verified 2026-08-30 by
+>   `scripts/aj2BoardCursor.mjs` in real Chrome: 17 checks, discriminating precondition included.
+> - **Task 2** is done for `resume-master` (`1066b0c`, `54d03dd`, `2c20400`, `d7d49c4`). The mobile
+>   half is reported in `docs/ak2-corruption-sweep.md` and deliberately NOT fixed: no JDK, Gradle,
+>   Android SDK or Xcode exists on this machine, so the sweep's own "verified by an actual build"
+>   cannot be met, and both mobile repos had uncommitted work a commit would have swallowed.
+>
+> **What actually blocks 4, 5 and 6** — each is a real dependency, not a scheduling one:
+> task 4's requirement 5 forbids setting thresholds on self-graded data and asks for the owner's
+> pass over the same 30 postings; task 5's requirement 2 demands measured before/after cost from a
+> real run, and the Anthropic key is out of credit; task 6 cannot be built or verified here.
 
 Owner-only, not agent work, running alongside: **AF5 semi campaign** · **extension submission**
 (blocked on `CWS_*` credentials) · **admin-panel build-flavour decision** · **Jobo renewal**.
