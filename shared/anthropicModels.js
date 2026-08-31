@@ -20,8 +20,24 @@ export const MODEL_SONNET = "claude-sonnet-5";
 export const MODEL_HAIKU = "claude-haiku-4-5-20251001";
 
 // Per-token costs in USD. Verified against
-// https://platform.claude.com/docs/en/about-claude/pricing on 2026-08-13.
+// https://platform.claude.com/docs/en/about-claude/pricing on 2026-08-13, re-verified 2026-08-31.
 // Cache reads cost 0.1x base input; 5-minute cache writes cost 1.25x base input.
+//
+// ⚠️ `cache_write` BELOW IS THE 5-MINUTE RATE ONLY (1.25x). A ONE-HOUR cache write costs 2x base
+// input — $4/MTok on Sonnet 5, $2/MTok on Haiku 4.5 — and there is no key for it here.
+//
+// This is fine today because nothing sets a ttl: services/promptAssembler.js and server.js both
+// send a bare `cache_control: { type: "ephemeral" }`, which is the 5-minute default. It stops being
+// fine the moment cache-window batching adopts `ttl: "1h"`, which is the natural reason to reach
+// for it. calculateCost would then price those writes at $2.50 instead of $4.00 and UNDER-REPORT
+// every batched write by 37.5% — silently, because the model ID still resolves and the loud
+// unknown-key branch below never fires.
+//
+// BEFORE adopting a 1-hour TTL, resolve the open question this comment exists to flag: the API
+// reports writes as `cache_creation_input_tokens` regardless of TTL, so a second price key is not
+// enough on its own — the usage payload's per-TTL breakdown has to be read, or the TTL threaded
+// through from the request. Do not add a 1h key without wiring whichever of those is real; a price
+// nothing selects is worse than an absent one. See docs/ak2-cache-batching-assessment.md.
 export const ANTHROPIC_PRICING = {
   // Claude Sonnet 5 — $2/MTok in, $10/MTok out.
   // Anthropic's launch "introductory" $2/$10 is now the STANDARD price; the increase to

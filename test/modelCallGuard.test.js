@@ -37,7 +37,13 @@ test("no bare anthropic.messages.create outside the wrapper", () => {
     src.split("\n").forEach((line, i) => {
       // Ignore comments — several files legitimately explain why they no longer call it directly.
       const code = line.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "");
-      if (/\.messages\.create\s*\(/.test(code)) offenders.push(`${file}:${i + 1}`);
+      // BATCHES COUNT TOO. This pattern used to be /\.messages\.create\s*\(/, which does not match
+      // `messages.batches.create(` — ".messages.create" is not a substring of
+      // ".messages.batches.create". The Batch API was therefore invisible to the one guard that
+      // exists to stop untracked spend: adding batching would have created exactly the defect
+      // described below while this test stayed green. Verified against all four shapes in the test
+      // beneath this one, so the regex cannot quietly narrow again.
+      if (/\.messages\.(batches\.)?(create|results)\s*\(/.test(code)) offenders.push(`${file}:${i + 1}`);
     });
   }
   assert.deepEqual(
@@ -53,6 +59,35 @@ test("no bare anthropic.messages.create outside the wrapper", () => {
     "  scope, pass userId: SYSTEM_USER_ID from the same module.\n" +
     "  Do NOT add an exemption here: an untracked call site is exactly the defect this guards."
   );
+});
+
+// The guard above is a regex over source text, so its COVERAGE is a property of the regex and
+// nothing else was checking it. It read /\.messages\.create\s*\(/ and therefore could not see
+// `messages.batches.create(` at all — the Batch API would have been an untracked spend path with a
+// green suite. Asserted against the literal call shapes rather than against a file, because that is
+// the thing that was wrong: the scan, not any call site.
+test("the untracked-call scan sees batch call shapes, not just messages.create", () => {
+  const SCAN = /\.messages\.(batches\.)?(create|results)\s*\(/;
+  const mustCatch = [
+    "const m = await client.messages.create({ model });",
+    "const m = await client.beta.messages.create({ model });",
+    "const b = await client.messages.batches.create({ requests });",
+    "for await (const r of client.messages.batches.results(id)) {}",
+    "await anthropic.messages.batches.create({requests})",
+  ];
+  for (const line of mustCatch) {
+    assert.ok(SCAN.test(line), `the scan would MISS an untracked call site: ${line}`);
+  }
+  // Must not fire on unrelated code, or the guard becomes noise and gets exemptions added to it.
+  const mustIgnore = [
+    "const messages = buildMessages();",
+    "db.prepare('SELECT * FROM messages').all();",
+    "await client.messages.countTokens({ messages });",
+    "batches.push(job);",
+  ];
+  for (const line of mustIgnore) {
+    assert.ok(!SCAN.test(line), `the scan false-positives on: ${line}`);
+  }
 });
 
 test("the wrapper is the only thing importing trackApiCall", () => {
