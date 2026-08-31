@@ -67,6 +67,7 @@ const EXCLUDED = {
   ai1SummaryVerify:    "REAL generation x2 + PDF render — spends model tokens on every run; run it by hand",
   ag2ClaimsGeneration: "REAL generation — spends model tokens on every run; run it by hand",
   ag3ClaimSample:      "REAL generation x12 — spends model tokens on every run; run it by hand",
+  ak2AtsGradingSet:    "utility, writes the grading sheet to docs/ and asserts nothing",
   fakeAts:             "the fixture server itself",
   verifyHarnesses:     "this runner",
 };

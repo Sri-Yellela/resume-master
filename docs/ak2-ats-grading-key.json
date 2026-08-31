@@ -1,0 +1,220 @@
+{
+  "generated_at": "2026-08-31T03:42:51.425Z",
+  "scorer": "local_ats_v4",
+  "profile_id": 6,
+  "resume_chars": 4912,
+  "board_size": 1290,
+  "note": "Do not read before grading. Join on job_id after the FIT column is filled in.",
+  "postings": [
+    {
+      "n": 1,
+      "job_id": "ashby::fff02c39-1185-427c-bf89-70d7eaa5e3db",
+      "company": "OpenAI",
+      "title": "Software Engineer, Codex -Enterprise Controls",
+      "engine_score": 21
+    },
+    {
+      "n": 2,
+      "job_id": "greenhouse::7644950",
+      "company": "Stripe",
+      "title": "Frontend Engineer, Expansion",
+      "engine_score": 34
+    },
+    {
+      "n": 3,
+      "job_id": "ashby::529feb11-4b9b-4baf-9b3f-f2b100156c5a",
+      "company": "OpenAI",
+      "title": "Protection Scientist Engineer, Integrity",
+      "engine_score": 43
+    },
+    {
+      "n": 4,
+      "job_id": "ashby::65913e57-80e0-4a1a-bbc3-265ae8a1a41b",
+      "company": "OpenAI",
+      "title": "Research Program Manager – Adversarial Model Research",
+      "engine_score": 6
+    },
+    {
+      "n": 5,
+      "job_id": "greenhouse::7589234",
+      "company": "Stripe",
+      "title": "Technical Program Manager, Core Infrastructure",
+      "engine_score": 37
+    },
+    {
+      "n": 6,
+      "job_id": "greenhouse::7863467",
+      "company": "Airbnb",
+      "title": "Senior Web Automation Engineer, Quality Platform",
+      "engine_score": 58
+    },
+    {
+      "n": 7,
+      "job_id": "ashby::9f78c41f-8d39-46c9-b9c3-c3b075905b24",
+      "company": "OpenAI",
+      "title": "Network Engineer",
+      "engine_score": 26
+    },
+    {
+      "n": 8,
+      "job_id": "greenhouse::6073106004",
+      "company": "Figma",
+      "title": "Software Engineer - Figma Weave (Tel Aviv, Israel)",
+      "engine_score": 64
+    },
+    {
+      "n": 9,
+      "job_id": "ashby::9d11e1d8-af1d-413b-873f-d8fac2bdee99",
+      "company": "OpenAI",
+      "title": "Full Stack Engineer, Fleet Scheduling",
+      "engine_score": 51
+    },
+    {
+      "n": 10,
+      "job_id": "greenhouse::8107302",
+      "company": "Stripe",
+      "title": "Software Engineer, Sending",
+      "engine_score": 49
+    },
+    {
+      "n": 11,
+      "job_id": "ashby::73fdf2c0-4318-4b13-addc-b66bc1308ba4",
+      "company": "OpenAI",
+      "title": "Product Designer, Engineering Acceleration",
+      "engine_score": 28
+    },
+    {
+      "n": 12,
+      "job_id": "greenhouse::6131089004",
+      "company": "Figma",
+      "title": "Software Engineer Intern (Winter 2027)",
+      "engine_score": 60
+    },
+    {
+      "n": 13,
+      "job_id": "ashby::da07ba71-81fd-47c7-adb1-2b2d1eaed325",
+      "company": "OpenAI",
+      "title": "Software Engineer, Distributed Data Systems - Robotics",
+      "engine_score": 39
+    },
+    {
+      "n": 14,
+      "job_id": "ashby::f272fc4a-91a7-4dcf-9cb5-3600ebaf14e1",
+      "company": "Linear",
+      "title": "Analytics Engineer",
+      "engine_score": 22
+    },
+    {
+      "n": 15,
+      "job_id": "greenhouse::7594208",
+      "company": "Stripe",
+      "title": "People Solutions Program Manager",
+      "engine_score": 17
+    },
+    {
+      "n": 16,
+      "job_id": "greenhouse::7736738",
+      "company": "Airbnb",
+      "title": "Strategic Sourcing, Manager - Engineering & Infrastructure",
+      "engine_score": 27
+    },
+    {
+      "n": 17,
+      "job_id": "greenhouse::8084195",
+      "company": "Stripe",
+      "title": "Backend Engineer, Credit Decisions",
+      "engine_score": 59
+    },
+    {
+      "n": 18,
+      "job_id": "ashby::0ed5f6c7-3977-4da9-9961-202fe76de456",
+      "company": "OpenAI",
+      "title": "Applied AI Engineer, Digital Natives",
+      "engine_score": 45
+    },
+    {
+      "n": 19,
+      "job_id": "ashby::66288824-8b77-4774-bc57-6825d3e6221e",
+      "company": "OpenAI",
+      "title": "Full Stack Software Engineer, API Experience",
+      "engine_score": 47
+    },
+    {
+      "n": 20,
+      "job_id": "greenhouse::8128900",
+      "company": "Stripe",
+      "title": "Account Executive, Startups (Scaled Grower)",
+      "engine_score": 20
+    },
+    {
+      "n": 21,
+      "job_id": "ashby::e44bfa94-0b82-4d0c-b224-02155b76eea9",
+      "company": "OpenAI",
+      "title": "Software Engineer, Infrastructure - Analytics Platform",
+      "engine_score": 35
+    },
+    {
+      "n": 22,
+      "job_id": "greenhouse::6141591004",
+      "company": "Figma",
+      "title": "Executive Recruiter",
+      "engine_score": 25
+    },
+    {
+      "n": 23,
+      "job_id": "greenhouse::7569678",
+      "company": "Stripe",
+      "title": "Program Manager, Intake & Portfolio Management",
+      "engine_score": 14
+    },
+    {
+      "n": 24,
+      "job_id": "greenhouse::8062305",
+      "company": "Stripe",
+      "title": "Full Stack Engineer, Link",
+      "engine_score": 53
+    },
+    {
+      "n": 25,
+      "job_id": "ashby::d8794980-1d3f-4d82-8b48-811449b6c492",
+      "company": "OpenAI",
+      "title": "Training: ML Framework Engineer",
+      "engine_score": 41
+    },
+    {
+      "n": 26,
+      "job_id": "ashby::4c078f82-93b9-427c-8fd8-95de198884b4",
+      "company": "OpenAI",
+      "title": "Forward Deployed Engineer - Singapore",
+      "engine_score": 30
+    },
+    {
+      "n": 27,
+      "job_id": "greenhouse::8070121",
+      "company": "Airbnb",
+      "title": "Senior Manager, Machine Learning Engineering - Communication & Connectivity",
+      "engine_score": 32
+    },
+    {
+      "n": 28,
+      "job_id": "greenhouse::7594866",
+      "company": "Stripe",
+      "title": "Risk Advisory Strategist, Card Network Compliance",
+      "engine_score": 16
+    },
+    {
+      "n": 29,
+      "job_id": "ashby::550d0123-238c-4ad8-aaee-ea4a5a484639",
+      "company": "OpenAI",
+      "title": "GRC Program Manager, US Government Compliance",
+      "engine_score": 7
+    },
+    {
+      "n": 30,
+      "job_id": "greenhouse::5691911004",
+      "company": "Figma",
+      "title": "Software Engineer - Full Stack",
+      "engine_score": 55
+    }
+  ]
+}
