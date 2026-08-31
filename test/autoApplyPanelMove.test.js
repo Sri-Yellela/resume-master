@@ -5,6 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const board   = read("client/src/panels/JobsPanel.jsx");
@@ -83,7 +84,7 @@ test("no apply behaviour changed — the requests and their guards moved verbati
 test("the pipeline's state sits above the tab switch, so a run keeps reporting while you navigate", () => {
   // If the provider were inside the Jobs panel, leaving the board would unmount the poll — and the
   // place you would go to watch a run is the very tab that would have stopped it.
-  const dash = app.slice(app.indexOf("<JobBoardProvider>"));
+  const dash = app.slice(at(app, "<JobBoardProvider>"));
   const providerAt = dash.indexOf("<AutoApplyProvider");
   const panelAt = dash.indexOf("<AutoApplyPanel/>");
   assert.ok(providerAt !== -1 && panelAt !== -1 && providerAt < panelAt,

@@ -9,6 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 // The tier FILTERS are still the board's, but the apply QUEUE's tier warning moved to
 // panels/AutoApplyPanel.jsx with the rest of the pipeline (W5). Both are read so each
@@ -70,7 +71,7 @@ test("a saved search round-trips all four params", () => {
   // silently comes back wider than the one that was saved.
   const anchor = panel.indexOf("const applyTrackedSearch = useCallback");
   assert.notEqual(anchor, -1);
-  const body = panel.slice(anchor, panel.indexOf("}, [activeDomainProfile]);", anchor));
+  const body = panel.slice(anchor, at(panel, "}, [activeDomainProfile]);", anchor));
   for (const param of ["sources_include", "sources_exclude", "tiers_include", "tiers_exclude"]) {
     assert.ok(body.includes(param), `applyTrackedSearch never reads ${param} back`);
   }
@@ -95,13 +96,13 @@ test("filter state, the staged snapshot and the commit path all know the four fi
   // reloading came back unfiltered. Asserting the routing plus "the writer covers every key of
   // defaultFilterSnapshot" is strictly stronger than looking for four names in Apply's body: it
   // fails for a FIFTH field too, which a hardcoded list never would.
-  const apply = panel.slice(panel.indexOf("const applyPendingFilters = useCallback"), panel.indexOf("const resetPendingFilters"));
+  const apply = panel.slice(at(panel, "const applyPendingFilters = useCallback"), at(panel, "const resetPendingFilters"));
   assert.match(apply, /applyFilterSnapshot\(pendingFilters\)/,
     "Apply must commit through the shared filter writer");
 
   const writerStart = panel.indexOf("const applyFilterSnapshot = useCallback");
   assert.notEqual(writerStart, -1, "applyFilterSnapshot moved");
-  const writer = panel.slice(writerStart, panel.indexOf("const applyPendingFilters = useCallback", writerStart));
+  const writer = panel.slice(writerStart, at(panel, "const applyPendingFilters = useCallback", writerStart));
   const defaultKeys = [...snapshot.matchAll(/^\s{4}([A-Za-z0-9_$]+):/gm)].map((m) => m[1]);
   assert.ok(defaultKeys.length >= 21, `expected defaultFilterSnapshot to declare many keys, saw ${defaultKeys.length}`);
   for (const key of defaultKeys) {

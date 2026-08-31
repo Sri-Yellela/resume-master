@@ -8,6 +8,7 @@ import fs from "node:fs";
 import {
   FORM_READY_POLL_MS, FORM_READY_STABLE_POLLS, FORM_READY_TIMEOUT_MS, waitForFormReady,
 } from "../services/applyAutomation.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const automation = fs.readFileSync("services/applyAutomation.js", "utf8");
 const harness = fs.readFileSync("scripts/fakeAts.js", "utf8");
@@ -19,7 +20,7 @@ test("no discovery pass runs behind a fixed sleep", () => {
     "a fixed 1500ms sleep is what let discovery walk an un-hydrated Ashby DOM");
   assert.match(automation, /const readiness = await waitForFormReady\(page\)/,
     "post-navigation discovery must wait on the readiness condition");
-  const clickNext = automation.slice(automation.indexOf("async function clickNext"));
+  const clickNext = automation.slice(at(automation, "async function clickNext"));
   assert.match(clickNext.slice(0, 900), /await waitForFormReady\(page\)/,
     "the next-step click must also wait for the new step to finish mounting");
 });
@@ -133,8 +134,8 @@ test("ANY \"is there a form\" question is asked ACROSS FRAMES, not of the main d
   // scripts/a8FileUploadTrap.mjs caught it and this suite did not, because it takes a real iframe to
   // see. This is the static half of that guard: the check has to be frame-summed at the source.
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
-  const classify = src.slice(src.indexOf("export async function classifyFlowState"),
-                             src.indexOf("export function frameList"));
+  const classify = src.slice(at(src, "export async function classifyFlowState"),
+                             at(src, "export function frameList"));
   assert.match(classify, /for \(const frame of frameList\(page\)\)/,
     "the form check must walk every frame");
   assert.match(classify, /frame\.evaluate\(COUNT_CONTROLS\)/,

@@ -11,6 +11,7 @@ import {
   markSelectedSuggestionsApplied,
   syncSelectedSkillSuggestions,
 } from "../services/profileSignalAggregator.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 test("ATS missing signals classify structured profile facts separately from skills", () => {
   const citizenship = classifyMissingSignal("U.S. citizenship");
@@ -236,7 +237,7 @@ test("migration 089 is present, additive, and byte-identical in both migration p
   const block = (src) => {
     const i = src.indexOf('id: "089_profile_signal_queue_and_assertion"');
     assert.ok(i > 0, "migration 089 must exist");
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   const a = block(server), b = block(script);
   assert.equal(a, b, "the migration must be byte-identical in server.js and scripts/migrations.js");
@@ -294,7 +295,7 @@ test("adopting an enhanced resume is one transaction, so it cannot half-apply", 
   const server = fs.readFileSync("server.js", "utf8");
   const start = server.indexOf("ADOPTING IS ONE ACT");
   assert.ok(start > 0, "the adopt route must wrap its writes in a transaction");
-  const block = server.slice(start, server.indexOf("adopt();", start));
+  const block = server.slice(start, at(server, "adopt();", start));
 
   // The destructive write and the bookkeeping must be inside the same transaction — the ordering
   // is what turned an undefined symbol into an overwritten base resume and a 500.

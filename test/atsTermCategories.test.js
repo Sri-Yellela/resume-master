@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { LOCAL_ATS_SOURCE, buildRuntimeAtsBasis, scoreAtsLocally } from "../services/localAtsScorer.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 /**
  * TASK AH3 — what belongs in each bucket, enforced.
@@ -221,7 +222,7 @@ test("the panel renders both new buckets, and AG2's copy is untouched", () => {
   assert.match(panel, /activeReport\.action_verbs_generic\?\.length > 0/);
   // Generic language is NOT claimable — a chip that offers to add "Manage" to your profile is the
   // same false gap in a different control.
-  const genericBlock = panel.slice(panel.indexOf("○ Generic Language"), panel.indexOf("○ Generic Language") + 600);
+  const genericBlock = panel.slice(at(panel, "○ Generic Language"), at(panel, "○ Generic Language") + 600);
   assert.doesNotMatch(genericBlock, /onToggleClaim/);
   // Competencies matched must count as evidenced, or a term shown as matched above renders as
   // unevidenced below.

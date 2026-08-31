@@ -25,6 +25,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { OUTCOME, OUTCOME_STATUSES, OUTCOME_LABELS } from "../shared/applyOutcomeGroups.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (f) => fs.readFileSync(f, "utf8");
 const panel    = read("client/src/panels/AutoApplyPanel.jsx");
@@ -97,7 +98,7 @@ test("AD1 requirement 2: the separate run-history surface is removed", () => {
   assert.ok(!/export function HistoryRow/.test(sections), "HistoryRow survived");
   assert.ok(!/<HistoryGroup|<HistoryRow/.test(panel), "the panel still renders the history components");
   assert.ok(!/HistoryGroup,|HistoryRow,|, HistoryGroup|, HistoryRow/.test(
-    panel.slice(0, panel.indexOf("export function AutoApplyPanel"))),
+    panel.slice(0, at(panel, "export function AutoApplyPanel"))),
     "the panel still imports the history components");
   assert.ok(!/SectionHeading[^>]*>\s*Run history\s*</.test(panel),
     "the Run history section heading is back — dated navigation was supposed to supersede it");
@@ -119,8 +120,8 @@ test("AD1 requirement 2: every consumer of the removed surface still has what it
   const inFlight = ctx.match(/const runInFlight = [^\n]+/)[0];
   assert.match(inFlight, /applyRuns\.some\(r => r\.status === "queued" \|\| r\.status === "running"\)/);
   assert.ok(!/history/i.test(inFlight), "runInFlight now depends on the dated history");
-  const nothingYet = panel.slice(panel.indexOf("const nothingYet ="),
-                                 panel.indexOf("// ── Grouping"));
+  const nothingYet = panel.slice(at(panel, "const nothingYet ="),
+                                 at(panel, "// ── Grouping"));
   assert.ok(!/history/i.test(nothingYet), "nothingYet now depends on the dated history");
   for (const feed of ["applyQueue", "applyRuns", "applyReviewJobs", "applyPending", "applyQuestions",
                       "applyInFlight", "applySubmitted", "applyStopped", "applyPrereqMissing"]) {
@@ -208,8 +209,8 @@ test("AD1 requirement 5: PENDING is the landing tab — the actionable one is no
   // being the default is what keeps it from being buried behind the first one.
   assert.match(panel, /\[OUTCOME\.COMPLETED, OUTCOME\.PENDING, OUTCOME\.ABORTED\]\.map/);
   // And the actionable work — portals, questions, approvals, prerequisites — is on that tab.
-  const band = panel.slice(panel.indexOf("THE STANDING WORK, ON THE PENDING TAB"),
-                           panel.indexOf("THE BODY — ONE DAY"));
+  const band = panel.slice(at(panel, "THE STANDING WORK, ON THE PENDING TAB"),
+                           at(panel, "THE BODY — ONE DAY"));
   assert.match(band, /historyGroup === OUTCOME\.PENDING && \(/);
   for (const [what, needle] of [
     ["the portal batches",   /applyGatePortals\.map\(p => \{/],
@@ -230,8 +231,8 @@ test("AD1: the standing work is NOT behind the date picker, and the panel says w
   // of them, and hiding the product's most differentiated surface behind a calendar would be worse.
   assert.match(panel, /none of it is date-scoped and none of it can be/);
   // It reads the cross-run feeds, not the dated endpoint — so it costs no query at render.
-  const band = panel.slice(panel.indexOf("THE STANDING WORK, ON THE PENDING TAB"),
-                           panel.indexOf("THE BODY — ONE DAY"));
+  const band = panel.slice(at(panel, "THE STANDING WORK, ON THE PENDING TAB"),
+                           at(panel, "THE BODY — ONE DAY"));
   assert.ok(!/\bhistory\.jobs\b|\blistedJobs\b|\blistedByCompany\b/.test(band),
     "the standing band reads the dated listing — it would empty out until a date is picked");
 });
@@ -304,7 +305,7 @@ test("AD1 requirement 1: the sub-tabs ARE AC4's partition, not a second copy of 
   // routes/apply.js files rows with.
   assert.match(panel, /from "\.\.\/\.\.\/\.\.\/shared\/applyOutcomeGroups\.js"/);
   for (const status of Object.values(OUTCOME_STATUSES).flat()) {
-    assert.ok(!new RegExp(`"${status}"`).test(panel.slice(0, panel.indexOf("return ("))),
+    assert.ok(!new RegExp(`"${status}"`).test(panel.slice(0, at(panel, "return ("))),
       `the panel branches on the '${status}' status itself instead of asking the partition`);
   }
   // The dead-posting override is still applied AFTER the map, on the server, where the join is.

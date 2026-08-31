@@ -19,6 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const tile     = read("client/src/components/ui/TileCard.jsx");
@@ -129,7 +130,7 @@ test("AC3: nothing was dropped from the row on the way to being compact", () => 
   // FEATURE PRESERVATION. The compact row keeps every control the full-width card had except the
   // problem SENTENCES, which moved into the modal AC2 restructured to hold them — and the row still
   // states how many there are, so nothing is hidden without being counted.
-  const row = sections.slice(sections.indexOf("export function CompanyApplicationRow"));
+  const row = sections.slice(at(sections, "export function CompanyApplicationRow"));
   for (const control of [
     // AE4: no screenshot on a compact held row - it was the least informative chip on the tier
     // whose entire purpose is compactness.

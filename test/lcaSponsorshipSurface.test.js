@@ -12,6 +12,7 @@ import Database from "better-sqlite3";
 import { reconcileCompanyLca, getCompanyLca, mapLcaRow, getCorpusCoverage, knownCompanies }
   from "../services/kb/lcaLayer.js";
 import { buildJobFilters, DERIVED_RANK_ORDER } from "../services/jobs/jobQuery.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const SECTIONS_SRC = fs.readFileSync(
   new URL("../client/src/components/CompanyKbSections.jsx", import.meta.url), "utf8");
@@ -226,13 +227,13 @@ test("a tier-C match renders, but only ever with the entity named and the basis 
 });
 
 test("the component returns null for anything not presentable, before it renders a number", () => {
-  const fn = SECTIONS_SRC.slice(SECTIONS_SRC.indexOf("export function SponsorshipSection"));
-  const body = fn.slice(0, fn.indexOf("export function HiringSection"));
+  const fn = SECTIONS_SRC.slice(at(SECTIONS_SRC, "export function SponsorshipSection"));
+  const body = fn.slice(0, at(fn, "export function HiringSection"));
   assert.match(body, /if \(!lca\?\.presentable\) return null;/);
   // The guard has to be the FIRST statement in the body — a number computed above it is a number
   // that can leak. Sliced from the parameter list's closing brace, not from the first `{`, which
   // belongs to the destructured props.
-  const firstStatement = body.slice(body.indexOf("}) {") + 4).trim();
+  const firstStatement = body.slice(at(body, "}) {") + 4).trim();
   assert.ok(firstStatement.startsWith("if (!lca?.presentable) return null;"),
     `the presentable guard must come first, found: ${firstStatement.slice(0, 80)}`);
 });
@@ -240,8 +241,8 @@ test("the component returns null for anything not presentable, before it renders
 // ── The integrity line ───────────────────────────────────────────────────────────────────────
 
 test("the copy says EVIDENCE ABOUT THE EMPLOYER, and never that the role sponsors", () => {
-  const body = SECTIONS_SRC.slice(SECTIONS_SRC.indexOf("export function SponsorshipSection"),
-                                  SECTIONS_SRC.indexOf("export function HiringSection"));
+  const body = SECTIONS_SRC.slice(at(SECTIONS_SRC, "export function SponsorshipSection"),
+                                  at(SECTIONS_SRC, "export function HiringSection"));
   assert.match(body, /Evidence about the employer — not confirmation that this role sponsors\./);
   assert.match(body, /Absence of a filing is evidence, not proof this employer will not sponsor\./);
   // Nothing anywhere in the rendered strings may promise sponsorship for the job.
@@ -267,8 +268,8 @@ test("nothing in X3 reads or writes scraped_jobs.is_h1b_sponsor", () => {
       `${name} must never write scraped_jobs`);
   }
   // And the company-level rank/filter block builds its SQL from company_lca_sponsorship only.
-  const block = JOBQUERY_SRC.slice(JOBQUERY_SRC.indexOf("Company-level H-1B evidence"),
-                                   JOBQUERY_SRC.indexOf("Provider (source) include/exclude"));
+  const block = JOBQUERY_SRC.slice(at(JOBQUERY_SRC, "Company-level H-1B evidence"),
+                                   at(JOBQUERY_SRC, "Provider (source) include/exclude"));
   assert.match(block, /company_lca_sponsorship/);
   const code = block.split("\n").filter(l => !l.trim().startsWith("//")).join("\n");
   assert.ok(!/is_h1b_sponsor|requires_work_auth/.test(code),

@@ -11,6 +11,7 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 import { MIGRATIONS } from "../scripts/migrations.js";
 import { CORRECTION_WATCH_SRC, installCorrectionWatcher } from "../services/applyAutomation.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const applySrc = fs.readFileSync("routes/apply.js", "utf8");
 const autoSrc = fs.readFileSync("services/applyAutomation.js", "utf8");
@@ -23,7 +24,7 @@ test("migration 088 is present, additive, and byte-identical in both migration p
   const block = (src) => {
     const i = src.indexOf('id: "088_apply_run_jobs_campaign_record"');
     assert.ok(i > 0, "migration 088 must exist");
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   assert.equal(block(server), block(script),
     "the migration must be byte-identical in server.js and scripts/migrations.js");
@@ -55,7 +56,7 @@ test("BOTH semi call sites pass onCorrections — one of them was the artifact p
   // calls, and applyMode is "semi" for both when mode !== "auto". Wiring one and not the other would
   // record corrections for some runs and silently not others.
   assert.equal((applySrc.match(/onCorrections: recordCorrections/g) || []).length, 2);
-  const semiCall = applySrc.slice(applySrc.indexOf('mode: "semi"'));
+  const semiCall = applySrc.slice(at(applySrc, 'mode: "semi"'));
   assert.match(semiCall.slice(0, 400), /onCorrections/);
 });
 
@@ -71,12 +72,12 @@ test("a missing corrections_json degrades the note, never the application", () =
   assert.match(applySrc, /CAMPAIGN RECORD DEGRADED/);
   assert.match(applySrc, /The application is unaffected/);
   // And the write is actually guarded by it.
-  const fn = applySrc.slice(applySrc.indexOf("const recordCorrections"), applySrc.indexOf("const recordCorrections") + 900);
+  const fn = applySrc.slice(at(applySrc, "const recordCorrections"), at(applySrc, "const recordCorrections") + 900);
   assert.match(fn, /!canRecordCorrections\(\)/);
 });
 
 test("fields_discovered is an audit column, so a stale schema costs only itself", () => {
-  const cols = applySrc.slice(applySrc.indexOf("const AUDIT_COLUMNS"), applySrc.indexOf("let auditColumnsCache"));
+  const cols = applySrc.slice(at(applySrc, "const AUDIT_COLUMNS"), at(applySrc, "let auditColumnsCache"));
   assert.match(cols, /"fields_discovered"/);
   assert.match(applySrc, /fields_discovered: Number\.isFinite\(result\.fieldsDiscovered\)/);
   // Null when the run never reached discovery — not 0.
@@ -96,7 +97,7 @@ test("autoApply accepts onCorrections and installs the watcher only for semi", (
   const semiStart = autoSrc.indexOf('status    = "awaiting_user";');
   // Bounded by the end of the branch rather than a character count, so the assertion cannot start
   // passing or failing because a comment above it grew.
-  const semiBranch = autoSrc.slice(semiStart, autoSrc.indexOf('console.log(`[autoApply] done', semiStart));
+  const semiBranch = autoSrc.slice(semiStart, at(autoSrc, 'console.log(`[autoApply] done', semiStart));
   assert.match(semiBranch, /installCorrectionWatcher\(page, resolvedAnswers, onCorrections\)/);
   // Exactly ONE call site, and it is the one above. An unattended run has nobody there to correct
   // anything, so installing a watcher and an interval on that path would be pure overhead on a page

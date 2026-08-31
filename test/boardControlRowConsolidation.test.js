@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { SORTS } from "../shared/jobFilterOptions.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const panel   = read("client/src/panels/JobsPanel.jsx");
@@ -21,7 +22,7 @@ test("the filter and sort triggers sit beside IMPORT, in the search bar's action
   // The slice used to start at `actions={activeTab === "console"` — the ternary that decided whether
   // to pass actions at all. Y4 removed that ternary because the WHOLE search bar now renders only on
   // Jobs, so there is nothing left to gate: if the bar is on screen, its actions belong to it.
-  const actions = app.slice(app.indexOf("actions={"), app.indexOf("</main>"));
+  const actions = app.slice(at(app, "actions={"), at(app, "</main>"));
   assert.match(actions, /<BoardControlIcons \/>/);
   assert.match(actions, /Import\s*\n?\s*<\/button>/);
   // And the board's view tabs, which moved here off the retired pill.
@@ -60,7 +61,7 @@ test("NEW IN 24H and Save Search moved INTO the filters panel, and still exist",
   const marker = panel.indexOf("The control ROW is gone");
   assert.notEqual(marker, -1, "the note explaining the removed row is gone");
   const rowStart = panel.indexOf("*/}", marker) + 3;
-  const rowRegion = panel.slice(rowStart, panel.indexOf("Background loading indicator"));
+  const rowRegion = panel.slice(rowStart, at(panel, "Background loading indicator"));
   const rowCode = rowRegion.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/^\s*\/\/.*$/gm, "");
   for (const gone of [/New in 24h/i, /Save Search/i, /Filter loaded jobs/i, /ProfileSelectorDropdown/, /Pay high to low/]) {
     assert.ok(!gone.test(rowCode), `${gone} is back in the control row`);

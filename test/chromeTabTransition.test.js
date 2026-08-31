@@ -17,6 +17,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const hook = read("client/src/hooks/useCollapsibleHeight.js");
@@ -96,7 +97,7 @@ test("BOTH directions measure inside a frame, because one of them did not and sn
   // `<main>` at 398 -> 233 -> 105 -> 53 -> 46.
   //
   // So the symmetry is the fix, not tidiness: NEITHER direction may read a height synchronously.
-  const effect = hook.slice(hook.indexOf("if (open) {"), hook.indexOf("// Settle on a timer"));
+  const effect = hook.slice(at(hook, "if (open) {"), at(hook, "// Settle on a timer"));
   const reads = [...effect.matchAll(/offsetHeight/g)].length;
   assert.equal(reads, 2, "expected exactly one height read per direction");
   for (const m of effect.matchAll(/offsetHeight/g)) {
@@ -129,7 +130,7 @@ test("the wrapper creates no containing block for a fixed overlay", () => {
   // Stripped: the style block's own comment explains WHY it must not set transform, and matching a
   // comment is how a source-string test fails on the explanation instead of the code.
   const style = hook
-    .slice(hook.indexOf("outerStyle: animating"), hook.indexOf("function prefersReduced"))
+    .slice(at(hook, "outerStyle: animating"), at(hook, "function prefersReduced"))
     .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.ok(style.length > 40, "the style block could not be isolated");
   for (const trap of ["transform", "filter", "backdropFilter", "contain:", "containerType"]) {

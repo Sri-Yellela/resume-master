@@ -14,6 +14,7 @@ import { buildOpenApi, buildTypeScript, renderJson, normaliseForHash } from "../
 import {
   EXPERIENCE_LEVELS, WORK_MODELS, AUTOMATION_TIERS, values,
 } from "../shared/jobFilterOptions.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 /**
  * TASK AJ1 — THE CONTRACT TEST.
@@ -261,9 +262,9 @@ test("enums come from the existing single sources — the contract is not a fift
   assert.deepEqual([...ENUMS.automationTier], values(AUTOMATION_TIERS));
 
   const contractSource = fs.readFileSync("services/api/mobileContract.js", "utf8");
-  const body = contractSource.slice(contractSource.indexOf("export const ENUMS"));
+  const body = contractSource.slice(at(contractSource, "export const ENUMS"));
   for (const tier of values(AUTOMATION_TIERS)) {
-    assert.ok(!new RegExp(`["']${tier}["']\\s*,`).test(body.slice(0, body.indexOf("})"))),
+    assert.ok(!new RegExp(`["']${tier}["']\\s*,`).test(body.slice(0, at(body, "})"))),
       `ENUMS restates the literal "${tier}" instead of importing it from shared/jobFilterOptions.js`);
   }
 });
@@ -367,8 +368,8 @@ test("the contract states the auth model the audit left open, and states it as r
 // ════════════════════════════════════════════════════════════════════════════════════════════
 
 test("AJ1 6a — sliding renewal exists, is clamped, and only ever moves the deadline FORWARD", () => {
-  const bind = SERVER.slice(SERVER.indexOf("function bindAuthContext"));
-  const body = bind.slice(0, bind.indexOf("\nfunction requireAuth"));
+  const bind = SERVER.slice(at(SERVER, "function bindAuthContext"));
+  const body = bind.slice(0, at(bind, "\nfunction requireAuth"));
   assert.match(body, /AUTH_CONTEXT_IDLE_SECONDS/, "renewal must use the named idle window");
   assert.match(body, /AUTH_CONTEXT_ABSOLUTE_SECONDS/,
     "renewal MUST be clamped by an absolute cap — without it 'active' means 'immortal', and a " +
@@ -381,7 +382,7 @@ test("AJ1 6a — sliding renewal exists, is clamped, and only ever moves the dea
 });
 
 test("AJ1 6b — the mobile mint is sessionLess, and independently revocable from the extension's", () => {
-  const mint = SERVER.slice(SERVER.indexOf('app.get("/api/auth/mobile-token"'));
+  const mint = SERVER.slice(at(SERVER, 'app.get("/api/auth/mobile-token"'));
   const route = mint.slice(0, 900);
   assert.match(route, /sessionLess: true/,
     "a login-issued token stores session_sid = req.sessionID, which is meaningless for a " +
@@ -392,7 +393,7 @@ test("AJ1 6b — the mobile mint is sessionLess, and independently revocable fro
     "the mobile revoke must key on the mobile user agent, so revoking the phone does not kill the " +
     "extension and vice versa");
   // The property that makes the whole design work.
-  const issue = SERVER.slice(SERVER.indexOf("function issueAuthContext"));
+  const issue = SERVER.slice(at(SERVER, "function issueAuthContext"));
   assert.match(issue.slice(0, 1800), /options\.sessionLess \? null : \(req\.sessionID \|\| null\)/,
     "sessionLess must store NULL, which revokeBrowserAuthContexts deliberately never sweeps");
 });
@@ -401,7 +402,7 @@ test("the 7-day literal is gone — the window is named in one place", () => {
   // A second copy of `7 * 24 * 60 * 60` is how the idle window and the renewal window come to
   // disagree, which would express itself as users being signed out at a time neither number
   // predicts. Exactly the shape of the three hardcoded tab lists.
-  const issue = SERVER.slice(SERVER.indexOf("function issueAuthContext"), SERVER.indexOf("function revokeBrowserAuthContexts"));
+  const issue = SERVER.slice(at(SERVER, "function issueAuthContext"), at(SERVER, "function revokeBrowserAuthContexts"));
   assert.ok(!/now \+ 7 \* 24 \* 60 \* 60/.test(issue),
     "issueAuthContext still hardcodes the 7-day window instead of using AUTH_CONTEXT_IDLE_SECONDS");
   assert.match(SERVER, /const AUTH_CONTEXT_IDLE_SECONDS = 7 \* 24 \* 60 \* 60;/);

@@ -10,6 +10,7 @@ import express from "express";
 import Database from "better-sqlite3";
 import { createAccountRouter } from "../routes/account.js";
 import { MIGRATIONS } from "../scripts/migrations.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const profilePanel = fs.readFileSync("client/src/panels/ProfilePanel.jsx", "utf8");
 
@@ -21,7 +22,7 @@ test("migration 087 is present, additive, and byte-identical in both migration p
   const block = (src) => {
     const i = src.indexOf('id: "087_user_profile_answer_overrides"');
     assert.ok(i > 0, "migration 087 must exist");
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   assert.equal(block(server), block(script),
     "the migration must be byte-identical in server.js and scripts/migrations.js");
@@ -177,13 +178,13 @@ test("the panel can edit and delete, not only add", () => {
 });
 
 test("renaming a question carries its per-company overrides with it", () => {
-  const rename = profilePanel.slice(profilePanel.indexOf("onRename={"), profilePanel.indexOf("onAnswer={"));
+  const rename = profilePanel.slice(at(profilePanel, "onRename={"), at(profilePanel, "onAnswer={"));
   assert.match(rename, /custom_answer_overrides/,
     "an override keyed to the old wording would be orphaned by a rename");
 });
 
 test("deleting a question deletes its overrides too", () => {
-  const del = profilePanel.slice(profilePanel.indexOf("onDelete={"), profilePanel.indexOf("onOverrides={"));
+  const del = profilePanel.slice(at(profilePanel, "onDelete={"), at(profilePanel, "onOverrides={"));
   assert.match(del, /custom_answer_overrides/);
 });
 
@@ -198,7 +199,7 @@ test("the panel's template rules match the server's, so the two cannot disagree 
   // The panel re-implements these to render verdicts without a round-trip. A divergence would show
   // the candidate a badge the resolver disagrees with, which is worse than showing nothing.
   const panelSeeds = profilePanel
-    .slice(profilePanel.indexOf("const SEED_QUESTIONS = ["), profilePanel.indexOf("];", profilePanel.indexOf("const SEED_QUESTIONS = [")))
+    .slice(at(profilePanel, "const SEED_QUESTIONS = ["), at(profilePanel, "];", at(profilePanel, "const SEED_QUESTIONS = [")))
     .match(/"([^"]+)"/g).map(s => s.slice(1, -1));
   assert.deepEqual(panelSeeds, SEED_QUESTIONS.map(s => s.question),
     "the seed wordings must be identical on both sides");
@@ -213,8 +214,8 @@ test("the panel's template rules match the server's, so the two cannot disagree 
 
 test("the seed button adds wordings only — never an answer", () => {
   const seedBlock = profilePanel.slice(
-    profilePanel.indexOf("+ Add the 5 commonly-asked questions") - 900,
-    profilePanel.indexOf("+ Add the 5 commonly-asked questions"),
+    at(profilePanel, "+ Add the 5 commonly-asked questions") - 900,
+    at(profilePanel, "+ Add the 5 commonly-asked questions"),
   );
   assert.match(seedBlock, /next\[q\] = ""/, "a seeded question must arrive blank");
 });

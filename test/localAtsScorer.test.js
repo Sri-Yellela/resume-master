@@ -1,8 +1,9 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildRuntimeAtsBasis, LOCAL_ATS_SOURCE, normaliseAtsTerm, scoreAtsLocally } from "../services/localAtsScorer.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 test("local ATS normalization catches common wording variations", () => {
   assert.equal(normaliseAtsTerm("REST APIs"), normaliseAtsTerm("REST API"));
@@ -70,9 +71,9 @@ test("hard profile facts and experience misses affect local ATS score", () => {
 
 test("server precomputed and generated ATS paths use local scorer instead of LLM ATS calls", () => {
   const server = fs.readFileSync("server.js", "utf8");
-  const scrapeBlock = server.slice(server.indexOf("ATS scoring for newly inserted jobs"), server.indexOf("Async clearbit icon fallback"));
-  const keywordBlock = server.slice(server.indexOf('app.post("/api/jobs/:id/keywords"'), server.indexOf('app.get("/api/jobs/pending"'));
-  const generateBlock = server.slice(server.indexOf("const resumeStripped = stripResumeHtml(formattedHtml)"), server.indexOf("const version = (db.prepare"));
+  const scrapeBlock = server.slice(at(server, "ATS scoring for newly inserted jobs"), at(server, "Async clearbit icon fallback"));
+  const keywordBlock = server.slice(at(server, 'app.post("/api/jobs/:id/keywords"'), at(server, 'app.get("/api/jobs/pending"'));
+  const generateBlock = server.slice(at(server, "const resumeStripped = stripResumeHtml(formattedHtml)"), at(server, "const version = (db.prepare"));
 
   assert.match(scrapeBlock, /scoreAtsLocally/);
   assert.doesNotMatch(scrapeBlock, /anthropic\.messages\.create|ATS_SYSTEM_PROMPT|claude-haiku/);
@@ -348,8 +349,8 @@ test("AG2: a claim informs FUTURE generation and never rewrites an existing resu
 
   // The claim store is separate from the profile's own term lists, which are what the ATS scorer
   // reads. Writing claims there would let a claim inflate its own score.
-  const claimFn = aggregator.slice(aggregator.indexOf("export function setProfileSignalClaim"),
-    aggregator.indexOf("export function listProfileClaims"));
+  const claimFn = aggregator.slice(at(aggregator, "export function setProfileSignalClaim"),
+    at(aggregator, "export function listProfileClaims"));
   assert.doesNotMatch(claimFn, /UPDATE domain_profiles/,
     "claiming must not write the profile's scored term lists");
   // Withdrawal clears the ASSERTION axis. Since migration 089 that no longer resets the row — its

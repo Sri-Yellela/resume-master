@@ -27,6 +27,7 @@ import {
 import {
   OUTCOME, OUTCOME_STATUSES, OUTCOME_LABELS, outcomeGroupFor, isAbortable,
 } from "../shared/applyOutcomeGroups.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const applySource = fs.readFileSync("routes/apply.js", "utf8");
 const read = (f) => fs.readFileSync(f, "utf8");
@@ -726,7 +727,7 @@ test("AC4: the confirmation survives the refresh that follows it", () => {
   // a few hundred milliseconds later — and the one sentence a user most needs after stopping an
   // application ("Nothing was submitted") flashed and went. Both handlers set it after.
   for (const handler of ["abortRunJob", "hideRunJob"]) {
-    const body = ctx.slice(ctx.indexOf(`const ${handler} = useCallback`));
+    const body = ctx.slice(at(ctx, `const ${handler} = useCallback`));
     const reload = body.indexOf("await Promise.all([loadHistory(historyDate)");
     const message = body.indexOf("setHistoryMsg(", body.indexOf("try {"));
     assert.ok(reload > 0 && message > reload,
@@ -781,12 +782,12 @@ test("AC4: the LAST thing before the submit click is the abort check", () => {
   // checkpoint returns without a click. An abort arriving AFTER the click has dispatched cannot be
   // recalled by anything — that window is one statement wide, and it is stated rather than implied.
   const submitBlock = automation.slice(
-    automation.indexOf("if (isAbortRequested(jobId)) {", automation.indexOf("PREVIEW STOP")),
-    automation.indexOf('inProgress.set(String(jobId), { status: "submitting", browser });') + 60);
+    at(automation, "if (isAbortRequested(jobId)) {", at(automation, "PREVIEW STOP")),
+    at(automation, 'inProgress.set(String(jobId), { status: "submitting", browser });') + 60);
   assert.match(submitBlock, /aborted before submit/);
   assert.match(submitBlock, /return \{ \.\.\.abortedResult\(totalFilled\)/);
   // Nothing between the check and the submit marker may click, navigate or type.
-  const between = submitBlock.slice(submitBlock.indexOf("}"), submitBlock.indexOf("inProgress.set"));
+  const between = submitBlock.slice(at(submitBlock, "}"), at(submitBlock, "inProgress.set"));
   assert.ok(!/\.click\(|\.type\(|\.goto\(|\.evaluate\(/.test(between),
     `something acts between the abort check and the submit gate: ${between.trim().slice(0, 120)}`);
 });

@@ -15,6 +15,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const stripComments = (t) => t
@@ -48,7 +49,7 @@ test("it reuses DockPortal rather than being a fourth popup implementation", () 
 });
 
 test("every colour in the open list comes from a design token, never a literal or the OS", () => {
-  const block = css.slice(css.indexOf("/* ── The open list"));
+  const block = css.slice(at(css, "/* ── The open list"));
   assert.ok(block.length > 200, "the open-list style block moved");
   // No hex/rgb literal may appear except as the second argument of var(), which is the fallback
   // this stylesheet already uses everywhere for when the theme bridge has not painted yet.
@@ -95,7 +96,7 @@ test("Tab is not swallowed, and Escape does not alter the value", () => {
   // Escape closes only. `active` is the keyboard cursor and is deliberately separate from `value`;
   // nothing is committed until Enter, so an arrow press cannot fire a board refetch either.
   const escStart = select.indexOf('case "Escape":');
-  const esc = select.slice(escStart, select.indexOf("break;", escStart));
+  const esc = select.slice(escStart, at(select, "break;", escStart));
   assert.ok(!/onChange|commit\(/.test(esc), "Escape commits a value — it must only close");
 });
 
@@ -117,13 +118,13 @@ test("the closed control is unchanged — only the open list was ever wrong", ()
   // font size and text colour on the control itself.
   assert.match(usb, /<div className="usb__field usb__field--sel">/);
   assert.match(css, /\.usb__field--sel\s*\{ flex: 0 0 auto; \}/);
-  const closed = css.slice(css.indexOf(".usb__sel {"), css.indexOf(".usb__sel-label"));
+  const closed = css.slice(at(css, ".usb__sel {"), at(css, ".usb__sel-label"));
   assert.match(closed, /font-size: \.875rem;/);
   assert.match(closed, /color: var\(--color-text, #cdccca\);/);
   assert.match(closed, /background: transparent;/);
 });
 
 test("the chevron animation respects prefers-reduced-motion", () => {
-  const rm = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+  const rm = css.slice(at(css, "@media (prefers-reduced-motion: reduce)"));
   assert.match(rm, /\.usb__chev \{ transition: none; \}/);
 });

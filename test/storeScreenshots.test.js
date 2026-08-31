@@ -11,6 +11,7 @@ import zlib from "node:zlib";
 import {
   readPngHeader, decodeToRgb, encodeRgbPng, toStorePng, compositeRgb,
 } from "../services/pngTruecolor.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const SHOT_DIR = "docs/store-screenshots";
 const SHOTS = ["1-review-overlay", "2-popup", "3-options"];
@@ -110,7 +111,7 @@ test("?presentation=1 removes the trap CAPTIONS and keeps the traps THEMSELVES",
   // they are why the review overlay has anything to show — so they stay. Only the didactic labels
   // a reviewer would read as a test rig are removed.
   const ats = fs.readFileSync("scripts/fakeAts.js", "utf8");
-  const form = ats.slice(ats.indexOf("function gatedForm("), ats.indexOf("// ── G0: multi-step"));
+  const form = ats.slice(at(ats, "function gatedForm("), at(ats, "// ── G0: multi-step"));
 
   assert.match(form, /const legend = \(teaching, neutral\) => presentation \? neutral : teaching;/);
   // The traps are outside the conditional — the field names are unconditional text.
@@ -127,7 +128,7 @@ test("?presentation=1 removes the trap CAPTIONS and keeps the traps THEMSELVES",
 
 test("the posting behind the popup drops the harness caption AND the real employer's brand", () => {
   const ats = fs.readFileSync("scripts/fakeAts.js", "utf8");
-  const form = ats.slice(ats.indexOf("function ashbySpaForm("), ats.indexOf("function ashbySpaThanks("));
+  const form = ats.slice(at(ats, "function ashbySpaForm("), at(ats, "function ashbySpaThanks("));
   assert.match(form, /presentation \? 'Senior Backend Engineer — Northwind Systems'/);
   assert.match(form, /Northwind Systems &middot; Remote/);
   // The transcribed shape keeps the real posting's field names — that is the point of it.
@@ -141,7 +142,7 @@ test("the posting behind the popup drops the harness caption AND the real employ
 const harness = fs.readFileSync("scripts/g3ReviewOverlay.mjs", "utf8");
 
 test("nothing is written until the image has been proved 1280x800, 24-bit and alpha-free", () => {
-  const write = harness.slice(harness.indexOf("function writeShot("), harness.indexOf("const ATS_PORT"));
+  const write = harness.slice(at(harness, "function writeShot("), at(harness, "const ATS_PORT"));
   const validateAt = write.indexOf("readPngHeader(png)");
   const writeAt = write.indexOf("fs.writeFileSync(file, png)");
   assert.ok(validateAt > 0 && writeAt > 0, "writeShot must both validate and write");
@@ -175,7 +176,7 @@ test("captures are checked against the developer's REAL profile values", () => {
 });
 
 test("trap captions and a real employer's brand are both forbidden in a capture", () => {
-  const list = harness.slice(harness.indexOf("const FORBIDDEN_IN_SHOTS"), harness.indexOf("let REAL_VALUES"));
+  const list = harness.slice(at(harness, "const FORBIDDEN_IN_SHOTS"), at(harness, "let REAL_VALUES"));
   for (const needle of ["TRAP:", "sponsorship_inversion", "rendered by JavaScript", "OpenAI"]) {
     assert.ok(list.includes(needle), `${needle} must be refused in a store screenshot`);
   }

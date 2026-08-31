@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at, lastAt } from "../test-support/sourceAnchors.js";
 
 /**
  * TASK AH1 — the credential's LIFECYCLE: issued, carried, revoked.
@@ -41,7 +42,7 @@ test("migration 090 is byte-identical in both migration sources", () => {
   const grab = (file) => {
     const s = fs.readFileSync(file, "utf8");
     const i = s.indexOf("090_auth_context_session_binding");
-    return s.slice(s.lastIndexOf("    {", i), s.indexOf("    },", i) + 6);
+    return s.slice(lastAt(s, "    {", i), at(s, "    },", i) + 6);
   };
   assert.equal(grab("server.js"), grab("scripts/migrations.js"));
 });

@@ -31,6 +31,7 @@ import {
   values, allValues, dbOnlyValues, valueSet, labelFor, labelMap, isValid, invalidEntries,
   ageDays, ageDaysMap, EXPERIENCE_LEVEL_ORDER,
 } from "../shared/jobFilterOptions.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 
@@ -96,8 +97,8 @@ test("experience level: every option is a value the WRITERS can store", () => {
 
   // normalizeExperienceLevel's own return values are literals in its regex ladder, so they are a
   // real second vocabulary and have to be reconciled rather than assumed.
-  const ladder = schema.slice(schema.indexOf("function normalizeExperienceLevel"),
-                             schema.indexOf("const VALID_WORKPLACE_TYPES"));
+  const ladder = schema.slice(at(schema, "function normalizeExperienceLevel"),
+                             at(schema, "const VALID_WORKPLACE_TYPES"));
   const returned = [...ladder.matchAll(/return '([a-z_]+)'/g)].map(m => m[1]);
   assert.ok(returned.length >= 6, `expected the ladder's returns, found ${returned.length}`);
   for (const level of returned) {
@@ -117,8 +118,8 @@ test("domain: the control and classifyJob's DOMAIN_PATTERNS name the same domain
   // it. That makes this a genuine two-sided join rather than a tautology — and it is the join that
   // 'ai ml' vs 'ai_ml' failed.
   const classify = read("services/jobs/classifyJob.js");
-  const block = classify.slice(classify.indexOf("const DOMAIN_PATTERNS"),
-                              classify.indexOf("function detectDomain"));
+  const block = classify.slice(at(classify, "const DOMAIN_PATTERNS"),
+                              at(classify, "function detectDomain"));
   const detected = [...block.matchAll(/domain: '([a-z_]+)'/g)].map(m => m[1]);
   assert.ok(detected.length >= 8, `expected DOMAIN_PATTERNS entries, found ${detected.length}`);
 
@@ -148,8 +149,8 @@ test("work model: the control and the two writers agree", () => {
   }
   // normalizeWorkplaceType's ladder is a second vocabulary, same as the experience one.
   const schema = read("services/jobs/schema.js");
-  const ladder = schema.slice(schema.indexOf("function normalizeWorkplaceType"),
-                              schema.indexOf("function normalizeSalaryPeriod"));
+  const ladder = schema.slice(at(schema, "function normalizeWorkplaceType"),
+                              at(schema, "function normalizeSalaryPeriod"));
   const returned = [...ladder.matchAll(/return '([a-z]+)'/g)].map(m => m[1]);
   for (const v of returned) {
     assert.ok(valueSet(WORK_MODELS).has(v),
@@ -163,8 +164,8 @@ test("employment type: the control matches what the synonym table maps ONTO", ()
   // VALID_EMP_TYPES listed it as valid anyway, which is what a validation set nothing reads
   // decays into.
   const schema = read("services/jobs/schema.js");
-  const block = schema.slice(schema.indexOf("const EMPLOYMENT_TYPE_SYNONYMS"),
-                             schema.indexOf("function normalizeEmploymentType"));
+  const block = schema.slice(at(schema, "const EMPLOYMENT_TYPE_SYNONYMS"),
+                             at(schema, "function normalizeEmploymentType"));
   const canonical = new Set([...block.matchAll(/:\s*'([a-z-]+)'/g)].map(m => m[1]));
   assert.ok(canonical.size >= 4, `expected canonical employment types, found ${canonical.size}`);
 
@@ -364,7 +365,7 @@ test("GET /api/jobs validates every enumerated dimension, under every param it a
   assert.match(server, /function rejectInvalidFilterValues\(query\)/,
     "the validator is gone — an unknown value is back to being an empty board");
   // It must be called BEFORE the query is built, and it must 400.
-  const handler = server.slice(server.indexOf('app.get("/api/jobs", requireAuth'));
+  const handler = server.slice(at(server, 'app.get("/api/jobs", requireAuth'));
   const guardAt = handler.indexOf("rejectInvalidFilterValues(req.query)");
   // buildJobFilters takes the provenance of each key as a second argument now (X2), so match the
   // call by its opening rather than by a closing paren that has moved.
@@ -412,8 +413,8 @@ test("the profile bridge can only derive experience levels the board offers", as
   assert.match(bridge, /const LEVEL_ORDER = EXPERIENCE_LEVEL_ORDER;/,
     "the bridge re-typed the level vocabulary — its widening walks this list BY INDEX");
 
-  const block = bridge.slice(bridge.indexOf("const EXPERIENCE_LEVEL_THRESHOLDS"),
-                             bridge.indexOf("const LEVEL_ORDER"));
+  const block = bridge.slice(at(bridge, "const EXPERIENCE_LEVEL_THRESHOLDS"),
+                             at(bridge, "const LEVEL_ORDER"));
   const derived = [...block.matchAll(/level: '([a-z]+)'/g)].map(m => m[1]);
   assert.ok(derived.length >= 5, `expected the threshold table, found ${derived.length}`);
   for (const level of derived) {

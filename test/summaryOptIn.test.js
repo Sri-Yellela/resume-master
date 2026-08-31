@@ -11,6 +11,7 @@ import {
 } from "../services/resumeClaimGuard.js";
 import { normalizeResumeHtml, renderStructuredResume } from "../services/resumeFormatter.js";
 import { scoreAtsLocally } from "../services/localAtsScorer.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 loadAllPrompts();
 
@@ -272,7 +273,7 @@ test("a term the summary was the ONLY carrier of is lost with it — which is wh
   // scorer penalising an absent section — it is a keyword that had one home. The no-summary prompt
   // rule exists precisely for this, so the assertion is on the rule.
   const rules = fs.readFileSync("prompts/layer1_global_rules.md", "utf8");
-  const noSummaryBlock = rules.slice(rules.indexOf("## NO SUMMARY SECTION"), rules.indexOf("<!--ENDIF--><!--IF:SUMMARY-->"));
+  const noSummaryBlock = rules.slice(at(rules, "## NO SUMMARY SECTION"), at(rules, "<!--ENDIF--><!--IF:SUMMARY-->"));
   assert.match(noSummaryBlock, /Every honestly claimable Tier 1 term still appears verbatim in TECHNICAL SKILLS or in a bullet/,
     "with no summary, the terms it used to carry must be required somewhere that remains");
 
@@ -310,8 +311,14 @@ test("the migration is byte-identical in both runners, and defaults to OFF", () 
 
 test("coreGenerateResume reads the per-profile preference and passes it to the PROMPT", () => {
   const server = fs.readFileSync("server.js", "utf8");
-  const body = server.slice(server.indexOf("async function coreGenerateResume"),
-                            server.indexOf("async function generateResumeForApply"));
+  // The end anchor read "async function generateResumeForApply" and that function is not async —
+  // it is declared `function generateResumeForApply(userId, jobId, toolType)`. indexOf returned -1,
+  // slice read -1 as "one from the end", and this body was 63,521 characters instead of 15,948:
+  // four times too wide, running past coreGenerateResume through most of the rest of server.js.
+  // The `body.length > 500` line below looks like it guards that and does not — it only catches a
+  // slice that came out too SMALL, which is the failure that does not happen here.
+  const body = server.slice(at(server, "async function coreGenerateResume"),
+                            at(server, "function generateResumeForApply(userId, jobId, toolType)"));
   assert.ok(body.length > 500, "coreGenerateResume was not located");
   assert.match(body, /const includeSummary = activeDomainProfile\?\.include_summary === 1;/);
   assert.match(body, /assemblePrompt\(domainModuleKey, promptMode, runtimeInputs, \{ SUMMARY: includeSummary \}\)/);
@@ -344,8 +351,8 @@ test("--from-file verifies externally-produced artifacts, and says what it canno
 
 test("the standalone path honours it, with the same default", () => {
   const server = fs.readFileSync("server.js", "utf8");
-  const body = server.slice(server.indexOf('app.post("/api/standalone/generate"'),
-                            server.indexOf('app.post("/api/standalone/apply"'));
+  const body = server.slice(at(server, 'app.post("/api/standalone/generate"'),
+                            at(server, 'app.post("/api/standalone/apply"'));
   assert.ok(body.length > 500, "the standalone generate route was not located");
   assert.match(body, /req\.body\?\.include_summary === true/);
   assert.match(body, /assemblePrompt\(domainModuleKey, "GENERATE", runtimeInputs, \{ SUMMARY: includeSummary \}\)/);

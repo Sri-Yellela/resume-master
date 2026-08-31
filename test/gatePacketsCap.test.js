@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import Database from "better-sqlite3";
 import express from "express";
+import { at } from "../test-support/sourceAnchors.js";
 
 /**
  * THE GATE-PACKET QUEUE'S CAP, and the two ways it failed silently.
@@ -72,7 +73,7 @@ function queriesFromSource() {
   const src = fs.readFileSync("routes/apply.js", "utf8");
   const start = src.indexOf('app.get("/api/apply/gate-packets"');
   assert.notEqual(start, -1, "the gate-packets handler moved");
-  return src.slice(start, src.indexOf("res.json({", start));
+  return src.slice(start, at(src, "res.json({", start));
 }
 
 /** Runs the handler's SELECT the way the handler does, for a given scope. */
@@ -195,7 +196,7 @@ test("the user and consumed predicates are still there, ahead of the origin filt
 test("the response carries the truncation signal, always", () => {
   const src = fs.readFileSync("routes/apply.js", "utf8");
   const start = src.indexOf('app.get("/api/apply/gate-packets"');
-  const body = src.slice(start, src.indexOf("packets: rows.map", start));
+  const body = src.slice(start, at(src, "packets: rows.map", start));
   for (const field of ["origin", "total", "returned", "truncated", "limit"]) {
     assert.match(body, new RegExp(`\\b${field}[,:]`), `the response must carry \`${field}\``);
   }

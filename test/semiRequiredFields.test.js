@@ -16,6 +16,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const automation = fs.readFileSync("services/applyAutomation.js", "utf8");
 const routes     = fs.readFileSync("routes/apply.js", "utf8");
@@ -25,7 +26,7 @@ const routes     = fs.readFileSync("routes/apply.js", "utf8");
 const semiBranch = (() => {
   const i = automation.indexOf('status    = "awaiting_user";');
   assert.ok(i > 0, "the semi branch must exist");
-  return automation.slice(i, automation.indexOf("console.log(`[autoApply] done", i));
+  return automation.slice(i, at(automation, "console.log(`[autoApply] done", i));
 })();
 
 test("the semi branch re-reads the form it just filled", () => {
@@ -70,8 +71,8 @@ test("the review surface is told, rather than left to infer it", () => {
   // routes/apply.js's semi branch is where a manual-review run's audit is written. The count has to
   // reach the event, and it has to be recorded even when zero — an absent key is exactly how this
   // went unnoticed.
-  const semiRoute = routes.slice(routes.indexOf('} else if (mode === "semi") {'),
-                                routes.indexOf("// CASE C: no artifact + auto mode"));
+  const semiRoute = routes.slice(at(routes, '} else if (mode === "semi") {'),
+                                at(routes, "// CASE C: no artifact + auto mode"));
   assert.ok(semiRoute.length > 0, "the semi route branch must exist");
   assert.match(semiRoute, /const semiMissing = Array\.isArray\(result\.missingRequired\) \? result\.missingRequired : null;/);
   assert.match(semiRoute, /yours to answer/);

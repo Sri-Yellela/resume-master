@@ -19,6 +19,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const panel    = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 const server   = fs.readFileSync("server.js", "utf8");
@@ -49,7 +50,7 @@ const REFETCH_ANCHOR      = "// Re-fetch when server-side filters/sort/tab chang
 function emittedParams() {
   const a = panel.indexOf(BUILD_PARAMS_ANCHOR);
   assert.notEqual(a, -1, "buildParams moved");
-  const body = stripComments(panel.slice(a, panel.indexOf("}, [", a)));
+  const body = stripComments(panel.slice(a, at(panel, "}, [", a)));
   const params = [...body.matchAll(/p\.set\(\s*"([^"]+)"/g)].map((m) => m[1]);
   assert.ok(params.length > 20, `expected buildParams to emit many params, found ${params.length}`);
   return [...new Set(params)];
@@ -93,12 +94,12 @@ test("every param buildParams emits is actually read by the server (the `starred
   const handlerStart = server.indexOf('app.get("/api/jobs", requireAuth');
   assert.notEqual(handlerStart, -1, "GET /api/jobs handler moved");
   const handler = stripComments(
-    server.slice(handlerStart, server.indexOf('app.get("/api/jobs/generic"', handlerStart)),
+    server.slice(handlerStart, at(server, 'app.get("/api/jobs/generic"', handlerStart)),
   );
 
   const destructureEnd = handler.indexOf("} = req.query;");
   assert.notEqual(destructureEnd, -1, "the handler no longer destructures req.query");
-  const destructured = identifiers(handler.slice(handler.indexOf("const {"), destructureEnd));
+  const destructured = identifiers(handler.slice(at(handler, "const {"), destructureEnd));
 
   const readNames = new Set([
     ...destructured,
@@ -156,7 +157,7 @@ test("the boot effect does not fetch /api/jobs — buildParams is the only param
   // That combination is what reset the board to its first-load state on trivial interaction.
   const a = panel.indexOf("// -- Boot ---");
   assert.notEqual(a, -1, "the boot effect's comment anchor moved");
-  const bootEffect = panel.slice(a, panel.indexOf("}, [user]);", a));
+  const bootEffect = panel.slice(a, at(panel, "}, [user]);", a));
   assert.ok(
     !/api\("\/api\/jobs\?/.test(stripComments(bootEffect)),
     "the boot effect fetches /api/jobs with a hardcoded querystring again — that is the reset bug",
@@ -174,12 +175,12 @@ test("every committed filter survives a reload (the persisted-key-list bug)", ()
   // The snapshot that feeds the cache has to carry the filters too, or there is nothing to persist.
   const makeStart = panel.indexOf("const makeProfileSnapshot = useCallback");
   assert.notEqual(makeStart, -1, "makeProfileSnapshot moved");
-  const make = panel.slice(makeStart, panel.indexOf("const applyProfileSnapshot", makeStart));
+  const make = panel.slice(makeStart, at(panel, "const applyProfileSnapshot", makeStart));
   assert.match(make, /\.\.\.activeFilterSnapshot\(\)/,
     "makeProfileSnapshot must spread activeFilterSnapshot, or newer filters are never cached");
   // ...and the restore side must go through the shared writer.
   const restoreStart = panel.indexOf("const applyProfileSnapshot = useCallback");
-  const restore = panel.slice(restoreStart, panel.indexOf("const fileRef", restoreStart));
+  const restore = panel.slice(restoreStart, at(panel, "const fileRef", restoreStart));
   assert.match(restore, /applyFilterSnapshot\(snapshot\)/,
     "applyProfileSnapshot must restore through the shared writer, or reload drops newer filters");
 });
@@ -231,7 +232,7 @@ const TRACKED_SEARCH_EXEMPT = new Map([
 test("every filter buildParams emits is restored by applyTrackedSearch (derived, not listed)", () => {
   const a = panel.indexOf("const applyTrackedSearch = useCallback");
   assert.notEqual(a, -1, "applyTrackedSearch moved");
-  const body = stripComments(panel.slice(a, panel.indexOf("}, [activeDomainProfile]);", a)));
+  const body = stripComments(panel.slice(a, at(panel, "}, [activeDomainProfile]);", a)));
   const readKeys = new Set([
     ...[...body.matchAll(/p\.get\("([^"]+)"\)/g)].map((m) => m[1]),
     ...[...body.matchAll(/csv\("([^"]+)"\)/g)].map((m) => m[1]),

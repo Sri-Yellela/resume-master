@@ -6,6 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const topBar = read("client/src/components/TopBar.jsx");
@@ -36,7 +37,7 @@ test("notifications moved INTO the profile menu, whole", () => {
   assert.match(topBar, /function useNotifications\(\)/);
   assert.match(topBar, /function NotificationsSection\(/);
   // Rendered inside the avatar menu's dropdown, not beside it in the bar.
-  const menu = topBar.slice(topBar.indexOf("function UserAvatarMenu"));
+  const menu = topBar.slice(at(topBar, "function UserAvatarMenu"));
   assert.match(menu, /<NotificationsSection theme=\{theme\} notifs=\{notifs\} unread=\{unread\} markAll=\{markAll\}\/>/);
   // Everything the bell did:
   assert.match(topBar, /api\("\/api\/notifications"\)/);
@@ -51,8 +52,8 @@ test("notifications moved INTO the profile menu, whole", () => {
 
 test("the unread count stays OUTSIDE the menu, on the avatar", () => {
   // This is the load-bearing half of the move. Same "9+" cap the bell used.
-  const menu = topBar.slice(topBar.indexOf("function UserAvatarMenu"));
-  const trigger = menu.slice(0, menu.indexOf("<DockPortal"));
+  const menu = topBar.slice(at(topBar, "function UserAvatarMenu"));
+  const trigger = menu.slice(0, at(menu, "<DockPortal"));
   assert.match(trigger, /\{unread > 0 && \(/, "the avatar carries no unread badge");
   assert.match(trigger, /\{unread > 9 \? "9\+" : unread\}/);
   // And it is announced, not just painted — the badge itself is aria-hidden, so the count has to
@@ -66,7 +67,7 @@ test("the unread count stays OUTSIDE the menu, on the avatar", () => {
 
 test("the profile menu kept everything it already had", () => {
   // Notifications were inserted into this menu, not swapped in for something.
-  const menu = topBar.slice(topBar.indexOf("function UserAvatarMenu"));
+  const menu = topBar.slice(at(topBar, "function UserAvatarMenu"));
   for (const kept of [/PROFILE/, /Job Profile/, /Manage Job Profiles/, /<ProfileSelectorDropdown/,
                       /Accent Color/, /Sign Out|onLogout/]) {
     assert.match(menu, kept, `the profile menu lost ${kept}`);
@@ -132,7 +133,7 @@ test("the logo's own container does not clip it", () => {
   // slice makes the negative assertion below pass without testing anything.
   const fillAt = logo.indexOf('background: "#ffffff"');
   assert.ok(fillAt > 0, "the stamp's fill declaration moved");
-  const box = logo.slice(fillAt, logo.indexOf("}}>", fillAt));
+  const box = logo.slice(fillAt, at(logo, "}}>", fillAt));
   assert.ok(box.length > 40, "the stamp's style object could not be isolated");
   assert.ok(!/overflow/.test(box), "the stamp box clips the mark again");
 

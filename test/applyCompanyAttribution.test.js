@@ -18,6 +18,7 @@ import { companyLabel, isAtsHost, UNKNOWN_COMPANY, ATS_HOST_SUFFIXES, ATS_PROVID
   from "../shared/atsHosts.js";
 import { DIRECT_ATS_SOURCES } from "../services/jobs/directApplyFilter.js";
 import { groupByCompany, groupByApplication } from "../client/src/lib/applyObstacles.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 // ── The rule ─────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ test("the host list covers every ATS the pipeline already trusts", () => {
       `DIRECT_ATS_SOURCES has '${source}' with no entry in ATS_PROVIDER_NAMES — it could render as a company`);
   }
   const detector = fs.readFileSync("services/platformDetector.js", "utf8");
-  const map = detector.slice(detector.indexOf("const URL_ATS_MAP"), detector.indexOf("];", detector.indexOf("const URL_ATS_MAP")));
+  const map = detector.slice(at(detector, "const URL_ATS_MAP"), at(detector, "];", at(detector, "const URL_ATS_MAP")));
   const entries = [...map.matchAll(/pattern:\s*"([^"]+)",\s*platform:\s*"([^"]+)"/g)]
     .map(m => ({ pattern: m[1], platform: m[2] }));
   assert.ok(entries.length >= 15, `expected URL_ATS_MAP entries, found ${entries.length}`);
@@ -130,7 +131,7 @@ test("a row with a company groups under it; a row with only a host does not beco
 
 test("openPortalReview names the EMPLOYERS in the batch, not the portal host", () => {
   const panel = fs.readFileSync("client/src/panels/AutoApplyPanel.jsx", "utf8");
-  const fn = panel.slice(panel.indexOf("const openPortalReview"), panel.indexOf("const openFacet"));
+  const fn = panel.slice(at(panel, "const openPortalReview"), at(panel, "const openFacet"));
   assert.ok(fn.length > 0, "openPortalReview must exist");
   assert.ok(!/label:\s*`\$\{p\.host\}/.test(fn),
     "the scope label must not be built from the portal host — that IS the defect");

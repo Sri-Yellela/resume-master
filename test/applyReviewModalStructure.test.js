@@ -19,6 +19,7 @@ import {
   resolutionPlan, groupByApplication, groupByCompany,
   CO_RESOLVABLE_GATE_REASONS, QUESTION_REASON_TO_HOLD,
 } from "../client/src/lib/applyObstacles.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const panel = read("client/src/panels/AutoApplyPanel.jsx");
@@ -70,7 +71,7 @@ test("AC2: the modal groups by the SAME functions the panel's sections use, not 
   assert.ok(!/\(applyRunDetail \? applyRunDetail\.jobs : scopedReviewJobs\)\.map\(job =>/.test(panel),
     "the modal still renders run-job rows as its top-level list");
   // And the entry is the card component the panel itself uses — not a second implementation.
-  const modal = panel.slice(panel.indexOf("Apply Runs Review Modal"));
+  const modal = panel.slice(at(panel, "Apply Runs Review Modal"));
   assert.match(modal, /<ApplicationObstacleCard/, "the modal built its own entry again");
   assert.match(modal, /<CompanyHeading company=\{company\} count=\{items\.length\} theme=\{theme\} \/>/);
 });
@@ -283,14 +284,14 @@ test("AC2 requirement 5: every control survives, and the attempts are one disclo
                          /Generate a resume/]) {
     assert.match(sections, control, `a control was dropped from the application entry: ${control}`);
   }
-  const modal = panel.slice(panel.indexOf("Apply Runs Review Modal"));
+  const modal = panel.slice(at(panel, "Apply Runs Review Modal"));
   assert.match(modal, /<AttemptRow key=\{row\.id\} job=\{row\}/);
   assert.match(modal, /Show\`\} \$\{app\.rows\.length\} attempt|Hide"\} \$\{app\.rows\.length\}|attempt\$\{app\.rows\.length === 1 \? "" : "s"\}/,
     "the attempts disclosure does not say how many attempts there are");
 });
 
 test("AC2: the modal's own Open is scoped too — AC1 must not come back one surface along", () => {
-  const modal = panel.slice(panel.indexOf("Apply Runs Review Modal"));
+  const modal = panel.slice(at(panel, "Apply Runs Review Modal"));
   assert.match(modal, /onResolve=\{resumable \? \(\) => openHandoff\(packet, app\) : openApplicationReview\}/);
   assert.ok(!/\bopenEverything\b/.test(modal.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")),
     "the modal reaches the unscoped handler");

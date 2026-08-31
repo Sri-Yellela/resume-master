@@ -18,6 +18,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { EXPERIENCE_LEVELS, DOMAINS, values } from "../shared/jobFilterOptions.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const usb     = read("client/src/components/UnifiedSearchBar.jsx");
@@ -81,9 +82,9 @@ test("the bar's wrapper sits inside JobBoardProvider, not above it", () => {
   // The SAME constraint applies to the count, and it is the reason there are two wrappers rather
   // than one: AppDashboard renders AutoApplyProvider too, so it cannot read that context either.
   assert.match(app, /function AppTopBar\(\{ tabs, \.\.\.props \}\) \{\s+const \{ needsAttentionCount = 0 \} = useAutoApply\(\);/);
-  const dashboard = app.slice(app.indexOf("function AppDashboard"));
+  const dashboard = app.slice(at(app, "function AppDashboard"));
   assert.ok(
-    !/const \{[^}]*\} = useJobBoard\(\)/.test(dashboard.slice(0, dashboard.indexOf("<JobBoardProvider>"))),
+    !/const \{[^}]*\} = useJobBoard\(\)/.test(dashboard.slice(0, at(dashboard, "<JobBoardProvider>"))),
     "AppDashboard calls useJobBoard above the provider it renders — that context is null",
   );
 });

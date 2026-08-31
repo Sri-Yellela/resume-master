@@ -54,14 +54,22 @@ The existing mojibake test strips comments and names five files; this was in nei
 | 935 double-encoded sequences | `server.js` (199), `JobsPanel.jsx` (714), `migrations.js` (21), `api.js` (1) | cp1252→UTF-8 inversion is clean for every run | Medium | Fixed |
 | 6 files **not valid UTF-8** | `services/jobNormalization.js`, `services/limitEnforcer.js`, 4 test files | raw cp1252 byte `0x97` in a line-1 banner | Medium | Fixed |
 | 12 files with a literal `U+FFFD` | `TopBar.jsx`, `AdminPanel.jsx`, `routes/admin.js`, +9 | same banner, em dash already destroyed | Medium | Fixed |
+| **+11 more, under `test/`** | found 2026-08-31 by the anchor sweep | same banner — **missed here** because this sweep's guard excludes `test/` | Medium | ✅ Fixed later |
 | UTF-8 BOM | 10 files incl. `server.js`, `JobsPanel.jsx`, `docs/privacy/index.html` | — | Low | Fixed |
 | Mixed line endings | `enrichLogos.js`, `schema.js`, `companyLogos.js` | CRLF+LF in one file | Low | See below |
 | Literal PowerShell escapes | — | none outside the sweep docs themselves | — | **Clean** |
 
-**The banner is one root cause with two outcomes.** Eighteen files carry
+**The banner is one root cause with two outcomes.** **29 files** carry
 `// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION`. Six kept the raw `0x97` byte and were
-therefore not valid UTF-8; twelve had already been flattened to `U+FFFD`. Node substitutes rather
+therefore not valid UTF-8; **23** had already been flattened to `U+FFFD`. Node substitutes rather
 than throwing, so neither form ever surfaced. A third group has a plain `--` and is fine.
+
+> **Corrected 2026-08-31.** This originally read "eighteen files … twelve", and 11 more were found
+> later, all under `test/`. The guard added by this sweep **excludes `test/`** — because the mojibake
+> guards in `menuSurfaceStyle.test.js` hold those characters on purpose — and excluding a whole
+> directory to protect two lines in one file left 11 real defects sitting in it. Repaired in the
+> anchor sweep (`docs/ak2-source-anchor-sweep.md`); narrowing the exclusion from the directory to
+> those two lines is still open.
 
 **`JobsPanel.jsx` needed separate handling.** It was mojibaked and *then* run through a smart-quote
 flattener, so the middle byte survives as a straight quote and the generic inversion cannot recover
@@ -167,7 +175,7 @@ This is the shape that took the board to zero four times, and it is now the best
 | Location | Evidence | Severity | Status |
 |---|---|---|---|
 | `jobsUiTierFilters`, `localAtsScorer`, `resumeFormatter` | sliced source using the **corrupt divider comments** as anchors | High | Fixed in `1066b0c` |
-| **179 unguarded `slice`/`indexOf` pairs across the suite** | same latent failure mode | Medium | **Reported, not swept** |
+| ~~179 unguarded `slice`/`indexOf` pairs across the suite~~ | same latent failure mode | Medium | ✅ **SWEPT 2026-08-31** — see below |
 
 This is the finding I would act on next. `indexOf` returns `-1` for a missing anchor and `slice`
 reads `-1` as *"one from the end"* — so a moved anchor does not fail the test, it **widens the
@@ -206,7 +214,10 @@ would have produced a second, contradictory note. §7 was the section actually m
 1. **Strip the BOM from `libs.versions.toml` and `project.pbxproj`** during tasks 6 and 8, where a
    real build can confirm it. These are the two findings most likely to be breaking a build right
    now, and the two I could not test.
-2. **Sweep the 179 unguarded `slice`/`indexOf` pairs.** A guarded-slice helper, asserted at both
-   ends, would close the whole class.
+2. ~~Sweep the 179 unguarded `slice`/`indexOf` pairs.~~ **Done 2026-08-31** —
+   `docs/ak2-source-anchor-sweep.md`. The real count was 284 lookups across 182 slice sites in 59
+   files; all now go through `at()`/`lastAt()`, which throw on a missing anchor, and a guard test
+   holds it at zero. **Three anchors were already dead, in tests that were passing**, over-slicing
+   by 4.0x, 4.2x and 4.8x.
 3. **Give the resume CSS one definition** rather than two, alongside work that can run a real
    generation.

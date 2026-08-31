@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { PROFILE_KEY_TO_HANDLER, matchesWholeToken, buildAnswers } from "../services/applyAutomation.js";
 import { getPlatformLabelMap, detectPlatformFromUrl, usesIframe } from "../services/platformDetector.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const detectorSrc   = fs.readFileSync("services/platformDetector.js", "utf8");
 const automationSrc = fs.readFileSync("services/applyAutomation.js", "utf8");
@@ -19,7 +20,7 @@ function emittedScript(name) {
   const open = `const ${name} = \``;
   const i = automationSrc.indexOf(open);
   assert.ok(i > 0, `${name} must exist`);
-  const raw = automationSrc.slice(i + open.length, automationSrc.indexOf("`;", i));
+  const raw = automationSrc.slice(i + open.length, at(automationSrc, "`;", i));
   return eval("`" + raw + "`"); // eslint-disable-line no-eval -- reproduces the parser exactly
 }
 
@@ -41,7 +42,7 @@ test("in-page scripts contain no regex whose backslash was eaten by the template
 test("the emitted tokenMatch handles multi-word keys, including ones containing 's'", () => {
   const emitted = emittedScript("DISCOVER_FN_SRC");
   const k = emitted.indexOf("function tokenMatch");
-  const fn = emitted.slice(k, emitted.indexOf("\n  }", k) + 4);
+  const fn = emitted.slice(k, at(emitted, "\n  }", k) + 4);
   const tokenMatch = new Function(`${fn}; return tokenMatch;`)();
 
   for (const key of ["First Name", "Last Name", "Years of Experience", "Postal Code",

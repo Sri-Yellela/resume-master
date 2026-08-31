@@ -14,6 +14,7 @@ import {
   CANONICAL_GATE_FIELDS, ELIGIBILITY_MARKERS, isEligibilityAnswer, DEFAULT_TOKEN_TTL_MS,
 } from "../services/applyGatePacket.js";
 import { GATE_FLOW_STATES, PROFILE_KEY_TO_HANDLER, CONFIDENCE_BY_PROVENANCE } from "../services/applyAutomation.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const SECRET = "test-secret";
 const PAYLOAD = {
@@ -219,7 +220,7 @@ test("a login_required gate does not carry the sign-in page's fields into the pa
   // through — before that refactor this rule lived inline in one of them, so the other could have
   // been written without it.
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
-  const helper = src.slice(src.indexOf("async function buildGateHold"));
+  const helper = src.slice(at(src, "async function buildGateHold"));
   assert.ok(helper.length > 0, "the shared gate result must exist");
   assert.match(helper.slice(0, 2500),
     /answers:\s*flowState === 'captcha_required' \? \(?resolvedAnswers\b/,
@@ -242,7 +243,7 @@ test("migration 079 is present, additive, and byte-identical in both migration p
   const block = (src) => {
     const i = src.indexOf('id: "079_apply_gate_packets"');
     assert.ok(i > 0, "migration 079 must exist");
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   const a = block(server), b = block(script);
   assert.equal(a, b, "the migration must be byte-identical in server.js and scripts/migrations.js");

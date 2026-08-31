@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 /**
  * TASK AH2 — four tabs, four surfaces, one session.
@@ -41,7 +42,7 @@ test("every nav tab is a real link, not a button", () => {
 });
 
 test("a modified click is left to the browser, a plain click still navigates in-app", () => {
-  const nav = TOPBAR.slice(TOPBAR.indexOf('<a key={t.id}'), TOPBAR.indexOf("{t.label}</a>"));
+  const nav = TOPBAR.slice(at(TOPBAR, '<a key={t.id}'), at(TOPBAR, "{t.label}</a>"));
   // Without this the href would hijack every click into a full page load, which is a worse
   // regression than the missing affordance it is there to add.
   assert.match(nav, /e\.metaKey \|\| e\.ctrlKey \|\| e\.shiftKey \|\| e\.altKey \|\| e\.button !== 0/);
@@ -60,7 +61,7 @@ test("the href and the click resolve through ONE mapping", () => {
   assert.match(APP, /hrefForTab=\{pathForTab\}/);
   assert.match(APP, /onTabChange=\{handlePanelChange\}/);
   // handlePanelChange must still route through the same rule rather than keeping its own copy.
-  const handler = APP.slice(APP.indexOf("const handlePanelChange = useCallback"), APP.indexOf("const handleProfileActivate"));
+  const handler = APP.slice(at(APP, "const handlePanelChange = useCallback"), at(APP, "const handleProfileActivate"));
   assert.match(handler, /NAVIGABLE_TABS\.has\(tab\)/);
 });
 
@@ -97,7 +98,7 @@ test("the panel resolves a deep-linked job BY ID, not by hoping it is on the pag
   // current response is incidental. A deep link that only works when the job happens to be loaded
   // is the no-op failure mode.
   assert.match(SERVER, /app\.get\("\/api\/jobs\/by-id\/:jobId", requireAuth/);
-  const route = SERVER.slice(SERVER.indexOf('app.get("/api/jobs/by-id/:jobId"'), SERVER.indexOf('app.get("/api/jobs/pending"'));
+  const route = SERVER.slice(at(SERVER, 'app.get("/api/jobs/by-id/:jobId"'), at(SERVER, 'app.get("/api/jobs/pending"'));
   assert.match(route, /uj\.user_id = \? AND uj\.domain_profile_id = \?/);
   assert.match(route, /WHERE sj\.job_id = \?/);
   assert.match(route, /404\).json\(\{ error: "Job not found" \}\)/);
@@ -135,7 +136,7 @@ test("the deep link ends on an EXPLICIT signal, never on a timing guess", () => 
   // the panel reopens itself after the user closed it.
   assert.match(PANEL, /close: \(\) => \{ clearDeepLink\(\); setSelectedJob\(null\); \}/);        // close button
   assert.match(PANEL, /if \(e\.key === "Escape"\) \{ clearDeepLink\(\); setSelectedJob\(null\); return; \}/); // Escape
-  const select = PANEL.slice(PANEL.indexOf("const handleJobSelect = useCallback"), PANEL.indexOf("// ── AH2: the open job detail lives IN THE URL"));
+  const select = PANEL.slice(at(PANEL, "const handleJobSelect = useCallback"), at(PANEL, "// ── AH2: the open job detail lives IN THE URL"));
   assert.match(select, /clearDeepLink\(\);/);                                                      // picking another card
   // A real profile SWITCH ends it; the FIRST arrival of a profile key does not, because that is the
   // restore the whole arrangement exists to survive.
@@ -144,12 +145,12 @@ test("the deep link ends on an EXPLICIT signal, never on a timing guess", () => 
 
 // ── 3. two tabs on the board do not fight ────────────────────────────────────────────────────
 test("the board's view snapshot is per tab, with the origin-wide copy as a seed", () => {
-  const reader = PANEL.slice(PANEL.indexOf("function readProfileUiCache"), PANEL.indexOf("function writeProfileUiCache"));
+  const reader = PANEL.slice(at(PANEL, "function readProfileUiCache"), at(PANEL, "function writeProfileUiCache"));
   // sessionStorage FIRST. Reading localStorage first would make the shared copy authoritative
   // again and reintroduce exactly the clobbering this fixes.
   assert.ok(reader.indexOf("sessionStorage.getItem") < reader.indexOf("localStorage.getItem"));
 
-  const writer = PANEL.slice(PANEL.indexOf("function writeProfileUiCache"), PANEL.indexOf("// Upstream scrape requests"));
+  const writer = PANEL.slice(at(PANEL, "function writeProfileUiCache"), at(PANEL, "// Upstream scrape requests"));
   assert.match(writer, /put\(sessionStorage\)/);
   assert.match(writer, /put\(localStorage\)/);
   // Two independent try blocks: a full localStorage quota must not be able to take the tab's own
@@ -158,12 +159,12 @@ test("the board's view snapshot is per tab, with the origin-wide copy as a seed"
 });
 
 test("currentPage is in the per-tab snapshot — it is the key that cannot be shared", () => {
-  const writer = PANEL.slice(PANEL.indexOf("function writeProfileUiCache"), PANEL.indexOf("// Upstream scrape requests"));
+  const writer = PANEL.slice(at(PANEL, "function writeProfileUiCache"), at(PANEL, "// Upstream scrape requests"));
   assert.match(writer, /"boardTab", "localSearch", "sortBy", "currentPage"/);
 });
 
 test("deleting a profile clears BOTH stores", () => {
-  const fn = CONTEXT.slice(CONTEXT.indexOf("const deleteProfileCache"), CONTEXT.indexOf("return ("));
+  const fn = CONTEXT.slice(at(CONTEXT, "const deleteProfileCache"), at(CONTEXT, "return ("));
   assert.match(fn, /for \(const store of \[sessionStorage, localStorage\]\)/);
   // Clearing only the seed left a deleted profile's board state alive in whichever tab had it open.
   assert.match(fn, /delete all\[String\(profileId\)\]/);

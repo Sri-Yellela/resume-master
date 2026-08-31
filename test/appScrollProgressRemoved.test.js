@@ -29,6 +29,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const code = (src) => src
@@ -43,7 +44,7 @@ const ctxCode = code(ctx), topBarCode = code(topBar), jobsCode = code(jobs);
 
 test("the context publishes scrollToTopRef and nothing else", () => {
   // Read off the provider's actual value object, so adding a member back fails here.
-  const value = ctxCode.slice(ctxCode.indexOf("value={{"), ctxCode.indexOf("}}>"));
+  const value = ctxCode.slice(at(ctxCode, "value={{"), at(ctxCode, "}}>"));
   assert.match(value, /scrollToTopRef/);
   for (const gone of ["progress", "update", "pinned", "pin", "unpin"]) {
     assert.ok(!new RegExp(`\\b${gone}\\b`).test(value),
@@ -66,10 +67,17 @@ test("the top bar no longer reads the context at all", () => {
 test("the bar's geometry is the constants it always rendered, not an interpolation", () => {
   // Every one of these is the p=0 end of the interpolation that used to produce it, i.e. what users
   // have always actually seen. If any becomes a variable again it needs a live progress first.
-  const style = topBarCode.slice(topBarCode.indexOf('data-app-chrome=""'),
-                                 topBarCode.indexOf("Left group") >= 0
-                                   ? topBarCode.indexOf("<div style={{ display: \"flex\", alignItems: \"center\", gap: 10")
-                                   : topBarCode.length);
+  // The end anchor used to be guarded by `topBarCode.indexOf("Left group") >= 0`, and that guard
+  // could never be true: "Left group" exists only inside a JSX comment, and `code()` above strips
+  // JSX comments before any of this runs. So the ternary always took its fallback and sliced to the
+  // END OF THE FILE — 2571 characters where 608 were meant, 4.2x too wide. Nothing failed, because
+  // the assertions below are all `match` and the strings they look for were still inside the larger
+  // region. A wider slice only fails if it happens to contain a counter-example; the rest of the
+  // time it silently stops testing what it names.
+  const style = topBarCode.slice(
+    at(topBarCode, 'data-app-chrome=""'),
+    at(topBarCode, '<div style={{ display: "flex", alignItems: "center", gap: 10'),
+  );
   assert.match(style, /top: 0,/);
   assert.match(style, /width: vw,/);
   assert.match(style, /borderRadius: 0,/);
@@ -90,8 +98,8 @@ test("the logo takes no progress prop and does not interpolate", () => {
   assert.match(topBarCode, /function AnimatedLucyLogo\(\)/,
     "AnimatedLucyLogo took a prop again");
   assert.ok(!/AnimatedLucyLogo\s+progress=/.test(topBarCode));
-  const logo = topBarCode.slice(topBarCode.indexOf("function AnimatedLucyLogo"),
-                               topBarCode.indexOf("function useNotifications"));
+  const logo = topBarCode.slice(at(topBarCode, "function AnimatedLucyLogo"),
+                               at(topBarCode, "function useNotifications"));
   assert.ok(!/textMaxW|textOpacity/.test(logo));
   assert.match(logo, /esume Master/, "the wordmark must still render in full");
 });

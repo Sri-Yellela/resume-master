@@ -21,6 +21,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const panel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
 
@@ -60,7 +61,7 @@ test("the debounced search calls through fetchJobsRef, never a captured fetchJob
 test("fetchJobs does not clear the board while the profile list is still loading", () => {
   const i = panel.indexOf("if (!activeDomainProfile) {");
   assert.notEqual(i, -1);
-  const branch = panel.slice(i, panel.indexOf("return;", i));
+  const branch = panel.slice(i, at(panel, "return;", i));
   assert.match(branch, /profilesLoadedRef\.current/,
     "the no-profile branch clears unconditionally, so any caller arriving before " +
     "/api/domain-profiles answers wipes an already-loaded board");

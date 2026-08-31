@@ -4,6 +4,7 @@ import fs from "node:fs";
 import express from "express";
 import Database from "better-sqlite3";
 import applyRoutes from "../routes/apply.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 /**
  * TASK AH6 — the Auto Apply panel opens on the day something last happened.
@@ -114,7 +115,7 @@ test("it returns a DATE and never a listing", () => {
 
 test("the listing endpoint still refuses to default — only the panel has a default", () => {
   const route = fs.readFileSync("routes/apply.js", "utf8");
-  const listing = route.slice(route.indexOf('app.get("/api/apply/history", requireAuth'));
+  const listing = route.slice(at(route, 'app.get("/api/apply/history", requireAuth'));
   assert.match(listing, /if \(!range\) return res\.status\(400\)/,
     "a caller must still name the day it wants; an endpoint with a sensible default invites a mount to hit it");
 });
@@ -142,8 +143,8 @@ test("a null date leaves AD1's resting state exactly as it was", () => {
 test("the bootstrap does not use a state updater to cause a side effect", () => {
   // React double-invokes updaters in development, so calling loadHistory inside one fires the
   // request twice. The live value is read through a ref instead.
-  const block = CONTEXT.slice(CONTEXT.indexOf("const bootstrappedFor = useRef(null)"),
-                              CONTEXT.indexOf("Switch sub-tab (AD1 requirement 3)"));
+  const block = CONTEXT.slice(at(CONTEXT, "const bootstrappedFor = useRef(null)"),
+                              at(CONTEXT, "Switch sub-tab (AD1 requirement 3)"));
   assert.doesNotMatch(block, /setHistoryDate\(prev =>/);
   assert.match(block, /historyDateRef\.current/);
 });
@@ -170,7 +171,7 @@ test("today is built from LOCAL parts, not toISOString", () => {
   // evening — the same class of bug localDateLabel already carries a comment about.
   assert.match(PANEL, /const todayIso = \(\) => \{/);
   assert.match(PANEL, /d\.getFullYear\(\)/);
-  const helper = PANEL.slice(PANEL.indexOf("const todayIso"), PANEL.indexOf("const isToday"));
+  const helper = PANEL.slice(at(PANEL, "const todayIso"), at(PANEL, "const isToday"));
   assert.doesNotMatch(helper, /toISOString/);
 });
 
@@ -201,8 +202,8 @@ test("the standing work says it is not the date's", () => {
 test("the standing work is still OUTSIDE the date filter, as decided", () => {
   // AH6 requirement 4 says to keep it there. It reads cross-run feeds the session already loads,
   // never the dated listing.
-  const band = PANEL.slice(PANEL.indexOf("THE STANDING WORK, ON THE PENDING TAB"),
-                           PANEL.indexOf("THE BODY — ONE DAY, ONE OUTCOME"));
+  const band = PANEL.slice(at(PANEL, "THE STANDING WORK, ON THE PENDING TAB"),
+                           at(PANEL, "THE BODY — ONE DAY, ONE OUTCOME"));
   assert.doesNotMatch(band, /history\?date=|historyJobs/);
   assert.match(band, /applyInFlight|needsYouCount/);
 });

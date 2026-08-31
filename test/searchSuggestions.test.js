@@ -11,6 +11,7 @@ import Database from "better-sqlite3";
 import {
   suggest, getSuggestionIndex, clearSuggestionCache, baseTitle, canonicalTitle, canonicalLocation,
 } from "../services/jobs/searchSuggestions.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 function db0(rows) {
   const db = new Database(":memory:");
@@ -175,8 +176,8 @@ test("the endpoint is additive, auth-gated, and never errors at the user", () =>
   assert.match(server, /app\.get\("\/api\/jobs\/suggest", requireAuth/);
   // No active profile is answered with an empty list, not a 4xx: the board already reports
   // needsProfileSetup properly and a typeahead must not put an error under the input.
-  const h = server.slice(server.indexOf('app.get("/api/jobs/suggest"'));
-  const body = h.slice(0, h.indexOf("\n});"));
+  const h = server.slice(at(server, 'app.get("/api/jobs/suggest"'));
+  const body = h.slice(0, at(h, "\n});"));
   assert.match(body, /if \(!profile\) return res\.json\(\{ suggestions: \[\] \}\)/);
   assert.match(body, /catch \(err\)[\s\S]*res\.json\(\{ suggestions: \[\] \}\)/);
   // Scoped to the caller's own active profile, never a role key from the query string.
@@ -200,8 +201,8 @@ test("Tab accepts the highlighted suggestion, and ONLY when one is highlighted",
 });
 
 test("Escape dismisses without altering the typed text", () => {
-  const esc = suggestUi.slice(suggestUi.indexOf('if (e.key === "Escape")'));
-  const block = esc.slice(0, esc.indexOf("\n    }"));
+  const esc = suggestUi.slice(at(suggestUi, 'if (e.key === "Escape")'));
+  const block = esc.slice(0, at(esc, "\n    }"));
   assert.match(block, /dismiss\(\)/);
   assert.ok(!/onChange|accept\(/.test(block), "Escape changes the value — it must only close the list");
 });

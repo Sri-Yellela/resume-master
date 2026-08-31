@@ -7,6 +7,7 @@ import {
   checkResumeClaims, assertResumeClaims, ResumeClaimError, profileContradictionFindings,
   extractSummaryText,
 } from "../services/resumeClaimGuard.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 // The real base resume's shape: two SDE roles, no seniority word anywhere, summary says 4 years.
 const BASE_RESUME = `SRI BALAJI YELLELA
@@ -466,7 +467,7 @@ test("the runtime inputs carry the profile's years, marked authoritative", () =>
   // ASSERTED AGAINST THE PROMPT STRING, not the file. The previous version of this test searched
   // all of server.js for the old label, and kept passing after the label changed because the
   // sentence explaining the change quotes it in a comment — a test matching its own changelog.
-  const block = server.slice(server.indexOf("let domainProfileBlock"), server.indexOf("**Target role / job title:**"));
+  const block = server.slice(at(server, "let domainProfileBlock"), at(server, "**Target role / job title:**"));
   assert.match(block, /Seniority the candidate states they are \(their own declaration — you may use it, and may not exceed it\)/);
   assert.doesNotMatch(block, /\*\*Target seniority:\*\*/);
   assert.doesNotMatch(block, /aspiration, not a level to claim/,
@@ -477,7 +478,7 @@ test("the assertion runs in coreGenerateResume, BEFORE the artifact is persisted
   const server = fs.readFileSync("server.js", "utf8");
   const start = server.indexOf("async function coreGenerateResume");
   assert.ok(start > 0);
-  const body = server.slice(start, server.indexOf("\n// ", server.indexOf("return { html: formattedHtml")));
+  const body = server.slice(start, at(server, "\n// ", at(server, "return { html: formattedHtml")));
   const assertAt = body.indexOf("assertResumeClaims(");
   assert.ok(assertAt > 0, "coreGenerateResume must assert its own output");
 
@@ -508,8 +509,8 @@ test("AG3: every resume-generating path funnels through the guarded coreGenerate
   assert.match(apply, /generateResumeForApply\(userId, jobId, toolType\)/,
     "the apply worker must go through generateResumeForApply");
   const wrapper = server.slice(
-    server.indexOf("function generateResumeForApply"),
-    server.indexOf("app.post(\"/api/resumes/:jobId/html\""),
+    at(server, "function generateResumeForApply"),
+    at(server, "app.post(\"/api/resumes/:jobId/html\""),
   );
   assert.match(wrapper, /coreGenerateResume\(/,
     "generateResumeForApply must delegate to coreGenerateResume rather than call a model itself");
@@ -522,8 +523,8 @@ test("AG3: every resume-generating path funnels through the guarded coreGenerate
 test("AG3: a withheld resume is never persisted, and the refusal reaches the caller", () => {
   const server = fs.readFileSync("server.js", "utf8");
   const body = server.slice(
-    server.indexOf("async function coreGenerateResume"),
-    server.indexOf("function generateResumeForApply"),
+    at(server, "async function coreGenerateResume"),
+    at(server, "function generateResumeForApply"),
   );
   const assertAt = body.indexOf("assertResumeClaims(");
   const insertVersion = body.indexOf("INSERT INTO resume_versions");
@@ -534,8 +535,8 @@ test("AG3: a withheld resume is never persisted, and the refusal reaches the cal
 
   // The throw is not swallowed into a generic failure: it is attributed to us and explained.
   const wrapper = server.slice(
-    server.indexOf("function generateResumeForApply"),
-    server.indexOf("app.post(\"/api/resumes/:jobId/html\""),
+    at(server, "function generateResumeForApply"),
+    at(server, "app.post(\"/api/resumes/:jobId/html\""),
   );
   assert.match(wrapper, /classifyGenerationError\(e\)/);
   const attribution = fs.readFileSync("shared/failureAttribution.js", "utf8");
@@ -585,7 +586,7 @@ test("the reason code renders as a sentence, not as a raw code", () => {
   // swapped out — which this codebase treats as a bug, not a rendering.
   const src = fs.readFileSync("client/src/lib/applyObstacles.js", "utf8");
   assert.match(src, /resume_claim_violation: \{/);
-  const entry = src.slice(src.indexOf("resume_claim_violation: {"), src.indexOf("resume_claim_violation: {") + 400);
+  const entry = src.slice(at(src, "resume_claim_violation: {"), at(src, "resume_claim_violation: {") + 400);
   assert.match(entry, /obstacle:/);
   assert.match(entry, /action:/);
   // Protective: the guard did its job. Filing it under "these broke" would be the wrong story.

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 test("public routes render public pages without eager jobs-board restore", () => {
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
@@ -9,13 +10,13 @@ test("public routes render public pages without eager jobs-board restore", () =>
     assert.match(app, new RegExp(`<Route path="${route}"\\s+element=\\{<`));
   }
 
-  const publicRoutesBlock = app.slice(app.indexOf("{/* Standalone tool pages"), app.indexOf("{/* Admin login"));
+  const publicRoutesBlock = app.slice(at(app, "{/* Standalone tool pages"), at(app, "{/* Admin login"));
   assert.doesNotMatch(publicRoutesBlock, /Navigate to="\/app"|Navigate to=\{consolePath\}|navigate\(consolePath/);
 });
 
 test("admin route guards never fall through to the regular user app", () => {
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
-  const adminBlock = app.slice(app.indexOf('<Route path="/admin/login"'), app.indexOf("{/* User login"));
+  const adminBlock = app.slice(at(app, '<Route path="/admin/login"'), at(app, "{/* User login"));
 
   // The admin routes no longer inline an authUser?.isAdmin check — guarding moved into the
   // <AdminRouteGate> component. Assert the routes are wrapped AND that the gate itself enforces
@@ -34,7 +35,12 @@ test("admin route guards never fall through to the regular user app", () => {
 
 test("user app guard remains role-aware and sends admins to admin, not jobs", () => {
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
-  const userAppBlock = app.slice(app.indexOf('<Route path="/app/*"'), app.indexOf("{/* Root and catch-all"));
+  // The end anchor read "{/* Root and catch-all". That comment has since been split in two — the
+  // root route now says "{/* Root: landing page for logged-out..." and the 404 has its own comment
+  // below it — so indexOf returned -1 and this block ran to the end of App.jsx: 1066 characters
+  // instead of 223, covering the root route and the catch-all it was written to exclude.
+  const userAppBlock = app.slice(at(app, '<Route path="/app/*"'),
+                                 at(app, "{/* Root: landing page for logged-out"));
 
   assert.match(app, /const \[authStatus,\s+setAuthStatus\]\s+=\s+useState\("unknown"\)/);
   assert.match(app, /if \(authStatus === "unknown"\) return \(/);
@@ -47,8 +53,8 @@ test("user app guard remains role-aware and sends admins to admin, not jobs", ()
 
 test("login and admin routes wait for auth bootstrap instead of redirecting from stale user state", () => {
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
-  const adminBlock = app.slice(app.indexOf('<Route path="/admin/login"'), app.indexOf("{/* Admin dashboard"));
-  const loginBlock = app.slice(app.indexOf('<Route path="/login"'), app.indexOf("{/* User app"));
+  const adminBlock = app.slice(at(app, '<Route path="/admin/login"'), at(app, "{/* Admin dashboard"));
+  const loginBlock = app.slice(at(app, '<Route path="/login"'), at(app, "{/* User app"));
 
   assert.match(app, /function PublicLoginRoute\(\{ authStatus, authUser, children, admin = false \}\)/);
   assert.match(app, /if \(authStatus === "unknown"\) return null/);

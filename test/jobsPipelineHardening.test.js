@@ -1,4 +1,4 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -113,8 +113,8 @@ test("migration 048 is idempotent — DELETE step removes conflicting engineerin
 test("migration 048 DELETE step scopes to firmware-title jobs only", () => {
   const m48start = server.indexOf("048_firmware_reclassify");
   const block    = server.slice(m48start, m48start + 4000);
-  const deleteBlock = block.slice(block.indexOf("DELETE FROM job_role_map"),
-                                  block.indexOf("UPDATE job_role_map"));
+  const deleteBlock = block.slice(at(block, "DELETE FROM job_role_map"),
+                                  at(block, "UPDATE job_role_map"));
   assert.match(deleteBlock, /LIKE '%firmware%'/);
   assert.match(deleteBlock, /LIKE '%embedded system%'/);
   assert.match(deleteBlock, /LIKE '%bootloader%'/);
@@ -123,7 +123,7 @@ test("migration 048 DELETE step scopes to firmware-title jobs only", () => {
 test("migration 048 UPDATE step is safe after DELETE — no UNIQUE violation possible", () => {
   const m48start = server.indexOf("048_firmware_reclassify");
   const block    = server.slice(m48start, m48start + 4000);
-  const updateBlock = block.slice(block.indexOf("UPDATE job_role_map"));
+  const updateBlock = block.slice(at(block, "UPDATE job_role_map"));
   // UPDATE must target only role_key='engineering' rows — after DELETE these have no
   // engineering_embedded_firmware counterpart, so no constraint conflict is possible
   assert.match(updateBlock, /WHERE role_key = 'engineering'/);
@@ -292,7 +292,7 @@ test("7-day expiry cron is extracted into runExpiredJobsCleanup and called at st
   assert.match(server, /function runExpiredJobsCleanup\(\)/, "cleanup must be a named function");
   assert.match(server, /cron\.schedule.*runExpiredJobsCleanup/, "cron must call the named function");
   // Startup call via setImmediate in app.listen
-  const listenBlock = server.slice(server.indexOf("app.listen(PORT"));
+  const listenBlock = server.slice(at(server, "app.listen(PORT"));
   assert.match(listenBlock, /runExpiredJobsCleanup\(\)/, "startup must call runExpiredJobsCleanup");
 });
 
@@ -332,6 +332,7 @@ test("/api/jobs auto-applies YoE hard constraint from stored signals when no exp
 
 // ── Phase 4: collar gate wired into every ingest point ───────────────────────
 import { classifyJob } from "../services/jobs/classifyJob.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 test("phase4: aggregator imports classifyJob (unified collar gate) not classifyForIngest", () => {
   const agg = fs.readFileSync("services/jobs/aggregator.js", "utf8");

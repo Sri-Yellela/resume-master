@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { createAdminRouter } from "../routes/admin.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 // Point the out-of-process sink at a scratch directory: these tests assert that nothing is
 // pending, and an ambient sink file left by any other run would make that assertion about the
@@ -176,7 +177,7 @@ test("the endpoint is read-only and admin-gated", async () => {
       "an analytics read must not write");
 
     const admin = fs.readFileSync("routes/admin.js", "utf8");
-    const spendBlock = admin.slice(admin.indexOf('router.get("/spend"'), admin.indexOf('router.get("/limits/:userId"'));
+    const spendBlock = admin.slice(at(admin, 'router.get("/spend"'), at(admin, 'router.get("/limits/:userId"'));
     assert.match(spendBlock, /requireAdmin/, "the spend endpoint must be admin-gated");
     // Match actual SQL statements, not bare keywords: the endpoint's own coverage message
     // contains the word "insert", and a guard that trips on prose is a guard people delete.

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import express from "express";
 import Database from "better-sqlite3";
 import applyRoutes from "../routes/apply.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 /**
  * /api/apply/session — retired, not implemented.
@@ -86,8 +87,8 @@ test("a path-traversing domain cannot reach the filesystem, because nothing touc
   const { status } = await call(server(), "GET", "/api/apply/session/..%2F..%2Fetc%2Fpasswd");
   assert.equal(status, 410);
   const route = fs.readFileSync("routes/apply.js", "utf8");
-  const block = route.slice(route.indexOf("RETIRED — the server does not keep your portal sessions"));
-  assert.doesNotMatch(block.slice(0, block.indexOf("\n}")), /writeFileSync|existsSync|sessionPath/);
+  const block = route.slice(at(route, "RETIRED — the server does not keep your portal sessions"));
+  assert.doesNotMatch(block.slice(0, at(block, "\n}")), /writeFileSync|existsSync|sessionPath/);
 });
 
 test("both routes stay behind requireAuth", () => {
@@ -101,7 +102,7 @@ test("both routes stay behind requireAuth", () => {
 test("the stub shapes are gone", () => {
   const route = fs.readFileSync("routes/apply.js", "utf8");
   assert.doesNotMatch(route, /res\.json\(\{ exists: false \}\)/);
-  const block = route.slice(route.indexOf("const SESSION_RETIRED"), route.indexOf("app.get(\"/api/apply/session/:domain\"") + 200);
+  const block = route.slice(at(route, "const SESSION_RETIRED"), at(route, "app.get(\"/api/apply/session/:domain\"") + 200);
   assert.doesNotMatch(block, /res\.json\(\{ ok: true \}\)/);
 });
 

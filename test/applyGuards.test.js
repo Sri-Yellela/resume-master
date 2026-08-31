@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import Database from "better-sqlite3";
 import applyRoutes from "../routes/apply.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 // TASK A3 submit guards, exercised over real HTTP against an in-memory DB.
 //
@@ -255,7 +256,7 @@ test("migration 072 is present, additive, and byte-identical in both migration p
   const block = (src) => {
     const i = src.indexOf('id: "072_apply_submit_guards"');
     assert.ok(i > 0, "migration 072 must exist");
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   const a = block(server), b = block(script);
   assert.equal(a, b, "the migration must be byte-identical in server.js and scripts/migrations.js");

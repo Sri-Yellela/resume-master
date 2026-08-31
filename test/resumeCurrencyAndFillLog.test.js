@@ -4,6 +4,7 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 import { artifactCurrency, currencySentence, modeForTool } from "../services/resumeCurrency.js";
 import { buildBlanks } from "../services/applyAutomation.js";
+import { at, lastAt } from "../test-support/sourceAnchors.js";
 
 /**
  * TASK AH5 — reuse what already exists, and say what was filled.
@@ -222,13 +223,13 @@ test("both run paths emit blanks, and the audit persists them", () => {
 
 test("the fill log composes what is already stored and keeps nothing of its own", () => {
   const route = fs.readFileSync("routes/apply.js", "utf8");
-  const ep = route.slice(route.indexOf('app.get("/api/apply/run-jobs/:runJobId/fill-log"'));
+  const ep = route.slice(at(route, 'app.get("/api/apply/run-jobs/:runJobId/fill-log"'));
   assert.match(ep, /parseJson\(rj\.answers_json, \[\]\)/);
   assert.match(ep, /parseJson\(rj\.blanks_json, null\)/);
   assert.match(ep, /parseJson\(rj\.corrections_json, \[\]\)/);
   // null and [] are different answers: "we never looked at the form" vs "nothing is empty".
   assert.match(ep, /blanks,/);
-  assert.doesNotMatch(ep.slice(0, ep.indexOf("res.json")), /INSERT INTO|UPDATE /);
+  assert.doesNotMatch(ep.slice(0, at(ep, "res.json")), /INSERT INTO|UPDATE /);
 });
 
 test("the hold NAMES its missing fields, on the row the panel already renders", () => {
@@ -256,7 +257,7 @@ test("migration 091 is byte-identical in both migration sources", () => {
   const grab = (file) => {
     const s = fs.readFileSync(file, "utf8");
     const i = s.indexOf("091_fill_log_and_artifact_provenance");
-    return s.slice(s.lastIndexOf("    {", i), s.indexOf("    },", i) + 6);
+    return s.slice(lastAt(s, "    {", i), at(s, "    },", i) + 6);
   };
   assert.equal(grab("server.js"), grab("scripts/migrations.js"));
   assert.match(grab("server.js"), /ALTER TABLE apply_run_jobs ADD COLUMN blanks_json TEXT/);

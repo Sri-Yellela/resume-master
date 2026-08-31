@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const apiSrc = fs.readFileSync("client/src/lib/api.js", "utf8");
 
@@ -13,7 +14,7 @@ test("errorMessage prefers the human sentence over the machine code", () => {
   assert.match(apiSrc, /function errorMessage\(payload, fallback\)/,
     "a single helper must own this precedence");
   const start = apiSrc.indexOf("function errorMessage(payload, fallback)");
-  const fn = apiSrc.slice(start, apiSrc.indexOf("\n}", start));
+  const fn = apiSrc.slice(start, at(apiSrc, "\n}", start));
   assert.match(fn, /payload\?\.message/, "must read message");
   assert.match(fn, /payload\?\.error/, "must fall back to error for older endpoints");
   assert.match(fn, /return message \|\| error \|\| fallback/, "message wins, then error, then generic");

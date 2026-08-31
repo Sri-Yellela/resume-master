@@ -12,6 +12,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { Z as Z_SCALE } from "../client/src/styles/zLayers.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const shell   = read("client/src/components/PanelShell.jsx");
@@ -116,7 +117,7 @@ test("the PDF and ATS surfaces are no longer inline columns", () => {
   // The two <Panel> columns and their handles are gone; only the board's column remains.
   assert.equal((jobs.match(/<Panel\b/g) || []).length, 1);
   assert.ok(!/<SandboxPanel entry=\{sandbox\} onClose=\{closeSandbox\}\s*\n\s*onSave/.test(
-    jobs.slice(0, jobs.indexOf("The popup panel group"))),
+    jobs.slice(0, at(jobs, "The popup panel group"))),
     "an inline copy of the sandbox survives above the popup group");
   // Exactly one mount of each panel type.
   assert.equal((jobs.match(/<SandboxPanel\b/g) || []).length, 1);
@@ -171,7 +172,7 @@ test("the failsafe review strip still renders nothing when kbFindings is empty",
   // non-empty array, and it is still inside the panel body rather than the sticky chrome.
   assert.match(sandbox, /activeEntry\?\.kbFindings\?\.length > 0 && \(/);
   assert.ok(!/kbFindings\?\.length >= 0/.test(sandbox));
-  assert.ok(!/kbFindings \|\| \[\]/.test(sandbox.slice(0, sandbox.indexOf("kbFindings?.length > 0"))));
+  assert.ok(!/kbFindings \|\| \[\]/.test(sandbox.slice(0, at(sandbox, "kbFindings?.length > 0"))));
 });
 
 test("the generate -> sandbox flow is untouched", () => {

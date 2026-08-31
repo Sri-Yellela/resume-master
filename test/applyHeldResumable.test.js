@@ -28,6 +28,7 @@ import {
   buildGatePacket, shouldBuildPacket, handoffKind, packetFreshness,
   PACKET_STALE_MS, RESUMABLE_HELD_REASONS, GATE_CROSSING_REASONS, HANDOFF_STATUSES,
 } from "../services/applyGatePacket.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const panel = read("client/src/panels/AutoApplyPanel.jsx");
@@ -332,7 +333,7 @@ test("the client refuses the two unresumable states BEFORE opening a tab that ca
   assert.match(ctx, /if \(packet\.stale\)/);
   assert.match(ctx, /no longer on the board/);
   // Each refusal names what to do instead, and neither silently opens a window.
-  const open = ctx.slice(ctx.indexOf("const openHandoff"), ctx.indexOf("// The resume and screenshot"));
+  const open = ctx.slice(at(ctx, "const openHandoff"), at(ctx, "// The resume and screenshot"));
   assert.ok(open.indexOf("if (packet.postingGone)") < open.indexOf("window.open"),
     "a gone posting opens a tab before it refuses");
   assert.ok(open.indexOf("if (packet.stale)") < open.indexOf("window.open"),
@@ -409,7 +410,7 @@ test("reopening an abandoned handoff works for a held review too, not only for a
 test("Retry no longer throws before it reaches the queue", () => {
   // setApplyQueueMsg was called by retryJob and never destructured from the context — a
   // ReferenceError on every click, the same "handler wired to nothing" class as W1's no-op callbacks.
-  const destructured = panel.slice(panel.indexOf("} = useAutoApply()") - 2000, panel.indexOf("} = useAutoApply()"));
+  const destructured = panel.slice(at(panel, "} = useAutoApply()") - 2000, at(panel, "} = useAutoApply()"));
   assert.match(destructured, /setApplyQueueMsg/,
     "retryJob calls setApplyQueueMsg but the panel never takes it from the context");
   assert.match(destructured, /setHandoffMsg/);

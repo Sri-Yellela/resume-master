@@ -7,6 +7,7 @@ import { MIGRATIONS } from "../scripts/migrations.js";
 import { capturedAtsAtApply } from "../routes/apply.js";
 import { trackApiCall, recordAtsOutcome } from "../services/usageTracker.js";
 import { callModel } from "../services/modelCall.js";
+import { at, lastAt } from "../test-support/sourceAnchors.js";
 
 /**
  * AK1 Phase 3 — the adversarial cases, asserted rather than described.
@@ -187,7 +188,7 @@ test("migration 094 is byte-identical in both runners and only ADDS columns", ()
     const src = fs.readFileSync(file, "utf8");
     const i = src.indexOf(`id: "094_application_ats_provenance"`);
     assert.ok(i > 0, `094 missing from ${file}`);
-    return src.slice(src.lastIndexOf("{", i), src.indexOf("\n    },", i))
+    return src.slice(lastAt(src, "{", i), at(src, "\n    },", i))
       .replace(/\r\n/g, "\n").replace(/^\s+/gm, "");
   };
   const sql = grab("scripts/migrations.js");

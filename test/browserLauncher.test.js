@@ -1,7 +1,8 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const launcher   = fs.readFileSync("services/browserLauncher.js",   "utf8");
 const automation = fs.readFileSync("services/applyAutomation.js",   "utf8");
@@ -121,7 +122,7 @@ test("the readiness probe resolves the same way launchBrowser does — they cann
     "the probe must not re-read a raw env var either");
 
   const launchStart = launcher.indexOf("export async function launchBrowser");
-  const launchFn = launcher.slice(launchStart, launcher.indexOf("\nexport async function launchBrowserPage"));
+  const launchFn = launcher.slice(launchStart, at(launcher, "\nexport async function launchBrowserPage"));
   assert.match(launchFn, /await resolveBrowserExecutable\(\)/,
     "launchBrowser must resolve through the same function as the probe");
 });
@@ -174,7 +175,7 @@ test("server imports launchBrowser and probeBrowserAvailability from browserLaun
 test("integrations status endpoint includes browser availability in response", () => {
   assert.match(server, /probeBrowserAvailability/);
   assert.match(server, /createAccountRouter/);
-  const statusRoute = account.slice(account.indexOf('"/api/integrations/status"'), account.indexOf('"/api/integrations/apify-token"'));
+  const statusRoute = account.slice(at(account, '"/api/integrations/status"'), at(account, '"/api/integrations/apify-token"'));
   assert.match(statusRoute, /browser:/);
   assert.match(statusRoute, /available/);
   assert.match(statusRoute, /reasonCode/);
@@ -182,7 +183,7 @@ test("integrations status endpoint includes browser availability in response", (
 
 test("server probes browser availability on startup", () => {
   // Startup probe warms the cache so /api/integrations/status is fast on first request
-  const listenBlock = server.slice(server.indexOf("app.listen(PORT"));
+  const listenBlock = server.slice(at(server, "app.listen(PORT"));
   assert.match(listenBlock, /probeBrowserAvailability/);
 });
 

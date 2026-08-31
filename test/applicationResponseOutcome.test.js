@@ -9,6 +9,7 @@ import {
 } from "../shared/applicationResponse.js";
 import { MIGRATIONS } from "../scripts/migrations.js";
 import applyRoutes from "../routes/apply.js";
+import { at, lastAt } from "../test-support/sourceAnchors.js";
 
 const DAY = 86400;
 const NOW = 1_800_000_000;
@@ -152,7 +153,7 @@ test("migration 095 is byte-identical in both runners and only ADDS", () => {
     const s = fs.readFileSync(file, "utf8");
     const i = s.indexOf(`id: "095_application_response_outcome"`);
     assert.ok(i > 0, `095 missing from ${file}`);
-    return s.slice(s.lastIndexOf("{", i), s.indexOf("\n    },", i))
+    return s.slice(lastAt(s, "{", i), at(s, "\n    },", i))
       .replace(/\r\n/g, "\n").replace(/^\s+/gm, "");
   };
   const sql = grab("scripts/migrations.js");
@@ -229,7 +230,7 @@ test("the panel reuses the shared response vocabulary rather than hardcoding lab
 
 test("the panel shows the score and the outcome as adjacent columns", () => {
   const src = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
-  const cols = src.slice(src.indexOf("const APP_COLS"), src.indexOf("const RES_COLS"));
+  const cols = src.slice(at(src, "const APP_COLS"), at(src, "const RES_COLS"));
   const score = cols.indexOf("ats_score_at_apply");
   const outcome = cols.indexOf("response_outcome");
   assert.ok(score > 0 && outcome > 0, "both columns must exist");
@@ -245,7 +246,7 @@ test("the ATS-at-apply cell is NOT colour-banded on the old thresholds", () => {
   // board runs median 28, max 63, so those bands would render every single row red and read as
   // "every application was bad" when it is only a different scale.
   const src = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
-  const cell = src.slice(src.indexOf("if (c.isAtsAtApply)"), src.indexOf("if (c.isOutcome)"));
+  const cell = src.slice(at(src, "if (c.isAtsAtApply)"), at(src, "if (c.isOutcome)"));
   assert.ok(cell.length > 100, "the ats-at-apply renderer must exist");
   // Comments stripped first: the renderer EXPLAINS the old bands in prose, and an assertion that
   // reads prose as code fails on a file that is doing exactly the right thing. What must be absent
@@ -259,7 +260,7 @@ test("the ATS-at-apply cell is NOT colour-banded on the old thresholds", () => {
 
 test("the summary strip counts unresolved applications separately", () => {
   const src = fs.readFileSync("client/src/panels/DatabasePanel.jsx", "utf8");
-  const fn = src.slice(src.indexOf("function ResponseSummary"), src.indexOf("function EmptyState"));
+  const fn = src.slice(at(src, "function ResponseSummary"), at(src, "function EmptyState"));
   assert.ok(fn.length > 200, "the summary component must exist");
   assert.match(fn, /unresolved/, "too-recent applications must be counted");
   assert.match(fn, /decided = responded \+ silent/,

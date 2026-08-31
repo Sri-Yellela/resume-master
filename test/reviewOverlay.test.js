@@ -14,6 +14,7 @@ import {
   CONFIDENCE_BY_PROVENANCE, MATCH_CONFIDENCE, LOW_CONFIDENCE, GUESS_PROVENANCE, TIER_LABEL,
 } from "../extension/review-overlay.js";
 import { CONFIDENCE_BY_PROVENANCE as SERVER_CONFIDENCE } from "../services/applyAutomation.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const item = (over) => ({
   field: "Field", name: "field", value: "v",
@@ -182,7 +183,7 @@ test("migration 080 is present, additive, and byte-identical in both migration p
   const block = (src) => {
     const i = src.indexOf('id: "080_apply_gate_review"');
     assert.ok(i > 0, "migration 080 must exist");
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   assert.equal(block(server), block(script));
   assert.match(block(server), /ALTER TABLE apply_run_jobs ADD COLUMN gate_review_json TEXT/);
@@ -195,7 +196,7 @@ test("the recorded review does not store corrected values", () => {
   const src = fs.readFileSync("routes/apply.js", "utf8");
   const i = src.indexOf('app.post("/api/apply/gate-review"');
   assert.ok(i > 0);
-  const body = src.slice(i, src.indexOf("app.post", i + 10));
+  const body = src.slice(i, at(src, "app.post", i + 10));
   assert.match(body, /field: String\(e\?\.key/, "only the field identity is kept");
   assert.doesNotMatch(body, /value: String\(e\?\.value/, "the new value must not be persisted");
 });

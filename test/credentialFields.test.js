@@ -23,6 +23,7 @@ import {
   isCredentialField, sanitizeDiscoveredFields, buildAnswers, detectGate, classifyGateEvidence,
   CREDENTIAL_SUBJECT_RE, CREDENTIAL_AUTOCOMPLETE,
 } from "../services/applyAutomation.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const PAYLOAD = {
   field_map: {
@@ -209,7 +210,7 @@ test("the probe reads the DOM, never page source", () => {
   // A bundled JS chunk that merely mentions 'hcaptcha' is not a challenge, and no text match could
   // tell the two apart. Every probe has to be a querySelector against live nodes.
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
-  const probe = src.slice(src.indexOf("export const GATE_EVIDENCE_SRC"), src.indexOf("export const EMPTY_GATE_EVIDENCE"));
+  const probe = src.slice(at(src, "export const GATE_EVIDENCE_SRC"), at(src, "export const EMPTY_GATE_EVIDENCE"));
   assert.ok(probe.length > 200, "the probe source must be locatable");
   for (const forbidden of ["innerHTML", "outerHTML", "documentElement.innerHTML", "textContent.includes", "document.scripts"]) {
     assert.ok(!probe.includes(forbidden), `the gate probe must not read ${forbidden}`);
@@ -263,7 +264,7 @@ test("a CREDENTIAL wall halts the pre-fill; a challenge does not (AE2)", () => {
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
   assert.match(src, /if \(preFillGate\?\.login\) \{/,
     "the pre-fill halt must key on the credential half specifically");
-  const halt = src.slice(src.indexOf("if (preFillGate?.login) {"), src.indexOf("await runDiscovery();"));
+  const halt = src.slice(at(src, "if (preFillGate?.login) {"), at(src, "await runDiscovery();"));
   assert.match(halt, /flowState: 'login_required'/,
     "the only gate that may hold with zero answers is the one where typing is the harm");
   assert.ok(!/if \(preFillGate\)\s*\{/.test(src),
@@ -274,16 +275,16 @@ test("classifyFlowState and the pre-fill check share ONE definition of a gate", 
   // Two copies would drift, and the drift would show up as a page filled by one and held by the
   // other — the exact inconsistency this bug was made of.
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
-  const classify = src.slice(src.indexOf("export async function classifyFlowState"));
+  const classify = src.slice(at(src, "export async function classifyFlowState"));
   assert.match(classify.slice(0, 2000), /const gate = await detectGate\(page\)/);
   // The gate's password probe lives in the evidence source and nowhere else. Counted inside that
   // slice rather than across the file, because defence 2's in-page credential-form check queries
   // the same selector for a different question ("is this control in a login form") and is not a
   // second copy of the gate rule.
-  const probe = src.slice(src.indexOf("export const GATE_EVIDENCE_SRC"), src.indexOf("export const EMPTY_GATE_EVIDENCE"));
+  const probe = src.slice(at(src, "export const GATE_EVIDENCE_SRC"), at(src, "export const EMPTY_GATE_EVIDENCE"));
   assert.equal((probe.match(/querySelectorAll\('input\[type="password"\]'\)/g) || []).length, 1,
     "the gate's password probe must exist in exactly one place");
-  const decider = src.slice(src.indexOf("export function classifyGateEvidence"), src.indexOf("export async function gatherGateEvidence"));
+  const decider = src.slice(at(src, "export function classifyGateEvidence"), at(src, "export async function gatherGateEvidence"));
   assert.ok(!decider.includes("querySelector"),
     "the DECISION must be a pure function of measured evidence — a DOM query here would be a second definition");
 });
@@ -295,7 +296,7 @@ test("EVERY write site in the legacy sweep is credential-guarded", () => {
   // does not touch it. It is injected into the page and cannot be imported, which is why this is
   // asserted against the source.
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
-  const sweep = src.slice(src.indexOf("const FILL_FN_SRC = `"), src.indexOf("const DISCOVER_FN_SRC"));
+  const sweep = src.slice(at(src, "const FILL_FN_SRC = `"), at(src, "const DISCOVER_FN_SRC"));
   assert.match(sweep, /function isCredential\(el\)/, "the sweep needs its own in-page predicate");
 
   // One guard per fill step: generic name/id, placeholder hint, label map, dropdown, radio.
@@ -315,7 +316,7 @@ test("the sweep refuses a password control it would otherwise have written to", 
   // hidden/submit/button/file/image — password is not on it. A profile carrying a key named
   // `password` would have had it typed into the page's password box by step 1.
   const src = fs.readFileSync("services/applyAutomation.js", "utf8");
-  const sweep = src.slice(src.indexOf("const FILL_FN_SRC = `"), src.indexOf("const DISCOVER_FN_SRC"));
+  const sweep = src.slice(at(src, "const FILL_FN_SRC = `"), at(src, "const DISCOVER_FN_SRC"));
   assert.match(sweep, /\["hidden","submit","button","file","image"\]\.includes\(el\.type\)\) return;\s*\n\s*if \(isCredential\(el\)\) return;/,
     "the credential guard must sit immediately after the type filter that omits password");
   assert.equal(isCredentialField({ name: "password", type: "password" }), true);

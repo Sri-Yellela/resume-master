@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import Database from "better-sqlite3";
 import { mapJobRow } from "../services/jobs/mapJobRow.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const server   = fs.readFileSync("server.js", "utf8");
 const jobCard  = fs.readFileSync("client/src/components/JobCard.jsx", "utf8");
@@ -171,11 +172,11 @@ test("mapJobRow reports isActive so the card can say the listing has closed", ()
 // ── the source ───────────────────────────────────────────────────────────────
 
 test("the cleanup retires starred rows and exempts them from the DELETE", () => {
-  const fn = server.slice(server.indexOf("function runExpiredJobsCleanup()"),
-                          server.indexOf("cron.schedule(\"0 3 * * *\""));
+  const fn = server.slice(at(server, "function runExpiredJobsCleanup()"),
+                          at(server, "cron.schedule(\"0 3 * * *\""));
   assert.match(fn, /UPDATE scraped_jobs SET is_active = 0/, "starred rows are retired, not removed");
   // Both exemptions must be on the DELETE, or the UPDATE is immediately undone by it.
-  const del = fn.slice(fn.indexOf("DELETE FROM scraped_jobs"));
+  const del = fn.slice(at(fn, "DELETE FROM scraped_jobs"));
   assert.match(del, /user_jobs WHERE applied = 1/, "applied stays exempt");
   assert.match(del, /user_jobs WHERE starred = 1/, "starred is now exempt too");
   assert.match(fn, /starredRetired/, "the log must count retirements separately from deletions");

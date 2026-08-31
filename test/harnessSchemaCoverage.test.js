@@ -25,13 +25,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { at, lastAt } from "../test-support/sourceAnchors.js";
 
 const stripSqlComments = (s) => s.replace(/--[^\n]*/g, "");
 
 /** Column names declared by a CREATE TABLE statement, ignoring table constraints. */
 function declaredColumns(stmt) {
   const clean = stripSqlComments(stmt);
-  const body = clean.slice(clean.indexOf("(") + 1, clean.lastIndexOf(")"));
+  const body = clean.slice(at(clean, "(") + 1, lastAt(clean, ")"));
   const parts = [];
   let depth = 0, cur = "";
   for (const ch of body) {
@@ -82,7 +83,7 @@ function harnessColumns(src, table) {
       for (const q of m[1].matchAll(/["']([0-9]{3}_[A-Za-z0-9_]+)["']/g)) ids.add(q[1]);
     }
     for (const id of ids) {
-      const block = migrations.slice(migrations.indexOf(`id: "${id}"`));
+      const block = migrations.slice(at(migrations, `id: "${id}"`));
       const stop = block.indexOf("\n    },");
       const sql = stop === -1 ? block : block.slice(0, stop);
       const created = createStatement(sql, table);
@@ -141,7 +142,7 @@ function migrationAddedColumns(src, table) {
   const migrations = fs.readFileSync("scripts/migrations.js", "utf8");
   const added = new Set();
   for (const id of migrationIdsApplied(src)) {
-    const block = migrations.slice(migrations.indexOf(`id: "${id}"`));
+    const block = migrations.slice(at(migrations, `id: "${id}"`));
     const stop = block.indexOf("\n    },");
     const sql = stop === -1 ? block : block.slice(0, stop);
     for (const a of sql.matchAll(new RegExp("ALTER TABLE " + table + " ADD COLUMN (\\w+)", "g"))) added.add(a[1]);

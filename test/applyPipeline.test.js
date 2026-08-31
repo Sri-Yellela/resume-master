@@ -1,7 +1,8 @@
-// SCRAPING � SCHEDULED FOR REMOVAL AFTER MIGRATION
+// SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const server = fs.readFileSync("server.js", "utf8");
 const applyRoute = fs.readFileSync("routes/apply.js", "utf8");
@@ -94,7 +95,7 @@ test("manual apply does not fail early when no resume artifact exists", () => {
   // CASE B: no artifact + manual mode — generation and browser run in parallel.
   // The browser must start even when generateResumeForApply is still pending.
   // The pipeline must NOT hold/fail with resume_required before the browser opens.
-  const caseB = applyRoute.slice(applyRoute.indexOf("CASE B:"), applyRoute.indexOf("CASE C:"));
+  const caseB = applyRoute.slice(at(applyRoute, "CASE B:"), at(applyRoute, "CASE C:"));
   assert.match(caseB, /generation_started/, "must log generation_started status");
   assert.match(caseB, /site_visit_started/, "must log site_visit_started before browser");
   assert.match(caseB, /Promise\.allSettled/, "must run generation and browser in parallel");
@@ -106,7 +107,7 @@ test("manual apply does not fail early when no resume artifact exists", () => {
 test("auto apply triggers generation instead of failing when no resume artifact exists", () => {
   // CASE C: no artifact + auto mode — generation runs first (sequential) to get ATS score.
   // The pipeline must NOT fail immediately — it must attempt generation.
-  const caseC = applyRoute.slice(applyRoute.indexOf("CASE C:"), applyRoute.indexOf("const processRun ="));
+  const caseC = applyRoute.slice(at(applyRoute, "CASE C:"), at(applyRoute, "const processRun ="));
   assert.match(caseC, /generation_started/, "must log generation_started status");
   assert.match(caseC, /generateResumeForApply/, "must call generateResumeForApply");
   assert.match(caseC, /generation_failed/, "must handle generation failure gracefully");
@@ -143,7 +144,7 @@ test("generateResumeForApply reuses existing artifact without triggering a new g
   // same decision, and neither checked whether the stored artifact was still the right one — so an
   // artifact built under a different job profile, or from a base resume the candidate had since
   // rewritten, was reused silently. The reuse itself is unchanged, and is what this pins.
-  const fn = server.slice(server.indexOf("function generateResumeForApply"), server.indexOf("\napp.post(\"/api/generate\""));
+  const fn = server.slice(at(server, "function generateResumeForApply"), at(server, "\napp.post(\"/api/generate\""));
   assert.match(fn, /artifactCurrency\(db, \{ userId, jobId, tool \}\)/, "must ask the shared currency rule");
   assert.match(fn, /if \(currency\.current\)/, "must reuse when the artifact is current");
   assert.match(fn, /currency\.artifact\.html/, "must return the stored html rather than regenerating");
@@ -154,7 +155,7 @@ test("generateResumeForApply reuses existing artifact without triggering a new g
 });
 
 test("generateResumeForApply attaches to in-flight HTTP generation instead of duplicating", () => {
-  const fn = server.slice(server.indexOf("function generateResumeForApply"), server.indexOf("\napp.post(\"/api/generate\""));
+  const fn = server.slice(at(server, "function generateResumeForApply"), at(server, "\napp.post(\"/api/generate\""));
   assert.match(fn, /generationInFlight\.has\(key\)/, "must check HTTP in-flight set");
   assert.match(fn, /pendingGenerationPromises\.has\(key\)/, "must check worker in-flight map");
   assert.match(fn, /generation_timed_out/, "must handle timeout for HTTP-triggered in-flight");
@@ -214,7 +215,7 @@ test("autoApply accepts resumePathPromise and awaits it before first upload", ()
 
 test("auto apply Case C launches browser in parallel with generation via resumePathPromise", () => {
   // Case C must no longer be sequential: browser launches before generation completes.
-  const caseC = applyRoute.slice(applyRoute.indexOf("CASE C:"), applyRoute.indexOf("const processRun ="));
+  const caseC = applyRoute.slice(at(applyRoute, "CASE C:"), at(applyRoute, "const processRun ="));
   assert.match(caseC, /resumePathPromise/, "must pass resumePathPromise to autoApply for parallel gating");
   assert.match(caseC, /site_visit_started/, "must log site_visit_started before browser launch");
   assert.match(caseC, /Promise\.allSettled/, "must await both tracks together via Promise.allSettled");

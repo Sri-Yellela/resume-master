@@ -38,6 +38,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 // Some assertions here are "this mechanism is GONE", and both this file's notes and the source
@@ -259,10 +260,10 @@ test("the clipped panel popover is portalled out of its overflow:hidden ancestor
   assert.match(dbPanel, /import \{ DockPortal \} from "\.\.\/components\/DockPortal\.jsx";/);
   assert.equal((dbPanel.match(/<DockPortal anchorRect=/g) || []).length, 2,
     "the per-cell date and outcome popovers must both be portalled; they are inside a scrolling table");
-  const dateCell = dbPanel.slice(dbPanel.indexOf("if (c.isDate)"), dbPanel.indexOf("if (c.isAtsAtApply)"));
+  const dateCell = dbPanel.slice(at(dbPanel, "if (c.isDate)"), at(dbPanel, "if (c.isAtsAtApply)"));
   assert.match(dateCell, /<DockPortal anchorRect=\{calCell\.rect\}/,
     "the date calendar is still portalled out of the table");
-  const outcomeCellSrc = dbPanel.slice(dbPanel.indexOf("if (c.isOutcome)"), dbPanel.indexOf('if (c.key === "ats_score")'));
+  const outcomeCellSrc = dbPanel.slice(at(dbPanel, "if (c.isOutcome)"), at(dbPanel, 'if (c.key === "ats_score")'));
   assert.match(outcomeCellSrc, /<DockPortal anchorRect=\{outcomeCell\.rect\}/,
     "the outcome picker is inside the same clipping table and must be portalled too");
   assert.match(dbPanel, /<DateFilterButton/,

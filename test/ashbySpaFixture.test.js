@@ -15,9 +15,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const fake = fs.readFileSync("scripts/fakeAts.js", "utf8");
-const spa  = fake.slice(fake.indexOf("function ashbySpaForm("), fake.indexOf("function ashbySpaThanks("));
+const spa  = fake.slice(at(fake, "function ashbySpaForm("), at(fake, "function ashbySpaThanks("));
 
 // ── The measurement ──────────────────────────────────────────────────────────
 // label, name, type, required — exactly as discoverFields reported them off the live page. `name: ""`
@@ -77,7 +78,7 @@ test("THE NAMELESS REQUIRED CONTROL — its only identity is a placeholder", () 
   // Read the `dateField` ternary and check each branch separately: the DEFAULT branch is the live
   // case and must be nameless; the ?answerable=1 branch is allowed a name, because giving it one is
   // the entire difference the run script measures.
-  const dateBlock = spa.slice(spa.indexOf("const dateField"), spa.indexOf("const autofillAria"));
+  const dateBlock = spa.slice(at(spa, "const dateField"), at(spa, "const autofillAria"));
   const [, answerableBranch, defaultBranch] = dateBlock.split(/\?\s*|\s*:\s*(?=`)/);
   assert.match(defaultBranch, /<input placeholder="Pick date\.\.\." required/,
     "the default date field must be the measured one");
@@ -124,7 +125,7 @@ test("it renders CLIENT-SIDE, in two chunks", () => {
     "chunk 2 must land after chunk 1, so the control count climbs rather than jumping");
   // The nameless and unlabelled half arrives in the SECOND chunk, so a readiness check that fires on
   // "any field" misses exactly the fields that matter.
-  const chunk2 = spa.slice(spa.indexOf("var chunk2 ="), spa.indexOf("setTimeout(function(){"));
+  const chunk2 = spa.slice(at(spa, "var chunk2 ="), at(spa, "setTimeout(function(){"));
   assert.ok(chunk2.includes("Pick date...") || chunk2.includes("dateField"),
     "the unanswerable required field must arrive in the late chunk");
 });
@@ -138,7 +139,7 @@ test("submission is recorded the way the real one happens, and navigates", () =>
   assert.match(spa, /fetch\('\/_submit\/ashby-spa'/);
   assert.match(spa, /location\.assign\('\/ashby-spa\/thanks'\)/,
     "a real navigation is what earns `url_changed`; asserting it in the fixture would prove nothing");
-  const thanks = fake.slice(fake.indexOf("function ashbySpaThanks("));
+  const thanks = fake.slice(at(fake, "function ashbySpaThanks("));
   assert.match(thanks, /Thank you for your application/,
     "and the confirmation text classifyFlowState actually matches on");
 });

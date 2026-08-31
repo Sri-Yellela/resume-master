@@ -26,6 +26,7 @@ import {
 // AD1: the outcome partition itself, so the sub-tab assertions read the shared source of truth
 // rather than three literal words that could drift from what routes/apply.js files rows under.
 import { OUTCOME, OUTCOME_LABELS } from "../shared/applyOutcomeGroups.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const read = (p) => fs.readFileSync(p, "utf8");
 const panel = read("client/src/panels/AutoApplyPanel.jsx");
@@ -464,7 +465,7 @@ test("EVERY feed the popup renders is filtered by the scope, including the bulk 
     assert.match(panel, needle, `an unscoped feed survives in the popup: ${needle}`);
   }
   // And nothing inside the modal reads the unscoped lists any more.
-  const modal = panel.slice(panel.indexOf("Apply Runs Review Modal"));
+  const modal = panel.slice(at(panel, "Apply Runs Review Modal"));
   assert.ok(!/applyPending\.(length|map)/.test(modal),
     "the modal still reads the full pending list");
   assert.ok(!/applyQuestions\.(length|map)/.test(modal),

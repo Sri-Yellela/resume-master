@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import Database from "better-sqlite3";
 import { MIGRATIONS } from "../scripts/migrations.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const ID = "082_company_lca_sponsorship";
 const FEIN_ID = "083_lca_source_fein_presence";
@@ -20,7 +21,7 @@ test("migration 082 is byte-identical in server.js and scripts/migrations.js", (
   const block = (src) => {
     const i = src.indexOf(`id: "${ID}"`);
     assert.ok(i > 0, `migration ${ID} must exist`);
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   assert.equal(block(server), block(script),
     "the migration must be byte-identical in server.js and scripts/migrations.js");
@@ -47,7 +48,7 @@ test("migration 083 is byte-identical in both paths, and records a layout fact n
   const block = (src) => {
     const i = src.indexOf(`id: "${FEIN_ID}"`);
     assert.ok(i > 0, `migration ${FEIN_ID} must exist`);
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   assert.equal(block(server), block(script));
 

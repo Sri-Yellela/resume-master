@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs";
 import path from "path";
+import { at } from "../test-support/sourceAnchors.js";
 
 // TASK E3 — the manifest and its written justification must not drift apart.
 //
@@ -126,7 +127,7 @@ test("the injected extractor is self-contained", () => {
 
   // Everything above the first export must be comment or blank; a module-scope const would not
   // survive serialisation.
-  const beforeFirstExport = src.slice(0, src.indexOf("export function"));
+  const beforeFirstExport = src.slice(0, at(src, "export function"));
   for (const line of beforeFirstExport.split("\n")) {
     const t = line.trim();
     if (!t || t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;

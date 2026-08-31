@@ -16,6 +16,7 @@ import {
   FIELD_KEYS, STALE_DECAY_FLOOR,
 } from "../services/kb/formSchemaLayer.js";
 import { MIGRATIONS } from "../scripts/migrations.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 const DAY = 86400;
 
@@ -302,7 +303,7 @@ test("migration 081 is present, additive, and byte-identical in both migration p
   const block = (src) => {
     const i = src.indexOf('id: "081_company_form_schemas"');
     assert.ok(i > 0, "migration 081 must exist");
-    return src.slice(i, src.indexOf("\n    },", i));
+    return src.slice(i, at(src, "\n    },", i));
   };
   assert.equal(block(server), block(script));
   assert.match(block(server), /CREATE TABLE IF NOT EXISTS company_form_schemas/);

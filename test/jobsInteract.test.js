@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import Database from "better-sqlite3";
+import { at } from "../test-support/sourceAnchors.js";
 
 /**
  * PATCH /api/jobs/interact — the star/dislike fallback that never once worked.
@@ -23,8 +24,8 @@ import Database from "better-sqlite3";
 
 const SERVER = fs.readFileSync("server.js", "utf8");
 const handler = SERVER.slice(
-  SERVER.indexOf('app.patch("/api/jobs/interact"'),
-  SERVER.indexOf('// GET /api/jobs/poll'));
+  at(SERVER, 'app.patch("/api/jobs/interact"'),
+  at(SERVER, '// GET /api/jobs/poll'));
 
 // ── the crash ────────────────────────────────────────────────────────────────────────────────
 
@@ -33,8 +34,8 @@ test("user_jobs has no `status` column, in any migration — so nothing may sele
   // than the endpoint quietly starting to read a column whose meaning nobody decided.
   const migrations = fs.readFileSync("scripts/migrations.js", "utf8");
   assert.doesNotMatch(migrations, /ALTER TABLE user_jobs ADD COLUMN status\b/);
-  const created = migrations.slice(migrations.indexOf("CREATE TABLE IF NOT EXISTS user_jobs"));
-  assert.doesNotMatch(created.slice(0, created.indexOf(");")), /\bstatus\b/);
+  const created = migrations.slice(at(migrations, "CREATE TABLE IF NOT EXISTS user_jobs"));
+  assert.doesNotMatch(created.slice(0, at(created, ");")), /\bstatus\b/);
 });
 
 test("the handler no longer selects a column that does not exist", () => {
@@ -172,7 +173,7 @@ test("two users starring the same job keep separate rows", () => {
 
 test("JobCard sends the jobId it already has", () => {
   const card = fs.readFileSync("client/src/components/JobCard.jsx", "utf8");
-  const fn = card.slice(card.indexOf("async function interact(patch)"), card.indexOf("// Fallback handlers"));
+  const fn = card.slice(at(card, "async function interact(patch)"), at(card, "// Fallback handlers"));
   assert.match(fn, /jobId: job\.jobId \|\| job\.id/);
   // The three parameters the endpoint discarded are gone.
   assert.doesNotMatch(fn, /title: job\.title/);

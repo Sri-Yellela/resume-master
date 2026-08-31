@@ -5,11 +5,11 @@ Run from `docs/QUEUED_PROMPTS.md`, 2026-08-30 → 2026-08-31, repository `resume
 | | |
 |---|---|
 | Test baseline at start | **2033 passing, 0 failing** (re-derived, not taken from the doc) |
-| Test baseline at end | **2036 passing, 0 failing** |
+| Test baseline at end | **2038 passing, 0 failing** |
 | Introduced failures | **0** |
-| Net new tests | +3 (2 encoding guards, 1 guard-coverage test) |
+| Net new tests | +5 (2 encoding guards, 2 guard-coverage tests, 1 anchor guard) |
 | Migrations touched | **none** — high-water stays **095** |
-| Commits | 8, all pushed to `main` |
+| Commits | 9, all pushed to `main` |
 | Repos modified | `resume-master` only |
 
 **The recurring theme of this session: three of the five tasks I picked up were already done or
@@ -39,9 +39,11 @@ bullet to `content: "â€¢"` instead of `"•"`, so **every generated resume P
 text-overlapping glyph**. Nothing caught it: the client's `cleanUiText()` repair layer only cleans
 API JSON in the web client, and a PDF never passes through it.
 
-Also repaired: **935 double-encoded sequences**, **18 files broken by one stamped banner in two
-different ways** (6 kept a raw cp1252 `0x97` byte and were not valid UTF-8; 12 had already decayed
-to a literal `U+FFFD`), and **10 BOMs**.
+Also repaired: **935 double-encoded sequences**, **29 files broken by one stamped banner in two
+different ways** (6 kept a raw cp1252 `0x97` byte and were not valid UTF-8; 23 had already decayed
+to a literal `U+FFFD`), and **10 BOMs**. *Eleven of those 29 were found later, by the anchor sweep —
+this sweep's own guard excludes `test/`, and excluding a whole directory to protect two deliberate
+lines in one file left 11 real defects in it.*
 
 Deliberately **not** repaired, because their mojibake is the content: `.cinematic/` repair scripts
 whose lookup tables are mojibake by design, and `client/src/lib/api.js`, which documents each corrupt
@@ -138,6 +140,25 @@ task 7 is committed to. **Sequence 5 behind 7.**
 
 ---
 
+### Follow-on — the source-anchor sweep · **DONE**
+
+Full findings: **`docs/ak2-source-anchor-sweep.md`**. The Shape 5 item this session carried forward
+is closed. The real scale was **284 lookups across 182 slice sites in 59 files**, not 179 pairs; all
+now go through `at()` / `lastAt()`, which throw and name the missing anchor, held at zero by
+`test/sourceAnchorGuard.test.js`.
+
+**Three anchors were already dead, every one in a test that was passing** — over-slicing by 4.0x,
+4.2x and 4.8x. The most instructive was not a `-1` at all: `appScrollProgressRemoved` guarded its end
+anchor with `indexOf("Left group") >= 0`, and that guard could never be true, because the file's own
+helper strips JSX comments before the search and the string exists only inside one. The ternary
+always took its fallback and sliced to end-of-file.
+
+The guard ships pinned against its own coverage — six call shapes it must catch, four it must
+ignore — and was verified to **fail** on an injected violation and pass once removed, because a guard
+never seen to fail is not evidence.
+
+---
+
 ## Shape 5, twice, and it is the durable finding
 
 Both instances are the same defect: **a guard whose coverage is a property of a pattern, with
@@ -147,8 +168,11 @@ nothing checking the pattern.**
    `JobsPanel.jsx` using the mojibake divider comments as anchors. Repairing the dividers moved the
    anchors — and `indexOf` returns `-1` for a missing anchor while `slice` reads `-1` as *"one from
    the end"*, so those tests would **not have failed**. They would have widened the slice and gone on
-   passing over the wrong region. All three now assert both ends before slicing. **179 unguarded
-   `slice`/`indexOf` pairs remain across the suite** — reported, not swept.
+   passing over the wrong region. All three now assert both ends before slicing. The rest of the
+   suite was **swept on 2026-08-31** — see `docs/ak2-source-anchor-sweep.md`: 284 lookups across 59
+   files now go through `at()`/`lastAt()`, which throw on a missing anchor, held at zero by a guard.
+   **Three more anchors were already dead, in tests that were passing**, over-slicing by 4.0x, 4.2x
+   and 4.8x.
 2. **The untracked-call guard could not see the Batch API.** `test/modelCallGuard.test.js` is the
    entire cost-tracking guarantee and scanned for `/\.messages\.create\s*\(/` — which does **not**
    match `messages.batches.create`, because `.messages.create` is not a substring of it. Adding
@@ -218,8 +242,7 @@ missed.
 | **Task 6 / 8** | a JDK + Android SDK / a Mac | Strip the BOM from `libs.versions.toml` and `project.pbxproj` — the two findings most likely breaking a build right now |
 | **Task 7** | nothing | Unblocked once task 4's bands are set |
 
-**Carried forward, not done:** the 179 unguarded `slice`/`indexOf` pairs (a guarded-slice helper
-asserted at both ends closes the class); the duplicated resume CSS (Shape 1 — interpolate
+**Carried forward, not done:** the duplicated resume CSS (Shape 1 — interpolate
 `RESUME_STYLE_BLOCK` into `FORMATTING_SYSTEM`, but only alongside work that can run a real
 generation, since editing a prompt is a behaviour change); `gradle.properties`' hardcoded
 `org.gradle.java.home`, which belongs to task 6.
