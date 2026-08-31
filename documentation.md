@@ -7,6 +7,13 @@
 > fill, and §6's prompt structure has moved on. Treat anything not listed here as indicative rather
 > than authoritative, and check the code. `docs/GATED_HANDOFF_STATUS.md` is the current state of the
 > apply/handoff surface.
+>
+> **§7 is stale too** (added by the 2026-08-30 corruption sweep). It describes job sourcing as
+> "Apify LinkedIn scraper + Apify Indeed scraper run in parallel". Sourcing now runs through the
+> plugin aggregator in `services/jobs/aggregator.js` over Adzuna, and eighteen source files carry a
+> `SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION` banner marking the old path for deletion. The
+> rate limit, cache window and filter list described in §7 should all be re-read from the code
+> before being relied on.
 
 **Last updated:** April 2026  
 **Status:** Local development complete, pre-deployment  

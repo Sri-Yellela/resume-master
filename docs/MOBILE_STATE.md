@@ -1,6 +1,24 @@
 # Mobile State — Phase 1 Audit
 
-**Read-only audit. No mobile code was changed, and none exists to change.**
+> ## ⚠️ SCOPE CORRECTION — READ BEFORE THE HEADLINE BELOW
+>
+> **This audit covers `resume-master` ONLY. Its conclusion is true of this repository and false of
+> the project.** The mobile apps are real and they live in two SIBLING repositories:
+>
+> | Repo | Contains |
+> |---|---|
+> | `../resume-master-android` | Kotlin / Jetpack Compose app, Gradle version catalog, `PHASE_2A.md` |
+> | `../resume-master-ios` | SwiftUI app, `ResumeMaster.xcodeproj`, `PHASE_1_AUDIT.md` |
+>
+> The section below concludes "no mobile project has ever existed in any commit, on any branch."
+> That sentence is scoped to this repository's history and nothing else. Read without this header
+> it asserts the opposite of the truth, and it has already caused that confusion in reverse — which
+> is why the header is here rather than a footnote.
+>
+> Verified 2026-08-30 during the corruption sweep: both sibling repos exist, are git repositories
+> with their own remotes, and contain committed application source.
+
+**Read-only audit. No mobile code was changed, and none exists to change *in this repository*.**
 Audited at `5c76ba1` (2026-08-27). Web test baseline re-derived: **1915 passing, 0 failing.**
 
 ---
