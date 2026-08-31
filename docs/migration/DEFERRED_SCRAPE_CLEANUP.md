@@ -14,7 +14,7 @@
 >   deferred pending "Trigger Adzuna Sync", which is not coming; retiring it is now an open product
 >   decision, along with the Apify token field `AuthScreen.jsx` still collects at signup.
 > - Item 3 (test files) is largely done: the scrape-era tests were re-pointed across commits
->   823b622…e475e55, and the suite is green.
+>   0a9fed2…543c3dc, and the suite is green.
 
 ## What This Tracks
 After the Phase 1–7 LinkedIn/scraping migration, a broad

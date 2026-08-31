@@ -13,37 +13,37 @@ For each posting, rate how well it fits the resume, **1 (poor) to 5 (excellent)*
 column. Judge from the title and description only.
 
 | # | FIT (1-5) | Company | Title |
-|---|---|---|---|
-| 1 | | OpenAI | Software Engineer, Codex -Enterprise Controls |
-| 2 | | Stripe | Frontend Engineer, Expansion |
-| 3 | | OpenAI | Protection Scientist Engineer, Integrity |
-| 4 | | OpenAI | Research Program Manager – Adversarial Model Research |
-| 5 | | Stripe | Technical Program Manager, Core Infrastructure |
-| 6 | | Airbnb | Senior Web Automation Engineer, Quality Platform |
-| 7 | | OpenAI | Network Engineer |
-| 8 | | Figma | Software Engineer - Figma Weave (Tel Aviv, Israel) |
-| 9 | | OpenAI | Full Stack Engineer, Fleet Scheduling |
-| 10 | | Stripe | Software Engineer, Sending |
-| 11 | | OpenAI | Product Designer, Engineering Acceleration |
-| 12 | | Figma | Software Engineer Intern (Winter 2027) |
-| 13 | | OpenAI | Software Engineer, Distributed Data Systems - Robotics |
-| 14 | | Linear | Analytics Engineer |
-| 15 | | Stripe | People Solutions Program Manager |
-| 16 | | Airbnb | Strategic Sourcing, Manager - Engineering & Infrastructure |
-| 17 | | Stripe | Backend Engineer, Credit Decisions |
-| 18 | | OpenAI | Applied AI Engineer, Digital Natives |
-| 19 | | OpenAI | Full Stack Software Engineer, API Experience |
-| 20 | | Stripe | Account Executive, Startups (Scaled Grower) |
-| 21 | | OpenAI | Software Engineer, Infrastructure - Analytics Platform |
-| 22 | | Figma | Executive Recruiter |
-| 23 | | Stripe | Program Manager, Intake & Portfolio Management |
-| 24 | | Stripe | Full Stack Engineer, Link |
-| 25 | | OpenAI | Training: ML Framework Engineer |
-| 26 | | OpenAI | Forward Deployed Engineer - Singapore |
-| 27 | | Airbnb | Senior Manager, Machine Learning Engineering - Communication & Connect |
-| 28 | | Stripe | Risk Advisory Strategist, Card Network Compliance |
-| 29 | | OpenAI | GRC Program Manager, US Government Compliance |
-| 30 | | Figma | Software Engineer - Full Stack |
+|---|-----------|---|---|
+| 1 | 5         | OpenAI | Software Engineer, Codex -Enterprise Controls |
+| 2 | 5         | Stripe | Frontend Engineer, Expansion |
+| 3 | 2         | OpenAI | Protection Scientist Engineer, Integrity |
+| 4 | 2         | OpenAI | Research Program Manager – Adversarial Model Research |
+| 5 | 3         | Stripe | Technical Program Manager, Core Infrastructure |
+| 6 | 4         | Airbnb | Senior Web Automation Engineer, Quality Platform |
+| 7 | 3         | OpenAI | Network Engineer |
+| 8 | 5         | Figma | Software Engineer - Figma Weave (Tel Aviv, Israel) |
+| 9 | 5         | OpenAI | Full Stack Engineer, Fleet Scheduling |
+| 10 | 5         | Stripe | Software Engineer, Sending |
+| 11 | 2         | OpenAI | Product Designer, Engineering Acceleration |
+| 12 | 2         | Figma | Software Engineer Intern (Winter 2027) |
+| 13 | 5         | OpenAI | Software Engineer, Distributed Data Systems - Robotics |
+| 14 | 4         | Linear | Analytics Engineer |
+| 15 | 2         | Stripe | People Solutions Program Manager |
+| 16 | 2         | Airbnb | Strategic Sourcing, Manager - Engineering & Infrastructure |
+| 17 | 5         | Stripe | Backend Engineer, Credit Decisions |
+| 18 | 5         | OpenAI | Applied AI Engineer, Digital Natives |
+| 19 | 5         | OpenAI | Full Stack Software Engineer, API Experience |
+| 20 | 1         | Stripe | Account Executive, Startups (Scaled Grower) |
+| 21 | 5         | OpenAI | Software Engineer, Infrastructure - Analytics Platform |
+| 22 | 1         | Figma | Executive Recruiter |
+| 23 | 1         | Stripe | Program Manager, Intake & Portfolio Management |
+| 24 | 5         | Stripe | Full Stack Engineer, Link |
+| 25 | 4         | OpenAI | Training: ML Framework Engineer |
+| 26 | 4         | OpenAI | Forward Deployed Engineer - Singapore |
+| 27 | 3         | Airbnb | Senior Manager, Machine Learning Engineering - Communication & Connect |
+| 28 | 2         | Stripe | Risk Advisory Strategist, Card Network Compliance |
+| 29 | 1         | OpenAI | GRC Program Manager, US Government Compliance |
+| 30 | 5         | Figma | Software Engineer - Full Stack |
 
 ---
 

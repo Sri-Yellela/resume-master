@@ -1,391 +1,231 @@
-# Queued Prompts — run in this order
+# Queued Prompts — current state
 
-Written after AK1 (ATS engine v4). Each task is a separate session and a separate commit.
-Re-derive the test baseline at the start of every task — the suite grows constantly and every
-recorded number in these docs goes stale. Last known: **2028 passing, 0 failing**; harnesses 32/32;
-migration high-water **095**; mobile contract **v1.1.0** at `contract/mobile-api.v1.json`.
+**Last reconciled:** 2026-08-31, after AK2. Suite **2038 passing, 0 failing**. Migration high-water
+**095**. Mobile contract **v1.1.0** at `contract/mobile-api.v1.json`.
 
-**Repo column matters.** Three repositories are in play:
-- `resume-master` (desktop: server, web client, extension, contract) — most tasks
-- `resume-master-android`
-- `resume-master-ios`
+> **Read this before trusting anything below.** AK2 picked up five tasks and found **three of them
+> already done** — tasks 1 and 3 had landed in commits this file listed as pending, and task 5's
+> headline pricing risk was refuted by live docs the repo already agreed with. This file was four
+> hours old and already wrong. Re-derive state from the repo, not from here. Re-derive the test
+> baseline at the start of every task; the number above will be stale too.
 
-| # | Task | Repo | Blocks | Parallel-safe with | Status |
-|---|---|---|---|---|---|
-| 1 | Outcome UI | desktop | AF5's value | 2, 3 | ✅ **DONE** `10836c1` |
-| 2 | Corruption + defect-pattern sweep | **all three** | Android Phase 2 | 1, 3 | ✅ **desktop done**, mobile reported |
-| 3 | Web client offset paging | desktop | — | 1, 2 | ✅ **DONE** `54cae7a` |
-| 4 | ATS bands, not numbers | desktop | swipe feed design | — | 🟡 **measurement done** `be94268` · thresholds ⛔ owner's grading pass |
-| 5 | Cache-window batching | desktop | — | 4 | 🟡 **assessment done** `761840f` · build ⛔ API credit, and sequence behind 7 |
-| 6 | Android Phase 2a | android | feed + review queue | 5 | ⛔ needs a JDK + Android SDK |
-| 7 | Generation deferral + free ATS at swipe | desktop | mobile feed | — | blocked on 4 |
-| 8 | **iOS Phase 1 audit** | **ios** | iOS Phase 2a | anything | in progress elsewhere |
-
-> **STATUS AS OF 2026-08-30 — re-derived from the repo, not from this table.**
->
-> This table was written before tasks 1 and 3 landed and described both as pending. Anyone reading
-> it cold would have rebuilt work that already exists — which is the failure mode the standing
-> conventions call out, so the status column is now part of the table.
->
-> - **Task 1** landed in `10836c1`. The deliverable was not a new screen: there are TWO application
->   endpoints, and the Database panel's Applications sheet already read the other one. It became two
->   columns (`ATS @ Apply`, `Outcome`) on the sheet that existed.
-> - **Task 3** landed in `54cae7a`, with requirement 4 answered rather than assumed — the board is a
->   NUMBERED pager, so a step uses a cursor and a jump uses offset. Re-verified 2026-08-30 by
->   `scripts/aj2BoardCursor.mjs` in real Chrome: 17 checks, discriminating precondition included.
-> - **Task 2** is done for `resume-master` (`1066b0c`, `54d03dd`, `2c20400`, `d7d49c4`). The mobile
->   half is reported in `docs/ak2-corruption-sweep.md` and deliberately NOT fixed: no JDK, Gradle,
->   Android SDK or Xcode exists on this machine, so the sweep's own "verified by an actual build"
->   cannot be met, and both mobile repos had uncommitted work a commit would have swallowed.
->
-> **Tasks 4 and 5 are PARTLY LANDED — each split cleanly into a half that needed nothing and a half
-> that needs the owner.** Do not re-run the finished halves.
->
-> - **Task 4 — measurement done** (`be94268`, `docs/ak2-ats-band-distribution.md`). The real v4
->   distribution is measured across all 1291 postings against the owner's real resume; candidate
->   cutpoints are reported as populations. **No thresholds are set**, because requirement 5 forbids
->   setting them on self-graded data. What remains needs the owner: **grade the 30 postings in
->   `docs/ak2-ats-grading-set.md`** (1–5, engine score withheld; key in `ak2-ats-grading-key.json`).
->   Then: ρ against that pass, fixed-vs-percentile bands decided on it, cutpoints set, surfaces
->   converted. Two findings there change the design — the required fourth band holds 1 posting in
->   1291, and a band is a fixed number while the score is resume-relative.
-> - **Task 5 — assessment done** (`761840f`, `docs/ak2-cache-batching-assessment.md`). Pricing
->   verified live, cost model reconciled to the recorded $0.041600, the Batch API assessed against
->   the semi path, and requirement 4's real hazard found and fixed: the untracked-call guard could
->   not see `messages.batches.create`. What remains needs credit — requirement 2's measured
->   before/after from a real run. **Two things to read before building it:** batching should be
->   sequenced BEHIND task 7 (it wins by making apply's CASE A artifact path normal, which is what 7
->   already does), and the largest saving is not in this task at all — `enrich_job` is 60% of
->   recorded spend, cannot be cached at any prefix length, and wants the Batch API.
->
-> **What actually blocks the rest** — each is a real dependency, not a scheduling one:
-> task 4's remaining half needs the owner's grading pass; task 5's needs API credit (exhausted
-> 2026-08-25, evidenced in `usage_events`) and should follow 7; task 6 cannot be built or verified
-> here. Full account of this session: `docs/ak2-session-report.md`.
-
-Owner-only, not agent work, running alongside: **AF5 semi campaign** · **extension submission**
-(blocked on `CWS_*` credentials) · **admin-panel build-flavour decision** · **Jobo renewal**.
+**Three repositories:** `resume-master` (desktop) · `resume-master-android` · `resume-master-ios`.
 
 ---
 
-## Standing conventions — prepend to every task below
+## Status
 
-```
-Session-aware: read the files in scope by SYMBOL, not line number — line numbers in this project's
-docs have gone stale twice in a day. Reconstruct state from the repo, not from status documents.
-Regression-proof: for every modified module review its dependents (importers) and children
-(imports) and fix them in the SAME pass, reporting each with a verdict. Migrations additive +
-dual-path, byte-identical in BOTH scripts/migrations.js and the server.js MIGRATIONS array
-(high-water 095). Close each task with a REPORT (files, dependents + verdicts, migration id,
-REAL-run verification — not simulated) then commit & push as ONE focused commit. Re-derive the test
-baseline BEFORE touching anything; introduced failures must be 0.
+| # | Task | Repo | State | Blocked on |
+|---|---|---|---|---|
+| 1 | Outcome UI | desktop | ✅ **DONE** `9edb91a` | — |
+| 2 | Corruption sweep | all three | ✅ **desktop DONE** · mobile reported only | toolchains |
+| 3 | Web client cursor paging | desktop | ✅ **DONE** `5d11da7`, re-verified 17/17 | — |
+| 4 | ATS bands | desktop | ⏸ **measurement done, thresholds blocked** | **owner grading** |
+| 5 | Cache batching | desktop | ⏸ **assessment done, changes blocked** | task 7, then API credit |
+| 6 | Android Phase 2a | android | ⛔ not started | **JDK + Android SDK** |
+| 7 | Generation deferral | desktop | ⛔ not started | task 4 |
+| 8 | iOS Phase 1 audit | ios | ⛔ not started | **a Mac with Xcode** |
 
-EVIDENCE RULE: a passing suite is not evidence for UI or pipeline behaviour in this codebase. A
-totally broken panel once passed the build and 1460 source tests (a TDZ crash — every render threw).
-Confirm UI work by SCREENSHOT and pipeline work by REAL RUN.
-
-THE RECURRING DEFECT SIGNATURE — every significant bug here has been one of these. Watch for all six.
- 1. Two sides of a contract that don't meet (mapJobRow vs the client mapper; popup vs hotkey writing
-    to different tables; `tool` sent vs `toolType` read; mode "manual" coerced to "auto").
- 2. A handler wired to nothing, or to the wrong thing (onSearch={() => {}}; an unscoped openReview
-    surviving in a ternary's fallback arm). Search by IDENTIFIER, not by call-site shape.
- 3. Silence reported as success (a provider that never ran logging "sync complete — 0 jobs cached";
-    enrichment stamping rows complete while writing nothing; a truncated packet list read as
-    batch_empty).
- 4. NULL-hostile predicates over optional data (IN / NOT IN / LIKE / `=` in a cursor chain — four
-    separate production incidents).
- 5. A test that pins a defect or asserts the wrong thing (one asserted a broken ternary verbatim, so
-    fixing it would have failed CI).
- 6. A claim with no code, or code with no claim (a store listing declaring "PII not collected" for a
-    build that types a postal address into an employer's form).
-```
+**Missing tools — the whole blocker list:** a JDK + Android SDK (Android Studio installs both) ·
+a Mac with Xcode · Anthropic API credit (exhausted 2026-08-25, confirmed by provider error text in
+`usage_events`).
 
 ---
 
-## 1 — Outcome UI (desktop)
+## Do these in this order
+
+**1 · Grade `docs/ak2-ats-grading-set.md`** — owner, ~30 minutes, blocks tasks 4 and 7.
+30 postings spanning engine scores 6–64, shuffled, score withheld. Rate each 1–5 for fit against
+your resume. **Do not read `ak2-ats-grading-key.json` first.** This is the only independent check on
+ρ = 0.504; AK1's own 30 were self-graded and were never committed, so its ρ cannot be re-joined.
+
+**2 · Install Android Studio** — unblocks task 6 and the two highest-severity mobile findings.
+Three sessions have now reported "the build has never been verified."
+
+**3 · Top up API credit** — unblocks task 5's verification, task 7's, and AF5.
+
+**4 · Decide the Android admin panel** — open across three reports. 6 screens of fabricated data,
+ungated (no auth exists to gate against), with Delete / Suspend / Impersonate controls that look
+functional and hit nothing. Recommendation: **build flavour, not deletion**, and never in a Play
+build.
+
+**5 · Then run task 4** (set bands) **→ task 7** (generation deferral) **→ task 5** (take the −8.1%,
+batch `enrich_job`). Tasks 6 and 8 run whenever their toolchain lands, in parallel with everything.
+
+---
+
+## Task 4 — ATS bands · thresholds blocked on grading
+
+Full findings: `docs/ak2-ats-band-distribution.md`. Grading sheet: `docs/ak2-ats-grading-set.md`.
+
+Measurement is complete. All 1291 postings re-scored through the real runtime path against the
+owner's profile (6): **median 27, p75 32, p90 39, max 64** — within a point of AK1's independent
+synthetic profile.
+
+**A near-miss worth carrying:** two profiles are active. Profile 5 is the `John Doe` placeholder AK1
+set aside; profile 6 is the real resume. Measuring the wrong one would have failed *quietly* —
+profile 5 gives median 20 / max 42, and the distribution of an empty CV would have been reported as
+the distribution of the engine.
+
+**Two findings that change the design:**
+
+1. **The required fourth band is empty.** "Not enough signal" holds **1 posting in 1291** (0.08%).
+   It stays — it is a *correctness state*, not a population to balance — but it cannot be calibrated
+   from board data, and tuning the other three against it means tuning against one row.
+2. **A band is a fixed number; the score is not.** Profile 6's cutpoints applied to profile 5 give
+   0.2% Strong / 97.6% Weak. Profile 5 is a placeholder rather than a second real user, so the
+   obvious reading overstates it — but the mechanism has a real victim: **a new user whose first
+   upload is thin gets an all-Weak board.**
 
 ```
-OBJECTIVE
-AK1 added the (score, outcome) pair — migration 095 plus shared/applicationResponse.js — and nothing
-in client/src reads /api/apply/applications. Outcomes are API-only. Without a UI, n stays 0 forever
-and the ATS engine can never be validated against reality.
-
-CONTEXT THAT SHAPES THE DESIGN
- • ρ = 0.504. The engine orders coarsely; it does not produce a trustworthy number. Do not build a
-   view that implies precision the engine lacks.
- • A rejection COUNTS AS A RESPONSE. An ATS score is a screening score; it has no business
-   predicting hiring outcomes. This decision is already encoded in shared/applicationResponse.js —
-   read it and follow it, do not re-derive it.
- • NULL is not "no response". MATURITY_DAYS = 30; anything younger is pending, or every early rate
-   reads near zero.
+⛔ DO NOT re-tune the engine. AK1 measured the obvious fix (renormalising over informative
+components) and it made ranking WORSE: ρ 0.448 → 0.242, mis-ordered 33.6% → 41.0%, floating a Fraud
+Strategist above a backend engineering role. Recorded in code with its numbers and pinned by a test.
 
 REQUIREMENTS
-1. A view of submitted applications: company, role, date, resume version sent, ATS score at time of
-   application, and current outcome.
-2. Let the user RECORD an outcome — responded / rejected / interview / offer / no response. This is
-   the ground-truth capture and it is the point of the feature. It must be one interaction, not a
-   form.
-3. Show pending-vs-mature honestly. An application 3 days old is not "no response".
-4. Aggregate ONLY once n supports it. With n < some stated threshold, show the raw list and say
-   "not enough applications yet to show a pattern" — never a correlation computed from four rows.
-5. Reuse the Database panel's listing idiom and PanelControls primitives. Do not clone.
+1. Bands: Strong / Moderate / Weak / Not enough signal. The fourth is REQUIRED — the scorer declines
+   rather than fabricating (false-match rate 22.8% → 0.8%) and that must reach the user as its own
+   state, never as a low score.
+2. Set cutpoints from the owner's graded 30 joined against the engine scores, NOT from percentiles
+   alone. Report where the human's 1–5 and the engine's ordering disagree — the disagreements are
+   the finding.
+3. Address the thin-resume case explicitly. An all-Weak board on first upload is a worse first
+   impression than no bands. Options: profile-relative cutpoints, a floor, or a distinct
+   "your resume needs more detail" state. Decide and state which.
+4. Every surface: ATS report panel, job cards, review screen, and anything the mobile contract
+   exposes. If the numeric score stays in the API, mark it internal in the contract.
+5. The auto-submit gate keeps using the NUMBER (threshold 30, recalibrated from 50 in AK1). Bands
+   are display only. Do not couple the gate to a band.
 
-VERIFY
-Record an outcome; confirm it persists and the maturity window behaves. Screenshot the empty state,
-the small-n state, and a populated state. Commit & push.
+VERIFY: band populations across 1291 postings. Human-vs-engine disagreements reported. Screenshot
+every surface. "Not enough signal" renders distinctly from "Weak".
 ```
 
 ---
 
-## 2 — Corruption and defect-pattern sweep (run separately in ALL THREE repos)
+## Task 5 — Cache batching · reframed by the assessment
 
-**Full prompt: `docs/CORRUPTION_SWEEP.md`.** Self-contained — it carries the six defect shapes with
-their precedents, the encoding checklist, and every known finding to start from. Run it three times,
-once per repository. For the mobile repos, either copy that file across or point the agent at
-`../resume-master/docs/CORRUPTION_SWEEP.md`.
+Full findings: `docs/ak2-cache-batching-assessment.md`.
+
+**The task as written aimed at 0.8% of spend.** `enrich_job` is **60.2%** ($3.32 over 1302 calls),
+uses no caching, and *cannot* — its entire static content is ~347 tokens against a ~1024-token
+minimum cacheable prefix. Its saving must come from the **Batch API**, where it is ideal: background
+pass, `SYSTEM_USER_ID`, no human waiting.
+
+**Available today, no batching, no credit needed to implement:** the prefix is written at 1.25× and
+read at 0.1× — **written every time, read never**. The caching is a 25% surcharge buying nothing.
+Removing the unread breakpoints is an unconditional **−8.1%**.
+
+**−37% and −68% are asymptotes.** Ten generations in one 5-minute window is −33.4%; two is −18.5%.
+And `resume_generate` has run **once** in 1367 events, so the projection rests on one row. Elsewhere
+the same mechanism gets 7.25× and 7.98× reads per write on clustered calls — that is the real
+evidence the thesis works.
+
+**Not on the apply path.** Semi and auto both hold a live browser open blocking on the resume at the
+upload step, against a 24-hour batch SLA. But CASE A (current artifact, no model call) already
+exists, so batching wins by **making CASE A normal** — which is exactly what task 7 does.
+**Sequence 5 behind 7.**
 
 ```
-KNOWN FINDINGS TO START FROM — these were found incidentally, which is the argument for running the
-sweep deliberately:
- • resume-master-android: three literal `r`n sites (app/build.gradle.kts, and TWO in
-   gradle/libs.versions.toml which broke the version catalog). Reported repaired — re-verify.
- • resume-master-android: UTF-8 BOM on 55 of 57 text files. Kotlin tolerates it; Gradle's TOML
-   parser is the open question (tomllib rejected the file outright). Same root cause as the `r`n:
-   PowerShell Set-Content with a single-quoted escape that never expanded.
- • Both mobile READMEs and SYNC.md are written in the present indicative describing unshipped
-   behaviour — Shape 6. SYNC.md's status glyphs are mojibake.
- • desktop: docs/MOBILE_STATE.md concludes "no mobile project has ever existed on any branch". True
-   of that repo, false of the project — it audited the wrong repo and will keep causing this
-   confusion in reverse. Needs a header pointing at the two sibling repos.
- • desktop: extension/manifest.json required utf-8-sig to parse (BOM).
-
-Report per repo. Fix build-breaking corruption immediately, each verified by an actual build.
-Everything else in separate commits by shape.
+1. Remove the unread cache breakpoints on the generation prefix — unconditional −8.1%. Verify
+   against real usage_events, before/after, reconciled.
+2. Batch enrich_job via the Batch API. It is the 60.2%.
+3. modelCallGuard was widened this session to catch messages.batches.create — confirm it still
+   holds and that batching creates no untracked path. All 14 call sites stay tracked.
+4. Verify pricing LIVE against the docs, not from memory. A cached table dated 2026-06-24 claimed a
+   Sonnet 5 rise landing 2026-09-01; the live docs say it will not occur, and
+   shared/anthropicModels.js was already correct.
 ```
 
 ---
 
-## 3 — Web client offset paging (desktop)
+## Task 7 — Generation deferral + free ATS at swipe
+
+**Unblocked the moment task 4's bands are set.** Full prompt below is unchanged and still correct.
 
 ```
 OBJECTIVE
-The server now supports keyset cursors (commit 153bb27 era, contract v1.1.0). The WEB CLIENT still
-pages by offset and has the same defect on its dislike path: every dislike sets disliked=1, the
-default board excludes disliked rows, so the next page silently skips as many jobs as were swiped
-away. Measured server-side at 6 of 25 skipped with 3 swipes per page. This is live on the only
-shipped client.
+Generation fires at QUEUE time (~$0.04, Sonnet). Swiping is ~1s per job, so five idle minutes is
+~60 jobs / ~$2.40 from a gesture costing the user no thought. Defer generation to APPROVAL so a
+right-swipe is free.
 
-READ FIRST
-services/jobs/jobCursor.js — one key list generates the ORDER BY, the SELECT projection AND the
-resume predicate, deliberately, because written twice they drift and a mismatched cursor does not
-error, it returns the wrong rows. Do not reimplement any part of that in the client.
-buildParams is the ONE param builder — extend, never fork.
+A user cannot approve blind. scoreAtsLocally runs with NO model call and NO generated artifact —
+server.js already does exactly this. So the swipe card shows a real fit BAND computed against the
+BASE resume, free, and generation happens on approval.
 
-REQUIREMENTS
-1. Adopt cursor paging on the board's continuous/scroll path. nextCursor is emitted in BOTH modes,
-   so an offset caller can adopt mid-feed.
-2. Cursors are valid only for the filter set that produced them. On any filter change, restart
-   paging — do not carry a stale cursor.
-3. Handle the filter-mismatch rejection error explicitly; it must restart paging, not surface as a
-   failure.
-4. If the board is a discrete paged list rather than a continuous feed, say so and report whether
-   cursors are the right fit — this may be a UI decision rather than a swap.
-
-VERIFY
-Load page 1, dislike several rows, load page 2: NO row skipped. Demonstrate the skip still occurs
-on the offset path, so the test discriminates rather than passing vacuously. Screenshot.
-```
-
----
-
-## 4 — ATS bands, not numbers (desktop)
-
-```
-OBJECTIVE
-AK1 measured ρ = 0.504, τ = 0.357, with 31.6% of pairs still mis-ordered. The engine orders coarsely
-and is honest about declining, but it CANNOT support a displayed number. "This job is a 43" claims
-precision it does not have. Convert every user-facing surface to coarse bands.
-
-⛔ DO NOT re-tune the engine in this task. AK1 measured the obvious fix (renormalising over
-informative components) and it made ranking WORSE: ρ 0.448 → 0.242, mis-ordered 33.6% → 41.0%,
-floating a Fraud Strategist above a backend engineering role. That result is recorded in code with
-its numbers and pinned by a test. Do not undo it.
-
-REQUIREMENTS
-1. Bands, not scores: Strong / Moderate / Weak / Not enough signal. The fourth is REQUIRED — the
-   scorer now declines rather than fabricating (false-match rate 22.8% → 0.8%) and that must reach
-   the user as its own state, never as a low score.
-2. Set the thresholds from the REAL distribution. v4's median is 28 and v3's was 45 — do not carry
-   over v3-era intuitions. Report the band populations across the live board; a band holding 3% or
-   85% of jobs is not a band.
-3. Every surface: the ATS report panel, job cards, the review screen, and anything the mobile
-   contract exposes. If the numeric score stays in the API, mark it internal in the contract with a
-   note that it must not be displayed.
-4. The auto-submit gate keeps using the NUMBER (threshold 30, recalibrated from 50 in AK1). Bands
-   are a display concern only. Do not couple the gate to a band.
-5. BEFORE setting thresholds: the owner should human-grade the same 30 postings AK1 used. Its
-   Phase 3 judgements were the agent's own and share a failure mode with the thing they grade, so
-   ρ may be flattered. Ask for that pass; do not proceed on self-graded data alone.
-
-VERIFY
-Band populations reported across 1291 postings. Every display surface shows a band. "Not enough
-signal" renders distinctly from "Weak". Screenshot each.
-```
-
----
-
-## 5 — Cache-window batching (desktop)
-
-```
-OBJECTIVE
-AK1 located the real token saving and it is not where either of us expected. From a real generation
-row, reconciling exactly to the recorded $0.041600: output 51%, cache write 40%, input 8.6%. A
-shorter prompt is nearly worthless. The 6704-token prefix is already correctly structured and is
-being WRITTEN AND NEVER READ.
-Cache-window batching: −37%. With the Batch API: −68%. No scorer change, no prompt change, no new
-integrity surface.
-
-REQUIREMENTS
-1. Batch generations so the cached prefix is written once and read many times, within the cache
-   window. Report the window and how batching respects it.
-2. Report measured cost before and after against a real run, not an estimate.
-3. Batch API: assess separately. It is asynchronous, so it changes latency and the user-visible
-   flow. Report whether the apply pipeline can tolerate that, especially the semi path where a human
-   is waiting. Do NOT adopt it unilaterally.
-4. usage_events must keep reconciling. All 14 call sites are tracked with guard tests; batching must
-   not create an untracked path.
-5. Verify pricing LIVE against docs.claude.com rather than from memory — AK1 found a cached table
-   claiming a Sonnet 5 price rise that the live docs refuted.
-
-VERIFY
-Real generations, before/after cost from usage_events, reconciled. Commit & push.
-```
-
----
-
-## 6 — Android Phase 2a (resume-master-android)
-
-**Full prompt: `resume-master-android/PHASE_2A.md`**, written into that repo so the agent working
-there has it locally. Self-contained — it carries the four constraints, the toolchain findings, the
-auth credential distinction, every API-layer defect found in the Phase 1 audit, and the deferred
-list.
-
-Summary of what it covers, so this index stands alone:
-
-```
-ORDER WITHIN THIS TASK, NOT NEGOTIABLE:
-  toolchain → auth → contract-typed API layer (including automationTier) → resume persistence.
-  NO FEED IN THIS TASK.
-
-TOOLCHAIN
- • gradle.properties hardcodes org.gradle.java.home=C:\Program Files\Android\Android Studio\jbr —
-   a path that does not exist on this machine and will break the build for anyone whose Studio is
-   elsewhere. Remove it; resolve JDK 17 from the toolchain.
- • compileSdk = 35 with agp 9.0.1. AGP 9 requires compileSdk 36+.
-   android.suppressUnsupportedCompileSdk=35 suppresses the warning, not the minimum. Prime suspect
-   for the next failure after the syntax fix.
- • The build has NEVER been verified — no JDK, no Android SDK, no Studio on the audit machine. "It
-   assembles" is currently unknown, not true.
-
-AUTH — ⛔ USE THE RIGHT CREDENTIAL. This trips people.
-  POST /api/auth/login        -> authContext   SESSION-BOUND. DO NOT PERSIST.
-  GET  /api/auth/mobile-token -> token         sessionLess, durable. THIS is the credential.
-A login-issued token stores session_sid = req.sessionID and is swept by revokeBrowserAuthContexts;
-the mobile mint stores NULL and that sweep deliberately never touches it. Persisting the login token
-produces intermittent, untraceable sign-outs.
-Flow: login → GET /api/auth/mobile-token → persist in EncryptedSharedPreferences (Keystore-backed)
-→ Authorization: Bearer thereafter. Idle 7d sliding, absolute 90d.
-POST /api/auth/revoke-mobile-token for sign-out.
-⛔ BEFORE the first token exists: android:allowBackup="true" with empty backup_rules.xml and
-data_extraction_rules.xml means the token is swept into Google cloud backup by default. Write the
-excludes FIRST.
-
-API LAYER — from contract/mobile-api.v1.json (v1.1.0), not hand-written
- • The existing hand-rolled JobRepository parser reads snake_case; the server emits camelCase. Five
-   fields fail silently to null (salary_min/max/currency, posted_at, contract_type) — salary never
-   renders, tags always empty, remote never labelled. Shape 1, confirmed against the generated
-   schema. Replace it; do not patch it.
- • matchScore = 0 and logoColor = "#888888" are hardcoded in toUiJob() despite the server providing
-   real values.
- • json.getJSONArray("attribution") THROWS on the cache-empty path (that branch omits the key),
-   so a successful 200 empty board reports as a network failure. Adzuna's ToS also requires the
-   attribution be displayed — swallowing it is a compliance problem.
- • The Job model carries 10 fields against the server's 37.
- • EIGHT contract fields have NO null coalescing server-side, so JSON.stringify DELETES them — they
-   arrive ABSENT, not null. A Kotlin decoder throws on a missing key it would accept as null. The
-   contract types them optional; honour that.
- • automationTier MUST land in the Job model in THIS change, not after. gated/account/unknown are
-   completableOnMobile: false — note UNKNOWN is not completable, which is broader than "gated".
-   Filter server-side via tiers_include/tiers_exclude, NEVER client-side: the server pages before
-   the client filters, so hiding rows after the fact yields short pages and a count that disagrees
-   with the list.
- • Use /api/jobs/interact, NOT PATCH /api/jobs/{id}/starred — the latter TOGGLES, so a retried swipe
-   on a flaky phone network undoes itself and returns 200. The contract excludes the toggle routes.
- • Cursor paging (v1.1.0) — build against cursors, not offset. The offset path silently skips rows
-   a user has swiped away.
- • APPLY_DAILY_QUEUE_CAP is a typed response field (DailyCap / QueueCap schemas) carrying limit and
-   remaining. Render remaining; never swallow it.
- • CHECKSUMS.json hashing is LF-NORMALISED on purpose — the desktop repo runs core.autocrlf=true
-   while this repo is CRLF. A raw-byte verify here fails spuriously.
-
-RESUME PERSISTENCE
-The builder is in-memory only; process death loses every edit. Invisible while data is mock, real
-data loss the moment it is not. Room is declared (runtime, ktx, compiler, KSP) and entirely unused —
-zero @Entity anywhere.
-
-ALSO
-The dead Button(onClick={}){Text("Apply")} at ui/jobs/JobCard.kt:20 — a tap, not a gesture, and a
-literal no-op, so it cannot submit, but the copy is misleading. Resolve it here.
-```
-
----
-
-## 7 — Generation deferral + free ATS at swipe (desktop)
-
-```
-⛔ DO NOT START until task 4 lands. The band design determines what the swipe card shows.
-
-OBJECTIVE
-Generation currently fires at QUEUE time (~$0.04, Sonnet). Swiping is ~1s per job, so five idle
-minutes is ~60 jobs / ~$2.40 from a gesture costing the user no thought. Defer generation to
-APPROVAL so a right-swipe is free.
-
-THE PROBLEM THIS MUST SOLVE
-A user cannot approve blind. AK1 established the answer: scoreAtsLocally runs with NO model call and
-NO generated artifact — server.js:7024 already does exactly this. So the swipe card shows a real fit
-BAND computed against the BASE resume, free, and generation happens on approval.
-
-That framing is also more honest than today's: the current score is computed against the GENERATED
+That framing is more honest than today's: the current score is computed against the GENERATED
 resume, so it reflects tailoring the user has not yet decided to pay for. A base-resume band is an
 honest floor — tailoring can only improve it.
 
 REQUIREMENTS
 1. Move the generation trigger from queue to approve. One queue mechanism, two triggers (web and
    mobile) — do NOT add a second path.
-2. The approval screen shows the band, the matched/missing terms, and what WOULD be filled, then
+2. The approval screen shows the band, matched/missing terms, and what WOULD be filled, then
    generates on commit.
-3. A per-profile "generate at queue" toggle, default OFF, for the owner's testing phase — real
-   output is needed while validating, and this is cheaper than reverting later.
-4. APPLY_DAILY_QUEUE_CAP was sized for generate-at-queue. Re-examine: if queueing is free, the cap
-   protects nothing and the meaningful limit moves to approvals. Report; do not change unilaterally.
-5. Both caps must stay SURFACEABLE — the structured payload carries limit and remaining, and the
-   client must render them rather than swallowing an error string.
+3. A per-profile "generate at queue" toggle, default OFF, for the owner's testing phase.
+4. APPLY_DAILY_QUEUE_CAP was sized for generate-at-queue. If queueing is free the cap protects
+   nothing and the meaningful limit moves to approvals. Report; do not change unilaterally.
+5. Both caps stay SURFACEABLE — the structured payload carries limit and remaining; render them.
 
-VERIFY
-Queue a job: no model call (assert by counting generator invocations, as AH5 did). Approve it: one
-generation. The band renders before approval. Toggle ON restores generate-at-queue. Commit & push.
+VERIFY: queue a job, assert zero generator invocations (count them, as AH5 did). Approve it: one
+generation. The band renders before approval. Toggle ON restores generate-at-queue.
 ```
+
+---
+
+## Tasks 6 and 8 — mobile, blocked on toolchains
+
+Full prompts live in their own repos: **`resume-master-android/PHASE_2A.md`** and
+**`resume-master-ios/PHASE_1_AUDIT.md`**. Both self-contained.
+
+**Two findings most likely breaking a build right now, first step in each repo:**
+
+- **android** — BOM on `gradle/libs.versions.toml`. A conforming TOML parser demonstrably rejects it
+  and parses cleanly once stripped. Also `gradle.properties` hardcodes
+  `org.gradle.java.home=C:\Program Files\Android\Android Studio\jbr`.
+- **ios** — BOM sitting in front of the mandatory `// !$*UTF8*$!` magic comment in `project.pbxproj`.
+
+**The iOS finding that settles its Phase 1 networking question:** 32 Swift files on disk, **30 in the
+Sources build phase**. The two omitted are `Data/JobRepository.swift` and
+`Services/LinkedInAuthService.swift` — the entire network and auth surface is **never compiled**.
+Commit `f8be63c` *"feat: JobRepository.swift — consumes /api/jobs"* has zero effect on the built app.
+
+⛔ Adding those files to the target breaks the build immediately on `invalid redeclaration of 'Job'`
+— two structs, 13 fields vs 10, `String` id vs `UUID`. Deciding which is canonical is the same
+decision as Phase 2's contract-typed model. **Defer to Phase 2; do not patch.**
+
+Note: the iOS working tree was committed by another session mid-sweep as `aad5a3a` — re-derive before
+acting on any iOS finding above.
+
+---
+
+## Carried forward
+
+- **Duplicated resume CSS** (Shape 1). 45 of 46 lines of `RESUME_STYLE_BLOCK` are duplicated into the
+  `FORMATTING_SYSTEM` prompt — which is *how* one corrupt character reached both the renderer and the
+  model instruction. Interpolate rather than duplicate, but only alongside work that can run a real
+  generation, since editing a prompt is a behaviour change.
+- **Shape 5 policy.** 113 of 157 desktop test files (72%) `readFileSync` a source file and assert on
+  its text. Not a mass rewrite — a policy going forward, plus re-pinning only tests that touch code
+  being changed. The source-anchor sweep closed the dangerous subset: 284 lookups across 59 files now
+  go through `at()`/`lastAt()`, which throw and name a missing anchor, held at zero by
+  `test/sourceAnchorGuard.test.js`.
+
+---
+
+## Owner-only, running alongside
+
+**AF5 semi campaign** (10 runs per ATS — needs credit) · **extension submission** (blocked on
+`CWS_*` credentials; preflight green, screenshots automated, privacy policy live) · **Android admin
+panel decision** · **Jobo renewal**.
 
 ---
 
 ## Cross-references
 
-Prompts already written and still valid, referenced rather than duplicated:
-- `docs/CORRUPTION_SWEEP.md` — task 2, run in all three repos
-- `resume-master-android/PHASE_2A.md` — task 6, lives in that repo
-- `resume-master-ios/PHASE_1_AUDIT.md` — task 8, lives in that repo
-- `docs/AUTOAPPLY_PROMPTS.md` — A1–A5, the semi campaign and live-run gate
-- `docs/GATED_HANDOFF_PROMPTS.md` — G0–G5, all landed
-- `docs/EXECUTION_PROMPTS.md` — the pipeline-diagnosis series
-- `docs/SWIPE_FEED_DESIGN.md` — updated by the mobile audit; Gate C superseded
-- `docs/ak1-ats-ranking.md` — the ρ measurement and the reverted renormalisation, with its numbers
+- `docs/CORRUPTION_SWEEP.md` — the sweep prompt, for the mobile repos when toolchains land
+- `docs/ak2-corruption-sweep.md` · `ak2-ats-band-distribution.md` · `ak2-ats-grading-set.md` ·
+  `ak2-cache-batching-assessment.md` · `ak2-source-anchor-sweep.md` — AK2 findings
+- `resume-master-android/PHASE_2A.md` · `resume-master-ios/PHASE_1_AUDIT.md`
+- `docs/AUTOAPPLY_PROMPTS.md` · `docs/GATED_HANDOFF_PROMPTS.md` · `docs/EXECUTION_PROMPTS.md` ·
+  `docs/SWIPE_FEED_DESIGN.md`

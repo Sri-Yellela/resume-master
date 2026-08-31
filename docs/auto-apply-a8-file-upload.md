@@ -19,7 +19,7 @@ could not distinguish "the resume was uploaded" from "the resume field was skipp
 the same recorded shape. `uploadToFileInput` and `handleTypedFileUploads` had no end-to-end coverage
 of any kind.
 
-Fixed in `196f4cf`: the four forms with file inputs post `multipart/form-data`, and each submission
+Fixed in `b913b7b`: the four forms with file inputs post `multipart/form-data`, and each submission
 now records `files` (name → `filename`/`contentType`/`size`) separately from `fields`, with `null`
 for an input that was present but left empty.
 

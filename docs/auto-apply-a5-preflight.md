@@ -51,7 +51,7 @@ earlier curl-driven session — and `.txt` outranks `.pdf`, so the cookie jar wo
 floor would have stopped it, but only incidentally: the rule as written made **any** stray file in
 that directory eligible to be submitted as a candidate's resume.
 
-Fixed in `b4b8bda`: a filename must contain `resume`/`cv` unless it is exactly
+Fixed in `bba3cee`: a filename must contain `resume`/`cv` unless it is exactly
 `resume.(txt|md|html|pdf)`, and the seeder prints what it ignored, so the selection is visible rather
 than inferred.
 

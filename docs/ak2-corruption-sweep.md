@@ -46,7 +46,7 @@ The existing mojibake test strips comments and names five files; this was in nei
 
 ## PART 1 — Encoding corruption
 
-### Desktop — fixed in `1066b0c`
+### Desktop — fixed in `82a5f74`
 
 | Finding | Location | Evidence | Severity | Status |
 |---|---|---|---|---|
@@ -81,7 +81,7 @@ mojibake by design, and `api.js` documents each corrupt sequence beside the rege
 Rewriting either would have destroyed the mapping it exists to express. `extension/manifest.json`,
 previously reported as needing `utf-8-sig`, is **already clean** — re-verified, not assumed.
 
-### Line endings — fixed in `54d03dd`
+### Line endings — fixed in `d199f6e`
 
 The three mixed-EOL files are now internally consistent, but that is not what the commit is. With
 `core.autocrlf=true` and no `.gitattributes`, an EOL-only edit produces **no git diff at all**, so
@@ -174,7 +174,7 @@ This is the shape that took the board to zero four times, and it is now the best
 
 | Location | Evidence | Severity | Status |
 |---|---|---|---|
-| `jobsUiTierFilters`, `localAtsScorer`, `resumeFormatter` | sliced source using the **corrupt divider comments** as anchors | High | Fixed in `1066b0c` |
+| `jobsUiTierFilters`, `localAtsScorer`, `resumeFormatter` | sliced source using the **corrupt divider comments** as anchors | High | Fixed in `82a5f74` |
 | ~~179 unguarded `slice`/`indexOf` pairs across the suite~~ | same latent failure mode | Medium | ✅ **SWEPT 2026-08-31** — see below |
 
 This is the finding I would act on next. `indexOf` returns `-1` for a missing anchor and `slice`
@@ -187,7 +187,7 @@ The existing mojibake guard is itself a mild instance: it strips comments and na
 it could not see 935 sequences, ten BOMs, or eighteen broken files. The new guard walks the shipping
 tree and checks mojibake, BOM and UTF-8 validity, comments included.
 
-### Shape 6 — a claim with no code · **FOUND, fixed in `2c20400`**
+### Shape 6 — a claim with no code · **FOUND, fixed in `9c60c2a`**
 
 | Location | Evidence | Status |
 |---|---|---|
@@ -205,9 +205,9 @@ would have produced a second, contradictory note. §7 was the section actually m
 
 | Commit | Contents |
 |---|---|
-| `1066b0c` | Encoding repair — 935 sequences, 18 broken files, 10 BOMs, the resume bullet, 3 Shape 5 test re-pins, 2 new guards |
-| `54d03dd` | `.gitattributes` — LF normalisation as a repository guarantee |
-| `2c20400` | Shape 6 doc corrections |
+| `82a5f74` | Encoding repair — 935 sequences, 18 broken files, 10 BOMs, the resume bullet, 3 Shape 5 test re-pins, 2 new guards |
+| `d199f6e` | `.gitattributes` — LF normalisation as a repository guarantee |
+| `9c60c2a` | Shape 6 doc corrections |
 
 ## Recommended next
 

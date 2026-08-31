@@ -181,7 +181,7 @@ The record above is left as it was written. Two things in it have since been ove
 
 - An eighth trap (the resume upload) was added to A1's scope afterwards. It could not be run at the
   time — no fakeAts form declared `enctype`, so an upload was indistinguishable from a skipped field.
-  Fixed in `196f4cf`; the trap is answered in **`docs/auto-apply-a8-file-upload.md`** (PASS).
+  Fixed in `b913b7b`; the trap is answered in **`docs/auto-apply-a8-file-upload.md`** (PASS).
 - Finding **N2** (the completeness gate exempted file inputs) was fixed in A2 and is verified closed
   by trap 8f. Trap 3's note that the harness has no checkbox anywhere is also stale — one was added
   to the ashby form.

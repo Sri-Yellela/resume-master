@@ -221,7 +221,7 @@ re-run against production. Items resolved by *code path or live API probe* hold 
 
 Worth writing down because it was set up as the gate on every downstream task, and the
 hypothesis attached to it ("a dismissed failure was really reporting the skills_json bug") is
-**false**. Resolved by running the suite in an isolated worktree at `19c53f9` (FE-3), the only
+**false**. Resolved by running the suite in an isolated worktree at `e51dadf` (FE-3), the only
 commit that ever claimed 45:
 
 ```
@@ -294,10 +294,10 @@ held alive by tests that assert it must still exist.
 | 5.4 | `/api/extension/save-jobs-bulk` (`server.js:4737`) | **Test-only.** Its sole client was `saved-jobs-content.js`, removed from the extension in v1.2.0. | **ORPHANED WRITE ENDPOINT.** Still accepts bulk LinkedIn job writes with nothing calling it. Note this outlived its client — the reverse of the usual drift. |
 | 5.5 | `/api/extension/save-job` (single, `server.js:4695`) | **LIVE** — `extension/linkedin-content.js:267`. | **KEEP.** Also keeps `imported_jobs` live (`server.js:4716` is its only real writer). |
 | 5.6 | `/simulate-jobs/:userId` (`routes/adminDb.js:671`) | **LIVE** — `DBInspector.jsx:1322` (Query Simulator tab). | **LIVE BUT LYING.** Hardcodes the removed `sevenDaysAgo` cutoff, so it simulates a filter the board no longer applies. Worse than dead: an admin debugging tool that reports the wrong thing. Fix or remove — do not leave. |
-| 5.7 | `profileMatcher.js` → `scoreJob`, `filterAndRankForProfile` | `server.js:80` **imports, never calls**. | **DEAD, BUT PINNED BY TESTS** (`profileIsolation.test.js:410-411` assert both "must still exist"). Already flagged in bb24241. |
+| 5.7 | `profileMatcher.js` → `scoreJob`, `filterAndRankForProfile` | `server.js:80` **imports, never calls**. | **DEAD, BUT PINNED BY TESTS** (`profileIsolation.test.js:410-411` assert both "must still exist"). Already flagged in c0aeb9c. |
 | 5.8 | `usageTracker.trackScrape` → `scrape_events` table | **Zero callers.** Table has 0 rows. | **DEAD.** Note `trackApiCall` (10 callers) is LIVE and is the real writer of `cache_events` — do not delete `usageTracker.js` wholesale. |
 | 5.9 | `refresh_log` table | **0 writers, 0 rows.** | **DEAD.** |
-| 5.10 | Scrape monitor admin surfaces | — | **DONE — repurposed, not deleted** (5d14c99). See §4. |
+| 5.10 | Scrape monitor admin surfaces | — | **DONE — repurposed, not deleted** (a8bc438). See §4. |
 
 **Keep — load-bearing despite scraping-era origin:** the 7 ATS-direct sources (canonically rank
 *above* Jobo), `aggregator.js`, `schema.js`, `reconcileFingerprint`/`computeReqUid`,

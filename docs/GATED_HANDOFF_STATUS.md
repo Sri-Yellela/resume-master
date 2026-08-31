@@ -1,6 +1,6 @@
 # Gated Portal Handoff — build status and handover
 
-**As of commit `4e02450`, with §8 added 2026-08-23 (AE6).** Read §8 before quoting anything
+**As of commit `8d89585`, with §8 added 2026-08-23 (AE6).** Read §8 before quoting anything
 here as "verified end to end": it states exactly which paths have met a real employer and
 which have not. Companion to `GATED_HANDOFF_ARCHITECTURE.md` (the design, now updated to
 match what was built) and `GATED_HANDOFF_PROMPTS.md` (the task definitions).

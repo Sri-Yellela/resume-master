@@ -23,9 +23,9 @@ path search with a warning if it does not resolve.
 
 Git history confirms it was fixed twice over:
 
-- **`76910ed`** — *"fix: browserLauncher.launchBrowser re-reads raw PUPPETEER_EXECUTABLE_PATH,
+- **`0ea689f`** — *"fix: browserLauncher.launchBrowser re-reads raw PUPPETEER_EXECUTABLE_PATH,
   bypassing validated fallback"*. That is A4's bug, by name.
-- **`8479220`** — *"fix Chromium path mismatch on Railway"*, which added the resolver's `existsSync`
+- **`e54ed88`** — *"fix Chromium path mismatch on Railway"*, which added the resolver's `existsSync`
   guard. The mismatch was real: `3b7fbcd` had set the var to `/usr/bin/chromium-browser` while the
   container package installs `/usr/bin/chromium`.
 
@@ -78,7 +78,7 @@ Note this verifies the launcher and Chromium PDF path; it does not exercise the 
 directly (`source=env:PUPPETEER_EXECUTABLE_PATH`). If that package path moves again, the resolver
 falls through `LINUX_SYSTEM_PATHS` — which contains both `/usr/bin/chromium-browser` and
 `/usr/bin/chromium` — and then the `@sparticuz/chromium` bundle. The class of incident that produced
-`8479220` can no longer take the process down.
+`e54ed88` can no longer take the process down.
 
 **Local papercut, not a bug:** `.env` sets `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`, which does
 not exist on Windows, so every local launch logs
@@ -107,7 +107,7 @@ A5 says: *do not start until A1–A4 are committed and the trap matrix is fully 
 
 | Precondition | Status |
 |---|---|
-| A1–A4 committed | ✅ `686e651`, `168ef32`, `95e8cd0`, and this commit |
+| A1–A4 committed | ✅ `3d61e40`, `915c75e`, `ad931ad`, and this commit |
 | A1 trap matrix all PASS/HOLD | ✅ A2 — every trap passes or holds, no wrong answer submitted |
 | A2 low-confidence policy active | ✅ `label_fuzzy` cannot auto-submit |
 | A3 audit trail recording | ✅ verified end to end, `submit_verified=1` with evidence |

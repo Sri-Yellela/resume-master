@@ -19,7 +19,7 @@
 > with their own remotes, and contain committed application source.
 
 **Read-only audit. No mobile code was changed, and none exists to change *in this repository*.**
-Audited at `5c76ba1` (2026-08-27). Web test baseline re-derived: **1915 passing, 0 failing.**
+Audited at `c8639e7` (2026-08-27). Web test baseline re-derived: **1915 passing, 0 failing.**
 
 ---
 
@@ -93,7 +93,7 @@ There is no mobile code to date. The nearest meaningful anchor is the sole mobil
 | | |
 |---|---|
 | Mobile doc last touched | **2026-05-08** (`c818b9c`) |
-| HEAD | **2026-08-27** (`5c76ba1`) |
+| HEAD | **2026-08-27** (`c8639e7`) |
 | Elapsed | ~3.5 months |
 | **Commits since** | **341** |
 | **Migrations then → now** | **54 → 93** (high-water **`092_profile_summary_opt_in`**) |

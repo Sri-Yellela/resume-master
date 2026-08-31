@@ -118,4 +118,4 @@ The 179-pair item from `docs/ak2-corruption-sweep.md` is **closed** — the real
 lookups across 182 slice sites, and it is now zero, with a guard holding it there.
 
 The sibling instance of the same shape is also closed: `modelCallGuard`'s scan could not see
-`messages.batches.create`, fixed in `761840f`.
+`messages.batches.create`, fixed in `990237e`.

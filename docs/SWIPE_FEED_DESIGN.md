@@ -1,7 +1,7 @@
 # Mobile Swipe Feed — Design + Phase-1 Audit
 
 **Status: DESIGN ONLY — no swipe feed has been built.**
-Audit performed against the working tree at commit `5c76ba1`, with live counts from
+Audit performed against the working tree at commit `c8639e7`, with live counts from
 `data/resume_master.db`.
 
 **One exception, added 2026-08-27:** the generation-cap hole in **Finding 4** has since been
