@@ -35,6 +35,7 @@ import {
 import CompanyIcon from "../components/ui/CompanyIcon.jsx";
 // AH2: the job-detail address, shared with JobCard so the href and the param cannot disagree.
 import { JOB_URL_PARAM, jobIdFromSearch } from "../lib/jobUrl.js";
+import { atsBandFor, atsBandLabel } from "../../../shared/atsBands.js";
 
 // The three extension-bridge stubs that stood here (getLinkedInExtensionInstallUrl,
 // isLinkedInExtensionInstalled, sendExtensionRequest) are gone with cleanup 5.3. They returned
@@ -236,18 +237,21 @@ function WorkBadge({ t, theme }) {
 }
 
 // ── ATS badge ─────────────────────────────────────────────────
+// The second of the two copies of this badge. Both now read their cutpoints and copy from
+// shared/atsBands.js — the duplication is the reason that matters, because the previous pair each
+// hardcoded >=80/>=60 thresholds and would have had to be fixed twice.
 function ATSBadge({ score, onClick }) {
-  if (score == null) return null;
-  const bg = score>=80 ? "#dcfce7" : score>=60 ? "#fef9c3" : "#fee2e2";
-  const fg = score>=80 ? "#166534" : score>=60 ? "#854d0e" : "#991b1b";
+  const band = atsBandFor(score ?? null);
+  const meta = atsBandLabel(band);
   return (
     <span
+      title={meta.blurb}
       onClick={onClick ? e => { e.stopPropagation(); onClick(); } : undefined}
-      style={{ background:bg, color:fg, padding:"2px 8px",
+      style={{ background:meta.bg, color:meta.fg, padding:"2px 8px",
                borderRadius:999, fontSize:10, fontWeight:700,
                cursor: onClick ? "pointer" : "default",
-               border: onClick ? `1px solid ${fg}33` : "none" }}>
-      ATS {score}
+               border: onClick ? `1px solid ${meta.fg}33` : "none" }}>
+      {meta.short}
     </span>
   );
 }

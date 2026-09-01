@@ -9,6 +9,7 @@ import { boardApplicationChip } from "../lib/applyObstacles.js";
 import { api } from "../lib/api.js";
 import { jobDetailHref } from "../lib/jobUrl.js";
 import CompanyIcon from "./ui/CompanyIcon.jsx";
+import { atsBandFor, atsBandLabel } from "../../../shared/atsBands.js";
 
 // AH2: a job's title is a LINK to that job's own address.
 //
@@ -224,16 +225,24 @@ function SkillChips({ skills, max = 5 }) {
 }
 
 // ── ATS badge ───────────────────────────────────────────────────
+// A BAND, NOT A NUMBER. "ATS 43" claims a precision the engine does not have (rho 0.746 against the
+// owner's graded 30, 12.2% of pairs still mis-ordered). The old thresholds here were >=80 green /
+// >=60 amber / else red, carried over from v3 — under v4 the board runs median 27 and max 64, so
+// every row on the board painted RED and the badge read as "every job is bad" when it was only a
+// different scale. Cutpoints now come from shared/atsBands.js, which is also what JobsPanel's copy
+// of this badge reads, so the two cannot drift into disagreeing about the same job.
 function ATSBadge({ score, onClick }) {
-  if (score == null) return null;
-  const bg = score >= 80 ? "#dcfce7" : score >= 60 ? "#fef9c3" : "#fee2e2";
-  const fg = score >= 80 ? "#166534" : score >= 60 ? "#854d0e" : "#991b1b";
+  // A null score is "not enough signal", which IS a band and must render — it is the scorer
+  // declining rather than fabricating, and hiding it makes the honest answer invisible.
+  const band = atsBandFor(score ?? null);
+  const meta = atsBandLabel(band);
   return (
-    <span onClick={onClick ? e => { e.stopPropagation(); onClick(); } : undefined}
-      style={{ background:bg, color:fg, padding:"2px 8px", borderRadius:999,
+    <span title={meta.blurb}
+      onClick={onClick ? e => { e.stopPropagation(); onClick(); } : undefined}
+      style={{ background:meta.bg, color:meta.fg, padding:"2px 8px", borderRadius:999,
                fontSize:10, fontWeight:700, cursor:onClick?"pointer":"default",
-               border:onClick?`1px solid ${fg}33`:"none" }}>
-      ATS {score}
+               border:onClick?`1px solid ${meta.fg}33`:"none" }}>
+      {meta.short}
     </span>
   );
 }
@@ -562,7 +571,12 @@ export default function JobCard({
                 {job.company}
               </span>
               <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt, job.scrapedAt)}</span>
-              {!isLoggedOut && (g?.atsScore != null || job?.baseAtsScore != null) && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>}
+              {/* NOT gated on a non-null score. null is the scorer DECLINING, which is its own
+                  band ("Not enough signal") and the one a user most needs distinguished from a poor
+                  match. The old `score != null` guard here is why that band could never appear on a
+                  card even after the badge learned to render it — caught by scripts/ak2BandSurfaces.mjs,
+                  not by any source test. */}
+              {!isLoggedOut && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore ?? null} onClick={onAts}/>}
               {!isLoggedOut && (
                 <ToggleIconBtn
                   bg="#f59e0b"
@@ -691,8 +705,8 @@ export default function JobCard({
             )}
             <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
 
-            {!isLoggedOut && (g?.atsScore != null || job?.baseAtsScore != null) && (
-              <ATSBadge score={g?.atsScore ?? job?.baseAtsScore} onClick={onAts}/>
+            {!isLoggedOut && (
+              <ATSBadge score={g?.atsScore ?? job?.baseAtsScore ?? null} onClick={onAts}/>
             )}
             {!isLoggedOut && done && (
               <span onClick={onResume ? e => { e.stopPropagation(); onResume(); } : undefined}

@@ -270,7 +270,10 @@ test("AD1 requirement 6: nothing AC1–AC4 built was dropped by the restructure"
     // AE4: on a held listing row the screenshot said nothing the row did not, so it is gone from
     // here. What has to survive is the SUBMITTED case, which is the one a candidate needs later.
     ["the submitted screenshot", /Screenshot of the form ↗/],
-    ["the ATS chip",   /ATS \{app\.atsScore\}/],
+    // AK2: the chip renders a BAND now, not "ATS 43" — the engine cannot support a displayed
+    // number (rho 0.746, 12.2% of pairs mis-ordered). What this line has always guarded is that
+    // the chip EXISTS on the row, so it is re-pinned on the band call rather than deleted.
+    ["the ATS chip",   /atsBandFor\(app\.atsScore/],
     ["the posting",    /The posting ↗/],
     ["Details",        /Details\s*\n\s*<\/button>/],
     ["the soft-hide copy", /hidden, not deleted, and can be restored/],

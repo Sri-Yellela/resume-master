@@ -13,6 +13,7 @@ import { api } from "../lib/api.js";
 import { describeApplication, attemptStatusChip, PREREQUISITE_LABELS } from "../lib/applyObstacles.js";
 import { TileCard, TilePill } from "../components/ui/TileCard.jsx";
 import { companyLabel } from "../../../shared/atsHosts.js";
+import { atsBandFor, atsBandLabel } from "../../../shared/atsBands.js";
 // AD1: OUTCOME_LABELS moved to AutoApplyPanel with the groups themselves — they name the SUB-TABS
 // now, and nothing in this module reads them. The partition still lives in shared/ because
 // routes/apply.js groups rows with it; a copy on each side is how the two come to disagree.
@@ -337,13 +338,19 @@ export function ApplicationObstacleCard({
             thing a candidate actually needs months later when an interview lands and they have to
             remember what they told this employer. The artifact and its endpoint are untouched — the
             audit row still references screenshot_path, and this removes an affordance, not a record. */}
-        {app.atsScore != null && (
-          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
-                         background: app.atsScore >= 80 ? "#dcfce7" : app.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
-                         color: app.atsScore >= 80 ? "#166534" : app.atsScore >= 60 ? "#854d0e" : "#991b1b" }}>
-            ATS {app.atsScore}
-          </span>
-        )}
+        {(() => {
+          // The REVIEW SCREEN's band. Renders even when atsScore is null, because null is the
+          // scorer declining — its own band — and a reviewer deciding whether to submit is exactly
+          // who needs to know the difference between "weak match" and "no basis to judge".
+          const meta = atsBandLabel(atsBandFor(app.atsScore ?? null));
+          return (
+            <span title={meta.blurb}
+              style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                       background: meta.bg, color: meta.fg }}>
+              {meta.short}
+            </span>
+          );
+        })()}
         {app.applyUrl && (
           <a href={app.applyUrl} target="_blank" rel="noreferrer"
             style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
@@ -510,10 +517,9 @@ export function ApplicationRow({ job, theme, variant, artifactUrl, onRetry, onOp
             there at all rather than offered under a softer label. */}
         {variant === "submitted" && job.screenshotAvailable
           && link(artifactUrl(job.id, "screenshot"), "Screenshot of the form ↗")}
-        {job.atsScore != null && chip(
-          job.atsScore >= 80 ? "#dcfce7" : job.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
-          job.atsScore >= 80 ? "#166534" : job.atsScore >= 60 ? "#854d0e" : "#991b1b",
-          `ATS ${job.atsScore}`)}
+        {chip(atsBandLabel(atsBandFor(job.atsScore ?? null)).bg,
+              atsBandLabel(atsBandFor(job.atsScore ?? null)).fg,
+              atsBandLabel(atsBandFor(job.atsScore ?? null)).short)}
         {job.applyUrl && link(job.applyUrl, "The posting ↗")}
 
         <span style={{ flex: 1 }} />
@@ -782,15 +788,13 @@ export function AttemptRow({ job, theme, artifactUrl, packetFor, onHandoff, onRe
               </span>
             );
           })()}
-          {job.atsScore != null && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
-              background: job.atsScore >= 80 ? "#dcfce7" : job.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
-              color: job.atsScore >= 80 ? "#166534" : job.atsScore >= 60 ? "#854d0e" : "#991b1b",
-            }}>
-              ATS {job.atsScore}
-            </span>
-          )}
+          <span title={atsBandLabel(atsBandFor(job.atsScore ?? null)).blurb} style={{
+            fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
+            background: atsBandLabel(atsBandFor(job.atsScore ?? null)).bg,
+            color: atsBandLabel(atsBandFor(job.atsScore ?? null)).fg,
+          }}>
+            {atsBandLabel(atsBandFor(job.atsScore ?? null)).short}
+          </span>
         </div>
       )}
 
@@ -981,13 +985,12 @@ export function CompanyApplicationRow({
         {/* AE4: not offered here. This row is a held application inside a company tile, where the
             whole point of the tier is compactness — and the picture was the least informative chip
             on it. See ApplicationObstacleCard for the full reasoning. */}
-        {app.atsScore != null && (
-          <span style={{ ...chip, border: "none",
-                         background: app.atsScore >= 80 ? "#dcfce7" : app.atsScore >= 60 ? "#fef9c3" : "#fee2e2",
-                         color: app.atsScore >= 80 ? "#166534" : app.atsScore >= 60 ? "#854d0e" : "#991b1b" }}>
-            ATS {app.atsScore}
-          </span>
-        )}
+        <span title={atsBandLabel(atsBandFor(app.atsScore ?? null)).blurb}
+          style={{ ...chip, border: "none",
+                   background: atsBandLabel(atsBandFor(app.atsScore ?? null)).bg,
+                   color: atsBandLabel(atsBandFor(app.atsScore ?? null)).fg }}>
+          {atsBandLabel(atsBandFor(app.atsScore ?? null)).short}
+        </span>
         {app.applyUrl && (
           <a href={app.applyUrl} target="_blank" rel="noreferrer" style={chip}>The posting ↗</a>
         )}

@@ -197,6 +197,13 @@ export const RESPONSE_SCHEMAS = Object.freeze({
   },
   PendingResume: {
     fields: { artifactId: "number|null", atsScore: "number|null", available: "boolean" },
+    fieldNotes: {
+      atsScore:
+        "INTERNAL - DO NOT DISPLAY. The engine orders coarsely (rho 0.746 against a human-graded 30, " +
+        "12.2% of pairs mis-ordered) and cannot support a shown number. Render the band from " +
+        "shared/atsBands.js instead. null means the scorer DECLINED for want of signal - its own " +
+        "band, never a zero. Kept in the payload because the auto-apply gate is numeric (30).",
+    },
   },
   ApproveResponse: {
     description:
@@ -272,6 +279,11 @@ export const RESPONSE_SCHEMAS = Object.freeze({
       startedAt: "number|null", finishedAt: "number|null", createdAt: "number|null",
     },
     fieldNotes: {
+      atsScore:
+        "INTERNAL - DO NOT DISPLAY. The engine orders coarsely (rho 0.746 against a human-graded 30, " +
+        "12.2% of pairs mis-ordered) and cannot support a shown number. Render the band from " +
+        "shared/atsBands.js instead. null means the scorer DECLINED for want of signal - its own " +
+        "band, never a zero. Kept in the payload because the auto-apply gate is numeric (30).",
       missingRequired: "The LABELS of required fields left blank. A hold reading 'required fields " +
         "were left empty' that does not say which is a hold the candidate cannot act on.",
       submitVerified: "Whether the submission was OBSERVED to succeed, as opposed to merely " +

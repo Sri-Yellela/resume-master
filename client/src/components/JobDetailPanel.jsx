@@ -7,6 +7,7 @@ import CoverLetterModal from "./CoverLetterModal.jsx";
 import CompanyViewModal from "./CompanyViewModal.jsx";
 import PanelShell from "./PanelShell.jsx";
 import CompanyIcon from "./ui/CompanyIcon.jsx";
+import { atsBandFor, atsBandLabel } from "../../../shared/atsBands.js";
 
 function ago(postedAt, scrapedAt) {
   let ms = postedAt ? new Date(postedAt).getTime() : NaN;
@@ -194,8 +195,10 @@ export default function JobDetailPanel({
                       : null;
                   const g = selectedJobMeta?.g;
                   const atsScore = g?.atsScore ?? job?.baseAtsScore ?? null;
-                  const atsBg = atsScore >= 80 ? "#dcfce7" : atsScore >= 60 ? "#fef9c3" : "#fee2e2";
-                  const atsFg = atsScore >= 80 ? "#166534" : atsScore >= 60 ? "#854d0e" : "#991b1b";
+                  // Band, not number — cutpoints and copy from shared/atsBands.js. This was the
+                  // third of five copies of the same >=80/>=60 ramp, all of which painted the whole
+                  // board red under v4 (median 27, max 64).
+                  const atsMeta = atsBandLabel(atsBandFor(atsScore));
                   const done = selectedJobMeta?.done;
                   const st = selectedJobMeta?.st;
                   return (
@@ -208,13 +211,11 @@ export default function JobDetailPanel({
                       {salaryStr && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{salaryStr}</span>}
                       {!salaryStr && job.compensation && <span style={{ fontSize:10, color:"#16a34a", fontWeight:700 }}>{job.compensation}</span>}
                       <span style={{ fontSize:10, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
-                      {atsScore != null && (
-                        <span onClick={() => selectedJobMeta?.onAts?.()}
-                          style={{ background:atsBg, color:atsFg, padding:"2px 8px", borderRadius:999,
-                                    fontSize:10, fontWeight:700, cursor:"pointer", border:`1px solid ${atsFg}33` }}>
-                          ATS {atsScore}
-                        </span>
-                      )}
+                      <span onClick={() => selectedJobMeta?.onAts?.()} title={atsMeta.blurb}
+                        style={{ background:atsMeta.bg, color:atsMeta.fg, padding:"2px 8px", borderRadius:999,
+                                  fontSize:10, fontWeight:700, cursor:"pointer", border:`1px solid ${atsMeta.fg}33` }}>
+                        {atsMeta.short}
+                      </span>
                       {done && (
                         <span onClick={() => selectedJobMeta?.onResume?.()} style={{ background:"#e8f6fb", color:"#1a6a8a",
                           padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:700, cursor:"pointer" }}>

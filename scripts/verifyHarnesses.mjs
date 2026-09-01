@@ -68,6 +68,7 @@ const EXCLUDED = {
   ag2ClaimsGeneration: "REAL generation — spends model tokens on every run; run it by hand",
   ag3ClaimSample:      "REAL generation x12 — spends model tokens on every run; run it by hand",
   ak2AtsGradingSet:    "utility, writes the grading sheet to docs/ and asserts nothing",
+  ak2BandSurfaces:     "screenshots; drives the real board in a browser to prove the bands reach pixels",
   fakeAts:             "the fixture server itself",
   verifyHarnesses:     "this runner",
 };

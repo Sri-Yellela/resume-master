@@ -20,6 +20,7 @@
  */
 
 import { actionVerbVocabularyTerms, companyStackTerms, skillVocabularyTerms } from "./skillVocabulary.js";
+import { resumeDepthWarning } from "../shared/atsBands.js";
 
 /**
  * The report format's version, and the cache key for every stored report.
@@ -246,6 +247,9 @@ export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, doma
     skills: compactUnique([...(signalProfile?.skills || []), ...(signalProfile?.keywords || []), ...profileSkills, ...profileKeywords], 64),
     actionVerbs: compactUnique(profileVerbs, 32),
     yearsExperience: signalProfile?.yearsExperience ?? null,
+    // The profile's own declared level, used by the seniority guard below. Read from the DOMAIN
+    // PROFILE rather than parsed out of the resume, deliberately — see the guard's note.
+    seniority: domainProfile?.seniority ?? null,
     structuredFacts,
     // Corpus weights ride along on the basis so the four call sites in server.js load them once per
     // request rather than once per job. Null is a supported state: the scorer falls back to
@@ -744,6 +748,86 @@ function experienceRequirement(jobText) {
   return nums.length ? Math.min(...nums) : null;
 }
 
+// ── AK2: THE SENIORITY GUARD ────────────────────────────────────────────────────────────────────
+//
+// THE DEFECT, from the owner's human grading of 30 postings. "Software Engineer Intern (Winter
+// 2027)" scored **60** — third-highest on the whole board — against a mid-level profile the human
+// graded **2 of 5**. It was the single worst inversion in the set and cost 0.10 of Spearman rho by
+// itself.
+//
+// Two things stack to produce it, and neither is a bug on its own. An intern posting states no
+// years requirement, so experienceRatio returns null and the flat 85% neutral credit applies (see
+// the long note at that constant — the flat rate is measured and deliberate). And an intern JD at a
+// strong engineering company is written in dense engineering vocabulary, so the skill component
+// scores well too. Term overlap is genuinely high. The posting is still wrong for the candidate,
+// for a reason no amount of term matching can see: they cannot take the job.
+//
+// A CAP, NOT A PENALTY. Subtracting points would leave a well-worded internship outranking a
+// mediocre senior role, because the thing being measured is not "slightly worse fit" — it is a
+// categorical mismatch. A ceiling says the right thing: however well the words line up, this cannot
+// be a strong match.
+//
+// KEYED ON THE PROFILE'S DECLARED SENIORITY, NOT ON YEARS PARSED FROM THE RESUME, and that choice
+// is measured rather than aesthetic. The obvious implementation reads years_of_experience — but
+// extractUserYearsExperience returns null for the owner's real resume ("4 years building scalable
+// systems" never says the word "experience"), so a years-keyed guard is DEAD CODE that never fires.
+// Repairing the extractor to make it fire was tried and measured, and it makes ranking WORSE:
+// rho 0.643 -> 0.552. It raises every non-engineering posting that happens to state a satisfied
+// year requirement — a Program Manager +10, an Account Executive +10, a Risk Strategist +5 — which
+// is the SAME failure AK1 documented when it reverted renormalisation: "it handed the ranking back
+// to the experience flag from the other direction". domain_profiles.seniority is already populated,
+// says exactly what is needed, and costs the experience component nothing.
+//
+// MEASURED, on the owner's graded 30:
+//   baseline                              rho 0.643   tau-b 0.507   mis-ordered 16.1%
+//   + years extractor repaired (rejected) rho 0.552   tau-b 0.433   mis-ordered 19.1%
+//   + this guard                          rho 0.746   tau-b 0.594   mis-ordered 12.2%
+//
+// Fires on 11 of 1291 live postings (0.9%).
+const SENIORITY_CAP = 20;
+
+// TITLE ONLY, and that is load-bearing. Scanning the description instead fired on three senior
+// backend roles whose opening line reads "if you are an intern, new grad, staff, frontend or
+// fullstack applicant, please do not apply using this link" — a posting EXCLUDING interns, read as
+// evidence that it is one. The title is where a posting says what the role is.
+// \b matching keeps "internal" and "international" from reading as "intern".
+const JUNIOR_TITLE = new RegExp([
+  String.raw`\bintern(s|ship)?\b`,
+  String.raw`\bnew\s+grad(uate)?s?\b`,
+  String.raw`\brecent\s+grad(uate)?s?\b`,
+  String.raw`\bco-?op\b`,
+  String.raw`\buniversity\s+grad(uate)?s?\b`,
+  String.raw`\bentry[-\s]level\b`,
+  String.raw`\bearly[-\s]career\b`,
+  String.raw`\bapprentice(ship)?\b`,
+  String.raw`\bcampus\s+hire\b`,
+].join("|"), "i");
+
+/** Seniorities for whom a junior posting is NOT a mismatch. Anything else is capped. */
+const ENTRY_SENIORITIES = new Set(["intern", "entry", "junior", "student", "new_grad", "new grad", "graduate"]);
+
+export function isJuniorPosting(title) {
+  return JUNIOR_TITLE.test(String(title || ""));
+}
+
+/**
+ * Should this posting's score be capped for this profile?
+ *
+ * Returns null when it should not, so the caller can record the reason when it should. An UNKNOWN
+ * seniority does not fire the guard — declining to cap is the conservative direction, and it keeps
+ * a profile that has simply not filled the field from being told every junior role is a poor match.
+ */
+export function seniorityCapFor(title, seniority) {
+  if (!isJuniorPosting(title)) return null;
+  const level = String(seniority || "").trim().toLowerCase();
+  if (!level || ENTRY_SENIORITIES.has(level)) return null;
+  return {
+    cap: SENIORITY_CAP,
+    reason: `This is an early-career posting and your profile is set to "${seniority}". ` +
+            `However well the keywords match, the level does not.`,
+  };
+}
+
 function hardConstraintMisses(jobText, facts = {}) {
   const text = normaliseAtsTerm(jobText);
   const misses = [];
@@ -935,9 +1019,14 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   const skillScore = (skillRatio == null ? 1 : skillRatio) * SKILL_POINTS;
   const verbScore = (verbRatio == null ? 1 : verbRatio) * VERB_POINTS;
   const hardPenalty = hardMisses.length * HARD_MISS_PENALTY;
-  const score = declineReasons.length
+  const rawScore = declineReasons.length
     ? null
     : Math.max(0, Math.min(100, Math.round(skillScore + verbScore + experienceScore - hardPenalty)));
+
+  // Applied AFTER the components, because it is not a component — it is a ceiling on what term
+  // overlap is allowed to conclude. See the note at SENIORITY_CAP.
+  const seniorityCap = rawScore == null ? null : seniorityCapFor(job?.title, basis.seniority);
+  const score = seniorityCap ? Math.min(rawScore, seniorityCap.cap) : rawScore;
 
   return {
     source: LOCAL_ATS_SOURCE,
@@ -949,6 +1038,18 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
     weighting: weights && weights.size
       ? { applied: true, terms: weights.size }
       : { applied: false, terms: 0 },
+    // Provenance of the seniority guard, in the same shape as `weighting`. Carries the pre-cap
+    // score so a reader can see WHAT was capped, not merely that something was — a cap with no
+    // visible before-value is indistinguishable from a genuinely low score.
+    seniority_cap: seniorityCap
+      ? { applied: true, cap: seniorityCap.cap, raw_score: rawScore, reason: seniorityCap.reason }
+      : { applied: false },
+    // Whether a flat, all-Weak board is explained by the RESUME rather than by the jobs. Computed
+    // here, on the basis, so it is identical on every posting and every surface — a per-job
+    // recomputation would flicker, and a client-side one cannot see the profile's skill list.
+    // See the THIN_RESUME note in shared/atsBands.js for why this is a distinct state rather than
+    // profile-relative cutpoints.
+    resume_depth: resumeDepthWarning(basis),
     tier1_matched: compactUnique(matchedSkills, 40),
     tier1_missing: compactUnique(missingSkills, 40),
     // AH3's third bucket. Competencies are real and wanted, but they are qualities, not skills —

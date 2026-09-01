@@ -18,6 +18,7 @@ import {
   setProfileClaim,
 } from "../lib/profileSuggestions.js";
 import { profileSignalKey } from "../../../shared/profileSignals.js";
+import { atsBandFor, atsBandLabel, ATS_BAND } from "../../../shared/atsBands.js";
 
 export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) {
   const { theme } = useTheme();
@@ -192,10 +193,28 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
   // whatever comes after) cannot quietly switch two sections back on for local reports.
   const isLocalReport = String(activeReport.source || "").startsWith("local_ats");
 
-  const R = 32, cx = 40, cy = 40, stroke = 7;
-  const circumference = 2 * Math.PI * R;
+  // THE DONUT AND ITS NUMBER ARE GONE, and the reason is the whole of AK2 task 4. A ring filled to
+  // 43/100 in a colour ramp is the most precise-looking thing on the screen, and the engine cannot
+  // support it: rho 0.746 against the owner's human-graded 30, with 12.2% of pairs still
+  // mis-ordered. It orders coarsely and honestly; it does not measure. The colour ramp was worse
+  // than merely imprecise — it was >=80 green / >=60 amber / else red, carried over from v3, and
+  // under v4 (median 27, max 64) NOTHING on the board ever cleared 60, so every single job rendered
+  // red. `pct` is retained only for the best-possible chip below, which is LLM-report-only.
   const pct = Math.max(0, Math.min(100, activeReport.score ?? score ?? 0));
-  const scoreColor = pct >= 80 ? "#22c55e" : pct >= 60 ? "var(--color-warning)" : "#ef4444";
+
+  // Rendered for every report, including a declined one. The old card was gated on `score != null`,
+  // so the scorer's most honest output — "I cannot judge this" — displayed as an empty space.
+  const band = atsBandFor(activeReport.score ?? score ?? null);
+  const atsCard = {
+    render: true,
+    meta: atsBandLabel(band),
+    isUnknown: band === ATS_BAND.NOT_ENOUGH_SIGNAL,
+    declineReasons: Array.isArray(activeReport.decline_reasons) ? activeReport.decline_reasons : [],
+    seniority: activeReport.seniority_cap?.applied ? activeReport.seniority_cap : null,
+    // Shown ABOVE the band, not instead of it: the user still gets the ordering, plus the reason
+    // the whole board looks flat. Telling them only "Weak" would be true and useless.
+    depth: activeReport.resume_depth || null,
+  };
   // AG2. CLAIMED, not merely suggested. The old lookup unioned every status, so a term the
   // scrape-time aggregator had written unprompted rendered as an already-added chip the user could
   // not click — an auto-opt-in the user never made. Only what the candidate said counts here.
@@ -223,25 +242,50 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
     // the panel body's height instead of letting it extend and scroll.
     <div style={{ padding:"16px 16px", display:"flex", flexDirection:"column", gap:14 }}>
 
-      {/* Score card — shown when a score is available */}
-      {activeReport.score != null && (
+      {atsCard.depth && (
+        <div style={{ background:"var(--color-surface-offset)", border:"1px solid var(--color-border)",
+                      borderRadius:12, padding:"12px 14px" }}>
+          <div style={{ fontSize:12.5, fontWeight:800, color:"var(--color-text)", marginBottom:4 }}>
+            {atsCard.depth.headline}
+          </div>
+          <div style={{ fontSize:11.5, color:"var(--color-text-muted)", lineHeight:1.6 }}>
+            {atsCard.depth.detail}
+          </div>
+        </div>
+      )}
+
+      {/* Band card. Renders for EVERY report, including a declined one. */}
+      {atsCard.render && (
         <div style={{ background:"var(--color-surface)", border:`1px solid ${"var(--color-border)"}`,
                       borderRadius:16, padding:"16px", display:"flex", alignItems:"center", gap:16 }}>
-          <div style={{ position:"relative", width:80, height:80, flexShrink:0 }}>
-            <svg width={80} height={80} viewBox="0 0 80 80">
-              <circle cx={cx} cy={cy} r={R} fill="none" stroke={"var(--color-surface-offset)"} strokeWidth={stroke}/>
-              <circle cx={cx} cy={cy} r={R} fill="none" stroke={scoreColor} strokeWidth={stroke}
-                strokeLinecap="round" strokeDasharray={circumference}
-                strokeDashoffset={circumference * (1 - pct / 100)}
-                transform={`rotate(-90 ${cx} ${cy})`}
-                style={{ transition:"stroke-dashoffset 0.8s ease-out" }}/>
-            </svg>
-            <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center",
-                          justifyContent:"center", fontWeight:900, fontSize:22, color:scoreColor }}>
-              {activeReport.score ?? score ?? "—"}
+          <div style={{ flexShrink:0, minWidth:104, display:"flex", flexDirection:"column",
+                        alignItems:"center", gap:6 }}>
+            <div style={{ background:atsCard.meta.bg, color:atsCard.meta.fg, padding:"10px 14px",
+                          borderRadius:12, fontWeight:900, fontSize:15, textAlign:"center",
+                          lineHeight:1.2, width:"100%" }}>
+              {atsCard.meta.label}
+            </div>
+            <div style={{ fontSize:10, color:"var(--color-text-muted)", textAlign:"center" }}>
+              {atsCard.isUnknown ? "no judgement" : "fit band"}
             </div>
           </div>
           <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:12, color:"var(--color-text-muted)", lineHeight:1.6, marginBottom:8 }}>
+              {atsCard.meta.blurb}
+            </div>
+            {atsCard.declineReasons.length > 0 && (
+              <ul style={{ margin:"0 0 8px 0", paddingLeft:16, fontSize:11.5,
+                           color:"var(--color-text-muted)", lineHeight:1.6 }}>
+                {atsCard.declineReasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            )}
+            {atsCard.seniority && (
+              <div style={{ fontSize:11.5, padding:"6px 10px", borderRadius:8, marginBottom:8,
+                            background:"var(--color-surface-offset)", color:"var(--color-text-muted)",
+                            border:"1px solid var(--color-border)" }}>
+                {atsCard.seniority.reason}
+              </div>
+            )}
             <div style={{ fontSize:12, color:"var(--color-text-muted)", fontStyle:"italic",
                           lineHeight:1.6, marginBottom:8 }}>
               {activeReport.verdict || activeReport.experience?.summary || "Deterministic local ATS match against this profile."}

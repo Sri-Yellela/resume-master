@@ -3,6 +3,7 @@ import { useState, useRef } from "react";
 import { useTheme } from "../../styles/theme.jsx";
 import { Footer } from "../../components/Footer.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";
+import { atsBandFor, atsBandLabel } from "../../../../shared/atsBands.js";
 
 const RESUME_PAGE_WIDTH  = 794;
 const RESUME_PAGE_HEIGHT = 1123;
@@ -100,9 +101,9 @@ export function GenerateToolPage() {
                           border: `1px solid ${theme.border}` }}>
               <div>
                 <span style={{ fontWeight: 700, color: theme.text }}>Resume generated</span>
-                {result.atsScore && (
+                {result.atsScore != null && (
                   <span style={{ marginLeft: 12, fontSize: 12, color: theme.textMuted }}>
-                    ATS score: <strong style={{ color: theme.accent }}>{result.atsScore}</strong>/100
+                    Fit: <strong style={{ color: theme.accent }}>{atsBandLabel(atsBandFor(result.atsScore)).label}</strong>
                   </span>
                 )}
               </div>

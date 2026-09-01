@@ -28,6 +28,7 @@ import { TileGrid } from "../components/ui/TileCard.jsx";
 import { PanelSubTabs, PanelSearch, DateFilterButton } from "../components/ui/PanelControls.jsx";
 import { OUTCOME, OUTCOME_LABELS } from "../../../shared/applyOutcomeGroups.js";
 import { companyLabel, UNKNOWN_COMPANY } from "../../../shared/atsHosts.js";
+import { atsBandFor, atsBandLabel } from "../../../shared/atsBands.js";
 
 // ============================================================
 // AutoApplyPanel — the auto-apply pipeline, on its own tab
@@ -1239,7 +1240,7 @@ export function AutoApplyPanel() {
                           )}
                           <span style={{ fontSize:10, color:theme.textDim, whiteSpace:"nowrap" }}>
                             {p.answerCount} answer{p.answerCount === 1 ? "" : "s"}
-                            {p.resume.atsScore != null ? ` · ATS ${p.resume.atsScore}` : ""}
+                            {` · ${atsBandLabel(atsBandFor(p.resume.atsScore ?? null)).short}`}
                           </span>
                         </div>
 

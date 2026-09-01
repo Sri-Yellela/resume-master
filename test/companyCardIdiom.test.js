@@ -134,7 +134,9 @@ test("AC3: nothing was dropped from the row on the way to being compact", () => 
   for (const control of [
     // AE4: no screenshot on a compact held row - it was the least informative chip on the tier
     // whose entire purpose is compactness.
-    /Resume PDF ↗/, /Generate a resume/, /ATS \{app\.atsScore\}/,
+    // AK2: the chip renders a BAND now rather than "ATS 43". Re-pinned on the band call, because
+    // what this list guards is that the control survived the compaction — not how it is worded.
+    /Resume PDF ↗/, /Generate a resume/, /atsBandFor\(app\.atsScore/,
     /The posting ↗/, /Run it again/, /posting gone — cannot be resumed/, /\{resolveLabel \|\| "Open"\}/,
     /Details/,
   ]) {

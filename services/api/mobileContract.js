@@ -149,7 +149,7 @@ export const JOB_FIELD_TYPES = Object.freeze({
   bucketDomain:        { type: "string",  nullable: true },
   directApply:         { type: "boolean" },
   companyIconUrl:      { type: "string",  nullable: true, format: "uri" },
-  matchScore:          { type: "number",  nullable: true },
+  matchScore:          { type: "number",  nullable: true, description: "INTERNAL — DO NOT DISPLAY THIS NUMBER. The local ATS engine orders coarsely and cannot support a shown figure: Spearman rho 0.746 against a human-graded set of 30, with 12.2% of pairs still mis-ordered. \"This job is a 43\" claims a precision it does not have. Render the BAND instead — Strong (>=44) / Moderate (>=26) / Weak / Not enough signal — whose cutpoints and copy are defined once in shared/atsBands.js. A NULL IS NOT A ZERO: null means the scorer declined for want of signal, which is its own band and must never render as a low score. The number stays in the payload because the auto-apply gate is a numeric threshold (30) and mobile needs to show remaining capacity against it; that is the only sanctioned use." },
   starred:             { type: "boolean", description: "Per (user, domain profile). The Saved tab is starred=1." },
   visited:             { type: "boolean", description: "Per (user, domain profile)." },
   disliked:            { type: "boolean", description: "Per (user, domain profile). Excluded from the default board." },
