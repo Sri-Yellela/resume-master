@@ -1,15 +1,15 @@
 # AJ2 — Android Phase 2a: toolchain, auth, contract-typed API layer
 
 Run 2026-09-01. Desktop suite re-derived before and after: **2050 passing, 0 failing** both times.
-Android: **32 JVM unit tests, 0 failing** (31 new). Android commits `e35b6f8`, `d8e0611`, `01c1221`.
-Desktop commit `8df2f6c`.
+Android: **32 JVM unit tests, 0 failing** (31 new). Android commits `e35b6f8`, `d8e0611`, `01c1221`,
+`6cb7a91`. Desktop commits `8df2f6c`, `a0be58b`, `54eb06e`.
 
 Steps 1–3 of `resume-master-android/PHASE_2A.md` are done and verified on a real emulator against
 the real local server. **Step 4 (resume persistence) is not started.**
 
 ---
 
-## The finding that outranks the rest: `Job.matchScore` is always null
+## The finding that outranks the rest: `Job.matchScore` was always null — FIXED `54eb06e`
 
 `services/jobs/mapJobRow.js:43` reads:
 
@@ -31,9 +31,22 @@ mobile client that implements it exactly as specified renders **"Not enough sign
 jobs**. This is not theoretical — the screenshot in this run shows a card whose row has
 `ats_score = 43` in the database rendering as "No signal".
 
-**Fix, not applied here:** map `ats_score` into `matchScore` in `mapJobRow`, or add `baseAtsScore`
-to the contract. Either is a contract change (regeneration + `CHECKSUMS.json` + the `--check` test),
-so it belongs to whoever owns the desktop side, not to a mobile pass reaching across.
+**Fixed in `54eb06e`** (desktop) and re-vendored in android `6cb7a91`. `mapJobRow` now reads
+`j.ats_score ?? j.matchScore ?? null` — `??` and not `||`, because a score of 0 is a real score that
+bands as Weak while null means the scorer declined, and `||` cannot tell them apart.
+
+Contract **1.1.0 → 1.1.1**. The schema is byte-identical apart from the version string; the bump
+exists because the mobile repos pin a checksum and needed a reason to re-copy.
+
+Verified end to end on the five boundary rows: the API answers 44 → Strong, 43 → Moderate,
+26 → Moderate, 25 → Weak, null → Not enough signal, and the rebuilt Android client renders "Strong"
+in green on the 44 row and "Moderate" on the 43 row — one point apart, so it fails if a cutpoint
+moves at all. `test/matchScoreReachesTheClient.test.js` pins it behaviourally (reverting the fix
+fails 5 of its 7 tests; flipping `??` to `||` fails exactly the zero-score one).
+
+⚠ The first attempt to verify this measured a **stale server**: the restart had died on
+`EADDRINUSE` while the old process kept serving, and the answer was still null. The symptom is
+indistinguishable from the fix not working.
 
 ---
 
@@ -122,7 +135,6 @@ target title, so profile 5's `["Software Engineer"]` rejects a row titled "Senio
 
 - **Step 4, resume persistence.** Room remains declared and entirely unused; the builder is still
   in-memory and process death still loses every edit. Untouched.
-- **`matchScore`** — reported above, deliberately not reached across for.
 - **The Android admin panel** decision is still open.
 
 ## Environment notes for the next session

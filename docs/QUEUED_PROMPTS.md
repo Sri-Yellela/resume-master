@@ -1,7 +1,7 @@
 # Queued Prompts — current state
 
-**Last reconciled:** 2026-09-01, after AJ2. Suite **2050 passing, 0 failing**. Migration high-water
-**095**. Mobile contract **v1.1.0** at `contract/mobile-api.v1.json`.
+**Last reconciled:** 2026-09-02, after AJ2. Suite **2057 passing, 0 failing**. Migration high-water
+**095**. Mobile contract **v1.1.1** at `contract/mobile-api.v1.json`.
 
 > **Read this before trusting anything below.** AK2 picked up five tasks and found **three of them
 > already done** — tasks 1 and 3 had landed in commits this file listed as pending, and task 5's
@@ -37,22 +37,14 @@ The build has now been run: it produces a 77.7 MB debug APK reproducibly from `c
 
 ## Do these in this order
 
-**1 · Fix `Job.matchScore`, which is ALWAYS NULL on `/api/jobs`.** One line, and it invalidates
-the whole mobile band surface until it lands. `services/jobs/mapJobRow.js:43` reads
-`j._matchScore || j.match_score`; `_matchScore` is assigned nowhere and `match_score` is not a
-column — the column is `ats_score`. The desktop never noticed because it reads `baseAtsScore` from
-a different mapper on a different endpoint. A mobile client following the contract exactly renders
-"Not enough signal" on 100% of jobs, and a screenshot in `docs/aj2-android-phase2a.md` shows that
-happening to a row whose `ats_score` is 43. Requires a contract regeneration + `CHECKSUMS.json`.
+**1 · Top up API credit** — unblocks task 5's verification, task 7's, and AF5.
 
-**2 · Top up API credit** — unblocks task 5's verification, task 7's, and AF5.
-
-**3 · Decide the Android admin panel** — open across three reports. 6 screens of fabricated data,
+**2 · Decide the Android admin panel** — open across three reports. 6 screens of fabricated data,
 ungated (no auth exists to gate against), with Delete / Suspend / Impersonate controls that look
 functional and hit nothing. Recommendation: **build flavour, not deletion**, and never in a Play
 build.
 
-**4 · Then run task 7** (generation deferral) **→ task 5** (take the −8.1%, batch `enrich_job`).
+**3 · Then run task 7** (generation deferral) **→ task 5** (take the −8.1%, batch `enrich_job`).
 Task 6 continues at step 4 (resume persistence); task 8 waits on a Mac.
 
 ---
@@ -67,9 +59,11 @@ graded 30 (ρ 0.746 after a seniority guard, τ-b 0.594, 12.2% mis-ordered). Str
 PRECISION and the accepted cost is stated: 4 of the 12 postings graded 5 render Moderate. The
 auto-apply gate stays a NUMBER at 30 and a test asserts 44 ≠ 30.
 
-⚠ **The bands are correct and the data feeding them is not.** See item 1 above: `matchScore` is
-always null on `/api/jobs`, so the mobile surface cannot show any band but "Not enough signal"
-until that is fixed. The desktop surfaces are unaffected — they read `baseAtsScore`.
+The bands had nothing to band until `54eb06e`: `matchScore` was null on every row of every
+response, because mapJobRow read `_matchScore || match_score` and neither exists — the column is
+`ats_score`. Fixed, contract bumped to **1.1.1**, and verified on a real device (44 → Strong,
+43 → Moderate, one point apart). The desktop surfaces were never affected; they read
+`baseAtsScore` from a different mapper, which is why nobody noticed for so long.
 
 ---
 
@@ -133,9 +127,9 @@ exists, so batching wins by **making CASE A normal** — which is exactly what t
 
 **UNBLOCKED — task 4's bands landed in `7494289`.** Full prompt below is unchanged and still correct.
 
-Note for requirement 2 (the approval screen shows the band): read item 1 of the ordered list above
-first. `matchScore` is always null on `/api/jobs`, so a band computed from the API alone is
-"Not enough signal" every time. `scoreAtsLocally` on the server is unaffected.
+Requirement 2 (the approval screen shows the band) is now actually implementable: `matchScore`
+carries a score as of `54eb06e`. Before that a band computed from the API alone was
+"Not enough signal" every time.
 
 ```
 OBJECTIVE
