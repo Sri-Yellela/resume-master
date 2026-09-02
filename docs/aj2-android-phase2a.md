@@ -1,6 +1,6 @@
 # AJ2 — Android Phase 2a: toolchain, auth, contract-typed API layer
 
-Run 2026-09-01. Desktop suite re-derived before and after: **2050 passing, 0 failing** both times.
+Run 2026-09-01/02. Desktop suite: **2050 → 2057 passing, 0 failing** (7 added with the matchScore fix).
 Android: **32 JVM unit tests, 0 failing** (31 new). Android commits `e35b6f8`, `d8e0611`, `01c1221`,
 `6cb7a91`. Desktop commits `8df2f6c`, `a0be58b`, `54eb06e`.
 
@@ -11,25 +11,26 @@ the real local server. **Step 4 (resume persistence) is not started.**
 
 ## The finding that outranks the rest: `Job.matchScore` was always null — FIXED `54eb06e`
 
-`services/jobs/mapJobRow.js:43` reads:
+`services/jobs/mapJobRow.js` READ, before the fix:
 
 ```js
 matchScore: j._matchScore || j.match_score || null,
 ```
 
 `_matchScore` is assigned **nowhere in this repository**, and `match_score` **is not a column** —
-the stored column is `ats_score`. So `GET /api/jobs` emits `matchScore: null` for every row, always.
+the stored column is `ats_score`. So `GET /api/jobs` emitted `matchScore: null` for every row,
+always.
 
 **Why nobody noticed.** The desktop client never reads it. `JobCard.jsx`, `JobDetailPanel.jsx` and
 `JobsPanel.jsx` all read `g?.atsScore ?? job?.baseAtsScore`, and `baseAtsScore` comes from a
 different mapper (`server.js:6964`, `j.ats_score ?? null`) on a different endpoint. Two sides,
 each self-consistent, joined to nothing — the shape this codebase keeps finding.
 
-**Why it matters now.** AK2 task 4 marked `matchScore` internal in three places and wrote the band
+**Why it mattered.** AK2 task 4 marked `matchScore` internal in three places and wrote the band
 apparatus around it; the contract's description of that one field is the longest in the schema. A
-mobile client that implements it exactly as specified renders **"Not enough signal" on 100% of
-jobs**. This is not theoretical — the screenshot in this run shows a card whose row has
-`ats_score = 43` in the database rendering as "No signal".
+mobile client implementing it exactly as specified rendered **"Not enough signal" on 100% of
+jobs**. Not theoretical — a screenshot in this run shows a card whose row has `ats_score = 43`
+rendering as "No signal", and the same card after the fix reading "Moderate".
 
 **Fixed in `54eb06e`** (desktop) and re-vendored in android `6cb7a91`. `mapJobRow` now reads
 `j.ats_score ?? j.matchScore ?? null` — `??` and not `||`, because a score of 0 is a real score that
