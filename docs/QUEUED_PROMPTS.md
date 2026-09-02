@@ -1,6 +1,6 @@
 # Queued Prompts — current state
 
-**Last reconciled:** 2026-08-31, after AK2. Suite **2038 passing, 0 failing**. Migration high-water
+**Last reconciled:** 2026-09-01, after AJ2. Suite **2050 passing, 0 failing**. Migration high-water
 **095**. Mobile contract **v1.1.0** at `contract/mobile-api.v1.json`.
 
 > **Read this before trusting anything below.** AK2 picked up five tasks and found **three of them
@@ -18,88 +18,78 @@
 | # | Task | Repo | State | Blocked on |
 |---|---|---|---|---|
 | 1 | Outcome UI | desktop | ✅ **DONE** `9edb91a` | — |
-| 2 | Corruption sweep | all three | ✅ **desktop DONE** · mobile reported only | toolchains |
+| 2 | Corruption sweep | all three | ✅ **desktop DONE** · ✅ **android DONE** (56 BOMs) · ios reported only | a Mac |
 | 3 | Web client cursor paging | desktop | ✅ **DONE** `5d11da7`, re-verified 17/17 | — |
-| 4 | ATS bands | desktop | ⏸ **measurement done, thresholds blocked** | **owner grading** |
+| 4 | ATS bands | desktop | ✅ **DONE** `7494289` | — |
 | 5 | Cache batching | desktop | ⏸ **assessment done, changes blocked** | task 7, then API credit |
-| 6 | Android Phase 2a | android | ⛔ not started | **JDK + Android SDK** |
-| 7 | Generation deferral | desktop | ⛔ not started | task 4 |
+| 6 | Android Phase 2a | android | 🟡 **steps 1-3 done & device-verified; step 4 not started** | — (toolchain landed) |
+| 7 | Generation deferral | desktop | ⛔ not started | — (task 4 landed) |
 | 8 | iOS Phase 1 audit | ios | ⛔ not started | **a Mac with Xcode** |
 
-**Missing tools — the whole blocker list:** a JDK + Android SDK (Android Studio installs both) ·
-a Mac with Xcode · Anthropic API credit (exhausted 2026-08-25, confirmed by provider error text in
-`usage_events`).
+**Missing tools — the whole blocker list:** a Mac with Xcode · Anthropic API credit (exhausted
+2026-08-25, confirmed by provider error text in `usage_events`).
+
+**The Android toolchain is no longer a blocker.** Studio, SDK platform 37, build-tools 36.0.0,
+`cmdline-tools`, and an emulator (`rm_api36`, API 36 x86_64, WHPX) are all installed and working.
+The build has now been run: it produces a 77.7 MB debug APK reproducibly from `clean`.
 
 ---
 
 ## Do these in this order
 
-**1 · Grade `docs/ak2-ats-grading-set.md`** — owner, ~30 minutes, blocks tasks 4 and 7.
-30 postings spanning engine scores 6–64, shuffled, score withheld. Rate each 1–5 for fit against
-your resume. **Do not read `ak2-ats-grading-key.json` first.** This is the only independent check on
-ρ = 0.504; AK1's own 30 were self-graded and were never committed, so its ρ cannot be re-joined.
+**1 · Fix `Job.matchScore`, which is ALWAYS NULL on `/api/jobs`.** One line, and it invalidates
+the whole mobile band surface until it lands. `services/jobs/mapJobRow.js:43` reads
+`j._matchScore || j.match_score`; `_matchScore` is assigned nowhere and `match_score` is not a
+column — the column is `ats_score`. The desktop never noticed because it reads `baseAtsScore` from
+a different mapper on a different endpoint. A mobile client following the contract exactly renders
+"Not enough signal" on 100% of jobs, and a screenshot in `docs/aj2-android-phase2a.md` shows that
+happening to a row whose `ats_score` is 43. Requires a contract regeneration + `CHECKSUMS.json`.
 
-**2 · Install Android Studio** — unblocks task 6 and the two highest-severity mobile findings.
-Three sessions have now reported "the build has never been verified."
+**2 · Top up API credit** — unblocks task 5's verification, task 7's, and AF5.
 
-**3 · Top up API credit** — unblocks task 5's verification, task 7's, and AF5.
-
-**4 · Decide the Android admin panel** — open across three reports. 6 screens of fabricated data,
+**3 · Decide the Android admin panel** — open across three reports. 6 screens of fabricated data,
 ungated (no auth exists to gate against), with Delete / Suspend / Impersonate controls that look
 functional and hit nothing. Recommendation: **build flavour, not deletion**, and never in a Play
 build.
 
-**5 · Then run task 4** (set bands) **→ task 7** (generation deferral) **→ task 5** (take the −8.1%,
-batch `enrich_job`). Tasks 6 and 8 run whenever their toolchain lands, in parallel with everything.
+**4 · Then run task 7** (generation deferral) **→ task 5** (take the −8.1%, batch `enrich_job`).
+Task 6 continues at step 4 (resume persistence); task 8 waits on a Mac.
 
 ---
 
-## Task 4 — ATS bands · thresholds blocked on grading
+## Task 4 — ATS bands · ✅ DONE
 
-Full findings: `docs/ak2-ats-band-distribution.md`. Grading sheet: `docs/ak2-ats-grading-set.md`.
+Landed in `7494289`. Full write-up: `docs/ak2-ats-bands.md`; measurement half in
+`docs/ak2-ats-band-distribution.md`; the owner's graded 30 in `docs/ak2-ats-grading-set.md`.
 
-Measurement is complete. All 1291 postings re-scored through the real runtime path against the
-owner's profile (6): **median 27, p75 32, p90 39, max 64** — within a point of AK1's independent
-synthetic profile.
+Cutpoints **Strong ≥ 44 · Moderate ≥ 26 · Weak < 26 · null = Not enough signal**, set from the
+graded 30 (ρ 0.746 after a seniority guard, τ-b 0.594, 12.2% mis-ordered). Strong is tuned for
+PRECISION and the accepted cost is stated: 4 of the 12 postings graded 5 render Moderate. The
+auto-apply gate stays a NUMBER at 30 and a test asserts 44 ≠ 30.
 
-**A near-miss worth carrying:** two profiles are active. Profile 5 is the `John Doe` placeholder AK1
-set aside; profile 6 is the real resume. Measuring the wrong one would have failed *quietly* —
-profile 5 gives median 20 / max 42, and the distribution of an empty CV would have been reported as
-the distribution of the engine.
+⚠ **The bands are correct and the data feeding them is not.** See item 1 above: `matchScore` is
+always null on `/api/jobs`, so the mobile surface cannot show any band but "Not enough signal"
+until that is fixed. The desktop surfaces are unaffected — they read `baseAtsScore`.
 
-**Two findings that change the design:**
+---
 
-1. **The required fourth band is empty.** "Not enough signal" holds **1 posting in 1291** (0.08%).
-   It stays — it is a *correctness state*, not a population to balance — but it cannot be calibrated
-   from board data, and tuning the other three against it means tuning against one row.
-2. **A band is a fixed number; the score is not.** Profile 6's cutpoints applied to profile 5 give
-   0.2% Strong / 97.6% Weak. Profile 5 is a placeholder rather than a second real user, so the
-   obvious reading overstates it — but the mechanism has a real victim: **a new user whose first
-   upload is thin gets an all-Weak board.**
+## Task 6 — Android Phase 2a · steps 1-3 done, step 4 open
 
-```
-⛔ DO NOT re-tune the engine. AK1 measured the obvious fix (renormalising over informative
-components) and it made ranking WORSE: ρ 0.448 → 0.242, mis-ordered 33.6% → 41.0%, floating a Fraud
-Strategist above a backend engineering role. Recorded in code with its numbers and pinned by a test.
+Full write-up: `docs/aj2-android-phase2a.md`. Android commits `e35b6f8`, `d8e0611`, `01c1221`.
 
-REQUIREMENTS
-1. Bands: Strong / Moderate / Weak / Not enough signal. The fourth is REQUIRED — the scorer declines
-   rather than fabricating (false-match rate 22.8% → 0.8%) and that must reach the user as its own
-   state, never as a low score.
-2. Set cutpoints from the owner's graded 30 joined against the engine scores, NOT from percentiles
-   alone. Report where the human's 1–5 and the engine's ordering disagree — the disagreements are
-   the finding.
-3. Address the thin-resume case explicitly. An all-Weak board on first upload is a worse first
-   impression than no bands. Options: profile-relative cutpoints, a floor, or a distinct
-   "your resume needs more detail" state. Decide and state which.
-4. Every surface: ATS report panel, job cards, review screen, and anything the mobile contract
-   exposes. If the numeric score stays in the API, mark it internal in the contract.
-5. The auto-submit gate keeps using the NUMBER (threshold 30, recalibrated from 50 in AK1). Bands
-   are display only. Do not couple the gate to a band.
+**Done and verified on a real emulator against the real local server:** the toolchain (first
+verified assemble in the project's history, four failures deep), auth (login → `mobile-token`
+exchange, with the sessionLess mint confirmed in `auth_contexts`), and a contract-typed API layer
+generated from `contract/mobile-api.v1.json` (37 fields, against the old parser's 10). Backup
+excludes for the token landed BEFORE any token existed and are verified in the compiled APK.
 
-VERIFY: band populations across 1291 postings. Human-vs-engine disagreements reported. Screenshot
-every surface. "Not enough signal" renders distinctly from "Weak".
-```
+Tier gating verified end to end: of five seeded rows, one per tier, only `direct` and `guest`
+reached the phone.
+
+**Step 4, resume persistence, is not started.** Room is still declared and entirely unused; the
+builder is in-memory and process death still loses every edit.
+
+⛔ Do not re-run the corruption sweep on this repo — all 56 BOMs are stripped and committed.
 
 ---
 
@@ -141,7 +131,11 @@ exists, so batching wins by **making CASE A normal** — which is exactly what t
 
 ## Task 7 — Generation deferral + free ATS at swipe
 
-**Unblocked the moment task 4's bands are set.** Full prompt below is unchanged and still correct.
+**UNBLOCKED — task 4's bands landed in `7494289`.** Full prompt below is unchanged and still correct.
+
+Note for requirement 2 (the approval screen shows the band): read item 1 of the ordered list above
+first. `matchScore` is always null on `/api/jobs`, so a band computed from the API alone is
+"Not enough signal" every time. `scoreAtsLocally` on the server is unaffected.
 
 ```
 OBJECTIVE
