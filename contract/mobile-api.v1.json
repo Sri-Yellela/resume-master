@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Resume Master — Mobile API",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "The contract between this repository and the two mobile repositories (iOS, Android), which are native clients over this JSON API and live outside this tree.\n\nGENERATED — DO NOT HAND-EDIT. Regenerate with `node scripts/generateMobileContract.mjs`. The Job schema is produced by EXECUTING services/jobs/mapJobRow.js, so it cannot disagree with what the server actually emits. test/mobileApiContract.test.js fails the build if this file and the source ever disagree.\n\nOnly the endpoints a swipe feed and a review flow need are published. Anything absent is absent on purpose and is not a promise — see x-retired for what a greenfield client must not call, and x-mobile-gaps for what mobile needs that this API does not yet expose."
   },
   "servers": [

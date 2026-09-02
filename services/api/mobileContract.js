@@ -60,13 +60,22 @@ import { OUTCOME, OUTCOME_STATUSES } from "../../shared/applyOutcomeGroups.js";
  * Semver. MAJOR is breaking; MINOR is additive. The rules, and why removing a field is
  * deliberately awkward, are in contract/README.md.
  *
+ * 1.1.1 — `Job.matchScore` now carries a score. THE SCHEMA IS BYTE-IDENTICAL to 1.1.0 — the field,
+ *         its type and its nullability were always declared exactly as they are now. What changed
+ *         is that the value was previously NULL ON EVERY ROW OF EVERY RESPONSE: mapJobRow read
+ *         `j._matchScore || j.match_score`, and neither exists (the column is `ats_score`).
+ *         A PATCH rather than a minor, because nothing was added and nothing broke — a client
+ *         already had to handle null, and null remains correct for the unscored paths. But it is a
+ *         bump rather than none for the same reason 1.1.0 was: the mobile repos pin a checksum and
+ *         need a reason to re-copy, and this one changes whether their bands can EVER say anything
+ *         other than "Not enough signal".
  * 1.1.0 — keyset pagination on GET /api/jobs: the `cursor` query parameter, and `nextCursor` /
  *         `paging` on the feed response. Additive: `page`/`pageSize` are unchanged, so client/ and
  *         extension/ need no release. A minor bump rather than none, because the mobile repos pin
  *         a checksum and need a reason to re-copy.
  * 1.0.0 — initial contract.
  */
-export const CONTRACT_VERSION = "1.1.0";
+export const CONTRACT_VERSION = "1.1.1";
 
 // ------------------------------------------------------------------------------------------------
 // THE JOB SHAPE — derived by executing mapJobRow, not by reading it

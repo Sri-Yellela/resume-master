@@ -40,7 +40,24 @@ function mapJobRow(j) {
     bucketDomain:    j.bucket_domain    || j.bucketDomain    || null,
     directApply:     Boolean(j.direct_apply ?? j.directApply),
     companyIconUrl:  j.company_icon_url || j.companyIconUrl  || j.thumbnail || null,
-    matchScore:      j._matchScore || j.match_score || null,
+    // THE STORED COLUMN IS ats_score. This read `j._matchScore || j.match_score`, and neither
+    // exists: `_matchScore` is assigned nowhere in this repository and `match_score` is not a
+    // column on scraped_jobs. So this field was NULL on every row of every response, always.
+    //
+    // Nothing failed, because the desktop client never reads it — JobCard/JobDetailPanel/JobsPanel
+    // all read `g?.atsScore ?? job?.baseAtsScore`, and baseAtsScore comes from a different mapper
+    // (the /api/jobs/poll shape) reading the same ats_score column. Two sides, each self-consistent,
+    // joined to nothing. It surfaced only when a native client implemented the mobile contract
+    // exactly as written and banded every job as "Not enough signal".
+    //
+    // ?? NOT ||, DELIBERATELY. A score of 0 is a real score and bands as Weak; `||` would collapse
+    // it to null, and null means the scorer DECLINED. Those are different answers, and keeping them
+    // apart is the entire point of the fourth band.
+    //
+    // Still null on two paths, correctly: /api/jobs/generic selects an explicit column list without
+    // ats_score because a public unpersonalized feed has no per-user score, and live aggregator
+    // results have never been scored. Both are "no opinion", which is what null means here.
+    matchScore:      j.ats_score ?? j.matchScore ?? null,
     starred:         Boolean(j.starred),
     visited:         Boolean(j.visited),
     disliked:        Boolean(j.disliked),
