@@ -1,6 +1,6 @@
 # Queued Prompts — current state
 
-**Last reconciled:** 2026-09-02, after AJ2. Suite **2057 passing, 0 failing**. Migration high-water
+**Last reconciled:** 2026-09-03, after AJ2. Suite **2057 passing, 0 failing**. Migration high-water
 **095**. Mobile contract **v1.1.1** at `contract/mobile-api.v1.json`.
 
 > **Read this before trusting anything below.** AK2 picked up five tasks and found **three of them
@@ -22,7 +22,7 @@
 | 3 | Web client cursor paging | desktop | ✅ **DONE** `5d11da7`, re-verified 17/17 | — |
 | 4 | ATS bands | desktop | ✅ **DONE** `7494289` | — |
 | 5 | Cache batching | desktop | ⏸ **assessment done, changes blocked** | task 7, then API credit |
-| 6 | Android Phase 2a | android | 🟡 **steps 1-3 done & device-verified; step 4 not started** | — (toolchain landed) |
+| 6 | Android Phase 2a | android | ✅ **DONE** — all 4 steps device-verified `2bbd242` | — |
 | 7 | Generation deferral | desktop | ⛔ not started | — (task 4 landed) |
 | 8 | iOS Phase 1 audit | ios | ⛔ not started | **a Mac with Xcode** |
 
@@ -45,7 +45,7 @@ functional and hit nothing. Recommendation: **build flavour, not deletion**, and
 build.
 
 **3 · Then run task 7** (generation deferral) **→ task 5** (take the −8.1%, batch `enrich_job`).
-Task 6 continues at step 4 (resume persistence); task 8 waits on a Mac.
+Task 6 is complete; task 8 waits on a Mac. Phase 2b (the feed) is the next mobile step.
 
 ---
 
@@ -80,8 +80,9 @@ excludes for the token landed BEFORE any token existed and are verified in the c
 Tier gating verified end to end: of five seeded rows, one per tier, only `direct` and `guest`
 reached the phone.
 
-**Step 4, resume persistence, is not started.** Room is still declared and entirely unused; the
-builder is in-memory and process death still loses every edit.
+**Step 4, resume persistence, is done** (`2bbd242`). Room-backed, with the two order columns SQL
+needs and no destructive migration. Verified by 13 instrumented tests on a real file-backed
+database, plus a by-hand edit read back out of the device's own `.db` + `-wal`.
 
 ⛔ Do not re-run the corruption sweep on this repo — all 56 BOMs are stripped and committed.
 

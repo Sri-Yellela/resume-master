@@ -1,11 +1,11 @@
 # AJ2 — Android Phase 2a: toolchain, auth, contract-typed API layer
 
 Run 2026-09-01/02. Desktop suite: **2050 → 2057 passing, 0 failing** (7 added with the matchScore fix).
-Android: **32 JVM unit tests, 0 failing** (31 new). Android commits `e35b6f8`, `d8e0611`, `01c1221`,
-`6cb7a91`. Desktop commits `8df2f6c`, `a0be58b`, `54eb06e`.
+Android: **40 JVM unit tests + 13 instrumented tests, 0 failing**. Android commits `e35b6f8`,
+`d8e0611`, `01c1221`, `6cb7a91`, `2bbd242`. Desktop commits `8df2f6c`, `a0be58b`, `54eb06e`.
 
-Steps 1–3 of `resume-master-android/PHASE_2A.md` are done and verified on a real emulator against
-the real local server. **Step 4 (resume persistence) is not started.**
+**All four steps** of `resume-master-android/PHASE_2A.md` are done and verified on a real emulator
+against the real local server.
 
 ---
 
@@ -132,11 +132,63 @@ target title, so profile 5's `["Software Engineer"]` rejects a row titled "Senio
 
 ---
 
+## Step 4 — resume persistence
+
+Room was declared and **entirely unused** — zero `@Entity` — while the builder was a
+`MutableStateFlow(MockData.defaultResume)`. Process death lost every edit, and that was invisible
+while the data was mock: the app reopened showing the same seeded resume, which is
+indistinguishable from working.
+
+**Two columns exist only because SQL has no list type.** `section_order` and `position`. Without
+them a round trip returns every value correct and in the wrong ORDER. `ResumeField` had no order of
+any kind — its order was its list index. Both are written from list index rather than from
+`ResumeSection.order`, because that field goes stale: the ViewModel renumbers it on reorder and
+delete but not on any other mutation, and the test fixture's stale 9/7/3 would have reversed the
+resume on load.
+
+**No `fallbackToDestructiveMigration`.** On this database that call means "silently delete the
+user's resume on the first schema change". Omitting it throws at startup instead — loud, and during
+development rather than after shipping. Schema exported to `app/schemas/`.
+
+**The UI reads memory; the database is a write-through mirror.** Every keystroke is a save, so a
+Room `Flow` would re-emit the whole resume per character and hand Compose a new `TextField` value
+mid-typing. Writes go through a CONFLATED channel: a single consumer keeps them ordered (a stale
+snapshot committed after a fresh one would revert the user's last keystrokes) and conflation avoids
+40 full rewrites for a 40-character line, which is sound precisely because each snapshot is
+complete.
+
+**A bug fixed on the way:** the repository is now shared through `AppGraph`. `ResumeViewModel` built
+its own, and `viewModel()` scopes to the NavBackStackEntry — so the builder and the preview each
+held a separate repository seeded from the same mock. Every edit was invisible in the preview, and
+"Export as PDF" wrote the MOCK resume to a file the user then shared.
+
+`ExampleInstrumentedTest` also asserted the package was `com.example.resumemaster`, the Studio
+placeholder. It had never run: the build was unverified until 2026-09-01.
+
+### Verified
+
+13 instrumented tests on the emulator against a **real file-backed** database — an in-memory one
+cannot outlive the process that made it, so it cannot express the claim. `ResumeHydrationTest` is
+the process-death test: one handle writes and closes, a second handle and a fresh repository read
+back, and the stored resume must arrive rather than the seed. Mutating hydration to always seed
+fails 3 of its 4 tests.
+
+Confirmed by hand too: a section title edited to "PERSISTED" through the real UI, then the app's own
+database pulled off the device — **with its `-wal` file**, since Room runs in WAL mode and the `.db`
+alone reads stale — contained `order=0 PERSISTED`, six sections in order, 7 field rows.
+
+Startup cost measured rather than assumed: `AppGraph.init` is 722ms, of which Room is **107ms** and
+605ms is pre-existing Keystore work in `EncryptedSharedPreferences`. The 15.5s cold start is Compose
+and dex on swiftshader; Settings takes 6.7s on the same device.
+
 ## Not done, and why
 
-- **Step 4, resume persistence.** Room remains declared and entirely unused; the builder is still
-  in-memory and process death still loses every edit. Untouched.
 - **The Android admin panel** decision is still open.
+- **Resume SYNC.** Persistence is local-only. The schema deliberately models nothing the server
+  owns, so nothing in it can drift from the contract; a sync phase will need a contract of its own.
+- ⚠ **The emulator degrades badly over hours of uptime.** A "failed to complete startup" ANR looked
+  like a regression until the control was measured: Settings took 17.8s on the same instance. It did
+  not reproduce after a restart. Measure a control app before believing a performance finding here.
 
 ## Environment notes for the next session
 
