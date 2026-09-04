@@ -696,7 +696,31 @@ function buildMatchIndex(haystack) {
  * number, it tells the candidate they have a skill they do not have. Adjacency, then a bounded
  * window, and nothing further.
  */
-function hasTerm(index, term) {
+/**
+ * G1 — the synonym expansion, and it is deliberately the LAST thing tried.
+ *
+ * `synonyms` is Map<normalisedTerm, equivalents[]>, built by the CALLER from confirmed rows only
+ * (services/kb/skillSynonyms.js). The scorer never loads it — same one-way dependency as the term
+ * weights, and for the same reason: this function must stay free, instant and deterministic
+ * because a swipe card waits on it.
+ *
+ * ⛔ ONE HOP, NEVER TRANSITIVE. `a~b` and `b~c` must not make `a~c`. Two reviewed equivalences
+ * chain into a third that no human ever saw, and chains are how a plausible table becomes a
+ * nonsense one: log analysis ~ observability ~ monitoring ~ alerting ~ pagerduty, and now a résumé
+ * mentioning PagerDuty "has" log analysis. Each equivalent is checked against the résumé DIRECTLY
+ * and its own synonyms are not consulted.
+ */
+function hasTerm(index, term, synonyms = null) {
+  if (hasTermDirect(index, term)) return true;
+  if (!synonyms || !synonyms.size) return false;
+  const key = normaliseAtsTerm(term);
+  const equivalents = synonyms.get(key);
+  if (!equivalents) return false;
+  // Single hop: each equivalent goes through hasTermDirect, not back through hasTerm.
+  return equivalents.some(alt => hasTermDirect(index, alt));
+}
+
+function hasTermDirect(index, term) {
   const key = normaliseAtsTerm(term);
   if (!key) return false;
   if (index.text.includes(` ${key} `)) return true;
@@ -913,7 +937,11 @@ function experienceRatio(requiredYears, candidateYears) {
   return 0.1;
 }
 
-export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null, signalProfile = null, domainProfile = null, termWeights = null } = {}) {
+export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null, signalProfile = null, domainProfile = null, termWeights = null,
+                                  // G1 — Map<term, equivalents[]>, CONFIRMED rows only, built by the caller.
+                                  // Absent means "no synonyms", which is exactly the pre-G1 behaviour, so every
+                                  // existing caller keeps scoring identically until it opts in.
+                                  synonyms = null } = {}) {
   const basis = runtimeBasis || buildRuntimeAtsBasis({ resumeText, signalProfile, domainProfile });
   const weights = termWeights || basis.termWeights || null;
   const jobText = [
@@ -931,10 +959,10 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
     company: job.company || "",
     jobSkills: jobSkillTerms(job),
   });
-  const matchedSkills = jobTerms.filter(term => hasTerm(matchIndex, term));
-  const missingSkills = jobTerms.filter(term => !hasTerm(matchIndex, term));
-  const matchedCompetencies = jobCompetencies.filter(term => hasTerm(matchIndex, term));
-  const missingCompetencies = jobCompetencies.filter(term => !hasTerm(matchIndex, term));
+  const matchedSkills = jobTerms.filter(term => hasTerm(matchIndex, term, synonyms));
+  const missingSkills = jobTerms.filter(term => !hasTerm(matchIndex, term, synonyms));
+  const matchedCompetencies = jobCompetencies.filter(term => hasTerm(matchIndex, term, synonyms));
+  const missingCompetencies = jobCompetencies.filter(term => !hasTerm(matchIndex, term, synonyms));
 
   const { verbs: jobVerbs, generic: genericVerbs } = candidateActionVerbsFromJob(jobText, basis);
   const matchedVerbs = jobVerbs.filter(verb => hasVerb(matchIndex, verb));

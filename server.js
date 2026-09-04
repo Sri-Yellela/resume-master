@@ -3163,6 +3163,55 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         ALTER TABLE apply_run_jobs ADD COLUMN base_ats_json TEXT;
       `,
     },
+    {
+      // AL3 (G1) — the skill synonym table: the ONLY thing on the horizon that moves rho UPWARD.
+      //
+      // THE MEASURED CEILING IT ATTACKS. AK1's worst inversion was -19 ranks: a reliability role
+      // whose JD said "log analysis" where the resume said "observability tooling". AK1 called that
+      // "a ceiling on the approach, not a bug" — the scorer matches terms, and two names for one
+      // skill are two terms. Everything else queued moves rho sideways.
+      //
+      // ⛔ WHY status IS HERE AND DEFAULTS TO 'proposed'. A FALSE EQUIVALENCE IS A CONFIDENTLY
+      // WRONG MATCH, which is the failure mode that costs the most trust — the same class as the
+      // "coffee machine vendor" credited with machine learning (22.8% of all multi-word matches
+      // before AK1's proximity fix). An LLM proposing "kubernetes ~ docker" is plausible-sounding
+      // and wrong, and it would silently inflate scores on every posting mentioning either. So the
+      // scorer reads ONLY 'confirmed' rows, promotion is a human act, and corroboration alone can
+      // never promote. This is deliberately STRICTER than company_org_units, which self-promotes at
+      // 3 postings / 0.6 confidence: an org unit that is wrong is a wrong label on a card, while a
+      // synonym that is wrong changes every score on the board.
+      //
+      // relation SEPARATES TWO DIFFERENT CLAIMS that must not be conflated:
+      //   'alias'   — the same thing under another name. k8s = kubernetes, postgres = postgresql.
+      //               Symmetric and safe.
+      //   'related' — adjacent, not identical. log analysis ~ observability. This is the one that
+      //               earns the rho and the one that produces false matches, so review is stricter.
+      //
+      // confidence and provenance follow services/kb/orgLayer.js exactly (corroboration_count,
+      // source_postings_json, decay against last_seen) rather than inventing a second convention.
+      id: "098_skill_synonyms",
+      sql: `
+        CREATE TABLE IF NOT EXISTS skill_synonyms (
+          term                TEXT    NOT NULL,
+          equivalent          TEXT    NOT NULL,
+          relation            TEXT    NOT NULL DEFAULT 'related',
+          confidence          REAL    NOT NULL DEFAULT 0,
+          corroboration_count INTEGER NOT NULL DEFAULT 0,
+          source_postings_json TEXT,
+          status              TEXT    NOT NULL DEFAULT 'proposed',
+          reviewed_at         INTEGER,
+          reviewed_by         TEXT,
+          first_seen          INTEGER,
+          last_seen           INTEGER,
+          updated_at          INTEGER,
+          PRIMARY KEY (term, equivalent)
+        );
+        CREATE INDEX IF NOT EXISTS idx_skill_synonyms_status
+          ON skill_synonyms(status, confidence);
+        CREATE INDEX IF NOT EXISTS idx_skill_synonyms_term
+          ON skill_synonyms(term, status);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

@@ -24,7 +24,7 @@ readiness.
 | **C** | Android Phase 2a | android | — | ✅ **DONE** — `docs/aj2-android-phase2a.md` |
 | **A2** | Provider quality verdict | desktop | **keys** | open — the real gate on A |
 | **D** | Generation deferral | desktop | B ✅ | ✅ **DONE 2026-09-04** — `docs/al2-generation-deferral.md`, 19-check real run |
-| **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A code | open |
+| **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A code | **G1 DONE 2026-09-04** — `docs/al3-skill-synonyms.md`; rho did NOT move. G2/G3/G4 open |
 | **F** | PII tokenization layer | desktop | A code | open |
 | **E** | Cache breakpoints + Batch API | desktop | D | open — see the conditional |
 | **H** | Form label → field mapping | desktop | G4 | open |
@@ -34,6 +34,25 @@ readiness.
 **Run next:** D (unblocked, bands are set) and G1 (public data only, needs no key). F needs A's
 code only. A2, E and H each have a real prerequisite below.
 
+### ⛔ THE BOARD IS GONE — read before any corpus or rho work
+
+`cleanup_log` id 85 deleted **1288 rows** from `scraped_jobs` on 2026-09-02T02:06. The table now
+holds **5 fixtures**. Every derived table still describes the old board (8690 technographics, 856
+term weights, 697 org units, 1302 enrich_job events), so every "1291 postings" figure in these docs
+is true of the EVIDENCE and false of the TABLE.
+
+**0 of the 30 graded postings survive**, so the ATS engine's only human-graded baseline cannot be
+re-scored against the live database at all.
+
+Recoverable, read-only, from `data/backups/resume_master_2026-08-31T06-00-00-534Z_auto-daily.db`
+(1261 active, 1259 with skills_json, all 30 graded, profile 6 intact). Both AL3 scripts default to
+it and refuse to run against a board under 200 postings.
+
+⚠ **The 2026-09-02 snapshot is already post-deletion.** When retention rotates the 08-31 file out,
+ρ = 0.746 becomes unreproducible. Pin that file out of the rotation, or export the 30 postings' text
+to `docs/`. This is an owner action and nothing else in the queue does it.
+
+---
 ### ⚠ Read this before picking up A, F or G
 
 **`GROQ_API_KEY` and `GOOGLE_API_KEY` ARE NOT IN THIS WORKING COPY.** The line below that said

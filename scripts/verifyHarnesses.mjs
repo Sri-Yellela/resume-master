@@ -78,6 +78,8 @@ const EXCLUDED = {
   ingestLca:           "utility, downloads a dataset",
   runEnrichment:       "utility, spends model tokens",
   al1ProviderQualityDiff: "REAL enrichment on BOTH providers — the Anthropic arm spends tokens on every row; run it by hand",
+  al3SynonymRhoEffect: "measurement, not a harness — re-scores the graded 30 against a read-only backup and prints rho; asserts nothing",
+  al3SkillSynonyms:    "OFFLINE asset generation — spends model tokens over the corpus vocabulary; run it by hand, and only when the review sheet is being rebuilt",
   af2ClaimVerify:      "REAL generation — spends model tokens on every run; run it by hand",
   ai1SummaryVerify:    "REAL generation x2 + PDF render — spends model tokens on every run; run it by hand",
   ag2ClaimsGeneration: "REAL generation — spends model tokens on every run; run it by hand",
