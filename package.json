@@ -18,6 +18,7 @@
     "build:extension": "node scripts/buildExtension.mjs",
     "publish:extension": "node scripts/publishExtension.mjs",
     "verify:harness": "node scripts/verifyHarnesses.mjs",
+    "//verify:harness": "REQUIRES the app already running on :3001 (node server.js). The runner starts only fakeAts and refuses to start without the app, because a run against a dead port prints nothing for hours. A green board here is NOT evidence about the model-call path — every harness that would exercise it is excluded for spending tokens.",
     "store:screenshots": "node scripts/g3ReviewOverlay.mjs --screenshots"
   },
   "dependencies": {

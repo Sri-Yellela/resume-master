@@ -23,12 +23,12 @@ readiness.
 | **B** | ATS bands | desktop | — | ✅ **DONE** — `docs/ak2-ats-bands.md`, ρ 0.643 → **0.746** |
 | **C** | Android Phase 2a | android | — | ✅ **DONE** — `docs/aj2-android-phase2a.md` |
 | **A2** | Provider quality verdict | desktop | **keys** | open — the real gate on A |
-| **D** | Generation deferral | desktop | B ✅ | **open, unblocked — run next** |
+| **D** | Generation deferral | desktop | B ✅ | ✅ **DONE 2026-09-04** — `docs/al2-generation-deferral.md`, 19-check real run |
 | **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A code | open |
 | **F** | PII tokenization layer | desktop | A code | open |
 | **E** | Cache breakpoints + Batch API | desktop | D | open — see the conditional |
 | **H** | Form label → field mapping | desktop | G4 | open |
-| **I** | Harness runner prerequisite doc | desktop | — | open, small |
+| **I** | Harness runner prerequisite doc | desktop | — | ✅ **DONE 2026-09-04** — fails fast in ~1s, exit 2 |
 | — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/PHASE_1_AUDIT.md` |
 
 **Run next:** D (unblocked, bands are set) and G1 (public data only, needs no key). F needs A's

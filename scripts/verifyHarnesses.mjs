@@ -23,6 +23,19 @@
  * Raising a floor is deliberate: add checks, run with --update-baseline, commit the new numbers in
  * the same change. Lowering one requires saying why in the commit, which is the point.
  *
+ * ⛔ PREREQUISITE: THE APP MUST ALREADY BE RUNNING ON :3001 (`node server.js`).
+ * This script starts fakeAts on :4599 and nothing else. Most harnesses drive the real server. The
+ * run now refuses to start without it — see assertAppUp() for why that check exists rather than
+ * letting the suite discover it 700 seconds at a time.
+ *
+ * ⛔ WHAT A GREEN RUN HERE DOES NOT MEAN: it is not evidence about the MODEL-CALL path. No harness
+ * in this suite exercises provider routing, generation, enrichment or classification — every one
+ * that would is in EXCLUDED below precisely because it spends tokens. So a full green board says
+ * the apply pipeline, the browser and the extension work; it says nothing about which provider
+ * served a call or what it cost. Cost and routing are covered by `npm test`
+ * (test/modelCallGuard.test.js, test/providerRouting.test.js) and, for real traffic, only by
+ * scripts/al1ProviderQualityDiff.mjs, which is run by hand.
+ *
  * Usage:
  *   node scripts/verifyHarnesses.mjs                  # all of them
  *   node scripts/verifyHarnesses.mjs g1 a7            # only those whose name contains an argument
@@ -104,6 +117,44 @@ async function atsUp() {
   } catch { return false; }
 }
 
+// ── THE PREREQUISITE THIS RUNNER DOES NOT SATISFY ITSELF ────────────────────────────────────────
+//
+// This script starts fakeAts on :4599. It does NOT start the app, and most harnesses drive it on
+// :3001 — that has to be running already, by hand (`node server.js`).
+//
+// ⛔ WITHOUT IT, THE RUN LOOKS EXACTLY LIKE A HANG. Each harness's stdout is buffered until it
+// exits and each gets a 700-second kill timeout, so a suite launched against a dead :3001 emits
+// NOTHING for hours while every harness times out in turn. AL1 spent 30 minutes watching a
+// zero-byte output file before working out that nothing was wrong with the harnesses. That is
+// Shape 3 — a silent failure indistinguishable from slow progress — in the one tool whose job is
+// to catch silent failures.
+//
+// So it is checked once, up front, and refuses to start. A fast, specific refusal beats a long,
+// ambiguous nothing.
+const APP_PORT = process.env.PORT || 3001;
+
+async function assertAppUp() {
+  try {
+    const r = await fetch(`http://localhost:${APP_PORT}/`, { signal: AbortSignal.timeout(3000) });
+    if (r.ok || r.status === 401 || r.status === 302) {
+      console.log(`app on :${APP_PORT} — up`);
+      return;
+    }
+    console.error(`\n⛔ the app on :${APP_PORT} answered ${r.status}, which is not a healthy server.`);
+  } catch {
+    console.error(
+      `\n⛔ NOTHING IS LISTENING ON :${APP_PORT}.\n\n` +
+      `   This runner starts fakeAts (:${PORT}) but NOT the app — most harnesses drive the real\n` +
+      `   server and it has to be running already:\n\n` +
+      `       node server.js\n\n` +
+      `   Refusing to start, because the alternative is silence: each harness buffers its output\n` +
+      `   until it exits and is killed after 700s, so a suite run against a dead port prints\n` +
+      `   nothing at all for hours and then reports every harness as failed.\n`
+    );
+  }
+  process.exit(2);
+}
+
 let ats = null;
 async function startAts() {
   if (await atsUp()) { console.log(`fakeAts already listening on :${PORT}`); return; }
@@ -152,6 +203,7 @@ const results = [];
 console.log("=".repeat(96));
 console.log(`REAL-RUN HARNESSES — ${all.length} to run. A truncated run is a failure.`);
 console.log("=".repeat(96));
+await assertAppUp();
 await startAts();
 
 for (const name of all) {
