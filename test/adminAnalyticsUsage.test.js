@@ -37,6 +37,9 @@ function setupServer() {
       -- limitEnforcer keys quotas on). This fixture builds its own schema, so it has to track
       -- the migration or every insert throws and the panel reads as empty.
       purpose TEXT,
+      -- migration 096: which provider served the call, so a $0 free-tier row and a paid
+      -- Anthropic row are distinguishable in the one table that records what was sent where.
+      provider TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE TABLE cache_events (

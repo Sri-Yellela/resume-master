@@ -41,6 +41,9 @@ function setup() {
       duration_ms INTEGER, job_id TEXT, company TEXT,
       success INTEGER NOT NULL DEFAULT 1, error_text TEXT,
       purpose TEXT,
+      -- migration 096: which provider served the call, so a $0 free-tier row and a paid
+      -- Anthropic row are distinguishable in the one table that records what was sent where.
+      provider TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE TABLE cache_events (

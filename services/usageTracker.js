@@ -87,6 +87,9 @@ export function trackApiCall(db, {
   success = true, errorText = null,
   domainModule = null,
   purpose = null,
+  // Which provider served the call. Defaults to anthropic so a caller that predates routing
+  // records the truth rather than a NULL that would read as "unknown".
+  provider = "anthropic",
 }) {
   let eventId = null;
   try {
@@ -100,8 +103,8 @@ export function trackApiCall(db, {
       user_id, event_type, event_subtype, input_tokens,
       output_tokens, cache_read_tokens, cache_creation_tokens,
       cached, model, cost_usd, ats_score_before, ats_score_after,
-      duration_ms, job_id, company, success, error_text, purpose
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      duration_ms, job_id, company, success, error_text, purpose, provider
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(
       userId, eventType, eventSubtype || null,
       usage?.input_tokens || 0,
@@ -110,7 +113,7 @@ export function trackApiCall(db, {
       cached, model, cost,
       atsScoreBefore ?? null, atsScoreAfter ?? null,
       durationMs || null, jobId || null, company || null,
-      success ? 1 : 0, errorText || null, purpose || null
+      success ? 1 : 0, errorText || null, purpose || null, provider || "anthropic"
     );
     trackingStats.recorded++;
     // AK1: the row id, so a caller that only learns a value AFTER the call can fill it in.

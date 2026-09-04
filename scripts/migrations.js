@@ -2738,4 +2738,28 @@ export const MIGRATIONS = [
           ON job_applications(user_id, response_outcome, applied_at);
       `,
     },
+    {
+      // AL1 — which PROVIDER served each call, alongside the model that already exists.
+      //
+      // WHY MODEL ALONE IS NOT ENOUGH. It nearly is — model IDs are globally unique in practice, so
+      // "llama-3.1-8b-instant" could only have come from Groq today. But the cost report groups by
+      // model and the whole point of the tracking work was that a report which silently omits part
+      // of the traffic is worse than no report. The moment the same open-weights model is served by
+      // two providers (which is the normal case for Llama — Groq, Together, SambaNova and Fireworks
+      // all serve it), a model-only column makes two different tiers with two different prices and
+      // two different data policies indistinguishable in the one table that is supposed to be the
+      // record of what was sent where.
+      //
+      // BACKFILLED TO 'anthropic' RATHER THAN LEFT NULL. Every row that exists before this
+      // migration was an Anthropic call — there was no other path. A NULL would say "unknown",
+      // which is a different and false claim, and it would make the honest query
+      // (`GROUP BY provider`) grow a bucket that never corresponded to anything.
+      id: "096_usage_events_provider",
+      sql: `
+        ALTER TABLE usage_events ADD COLUMN provider TEXT;
+        UPDATE usage_events SET provider = 'anthropic' WHERE provider IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_usage_events_provider
+          ON usage_events(provider, created_at);
+      `,
+    },
   ];

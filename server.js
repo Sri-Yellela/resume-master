@@ -45,6 +45,7 @@ import { classifyGenerationError } from "./shared/failureAttribution.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
 import { classify } from "./services/classifier.js";
+import { DATA_CLASS } from "./shared/modelProviders.js";
 import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } from "./services/qualificationResolver.js";
 // buildApifyQueriesFromProfile and buildProfileSearchTerms dropped from this import in cleanup
 // 5.1: both were imported here and never called. The functions themselves are KEPT — unlike
@@ -3107,6 +3108,30 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON job_applications(user_id, response_outcome, applied_at);
       `,
     },
+    {
+      // AL1 — which PROVIDER served each call, alongside the model that already exists.
+      //
+      // WHY MODEL ALONE IS NOT ENOUGH. It nearly is — model IDs are globally unique in practice, so
+      // "llama-3.1-8b-instant" could only have come from Groq today. But the cost report groups by
+      // model and the whole point of the tracking work was that a report which silently omits part
+      // of the traffic is worse than no report. The moment the same open-weights model is served by
+      // two providers (which is the normal case for Llama — Groq, Together, SambaNova and Fireworks
+      // all serve it), a model-only column makes two different tiers with two different prices and
+      // two different data policies indistinguishable in the one table that is supposed to be the
+      // record of what was sent where.
+      //
+      // BACKFILLED TO 'anthropic' RATHER THAN LEFT NULL. Every row that exists before this
+      // migration was an Anthropic call — there was no other path. A NULL would say "unknown",
+      // which is a different and false claim, and it would make the honest query
+      // (`GROUP BY provider`) grow a bucket that never corresponded to anything.
+      id: "096_usage_events_provider",
+      sql: `
+        ALTER TABLE usage_events ADD COLUMN provider TEXT;
+        UPDATE usage_events SET provider = 'anthropic' WHERE provider IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_usage_events_provider
+          ON usage_events(provider, created_at);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -3319,6 +3344,13 @@ async function classifyJob(title, description = "") {
   try {
     const msg = await callModel({
       anthropic, db, purpose: "classify_job", userId: SYSTEM_USER_ID,
+      // PUBLIC: title + the first 600 chars of the posting's own description, and nothing else.
+      //
+      // ⚠ NOT TO BE CONFUSED WITH `classifier` (services/classifier.js), whose name is one letter
+      // apart and which sends 2000 chars of the CANDIDATE'S RESUME. That one is CANDIDATE class and
+      // must never be routed. The two purposes are adjacent in every cost report; check the payload,
+      // not the name.
+      dataClass: DATA_CLASS.PUBLIC,
       model: MODEL_HAIKU,
       max_tokens: 30,
       messages: [{ role:"user", content:
@@ -7365,6 +7397,8 @@ Return ONLY the improved resume text with no commentary, preamble, or explanatio
     const t0 = Date.now();
     const enhanceMsg = await callModel({
       anthropic, db, purpose: "resume_enhance", userId: req.user.id,
+      // CANDIDATE: the candidate's full resume text (A+ path; owner keeps this on Claude regardless). Never routed off Anthropic.
+      dataClass: DATA_CLASS.CANDIDATE,
       eventType: "resume_enhance", eventSubtype: "enhance",
       model: MODEL_SONNET,
       // thinking is explicit: Sonnet 5 runs ADAPTIVE thinking when the field is omitted, and
@@ -7566,6 +7600,8 @@ app.post("/api/parse-pdf", requireAuth, upload.single("file"), async (req, res) 
     const base64 = req.file.buffer.toString("base64");
     const msg = await callModel({
       anthropic, db, purpose: "parse_pdf", userId: req.user.id,
+      // CANDIDATE: the raw bytes/text of an uploaded resume PDF — name, address, phone, employment history. Never routed off Anthropic.
+      dataClass: DATA_CLASS.CANDIDATE,
       model: MODEL_SONNET,
       // See the enhance call site: explicit thinking:disabled + doubled budget, because Sonnet 5
       // thinks by default and its tokenizer is denser. A truncated extraction here silently
@@ -7676,6 +7712,8 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
   const genStart = Date.now();
   const resumeMsg = await callModel({
     anthropic, db, purpose: "resume_generate", userId,
+    // CANDIDATE: the candidate's profile and resume, tailored against a JD. Never routed off Anthropic.
+    dataClass: DATA_CLASS.CANDIDATE,
     eventType: "resume_generate", eventSubtype,
     atsScoreBefore,
     onTracked: (id) => { usageEventId = id; },
@@ -7765,6 +7803,8 @@ RULES:
       const fmtStart = Date.now();
       const formatMsg = await callModel({
         anthropic, db, purpose: "resume_format", userId,
+        // CANDIDATE: the generated resume's full HTML, content preserved verbatim. Never routed off Anthropic.
+        dataClass: DATA_CLASS.CANDIDATE,
         eventType: "resume_format", eventSubtype,
         jobId: String(jobId), company: job.company, domainModule: domainModuleKey,
         model: MODEL_HAIKU,
@@ -8021,6 +8061,8 @@ REQUIREMENTS:
   try {
     const message = await callModel({
       anthropic, db, purpose: "cover_letter_apply", userId, jobId: String(jobId),
+      // CANDIDATE: the candidate's resume and profile. Never routed off Anthropic.
+      dataClass: DATA_CLASS.CANDIDATE,
       model: MODEL_HAIKU,
       max_tokens: 800,
       messages: [{ role: "user", content: prompt }],
@@ -8625,6 +8667,8 @@ app.post("/api/standalone/ats", standaloneRateLimit("ats", 1, 3), standaloneUplo
     const atsDynamic = `JOB DESCRIPTION (extract keywords ONLY from this text):\n${jdText}\n\nRESUME TEXT (check which JD keywords appear here):\n${resumeText}`;
     const msg = await callModel({
       anthropic, db, purpose: "standalone_ats", userId: SYSTEM_USER_ID,
+      // CANDIDATE: an uploaded resume scored against a pasted JD. Never routed off Anthropic.
+      dataClass: DATA_CLASS.CANDIDATE,
       model: MODEL_HAIKU,
       max_tokens: 900,
       system: ATS_SYSTEM_PROMPT,
@@ -8672,6 +8716,8 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
 
     const resumeMsg = await callModel({
       anthropic, db, purpose: "standalone_generate", userId: SYSTEM_USER_ID,
+      // CANDIDATE: an uploaded resume, rewritten. Never routed off Anthropic.
+      dataClass: DATA_CLASS.CANDIDATE,
       model: MODEL_SONNET,
       // See the enhance call site: explicit thinking:disabled + denser-tokenizer headroom.
       thinking: { type: "disabled" },
@@ -8687,6 +8733,8 @@ app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), stan
     try {
       const atsMsg = await callModel({
         anthropic, db, purpose: "standalone_ats", userId: SYSTEM_USER_ID,
+        // CANDIDATE: an uploaded resume scored against a pasted JD. Never routed off Anthropic.
+        dataClass: DATA_CLASS.CANDIDATE,
         model: MODEL_HAIKU, max_tokens: 900,
         system: ATS_SYSTEM_PROMPT,
         messages: [{ role: "user", content: `JOB DESCRIPTION:\n${jdText}\n\nRESUME TEXT:\n${cachedText}` }],
@@ -8758,6 +8806,8 @@ REQUIREMENTS:
   try {
     const message = await callModel({
       anthropic, db, purpose: "cover_letter", userId: req.user.id, company: company || null,
+      // CANDIDATE: the candidate's resume and profile. Never routed off Anthropic.
+      dataClass: DATA_CLASS.CANDIDATE,
       model: MODEL_HAIKU,
       max_tokens: 800,
       messages: [{ role: "user", content: prompt }],

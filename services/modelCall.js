@@ -17,6 +17,65 @@
 // grouped by feature rather than only by model.
 
 import { trackApiCall } from "./usageTracker.js";
+import { DATA_CLASS, PROVIDER, PROVIDERS, resolveProvider } from "../shared/modelProviders.js";
+import { callProvider } from "./providerTransport.js";
+
+// ── ROUTING ─────────────────────────────────────────────────────────────────────────────────────
+//
+// ROUTE BY WHOSE DATA IT IS, NOT BY WHAT A FILTER FINDS IN THE STRING. "Did the regex catch every
+// email in this resume" is not a checkable property; "does this call site send job-advert text or
+// person text" is, and a test can assert it per site.
+//
+// PUBLIC   — job descriptions, titles, requirements: text a company published about itself.
+//            enrich_job (60.2% of all spend), classify_job, import_job.
+// CANDIDATE — anything derived from a person. resume_generate, enhanceProfileResume, parse-pdf,
+//            cover letters, domainProfiles suggestions. These stay on Anthropic. Redaction is NOT
+//            part of this: a call site either sends public text or it does not.
+//
+// ⛔ THE DEFAULT IS CANDIDATE. A call site that declares nothing stays on Anthropic. That is the
+// whitelist direction and it is the whole safety property here — a blacklist would mean that
+// forgetting to annotate a new resume-touching site silently routes a person's home address and
+// work authorisation to a free tier that may train on it. Forgetting to annotate a public site
+// costs a fraction of a cent.
+
+/** Warned reasons, so a fallback is loud ONCE per process rather than 1302 times per pass. */
+const warnedFallbacks = new Set();
+
+function warnFallbackOnce(reason, detail) {
+  if (warnedFallbacks.has(reason)) return;
+  warnedFallbacks.add(reason);
+  console.warn(
+    `[modelCall] PUBLIC traffic is NOT using a free tier — falling back to Anthropic. ` +
+    `Reason: ${reason}. ${detail || ""} ` +
+    `This warns once per process; every subsequent PUBLIC call takes the same fallback.`
+  );
+}
+
+/** Test seam — the warn-once set is process-global and would hide a second test's warning. */
+export function resetRoutingWarnings() {
+  warnedFallbacks.clear();
+}
+
+/**
+ * Decide which provider and model a call uses. Exported for testing; nothing else may call it,
+ * because a second consumer is a second routing path and this must have exactly one.
+ *
+ * @returns {{ provider: string, model: string }}
+ */
+export function routeFor({ dataClass, model, env = process.env } = {}) {
+  if (dataClass !== DATA_CLASS.PUBLIC) return { provider: PROVIDER.ANTHROPIC, model };
+
+  // Throws on an unpinned ENRICH_MODEL, deliberately — see requirement 6 in shared/modelProviders.js.
+  const resolved = resolveProvider(env);
+  if (resolved.provider === PROVIDER.ANTHROPIC) {
+    // UNCONFIGURED MUST BE LOUD. cacheJoboFeed logged "sync complete — 0 jobs cached" for months on
+    // exactly this shape: a missing key producing a quiet no-op that reads as success.
+    // `not_configured` is the honest default and is not a defect, so it does not warn.
+    if (resolved.reason !== "not_configured") warnFallbackOnce(resolved.reason, resolved.detail);
+    return { provider: PROVIDER.ANTHROPIC, model };
+  }
+  return { provider: resolved.provider, model: resolved.model };
+}
 
 // Background work — enrichment, import extraction, job classification, and the unauthenticated
 // standalone endpoints — has no user in scope, but usage_events.user_id is NOT NULL REFERENCES
@@ -60,11 +119,20 @@ export async function callModel({
   // records the row, so it runs on success AND on failure, and a throwing callback cannot escape
   // into the caller's error path.
   onTracked = null,
+  // WHOSE DATA THIS CALL SENDS. See the routing note at the top of this file. Defaults to
+  // CANDIDATE so an unannotated site can never be routed off Anthropic by accident.
+  dataClass = DATA_CLASS.CANDIDATE,
   ...params
 } = {}) {
   if (!purpose) throw new Error("callModel: `purpose` is required — it is how spend is attributed to a feature");
-  if (!anthropic) throw new Error(`callModel(${purpose}): no anthropic client`);
   if (!model) throw new Error(`callModel(${purpose}): no model — import MODEL_SONNET/MODEL_HAIKU from shared/anthropicModels.js`);
+
+  // Resolved BEFORE the timer and outside the try, because an unpinned ENRICH_MODEL is a config
+  // error rather than a call: no request is made, so no usage row should be written for it.
+  const route = routeFor({ dataClass, model });
+  // Only the Anthropic route needs the SDK client. Checked after routing so a PUBLIC-only pass is
+  // not blocked by an absent Anthropic client it was never going to use.
+  if (route.provider === PROVIDER.ANTHROPIC && !anthropic) throw new Error(`callModel(${purpose}): no anthropic client`);
 
   const startedAt = Date.now();
   let message = null;
@@ -72,7 +140,15 @@ export async function callModel({
   let errorText = null;
 
   try {
-    message = await anthropic.messages.create({ model, ...params });
+    message = route.provider === PROVIDER.ANTHROPIC
+      ? await anthropic.messages.create({ model: route.model, ...params })
+      // Returns an Anthropic-SHAPED message, so every caller's `.content.map(b => b.text)` and
+      // `.usage.input_tokens` keep working and routing stays a concern of this file alone.
+      : await callProvider({
+          provider: route.provider,
+          apiKey: process.env[PROVIDERS[route.provider].envKey],
+          params: { model: route.model, ...params },
+        });
     return message;
   } catch (e) {
     success = false;
@@ -90,7 +166,11 @@ export async function callModel({
         eventType: eventType || purpose,
         eventSubtype,
         purpose,
-        model,
+        // THE MODEL ACTUALLY CALLED, not the one the call site asked for — they differ whenever a
+        // PUBLIC site is routed. Recording the requested one would make cost reconcile against a
+        // model that was never invoked.
+        model: route.model,
+        provider: route.provider,
         usage: message?.usage || {},
         durationMs: Date.now() - startedAt,
         jobId,

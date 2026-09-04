@@ -39,6 +39,7 @@ import { reconcileFingerprint, upsertCanonicalJob, fingerprintJob, SOURCE_LABELS
 import { runEnrichment } from './enrichJob.js';
 import { mapJobRow } from './mapJobRow.js';
 import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
+import { DATA_CLASS } from '../../shared/modelProviders.js';
 import { callModel, SYSTEM_USER_ID } from '../modelCall.js';
 
 import { fetchCompanyJobs as fetchGreenhouseJobs }      from './sources/greenhouse.js';
@@ -319,6 +320,10 @@ async function extractJobFromContent(anthropic, { url, text, db = null }) {
     // User-initiated import, but this helper has no user in scope; the system sentinel keeps the
     // spend visible rather than dropping it.
     anthropic, db, purpose: "import_job", userId: SYSTEM_USER_ID,
+    // PUBLIC: the payload is the fetched text of an open-web job posting, plus its URL. The user
+    // supplies the LOCATION of the text, never any of their own data — nothing from their profile
+    // or resume is in this prompt.
+    dataClass: DATA_CLASS.PUBLIC,
     model: IMPORT_MODEL_ID,
     max_tokens: 800,
     messages: [{ role: 'user', content: buildExtractionPrompt(text, url) }],

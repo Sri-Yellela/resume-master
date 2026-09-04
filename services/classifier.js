@@ -21,6 +21,7 @@
 
 import { MODEL_HAIKU } from "../shared/anthropicModels.js";
 import { callModel, SYSTEM_USER_ID } from "./modelCall.js";
+import { DATA_CLASS } from "../shared/modelProviders.js";
 import { PROFILE_SENIORITY, values } from "../shared/jobFilterOptions.js";
 
 // The seniority enum this prompt asks Haiku for is the vocabulary of domain_profiles.seniority, and
@@ -78,6 +79,8 @@ Reply ONLY with valid JSON matching this exact schema. No markdown fences, no ex
     anthropic,
     db: options.db,
     purpose: "classifier",
+    // CANDIDATE: 2000 chars of the candidate's RESUME alongside the JD — see the warning at classify_job. Never routed off Anthropic.
+    dataClass: DATA_CLASS.CANDIDATE,
     eventType: "classifier",
     userId: options.userId ?? SYSTEM_USER_ID,
     eventSubtype: options.eventSubtype ?? null,

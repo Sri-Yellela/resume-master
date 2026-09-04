@@ -40,6 +40,7 @@ import crypto from 'crypto';
 import { recordPipelineRun } from './pipelineRunLog.js';
 import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
 import { callModel, SYSTEM_USER_ID } from '../modelCall.js';
+import { DATA_CLASS } from '../../shared/modelProviders.js';
 import { EXPERIENCE_LEVELS, WORK_MODELS, valueSet } from '../../shared/jobFilterOptions.js';
 
 // Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
@@ -117,6 +118,11 @@ async function extractSignals(anthropic, job, { onUsage, db = null } = {}) {
     // One call PER JOB across hundreds of rows — the single largest untracked spender.
     // Background pass, so there is no user: attributed to the system sentinel.
     anthropic, db, purpose: "enrich_job", userId: SYSTEM_USER_ID, jobId: job?.job_id ?? null,
+    // PUBLIC: the payload is a job advert's title, company and description — text the company
+    // published about itself. No candidate data reaches this prompt at all; buildPrompt above takes
+    // exactly three fields and all three come from scraped_jobs. This is 60.2% of all model spend
+    // and it is the reason routing exists.
+    dataClass: DATA_CLASS.PUBLIC,
     model: MODEL_ID,
     max_tokens: 500,
     messages: [{ role: 'user', content: prompt }],
@@ -373,4 +379,8 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
   }
 }
 
-export { runEnrichment, computeContentHash, decayedWeight, hasAnySignal, DECAY_HALFLIFE_DAYS, ENRICH_BATCH_SIZE };
+// buildPrompt is exported for scripts/al1ProviderQualityDiff.mjs, which compares two providers on
+// THIS prompt. It is exported rather than copied into the harness deliberately: a copy would drift
+// and the harness would then measure a prompt the pipeline does not use — two sides, each
+// self-consistent, joined to nothing, which is the shape this codebase keeps finding.
+export { runEnrichment, computeContentHash, decayedWeight, hasAnySignal, buildPrompt, DECAY_HALFLIFE_DAYS, ENRICH_BATCH_SIZE };

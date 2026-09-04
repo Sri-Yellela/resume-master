@@ -172,6 +172,7 @@ test("coverage does not claim healthy while the sink holds unimported failures",
         cached INTEGER NOT NULL DEFAULT 0, model TEXT, cost_usd REAL DEFAULT 0,
         ats_score_before INTEGER, ats_score_after INTEGER, duration_ms INTEGER, job_id TEXT,
         company TEXT, success INTEGER NOT NULL DEFAULT 1, error_text TEXT, purpose TEXT,
+        provider TEXT,
         created_at INTEGER NOT NULL DEFAULT (unixepoch()));
       CREATE TABLE cache_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, event_type TEXT NOT NULL,
@@ -219,6 +220,7 @@ test("a recovered failure is reported as recovered, not as a live record", async
         cached INTEGER NOT NULL DEFAULT 0, model TEXT, cost_usd REAL DEFAULT 0,
         ats_score_before INTEGER, ats_score_after INTEGER, duration_ms INTEGER, job_id TEXT,
         company TEXT, success INTEGER NOT NULL DEFAULT 1, error_text TEXT, purpose TEXT,
+        provider TEXT,
         created_at INTEGER NOT NULL DEFAULT (unixepoch()));
       CREATE TABLE cache_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, event_type TEXT NOT NULL,

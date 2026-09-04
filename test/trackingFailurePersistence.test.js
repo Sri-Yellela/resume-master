@@ -49,7 +49,7 @@ function setup({ withFailuresTable = true, withUsageEvents = true } = {}) {
       cached INTEGER NOT NULL DEFAULT 0, model TEXT, cost_usd REAL DEFAULT 0,
       ats_score_before INTEGER, ats_score_after INTEGER, duration_ms INTEGER,
       job_id TEXT, company TEXT, success INTEGER NOT NULL DEFAULT 1, error_text TEXT,
-      purpose TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      purpose TEXT, provider TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );`);
   }
   return db;
@@ -131,7 +131,7 @@ test("a failure record has no FK on user_id, so an FK violation is still recorda
       cached INTEGER NOT NULL DEFAULT 0, model TEXT, cost_usd REAL DEFAULT 0,
       ats_score_before INTEGER, ats_score_after INTEGER, duration_ms INTEGER,
       job_id TEXT, company TEXT, success INTEGER NOT NULL DEFAULT 1, error_text TEXT,
-      purpose TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      purpose TEXT, provider TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );`);
   assert.equal(db.pragma("foreign_keys", { simple: true }), 1, "better-sqlite3 enforces FKs by default");
 
@@ -159,7 +159,7 @@ test("the spend endpoint reports persisted failures and stops claiming healthy",
     cached INTEGER NOT NULL DEFAULT 0, model TEXT, cost_usd REAL DEFAULT 0,
     ats_score_before INTEGER, ats_score_after INTEGER, duration_ms INTEGER,
     job_id TEXT, company TEXT, success INTEGER NOT NULL DEFAULT 1, error_text TEXT,
-    purpose TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    purpose TEXT, provider TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );`);
   // Counters cleared, as after a deploy — only the persisted row remains.
   resetTrackingStats();

@@ -15,6 +15,11 @@
 // to the API, or calculateCost() cannot price the call (it warns loudly rather than silently
 // returning $0 — see the unknown-key branch).
 
+// Free-tier providers keep their own catalog and their own (zero) prices, so this file stays what
+// its header says it is. calculateCost consults both, because usage_events has ONE cost column and
+// a report that silently omitted a third of traffic is the exact defect the tracking work fixed.
+import { FREE_TIER_PRICING } from "./modelProviders.js";
+
 // Verified against https://platform.claude.com/docs/en/about-claude/models/overview 2026-08-13.
 export const MODEL_SONNET = "claude-sonnet-5";
 export const MODEL_HAIKU = "claude-haiku-4-5-20251001";
@@ -79,7 +84,11 @@ export function cacheCreationTokensOf(usage = {}) {
 }
 
 export function calculateCost(model, usage = {}) {
-  const p = ANTHROPIC_PRICING[model];
+  // FREE-TIER MODELS ARE PRICED, AT ZERO — they are not absent and they are not an exception.
+  // An absent entry would fire the loud warning below on every enrichment call, and the only way
+  // to quiet that would be to special-case "free" in here, which would then silence a genuinely
+  // dead model ID too. See the long note in shared/modelProviders.js.
+  const p = ANTHROPIC_PRICING[model] || FREE_TIER_PRICING[model];
   if (!p) {
     // Fail LOUD, not soft. Returning a bare 0 here is how a dead model ID hides: the call
     // fails or the price changes, cost logging reports $0.00, and the dashboards look healthy.

@@ -25,6 +25,7 @@ import {
 } from "../services/profileSignalAggregator.js";
 import { mergeUniqueSignalLabels } from "../shared/profileSignals.js";
 import { MODEL_HAIKU } from "../shared/anthropicModels.js";
+import { DATA_CLASS } from "../shared/modelProviders.js";
 import { callModel } from "../services/modelCall.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -592,6 +593,8 @@ Rules:
     try {
       const msg = await callModel({
         anthropic, db, purpose: "domain_chips", userId: req.user.id,
+        // CANDIDATE: the candidate's profile, to suggest domain skills. Never routed off Anthropic.
+        dataClass: DATA_CLASS.CANDIDATE,
         model: MODEL_HAIKU,
         max_tokens: 600,
         messages: [{ role: "user", content: prompt }],

@@ -64,6 +64,7 @@ const EXCLUDED = {
   importJobUrls:       "utility, writes to the database",
   ingestLca:           "utility, downloads a dataset",
   runEnrichment:       "utility, spends model tokens",
+  al1ProviderQualityDiff: "REAL enrichment on BOTH providers — the Anthropic arm spends tokens on every row; run it by hand",
   af2ClaimVerify:      "REAL generation — spends model tokens on every run; run it by hand",
   ai1SummaryVerify:    "REAL generation x2 + PDF render — spends model tokens on every run; run it by hand",
   ag2ClaimsGeneration: "REAL generation — spends model tokens on every run; run it by hand",

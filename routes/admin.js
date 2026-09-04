@@ -403,14 +403,32 @@ export function createAdminRouter(db) {
       totals.total_tokens = totals.input_tokens + totals.output_tokens
         + totals.cache_read_tokens + totals.cache_creation_tokens;
 
+      // GROUPED BY PROVIDER AS WELL AS MODEL. A free-tier row costs $0, so a cost-ordered
+      // by-model list sinks it to the bottom and a reader concludes it did not happen — which is
+      // the same "confidently wrong total" the tracking work existed to fix, arriving as a
+      // presentation bug instead of a recording one. The CALL COUNT is the honest measure of
+      // routed traffic, and it only means anything next to the provider that served it.
       const byModel = db.prepare(`
         SELECT COALESCE(model, '(no model recorded)') AS model,
+          COALESCE(provider, 'anthropic') AS provider,
           COUNT(*) AS calls,
           COALESCE(SUM(cost_usd), 0) AS cost_usd,
           COALESCE(SUM(input_tokens), 0) AS input_tokens,
           COALESCE(SUM(output_tokens), 0) AS output_tokens
         FROM usage_events WHERE created_at BETWEEN ? AND ?
-        GROUP BY model ORDER BY cost_usd DESC
+        GROUP BY model, COALESCE(provider, 'anthropic') ORDER BY cost_usd DESC, calls DESC
+      `).all(from, to);
+
+      // Routed vs not, at a glance. Answers "is the free tier actually being used" without
+      // reading a table — the question the unconfigured-fallback warning exists to answer at
+      // boot, asked again against what really happened.
+      const byProvider = db.prepare(`
+        SELECT COALESCE(provider, 'anthropic') AS provider,
+          COUNT(*) AS calls,
+          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+          SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failed_calls
+        FROM usage_events WHERE created_at BETWEEN ? AND ?
+        GROUP BY COALESCE(provider, 'anthropic') ORDER BY calls DESC
       `).all(from, to);
 
       // 'unattributed' is rows written before migration 075 added purpose. They are shown, not
@@ -604,6 +622,7 @@ export function createAdminRouter(db) {
         },
         totals,
         byModel,
+        byProvider,
         byPurpose,
         byDay,
         cache,

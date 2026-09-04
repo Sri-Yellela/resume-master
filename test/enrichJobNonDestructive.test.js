@@ -33,6 +33,7 @@ function makeDb() {
       cached INTEGER NOT NULL DEFAULT 0, model TEXT, cost_usd REAL DEFAULT 0,
       ats_score_before INTEGER, ats_score_after INTEGER, duration_ms INTEGER, job_id TEXT,
       company TEXT, success INTEGER NOT NULL DEFAULT 1, error_text TEXT, purpose TEXT,
+      provider TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
     CREATE TABLE IF NOT EXISTS cache_events (
