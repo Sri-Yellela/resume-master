@@ -2492,6 +2492,21 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     resumePathPromise        = null,
     coverLetterPath          = null,
     coverLetterPathPromise   = null,
+    // AL2 — THE DOCUMENTS ARE NOT MISSING, THEY ARE NOT WRITTEN YET.
+    //
+    // With generation deferred to approval, a preview reaches the form with no resume and no cover
+    // letter ON PURPOSE: they are written when the user approves. The completeness gate below
+    // checks required FILE inputs (A1 finding N2 — a form with no resume used to pass the gate and
+    // then be silently unsubmittable), so a deferred preview held as 'incomplete_form' instead of
+    // 'awaiting_approval'. Only 'awaiting_approval' rows are approvable, so EVERY deferred preview
+    // became unapprovable and the entire queue-then-approve flow dead-ended — while the run
+    // history blamed the employer's form.
+    //
+    // This flag is the difference between "we could not fill this" and "we have not written it
+    // yet", which is a distinction the gate cannot make on its own. It NEVER widens what may be
+    // submitted: it is only ever set on a preview, the blanks are still reported, and the approved
+    // run that follows carries a real resume through the ordinary gate.
+    documentsDeferred        = false,
     jobId             = `tmp_${Date.now()}`,
     storageStatePath  = null,
     // Step-scoped approval hook. Receives each step's resolved answer set BEFORE anything is typed
@@ -2844,8 +2859,16 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       // attached passed the gate while the browser refused to submit it — the run then reported
       // filled_not_submitted with no reasonCode, having never reached the later steps. A file
       // input's value is readable ('' when empty), so it is checked like any other control.
+      // A DEFERRED DOCUMENT IS NOT A MISSING ANSWER. When generation waits for approval there is
+      // deliberately no resume or cover letter to attach yet, so a required FILE input is expected
+      // to be empty in the preview and holding on it makes the row unapprovable — see
+      // `documentsDeferred` above. Scoped to FILE inputs only: every other required field is still
+      // the candidate's to answer and still holds the run. The fields are excluded from the GATE,
+      // not from the record — they remain in `blanks` below, so the preview still shows them.
+      const deferredDoc = (f) => documentsDeferred && f.type === 'file';
       const missingFields = postFillFields
-        .filter(f => f.is_required && (f.current_value === '' || f.current_value == null));
+        .filter(f => f.is_required && (f.current_value === '' || f.current_value == null))
+        .filter(f => !deferredDoc(f));
       const missingRequired = missingFields.map(f => f.label || f.field_id || '(unknown)');
       if (missingRequired.length > 0) {
         // Attach what the resolver refused for each field, so a question can explain itself

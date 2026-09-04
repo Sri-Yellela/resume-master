@@ -2762,4 +2762,33 @@ export const MIGRATIONS = [
           ON usage_events(provider, created_at);
       `,
     },
+    {
+      // AL2 — generation is deferred to APPROVAL, and the free base-resume fit is recorded instead.
+      //
+      // WHY. Generation costs ~$0.04 on Sonnet and fired at QUEUE time. A swipe is ~1 second, so
+      // five idle minutes of swiping is ~60 jobs and ~$2.40 spent by a gesture that cost the user
+      // no thought at all. Nothing was decided at that point — the user had not seen the
+      // application and had not approved sending it.
+      //
+      // A USER CANNOT APPROVE BLIND, which is why this is three columns and not a feature flag.
+      // scoreAtsLocally runs with NO model call and NO generated artifact, so the approval screen
+      // can show a real fit band computed against the BASE resume, for free, before anything is
+      // spent. That is also a MORE HONEST number than the one it replaces: the old score was
+      // computed against the GENERATED resume, so it reflected tailoring the user had not yet
+      // decided to pay for. A base-resume band is an honest floor — tailoring can only raise it.
+      //
+      //   generate_at_queue  per-profile, DEFAULT 0 (off). Restores the old behaviour for testing.
+      //                      On domain_profiles beside include_summary (092), because it is the
+      //                      same kind of thing: a per-profile choice about what a run does.
+      //   base_ats_score     the free score, INTEGER and nullable — NULL is the scorer DECLINING,
+      //                      which is not a zero and must never render as one.
+      //   base_ats_json      the matched/missing terms behind it, so the approval screen can say
+      //                      WHY rather than showing a bare number the user cannot check.
+      id: "097_generation_deferred_to_approval",
+      sql: `
+        ALTER TABLE domain_profiles ADD COLUMN generate_at_queue INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE apply_run_jobs ADD COLUMN base_ats_score INTEGER;
+        ALTER TABLE apply_run_jobs ADD COLUMN base_ats_json TEXT;
+      `,
+    },
   ];

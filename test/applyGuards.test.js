@@ -47,6 +47,7 @@ function setup({ planTier = "PRO", env = {} } = {}) {
       job_id TEXT, status TEXT, reason_code TEXT, reason_detail TEXT, started_at INTEGER,
       finished_at INTEGER, created_at INTEGER DEFAULT (unixepoch()),
       answers_json TEXT, resume_artifact_id INTEGER, resume_ats_score INTEGER,
+      base_ats_score INTEGER, base_ats_json TEXT,
       screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT,
       hidden_at INTEGER, UNIQUE(run_id, job_id));
     CREATE TABLE apply_job_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, run_job_id INTEGER,

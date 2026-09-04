@@ -125,7 +125,8 @@ function publicApplication(row) {
   };
 }
 
-export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply) {
+export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply,
+                                    scoreBaseResumeForApply) {
   // ── Manual tracking endpoints ────────────────────────────────────────────────
 
   app.post("/api/apply", requireAuth, (req, res) =>
@@ -747,6 +748,37 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // submitted — so NULL keeps submitting rather than silently changing what old runs did.
     const approvalMode  = run.approval_mode || "auto";
     const needsApproval = mode === "auto" && approvalMode === "required";
+
+    // ── AL2: GENERATION IS DEFERRED TO APPROVAL ──────────────────────────────────────────────
+    //
+    // Generation costs ~$0.04 on Sonnet. Swiping costs ~1 second, so five idle minutes of swiping
+    // was ~60 jobs and ~$2.40 spent by a gesture that decided nothing — the user had not seen the
+    // application, and had not approved sending it.
+    //
+    // ⛔ ONLY THE PREVIEW PATH DEFERS, and the other two keep generating exactly when they did:
+    //   needsApproval (auto + approval_mode 'required')  DEFER. A human will see this before it is
+    //                                                    sent, so the spend can wait for them.
+    //   mode 'semi'                                      DO NOT defer. A live human is standing at
+    //                                                    an open browser; a resume that does not
+    //                                                    exist yet cannot be uploaded, and the
+    //                                                    hold it produces ('manual_review') is not
+    //                                                    approvable in the first place.
+    //   approval_mode 'auto' / 'approved'                DO NOT defer. Nobody is going to approve
+    //                                                    it later — 'auto' has opted out of review
+    //                                                    and 'approved' IS the approval.
+    //
+    // The per-profile escape hatch is DEFAULT OFF, per requirement 3: this is the owner's testing
+    // switch for restoring the old behaviour, not a setting users are expected to find.
+    // ALIASED ON PURPOSE (`dp`), and it is not a style choice. test/harnessSchemaCoverage.test.js
+    // discovers which columns these routes read by finding `FROM <table> <alias>` and then sweeping
+    // for `alias.column`; an unaliased SELECT list is invisible to it, so this query produced NO
+    // required-column entry and the guard skipped domain_profiles entirely — passing vacuously
+    // while a9ApprovalFlow died on `no such column: generate_at_queue`.
+    const generateAtQueue = !!db.prepare(`
+      SELECT dp.generate_at_queue FROM domain_profiles dp
+      WHERE dp.user_id=? AND dp.is_active=1 ORDER BY dp.id DESC LIMIT 1
+    `).pluck().get(userId);
+    const deferGeneration = needsApproval && !generateAtQueue;
     // 'preview' is full-auto minus the click; 'semi' opens a visible browser for a live human.
     const applyMode = mode !== "auto" ? "semi" : needsApproval ? "preview" : "full";
     // What the human approved, if this run exists because of an approval. autoApply refuses to
@@ -1101,6 +1133,46 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           });
         }
         return;
+
+      } else if (deferGeneration) {
+        // ── CASE D: PREVIEW WITHOUT GENERATING (AL2) ───────────────────────────────────────────
+        //
+        // The whole point of the deferral. Nothing here calls a model: no resume, no cover letter.
+        // The browser still opens and fills the form, because the form is what the human is being
+        // asked to approve — what changes is that the ~$0.04 waits for their decision.
+        //
+        // ⛔ resumePathPromise IS DELIBERATELY NOT PASSED, and this is not a tidiness choice.
+        // autoApply treats `preview` as UNATTENDED, and it has a gate reading
+        // `isUnattended && resumePathPromise && !effectiveResumePath` which returns
+        // status 'ats_held' / 'resume_unavailable'. Passing Promise.resolve(null) — the obvious
+        // way to say "no resume yet" — therefore turns EVERY deferred preview into a hold that the
+        // approve endpoint cannot release, because only 'awaiting_approval' rows are approvable.
+        // The deferral would silently break the entire queue. Omitting the option is what tells
+        // autoApply there was never a resume coming, which is the truth.
+        const baseAts = typeof scoreBaseResumeForApply === "function"
+          ? scoreBaseResumeForApply(userId, jobId) : null;
+        db.prepare(`UPDATE apply_run_jobs SET base_ats_score=?, base_ats_json=? WHERE id=?`)
+          .run(baseAts?.score ?? null, baseAts ? JSON.stringify(baseAts) : null, runJobId);
+        logEvent(runId, runJobId, userId, jobId, "generation_deferred",
+          baseAts
+            // The band, not the number — the number is internal (see shared/atsBands.js).
+            ? `No resume generated yet. Base resume fit: ${baseAts.band.replace(/_/g, " ")}. ` +
+              `Generation happens when you approve.`
+            : "No resume generated yet. Generation happens when you approve.",
+          { baseAtsScore: baseAts?.score ?? null, baseAtsBand: baseAts?.band ?? null,
+            deferred: true, generateAtQueue });
+        logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page for preview");
+        const applyPromise = autoApply(jobUrl, autofillPayload, {
+          mode: applyMode,
+          jobId,
+          approvedAnswers,
+          // Says the empty resume/cover-letter slots are DEFERRED, not unfillable. Without it the
+          // completeness gate holds this row as 'incomplete_form', and only 'awaiting_approval'
+          // rows can be approved — so every deferred preview would be a dead end.
+          documentsDeferred: true,
+        });
+        const settled = await Promise.allSettled([applyPromise]);
+        result = settled[0].status === "fulfilled" ? settled[0].value : { status: "error", fieldsFilled: 0 };
 
       } else {
         // CASE C: no artifact + auto mode
@@ -1525,6 +1597,16 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // queuedLast24h). Checked before it because it is the limit a queue-heavy caller hits first,
     // and refused with the same explicit shape as every other limit here.
     //
+    // ⚠ AL2 CHANGED WHAT THIS PROTECTS, and the number was deliberately NOT changed with it.
+    // This cap was sized for generate-at-queue, where 40 queued applications meant 40 generations
+    // and ~$1.60. With generation deferred to approval, queueing 40 jobs costs nothing and the
+    // meaningful cost limit is the number of APPROVALS — which this does not bound. So the cap now
+    // limits how many previews a user may open, which is a browser-time and rate-limit concern
+    // rather than a spend one. That is a real change in meaning and it is the owner's call, not
+    // one to make unilaterally; see docs/al2-generation-deferral.md. The user-facing message below
+    // no longer claims each queued application generates a resume, because on the deferred path it
+    // does not, and a limit that explains itself with a false reason is worse than a bare number.
+    //
     // Skipped for approval_mode='approved' — the approve endpoint is releasing work already
     // reviewed and already generated, and this guard exists to stop unreviewed generation, not to
     // stand between a human decision and the submission it authorises.
@@ -1533,7 +1615,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       if (queuedUsed + filtered.length > APPLY_DAILY_QUEUE_CAP) {
         return respond(429, {
           error: "queue_cap_exceeded",
-          message: `Daily queue limit reached: ${queuedUsed} of ${APPLY_DAILY_QUEUE_CAP} applications queued in the last 24h, ${filtered.length} requested. Each queued application generates a resume, so this limit protects your usage.`,
+          message: `Daily queue limit reached: ${queuedUsed} of ${APPLY_DAILY_QUEUE_CAP} applications queued in the last 24h, ${filtered.length} requested. This limit bounds how many applications can be opened and previewed per day.`,
           queuedLast24h: queuedUsed,
           requested: filtered.length,
           limit: APPLY_DAILY_QUEUE_CAP,
@@ -1848,6 +1930,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         atsScore:   rj.resume_ats_score ?? null,
         available:  rj.resume_artifact_id != null,
       },
+      // AL2 — the free base-resume fit, and the terms behind it. On a deferred row this is what
+      // the approve decision is actually made on; the FULL matched/missing sets are served here
+      // (the pending list caps them) because this is the screen where a user checks the number
+      // rather than just reading it.
+      baseAts: (() => {
+        const b = baseAtsFor(rj);
+        if (!b) return null;
+        const parsed = parseJson(rj.base_ats_json, null) || {};
+        return { ...b, matched: parsed.matched || [], missing: parsed.missing || [] };
+      })(),
+      generationDeferred: rj.resume_artifact_id == null && rj.base_ats_json != null,
       submission: {
         verified: rj.submit_verified === 1,
         evidence: rj.submit_evidence ?? null,
@@ -2908,9 +3001,37 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   const AWAITING = "awaiting_approval";
 
   /** Jobs parked for a decision, each with the answers that are actually going to be sent. */
+  /**
+   * The free base-resume fit for a run-job row, in the shape every surface renders.
+   *
+   * ONE DEFINITION, because the approval list and the review detail both show it and this codebase
+   * has repeatedly produced two self-consistent sides joined to nothing. Returns null when the row
+   * predates the deferral (nothing was recorded) — which is different from a recorded decline, and
+   * both are different from a low score.
+   */
+  const baseAtsFor = (row) => {
+    if (row?.base_ats_json == null) return null;
+    const parsed = parseJson(row.base_ats_json, null);
+    if (!parsed) return null;
+    return {
+      score: parsed.score ?? null,
+      band: parsed.band ?? null,
+      scorable: parsed.scorable ?? null,
+      declineReasons: parsed.declineReasons ?? [],
+      // Capped for a list surface. The full sets live on the review detail; a pending list showing
+      // 40 missing terms per row is not a screen anyone reads.
+      matched: (parsed.matched || []).slice(0, 12),
+      missing: (parsed.missing || []).slice(0, 12),
+      matchedCount: (parsed.matched || []).length,
+      missingCount: (parsed.missing || []).length,
+      resumeDepth: parsed.resumeDepth ?? null,
+    };
+  };
+
   app.get("/api/apply/pending", requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT rj.id, rj.run_id, rj.job_id, rj.answers_json, rj.resume_artifact_id, rj.resume_ats_score,
+             rj.base_ats_score, rj.base_ats_json,
              rj.screenshot_path, rj.created_at, r.mode, r.tool_type,
              sj.title, sj.company, sj.apply_url, sj.url
       FROM apply_run_jobs rj
@@ -2935,6 +3056,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
           guessCount: filled.filter(a => a.provenance === "label_fuzzy").length,
           resume: { artifactId: r.resume_artifact_id ?? null, atsScore: r.resume_ats_score ?? null,
                     available: r.resume_artifact_id != null },
+          // AL2 — WHAT THE USER APPROVES ON. With generation deferred there is no artifact yet, so
+          // `resume.available` is false and this is the only fit signal on the screen. It is the
+          // BASE resume's band: free, computed with no model call, and an honest floor, because
+          // tailoring at approval time can only raise it.
+          //
+          // A null score is the scorer DECLINING, not a zero — `band` carries 'not_enough_signal'
+          // for that case and the client must render it as its own state, never as a low score.
+          baseAts: baseAtsFor(r),
+          // Says WHY the resume is absent. "Not generated yet" and "generation failed" look
+          // identical from `available: false` alone, and they need opposite responses from the user.
+          generationDeferred: r.resume_artifact_id == null && r.base_ats_json != null,
           screenshotAvailable: !!r.screenshot_path,
         };
       }),

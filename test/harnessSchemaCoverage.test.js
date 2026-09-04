@@ -176,7 +176,14 @@ function requiredColumns(routeSrc, table) {
   return [...columnsRoutesUse(routeSrc, table)].filter(c => prod.has(c)).sort();
 }
 
-const APPLY_TABLES = ["apply_run_jobs", "apply_runs", "apply_gate_packets", "apply_job_logs"];
+// domain_profiles IS ON THIS LIST BECAUSE IT WAS MISSING FROM IT. AL2 made processRunJob read
+// `domain_profiles.generate_at_queue` to decide whether to defer generation — the first time the
+// apply worker touched a table outside the apply_* family. Every unit test passed; a9ApprovalFlow
+// died at check 2 of 15 with `no such column: generate_at_queue`, which is the exact defect this
+// file exists to prevent, one table over. The list was scoped to the tables that had broken before
+// rather than to the tables the routes actually read.
+const APPLY_TABLES = ["apply_run_jobs", "apply_runs", "apply_gate_packets", "apply_job_logs",
+                      "domain_profiles"];
 const routeSrc = fs.readFileSync("routes/apply.js", "utf8");
 const harnesses = fs.readdirSync("scripts")
   .filter(f => /\.mjs$/.test(f))
@@ -197,9 +204,23 @@ test("routes/apply.js really does read the column that broke g1", () => {
   assert.ok(used.size >= 10, `only ${used.size} columns extracted: ${[...used].join(" ")}`);
 });
 
+test("routes/apply.js really does read the column that broke a9ApprovalFlow", () => {
+  // The second anchor, and it exists because the FIRST failure mode here was silence. Adding
+  // domain_profiles to APPLY_TABLES produced no test at all: `requiredColumns` came back empty
+  // because the query was unaliased and the extractor only sweeps `alias.column`, so the loop
+  // below `continue`d and the whole table went unchecked while reporting green.
+  const used = columnsRoutesUse(routeSrc, "domain_profiles");
+  assert.ok(used.has("generate_at_queue"),
+    "the extractor no longer sees domain_profiles.generate_at_queue — the deferral decision is " +
+    "unguarded again, and a harness missing the column fails only at run time");
+});
+
 for (const table of APPLY_TABLES) {
   const required = requiredColumns(routeSrc, table);
-  if (!required.length) continue;
+  // A table that yields NOTHING is a broken extractor, not a table with no requirements — that is
+  // exactly how domain_profiles went unchecked. Fail rather than skip.
+  assert.ok(required.length,
+    `no required columns extracted for ${table}: the guard would pass vacuously for it`);
   test(`every harness supplying ${table} declares the columns routes/apply.js reads`, () => {
     const failures = [];
     for (const f of harnesses) {

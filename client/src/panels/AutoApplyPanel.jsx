@@ -1238,11 +1238,39 @@ export function AutoApplyPanel() {
                               {p.guessCount} GUESSED
                             </span>
                           )}
+                          {/* ── AL2: WHICH BAND THIS IS, AND WHAT IT IS OF ────────────────────
+                              With generation deferred to approval there is no tailored resume yet,
+                              so `resume.atsScore` is null on every waiting row. Reading the band
+                              off it alone would print "No signal" on 100% of them — the exact
+                              shape AJ2 found when Job.matchScore was always null and a correct
+                              client rendered "Not enough signal" for every job on the board.
+                              So: the BASE resume's band, labelled as the base, which is what the
+                              user is actually deciding on. It is an honest floor — tailoring at
+                              approval can only raise it. */}
                           <span style={{ fontSize:10, color:theme.textDim, whiteSpace:"nowrap" }}>
                             {p.answerCount} answer{p.answerCount === 1 ? "" : "s"}
-                            {` · ${atsBandLabel(atsBandFor(p.resume.atsScore ?? null)).short}`}
+                            {p.generationDeferred
+                              ? ` · ${atsBandLabel(p.baseAts?.band ?? null).short} (base resume)`
+                              : ` · ${atsBandLabel(atsBandFor(p.resume.atsScore ?? null)).short}`}
                           </span>
                         </div>
+
+                        {/* AL2 — WHY THERE IS NO RESUME BUTTON ON THIS ROW, and what it will cost.
+                            "Not generated yet" and "generation failed" are indistinguishable from a
+                            missing button alone, and they need opposite responses from the user.
+                            The terms are shown because a band nobody can check is a number to be
+                            trusted rather than read. */}
+                        {p.generationDeferred && (
+                          <div style={{ fontSize:10.5, color:theme.textMuted, lineHeight:1.5 }}>
+                            No resume has been written for this application yet — approving is what
+                            generates the tailored one. The band above is your base resume against
+                            this posting, so tailoring can only improve it.
+                            {p.baseAts?.missingCount > 0 && (
+                              <span> Not yet covered: {p.baseAts.missing.slice(0, 6).join(", ")}
+                                {p.baseAts.missingCount > 6 ? ` +${p.baseAts.missingCount - 6} more` : ""}.</span>
+                            )}
+                          </div>
+                        )}
 
                         <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
                           <button onClick={() => openPendingDetail(p.runJobId)}

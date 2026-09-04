@@ -95,7 +95,10 @@ test("manual apply does not fail early when no resume artifact exists", () => {
   // CASE B: no artifact + manual mode — generation and browser run in parallel.
   // The browser must start even when generateResumeForApply is still pending.
   // The pipeline must NOT hold/fail with resume_required before the browser opens.
-  const caseB = applyRoute.slice(at(applyRoute, "CASE B:"), at(applyRoute, "CASE C:"));
+  // Bounded at CASE D, not CASE C: AL2 inserted the deferred-preview branch BETWEEN them, so a
+  // region running to "CASE C:" would silently swallow it and these assertions would be reading
+  // two branches while claiming to read one.
+  const caseB = applyRoute.slice(at(applyRoute, "CASE B:"), at(applyRoute, "CASE D:"));
   assert.match(caseB, /generation_started/, "must log generation_started status");
   assert.match(caseB, /site_visit_started/, "must log site_visit_started before browser");
   assert.match(caseB, /Promise\.allSettled/, "must run generation and browser in parallel");
@@ -130,10 +133,13 @@ test("coreGenerateResume is extracted and callable from generateResumeForApply",
   assert.match(server, /async function coreGenerateResume/);
   assert.match(server, /function generateResumeForApply/);
   assert.match(server, /const pendingGenerationPromises = new Map/);
-  // generateResumeForApply, htmlToPdf, AND generateCoverLetterForApply must be passed to applyRoutes
-  assert.match(server, /applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply\)/);
+  // generateResumeForApply, htmlToPdf, generateCoverLetterForApply AND scoreBaseResumeForApply
+  // must be passed to applyRoutes. The last is AL2's free base-resume scorer: with generation
+  // deferred to approval, it is the only fit signal the approval screen has, so a wiring that
+  // dropped it would leave every deferred preview with nothing to approve on.
+  assert.match(server, /applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply,\s*\n\s*scoreBaseResumeForApply\)/);
   // The apply routes must accept all as parameters
-  assert.match(applyRoute, /function applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply\)/);
+  assert.match(applyRoute, /function applyRoutes\(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply,\s*\n\s*scoreBaseResumeForApply\)/);
 });
 
 test("generateResumeForApply reuses existing artifact without triggering a new generation", () => {

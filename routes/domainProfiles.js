@@ -84,6 +84,9 @@ function parseProfileRow(row) {
     // AI1. Sent as a boolean rather than the stored 0/1, because the client renders it as a
     // checkbox and `0` is truthy once it has been through JSON and a `||` somewhere.
     include_summary: row.include_summary === 1,
+    // AL2. Same reason as include_summary: a checkbox, and `0` is truthy once it has been through
+    // JSON and a `||`. DEFAULT OFF — generation waits for approval unless this is deliberately on.
+    generate_at_queue: row.generate_at_queue === 1,
     target_titles: JSON.parse(row.target_titles || "[]"),
     selected_keywords: JSON.parse(row.selected_keywords || "[]"),
     selected_verbs: JSON.parse(row.selected_verbs || "[]"),
@@ -215,7 +218,7 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
 
     const allowed = ["profile_name","role_family","domain","seniority",
                      "target_titles","selected_keywords","selected_verbs","selected_tools",
-                     "include_summary"];
+                     "include_summary", "generate_at_queue"];
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
@@ -228,6 +231,14 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
     if (updates.include_summary !== undefined) {
       updates.include_summary =
         (updates.include_summary === true || updates.include_summary === 1 || updates.include_summary === "true") ? 1 : 0;
+    }
+
+    // AL2. Coerced the same way and for the same reason, with the same fail-safe direction: this
+    // column decides whether queueing SPENDS MONEY, so anything that is not an explicit
+    // affirmative lands on OFF — which is the default and the cheap side.
+    if (updates.generate_at_queue !== undefined) {
+      updates.generate_at_queue =
+        (updates.generate_at_queue === true || updates.generate_at_queue === 1 || updates.generate_at_queue === "true") ? 1 : 0;
     }
 
     // JSON-encode array fields

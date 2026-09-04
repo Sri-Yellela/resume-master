@@ -20,7 +20,8 @@ if (!RESUME_PDF || !fs.existsSync(RESUME_PDF)) {
 const SCHEMA = `
   CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, plan_tier TEXT DEFAULT 'BASIC');
   CREATE TABLE domain_profiles (id INTEGER PRIMARY KEY, user_id INTEGER, profile_name TEXT,
-    role_family TEXT, domain TEXT, is_active INTEGER DEFAULT 0);
+    role_family TEXT, domain TEXT, is_active INTEGER DEFAULT 0,
+    generate_at_queue INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE user_profile (user_id INTEGER PRIMARY KEY, first_name TEXT, last_name TEXT,
     full_name TEXT, email TEXT, phone TEXT);
   CREATE TABLE user_integrations (user_id INTEGER, provider TEXT, status TEXT, account_email TEXT,
@@ -46,6 +47,7 @@ const SCHEMA = `
     job_id TEXT, status TEXT, reason_code TEXT, reason_detail TEXT, started_at INTEGER,
     finished_at INTEGER, created_at INTEGER DEFAULT (unixepoch()),
     answers_json TEXT, resume_artifact_id INTEGER, resume_ats_score INTEGER,
+    base_ats_score INTEGER, base_ats_json TEXT,
     screenshot_path TEXT, submit_verified INTEGER, submit_evidence TEXT,
     -- migration 073. Omitting it made the audit UPDATE throw, and because every audit column shares
     -- one best-effort statement the ENTIRE audit row was silently lost while the run still reported

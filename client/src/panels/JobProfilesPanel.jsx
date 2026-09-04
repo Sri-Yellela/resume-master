@@ -139,6 +139,26 @@ export function JobProfilesPanel() {
     }
   };
 
+  // AL2. Same optimistic-then-revert shape as setIncludeSummary, because it is the same kind of
+  // control. What differs is what it costs: turning this ON makes queueing spend money again, so
+  // the copy says that in the status line rather than describing it as a scheduling preference.
+  const setGenerateAtQueue = async (profile, next) => {
+    const previous = profile.generate_at_queue;
+    setProfiles(prev => prev.map(p => p.id === profile.id ? { ...p, generate_at_queue: next } : p));
+    try {
+      await api(`/api/domain-profiles/${profile.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ generate_at_queue: next }),
+      });
+      setStatus(next
+        ? `Resumes for ${profile.profile_name} will be generated when a job is QUEUED. Queueing now costs money — about $0.04 per application, whether or not you approve it.`
+        : `Resumes for ${profile.profile_name} are generated when you APPROVE. Queueing is free.`);
+    } catch (e) {
+      setProfiles(prev => prev.map(p => p.id === profile.id ? { ...p, generate_at_queue: previous } : p));
+      setStatus(e.message || "Could not change the generation setting");
+    }
+  };
+
   const closeWizard = () => {
     setWizardMode(null);
     setEditingProfile(null);
@@ -247,6 +267,32 @@ export function JobProfilesPanel() {
                             {profile.include_summary
                               ? "Generated resumes for this profile open with a summary."
                               : "Off. Generated resumes for this profile have no summary section — resumes generated before this setting existed did."}
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                    {/* AL2. A TESTING SWITCH, and the copy says what it costs rather than what it
+                        schedules. Default OFF: queueing is free and the tailored resume is written
+                        when the application is approved, so a user who never finds this control is
+                        never charged for an application they did not decide to send. Turning it on
+                        restores the old behaviour, which is useful for testing generation without
+                        walking the approval flow — and expensive for exactly the same reason. */}
+                    <div style={{ marginTop:9, paddingTop:9, borderTop:"1px solid var(--color-border)" }}>
+                      <label style={{ display:"flex", gap:8, alignItems:"flex-start", cursor:"pointer", margin:0 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!profile.generate_at_queue}
+                          onChange={event => setGenerateAtQueue(profile, event.target.checked)}
+                          style={{ marginTop:2, flexShrink:0 }}
+                        />
+                        <span>
+                          <span style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.06em", color:"var(--color-text)" }}>
+                            Generate resumes at queue time
+                          </span>
+                          <span style={{ display:"block", fontSize:10, color:"var(--color-text-muted)", marginTop:2, lineHeight:1.4 }}>
+                            {profile.generate_at_queue
+                              ? "On. A tailored resume is written as soon as a job is queued — about $0.04 each, spent whether or not you go on to approve it."
+                              : "Off. Queueing is free; the tailored resume is written when you approve the application. The approval screen shows your base resume's fit so you are not deciding blind."}
                           </span>
                         </span>
                       </label>

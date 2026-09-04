@@ -92,6 +92,8 @@ import {
   scoreAtsLocally,
 } from "./services/localAtsScorer.js";
 import { loadTermWeights } from "./services/atsTermWeights.js";
+// The band, not the number, is what a user is shown — see the header of shared/atsBands.js.
+import { atsBandFor } from "./shared/atsBands.js";
 import { roleFamilyForTitle } from "./services/searchQueryBuilder.js";
 import {
   INTEGRATION_PROVIDERS,
@@ -3130,6 +3132,35 @@ console.log(`[boot] database ready: ${DB_PATH}`);
         UPDATE usage_events SET provider = 'anthropic' WHERE provider IS NULL;
         CREATE INDEX IF NOT EXISTS idx_usage_events_provider
           ON usage_events(provider, created_at);
+      `,
+    },
+    {
+      // AL2 — generation is deferred to APPROVAL, and the free base-resume fit is recorded instead.
+      //
+      // WHY. Generation costs ~$0.04 on Sonnet and fired at QUEUE time. A swipe is ~1 second, so
+      // five idle minutes of swiping is ~60 jobs and ~$2.40 spent by a gesture that cost the user
+      // no thought at all. Nothing was decided at that point — the user had not seen the
+      // application and had not approved sending it.
+      //
+      // A USER CANNOT APPROVE BLIND, which is why this is three columns and not a feature flag.
+      // scoreAtsLocally runs with NO model call and NO generated artifact, so the approval screen
+      // can show a real fit band computed against the BASE resume, for free, before anything is
+      // spent. That is also a MORE HONEST number than the one it replaces: the old score was
+      // computed against the GENERATED resume, so it reflected tailoring the user had not yet
+      // decided to pay for. A base-resume band is an honest floor — tailoring can only raise it.
+      //
+      //   generate_at_queue  per-profile, DEFAULT 0 (off). Restores the old behaviour for testing.
+      //                      On domain_profiles beside include_summary (092), because it is the
+      //                      same kind of thing: a per-profile choice about what a run does.
+      //   base_ats_score     the free score, INTEGER and nullable — NULL is the scorer DECLINING,
+      //                      which is not a zero and must never render as one.
+      //   base_ats_json      the matched/missing terms behind it, so the approval screen can say
+      //                      WHY rather than showing a bare number the user cannot check.
+      id: "097_generation_deferred_to_approval",
+      sql: `
+        ALTER TABLE domain_profiles ADD COLUMN generate_at_queue INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE apply_run_jobs ADD COLUMN base_ats_score INTEGER;
+        ALTER TABLE apply_run_jobs ADD COLUMN base_ats_json TEXT;
       `,
     },
   ];
@@ -7904,6 +7935,58 @@ RULES:
   return { html: formattedHtml, atsScore, atsReport, version, resumeId: savedResume?.id ?? null };
 }
 
+// ── scoreBaseResumeForApply ────────────────────────────────────────────────────
+//
+// THE FREE HALF OF THE QUEUE-THEN-APPROVE SPLIT (AL2).
+//
+// Generation costs ~$0.04 and now waits for approval. A user cannot approve blind, so the approval
+// screen needs a real fit signal that costs nothing — and this is it: the candidate's BASE resume
+// scored against the posting by the deterministic in-house scorer. NO model call, NO generated
+// artifact, and no network. server.js already does exactly this for /api/jobs/:id/keywords; this
+// is that path made reusable so the apply worker is not a second, drifting copy of it.
+//
+// IT IS A MORE HONEST NUMBER THAN THE ONE IT REPLACES. The score shown before this change was
+// computed against the GENERATED resume, so it reflected tailoring the user had not yet decided to
+// buy — the preview flattered the thing it was asking them to pay for. A base-resume score is an
+// honest FLOOR: tailoring can only raise it, so approving on it can only be a pleasant surprise.
+//
+// NULL IS NOT ZERO. scoreAtsLocally DECLINES (score null, with decline_reasons) when there is too
+// little signal to judge. That is returned as null and banded as "not enough signal", never
+// coerced to 0 — collapsing them would render the most honest answer the engine gives as the
+// worst grade it has.
+function scoreBaseResumeForApply(userId, jobId) {
+  try {
+    const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(String(jobId));
+    if (!job) return null;
+    const activeProfile = getOrRepairActiveProfile(userId);
+    if (!activeProfile) return null;
+    const resumeText = getBaseResumeRecord(db, { userId, profileId: activeProfile.id })?.content;
+    if (!resumeText) return null;
+
+    const runtimeBasis = buildRuntimeAtsBasis({
+      resumeText,
+      signalProfile: loadOrCreateSimpleApplyProfile(db, { userId, profileId: activeProfile.id }),
+      domainProfile: activeProfile,
+    });
+    const report = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
+    return {
+      score: report.score,
+      band: atsBandFor(report),
+      scorable: report.scorable,
+      declineReasons: report.decline_reasons || [],
+      matched: report.tier1_matched || [],
+      missing: report.tier1_missing || [],
+      resumeDepth: report.resume_depth || null,
+    };
+  } catch (e) {
+    // A missing free score must not take down the run that was going to show it. The approval
+    // screen renders "not enough signal" and says so, which is the same state the scorer itself
+    // produces when it declines — and is honest here for the same reason.
+    console.warn(`[scoreBaseResumeForApply] job=${jobId}: ${e.message}`);
+    return null;
+  }
+}
+
 // ── generateResumeForApply ─────────────────────────────────────────────────────
 // Called by the apply worker to resolve or trigger a resume artifact in the
 // background.  Returns a Promise that resolves to { html, atsScore, resumeId }
@@ -8531,7 +8614,8 @@ app.post("/api/smart-search", requireAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 // APPLY AUTOMATION (Playwright)
 // ═══════════════════════════════════════════════════════════════
-applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply);
+applyRoutes(app, db, requireAuth, buildAutofillPayload, generateResumeForApply, htmlToPdf, generateCoverLetterForApply,
+            scoreBaseResumeForApply);
 
 // ── Contact form (public — no auth required) ──────────────────
 app.post("/api/contact", (req, res) => {

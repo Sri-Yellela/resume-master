@@ -361,7 +361,10 @@ test("the standalone path honours it, with the same default", () => {
 test("the API accepts the field, coerces it, and returns it as a boolean", () => {
   const routes = fs.readFileSync("routes/domainProfiles.js", "utf8");
   assert.match(routes, /include_summary: row\.include_summary === 1,/);
-  assert.match(routes, /"include_summary"\]/, "PUT must allow the field");
+  // Anchored on the field, not on it being LAST in the allow-list — AL2 appended
+  // generate_at_queue after it, and pinning "is the final entry" makes every future addition to
+  // this list look like a regression in the summary feature.
+  assert.match(routes, /"include_summary",? ?/, "PUT must allow the field");
   assert.match(routes, /updates\.include_summary === true \|\| updates\.include_summary === 1 \|\| updates\.include_summary === "true"\) \? 1 : 0/);
 });
 

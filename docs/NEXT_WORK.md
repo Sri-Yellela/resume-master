@@ -1,13 +1,17 @@
-# Next Work — provider routing, then the queued tasks
+# Next Work
 
-**Written:** 2026-08-31, after AK2 and the ATS grading join.
-**Baseline at writing:** 2038 passing, 0 failing. Migration high-water **095**. Contract **v1.1.0**.
+**Last reconciled:** 2026-09-04, after AL1 (provider routing).
+**Baseline:** 2090 passing, 0 failing. Migration high-water **096**. Contract **v1.1.0**.
 
-> Re-derive the baseline at the start of every task. AK2 picked up five tasks and found **three
-> already done**, with this file's predecessor being the stale thing. Trust the repo, not this doc.
+> ⚠ **This file has been the stale thing twice in three sessions.** AK2 picked up five tasks and
+> found three already done. AL1 picked up three and found two already done — B and C, both landed
+> between this doc being written and being read. Agents land work faster than the doc can be
+> reconciled. **Re-derive the baseline and check each task's status in the repo before starting.**
+> That check has caught it every time.
 
-**Blockers cleared since the last doc:** API credit reloaded (key never rotated) · Android Studio
-installed · Jobo deferred to launch readiness, not a pending task.
+**Blockers cleared:** API credit reloaded · Android Studio installed · Jobo deferred to launch
+readiness.
+**Blocker still live:** `GROQ_API_KEY` / `GOOGLE_API_KEY` are **not** in `.env` or the environment.
 
 ---
 
@@ -15,14 +19,20 @@ installed · Jobo deferred to launch readiness, not a pending task.
 
 | # | Task | Repo | Needs | Status |
 |---|---|---|---|---|
-| **A** | Multi-provider routing + widened guard | desktop | `GROQ_API_KEY` | **CODE DONE 2026-09-04**, unverified on real traffic — see below |
-| **B** | ATS bands (graded data joined) | desktop | — | ✅ **DONE** before 2026-09-04 — `docs/ak2-ats-bands.md` |
-| **C** | Android Phase 2a | android | — | ✅ **DONE** before 2026-09-04 — `docs/aj2-android-phase2a.md` |
-| **D** | Generation deferral | desktop | B | open — B is done, so this is unblocked |
-| **E** | Cache breakpoints + Batch API | desktop | D | open |
-| **F** | PII tokenization layer | desktop | A | open |
-| **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A | open |
-| **H** | Form label → field mapping | desktop | G | open |
+| **A** | Multi-provider routing + widened guard | desktop | keys | ✅ code done — **A2 below is what remains** |
+| **B** | ATS bands | desktop | — | ✅ **DONE** — `docs/ak2-ats-bands.md`, ρ 0.643 → **0.746** |
+| **C** | Android Phase 2a | android | — | ✅ **DONE** — `docs/aj2-android-phase2a.md` |
+| **A2** | Provider quality verdict | desktop | **keys** | open — the real gate on A |
+| **D** | Generation deferral | desktop | B ✅ | **open, unblocked — run next** |
+| **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A code | open |
+| **F** | PII tokenization layer | desktop | A code | open |
+| **E** | Cache breakpoints + Batch API | desktop | D | open — see the conditional |
+| **H** | Form label → field mapping | desktop | G4 | open |
+| **I** | Harness runner prerequisite doc | desktop | — | open, small |
+| — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/PHASE_1_AUDIT.md` |
+
+**Run next:** D (unblocked, bands are set) and G1 (public data only, needs no key). F needs A's
+code only. A2, E and H each have a real prerequisite below.
 
 ### ⚠ Read this before picking up A, F or G
 
@@ -43,7 +53,79 @@ the unanswered question above.
 
 ---
 
-## TASK A — Multi-provider routing
+## TASK A — ✅ CODE DONE, DO NOT RE-RUN
+
+Landed 2026-09-04. See `docs/al1-provider-routing.md`. Routing in `callModel()` only with a
+fail-closed CANDIDATE default across all 14 sites, explicit `$0` pricing, migration **096** recording
+provider, loud fallbacks, a pinned model that throws rather than falling back, and 429 backoff with
+the row confirmed retryable. +33 tests.
+
+**Two findings from it that must not be lost:**
+
+1. **The guard was structurally blind to the shape it most needed to catch.** Its comment stripper
+   used `/\/\/.*$/`, and `https://api.groq.com/...` contains `//` — so every URL-shaped provider
+   call was erased as a "comment" before the scan ran. With no Groq or Gemini SDK installed, an
+   untracked call would be a bare `fetch`: exactly the invisible case. **A guard extended by reading
+   it would have shipped inert and green.** Third instance of this defect class, after
+   `.messages.create(` missing `messages.batches.create` and three dead source anchors in passing
+   tests. The rule that caught it: verify by INJECTING a violation per shape.
+2. **`purpose classifier` is not `classify_job`.** One word apart, adjacent in every cost report —
+   and `services/classifier.js` sends **2000 chars of the candidate's résumé**. This doc's original
+   task-A split named `classify_job` as free-tier eligible; routing by that name would have leaked
+   résumés on the first pass. The fail-closed CANDIDATE default is what makes a misclassified site
+   fail safe instead of leaking. **Never route by call-site name; route by payload.**
+
+The original task A prompt is retained below for reference only — **it is not work to be done.**
+
+---
+
+## TASK A2 — Provider quality verdict ⛔ NEEDS THE KEYS
+
+```
+This is requirement 8 and the VERIFY block of task A, which could not run: GROQ_API_KEY and
+GOOGLE_API_KEY are in neither .env nor the environment. The routing has never served a real token.
+Everything in A is verified against fetch stubs, so none of it is evidence about Groq's actual
+extraction quality.
+
+OWNER ACTION FIRST: set GROQ_API_KEY (and optionally GOOGLE_API_KEY), plus
+ENRICH_PROVIDER=groq and a pinned ENRICH_MODEL=llama-3.1-8b-instant.
+
+THEN
+1. Run scripts/al1ProviderQualityDiff.mjs — 50 rows through both providers, per-column agreement.
+   It REFUSES to run unconfigured rather than comparing Haiku to Haiku and reporting 100% agreement.
+   That refusal is deliberate; do not work around it.
+2. THE QUESTION: is an 8B model good enough for skills_json? It feeds company_technographics (8507
+   rows) AND the ATS scorer. The saving at stake is ~$3.32 a pass.
+   ⛔ IF AGREEMENT IS MATERIALLY WORSE, SAY SO AND KEEP ENRICHMENT ON HAIKU. Task A then stands as
+   infrastructure for later rather than a live switch. Degrading the input to the ATS engine to save
+   three dollars is a bad trade and reporting that honestly is the correct outcome.
+3. Confirm usage_events records provider and $0 cost on real calls. The cost queries currently
+   reconcile to $3.3284 over 1303 Haiku calls — they must still reconcile afterwards.
+4. Confirm a real 429 leaves the row retryable (content_hash/enriched_at unset). Verified against a
+   stub; not against Groq's actual rate limiter.
+
+VERIFY: per-column agreement table, a stated verdict on the default, reconciled cost queries.
+```
+
+---
+
+## TASK I — Harness runner prerequisite (small)
+
+```
+AL1 lost 30 minutes to a zero-output verify:harness run before discovering the suite needs the app
+running separately on :3001. Nothing says so.
+
+1. Document the prerequisite where the runner is invoked — scripts/verifyHarnesses.mjs and the npm
+   script — and make the runner FAIL FAST with a clear message when :3001 is not answering, rather
+   than producing 30 minutes of nothing. A silent zero-output run is Shape 3.
+2. Note in the same place that no harness in that suite exercises the model-call path: the ones that
+   do are excluded because they spend tokens. So a green verify:harness is NOT evidence about
+   provider routing, and a future session should not read it as such.
+```
+
+---
+
+## TASK A — original prompt (SUPERSEDED, reference only)
 
 ```
 OBJECTIVE
@@ -105,7 +187,17 @@ Haiku reported. Guard fails on an injected Groq call outside the wrapper. Missin
 falls back. A 429 leaves the row retryable. Commit & push.
 ```
 
-## TASK B — ATS bands
+## TASK B — ✅ DONE, DO NOT RE-RUN
+
+Landed before 2026-09-04. `shared/atsBands.js` — all four bands, the seniority guard
+(**ρ 0.643 → 0.746**, mis-ordered 16.1% → 12.2%), the thin-resume state, and the auto-submit gate
+left decoupled at 30. 12 tests. Write-up: `docs/ak2-ats-bands.md`.
+
+The original prompt is retained below for reference only — **it is not work to be done.**
+
+---
+
+## TASK B — original prompt (SUPERSEDED, reference only)
 
 Graded sheet is filled in. `docs/ak2-ats-grading-set.md` joined against
 `docs/ak2-ats-grading-key.json`:
@@ -155,7 +247,27 @@ VERIFY: band populations across 1291 postings. rho before/after the seniority gu
 disagreements reported. "Not enough signal" renders distinctly from "Weak". Screenshot each surface.
 ```
 
-## TASK C — Android Phase 2a
+## TASK C — ✅ DONE, DO NOT RE-RUN
+
+All four steps landed and verified on a real emulator: toolchain, auth via
+`GET /api/auth/mobile-token`, the contract-typed API layer including `automationTier`, and Room
+persistence. 40 JVM + 13 instrumented tests. Write-up: `docs/aj2-android-phase2a.md`.
+
+**Carried forward from it — not done, and now user data exists on device:**
+`android:allowBackup="true"` with empty `backup_rules.xml` and `data_extraction_rules.xml` (both
+still untouched Studio templates). The auth token AND the persisted résumé are swept into Google
+cloud backup by default. **Write the excludes.** This was flagged as "before the first token exists"
+— the token now exists.
+
+Still open and owner's: **the Android admin panel.** Six screens of fabricated data, ungated, with
+Delete / Suspend / Impersonate controls that hit nothing. Recommendation: build flavour, not
+deletion, and never in a Play build. Asked five times.
+
+The original prompt is at `resume-master-android/PHASE_2A.md` — reference only.
+
+---
+
+## TASK C — original summary (SUPERSEDED, reference only)
 
 Full prompt: **`resume-master-android/PHASE_2A.md`** (self-contained, in that repo).
 

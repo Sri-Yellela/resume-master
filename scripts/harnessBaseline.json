@@ -65,6 +65,9 @@
   "ak2ApplicationsOutcomeUi": {
     "pass": 21
   },
+  "al2GenerationDeferral": {
+    "pass": 19
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },
