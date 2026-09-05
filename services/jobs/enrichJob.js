@@ -41,6 +41,9 @@ import { recordPipelineRun } from './pipelineRunLog.js';
 import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
 import { callModel, SYSTEM_USER_ID } from '../modelCall.js';
 import { DATA_CLASS } from '../../shared/modelProviders.js';
+// G3 — the same canonical key the stack surface merges on. One vocabulary, used twice.
+import { canonicalSkillKey } from '../kb/technographics.js';
+import { loadConfirmedSynonyms } from '../kb/skillSynonyms.js';
 import { EXPERIENCE_LEVELS, WORK_MODELS, valueSet } from '../../shared/jobFilterOptions.js';
 
 // Model IDs come from shared/anthropicModels.js so a bump cannot land in only some files.
@@ -193,10 +196,23 @@ function upsertTechnographics(db, company, skills, nowEpoch) {
     ON CONFLICT(company, skill) DO UPDATE SET
       weight = @weight, last_seen = @now, posting_count = posting_count + 1
   `);
+  // G3 — DE-DUP ON THE CANONICAL KEY, not the raw string.
+  //
+  // This used to key on the exact spelling, so one posting listing both "problem-solving" and
+  // "problem solving" incremented TWO rows and counted itself twice in the evidence for one skill.
+  // That is where the 386 duplicate rows in this table came from, and it is why the read-side merge
+  // in services/kb/technographics.js has to warn that its sums can double-count history it cannot
+  // correct. Fixing it here stops the table growing any more of them.
+  //
+  // The RAW spelling is still what gets stored: it is the provenance, and with the board deleted by
+  // retention it is the only surviving record of what the posting actually said. Only the DE-DUP
+  // decision is canonical.
+  const synonyms = loadConfirmedSynonyms(db);
   const seen = new Set();
   for (const { skill } of skills) {
-    if (seen.has(skill)) continue; // de-dup within the SAME posting (hard+soft lists can repeat)
-    seen.add(skill);
+    const key = canonicalSkillKey(skill, synonyms);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
     const existing = getStmt.get(company, skill);
     // Fresh evidence from THIS posting always contributes a full unit of weight on top of
     // whatever's left of prior evidence after decay — recent postings weigh more because

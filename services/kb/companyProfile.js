@@ -9,6 +9,11 @@ import { decayedWeight } from '../jobs/enrichJob.js';
 import { mapOrgUnitRow } from './orgLayer.js';
 import { getHiringSignals } from '../jobs/hiringSignals.js';
 import { getCompanyLca } from './lcaLayer.js';
+// G3 — one vocabulary, used twice: the same normaliser the ATS scorer matches with and the same
+// CONFIRMED synonym table it expands with. A second one here would let a company's stack and a
+// candidate's match disagree about what a skill is.
+import { mergeStackRows } from './technographics.js';
+import { loadConfirmedSynonyms } from './skillSynonyms.js';
 
 const MAX_STACK_SKILLS = 12;
 // Stripe has 271 org units, 258 of them single-corroboration 'proposed' guesses. Rendering all of
@@ -25,15 +30,24 @@ function getStack(db, company) {
     `SELECT skill, weight, last_seen, posting_count FROM company_technographics WHERE company = ?`
   ).all(company);
   const now = Math.floor(Date.now() / 1000);
-  const skills = rows
+  // G3 — MERGED HERE, NOT IN THE TABLE. 386 of the 8690 stored rows are the same skill for the
+  // same company under a different spelling ("Infrastructure-as-Code" six ways), so an unmerged
+  // stack ranks each fragment below skills that happen to have one spelling. The rows themselves
+  // are left alone: the board that produced them was deleted by retention, so the raw variants are
+  // now the only surviving record of what the postings said. See services/kb/technographics.js.
+  const merged = mergeStackRows(rows, loadConfirmedSynonyms(db));
+  const skills = merged
     .map(r => {
-      const liveWeight = decayedWeight(r.weight, r.last_seen, now);
+      const liveWeight = decayedWeight(r.weight, r.lastSeen, now);
       return {
         skill: r.skill,
         weight: Math.round(liveWeight * 100) / 100,
-        postingCount: r.posting_count,
-        lastSeen: r.last_seen,
+        postingCount: r.postingCount,
+        lastSeen: r.lastSeen,
         fresh: r.weight > 0 ? liveWeight / r.weight >= STACK_FRESH_FLOOR : false,
+        // What was collapsed into this entry. Present so the surface can disclose a merge rather
+        // than silently presenting six postings' evidence as one tidy row.
+        ...(r.variants.length > 1 ? { mergedFrom: r.variants } : {}),
       };
     })
     .sort((a, b) => b.weight - a.weight)
@@ -44,7 +58,10 @@ function getStack(db, company) {
   // SINGLE posting into "12", making the thinnest possible evidence read as twelve-fold. The
   // most-reinforced skill's own count is the honest floor: at least that many postings
   // contributed, and no skill can have been seen in more postings than actually exist.
-  const postings = rows.reduce((n, r) => Math.max(n, r.posting_count), 0);
+  // Still the MAX rather than a sum, and now over MERGED groups — which is what makes the floor
+  // honest again. Before the merge the most-reinforced skill might be one of six fragments, so the
+  // floor under-reported; summing would over-report for the reason the note above gives.
+  const postings = merged.reduce((n, r) => Math.max(n, r.postingCount), 0);
   return { skills, postings };
 }
 
