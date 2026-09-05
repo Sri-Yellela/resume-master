@@ -86,7 +86,12 @@ const HOLDCO_TOKENS = new Set([
   'enterprises', 'business', 'operations', 'studios', 'works', 'digital',
 ]);
 
-const TIER_CONFIDENCE = { A: 0.95, B: 0.80, C: 0.60 };
+// R is G2's reviewed identity resolution. It is the ONLY tier whose evidence is not in the source
+// data — it rests on a person knowing that Ramp the fintech is registered as "Ramp Business
+// Corporation" — so it sits ABOVE the presentable floor and BELOW the high-confidence line, which
+// makes the surface name the matched entity inline instead of asserting a bare count. See
+// services/kb/lcaResolution.js.
+const TIER_CONFIDENCE = { A: 0.95, B: 0.80, C: 0.60, R: 0.70 };
 
 // Below this a match is stored but NEVER rendered as a statement about the company. See
 // lcaLayer.js's `presentable` and the UI's use of it.
@@ -238,7 +243,11 @@ function countDistinctEntities(candidates) {
  *   confidence: number, key: string, entities: object[], candidateCount: number,
  *   reason: string }}
  */
-function matchCompanyToEntities(company, entities) {
+/**
+ * @param resolution  G2 — a CONFIRMED, human-reviewed identity for this company, or null.
+ *                    Applied only where the automatic tiers declined; see applyResolution below.
+ */
+function matchCompanyToEntities(company, entities, resolution = null) {
   const key = companyMatchKey(company);
   const base = { key, tier: null, confidence: 0, entities: [], candidateCount: 0 };
   if (!key) return { ...base, status: 'unmatched', reason: 'empty company name' };
@@ -278,11 +287,12 @@ function matchCompanyToEntities(company, entities) {
   // "Linear Labs LLC", an unrelated motor company, because it was the sole all-holdco candidate.
   if (family.holdco.length) {
     if (!family.distinctive) {
-      return { ...base, status: 'ambiguous', candidateCount: family.holdco.length,
+      return applyResolution({ ...base, status: 'ambiguous', candidateCount: family.holdco.length,
         entities: family.holdco,
         reason: `"${key}" is not a distinctive name — ${family.foreign.length} other employer(s) ` +
                 `use it (${family.foreign.slice(0, 3).map(e => e.employerName).join(', ')}), so ` +
-                `${family.holdco.map(e => e.employerName).join(', ')} cannot be attributed safely` };
+                `${family.holdco.map(e => e.employerName).join(', ')} cannot be attributed safely` },
+        entities, resolution);
     }
     const { count, basis } = countDistinctEntities(family.holdco);
     if (count <= 1) {
@@ -290,13 +300,56 @@ function matchCompanyToEntities(company, entities) {
         entities: family.holdco, candidateCount: family.holdco.length,
         reason: `brand-prefix match: ${family.holdco.map(e => e.employerName).join(', ')}` };
     }
-    return { ...base, status: 'ambiguous', candidateCount: family.holdco.length,
+    return applyResolution({ ...base, status: 'ambiguous', candidateCount: family.holdco.length,
       entities: family.holdco,
       reason: `${count} distinct employers (by ${basis}) share the name "${key}": ` +
-              `${family.holdco.map(e => e.employerName).join(', ')}` };
+              `${family.holdco.map(e => e.employerName).join(', ')}` },
+      entities, resolution);
   }
 
-  return { ...base, status: 'unmatched', reason: `no LCA employer matches "${key}"` };
+  return applyResolution(
+    { ...base, status: 'unmatched', reason: `no LCA employer matches "${key}"` },
+    entities, resolution);
+}
+
+/**
+ * G2 — a human-confirmed identity, applied ONLY where the automatic tiers declined.
+ *
+ * ⛔ IT NEVER OVERRIDES A MATCH. Tiers A/B/C are evidence found IN the source data; tier R is
+ * outside knowledge a person vouched for. Where the data already answers, the data wins — a
+ * resolution that could overwrite an exact legal-name match would let one review mistake silently
+ * replace the strongest evidence the corpus has.
+ *
+ * A CONFIRMED NULL RESOLUTION IS HONOURED AS A DECISION. "None of these candidates is this company"
+ * is the expected answer for Linear, and the status stays ambiguous/unmatched — but the reason says
+ * a human decided it, which is a different fact from nobody having looked.
+ */
+function applyResolution(result, entities, resolution) {
+  if (!resolution) return result;
+  if (result.status === 'matched') return result;
+
+  if (!resolution.employerName) {
+    return { ...result,
+      reason: `${result.reason}; reviewed${resolution.reviewedBy ? ` by ${resolution.reviewedBy}` : ''}: ` +
+              `none of the candidates is this company` };
+  }
+
+  // The resolved entity must EXIST in the candidate index. A name a reviewer typed that matches no
+  // employer would otherwise become a sponsorship claim backed by no filings at all.
+  const chosen = entities.filter(e =>
+    e.employerName === resolution.employerName ||
+    companyMatchKey(e.employerName) === resolution.matchKey);
+  if (!chosen.length) {
+    return { ...result,
+      reason: `${result.reason}; a reviewed resolution named "${resolution.employerName}", ` +
+              `which is not in the LCA corpus — not applied` };
+  }
+
+  return { ...result, status: 'matched', tier: 'R', confidence: TIER_CONFIDENCE.R,
+    entities: chosen, candidateCount: chosen.length,
+    reason: `reviewed identity resolution${resolution.reviewedBy ? ` by ${resolution.reviewedBy}` : ''}: ` +
+            `${chosen.map(e => e.employerName).join(', ')}. ` +
+            `Confirmed by a person from outside the filing data, so it is shown with the entity named.` };
 }
 
 /**

@@ -161,13 +161,59 @@ test("a single-word team is not mistaken for a place", () => {
   db.close();
 });
 
-test("a database with no locations degrades to the shapes, and never throws", () => {
+test("a database with no locations falls back to the FLOOR, not to nothing", () => {
+  // ⛔ THIS ASSERTION USED TO READ THE OTHER WAY — `looksLikeLocation(db, "Bangalore") === false`,
+  // commented "with no corpus there is nothing to know". That was not a degradation, it was the
+  // BUG, written down as a guarantee.
+  //
+  // It went live: cleanup_log id 85 deleted 1288 postings on 2026-09-02 and the distinct-location
+  // vocabulary fell from 235 to 4. On the real database afterwards, "Bangalore" was no longer a
+  // place — so AH4's fix, which this very file was written to protect, had silently reverted to
+  // the exact false finding it removed, with every test still green because the tests agreed with
+  // it. A guard whose evidence is a purgeable table is a guard a cron job can delete.
+  //
+  // The corpus is still the primary source; SEED_LOCATIONS is a floor beneath it.
   const db = new Database(":memory:");
   db.exec(`CREATE TABLE company_org_units (company TEXT, org_unit TEXT, confidence REAL, status TEXT);
            CREATE TABLE company_technographics (company TEXT, skill TEXT);`);
   assert.doesNotThrow(() => looksLikeLocation(db, "Bangalore"));
-  assert.equal(looksLikeLocation(db, "Bangalore"), false, "with no corpus there is nothing to know");
+  assert.equal(looksLikeLocation(db, "Bangalore"), true,
+    "the place the original false flag was about must be known even with no corpus at all");
   assert.equal(looksLikeLocation(db, "Remote"), true, "the shapes still apply");
+  assert.equal(looksLikeLocation(db, "Payments Infrastructure"), false,
+    "and the floor must not start swallowing real teams");
+  db.close();
+});
+
+test("a region in front of a business function is a TEAM, not a place", () => {
+  // G4 requirement 2, the same class of error running the other way. The old region rule was
+  // "starts with a region word", so `EMEA Marketing`, `APAC Sales` and `UK Enterprise sales team`
+  // — all real units sitting in company_org_units — were classified as locations. extractTeamClaim
+  // strips trailing places, so those claims were silently DELETED and never checked. Bangalore
+  // produced a wrong finding; this produced NO finding, which no screen can show.
+  const db = new Database(":memory:");
+  db.exec(`CREATE TABLE company_org_units (company TEXT, org_unit TEXT, confidence REAL, status TEXT);
+           CREATE TABLE company_technographics (company TEXT, skill TEXT);`);
+  for (const team of ["EMEA Marketing", "APAC Sales", "UK Enterprise sales team", "AMER Sales Development"]) {
+    assert.equal(looksLikeLocation(db, team), false, `${team} is an org unit, not a place`);
+  }
+  // The region ALONE, or with another place word, still is one.
+  for (const place of ["EMEA", "US", "US - Remote", "EMEA HQ"]) {
+    assert.equal(looksLikeLocation(db, place), true, `${place} is a place`);
+  }
+  db.close();
+});
+
+test("a two-letter code is read from the RAW segment, never the stripped key", () => {
+  // normalizeOrgUnitKey drops a trailing "team"/"org"/"group", so "AI team" becomes "ai" and a
+  // key-level bare-code check reads a real unit as a country code. Figma's "AI team" is in
+  // company_org_units and was being classified as a location for exactly that reason.
+  const db = new Database(":memory:");
+  db.exec(`CREATE TABLE company_org_units (company TEXT, org_unit TEXT, confidence REAL, status TEXT);
+           CREATE TABLE company_technographics (company TEXT, skill TEXT);`);
+  assert.equal(looksLikeLocation(db, "AI team"), false);
+  assert.equal(looksLikeLocation(db, "ML org"), false);
+  assert.equal(looksLikeLocation(db, "CA"), true, "a genuinely bare code is still a place");
   db.close();
 });
 
@@ -225,4 +271,39 @@ test("validateResumeClaims passes the db through — without it the old behaviou
   // And the recruiter surface (FE-6) reuses validateResumeClaims rather than re-extracting, so it
   // inherits the fix instead of needing its own.
   assert.match(src, /function checkCandidateConsistency[\s\S]{0,400}?validateResumeClaims\(db, resumeText\)/);
+});
+
+// ── G4 requirement 3: THE 9.5 INTEGRITY RULE, RE-ASSERTED ───────────────────────────────────────
+
+test("⛔ NO code path writes org units from resume or profile tables", () => {
+  // The KB is company/postings ground truth. If a résumé claim could become an org unit, the
+  // failsafe would be checking claims against a table the claims themselves had written — and
+  // every fabrication would corroborate itself. The original 9.5 audit grep-proved this; it is
+  // re-proved here because G4 changed code in the same neighbourhood.
+  const org = fs.readFileSync("services/kb/orgLayer.js", "utf8");
+
+  // Exactly two statements write the table, and both live in orgLayer.
+  for (const file of ["services/kb/failsafe.js", "services/kb/skillSynonyms.js",
+                      "services/resumeClaimGuard.js", "services/kb/lcaResolution.js"]) {
+    const src = fs.readFileSync(file, "utf8");
+    assert.ok(!/(INSERT INTO|UPDATE)\s+company_org_units/i.test(src),
+      `${file} must not write company_org_units`);
+  }
+
+  // And orgLayer's own evidence comes from postings ONLY. A FROM against any candidate-owned
+  // table here is the defect, whatever it was intended to do.
+  for (const table of ["base_resume", "user_profile", "resumes", "resume_versions",
+                       "profile_base_resumes", "simple_apply_profile", "domain_profiles"]) {
+    assert.ok(!new RegExp(`FROM\s+${table}\b`, "i").test(org),
+      `orgLayer must not read ${table} — org units are learned from postings, never from claims`);
+  }
+  assert.match(org, /FROM scraped_jobs/, "and it must still actually read the postings");
+});
+
+test("G4 requirement 4: the promotion thresholds are unchanged", () => {
+  // An LLM or a location fix proposing a unit does not promote it; corroboration does, at the
+  // numbers 9.5 set. These are asserted so a later tuning pass has to say so out loud.
+  const org = fs.readFileSync("services/kb/orgLayer.js", "utf8");
+  assert.match(org, /PROMOTE_MIN_CORROBORATION\s*=\s*3\b/);
+  assert.match(org, /PROMOTE_MIN_CONFIDENCE\s*=\s*0\.6\b/);
 });

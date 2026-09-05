@@ -2840,4 +2840,48 @@ export const MIGRATIONS = [
           ON skill_synonyms(term, status);
       `,
     },
+    {
+      // AL4 (G2) — human-reviewed identity resolutions for LCA company matching.
+      //
+      // WHAT IS ACTUALLY UNRESOLVED, measured rather than assumed. The task described the gap as
+      // "legal-entity vs brand mismatches — META PLATFORMS, INC. vs Meta". That is NOT what the
+      // 6 unresolved rows are: tier A already strips legal suffixes, so those cases match. The
+      // real split is
+      //   3 UNMATCHED  Bolt Farm Treehouse, Epia Neuro, Physical Superintelligence — ZERO candidate
+      //                employers in 144,584. There is nothing to resolve TO, and a model "finding"
+      //                one would be inventing an attestation about a third party.
+      //   3 AMBIGUOUS  Linear, Mercury, Ramp — real candidates that the matcher refuses to choose
+      //                between. This is the only place outside knowledge can help.
+      //
+      // ⛔ WHY A SEPARATE TABLE AND NOT A CONFIDENCE BUMP. Saying "Company A sponsors H-1Bs" when
+      // the filings belong to a similarly-named Company B is a FALSE ATTESTATION ABOUT A THIRD
+      // PARTY — worse than a wrong score, because it is a factual claim about someone who is not
+      // the user and cannot correct it. lcaMatch.js already declines these deliberately (see the
+      // Linear case in its header: "Linear Labs LLC" is an electric-motor company and Linear.app
+      // has never filed). Loosening the matcher would re-open exactly that. So resolutions live
+      // beside the matcher, are proposed by a model, and reach it ONLY after a human confirms.
+      //
+      // resolved_employer_name NULL IS A REAL ANSWER, and the most likely correct one for Linear:
+      // "none of these candidates is this company". Recording it keeps the negative pinned so a
+      // later pass does not re-propose the wrong entity, exactly as a rejected skill synonym stays
+      // rejected.
+      id: "099_lca_company_resolutions",
+      sql: `
+        CREATE TABLE IF NOT EXISTS lca_company_resolutions (
+          company                TEXT    NOT NULL PRIMARY KEY,
+          resolved_employer_name TEXT,
+          resolved_match_key     TEXT,
+          candidates_json        TEXT,
+          model_confidence       REAL,
+          model_reason           TEXT,
+          status                 TEXT    NOT NULL DEFAULT 'proposed',
+          reviewed_at            INTEGER,
+          reviewed_by            TEXT,
+          proposed_at            INTEGER,
+          updated_at             INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_lca_company_resolutions_status
+          ON lca_company_resolutions(status);
+      `,
+    },
   ];

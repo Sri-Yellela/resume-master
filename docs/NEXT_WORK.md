@@ -24,7 +24,7 @@ readiness.
 | **C** | Android Phase 2a | android | — | ✅ **DONE** — `docs/aj2-android-phase2a.md` |
 | **A2** | Provider quality verdict | desktop | **keys** | open — the real gate on A |
 | **D** | Generation deferral | desktop | B ✅ | ✅ **DONE 2026-09-04** — `docs/al2-generation-deferral.md`, 19-check real run |
-| **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A code | **G1 DONE 2026-09-04** — `docs/al3-skill-synonyms.md`; rho did NOT move. G2/G3/G4 open |
+| **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A code | **G1·G2·G4 DONE 2026-09-04** — `docs/al3-skill-synonyms.md`, `docs/al4-lca-and-org-units.md`. G3 open (and near-pointless — see G1) |
 | **F** | PII tokenization layer | desktop | A code | open |
 | **E** | Cache breakpoints + Batch API | desktop | D | open — see the conditional |
 | **H** | Form label → field mapping | desktop | G4 | open |

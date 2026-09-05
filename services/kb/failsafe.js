@@ -79,17 +79,70 @@ const SENIORITY_WORDS = new Set([
  */
 const WORKPLACE_TYPE_WORDS = new Set(['remote', 'hybrid', 'onsite', 'on site', 'in office', 'in person']);
 
+// ⛔ A REGION IN FRONT OF A BUSINESS FUNCTION IS A TEAM, NOT A PLACE (AL4/G4 requirement 2).
+//
+// The first version of the region rule was /^(us|usa|uk|emea|apac|…)\b/i — "starts with a region
+// word" — and it classified `EMEA Marketing`, `APAC Sales` and `UK Enterprise sales team` as
+// locations. Those are real Stripe and Figma org units, sitting in company_org_units right now.
+// Ten of the 697 stored units matched the old shapes.
+//
+// The consequence ran the OPPOSITE way to the Bangalore bug and was quieter: extractTeamClaim
+// strips trailing segments it thinks are places, so a résumé claiming "Stripe | EMEA Marketing"
+// had its team claim silently DELETED and was never checked at all. Bangalore produced a wrong
+// finding; this produced no finding, which nothing on any screen can show.
+//
+// So the region must be the WHOLE segment, or be followed only by another place-ish word
+// ("US - Remote", "EMEA HQ"), never by a function word.
+const REGION_WORDS = "us|usa|uk|emea|apac|amer|latam|na|eu|anz|mena";
 const LOCATION_SHAPES = [
   /^(remote|hybrid|onsite|on-?site|in-?office|in-?person)\b/i,
   /\b(remote|hybrid|onsite)$/i,
-  /^[a-z]{2}$/i,                                  // a bare state or country code: CA, NY, UK, IN
-  /^(us|usa|uk|emea|apac|amer|latam|na|eu)\b/i,   // region prefixes the feeds use
+  new RegExp(`^(${REGION_WORDS})$`, "i"),
+  new RegExp(`^(${REGION_WORDS})[\\s-]+(remote|hybrid|onsite|office|hq|headquarters|region|wide)$`, "i"),
 ];
 
+// A bare state or country code — CA, NY, UK, IN. Checked against the RAW segment ONLY, never the
+// normalised org key: normalizeOrgUnitKey strips a trailing "team"/"org"/"group", so "AI team"
+// becomes "ai" and a key-level check reads a real org unit as a country code. Figma's "AI team" is
+// in company_org_units and was being classified as a place for exactly that reason.
+const BARE_CODE_SHAPE = /^[a-z]{2}$/i;
+
+// ⛔ THE FLOOR, AND WHY IT EXISTS DESPITE THE ARGUMENT ABOVE AGAINST HAND-LISTS.
+//
+// The comment above says a hand-written city list "would be a second source of truth that goes
+// stale the first time the board learns a new market". That reasoning was right, and it silently
+// assumed the board would CONTINUE TO EXIST.
+//
+// It does not. `cleanup_log` id 85 deleted 1288 postings on 2026-09-02, and the distinct-location
+// vocabulary fell from **235 to 4**. Measured on the live database afterwards:
+//
+//     looksLikeLocation(db, "Bangalore")  ->  false
+//
+// AH4's fix — verified, tested, and correct when it shipped — had regressed to nothing, with no
+// error, no warning and no failing test, because its evidence was a table a retention job is free
+// to empty. A guard derived entirely from mutable data is a guard that can be deleted by a cron.
+//
+// So the corpus stays the PRIMARY source and this is a FLOOR beneath it, not a replacement: a
+// short list of the places this board has actually hired in, which cannot be purged. It is unioned,
+// never substituted, so a new market the corpus learns still works exactly as before.
+const SEED_LOCATIONS = new Set([
+  'bangalore', 'bengaluru', 'hyderabad', 'pune', 'mumbai', 'delhi', 'gurgaon', 'noida', 'chennai',
+  'san francisco', 'new york', 'nyc', 'seattle', 'austin', 'boston', 'chicago', 'denver', 'atlanta',
+  'los angeles', 'san jose', 'palo alto', 'mountain view', 'sunnyvale', 'san diego', 'portland',
+  'london', 'dublin', 'berlin', 'paris', 'amsterdam', 'madrid', 'barcelona', 'lisbon', 'zurich',
+  'stockholm', 'warsaw', 'krakow', 'bucharest', 'tel aviv', 'singapore', 'tokyo', 'sydney',
+  'melbourne', 'toronto', 'vancouver', 'montreal', 'mexico city', 'sao paulo', 'buenos aires',
+  'dubai', 'bengaluru india', 'united states', 'india', 'ireland', 'germany', 'canada',
+]);
+
+/** Below this, the corpus is not supplying a usable vocabulary and the floor is doing the work. */
+const MIN_CORPUS_LOCATIONS = 25;
+
 let _locationVocabulary = null;
+let _warnedThinVocabulary = false;
 function locationVocabulary(db) {
   if (_locationVocabulary) return _locationVocabulary;
-  const vocab = new Set();
+  const vocab = new Set(SEED_LOCATIONS);
   try {
     const rows = db.prepare(
       `SELECT DISTINCT location FROM scraped_jobs WHERE location IS NOT NULL AND TRIM(location) <> ''`
@@ -104,12 +157,27 @@ function locationVocabulary(db) {
       }
     }
   } catch { /* no scraped_jobs, or a schema without location — the shapes still apply */ }
+
+  // LOUD WHEN THE CORPUS STOPS CONTRIBUTING. The regression above was invisible precisely because
+  // an empty vocabulary and a healthy one look identical from the call site — both just return
+  // false for a city nobody listed. Once per process, so a background pass cannot bury the log.
+  const fromCorpus = vocab.size - SEED_LOCATIONS.size;
+  if (fromCorpus < MIN_CORPUS_LOCATIONS && !_warnedThinVocabulary) {
+    _warnedThinVocabulary = true;
+    console.warn(
+      `[failsafe] the location vocabulary drew only ${fromCorpus} entries from scraped_jobs ` +
+      `(expected 200+). The board has probably been purged by retention — see cleanup_log. ` +
+      `Place detection is running on the built-in floor alone, so a location outside it will be ` +
+      `read as a team name and produce a false "doesn't match any team" finding.`
+    );
+  }
+
   _locationVocabulary = vocab;
   return vocab;
 }
 
 /** Test seam — the vocabulary is memoised, and a test that swaps databases needs it rebuilt. */
-function resetLocationVocabulary() { _locationVocabulary = null; }
+function resetLocationVocabulary() { _locationVocabulary = null; _warnedThinVocabulary = false; }
 
 /** One place, with no conjunction in it: a workplace type, a corpus location, or a location shape. */
 function isLocationAtom(db, key) {
@@ -120,11 +188,15 @@ function isLocationAtom(db, key) {
 }
 
 function looksLikeLocation(db, segment) {
+  const raw = String(segment || '').trim();
   const key = normalizeOrgUnitKey(segment);
   if (!key) return false;
   // Shapes are checked against the RAW segment too, because "US - Remote" loses its hyphen to
   // normalisation and the prefix rule is written against what the feeds actually store.
-  if (LOCATION_SHAPES.some(re => re.test(String(segment).trim()))) return true;
+  if (LOCATION_SHAPES.some(re => re.test(raw))) return true;
+  // RAW ONLY — see the note at BARE_CODE_SHAPE. "AI team" normalises to "ai" and would otherwise
+  // read as a country code.
+  if (BARE_CODE_SHAPE.test(raw)) return true;
 
   // A CONJUNCTION OF PLACES IS STILL A PLACE, and a dangling conjunction is a fragment of one.
   // The board stores "London OR Dublin", "Chicago and NYC", "San Francisco or Seattle" — 16 of the

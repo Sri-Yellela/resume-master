@@ -32,6 +32,7 @@ import {
   PRESENTABLE_MIN_CONFIDENCE,
   HIGH_CONFIDENCE,
 } from './lcaMatch.js';
+import { loadConfirmedResolutions } from './lcaResolution.js';
 
 // Four quarters. One year of silence halves the weight of the evidence — chosen to match the
 // annual rhythm of the H-1B cap rather than picked for feel: an employer that files only in the
@@ -281,10 +282,15 @@ function reconcileCompanyLca(db, opts = {}) {
       provenance_json = @provenance_json, last_seen = @now
   `);
 
+  // G2 — human-CONFIRMED identity resolutions only. Proposals never reach the matcher; see
+  // services/kb/lcaResolution.js for why a wrong row here is a false attestation about a third
+  // party rather than merely a wrong number.
+  const resolutions = loadConfirmedResolutions(db);
+
   const summary = { companies: 0, matched: 0, ambiguous: 0, unmatched: 0, tiers: {}, withFilings: 0 };
   const run = db.transaction(() => {
     for (const company of companies) {
-      const m = matchCompanyToEntities(company, index);
+      const m = matchCompanyToEntities(company, index, resolutions.get(company) || null);
       const totals = m.status === 'matched'
         ? aggregateEntityPeriods(db, m.entities, coverage.spanByPeriod)
         : aggregateEntityPeriods(db, [], coverage.spanByPeriod);
