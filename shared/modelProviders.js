@@ -27,6 +27,17 @@ export const DATA_CLASS = Object.freeze({
   PUBLIC: "public",
   /** Anything derived from a person: resumes, profiles, cover letters, parsed PDFs. */
   CANDIDATE: "candidate",
+  /**
+   * TASK F — a payload built from an explicit field ALLOW-LIST and tokenized, so it carries the
+   * structure of a candidate's history without their identity. Eligible for a non-Anthropic
+   * provider, and ONLY because callModel refuses to send it unless the whitelist assertion passes.
+   *
+   * ⛔ THIS IS NOT "CANDIDATE, BUT FILTERED". A filtered payload is a full payload minus whatever a
+   * regex caught, and it fails silently. A TOKENIZED payload is CONSTRUCTED from the allow-list, so
+   * a field nobody considered is absent by construction. The distinction is the entire reason this
+   * class may leave Anthropic and CANDIDATE may not. See shared/piiPolicy.js.
+   */
+  TOKENIZED: "tokenized",
 });
 
 export const PROVIDER = Object.freeze({

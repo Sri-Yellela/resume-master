@@ -18,6 +18,7 @@
 
 import { trackApiCall } from "./usageTracker.js";
 import { DATA_CLASS, PROVIDER, PROVIDERS, resolveProvider } from "../shared/modelProviders.js";
+import { assertOutboundFields } from "../shared/piiPolicy.js";
 import { callProvider } from "./providerTransport.js";
 
 // ── ROUTING ─────────────────────────────────────────────────────────────────────────────────────
@@ -63,7 +64,13 @@ export function resetRoutingWarnings() {
  * @returns {{ provider: string, model: string }}
  */
 export function routeFor({ dataClass, model, env = process.env } = {}) {
-  if (dataClass !== DATA_CLASS.PUBLIC) return { provider: PROVIDER.ANTHROPIC, model };
+  // TOKENIZED is routable for the same reason PUBLIC is: what leaves carries no identity. The
+  // difference is that PUBLIC is safe by WHERE THE TEXT CAME FROM, while TOKENIZED is safe only
+  // because callModel refuses to send it unless the whitelist assertion passes — see the guard in
+  // callModel below, which is the thing that makes this class meaningful.
+  if (dataClass !== DATA_CLASS.PUBLIC && dataClass !== DATA_CLASS.TOKENIZED) {
+    return { provider: PROVIDER.ANTHROPIC, model };
+  }
 
   // Throws on an unpinned ENRICH_MODEL, deliberately — see requirement 6 in shared/modelProviders.js.
   const resolved = resolveProvider(env);
@@ -122,6 +129,10 @@ export async function callModel({
   // WHOSE DATA THIS CALL SENDS. See the routing note at the top of this file. Defaults to
   // CANDIDATE so an unannotated site can never be routed off Anthropic by accident.
   dataClass = DATA_CLASS.CANDIDATE,
+  // TASK F — the STRUCTURED payload a TOKENIZED prompt was rendered from. Required for that class
+  // and asserted field-by-field against shared/piiPolicy.js before anything is sent. Not forwarded
+  // to any provider; it exists to be checked.
+  piiFields = null,
   ...params
 } = {}) {
   if (!purpose) throw new Error("callModel: `purpose` is required — it is how spend is attributed to a feature");
@@ -130,6 +141,29 @@ export async function callModel({
   // Resolved BEFORE the timer and outside the try, because an unpinned ENRICH_MODEL is a config
   // error rather than a call: no request is made, so no usage row should be written for it.
   const route = routeFor({ dataClass, model });
+
+  // ── TASK F: THE FIELD-LEVEL WHITELIST ASSERTION ON THE OUTBOUND PAYLOAD ────────────────────────
+  //
+  // Enforced HERE, in the one wrapper every call passes through, rather than at the call site that
+  // built the payload — a guard living next to the code it guards is a guard that gets edited in
+  // the same commit as the mistake.
+  //
+  // ⛔ IT REFUSES, IT DOES NOT SANITISE. Dropping the offending field would mean the send succeeds
+  // and nobody ever learns the payload was wrong; the next payload built the same way would be
+  // wrong too, silently. Refusing is the only outcome a caller cannot ignore.
+  //
+  // A TOKENIZED call with no declared fields is also refused: the class asserts a property, and a
+  // call claiming it without supplying anything to check is claiming it vacuously.
+  if (dataClass === DATA_CLASS.TOKENIZED) {
+    if (!piiFields || typeof piiFields !== "object") {
+      throw new Error(
+        `callModel(${purpose}): dataClass TOKENIZED requires \`piiFields\` — the structured payload ` +
+        `the prompt was rendered from. Without it there is nothing to assert, and the class would ` +
+        `be a label rather than a guarantee.`
+      );
+    }
+    assertOutboundFields(piiFields, { where: `callModel(${purpose})` });
+  }
   // Only the Anthropic route needs the SDK client. Checked after routing so a PUBLIC-only pass is
   // not blocked by an absent Anthropic client it was never going to use.
   if (route.provider === PROVIDER.ANTHROPIC && !anthropic) throw new Error(`callModel(${purpose}): no anthropic client`);
