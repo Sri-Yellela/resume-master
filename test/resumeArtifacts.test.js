@@ -67,7 +67,15 @@ test("prompt assembler caches stable mode overlays", () => {
   // Reads layer3Resolved, not layer3Text: AI1 resolves the prompt-file conditionals before the
   // block is built, so the text that is cached is the text that is SENT. Asserting against the
   // raw file variable would pass while a resolved-but-uncached block went out on every call.
-  assert.match(assembler, /\.\.\.\(layer3Resolved \? \{ cache_control: \{ type: "ephemeral" \} \} : \{\}\)/);
+  //
+  // ASSERTED ON THE VARIABLE, NOT ON THE WHOLE EXPRESSION. This used to pin the literal
+  // `...(layer3Resolved ? { cache_control: { type: "ephemeral" } } : {})`, which broke when AL6
+  // hoisted the breakpoint into a `breakpoint` const so callers could switch caching off — a
+  // change that did not touch the property this test is named after. The behavioural half is in
+  // test/cacheBreakpoints.test.js.
+  assert.match(assembler, /\.\.\.\(layer3Resolved \? breakpoint : \{\}\)/);
+  assert.ok(!/layer3Text\s*\?\s*breakpoint/.test(assembler),
+    "the cached block must key off the RESOLVED text, not the raw file text");
 });
 
 test("admin job review remains narrow to classification reassignment", () => {

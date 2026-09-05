@@ -26,7 +26,7 @@ readiness.
 | **D** | Generation deferral | desktop | B ✅ | ✅ **DONE 2026-09-04** — `docs/al2-generation-deferral.md`, 19-check real run |
 | **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A code | **G1·G2·G4 DONE 2026-09-04** — `docs/al3-skill-synonyms.md`, `docs/al4-lca-and-org-units.md`. G3 open (and near-pointless — see G1) |
 | **F** | PII tokenization layer | desktop | A code | ✅ **DONE 2026-09-04** — `docs/al5-pii-tokenization.md`; real round trip verified |
-| **E** | Cache breakpoints + Batch API | desktop | D | open — see the conditional |
+| **E** | Cache breakpoints + Batch API | desktop | D | ✅ **DONE 2026-09-04** — `docs/al6-cache-and-batching.md`; removal would LOSE $0.36 |
 | **H** | Form label → field mapping | desktop | G4 | open |
 | **I** | Harness runner prerequisite doc | desktop | — | ✅ **DONE 2026-09-04** — fails fast in ~1s, exit 2 |
 | — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/PHASE_1_AUDIT.md` |

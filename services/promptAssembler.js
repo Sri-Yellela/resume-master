@@ -110,7 +110,14 @@ export function applyPromptConditionals(text, flags = {}) {
 // `flags` gates the prompt-file conditionals above. SUMMARY defaults to FALSE — the same default
 // as the per-profile preference it carries, so a caller that forgets to pass it gets the documented
 // product default rather than a quietly different resume.
-export function assemblePrompt(domainModuleKey, mode, runtimeInputs, flags = {}) {
+/**
+ * @param options.cache  AL6 — whether to place prompt-cache breakpoints on the system blocks.
+ *                       DEFAULT TRUE, and the long note beside `const cache` below has the
+ *                       measurement that decided it. Pass `false` from a caller that knows it is
+ *                       one-shot: a written-and-never-read prefix is a 25% surcharge on the
+ *                       system blocks buying nothing.
+ */
+export function assemblePrompt(domainModuleKey, mode, runtimeInputs, flags = {}, options = {}) {
   if (!_layer1Cache.text) {
     throw new Error("Prompt assembler not initialised - call loadAllPrompts() at startup");
   }
@@ -138,21 +145,53 @@ export function assemblePrompt(domainModuleKey, mode, runtimeInputs, flags = {})
   const layer2Resolved = applyPromptConditionals(layer2Text, resolvedFlags);
   const layer3Resolved = applyPromptConditionals(layer3Text, resolvedFlags);
 
+  // ── AL6 (task E requirement 1): THE BREAKPOINTS STAY, AND THE MEASUREMENT SAYS WHY ─────────────
+  //
+  // The assessment said to REMOVE these: "the generation prefix is written at 1.25x and read at
+  // 0.1x — written every time, read never. A 25% surcharge buying nothing. Unconditional -8.1%."
+  //
+  // Verified against real usage_events, as instructed, and the premise is TRUE OF ONE CALLER and
+  // FALSE IN AGGREGATE. Sonnet 5 base input is $2/MTok (verified live 2026-09-04; a cache write is
+  // 1.25x, so the surcharge is 0.25x, and a read is 0.1x, so a hit saves 0.9x):
+  //
+  //     purpose              writes    reads   surcharge     saved
+  //     resume_generate        6704        0     $0.0034   $0.0000
+  //     af2_claim_verify      14352        0     $0.0072   $0.0000
+  //     ag2_claims_verify     19136   138736     $0.0096   $0.2497
+  //     ag3_claim_sample       9632    76864     $0.0048   $0.1384
+  //     ────────────────────────────────────────────────────────────
+  //     NET                                      $0.0249   $0.3881   -> caching has SAVED $0.3632
+  //
+  // The unread writes are real and they are exactly where the assessment said. But the callers that
+  // generate in BURSTS read the prefix heavily, and removing the breakpoints would forfeit $0.39 to
+  // recover $0.02. "Unconditional -8.1%" was computed on the interactive path alone.
+  //
+  // ⚠ AND TASK D JUST CHANGED THE INTERACTIVE PATH. Approving N applications now starts N
+  // generations in quick succession, so resume_generate — the caller with 0 reads — is precisely
+  // the one about to become bursty. Removing its breakpoints would lose the saving at the moment it
+  // starts to exist.
+  //
+  // So this is a LEVER rather than a deletion: `cache` defaults to true (the measured-best status
+  // quo) and any caller that knows it is one-shot can turn it off and take the -8.1%. The decision
+  // is now cheap and explicit instead of being hardcoded either way.
+  const cache = options.cache !== false;
+  const breakpoint = cache ? { cache_control: { type: "ephemeral" } } : {};
+
   const systemBlocks = [
     {
       type: "text",
       text: layer1Resolved,
-      cache_control: { type: "ephemeral" },
+      ...breakpoint,
     },
     {
       type: "text",
       text: layer2Resolved,
-      cache_control: { type: "ephemeral" },
+      ...breakpoint,
     },
     {
       type: "text",
       text: layer3Resolved,
-      ...(layer3Resolved ? { cache_control: { type: "ephemeral" } } : {}),
+      ...(layer3Resolved ? breakpoint : {}),
     },
   ];
 
