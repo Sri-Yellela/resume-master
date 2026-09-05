@@ -145,13 +145,33 @@ export async function detectPlatformFromPage(page) {
  * Note the map keys are NEEDLES searched inside a form's label, so a longer provider spelling cannot
  * match a shorter label — which is why the generic fallback matters rather than being redundant.
  */
-export const getPlatformLabelMap = (platform) => {
+export const getPlatformLabelMap = (platform, derived = null) => {
   const base = PLATFORM_LABEL_MAPS.generic || {};
   const specific = PLATFORM_LABEL_MAPS[platform];
-  if (!specific || specific === base) return { ...base };
+  const authored = (!specific || specific === base)
+    ? { ...base }
+    : {
+        ...specific,
+        ...Object.fromEntries(Object.entries(base).filter(([label]) => !(label in specific))),
+      };
+
+  // ── TASK H: DERIVED MAPPINGS FILL GAPS. THEY NEVER OVERRIDE. ────────────────────────────────
+  //
+  // `derived` is the CONFIRMED half of form_field_mappings, learned from real captured form
+  // structure (services/kb/formFieldMappings.js). It is merged UNDER the hand-written entries, so
+  // an authored label always wins a collision.
+  //
+  // That direction is the safety property, not a preference. The authored maps are where the
+  // eligibility labels live — "Sponsorship", "Work Authorization", "Clearance", "Years of
+  // Experience" — and they are there because those answers must resolve by an EXACT, reviewed
+  // mapping or not at all. If a derived entry could shadow one, a table built from labels scraped
+  // off employer forms would be deciding how an attestation is answered. It cannot: the derived
+  // table refuses to store those keys at all, and this merge order means that even if one existed
+  // it could not take effect.
+  if (!derived) return authored;
   return {
-    ...specific,
-    ...Object.fromEntries(Object.entries(base).filter(([label]) => !(label in specific))),
+    ...Object.fromEntries(Object.entries(derived).filter(([label]) => !(label in authored))),
+    ...authored,
   };
 };
 export const usesIframe = (platform) =>

@@ -68,6 +68,9 @@
   "al2GenerationDeferral": {
     "pass": 19
   },
+  "al8DerivedMappingVerify": {
+    "pass": 9
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

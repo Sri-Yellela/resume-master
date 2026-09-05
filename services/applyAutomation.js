@@ -1145,9 +1145,11 @@ function(answers) {
 `;
 
 // -- discoverFields ------------------------------------------------------------
-export async function discoverFields(pageOrFrame, provider) {
+export async function discoverFields(pageOrFrame, provider, derivedLabelMap = null) {
   try {
-    const labelMap = getPlatformLabelMap(provider || 'generic');
+    // TASK H — the derived half is merged UNDER the authored map, never over it. See
+    // getPlatformLabelMap: the authored entries are where the eligibility labels live.
+    const labelMap = getPlatformLabelMap(provider || 'generic', derivedLabelMap);
     const fields = await pageOrFrame.evaluate(
       `(${DISCOVER_FN_SRC})(${JSON.stringify(HANDLER_BY_ATTR)}, ${JSON.stringify(PROFILE_KEY_TO_HANDLER)}, ${JSON.stringify(labelMap)})`
     );
@@ -2264,6 +2266,11 @@ export async function waitForFormReady(page, {
 }
 
 async function discoverAndFill(page, frames, provider, autofillData, labelMap, opts = {}) {
+  // TASK H — the derived map has to reach discoverFields, which is where a LABEL becomes a
+  // handler. discoverAndFill already receives the merged `labelMap`, but discoverFields
+  // recomputes its own from the provider alone, so an injected mapping was being built here and
+  // then thrown away one call later — the fill was unchanged and nothing said why.
+  const derivedLabelMap = opts.derivedLabelMap || null;
   const { policy = defaultAnswerPolicy, mode = 'full', step = 0, touched = new Set() } = opts;
   let filled = 0;
   const collected = [];
@@ -2273,7 +2280,7 @@ async function discoverAndFill(page, frames, provider, autofillData, labelMap, o
   let fieldCount = 0;
 
   for (const frame of frames) {
-    const fields = await discoverFields(frame, provider);
+    const fields = await discoverFields(frame, provider, derivedLabelMap);
     fieldCount += fields.length;
     if (fields.length) {
       const answers = buildAnswers(fields, autofillData);
@@ -2507,6 +2514,9 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     // submitted: it is only ever set on a preview, the blanks are still reported, and the approved
     // run that follows carries a real resume through the ordinary gate.
     documentsDeferred        = false,
+    // TASK H — { platform: { normalisedLabel: field_key } }, CONFIRMED rows only. Absent means
+    // "authored map only", which is the pre-H behaviour.
+    derivedLabelMaps         = null,
     jobId             = `tmp_${Date.now()}`,
     storageStatePath  = null,
     // Step-scoped approval hook. Receives each step's resolved answer set BEFORE anything is typed
@@ -2585,7 +2595,10 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       (readiness.timedOut ? " (TIMED OUT — page never settled with a fillable control)" : ""));
 
     const detected  = platform || detectPlatformFromUrl(jobUrl) || await detectPlatformFromPage(page);
-    const labelMap  = getPlatformLabelMap(detected);
+    // TASK H — `derivedLabelMaps` is every platform's CONFIRMED mappings, injected by the caller
+    // because this module has no database handle by design. Picked after detection, and merged
+    // beneath the authored map so a derived entry can only ever fill a gap.
+    const labelMap  = getPlatformLabelMap(detected, derivedLabelMaps?.[detected] || null);
     console.log(`[autoApply] detected platform=${detected}`);
 
     inProgress.set(String(jobId), { status: "filling", browser });
@@ -2605,7 +2618,8 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     let firstPassFieldCount = null;
     const runDiscovery = async () => {
       const r = await discoverAndFill(page, frameList(page), detected, autofillData, labelMap,
-        { policy: answerPolicy, mode: isUnattended ? 'full' : 'semi', step: stepIndex++, touched: touchedFrames });
+        { policy: answerPolicy, mode: isUnattended ? 'full' : 'semi', step: stepIndex++, touched: touchedFrames,
+          derivedLabelMap: derivedLabelMaps?.[detected] || null });
       if (firstPassFieldCount === null) firstPassFieldCount = r.fieldCount ?? null;
       totalFilled += r.filled;
       resolvedAnswers.push(...r.answers);
@@ -2853,7 +2867,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
     if (isUnattended) {
       // Completeness gate: re-discover all frames; hold if any required non-file field is still empty.
       const postFillFields = (await Promise.all(
-        frameList(page).map(f => discoverFields(f, detected).catch(() => []))
+        frameList(page).map(f => discoverFields(f, detected, derivedLabelMaps?.[detected] || null).catch(() => []))
       )).flat();
       // A1 finding N2: required FILE inputs used to be exempt here, so a form with no resume
       // attached passed the gate while the browser refused to submit it — the run then reported
@@ -3140,7 +3154,7 @@ export async function autoApply(jobUrl, autofillData, options = {}) {
       // routes/apply.js and the panel consume it unchanged, and `openQuestions` carries the type
       // and options so a question can be answered rather than merely named.
       const semiFields = (await Promise.all(
-        frameList(page).map(f => discoverFields(f, detected).catch(() => []))
+        frameList(page).map(f => discoverFields(f, detected, derivedLabelMaps?.[detected] || null).catch(() => []))
       )).flat();
       const semiMissingFields = semiFields
         .filter(f => f.is_required && (f.current_value === '' || f.current_value == null));

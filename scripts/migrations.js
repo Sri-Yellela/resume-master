@@ -2884,4 +2884,50 @@ export const MIGRATIONS = [
           ON lca_company_resolutions(status);
       `,
     },
+    {
+      // AL8 (H) — label to field mappings DERIVED from captured form structure.
+      //
+      // PLATFORM_LABEL_MAPS is hand-written for greenhouse, lever and workday; every other ATS falls
+      // through to `generic`. G4's capture collects real form STRUCTURE from live pages, so the
+      // mapping can be derived from what employers actually label their fields rather than authored
+      // one ATS at a time.
+      //
+      // ⛔ THIS TABLE PRODUCES A TABLE, NOT A MODEL CALL AT FILL TIME. buildAnswers stays
+      // deterministic — Jobo's integration terms say "No AI-generated answers" and §7 says the same.
+      // Nothing here is consulted by a model; the resolver reads confirmed rows and nothing else.
+      //
+      // ⛔ NO ELIGIBILITY FIELD MAY EVER BE STORED HERE. Work authorisation, sponsorship, clearance,
+      // visa, criminal history, EEO and years of experience resolve by EXACT HANDLER MAPPING or not
+      // at all. Two live defects say why label matching must not get clever near an attestation:
+      //   · `login_email` labelled "Email" resolved to the email handler and typed the candidate's
+      //     address into a portal's SIGN-IN box at 0.9 confidence.
+      //   · a work_authorization key substring-matched "do you now or in the future require
+      //     sponsorship for work authorization" — a semantically INVERTED question, and a materially
+      //     false attestation to an employer.
+      // The exclusion is enforced in services/kb/formFieldMappings.js and asserted by a test, not
+      // left as a comment.
+      //
+      // status DEFAULTS TO 'proposed' and only a human moves it. A wrong mapping fills the wrong
+      // answer into a real employer's form, which cannot be recalled — so corroboration orders the
+      // review queue and never promotes, exactly as with skill synonyms.
+      id: "100_form_field_mappings",
+      sql: `
+        CREATE TABLE IF NOT EXISTS form_field_mappings (
+          platform            TEXT    NOT NULL,
+          label               TEXT    NOT NULL,
+          field_key           TEXT    NOT NULL,
+          confidence          REAL    NOT NULL DEFAULT 0,
+          corroboration_count INTEGER NOT NULL DEFAULT 0,
+          source_hosts_json   TEXT,
+          status              TEXT    NOT NULL DEFAULT 'proposed',
+          reviewed_at         INTEGER,
+          reviewed_by         TEXT,
+          first_seen          INTEGER,
+          last_seen           INTEGER,
+          PRIMARY KEY (platform, label)
+        );
+        CREATE INDEX IF NOT EXISTS idx_form_field_mappings_status
+          ON form_field_mappings(platform, status);
+      `,
+    },
   ];

@@ -30,8 +30,13 @@ const semiBranch = (() => {
 })();
 
 test("the semi branch re-reads the form it just filled", () => {
-  assert.match(semiBranch, /discoverFields\(f, detected\)/,
-    "semi has to look at the form to be able to report on it");
+  // The third argument is task H's derived label map, and passing it here is REQUIRED rather than
+  // incidental: this re-read decides what is reported as still-missing, so if it ran with a
+  // different label map from the one that did the filling, a field the derived mapping had just
+  // filled would be reported as blank. That is the same "the two cannot disagree" property the
+  // predicate assertion below exists to protect, one argument over.
+  assert.match(semiBranch, /discoverFields\(f, detected, derivedLabelMaps\?\.\[detected\] \|\| null\)/,
+    "semi has to look at the form to be able to report on it, with the SAME label map that filled it");
   assert.match(semiBranch, /frameList\(page\)\.map/,
     "across every frame — a form in an iframe is the common case on workday/icims/taleo");
 });

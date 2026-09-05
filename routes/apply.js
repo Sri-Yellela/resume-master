@@ -19,6 +19,9 @@ import { probeBrowserAvailability } from "../services/browserLauncher.js";
 // AH5: the one definition of "is this stored resume still the right one". Shared with server.js's
 // generateResumeForApply so the two reuse sites cannot drift apart again.
 import { artifactCurrency, currencySentence } from "../services/resumeCurrency.js";
+// TASK H — CONFIRMED label mappings only, loaded here because services/applyAutomation.js has no
+// database handle by design and must keep it that way.
+import { loadAllConfirmedMappings } from "../services/kb/formFieldMappings.js";
 import { detectPlatformFromUrl } from "../services/platformDetector.js";
 import { classifyRuntimeError } from "../shared/failureAttribution.js";
 import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
@@ -774,6 +777,11 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // for `alias.column`; an unaliased SELECT list is invisible to it, so this query produced NO
     // required-column entry and the guard skipped domain_profiles entirely — passing vacuously
     // while a9ApprovalFlow died on `no such column: generate_at_queue`.
+    // TASK H — every platform's CONFIRMED derived mappings, loaded once per run-job. Injected into
+    // autoApply because that module has no database handle by design, and merged BENEATH the
+    // authored label map so a derived entry can only ever fill a gap it does not already cover.
+    const derivedLabelMaps = loadAllConfirmedMappings(db);
+
     const generateAtQueue = !!db.prepare(`
       SELECT dp.generate_at_queue FROM domain_profiles dp
       WHERE dp.user_id=? AND dp.is_active=1 ORDER BY dp.id DESC LIMIT 1
@@ -1007,6 +1015,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         const clPath = await clPromise;
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page in browser");
         result = await autoApply(jobUrl, autofillPayload, {
+          derivedLabelMaps,
           mode: applyMode,
           jobId,
           resumePath: resumeTmpPath,
@@ -1062,6 +1071,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         }).catch(() => null);
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page for review");
         const browserPromise = autoApply(jobUrl, autofillPayload, {
+          derivedLabelMaps,
           mode: "semi",
           jobId,
           resumePathPromise: genPromise,
@@ -1163,6 +1173,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
             deferred: true, generateAtQueue });
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page for preview");
         const applyPromise = autoApply(jobUrl, autofillPayload, {
+          derivedLabelMaps,
           mode: applyMode,
           jobId,
           approvedAnswers,
@@ -1243,6 +1254,7 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         }).catch(() => null);
         logEvent(runId, runJobId, userId, jobId, "site_visit_started", "Opening application page in browser");
         const applyPromise = autoApply(jobUrl, autofillPayload, {
+          derivedLabelMaps,
           mode: applyMode,
           jobId,
           resumePathPromise,
