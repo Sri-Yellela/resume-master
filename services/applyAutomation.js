@@ -196,6 +196,37 @@ export const ELIGIBILITY_HANDLERS = {
   eeo:         ['gender', 'ethnicity', 'veteran', 'disability'],
 };
 
+// Labels naming a DIFFERENT NAME FOR THE SAME PERSON.
+//
+// THE OBSERVED DEFECT (AL8): Ashby's SPA labels a field "Preferred Name (if applicable)" and gives
+// the control a bare GUID for a name, so only the label can resolve it. The generic label map's
+// `"Name"` needle is a whole token in that label, so it matched, and the candidate's LEGAL name was
+// typed into the preferred-name box at `field_map_exact` — 0.9 confidence, the second-highest tier.
+//
+// This is the A1 name_ambiguity class one step milder than "Name of Referrer": nothing false is
+// asserted about a third party, because it is still the candidate's own name. It is still wrong.
+// A preferred name is a DIFFERENT DATUM — the whole reason the form asks for it separately is that
+// it may not be the legal one — and answering it with the legal name silently overwrites a question
+// the candidate was being given the chance to answer.
+//
+// ⛔ THE QUALIFIER IS REQUIRED, so this cannot swallow the ordinary name fields. "Legal Name",
+// "Full Name", "First Name" and a bare "Name" all have no qualifying word and do not match; only
+// "Preferred Name", "Nickname", "Maiden Name", "Former Names", "Chosen Name" and "the name you go
+// by" do. Getting that wrong in the other direction would leave every application nameless.
+//
+// The refusal is scoped to CANONICAL name keys. If a key is itself an other-name key
+// (`preferred_name`), it is the right answer and is allowed through — so this blocks the wrong
+// source rather than the field.
+export const OTHER_NAME_SUBJECT_RE =
+  // NOTE `go(?:es)?` and not `goes?` — the latter is "goe" plus an optional "s", so it never
+  // matches the bare "go by" that "What name do you go by?" actually contains. Caught by the test
+  // below, which is why that phrasing is in it.
+  /\b(?:preferred|nick|maiden|former|previous|prior|chosen|other|alias)[\s-]*(?:first[\s-]+|last[\s-]+|full[\s-]+|legal[\s-]+|middle[\s-]+)?names?\b|\bname\s+(?:you|they)\s+(?:go(?:es)?\s+by|prefer|use)\b|\bname\s+do\s+you\s+go\s+by\b/i;
+
+/** Handlers that carry the candidate's canonical, legal-ish name. */
+export const CANONICAL_NAME_HANDLERS = new Set(['full-name', 'first-name', 'last-name']);
+const CANONICAL_NAME_KEY_RE = /\b(?:full[_\s-]?name|first[_\s-]?name|last[_\s-]?name|name)\b/i;
+
 // Labels naming a DIFFERENT person. "Name of Referrer" is not the candidate's name, and this —
 // not whole-token matching — is what actually stops the A1 name_ambiguity trap: "name" IS a whole
 // token in "Name of Referrer", so token matching alone would still match it.
@@ -315,6 +346,20 @@ export function refuseReason({ label = '', name = '', key = null, handler = null
     const identityKey = key != null && IDENTITY_KEY_RE.test(keyToPhrase(key));
     const identityHandler = handler != null && IDENTITY_HANDLERS.has(String(handler));
     if (identityKey || identityHandler) return 'third_party_subject';
+  }
+  // A DIFFERENT NAME FOR THE SAME PERSON — see OTHER_NAME_SUBJECT_RE. Checked after the third-party
+  // rule because that one is about a different PERSON and is the more serious claim; this is about
+  // the same person's other name.
+  if (OTHER_NAME_SUBJECT_RE.test(subject)) {
+    const keyPhrase = key != null ? keyToPhrase(key) : '';
+    // An other-name KEY answering an other-name FIELD is exactly right, so it passes. This blocks
+    // the wrong SOURCE, not the field.
+    const keyIsOtherName = key != null && OTHER_NAME_SUBJECT_RE.test(keyPhrase);
+    if (!keyIsOtherName) {
+      const canonicalHandler = handler != null && CANONICAL_NAME_HANDLERS.has(String(handler));
+      const canonicalKey = key != null && CANONICAL_NAME_KEY_RE.test(keyPhrase);
+      if (canonicalHandler || canonicalKey) return 'other_name_subject';
+    }
   }
   return null;
 }

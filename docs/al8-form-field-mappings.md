@@ -144,13 +144,19 @@ been the easy change and the wrong one. Asserted.
 
 ---
 
-## A live near-miss found on the way, and not fixed here
+## A live near-miss found on the way — NOW FIXED
 
 `"Preferred Name (if applicable)"` on the Ashby SPA has a **bare GUID** for a control name, so it
 resolves by label only — and the generic map's `"Name"` needle matches it, mapping it to
 **`full_name`**. The candidate's *legal* name is typed into a *preferred name* box.
 
-That is the `name_ambiguity` class the A1 traps exist for, one step milder (it is still the
-candidate's own name, so nothing false is asserted). **Task H's table cannot fix it**, by design: a
-derived entry may not override an authored one. It needs an edit to `PLATFORM_LABEL_MAPS` or a
-narrower needle, and it is the owner's call.
+That is the `name_ambiguity` class the A1 traps exist for, one step milder — it is still the
+candidate's own name, so nothing false is asserted about a third party. It is still wrong: a
+preferred name is a **different datum**, and the entire reason a form asks for it separately is that
+it may not be the legal one.
+
+**The greenhouse fixture labels the field `TRAP: name_ambiguity`, beside "Name of Referrer".** The
+trap was only ever checked on the referrer half; the preferred-name half was being filled at
+`field_map_exact` and the matrix reported PASS.
+
+Fixed — see the AL9 section below.
