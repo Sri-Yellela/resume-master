@@ -69,6 +69,12 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
   // applications waiting on a decision. Approving them submits to a real employer and cannot be
   // undone, which is why the detail view shows every answer with the rule that produced it.
   const [applyPending, setApplyPending] = useState([]);
+  // TASK Q — the budget that decides how much of the queue above can actually be acted on today.
+  // Generation moved from queue time to approval time (AL2), so approving is now the action that
+  // spends money and this is the cap on it. Null until /api/apply/pending has answered: rendering
+  // "0 approvals left" from an unloaded state would be a false statement, and it is exactly the
+  // statement that would stop a user from approving.
+  const [approvalCap, setApprovalCap] = useState(null);
   const [pendingDetail, setPendingDetail] = useState(null); // { runJobId, answers, resume, ... }
   const [pendingBusy, setPendingBusy] = useState(false);
   const [pendingMsg, setPendingMsg] = useState("");
@@ -225,6 +231,9 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
     try {
       const data = await api("/api/apply/pending");
       setApplyPending(Array.isArray(data.pending) ? data.pending : []);
+      // Only when the server actually sent one. An older server that predates the cap must leave
+      // this null so the panel says nothing, rather than defaulting to a limit it invented.
+      setApprovalCap(Number.isFinite(data.approvalCap?.remaining) ? data.approvalCap : null);
     } catch {}
   }, []);
 
@@ -670,7 +679,7 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
       applyQuestions, applyQuestionMeta,
       questionDrafts, setQuestionDrafts,
       answersSaving, answersMsg,
-      applyPending, pendingDetail, pendingBusy, pendingMsg,
+      applyPending, approvalCap, pendingDetail, pendingBusy, pendingMsg,
       confirmApproveAll, setConfirmApproveAll,
       addToApplyQueue, removeFromApplyQueue,
       loadApplyRuns, loadApplyRunDetail, loadApplyQuestions, loadApplyPending,

@@ -2218,6 +2218,21 @@
         },
         "description": "About the CALLER, not about the job. Discloses nothing of another user's."
       },
+      "ApprovalCap": {
+        "type": "object",
+        "properties": {
+          "approvedLast24h": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "remaining": {
+            "type": "number"
+          }
+        },
+        "description": "The GENERATION cost budget. Approving generates a tailored resume and cover letter per application, so this is the limit that bounds spend. Reported on every run, not only when it binds, so a client can show what is left rather than discovering the ceiling by being refused at it."
+      },
       "ApproveResponse": {
         "type": "object",
         "properties": {
@@ -3185,13 +3200,17 @@
       "PendingResponse": {
         "type": "object",
         "properties": {
+          "approvalCap": {
+            "$ref": "#/components/schemas/ApprovalCap"
+          },
           "pending": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PendingItem"
             }
           }
-        }
+        },
+        "description": "The approval queue, plus the budget that decides how much of it can be acted on."
       },
       "PendingResume": {
         "type": "object",
@@ -3280,7 +3299,7 @@
             "type": "number"
           }
         },
-        "description": "The GENERATION cost budget, reported so a client can show what is left rather than discovering the ceiling by being refused at it."
+        "description": "The PREVIEW/SESSION budget — how many applications may be opened and filled per day. NOT the cost budget: AL2 moved generation to approval time, so queueing spends no model tokens. See ApprovalCap for the one that bounds money."
       },
       "ReadinessResponse": {
         "type": "object",
@@ -3681,6 +3700,9 @@
       "RunQueuedResponse": {
         "type": "object",
         "properties": {
+          "approvalCap": {
+            "$ref": "#/components/schemas/ApprovalCap"
+          },
           "dailyCap": {
             "$ref": "#/components/schemas/DailyCap"
           },

@@ -163,7 +163,7 @@ export const RESPONSE_SCHEMAS = Object.freeze({
     fields: {
       ok: "boolean", runId: "number", mode: "string", toolType: "string",
       queued: "string[]", totalJobs: "number",
-      dailyCap: "$DailyCap", queueCap: "$QueueCap",
+      dailyCap: "$DailyCap", queueCap: "$QueueCap", approvalCap: "$ApprovalCap",
     },
   },
   DailyCap: {
@@ -171,12 +171,21 @@ export const RESPONSE_SCHEMAS = Object.freeze({
     fields: { limit: "number", submittedLast24h: "number", remaining: "number" },
   },
   QueueCap: {
-    description: "The GENERATION cost budget, reported so a client can show what is left rather " +
-      "than discovering the ceiling by being refused at it.",
+    description: "The PREVIEW/SESSION budget — how many applications may be opened and filled per " +
+      "day. NOT the cost budget: AL2 moved generation to approval time, so queueing spends no " +
+      "model tokens. See ApprovalCap for the one that bounds money.",
     fields: { limit: "number", queuedLast24h: "number", remaining: "number" },
   },
+  ApprovalCap: {
+    description: "The GENERATION cost budget. Approving generates a tailored resume and cover " +
+      "letter per application, so this is the limit that bounds spend. Reported on every run, not " +
+      "only when it binds, so a client can show what is left rather than discovering the ceiling " +
+      "by being refused at it.",
+    fields: { limit: "number", approvedLast24h: "number", remaining: "number" },
+  },
   PendingResponse: {
-    fields: { pending: "$PendingItem[]" },
+    description: "The approval queue, plus the budget that decides how much of it can be acted on.",
+    fields: { pending: "$PendingItem[]", approvalCap: "$ApprovalCap" },
   },
   PendingItem: {
     description: "One application previewed and awaiting a decision.",

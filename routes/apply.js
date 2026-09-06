@@ -365,19 +365,81 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   const APPLY_DAILY_CAP      = envInt("APPLY_DAILY_CAP", 25);
   const APPLY_MAX_ACTIVE_RUNS = envInt("APPLY_MAX_ACTIVE_RUNS_PER_USER", 1);
   /**
-   * The ceiling on queue attempts per 24h — the limit that bounds MODEL SPEND rather than
-   * submissions. See queuedLast24h() for why APPLY_DAILY_CAP could not do this job.
+   * The ceiling on queue attempts per 24h.
    *
-   * 40, not 25. It has to sit ABOVE APPLY_DAILY_CAP: every submission needs a queue first, so a
-   * queue cap at or below the submission cap would make the submission cap unreachable. The 15 of
-   * headroom is for the legitimate re-queues — the answers path and a retry after a hold both come
-   * back through startRun and each is a fresh generation.
+   * ⛔ RE-SCOPED BY TASK Q. THIS IS NO LONGER THE SPEND CAP. It was written as one — "at two model
+   * calls per queued job (resume + cover letter), 40 is already ~80 calls a day" — and that was
+   * true while processRunJob generated at QUEUE time. AL2 moved generation to approval — the
+   * deferred branch below says "Nothing here calls a model" — so queueing 40 jobs now costs $0.
+   * (The phrase "CASE D" with a colon is deliberately not written here: test/generationDeferral
+   * .test.js anchors its branch slice on that exact string, and a prose mention of it upstream
+   * silently widens the slice to most of this file. Third time this file has taught that lesson.)
+   * The sentence was correct when
+   * written and became false without anything editing it, which is the reason it is corrected here
+   * rather than deleted: a stale rationale is how a cap survives the disappearance of its purpose.
    *
-   * It is deliberately NOT generous. At two model calls per queued job (resume + cover letter),
-   * 40 is already ~80 calls a day for one user, and the cheapest way to spend money in this
-   * product is to queue jobs nobody ever approves.
+   * KEPT, NOT REMOVED, and the reason is that queueing is free of MODEL spend, not free. Every
+   * preview opens a real browser, navigates a real employer's form and fills it. That is CPU, wall
+   * time, disk, and — the part that actually matters — traffic to a third party under the
+   * candidate's name. A ceiling on how many of those a day one user can start is worth having on
+   * its own terms.
+   *
+   * So the number is unchanged and its MEANING is now stated honestly: a session/rate limit, not a
+   * budget. What it must never again do is explain itself with a cost that is not incurred.
+   *
+   * 40 still has to sit ABOVE the caps below it: every approval needs a queue first and every
+   * submission needs an approval, so a queue cap at or under either would make them unreachable.
+   * assertCapOrdering() checks that rather than trusting this comment.
    */
   const APPLY_DAILY_QUEUE_CAP = envInt("APPLY_DAILY_QUEUE_CAP", 40);
+  /**
+   * ⛔ THE SPEND CAP, and the one this pipeline was missing (TASK Q).
+   *
+   * AL2 moved every model call from queue time to APPROVAL time. The approve endpoint starts a run
+   * with approval_mode='approved'; that run finds no artifact and goes down CASE C, which calls
+   * generateResumeForApply AND generateCoverLetterForApply. Two model calls, ~$0.04, per approval.
+   *
+   * Nothing bounded it. queuedLast24h EXCLUDES approval_mode='approved' by design — that exclusion
+   * was correct when an approval REUSED the preview's artifact and would otherwise have charged the
+   * user twice for one application. After the deferral the same exclusion means the only action
+   * that spends money is the only one no cap counts. The guard did not break; the cost moved out
+   * from under it.
+   *
+   * 30. Above APPLY_DAILY_CAP's 25, because every submission needs an approval first and an
+   * approval cap at or below it would make the submission cap unreachable — the identical argument
+   * that put the queue cap above the submission cap. Below the queue cap's 40, because an approval
+   * requires a preview to approve. The 5 over 25 is for approvals that do not end in a submission:
+   * a hold, a form that stopped resolving, a retry through the answers path.
+   */
+  const APPLY_DAILY_APPROVAL_CAP = envInt("APPLY_DAILY_APPROVAL_CAP", 30);
+
+  /**
+   * ⛔ THE THREE CAPS MUST STAY REACHABLE (task Q requirement 4), AND ALL THREE ARE env-OVERRIDABLE.
+   *
+   * queue >= approval >= submission is not a style preference, it is the pipeline's own order: a
+   * submission needs an approval, an approval needs a preview. Set APPLY_DAILY_QUEUE_CAP=10 with
+   * APPLY_DAILY_CAP at 25 and the submission cap can never be hit — it would look like a
+   * configured limit and behave like dead code, and nothing would say so.
+   *
+   * Warn rather than throw. A refusal to boot over a cap ordering would take the whole product down
+   * for a misconfiguration that degrades one flow, and an operator who deliberately wants a tight
+   * queue for a day should be able to have one. But it must be SAID, once, loudly, at the moment
+   * the process reads the values.
+   */
+  function assertCapOrdering(log = console.warn) {
+    const problems = [];
+    if (APPLY_DAILY_QUEUE_CAP < APPLY_DAILY_APPROVAL_CAP) {
+      problems.push(`APPLY_DAILY_QUEUE_CAP (${APPLY_DAILY_QUEUE_CAP}) is below APPLY_DAILY_APPROVAL_CAP ` +
+        `(${APPLY_DAILY_APPROVAL_CAP}) — an approval needs a queued preview first, so the approval cap is unreachable.`);
+    }
+    if (APPLY_DAILY_APPROVAL_CAP < APPLY_DAILY_CAP) {
+      problems.push(`APPLY_DAILY_APPROVAL_CAP (${APPLY_DAILY_APPROVAL_CAP}) is below APPLY_DAILY_CAP ` +
+        `(${APPLY_DAILY_CAP}) — a submission needs an approval first, so the submission cap is unreachable.`);
+    }
+    for (const p of problems) log(`[applyRoutes] ⛔ CAP ORDERING: ${p}`);
+    return problems;
+  }
+  assertCapOrdering();
   /**
    * The score at or above which an application is sent UNATTENDED. Below it the job is not
    * discarded — it becomes held_review with an early handoff, so the candidate still gets to send
@@ -486,6 +548,13 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
    * (artifactCurrency finds it current, CASE A) rather than generating again. Counting it would
    * make the normal flow cost two against the cap per application and turn this guard into a
    * refusal to submit work the user has already reviewed — the opposite of the intent.
+   *
+   * ⚠ THE PARAGRAPH ABOVE IS THE REASON THE SPEND CAP HAD TO BE ADDED (task Q). It describes
+   * generate-at-queue, where the exclusion cost nothing because the approved run reused an existing
+   * artifact. With AL2's deferral there IS no artifact at approval time — the approved run goes down
+   * CASE C and generates — so this exclusion now removes the only spending action from the only
+   * cap that was counting. The exclusion is still right for what THIS counter measures; it is
+   * approvedLast24h below that counts the other side.
    */
   function queuedLast24h(userId) {
     try {
@@ -495,6 +564,31 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
         JOIN apply_runs r ON r.id = rj.run_id
         WHERE rj.user_id=?
           AND COALESCE(r.approval_mode, '') != 'approved'
+          AND COALESCE(rj.created_at, 0) >= unixepoch() - 86400
+      `).get(userId).n;
+    } catch { return 0; }
+  }
+
+  /**
+   * Approvals that DO trigger generation, for this user, in the trailing 24h — the exact complement
+   * of queuedLast24h's exclusion, so between them the two counters partition every run-job and no
+   * spending action can fall through the gap that opened when generation moved.
+   *
+   * COUNTS RUN-JOBS, NOT APPROVE CALLS. One POST /api/apply/approve with eight runJobIds starts one
+   * run of eight jobs and generates eight resumes. Counting requests would bound the wrong thing by
+   * a factor of eight, which is the shape of a cap that reports a limit and enforces nothing.
+   *
+   * BY created_at, REGARDLESS OF OUTCOME, for the same reason queuedLast24h does: a job that
+   * generated and then held cost exactly as much as one that submitted.
+   */
+  function approvedLast24h(userId) {
+    try {
+      return db.prepare(`
+        SELECT COUNT(*) AS n
+        FROM apply_run_jobs rj
+        JOIN apply_runs r ON r.id = rj.run_id
+        WHERE rj.user_id=?
+          AND COALESCE(r.approval_mode, '') = 'approved'
           AND COALESCE(rj.created_at, 0) >= unixepoch() - 86400
       `).get(userId).n;
     } catch { return 0; }
@@ -1636,6 +1730,33 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       }
     }
 
+    // ⛔ APPROVAL CAP (TASK Q) — the branch the queue cap deliberately skips, which is exactly where
+    // the money now goes. This run has approval_mode='approved', has no artifact, and will take
+    // CASE C: generateResumeForApply + generateCoverLetterForApply, ~$0.04 a job.
+    //
+    // Enforced in startRun rather than in POST /api/apply/approve because /approve is not the only
+    // caller — the answers/retry path reaches startRun with approvalMode too, and a cap installed at
+    // one of two doors is a cap on one of two doors. /approve already handles a non-202 by putting
+    // its approvals back, so a refusal here loses nothing.
+    if (resolvedApproval === "approved") {
+      const approvedUsed = approvedLast24h(userId);
+      if (approvedUsed + filtered.length > APPLY_DAILY_APPROVAL_CAP) {
+        return respond(429, {
+          error: "approval_cap_exceeded",
+          // Says what it protects. The queue cap's old message explained itself with a cost that
+          // was no longer incurred; this one must not acquire the opposite problem, so it names the
+          // generation directly.
+          message: `Daily approval limit reached: ${approvedUsed} of ${APPLY_DAILY_APPROVAL_CAP} approved in the last 24h, ` +
+            `${filtered.length} requested. Approving generates a tailored resume and cover letter for each ` +
+            `application, and this limit bounds that cost. Previewing more applications is unaffected.`,
+          approvedLast24h: approvedUsed,
+          requested: filtered.length,
+          limit: APPLY_DAILY_APPROVAL_CAP,
+          remaining: Math.max(0, APPLY_DAILY_APPROVAL_CAP - approvedUsed),
+        });
+      }
+    }
+
     // DAILY CAP (requirement 2). Checked here so the caller gets a clear error rather than a run
     // that quietly holds most of its jobs. processRunJob re-checks before each submit, because a
     // long run can cross the cap after it was admitted.
@@ -1682,11 +1803,23 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       queued: filtered,
       totalJobs: filtered.length,
       dailyCap: { limit: APPLY_DAILY_CAP, submittedLast24h: used, remaining: Math.max(0, APPLY_DAILY_CAP - used - filtered.length) },
-      // The cost budget, reported alongside the submission budget so a caller can show how much
-      // generation it has left rather than discovering the ceiling by being refused at it.
+      // The preview/session budget. NOT the cost budget any more — see APPLY_DAILY_QUEUE_CAP.
       queueCap: (() => {
         const q = queuedLast24h(userId);
         return { limit: APPLY_DAILY_QUEUE_CAP, queuedLast24h: q, remaining: Math.max(0, APPLY_DAILY_QUEUE_CAP - q) };
+      })(),
+      // ⛔ THE COST BUDGET (task Q requirement 3). Reported on every run, not only on the approvals,
+      // because a user planning a queueing session needs to know how many of those previews they
+      // will be able to act on — a cap discovered by being refused at it is a cap that has already
+      // wasted the work it was supposed to bound.
+      //
+      // Counted AFTER this run's rows are inserted, like queueCap above and unlike dailyCap, which
+      // subtracts `filtered.length` because a submission has not happened yet. The client renders
+      // "what is left now", and an approval budget that excluded the approval just made would tell
+      // the user they have one more than they do.
+      approvalCap: (() => {
+        const a = approvedLast24h(userId);
+        return { limit: APPLY_DAILY_APPROVAL_CAP, approvedLast24h: a, remaining: Math.max(0, APPLY_DAILY_APPROVAL_CAP - a) };
       })(),
     });
   }
@@ -3053,7 +3186,17 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
       ORDER BY rj.created_at DESC, rj.id DESC LIMIT 100
     `).all(req.user.id, AWAITING);
 
+    // ⛔ THE BUDGET BELONGS ON THE SCREEN WHERE IT IS SPENT (task Q requirement 3). This is the
+    // approval queue; approving is now the action that costs money. A user with 18 pending previews
+    // and 4 approvals left needs to know that BEFORE selecting all of them, not from a 429 after.
+    const approvedUsed = approvedLast24h(req.user.id);
+
     res.json({
+      approvalCap: {
+        limit: APPLY_DAILY_APPROVAL_CAP,
+        approvedLast24h: approvedUsed,
+        remaining: Math.max(0, APPLY_DAILY_APPROVAL_CAP - approvedUsed),
+      },
       pending: rows.map(r => {
         const answers = parseJson(r.answers_json, []);
         const filled = answers.filter(a => !a.skipped && !a.policy_rejected);

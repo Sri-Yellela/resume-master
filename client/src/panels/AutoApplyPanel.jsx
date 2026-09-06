@@ -70,7 +70,7 @@ export function AutoApplyPanel() {
     applyQuestions = [], applyQuestionMeta,
     questionDrafts, setQuestionDrafts,
     answersSaving, answersMsg,
-    applyPending = [], pendingDetail, pendingBusy, pendingMsg,
+    applyPending = [], approvalCap, pendingDetail, pendingBusy, pendingMsg,
     confirmApproveAll, setConfirmApproveAll,
     addToApplyQueue, removeFromApplyQueue, loadApplyRunDetail,
     submitApplyAnswers, openPendingDetail, decidePending,
@@ -845,7 +845,20 @@ export function AutoApplyPanel() {
                 theme={theme} tone="#2563eb" hero
                 kicker="filled, checked, and not sent"
                 headline={`${applyPending.length} application${applyPending.length === 1 ? "" : "s"} waiting for your approval`}
-                detail="Read one before you approve it — approving submits it to the employer and cannot be undone."
+                /* TASK Q — THE BUDGET IS ON THE SCREEN WHERE IT IS SPENT.
+                   Approving is what generates the resume and cover letter now (AL2 deferred both
+                   from queue time), so this is the number that decides how much of the queue above
+                   can be acted on today. A cap discovered by being refused at it has already wasted
+                   the reviewing it was meant to bound — so it is stated up front, and only when the
+                   server sent one, and only when it is actually close enough to matter. */
+                detail={
+                  !approvalCap ? "Read one before you approve it — approving submits it to the employer and cannot be undone."
+                  : approvalCap.remaining === 0
+                    ? `Approving submits to the employer and cannot be undone. You have used all ${approvalCap.limit} of today's approvals — these stay here until the limit resets.`
+                  : approvalCap.remaining < applyPending.length
+                    ? `Read one before you approve it — approving submits it to the employer and cannot be undone. ${approvalCap.remaining} of ${approvalCap.limit} approvals left today, fewer than the ${applyPending.length} waiting.`
+                    : `Read one before you approve it — approving submits it to the employer and cannot be undone. ${approvalCap.remaining} of ${approvalCap.limit} approvals left today.`
+                }
                 count={applyPending.length}
                 countLabel="to approve"
                 actionLabel="Review & approve"

@@ -1,7 +1,8 @@
 # Next Work
 
-**Last reconciled:** 2026-09-04, after AL1 (provider routing).
-**Baseline:** 2090 passing, 0 failing. Migration high-water **096**. Contract **v1.1.0**.
+**Last reconciled:** 2026-09-05, after AM1 (recovery) and AM2 (approval cap).
+**Baseline:** **2245** passing, 0 failing. Migration high-water **100** (read from
+`schema_migrations`, not from this file — the "096" here was three behind). Contract **v1.1.1**.
 
 > ⚠ **This file has been the stale thing twice in three sessions.** AK2 picked up five tasks and
 > found three already done. AL1 picked up three and found two already done — B and C, both landed
@@ -29,28 +30,44 @@ readiness.
 | **E** | Cache breakpoints + Batch API | desktop | D | ✅ **DONE 2026-09-04** — `docs/al6-cache-and-batching.md`; removal would LOSE $0.36 |
 | **H** | Form label → field mapping | desktop | G4 | ✅ **DONE 2026-09-05** — `docs/al8-form-field-mappings.md`; input empty + attributes win, headroom ~0 |
 | **I** | Harness runner prerequisite doc | desktop | — | ✅ **DONE 2026-09-04** — fails fast in ~1s, exit 2 |
+| **R** | ⛔ **RECOVERY** — board deleted, evidence on a retention clock | desktop | — | ✅ **DONE 2026-09-05** — `docs/am1-recovery.md`; evidence pinned, ρ reproduces from a committed file, the deletion is braked |
+| **Q** | Approval cap — the queue cap now bounds nothing | desktop | — | ✅ **DONE 2026-09-05** — `docs/am2-approval-cap.md`; `APPLY_DAILY_APPROVAL_CAP` (30), verified in real Chrome |
 | — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/PHASE_1_AUDIT.md` |
 
-**Run next:** D (unblocked, bands are set) and G1 (public data only, needs no key). F needs A's
-code only. A2, E and H each have a real prerequisite below.
+**Everything in this table is now ✅ DONE except A2**, which needs `GROQ_API_KEY`, and the iOS audit,
+which needs a Mac. Their prompt bodies are retained below for reference only — do not re-run them.
 
-### ⛔ THE BOARD IS GONE — read before any corpus or rho work
+### ⛔ THE BOARD IS STILL 5 ROWS — read before any corpus or rho work
 
-`cleanup_log` id 85 deleted **1288 rows** from `scraped_jobs` on 2026-09-02T02:06. The table now
+`cleanup_log` id 85 deleted **1288 rows** from `scraped_jobs` on 2026-09-02T02:06. The table still
 holds **5 fixtures**. Every derived table still describes the old board (8690 technographics, 856
-term weights, 697 org units, 1302 enrich_job events), so every "1291 postings" figure in these docs
-is true of the EVIDENCE and false of the TABLE.
+term weights, 697 org units), so every "1291 postings" figure in these docs is true of the EVIDENCE
+and false of the TABLE. **Task R did not refill the board and nothing in the queue does** — it made
+the loss survivable and stopped it recurring.
 
-**0 of the 30 graded postings survive**, so the ATS engine's only human-graded baseline cannot be
-re-scored against the live database at all.
+**What R changed (`docs/am1-recovery.md`):**
 
-Recoverable, read-only, from `data/backups/resume_master_2026-08-31T06-00-00-534Z_auto-daily.db`
-(1261 active, 1259 with skills_json, all 30 graded, profile 6 intact). Both AL3 scripts default to
-it and refuse to run against a board under 200 postings.
+- **The evidence is pinned.** `data/evidence/resume_master_2026-08-31...db`, sha256
+  `ad8b5c29…9ccffc`, outside anything `scripts/backup.js` can reach. It had **one backup left**
+  before retention would have evicted it — computed from the real `selectRetained()`, not guessed.
+- **ρ no longer depends on that file.** `docs/am1-ats-graded-corpus.json` is the 30 graded postings
+  with full text, committed. `node scripts/am1GradedCorpusVerify.mjs` re-scores from it:
+  **ρ = 0.737** against the published 0.746 (drift 0.009), byte-identical to what the 110 MB backup
+  gives. Note the published figure is **0.746** and today's engine gives **0.737** — 26 of the 30
+  individual scores moved, by up to 40 points, mostly the seniority guard landing after grading.
+- **The deletion is braked.** `services/jobs/cleanupBrake.js` refuses to delete >50% of a board over
+  50 rows and retires those rows instead. `CLEANUP_ALLOW_MASS_DELETE=1` overrides.
+- **⛔ Every board-derived rollup now REFUSES.** `services/jobs/boardSufficiency.js` blocks
+  `runHiringSignalsRollup`, `runOrgLayerRollup` and `computeTermWeights` below 200 active postings.
+  This is deliberate and it means **the KB rollups are not running.** They stay blocked until the
+  board is refilled. `ALLOW_THIN_BOARD_DERIVATION=1` overrides, and doing so would overwrite the
+  8690/697/856 real rows with fixtures-derived ones.
+- **AH4's reverted location fix** is confirmed fixed (landed in `ac25de2`) and the test that
+  asserted the bug is re-pinned. The audit found no other test of that shape.
 
-⚠ **The 2026-09-02 snapshot is already post-deletion.** When retention rotates the 08-31 file out,
-ρ = 0.746 becomes unreproducible. Pin that file out of the rotation, or export the 30 postings' text
-to `docs/`. This is an owner action and nothing else in the queue does it.
+**⚠ The board does not refill by itself.** The 07:00 re-scrape cron was removed in §5.12 (dead by
+data flow), so `POST /api/admin/db/force-scrape` is the only path. Until someone runs it, "seven
+days without a crawl" is the resting state.
 
 ---
 ### ⚠ Read this before picking up A, F or G
@@ -69,6 +86,113 @@ Task A's routing is built, guarded and tested (`docs/al1-provider-routing.md`, +
 **F and G both list A as a prerequisite.** A's *code* satisfies that; A's *quality verdict* does
 not exist yet. G in particular generates assets FROM the free tier, so its output quality inherits
 the unanswered question above.
+
+---
+
+## ⛔ TASK R — ✅ DONE 2026-09-05. DO NOT RE-RUN.
+
+Landed as `docs/am1-recovery.md`. Every requirement is answered there with the measurement behind it:
+the pinned backup and its checksum (R1.1), the committed 30-posting fixture (R1.2), rho reproduced
+at 0.737 from that fixture and cross-checked against the backup (R1.3), cleanup_log id 85's trigger
+and root cause (R2.4), the derived-table state table (R2.5), the two automatic re-derivations that
+were stopped rather than merely reported (R2.6), AH4's reversion confirmed fixed and its test
+re-pinned (R3.7-9), and the differential audit over 11 read surfaces (R3.10).
+
+The original prompt is retained below for reference only.
+
+### original prompt (SUPERSEDED)
+
+```
+CONTEXT
+cleanup_log id 85 deleted 1288 postings. scraped_jobs now holds 5 fixtures. Every derived table
+(company_technographics, company_org_units, LCA matches) still describes the old board, so every
+"1291 postings" figure in these docs is true of the evidence and false of the table.
+
+0 of the 30 human-graded postings survive. rho = 0.746, the seniority guard and every band cutpoint
+were measured against a table that no longer exists.
+
+The 2026-08-31 backup has the data. The 2026-09-02 snapshot is ALREADY POST-DELETION. When
+retention rotates 08-31 out, rho = 0.746 becomes permanently unreproducible. THIS IS THE ONLY ITEM
+IN THE PROJECT THAT GETS WORSE WHILE NOTHING HAPPENS.
+
+R1 — PRESERVE THE EVIDENCE (do this first, before any analysis)
+1. Copy the 2026-08-31 backup somewhere retention does not touch. Report the path and its checksum.
+2. Export the 30 graded postings as a COMMITTED fixture — job_id, company, title, full description,
+   plus the engine score and the human grade from docs/ak2-ats-grading-key.json and
+   docs/ak2-ats-grading-set.md. A committed file survives any future purge; a backup does not.
+   These 30 grades are the ONLY independent validation the ATS engine has, and they are worthless
+   without the postings they refer to.
+3. Re-run the band measurement against the restored data and confirm rho = 0.746 reproduces. If it
+   does not, say so — that is a finding, not a failure to be smoothed.
+
+R2 — UNDERSTAND HOW IT HAPPENED
+4. Find what cleanup_log id 85 was and how it was invoked. A cleanup that removes 1288 of 1293 rows
+   should not be reachable without an explicit confirmation. Report the trigger, whether it was
+   intentional, and whether it can fire again.
+5. Report the state of every derived table against the current 5-row board:
+   company_technographics (was 8278 after G3), company_org_units (was 697), LCA matches, and the
+   synonym proposals. Each now describes rows that do not exist. State which are recoverable by
+   re-derivation and which depended on the deleted text.
+6. Do NOT re-run enrichment or any derivation against 5 fixtures. That would overwrite real derived
+   data with data derived from nothing — the same shape as the enrichment poisoning that cost 120
+   rows. Report first.
+
+R3 — THE SILENT REVERSION, and the test that certified it
+7. AH4's location fix has silently reverted. Its vocabulary is read from scraped_jobs.location; the
+   purge took that from 235 entries to 4, so looksLikeLocation("Bangalore") returns false again —
+   the exact false finding AH4 removed, and the one §7 names as the costly error.
+8. ⛔ THE SUITE STAYED GREEN BECAUSE A TEST ASSERTED THE BUG. failsafeLocationClaims.test.js asserts
+   === false, commented "with no corpus there is nothing to know". That is the defect written down
+   as a guarantee — Shape 5 in its most complete form. Re-pin it to assert BEHAVIOUR: a location
+   must never be flagged as an unknown team, regardless of corpus state.
+9. STRUCTURAL FIX: a vocabulary derived from live data is a dependency on that data existing. Seed
+   a minimum location vocabulary that does not depend on the board — major cities, regions,
+   countries, "Remote" — and let the corpus EXTEND it, never constitute it.
+10. Audit for the same class: any other behaviour whose correctness depends on a table being
+    populated, and any other test whose assertion holds only while data is absent.
+
+VERIFY
+Backup pinned with checksum. The 30 postings committed as a fixture. rho reproduced or its failure
+reported. cleanup_log id 85's trigger identified. looksLikeLocation("Bangalore") returns true with
+an empty board. The re-pinned test FAILS against the current reverted behaviour before the seed is
+added — verify that, because a test that only passes is not evidence.
+```
+
+---
+
+## TASK Q — ✅ DONE 2026-09-05. DO NOT RE-RUN.
+
+Landed as `docs/am2-approval-cap.md`. `APPLY_DAILY_APPROVAL_CAP` (30) bounds the approvals that now
+incur the model call; `APPLY_DAILY_QUEUE_CAP` (40) is kept and re-scoped to previews with its stale
+spend rationale corrected; all three caps ride on the run payload and the approval screen, verified
+in real Chrome across four states; `assertCapOrdering()` reports a configuration in which any cap is
+unreachable. `APPLY_DAILY_CAP` (25) is untouched.
+
+The original prompt is retained below for reference only.
+
+### original prompt (SUPERSEDED)
+
+```
+Task D moved generation from queue time to approval. Correct change, but APPLY_DAILY_QUEUE_CAP
+(40) was sized to bound GENERATION SPEND when queueing generated. It now bounds previews, which are
+free. THE MEANINGFUL LIMIT MOVED TO APPROVALS, AND NOTHING BOUNDS APPROVALS.
+
+Task D's requirement 4 asked for this to be reported rather than changed unilaterally. It was
+reported. This task decides it.
+
+1. Add a daily cap on APPROVALS — the point where a model call is now actually incurred.
+2. Re-scope or remove APPLY_DAILY_QUEUE_CAP. A cap on a free action is friction with no benefit;
+   if it stays, its message must stop saying "each queued application generates a resume", which is
+   no longer true and is now a false statement to the user.
+3. Both caps stay SURFACEABLE — the DailyCap/QueueCap schemas carry limit and remaining, and the
+   client renders them. Do not let a cap fail as a silent drop.
+4. APPLY_DAILY_CAP (25, submissions) is unaffected — confirm the three caps do not interact such
+   that one makes another unreachable. The queue cap was originally set above the submission cap
+   deliberately, because every submission needs a queue first.
+
+VERIFY: exceeding the approval cap returns a clear error carrying remaining. Queueing past the old
+queue cap does not block a user from work that costs nothing. Real runs.
+```
 
 ---
 

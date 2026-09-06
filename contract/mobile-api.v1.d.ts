@@ -137,6 +137,13 @@ export interface ApplyStatusResponse {
   status: string;
 }
 
+/** The GENERATION cost budget. Approving generates a tailored resume and cover letter per application, so this is the limit that bounds spend. Reported on every run, not only when it binds, so a client can show what is left rather than discovering the ceiling by being refused at it. */
+export interface ApprovalCap {
+  approvedLast24h: number;
+  limit: number;
+  remaining: number;
+}
+
 /** 202. Approval creates a NEW run carrying approval_mode='approved'; the ids you sent become 'superseded' and the submission lives on new runJobIds. The started run is NESTED under `run` — it is not flattened into this body. */
 export interface ApproveResponse {
   /** The runJobIds actually approved — the ids you SENT, now superseded. */
@@ -322,7 +329,9 @@ export interface PendingItem {
   title: string | null;
 }
 
+/** The approval queue, plus the budget that decides how much of it can be acted on. */
 export interface PendingResponse {
+  approvalCap: ApprovalCap;
   pending: PendingItem[];
 }
 
@@ -352,7 +361,7 @@ export interface QuestionsResponse {
   questions: OpenQuestion[];
 }
 
-/** The GENERATION cost budget, reported so a client can show what is left rather than discovering the ceiling by being refused at it. */
+/** The PREVIEW/SESSION budget — how many applications may be opened and filled per day. NOT the cost budget: AL2 moved generation to approval time, so queueing spends no model tokens. See ApprovalCap for the one that bounds money. */
 export interface QueueCap {
   limit: number;
   queuedLast24h: number;
@@ -468,6 +477,7 @@ export interface RunLogEntry {
 
 /** 202. QUEUED, NOT SUBMITTED — see the endpoint note. `queued` is the ids accepted after duplicates were dropped and is the only correct count to report. */
 export interface RunQueuedResponse {
+  approvalCap: ApprovalCap;
   dailyCap: DailyCap;
   mode: string;
   ok: boolean;
