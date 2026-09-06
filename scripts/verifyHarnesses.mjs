@@ -88,6 +88,8 @@ const EXCLUDED = {
   ag2ClaimsGeneration: "REAL generation — spends model tokens on every run; run it by hand",
   ag3ClaimSample:      "REAL generation x12 — spends model tokens on every run; run it by hand",
   ak2AtsGradingSet:    "utility, writes the grading sheet to docs/ and asserts nothing",
+  am1PreserveGradedCorpus: "utility — copies a 110 MB backup to data/evidence/ and rewrites the docs fixture; run it when the corpus needs re-pinning. am1GradedCorpusVerify is the half that asserts, and it stays in the suite",
+  am1PurgeImpactAudit: "read-only forensics report against the real database and a backup; asserts nothing",
   ak2BandSurfaces:     "screenshots; drives the real board in a browser to prove the bands reach pixels",
   fakeAts:             "the fixture server itself",
   verifyHarnesses:     "this runner",

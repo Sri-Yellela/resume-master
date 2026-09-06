@@ -14,6 +14,8 @@
  * column/table if wanted later, not silently invented here.
  */
 
+import { boardSufficiency } from './boardSufficiency.js';
+
 const WINDOW_DAYS = 30;
 const SECONDS_PER_DAY = 86400;
 
@@ -35,6 +37,17 @@ function computeGrowthScore(newCount, expiredCount, openCount) {
  * @param {import('better-sqlite3').Database} db
  */
 function runHiringSignalsRollup(db) {
+  // ⛔ THE ONE ROLLUP ON A CRON THAT CAN PUBLISH A FALSE ANSWER. Every pass writes a row at
+  // window_end = now, and getHiringSignals reads ORDER BY window_end DESC LIMIT 1 — so a pass over
+  // a purged board does not merely add a stale row, it makes "Stripe: 1 open role" the CURRENT
+  // answer while the true snapshot sits underneath it, unread. See services/jobs/boardSufficiency.js.
+  const board = boardSufficiency(db, 'hiringSignals rollup');
+  if (!board.sufficient) {
+    console.error(`[hiringSignals] ⛔ ${board.reason}`);
+    return { count: 0, skipped: true, activePostings: board.active };
+  }
+  if (board.reason) console.warn(`[hiringSignals] ${board.reason}`);
+
   const now = Math.floor(Date.now() / 1000);
   const windowStart = now - WINDOW_DAYS * SECONDS_PER_DAY;
 

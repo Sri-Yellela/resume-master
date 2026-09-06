@@ -175,10 +175,21 @@ test("the cleanup retires starred rows and exempts them from the DELETE", () => 
   const fn = server.slice(at(server, "function runExpiredJobsCleanup()"),
                           at(server, "cron.schedule(\"0 3 * * *\""));
   assert.match(fn, /UPDATE scraped_jobs SET is_active = 0/, "starred rows are retired, not removed");
+
   // Both exemptions must be on the DELETE, or the UPDATE is immediately undone by it.
-  const del = fn.slice(at(fn, "DELETE FROM scraped_jobs"));
-  assert.match(del, /user_jobs WHERE applied = 1/, "applied stays exempt");
-  assert.match(del, /user_jobs WHERE starred = 1/, "starred is now exempt too");
+  //
+  // They now live in EXPIRED_PREDICATE rather than inline in the DELETE — the blast-radius brake
+  // (services/jobs/cleanupBrake.js) has to COUNT what the pass would remove before removing it, and
+  // one predicate shared by the count and the statement is the only arrangement in which the two
+  // cannot disagree. So the exemptions are checked where they are defined, plus the fact that the
+  // DELETE is what interpolates it: matching only the definition would pass on a DELETE that had
+  // quietly stopped using it.
+  const predicate = fn.slice(at(fn, "const EXPIRED_PREDICATE = "), at(fn, "const boardTotal"));
+  assert.match(predicate, /user_jobs WHERE applied = 1/, "applied stays exempt");
+  assert.match(predicate, /user_jobs WHERE starred = 1/, "starred is now exempt too");
+  assert.match(fn, /DELETE FROM scraped_jobs WHERE \$\{EXPIRED_PREDICATE\}/,
+    "and the DELETE must be the predicate's only expression of itself");
+
   assert.match(fn, /starredRetired/, "the log must count retirements separately from deletions");
 });
 

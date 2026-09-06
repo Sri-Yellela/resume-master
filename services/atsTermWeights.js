@@ -38,6 +38,7 @@
 // pure, deterministic and testable without a DB. Loading is the caller's job.
 import { roleFamilyForTitle } from "./searchQueryBuilder.js";
 import { normaliseAtsTerm } from "./localAtsScorer.js";
+import { assessRebuildScope, thinBoardConfirmed } from "./jobs/boardSufficiency.js";
 
 /**
  * A term must appear in at least this many postings before its rarity is believed.
@@ -129,6 +130,31 @@ export function computeTermWeights(db, { now = Math.floor(Date.now() / 1000) } =
     const family = roleFamilyForTitle(row.normalized_title || row.title || "");
     if (family) bump(family, terms);
   }
+
+  // ⛔ COUNT THE OUTCOME BEFORE DESTROYING THE PREDECESSOR — see services/jobs/boardSufficiency.js.
+  //
+  // The DELETE below is unconditional and inside the same transaction as the rebuild, so the only
+  // moment at which this can be stopped is here, before either runs. `cleanup_log` id 85 took
+  // scraped_jobs from 1291 rows to 5; one run of scripts/recomputeAtsTermWeights.js against that
+  // board would trade 856 measured weights for a handful and the scorer would carry on, silently
+  // neutral, with rho no longer reproducible.
+  //
+  // Counted with the same two filters the write loop applies, so the estimate cannot disagree with
+  // what would actually be inserted.
+  let incoming = 0;
+  for (const [family, bucket] of families) {
+    if (family !== GLOBAL_FAMILY && bucket.postings < MIN_FAMILY_POSTINGS) continue;
+    for (const df of bucket.df.values()) if (df >= MIN_DF) incoming++;
+  }
+  const existing = db.prepare("SELECT COUNT(*) c FROM ats_term_weights").get().c;
+  const scope = assessRebuildScope({
+    existing, incoming, operation: "computeTermWeights", confirmed: thinBoardConfirmed(),
+  });
+  if (!scope.allowed) {
+    console.error(`[atsTermWeights] ⛔ ${scope.reason}`);
+    return { computedAt: now, corpusSize: rows.length, families: [], skipped: true, reason: scope.reason };
+  }
+  if (scope.reason) console.warn(`[atsTermWeights] ${scope.reason}`);
 
   const written = [];
   const insert = db.prepare(

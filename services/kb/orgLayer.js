@@ -14,6 +14,7 @@
  */
 
 import { decayedWeight } from '../jobs/enrichJob.js';
+import { boardSufficiency } from '../jobs/boardSufficiency.js';
 
 // Promotion thresholds — documented, tunable constants (not magic numbers).
 const PROMOTE_MIN_CORROBORATION = 3;   // distinct postings required to auto-promote
@@ -95,6 +96,18 @@ function seniorityBreakdown(postings) {
  * @param {import('better-sqlite3').Database} db
  */
 function runOrgLayerRollup(db) {
+  // Guarded even though this pass is currently harmless on a thin board — it never deletes, never
+  // demotes a confirmed unit, and touches only the clusters it re-derives, so with the five
+  // surviving fixtures (all org_unit_raw = NULL) it writes nothing at all. That is a property of
+  // this implementation, not of the contract, and the 697 stored units are unrecoverable except
+  // from a backup. See services/jobs/boardSufficiency.js.
+  const board = boardSufficiency(db, 'orgLayer rollup');
+  if (!board.sufficient) {
+    console.error(`[orgLayer] ⛔ ${board.reason}`);
+    return { unitCount: 0, promotedCount: 0, skipped: true, activePostings: board.active };
+  }
+  if (board.reason) console.warn(`[orgLayer] ${board.reason}`);
+
   const now = Math.floor(Date.now() / 1000);
 
   const rows = db.prepare(`

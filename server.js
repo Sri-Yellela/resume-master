@@ -120,6 +120,8 @@ import { deriveAutomationTier } from "./services/jobs/automationTier.js";
 import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { suggest } from "./services/jobs/searchSuggestions.js";
+// Bounds the blast radius of one expiry pass — see services/jobs/cleanupBrake.js and cleanup_log 85.
+import { assessCleanupScope, cleanupBrakeOptions } from "./services/jobs/cleanupBrake.js";
 // The filter option contract — the ONE definition of every board filter's value vocabulary.
 // GET /api/jobs validates against it (rejectInvalidFilterValues below) so an unknown value is a
 // 400 rather than a board that silently matches nothing. See shared/jobFilterOptions.js.
@@ -4093,16 +4095,39 @@ function runExpiredJobsCleanup() {
   // having actually gone. A retired-but-present row therefore keeps its job_role_map entry, its
   // star, its views and its resumes with no extra guard needed — which is the reason to retire it
   // rather than delete it.
-  const deletedJobs = db.prepare(`
-    DELETE FROM scraped_jobs
-    WHERE scraped_at < ?
+  //
+  // ⛔ COUNTED BEFORE IT IS RUN — see services/jobs/cleanupBrake.js. cleanup_log id 85 deleted 1288
+  // of 1291 rows in one unattended startup pass and there was no point at which anything could have
+  // objected, because the DELETE was the first thing that knew how big it was. The same predicate is
+  // used for the count and for the statement, so the two cannot disagree.
+  const EXPIRED_PREDICATE = `
+    scraped_at < ?
     AND job_id NOT IN (
       SELECT DISTINCT job_id FROM user_jobs WHERE applied = 1
     )
     AND job_id NOT IN (
       SELECT DISTINCT job_id FROM user_jobs WHERE starred = 1
     )
-  `).run(cutoff);
+  `;
+  const boardTotal = db.prepare("SELECT COUNT(*) c FROM scraped_jobs").get().c;
+  const wouldDelete = db.prepare(`SELECT COUNT(*) c FROM scraped_jobs WHERE ${EXPIRED_PREDICATE}`).get(cutoff).c;
+  const scope = assessCleanupScope({ total: boardTotal, deletable: wouldDelete, ...cleanupBrakeOptions() });
+
+  let deletedJobs = { changes: 0 };
+  let brakedRetired = 0;
+  if (scope.allowed) {
+    if (scope.reason) console.warn(`[cleanup] ${scope.reason}`);
+    deletedJobs = db.prepare(`DELETE FROM scraped_jobs WHERE ${EXPIRED_PREDICATE}`).run(cutoff);
+  } else {
+    // NOT a silent skip. The rows still leave discovery — that part of the policy is correct and
+    // unchanged — but the text survives, so the decision stays reversible by anyone who reads this.
+    console.error(`[cleanup] ⛔ MASS DELETE REFUSED — ${scope.reason}`);
+    brakedRetired = db.prepare(
+      `UPDATE scraped_jobs SET is_active = 0 WHERE is_active = 1 AND ${EXPIRED_PREDICATE}`
+    ).run(cutoff).changes;
+    console.error(`[cleanup] retired ${brakedRetired} row(s) instead (is_active=0); ` +
+                  `${wouldDelete} row(s) remain on the board and will be re-offered to the next pass.`);
+  }
 
   // Cascade: remove orphaned user records for expired jobs (exempt applied rows)
   const deletedRoleMap = db.prepare(
@@ -4140,12 +4165,21 @@ function runExpiredJobsCleanup() {
     // the delete count would report a removal that did not happen, and this log is the only record
     // of what a cleanup pass did.
     starredRetired: retiredStarred.changes,
+    // ⛔ THE REFUSAL IS PART OF THE RECORD. cleanup_log id 85 is how the mass deletion was
+    // eventually found at all; a pass that DECLINED to delete has to be just as findable, or the
+    // next reader sees "jobs_deleted: 0" and concludes there was nothing to do.
+    ...(scope.braked ? { brakedDeletable: wouldDelete, brakedBoardTotal: boardTotal, brakedRetired } : {}),
   });
   db.prepare(
     "INSERT INTO cleanup_log (jobs_deleted, orphans_cleaned, details) VALUES (?,?,?)"
   ).run(deletedJobs.changes, orphans, details);
 
-  console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by DB age), retired ${retiredStarred.changes} starred jobs (kept, is_active=0), pruned ${orphans} orphaned rows`);
+  if (scope.braked) {
+    console.warn(`[cleanup] REFUSED to expire ${wouldDelete} of ${boardTotal} jobs; retired ${brakedRetired} instead, ` +
+                 `retired ${retiredStarred.changes} starred jobs, pruned ${orphans} orphaned rows`);
+  } else {
+    console.log(`[cleanup] Expired ${deletedJobs.changes} jobs (by DB age), retired ${retiredStarred.changes} starred jobs (kept, is_active=0), pruned ${orphans} orphaned rows`);
+  }
 }
 
 // ── Cron: daily backup 02:00, re-scrape 07:00, cleanup 03:00 ──
