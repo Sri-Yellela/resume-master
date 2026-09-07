@@ -1,6 +1,7 @@
 # Next Work
 
-**Last reconciled:** 2026-09-05, after AM1 (recovery) and AM2 (approval cap).
+**Last reconciled:** 2026-09-07 — AM1/AM2 landed, then reconciled against the 2026-09-05
+production measurement (see PRODUCTION IS INTACT below; two claims were corrected).
 **Baseline:** **2245** passing, 0 failing. Migration high-water **100** (read from
 `schema_migrations`, not from this file — the "096" here was three behind). Contract **v1.1.1**.
 
@@ -12,7 +13,8 @@
 
 **Blockers cleared:** API credit reloaded · Android Studio installed · Jobo deferred to launch
 readiness.
-**Blocker still live:** `GROQ_API_KEY` / `GOOGLE_API_KEY` are **not** in `.env` or the environment.
+**`GROQ_API_KEY` is live in the Railway environment** — it is NOT in local `.env`, which is why
+local scripts report it missing. Both facts are true; see task A2.
 
 ---
 
@@ -23,7 +25,6 @@ readiness.
 | **A** | Multi-provider routing + widened guard | desktop | keys | ✅ code done — **A2 below is what remains** |
 | **B** | ATS bands | desktop | — | ✅ **DONE** — `docs/ak2-ats-bands.md`, ρ 0.643 → **0.746** |
 | **C** | Android Phase 2a | android | — | ✅ **DONE** — `docs/aj2-android-phase2a.md` |
-| **A2** | Provider quality verdict | desktop | **keys** | open — the real gate on A |
 | **D** | Generation deferral | desktop | B ✅ | ✅ **DONE 2026-09-04** — `docs/al2-generation-deferral.md`, 19-check real run |
 | **G** | Offline assets — G1 skills · G2 LCA · G3 technographics · G4 org units | desktop | A code | ✅ **ALL DONE** — G1/G2/G4 2026-09-04, G3 2026-09-05. `al3-skill-synonyms.md`, `al4-lca-and-org-units.md`, `al7-technographic-canonicalisation.md` |
 | **F** | PII tokenization layer | desktop | A code | ✅ **DONE 2026-09-04** — `docs/al5-pii-tokenization.md`; real round trip verified |
@@ -32,10 +33,27 @@ readiness.
 | **I** | Harness runner prerequisite doc | desktop | — | ✅ **DONE 2026-09-04** — fails fast in ~1s, exit 2 |
 | **R** | ⛔ **RECOVERY** — board deleted, evidence on a retention clock | desktop | — | ✅ **DONE 2026-09-05** — `docs/am1-recovery.md`; evidence pinned, ρ reproduces from a committed file, the deletion is braked |
 | **Q** | Approval cap — the queue cap now bounds nothing | desktop | — | ✅ **DONE 2026-09-05** — `docs/am2-approval-cap.md`; `APPLY_DAILY_APPROVAL_CAP` (30), verified in real Chrome |
+| **S** | Restore the local board (still 5 rows) | desktop | — | **OPEN — run first, gates A2** |
+| **A2** | Provider quality verdict | desktop | S + key in local `.env` | **OPEN** |
+| **T** | Is the brake deployed? + a real prod/dev schema check | desktop | — | **OPEN** — small; its `ran_at` premise was a typo, corrected in the body |
 | — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/PHASE_1_AUDIT.md` |
 
-**Everything in this table is now ✅ DONE except A2**, which needs `GROQ_API_KEY`, and the iOS audit,
-which needs a Mac. Their prompt bodies are retained below for reference only — do not re-run them.
+**Open: S, A2, T, and the iOS audit.** Everything else in this table is ✅ DONE — do not re-run it.
+Their prompt bodies are retained below for reference only.
+
+### ✅ PRODUCTION IS INTACT — measured 2026-09-05
+
+**`scraped_jobs` in production holds 1399 rows, 1248 active.** The id-85 purge was **local only**.
+Every "the board is gone" framing in this file and in `docs/am1-recovery.md` describes the DEV
+database; the live board was never affected.
+
+⚠ **The `ran_at` observation was a query typo, not schema drift — corrected 2026-09-06.** The
+column is **`run_at`**, and `ran_at` exists nowhere in the repository. `SELECT ran_at FROM
+cleanup_log` fails with the identical *"no such column"* against the LOCAL database too, and
+migration `011_cleanup_log` declares `run_at` byte-identically in both dual-path definitions
+(`scripts/migrations.js:230`, `server.js:604`). So this says nothing about whether prod and dev have
+diverged. A real schema diff is still worth running — it just needs a different starting point. See
+task T.
 
 ### ⛔ THE BOARD IS STILL 5 ROWS — read before any corpus or rho work
 
@@ -65,16 +83,28 @@ the loss survivable and stopped it recurring.
 - **AH4's reverted location fix** is confirmed fixed (landed in `ac25de2`) and the test that
   asserted the bug is re-pinned. The audit found no other test of that shape.
 
-**⚠ The board does not refill by itself.** The 07:00 re-scrape cron was removed in §5.12 (dead by
-data flow), so `POST /api/admin/db/force-scrape` is the only path. Until someone runs it, "seven
-days without a crawl" is the resting state.
+**⚠ The board refills on a CRON, so a process that is not running does not refill it.** An earlier
+version of this line — and of `docs/am1-recovery.md` — said the 07:00 removal in §5.12 left
+`force-scrape` as "the only path". **Production disproves that:** 1248 active rows on a board nobody
+force-scrapes daily. The **04:00 `cacheJobs` / `cacheJoboFeed` cron** is the refill and survived
+§5.12; only the dead `user_job_searches`-driven 07:00 crawl was removed.
+
+The corrected statement is narrower and is the actual root cause of the purge: refill and deletion
+are both tied to the process, so a continuously-deployed board stays full while a laptop's empties
+between sessions. Locally, `force-scrape` or task S is what fills it, because the 04:00 cron only
+fires while the server happens to be up.
 
 ---
 ### ⚠ Read this before picking up A, F or G
 
-**`GROQ_API_KEY` and `GOOGLE_API_KEY` ARE NOT IN THIS WORKING COPY.** The line below that said
-"Env now injected" was **wrong** — neither variable is in `.env` and neither is in the process
-environment. Verified 2026-09-04.
+**`GROQ_API_KEY` AND `GOOGLE_API_KEY` ARE NOT IN THIS WORKING COPY** — not in `.env`, not in the
+process environment. Verified 2026-09-04. The line below that said "Env now injected" was wrong
+about the working copy.
+
+⚠ **But `GROQ_API_KEY` IS live in Railway** (2026-09-05). Both statements are true and they are
+about different environments, which is exactly why the local scripts' "missing key" refusal is
+correct rather than a bug. Task A2 says how to bridge it: copy the value into local `.env`, or run
+under `railway run`.
 
 Task A's routing is built, guarded and tested (`docs/al1-provider-routing.md`, +33 tests), but it
 **has never served a real token**. Still outstanding, and all of it needs the key:
@@ -222,7 +252,125 @@ The original task A prompt is retained below for reference only — **it is not 
 
 ---
 
-## TASK A2 — Provider quality verdict ⛔ NEEDS THE KEYS
+## TASK S — Restore the local board (run first; gates A2)
+
+```
+CONTEXT
+Production holds 1399 rows / 1248 active — measured 2026-09-05. The id-85 purge was LOCAL ONLY.
+Local scraped_jobs still holds 5 fixtures, so development, the ATS engine, the derived tables and
+any rho work are all running against nothing. Task R made the loss survivable and braked the
+deletion; it deliberately did not refill the board.
+
+Two sources, in order of preference:
+ 1. data/evidence/resume_master_2026-08-31...db — the pinned evidence DB from task R. Local,
+    checksummed, and it is the exact board rho = 0.746 was measured against.
+ 2. A production export, if the evidence DB proves incomplete.
+
+REQUIREMENTS
+1. Restore scraped_jobs from the pinned evidence DB. Report rows restored and the active count.
+2. ⛔ DO NOT restore over user tables. The purge hit scraped_jobs; users, domain_profiles,
+   profile_base_resumes, apply_runs and usage_events are current and must not be rolled back to
+   08-31. Restore the board table (and only what the board needs), not the database.
+3. RECONCILE THE DERIVED TABLES against the restored board rather than re-deriving blindly:
+   company_technographics (8690 rows), the 856 term weights, company_org_units (697). Report which
+   still join to a live job_id and which are orphaned. An orphan is not automatically wrong — a
+   company fact outlives a posting — so state the rule you applied per table.
+4. ⛔ DO NOT re-run enrichment as part of this task. 1302 enrich_job events already exist for these
+   rows; re-running would spend money to reproduce data that is being restored. If any restored row
+   genuinely lacks enrichment, report the count and stop.
+5. Confirm looksLikeLocation("Bangalore") returns true again once the corpus is back — and that it
+   ALSO returns true with an empty board, which is task R's seeded-vocabulary fix. If the seed
+   works, the corpus should be an improvement, not the thing holding it up.
+
+VERIFY
+Row counts before and after. rho reproduces at 0.746 against the restored board (task R proved it
+reproduces from the committed fixture; this proves the board and the fixture agree). Derived-table
+join report. No user table altered — diff the row counts of users, domain_profiles and apply_runs
+before and after and confirm they are identical.
+```
+
+---
+
+## TASK T — Is the brake deployed, and do the schemas actually differ? (small)
+
+```
+⛔ THIS TASK'S SECOND PREMISE WAS WRONG AND IS CORRECTED BELOW. Requirement 1 stands on its own
+evidence; requirement 2 originally read "THE SCHEMAS HAVE DIVERGED — production's cleanup_log has
+no `ran_at` column". They have not been shown to diverge, and that column does not exist anywhere:
+
+    SELECT ran_at FROM cleanup_log   ->  no such column: ran_at   ON THE LOCAL DATABASE TOO
+    SELECT id, run_at FROM cleanup_log  ->  {"id":92,"run_at":1788577796}
+
+The column is `run_at`. `grep -rn ran_at` finds the string only in this file. Migration
+011_cleanup_log declares `run_at` byte-identically in scripts/migrations.js:230 and server.js:604,
+so the dual path is intact as far as this table can show. A query that fails the same way against
+both databases is evidence about the query.
+
+The remaining work is a real schema comparison, which has NOT been run and is worth doing — the
+original note was pointing at something worth checking, just not with that column. Do not open it
+by assuming an answer.
+
+1. CAN THE ID-85 CLEANUP REACH PRODUCTION? It removed 99.6% of a table locally. Find what invoked
+   it, whether it is reachable from a deployed route or a cron, and what guards it. Task R braked
+   the deletion (services/jobs/cleanupBrake.js, in main as of bd95d20) — CONFIRM THAT BRAKE IS ON
+   THE CODE PATH THE RUNNING PRODUCTION PROCESS EXECUTES, not merely in the repo. Until it is
+   deployed, production is protected by uptime rather than by a guard. A cleanup that can remove
+   1248 live postings should not be one invocation away.
+   Task R's finding to start from: the pass that fired was the STARTUP cleanup (app.listen ->
+   setImmediate), not the 03:00 cron, and the refill is the 04:00 cacheJobs cron — so the rule
+   empties a board in proportion to process downtime. Production stays full because it runs
+   continuously, which means uptime IS the current control.
+2. IS THERE ANY PROD/DEV SCHEMA DIVERGENCE AT ALL? Open question, not a stated finding. Compare the
+   FULL schema — every table, not one column — and report the answer either way. "They match" is a
+   perfectly good result and is worth writing down, because the dual-path guarantee has never been
+   checked against a deployed database.
+   ⛔ WHY IT IS WORTH CHECKING EVEN THOUGH THE TRIGGERING OBSERVATION WAS BAD. Migrations are
+   DUAL-PATH and byte-identical in scripts/migrations.js and the server.js MIGRATIONS array
+   precisely so the two can never drift, and nothing verifies that against production. If a
+   difference exists it means either that guarantee has a hole or a table was created outside the
+   migration system. If none exists, the guarantee has its first real measurement.
+3. Report production's applied migration high-water against local (local reads 100 from
+   schema_migrations). Do this FIRST — it is one query and it bounds requirement 2: equal
+   high-waters make a divergence much less likely and tell you what to expect from the diff.
+
+VERIFY: the trigger named and its production reachability stated, including whether the brake is
+deployed. A full prod-vs-dev schema diff with its result stated either way. The migration
+high-water for both. No schema change applied in this task — report first.
+```
+
+---
+
+## TASK A2 — Provider quality verdict
+
+```
+TWO PREREQUISITES, BOTH REAL:
+ a. THE KEY. GROQ_API_KEY is live in the RAILWAY environment but is NOT in local .env, which is why
+    local scripts correctly report it missing. Either copy the value from the Railway dashboard
+    into resume-master/.env (gitignored — verified), or run via `railway run` to inject the
+    deployed environment. Local .env is simpler; the script reads process.env either way.
+ b. TASK S. The quality diff needs ~50 REAL postings to compare extraction across. Local
+    scraped_jobs holds 5 fixtures. Restore the board first or the diff has nothing to run on.
+
+This is requirement 8 and the VERIFY block of task A. Task A's routing is built, guarded and tested
+(docs/al1-provider-routing.md, +33 tests) but HAS NEVER SERVED A REAL TOKEN — everything in it is
+verified against fetch stubs, so none of it is evidence about Groq's actual extraction quality.
+
+THEN
+1. Run scripts/al1ProviderQualityDiff.mjs — 50 rows through both providers, per-column agreement.
+   It REFUSES to run unconfigured rather than comparing Haiku to Haiku and reporting 100%
+   agreement. That refusal is deliberate; do not work around it.
+2. THE QUESTION: is an 8B model good enough for skills_json? It feeds company_technographics AND
+   the ATS scorer. The saving at stake is ~$3.32 a pass.
+   ⛔ IF AGREEMENT IS MATERIALLY WORSE, SAY SO AND KEEP ENRICHMENT ON HAIKU. Task A then stands as
+   infrastructure for later rather than a live switch. Degrading the input to the ATS engine to
+   save three dollars is a bad trade, and reporting that is the correct outcome, not a failure.
+3. Confirm usage_events records provider and $0 cost on real calls, and that the cost queries still
+   reconcile.
+4. Confirm a real 429 leaves the row retryable (content_hash/enriched_at unset). Verified against a
+   stub; never against Groq's actual rate limiter.
+
+VERIFY: per-column agreement table, a stated verdict on the default, reconciled cost queries.
+```
 
 ```
 This is requirement 8 and the VERIFY block of task A, which could not run: GROQ_API_KEY and
