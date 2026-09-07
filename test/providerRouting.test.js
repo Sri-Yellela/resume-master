@@ -578,10 +578,27 @@ test("the three PUBLIC call sites pass only translatable params", async () => {
       // the first line that closes it. A fixed character window overruns into the neighbouring
       // object literals (enrichJob's SQL bindings sit right below the call) and reports column
       // names as if they were request params.
+      //
+      // ⛔ `[ \t]`, NEVER `\s`, IN EITHER PATTERN — `\s` MATCHES NEWLINES AND SO CROSSES LINES.
+      //
+      // Indentation is spaces and tabs; a newline is not indentation. With `^\s{2,}` the engine
+      // could match `^` after the first newline of a BLANK LINE, spend the blank line's own
+      // whitespace on the `{2,}`, and then read an identifier sitting at column 0 of the next line
+      // as though it were an indented key. That is not hypothetical: server.js's classifier prompt
+      // is a template literal containing the lines `Categories: ${...}` and `Title: ${...}` at
+      // column 0, and this test reported both as untranslatable request params.
+      //
+      // It only did so on a CRLF working tree, which is what `.gitattributes`' `* text=auto` plus
+      // core.autocrlf=true produce on a Windows checkout — a blank line is then `\r\n`, two
+      // whitespace characters, exactly enough for `{2,}`. Under LF a blank line is one character
+      // and the same pattern cannot reach. So the test passed or failed according to how server.js
+      // happened to have been written, and it failed on every fresh clone here while finding
+      // nothing wrong with the code. Restricting the class to horizontal whitespace fixes the
+      // line-crossing bug and makes the line ending irrelevant, which is the same repair.
       const rest = src.slice(m.index);
-      const close = rest.search(/^\s*\}\);/m);
+      const close = rest.search(/^[ \t]*\}\);/m);
       const after = close > 0 ? rest.slice(0, close) : rest.slice(0, 2000);
-      const keys = [...after.matchAll(/^\s{2,}([a-zA-Z_]+):/gm)].map(x => x[1]);
+      const keys = [...after.matchAll(/^[ \t]{2,}([a-zA-Z_]+):/gm)].map(x => x[1]);
       const bad = keys.filter(k => !translatable.has(k) && !wrapperKeys.has(k));
       assert.deepEqual(bad, [],
         `${file}: a PUBLIC call site passes ${bad.join(", ")}, which the transport cannot translate`);

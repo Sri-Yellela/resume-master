@@ -345,7 +345,12 @@ test("AG2: a claim informs FUTURE generation and never rewrites an existing resu
   // with no seniority in their base resume — 0 of 6 did so with the block removed. The carve-out is
   // what closed that, so it is pinned by name.
   assert.match(build, /They are NOT a title, a level or a headline/);
-  assert.match(build, /never change the candidate's tagline, role\ntitles or seniority because of a claim/);
+  // `\r?\n`, NOT `\n`. This is the only assertion in the suite anchored to a line break inside a
+  // prompt string, and with a CRLF working tree — which is what `.gitattributes`' `* text=auto`
+  // plus core.autocrlf=true produce on a Windows checkout — the source reads `role\r\ntitles` and a
+  // bare `\n` never matches. The test then fails on a fresh clone, having found nothing wrong with
+  // the code. A test whose result depends on how a file was last written is not testing the code.
+  assert.match(build, /never change the candidate's tagline, role\r?\ntitles or seniority because of a claim/);
 
   // The claim store is separate from the profile's own term lists, which are what the ATS scorer
   // reads. Writing claims there would let a claim inflate its own score.
