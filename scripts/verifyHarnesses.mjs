@@ -90,6 +90,8 @@ const EXCLUDED = {
   ak2AtsGradingSet:    "utility, writes the grading sheet to docs/ and asserts nothing",
   am1PreserveGradedCorpus: "utility — copies a 110 MB backup to data/evidence/ and rewrites the docs fixture; run it when the corpus needs re-pinning. am1GradedCorpusVerify is the half that asserts, and it stays in the suite",
   am1PurgeImpactAudit: "read-only forensics report against the real database and a backup; asserts nothing",
+  am3RestoreBoard:     "mutates the developer's database — restores scraped_jobs from the pinned evidence DB. --dry-run and --report-only are read-only, but the default is a 1291-row INSERT, so it is run by hand",
+  am3ProdSchemaDiff:   "authenticates to PRODUCTION with the admin credentials and reads its schema. Read-only, but it points at a live deployment and is nobody's business to run on a timer",
   ak2BandSurfaces:     "screenshots; drives the real board in a browser to prove the bands reach pixels",
   fakeAts:             "the fixture server itself",
   verifyHarnesses:     "this runner",
