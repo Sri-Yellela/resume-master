@@ -18,9 +18,12 @@
  *   ENRICH_PROVIDER=groq GROQ_API_KEY=gsk_... node scripts/al1ProviderQualityDiff.mjs --rows 50
  *
  * Flags:
- *   --rows N        how many postings to compare (default 50)
- *   --free-only     skip the Anthropic arm; proves the free path runs, measures no agreement
- *   --json PATH     also write the raw per-row extractions for inspection
+ *   --rows N         how many postings to compare (default 50)
+ *   --free-only      skip the Anthropic arm; proves the free path runs, measures no agreement
+ *   --json PATH      also write the raw per-row extractions for inspection
+ *   --max-tokens N   output ceiling (default 500, the value enrichment uses). Raise it only to
+ *                    diagnose a REASONING model — see the note at MAX_TOKENS. A comparison run at a
+ *                    non-default value is not a statement about what production would do.
  */
 
 import Database from "better-sqlite3";
@@ -48,6 +51,20 @@ const flag = (name, fallback = null) => {
 const ROWS = Number(flag("--rows", "50"));
 const FREE_ONLY = args.includes("--free-only");
 const JSON_OUT = flag("--json");
+// ⛔ ADDED 2026-09-07 BECAUSE 500 IS NOT A NEUTRAL BUDGET FOR EVERY MODEL.
+//
+// The first real run of this harness put 50 postings through openai/gpt-oss-20b. Every call
+// SUCCEEDED and 49 of 50 were unparseable, with `outputTokens` sitting at exactly 500 — the ceiling.
+// gpt-oss is a REASONING model: it returns `message.reasoning` alongside `message.content`, and
+// those reasoning tokens are charged against max_tokens. On a ~1100-token posting the reasoning
+// consumed the whole budget and the JSON was truncated mid-object.
+//
+// 500 was chosen for enrichment against a non-reasoning model, so leaving it fixed here would
+// report a reasoning model as "produces garbage" when the real finding is narrower and much more
+// useful: it does not fit THIS budget. The flag exists so the two can be told apart, and the
+// default stays 500 — the value the pipeline actually uses — so the headline comparison keeps
+// measuring what production would do.
+const MAX_TOKENS = Number(flag("--max-tokens", "500"));
 
 const COLUMNS = [
   "normalizedTitle", "experienceLevel", "workplaceType",
@@ -115,7 +132,7 @@ async function main() {
 
   for (const [i, job] of jobs.entries()) {
     const params = {
-      max_tokens: 500,
+      max_tokens: MAX_TOKENS,
       messages: [{ role: "user", content: buildPrompt(job.title, job.company, job.description) }],
     };
 

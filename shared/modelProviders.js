@@ -70,8 +70,29 @@ export const PROVIDERS = Object.freeze({
     // scans for this hostname so a second, untracked caller cannot appear.
     wire: "openai",
     baseUrl: "https://api.groq.com/openai/v1",
-    defaultModel: "llama-3.1-8b-instant",
-    models: Object.freeze(["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]),
+    // ⛔ THE LLAMA PINS WERE DECOMMISSIONED UNDER US — MEASURED 2026-09-07, NOT ASSUMED.
+    //
+    // `llama-3.1-8b-instant` was the pinned default from task A until the first real call was
+    // attempted. It returns:
+    //
+    //     404  {"code":"model_not_found","message":"The model `llama-3.1-8b-instant` does not
+    //           exist or you do not have access to it."}
+    //
+    // and GET /openai/v1/models on the live key lists NO llama model at all — the whole family is
+    // gone, `llama-3.3-70b-versatile` with it. Task A was built, guarded and tested against fetch
+    // stubs and never served a real token, so nothing in the suite could have noticed: a stub
+    // answers for any model id, including one the platform has retired.
+    //
+    // That is the standing lesson here, and it is why the allowlist below is short. A pinned model
+    // id is a dependency on someone else's product decision, and the only thing that detects its
+    // removal is a real call.
+    //
+    // gpt-oss-20b is the replacement: the smallest general-purpose chat model Groq now serves, so
+    // it is the nearest live stand-in for task A's actual question — is a SMALL free model good
+    // enough for skills_json? It is 20B rather than 8B, which makes that question easier, and the
+    // verdict has to say so.
+    defaultModel: "openai/gpt-oss-20b",
+    models: Object.freeze(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]),
     // RATE LIMITS ARE THE CONSTRAINT HERE, NOT PRICE. 30 req/min is the binding one: enrichment
     // paces at 25 per batch / 250ms, which is 240 req/min — eight times over. The transport
     // throttles to this rather than leaving it to each caller, so a future PUBLIC call site
@@ -105,6 +126,13 @@ export const PROVIDERS = Object.freeze({
 // These are ZERO BECAUSE THE TIER IS FREE, not because the cost is unknown. If a paid tier is ever
 // adopted, these become real numbers here and nothing else changes.
 export const FREE_TIER_PRICING = Object.freeze({
+  "openai/gpt-oss-20b":     Object.freeze({ input: 0, output: 0, cache_read: 0, cache_write: 0 }),
+  "openai/gpt-oss-120b":    Object.freeze({ input: 0, output: 0, cache_read: 0, cache_write: 0 }),
+  // The retired Llama ids stay PRICED but are no longer SELECTABLE (they are out of the `models`
+  // allowlist above). The two lists do different jobs: the allowlist decides what may be sent, and
+  // pricing has to answer for what WAS sent. 6 usage_events rows already carry
+  // `llama-3.1-8b-instant` from the 2026-09-07 attempt, and dropping the entry would make
+  // calculateCost warn on a historical row it can price perfectly well — at zero, correctly.
   "llama-3.1-8b-instant":   Object.freeze({ input: 0, output: 0, cache_read: 0, cache_write: 0 }),
   "llama-3.3-70b-versatile": Object.freeze({ input: 0, output: 0, cache_read: 0, cache_write: 0 }),
   "gemini-2.0-flash":       Object.freeze({ input: 0, output: 0, cache_read: 0, cache_write: 0 }),

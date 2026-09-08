@@ -1,9 +1,17 @@
 # Next Work
 
-**Last reconciled:** 2026-09-07 — AM1/AM2 landed, then reconciled against the 2026-09-05
-production measurement (see PRODUCTION IS INTACT below; two claims were corrected).
-**Baseline:** **2245** passing, 0 failing. Migration high-water **100** (read from
-`schema_migrations`, not from this file — the "096" here was three behind). Contract **v1.1.1**.
+**Last reconciled:** 2026-09-07 — **AM3 landed S and T** (`docs/am3-board-restore-and-schema.md`).
+The local board is refilled and ρ reproduces from the table. Two more claims in this file were
+stale and are corrected below.
+**Baseline:** **2245** passing, 0 failing — unchanged by the restore. Migration high-water **100**,
+confirmed identical in production. Contract **v1.1.1**.
+
+> ⛔ **THE CLEANUP BRAKE IS NOT DEPLOYED — measured 2026-09-07, task T.** `bd95d20` is in `main`
+> and is NOT on production's code path: `GET /api/apply/pending` does not serve task Q's
+> `approvalCap`, so the running build predates `abea2c9`, which was committed **49 seconds after**
+> the brake. **1248 live postings are one process start away from the id-85 predicate with nothing
+> counting the rows first.** This is a redeploy, not a code change, and it is the highest-value
+> open item in this file.
 
 > ⚠ **This file has been the stale thing twice in three sessions.** AK2 picked up five tasks and
 > found three already done. AL1 picked up three and found two already done — B and C, both landed
@@ -13,8 +21,17 @@ production measurement (see PRODUCTION IS INTACT below; two claims were correcte
 
 **Blockers cleared:** API credit reloaded · Android Studio installed · Jobo deferred to launch
 readiness.
-**`GROQ_API_KEY` is live in the Railway environment** — it is NOT in local `.env`, which is why
-local scripts report it missing. Both facts are true; see task A2.
+
+⚠ **CORRECTED 2026-09-07 — `GROQ_API_KEY` IS IN LOCAL `.env`.** This file said it was not, and that
+it was why local scripts reported it missing. `.env` carries a live `gsk_`-prefixed key plus
+`ENRICH_PROVIDER=groq` and `ENRICH_MODEL`. A2's "owner action first" was already done, and had been
+for some time — nobody had re-checked.
+
+⛔ **AND THE MODEL A2 NAMED NO LONGER EXISTS.** `llama-3.1-8b-instant` returns
+`404 model_not_found` and Groq's live catalog lists **no llama model at all**. Task A was built,
+guarded and tested against fetch stubs and never served a real token, so nothing in the suite could
+notice — a stub answers for any model id, including a retired one. Re-pinned to
+`openai/gpt-oss-20b`; see `docs/am3-provider-verdict.md`.
 
 ---
 
@@ -33,13 +50,27 @@ local scripts report it missing. Both facts are true; see task A2.
 | **I** | Harness runner prerequisite doc | desktop | — | ✅ **DONE 2026-09-04** — fails fast in ~1s, exit 2 |
 | **R** | ⛔ **RECOVERY** — board deleted, evidence on a retention clock | desktop | — | ✅ **DONE 2026-09-05** — `docs/am1-recovery.md`; evidence pinned, ρ reproduces from a committed file, the deletion is braked |
 | **Q** | Approval cap — the queue cap now bounds nothing | desktop | — | ✅ **DONE 2026-09-05** — `docs/am2-approval-cap.md`; `APPLY_DAILY_APPROVAL_CAP` (30), verified in real Chrome |
-| **S** | Restore the local board (still 5 rows) | desktop | — | **OPEN — run first, gates A2** |
-| **A2** | Provider quality verdict | desktop | S + key in local `.env` | **OPEN** |
-| **T** | Is the brake deployed? + a real prod/dev schema check | desktop | — | **OPEN** — small; its `ran_at` premise was a typo, corrected in the body |
+| **S** | Restore the local board | desktop | — | ✅ **DONE 2026-09-07** — `docs/am3-board-restore-and-schema.md`; 1291 restored, 1296/1266 active, ρ 0.737 from board == fixture |
+| **A2** | Provider quality verdict | desktop | S ✅ + key ✅ | ✅ **DONE 2026-09-07** — `docs/am3-provider-verdict.md`; **KEEP HAIKU**, skillsHard Jaccard **30.5%** |
+| **T** | Is the brake deployed? + a real prod/dev schema check | desktop | — | ✅ **DONE 2026-09-07** — schemas match; ⛔ **THE BRAKE IS NOT DEPLOYED** — redeploy |
 | — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/PHASE_1_AUDIT.md` |
 
-**Open: S, A2, T, and the iOS audit.** Everything else in this table is ✅ DONE — do not re-run it.
-Their prompt bodies are retained below for reference only.
+**Open: the iOS audit only** — and it needs a Mac. Everything else in this table is ✅ DONE; do not
+re-run it. Their prompt bodies are retained below for reference only.
+
+⛔ **The one thing that needs doing is not a task in this table: REDEPLOY.** Task R's cleanup brake
+is in `main` and is not on production's code path (task T). Nothing else in this file protects 1248
+live postings.
+
+⇒ Also worth queueing from what AM3 turned up, none of it in scope for S/T/A2:
+> - **Pace the free tier on TOKENS, not requests.** `PROVIDERS[GROQ].requestsPerMinute: 30` is not
+>   the binding limit; 8000 TPM is, and nothing in the code knows it exists.
+> - **A model-catalogue liveness check.** A pinned model id can be retired under us and every
+>   stub-based test stays green. One real `GET /v1/models` per provider would have caught it.
+> - **Drop `import_extension_tokens` in production** — 3 stale token hashes from a feature removed
+>   in `c818b9c`, which SQLite never dropped.
+> - **Consider a migration for `users`/`resumes`.`apply_mode` defaults.** Inert today, but it proves
+>   `CREATE TABLE IF NOT EXISTS` can never reconcile an existing database.
 
 ### ✅ PRODUCTION IS INTACT — measured 2026-09-05
 
@@ -47,21 +78,49 @@ Their prompt bodies are retained below for reference only.
 Every "the board is gone" framing in this file and in `docs/am1-recovery.md` describes the DEV
 database; the live board was never affected.
 
-⚠ **The `ran_at` observation was a query typo, not schema drift — corrected 2026-09-06.** The
-column is **`run_at`**, and `ran_at` exists nowhere in the repository. `SELECT ran_at FROM
-cleanup_log` fails with the identical *"no such column"* against the LOCAL database too, and
-migration `011_cleanup_log` declares `run_at` byte-identically in both dual-path definitions
-(`scripts/migrations.js:230`, `server.js:604`). So this says nothing about whether prod and dev have
-diverged. A real schema diff is still worth running — it just needs a different starting point. See
-task T.
+⚠ **The `ran_at` observation was a query typo, not schema drift — corrected 2026-09-06, and
+CONFIRMED against production 2026-09-07.** Task T read production's own `sqlite_master`: both
+databases have `id, run_at, jobs_deleted, orphans_cleaned, details`, and `ran_at` is in neither.
 
-### ⛔ THE BOARD IS STILL 5 ROWS — read before any corpus or rho work
+✅ **The full schema diff has now been RUN — see `docs/am3-board-restore-and-schema.md`.** Migration
+sets are IDENTICAL (107 rows, high-water 100 both sides), which is the dual path's first real
+measurement against a deployed database. Three differences exist and none is dual-path drift:
+`import_extension_tokens` (prod only, 3 rows — residue of the extension token flow removed in
+`c818b9c`, which SQLite never dropped), `provider_eval_jobs` (local only — a `providerEval` scratch
+table), and `users`/`resumes`.`apply_mode` defaulting to `'TAILORED'` in prod vs `'SIMPLE'` locally.
 
-`cleanup_log` id 85 deleted **1288 rows** from `scraped_jobs` on 2026-09-02T02:06. The table still
-holds **5 fixtures**. Every derived table still describes the old board (8690 technographics, 856
-term weights, 697 org units), so every "1291 postings" figure in these docs is true of the EVIDENCE
-and false of the TABLE. **Task R did not refill the board and nothing in the queue does** — it made
-the loss survivable and stopped it recurring.
+⛔ **That last one exposes a real hole, just not the expected one.** Both code paths say `'SIMPLE'`
+byte-identically; `'TAILORED'` was the original default and `b212ca6` changed it. Production's
+tables predate that commit, and **`CREATE TABLE IF NOT EXISTS` is a no-op against an existing
+table** — so the dual path governs what a NEW database gets and nothing reconciles a long-lived one.
+Impact is inert (every insert that matters is explicit, and `publicUser()` coerces on read), but the
+class of defect is not: editing a `CREATE TABLE` changes nothing already deployed.
+
+### ✅ THE BOARD IS RESTORED — 2026-09-07, task S
+
+**`scraped_jobs` holds 1296 rows / 1266 active.** `cleanup_log` id 85's 1288-row deletion is undone
+locally: 1291 rows came back from the pinned evidence DB via `scripts/am3RestoreBoard.mjs`, and the
+"1291 postings" figures throughout these docs are **true of the TABLE again**, not just the evidence.
+
+The derived tables were RECONCILED rather than rebuilt, with a stated rule per table — 8580/8690
+technographic rows join to a live posting, **1100/1100 org-unit citations resolve**, and every
+`ats_term_weights` family is within 2–3 rows of its stored `corpus_size`. That last point is why ρ
+still means something.
+
+**ρ now reproduces from the TABLE, not only from the fixture:** 30/30 graded postings present,
+30/30 descriptions byte-identical, 30/30 scores identical, **ρ = 0.737 from the board == 0.737 from
+the fixture**. Task R proved the fixture reproduces ρ; this proves the fixture and the table agree.
+
+⛔ **The rollups are still blocked and that is still correct.** `boardSufficiency.js` continues to
+refuse `computeTermWeights`, `runHiringSignalsRollup` and `runOrgLayerRollup`. A refilled board is
+not a decision to recompute — and the weights above are valid *because* nothing recomputed them.
+
+⚠ **`scraped_at` was rebased to now on restore.** Every evidence row was older than the 7-day
+expiry cutoff, so a verbatim restore would have been expired on arrival: the next startup pass would
+have braked the mass delete and retired all 1291, leaving 5 active. Rebasing matches what the real
+refill does (`services/jobs/aggregator.js:319` sets `scraped_at` on every re-sight, i.e. it means
+LAST SEEN). `discovered_at`, `posted_at` and `is_active` are untouched, so provenance and board
+ordering are intact. **The restored rows will all expire together 7 days from 2026-09-07.**
 
 **What R changed (`docs/am1-recovery.md`):**
 
@@ -252,7 +311,22 @@ The original task A prompt is retained below for reference only — **it is not 
 
 ---
 
-## TASK S — Restore the local board (run first; gates A2)
+## TASK S — ✅ DONE 2026-09-07. DO NOT RE-RUN.
+
+Landed as `docs/am3-board-restore-and-schema.md` via `scripts/am3RestoreBoard.mjs`. Every
+requirement is answered there with its measurement: 1291 rows restored to 1296/1266 active (1),
+nine guard tables asserted unchanged INSIDE the transaction (2), all three derived tables
+reconciled with a stated rule each and none rebuilt (3), 0 restored rows lacking enrichment so
+nothing was re-run (4), and `looksLikeLocation("Bangalore")` true against both the restored corpus
+AND an empty board (5). ρ = 0.737 from the board, identical to the fixture.
+
+⚠ One thing the prompt did not anticipate: every evidence row was already past the 7-day expiry
+cutoff, so a verbatim restore would have self-destructed on the next startup. `scraped_at` is
+rebased; see the doc for why that is what the real refill does.
+
+The original prompt is retained below for reference only.
+
+### original prompt (SUPERSEDED)
 
 ```
 CONTEXT
@@ -291,7 +365,23 @@ before and after and confirm they are identical.
 
 ---
 
-## TASK T — Is the brake deployed, and do the schemas actually differ? (small)
+## TASK T — ✅ DONE 2026-09-07. DO NOT RE-RUN.
+
+Landed as `docs/am3-board-restore-and-schema.md` via `scripts/am3ProdSchemaDiff.mjs` (read-only,
+three authenticated GETs, no schema change applied or proposed).
+
+⛔ **Requirement 1's answer is the important one: THE BRAKE IS NOT DEPLOYED.** Production does not
+serve task Q's `approvalCap`, so it predates `abea2c9` — committed 49 seconds after the brake.
+Redeploy.
+
+Requirement 2: migration sets IDENTICAL (the dual path's first real measurement against a deployed
+database). Three schema differences, all explained, none of them dual-path drift — but the
+`apply_mode` default divergence exposes that `CREATE TABLE IF NOT EXISTS` can never update an
+existing database, so the dual path only governs NEW ones. Requirement 3: high-water 100 both sides.
+
+The original prompt is retained below for reference only.
+
+### original prompt (SUPERSEDED)
 
 ```
 ⛔ THIS TASK'S SECOND PREMISE WAS WRONG AND IS CORRECTED BELOW. Requirement 1 stands on its own
@@ -340,7 +430,27 @@ high-water for both. No schema change applied in this task — report first.
 
 ---
 
-## TASK A2 — Provider quality verdict
+## TASK A2 — ✅ DONE 2026-09-07. DO NOT RE-RUN.
+
+Landed as `docs/am3-provider-verdict.md`. **VERDICT: KEEP ENRICHMENT ON HAIKU.**
+
+Both stated prerequisites were already satisfied (board restored by task S; key present in `.env` —
+this file was wrong about that). A2 was blocked by a third thing nobody had checked: the pinned
+model `llama-3.1-8b-instant` **404s and no Llama model exists on Groq any more**. Re-pinned to
+`openai/gpt-oss-20b` and measured for real:
+
+- **`skillsHard` Jaccard 30.5%**, `skillsSoft` 17.4%. Columns that carry a value agree 57–84%; the
+  100% columns agree only because neither model extracted anything on any row.
+- **8000 tokens/minute** is the binding rate limit, not 30 req/min — ~2 enrichment calls a minute,
+  so a 1291-row pass is ~9.7 hours and breaches the 1000/day request cap first.
+- At the pipeline's `max_tokens: 500` this reasoning model returns HTTP 200, `success: true`, and a
+  **null extraction 49 times out of 50** — silently. Requirement 3 (provider + $0 recorded, cost
+  queries reconcile) is fully confirmed; requirement 4 is confirmed for the transport and remains
+  stub-only for the row.
+
+The original prompt is retained below for reference only.
+
+### original prompt (SUPERSEDED)
 
 ```
 TWO PREREQUISITES, BOTH REAL:

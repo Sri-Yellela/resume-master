@@ -92,7 +92,7 @@ function jsonResponse(body, { status = 200, headers = {} } = {}) {
 test("PUBLIC traffic routes to the configured free tier, at the pinned model", () => {
   const route = routeFor({ dataClass: DATA_CLASS.PUBLIC, model: "claude-haiku-4-5-20251001", env: GROQ_ENV });
   assert.equal(route.provider, PROVIDER.GROQ);
-  assert.equal(route.model, "llama-3.1-8b-instant");
+  assert.equal(route.model, "openai/gpt-oss-20b");
 });
 
 test("CANDIDATE traffic stays on Anthropic even when a free tier is fully configured", () => {
@@ -171,14 +171,45 @@ test("an unpinned ENRICH_MODEL is a LOUD failure, not a quiet fallback", () => {
   // Anthropic here would mean the free tier silently stopped being used and the bill silently
   // returned, with every dashboard green.
   assert.throws(
-    () => resolveProvider({ ...GROQ_ENV, ENRICH_MODEL: "llama-3.1-8b-instant-deprecated" }),
+    () => resolveProvider({ ...GROQ_ENV, ENRICH_MODEL: "openai/gpt-oss-20b-deprecated" }),
     (e) => e.code === "UNPINNED_MODEL" && /Pinned: /.test(e.message),
   );
 });
 
 test("a pinned ENRICH_MODEL that IS in the catalog is honoured", () => {
-  const r = resolveProvider({ ...GROQ_ENV, ENRICH_MODEL: "llama-3.3-70b-versatile" });
-  assert.equal(r.model, "llama-3.3-70b-versatile");
+  const r = resolveProvider({ ...GROQ_ENV, ENRICH_MODEL: "openai/gpt-oss-120b" });
+  assert.equal(r.model, "openai/gpt-oss-120b");
+});
+
+// ⛔ THE MODEL THIS PROJECT ACTUALLY LOST. Not a hypothetical — `llama-3.1-8b-instant` was the
+// pinned default from task A until 2026-09-07, when the first REAL call returned
+// 404 model_not_found and the live catalog turned out to list no llama model at all.
+//
+// Task A was fully tested when that happened and the suite was green, because every test used a
+// fetch stub and a stub answers for any model id. So this pair of assertions is deliberately about
+// the TWO DIFFERENT JOBS the two lists do, which is what the incident exposed:
+//
+//   the allowlist decides what MAY BE SENT     -> a retired id must be refused, loudly
+//   pricing has to answer for what WAS SENT    -> a retired id must still price, silently
+//
+// Getting either backwards is a real failure: refuse-but-unpriced makes calculateCost warn on
+// every historical row, and priced-but-selectable lets a 404 back into the enrichment path.
+test("a DECOMMISSIONED model id is refused for sending yet still prices historical rows", () => {
+  assert.throws(
+    () => resolveProvider({ ...GROQ_ENV, ENRICH_MODEL: "llama-3.1-8b-instant" }),
+    (e) => e.code === "UNPINNED_MODEL",
+    "the retired llama id must not be selectable — it 404s against the live API",
+  );
+
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...a) => warnings.push(a.join(" "));
+  try {
+    // 6 usage_events rows carry this id from the 2026-09-07 attempt. They price at zero, correctly,
+    // and must not drag a warning along behind them every time the cost report is built.
+    assert.equal(calculateCost("llama-3.1-8b-instant", { input_tokens: 1000, output_tokens: 500 }), 0);
+    assert.deepEqual(warnings, [], "a retired but still-priced model must not warn");
+  } finally { console.warn = realWarn; }
 });
 
 // ── PRICING ─────────────────────────────────────────────────────────────────────────────────────
@@ -198,7 +229,7 @@ test("a free-tier model prices at $0 SILENTLY; a genuinely unknown model still w
   const realWarn = console.warn;
   console.warn = (...a) => warnings.push(a.join(" "));
   try {
-    const free = calculateCost("llama-3.1-8b-instant", { input_tokens: 100000, output_tokens: 50000 });
+    const free = calculateCost("openai/gpt-oss-20b", { input_tokens: 100000, output_tokens: 50000 });
     assert.equal(free, 0);
     assert.deepEqual(warnings, [], "a priced-at-zero model must not warn — it would warn 1302 times a pass");
 
@@ -244,7 +275,7 @@ test("a routed call records the PROVIDER and the model actually called", async (
 
     const row = db.prepare("SELECT * FROM usage_events ORDER BY id DESC LIMIT 1").get();
     assert.equal(row.provider, "groq");
-    assert.equal(row.model, "llama-3.1-8b-instant",
+    assert.equal(row.model, "openai/gpt-oss-20b",
       "the model RECORDED must be the one called, not the one the call site asked for");
     assert.equal(row.purpose, "enrich_job");
     assert.equal(row.input_tokens, 900);
@@ -273,7 +304,7 @@ test("an unrouted call still records provider=anthropic — no row is left unatt
 });
 
 test("providerForModel labels a model with its provider", () => {
-  assert.equal(providerForModel("llama-3.1-8b-instant"), PROVIDER.GROQ);
+  assert.equal(providerForModel("openai/gpt-oss-20b"), PROVIDER.GROQ);
   assert.equal(providerForModel("gemini-2.0-flash"), PROVIDER.GOOGLE);
   assert.equal(providerForModel("claude-sonnet-5"), null);
 });
@@ -288,7 +319,7 @@ test("the OpenAI-compatible adapter returns an ANTHROPIC-shaped message", async 
   }));
   const msg = await callProvider({
     provider: PROVIDER.GROQ, apiKey: "gsk_test", fetchImpl: impl,
-    params: { model: "llama-3.1-8b-instant", max_tokens: 100,
+    params: { model: "openai/gpt-oss-20b", max_tokens: 100,
               messages: [{ role: "user", content: "hi" }], system: "be terse" },
   });
   // `content` MUST be an array of blocks: every caller does `.content.map(b => b.text || '')`.
@@ -338,7 +369,7 @@ test("Anthropic's array-of-blocks content and system shapes flatten rather than 
   await callProvider({
     provider: PROVIDER.GROQ, apiKey: "k", fetchImpl: impl,
     params: {
-      model: "llama-3.1-8b-instant",
+      model: "openai/gpt-oss-20b",
       system: [{ type: "text", text: "SYSTEM RULES" }],
       messages: [{ role: "user", content: [{ type: "text", text: "BLOCK ONE" }, { type: "text", text: " AND TWO" }] }],
     },
@@ -359,7 +390,7 @@ test("a 429 backs off, retries, and SUCCEEDS if the limit clears", async () => {
       : jsonResponse({ choices: [{ message: { content: "second try" } }], usage: {} }));
   const msg = await callProvider({
     provider: PROVIDER.GROQ, apiKey: "k", fetchImpl: impl,
-    params: { model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "x" }] },
+    params: { model: "openai/gpt-oss-20b", messages: [{ role: "user", content: "x" }] },
   });
   assert.equal(msg.content[0].text, "second try");
   assert.equal(impl.calls.length, 2);
@@ -375,7 +406,7 @@ test("a persistent 429 throws ProviderRateLimitError — it never returns an emp
   await assert.rejects(
     () => callProvider({
       provider: PROVIDER.GROQ, apiKey: "k", fetchImpl: impl,
-      params: { model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "x" }] },
+      params: { model: "openai/gpt-oss-20b", messages: [{ role: "user", content: "x" }] },
     }),
     (e) => e instanceof ProviderRateLimitError && e.code === "RATE_LIMITED",
   );
@@ -388,7 +419,7 @@ test("a non-429 provider error is a ProviderRequestError carrying the status", a
   await assert.rejects(
     () => callProvider({
       provider: PROVIDER.GROQ, apiKey: "k", fetchImpl: impl,
-      params: { model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "x" }] },
+      params: { model: "openai/gpt-oss-20b", messages: [{ role: "user", content: "x" }] },
     }),
     (e) => e instanceof ProviderRequestError && e.status === 400,
   );
@@ -549,7 +580,7 @@ test("a param the transport cannot translate is REFUSED, not dropped", async () 
   await assert.rejects(
     () => callProvider({
       provider: PROVIDER.GROQ, apiKey: "k", fetchImpl: impl,
-      params: { model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "x" }],
+      params: { model: "openai/gpt-oss-20b", messages: [{ role: "user", content: "x" }],
                 tools: [{ name: "search" }] },
     }),
     (e) => e instanceof ProviderRequestError && /tools/.test(e.message),
