@@ -19,7 +19,7 @@
 // stay on scraped_jobs; provenance is a pointer. See migration 101's comment for the cost of the
 // alternative.
 
-import { Router } from "express";
+import express, { Router } from "express";
 import {
   selectCandidates, estimateCost, columnCoverage, diffCoverage,
   enrichSelectionOptions, DEFAULT_MAX_LAST_SEEN_DAYS, ENRICHMENT_COLUMNS,
@@ -35,6 +35,31 @@ import { listBatches, getBatch, revertBatch } from "../services/jobs/enrichmentB
 // batch and is individually revertible.
 const MAX_MANUAL_ROWS = 100;
 const DEFAULT_MANUAL_ROWS = 10;
+
+// ── U5.10 — VOLUME, MEASURED RATHER THAN GUESSED ────────────────────────────────────────────────
+//
+// The owner intends to push the whole board through this path, so "does 790 rows fit in one
+// request" is a number, not a judgement call. Measured against the real board (1266 active rows):
+//
+//   an exported row WITH its `source` block (title/company/description/…)  ~5.3 KB
+//   an import-shaped row (job_id + content_hash + enrichment only)         ~1.2 KB
+//
+//   790 rows, source echoed back, wrapped as {"jsonl":"…"}   5.06 MB  ← EXCEEDS express.json's 4mb
+//   790 rows, source stripped                                0.92 MB  ← fits comfortably
+//   500 rows, source echoed back                             3.18 MB  ← fits, with little headroom
+//
+// So the honest answer to "does the whole board fit in one request": NOT as a JSON string in a
+// JSON body, which is what a filler returning the export file unmodified would send. It fails with
+// a 413 whose body is not JSON, so the UI would have shown an unexplained error at exactly the
+// scale the owner cares about.
+//
+// Two fixes, both here. First, the raw NDJSON upload below: the file is the body, so the ~5% JSON
+// string-escaping overhead disappears and the limit is this route's own rather than the global
+// 4mb. Second, PRACTICAL_IMPORT_ROWS is reported by the export endpoint so the UI can chunk before
+// the operator discovers the ceiling the hard way. Chunking is safe and is the intended shape:
+// each chunk is its own batch and is independently revertible.
+const IMPORT_BODY_LIMIT = "32mb";
+const PRACTICAL_IMPORT_ROWS = 500;
 
 export function createEnrichmentRouter(db, requireAdmin, { anthropic = null } = {}) {
   const router = Router();
@@ -127,6 +152,26 @@ export function createEnrichmentRouter(db, requireAdmin, { anthropic = null } = 
         batchNotes: `POST /api/admin/enrichment/run by ${req.user?.username ?? "admin"}`,
         recordRun: true,
       });
+      // ⛔ A REFUSED INVOCATION IS NOT AN APPLIED RUN.
+      //
+      // runEnrichment's concurrency guard returns all-zeros, which this handler used to pass
+      // straight through as `applied: true, enriched: 0, failed: 0, empty: 0, batchId: null,
+      // warning: null` — the exact shape of a healthy pass with nothing to do. The owner read
+      // that as a failure twice, correctly: the run they asked for did not happen, and nothing in
+      // the response said so. 409 Conflict, because the request was fine and the SERVER STATE is
+      // what refused it; retrying once the in-flight pass finishes is the fix.
+      if (result.ran === false) {
+        return res.status(409).json({
+          applied: false, skipped: true, skippedReason: result.skippedReason,
+          plan, enriched: 0, failed: 0, empty: 0, batchId: null,
+          error: result.skippedDetail,
+          note: result.skippedReason === 'already_running'
+            ? "Nothing was sent and no row was touched. Wait for the in-flight pass to finish " +
+              "(check GET /api/admin/enrichment/batches for the batch it opened) and POST again."
+            : "Nothing was sent and no row was touched.",
+        });
+      }
+
       const after = columnCoverage(db, { jobIds: ids });
       const coverage = diffCoverage(before, after);
 
@@ -167,7 +212,13 @@ export function createEnrichmentRouter(db, requireAdmin, { anthropic = null } = 
         candidatesOnly: req.query.allRows !== "1",
         limit: req.query.limit != null ? Number(req.query.limit) : null,
       });
-      if (req.query.format === "json") return res.json(payload);
+      if (req.query.format === "json") {
+        return res.json({
+          ...payload,
+          meta: { ...payload.meta, practicalImportRows: PRACTICAL_IMPORT_ROWS,
+                  importBodyLimit: IMPORT_BODY_LIMIT },
+        });
+      }
       res.setHeader("Content-Type", "application/x-ndjson");
       res.setHeader("Content-Disposition", `attachment; filename="enrichment-export.jsonl"`);
       res.send(toJsonl(payload));
@@ -178,12 +229,31 @@ export function createEnrichmentRouter(db, requireAdmin, { anthropic = null } = 
   //
   // Body: { jsonl: "<text>", apply?: bool, overwrite?: bool, allowStale?: bool }
   // Dry by default; a malformed file is refused AS A WHOLE and names the offending rows.
-  router.post("/import", (req, res) => {
+  // Two body shapes, ONE handler — so the upload path cannot drift from the JSON path. A raw
+  // `application/x-ndjson` (or text/plain) body is the file itself, with options as query
+  // parameters; anything else is parsed as JSON and read from `body.jsonl`. express.text() only
+  // claims the raw content types, so the global express.json() still handles the JSON shape.
+  const importText = express.text({
+    type: ["application/x-ndjson", "application/jsonl", "text/plain"], limit: IMPORT_BODY_LIMIT,
+  });
+
+  router.post("/import", importText, (req, res) => {
     try {
-      const body = req.body || {};
-      const text = typeof body.jsonl === "string" ? body.jsonl : null;
-      if (!text) return res.status(400).json({ error: "body.jsonl (a JSONL string) is required" });
-      const options = { overwrite: body.overwrite === true, allowStale: body.allowStale === true };
+      const raw = typeof req.body === "string" ? req.body : null;
+      const body = raw ? {} : (req.body || {});
+      // For a raw upload the flags ride in the query string. `apply` stays explicit and defaults
+      // to false in both shapes: the dry run is the default no matter how the file arrived.
+      const src = raw ? req.query : body;
+      const truthy = v => v === true || v === "1" || v === "true";
+      const text = raw ?? (typeof body.jsonl === "string" ? body.jsonl : null);
+      if (!text) {
+        return res.status(400).json({
+          error: "No file content. Send the JSONL as a raw application/x-ndjson body, or as " +
+                 "body.jsonl in a JSON request.",
+        });
+      }
+      const options = { overwrite: truthy(src.overwrite), allowStale: truthy(src.allowStale) };
+      const apply = truthy(src.apply);
 
       const plan = planImport(db, text, options);
       const planSummary = {
@@ -197,9 +267,39 @@ export function createEnrichmentRouter(db, requireAdmin, { anthropic = null } = 
         allowStale: options.allowStale,
       };
 
-      if (body.apply !== true) {
-        return res.json({ applied: false, dryRun: true, plan: planSummary,
-          note: "Nothing was written. POST again with apply: true to apply." });
+      // ⛔ U5.9 — COVERAGE, NOT ROW COUNTS. "imported: 790" is compatible with 790 rows of nulls;
+      // the enrichment trigger learned this when a model returned HTTP 200 and a null extraction
+      // 49 times in 50. The denominator is the rows in this FILE that matched a posting, so the
+      // rate answers "of what I sent, how much is now filled" rather than diluting the delta
+      // across a 1266-row board where it would round to nothing.
+      const matchedIds = plan.planned.map(p => p.jobId);
+      const before = matchedIds.length ? columnCoverage(db, { jobIds: matchedIds }) : null;
+
+      if (!apply) {
+        // The dry run PROJECTS the after-state rather than leaving the operator to add up
+        // perColumn by hand: before + the planned writes, which is exactly what apply will do.
+        // Reported in the same shape as the applied run so the two can be compared directly.
+        let projected = null;
+        if (before) {
+          const cols = {};
+          for (const [c, v] of Object.entries(before.columns)) {
+            const gain = c === "enriched_at" ? plan.wouldWrite : (plan.perColumn[c] || 0);
+            const filled = Math.min(before.total, v.filled + gain);
+            cols[c] = { filled, total: before.total,
+                        rate: before.total ? Number((filled / before.total).toFixed(4)) : 0 };
+          }
+          projected = diffCoverage(before, { total: before.total, columns: cols });
+        }
+        return res.json({
+          applied: false, dryRun: true, plan: planSummary,
+          coverage: projected?.rows ?? [],
+          columnsWouldClimb: projected?.climbed ?? 0,
+          warning: plan.wouldWrite > 0 && (projected?.climbed ?? 0) === 0
+            ? "This file would stamp rows as enriched but NO COLUMN WOULD GAIN A VALUE. Applying " +
+              "it buys nothing and takes the rows out of the candidate set — check the file first."
+            : null,
+          note: "Nothing was written. POST again with apply: true to apply.",
+        });
       }
       if (!plan.valid) {
         // U3.2 — never partially apply. 422 rather than 400: the request is well-formed, the
@@ -211,18 +311,35 @@ export function createEnrichmentRouter(db, requireAdmin, { anthropic = null } = 
         });
       }
 
-      const ids = plan.planned.filter(p => p.wouldWrite).map(p => p.jobId);
-      const before = columnCoverage(db, { jobIds: ids });
       const result = applyImport(db, text, {
         ...options,
         notes: `POST /api/admin/enrichment/import by ${req.user?.username ?? "admin"}`,
       });
       if (!result.ok) return res.status(422).json({ applied: false, plan: planSummary, error: result.reason });
-      const coverage = ids.length ? diffCoverage(before, columnCoverage(db, { jobIds: ids })) : null;
+      // Measured over the SAME row set the dry run projected — every row in the file that matched a
+      // posting, not just the ones written. A denominator that changes between the projection and
+      // the result would make the two incomparable, which is the whole point of reporting both.
+      const coverage = matchedIds.length
+        ? diffCoverage(before, columnCoverage(db, { jobIds: matchedIds })) : null;
 
       res.json({
         applied: true, plan: planSummary, written: result.written, batchId: result.batchId ?? null,
-        coverage: coverage?.rows ?? [], columnsClimbed: coverage?.climbed ?? 0,
+        coverage: coverage?.rows ?? [],
+        columnsClimbed: coverage?.climbed ?? 0,
+        columnsRegressed: coverage?.regressed ?? 0,
+        coverageClimbed: (coverage?.climbed ?? 0) > 0,
+        // ⛔ FLAG columnsClimbed: 0 LOUDLY. A row stamped enriched_at with nothing filled is out of
+        // the candidate set for good — the poisoning that cost 120 rows once. `written > 0` with no
+        // column climbing is that shape arriving from outside, where there is no code to inspect
+        // afterwards, only a file somebody sent.
+        warning: result.written > 0 && (coverage?.climbed ?? 0) === 0
+          ? `${result.written} row(s) were written and stamped enriched but NO COLUMN GAINED A ` +
+            `VALUE. Revert batch ${result.batchId ?? "(none — provenance unavailable)"} and check ` +
+            `the file before importing more.`
+          : null,
+        revert: result.batchId != null
+          ? `POST /api/admin/enrichment/batches/${result.batchId}/revert`
+          : null,
       });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

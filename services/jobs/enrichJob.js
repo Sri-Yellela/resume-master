@@ -269,11 +269,31 @@ async function runEnrichment(db, anthropic, {
       runKind: 'enrichment', status: 'skipped_unconfigured', startedAt: runStartedAt,
       errorText: 'No Anthropic client available (ANTHROPIC_KEY unset?)',
     });
-    return { enriched: 0, failed: 0, empty: 0, skipped: 0 };
+    return {
+      enriched: 0, failed: 0, empty: 0, skipped: 0,
+      ran: false, skippedReason: 'unconfigured',
+      skippedDetail: 'No Anthropic client available (ANTHROPIC_KEY unset?) — enrichment did NOT run.',
+    };
   }
   if (enrichmentInProgress) {
     console.log('[enrichJob] Enrichment already running — skipping overlapping invocation');
-    return { enriched: 0, failed: 0, empty: 0, skipped: 0 };
+    // ⛔ A REFUSAL MUST NOT REPORT AS AN APPLIED RUN.
+    //
+    // This return used to be indistinguishable from a pass that ran and found nothing: zeros
+    // across the board, and the ONLY record that the invocation was refused was the log line
+    // above. The caller then reported `applied: true, enriched: 0, failed: 0, empty: 0,
+    // batchId: null, warning: null` — a clean bill of health for work that never happened. The
+    // owner hit this twice and both times read it as a silent failure of the enrichment itself.
+    //
+    // That is this pipeline's own defect signature — success-shaped output over an empty result —
+    // appearing inside the tooling built to detect it. So `ran` is the field callers branch on:
+    // zeros mean "nothing needed doing" ONLY when ran is true.
+    return {
+      enriched: 0, failed: 0, empty: 0, skipped: 0,
+      ran: false, skippedReason: 'already_running',
+      skippedDetail: 'Another enrichment pass is already in flight in this process. Nothing was ' +
+                     'sent and no row was touched — this invocation was refused, not completed.',
+    };
   }
   enrichmentInProgress = true;
 
@@ -311,7 +331,10 @@ async function runEnrichment(db, anthropic, {
         runKind: 'enrichment', status: 'ok', startedAt: runStartedAt,
         skipped: noDescription, details: { reason: 'no_candidates', gatedOut },
       });
-      return { enriched: 0, failed: 0, empty: 0, skipped: 0, noDescription, gatedOut };
+      // ran: true — this pass DID execute; it simply had nothing to do. That is the state the
+      // refusal above must never be confused with, which is why both carry the flag explicitly.
+      return { enriched: 0, failed: 0, empty: 0, skipped: 0, noDescription, gatedOut,
+               ran: true, skippedReason: null };
     }
 
     const batch = candidates.slice(0, batchSize);
@@ -528,6 +551,7 @@ async function runEnrichment(db, anthropic, {
     return {
       enriched, failed, empty, skipped: candidates.length - batch.length, noDescription,
       totalInputTokens, totalOutputTokens, batchId, gatedOut, coverage,
+      ran: true, skippedReason: null,
     };
   } finally {
     enrichmentInProgress = false;

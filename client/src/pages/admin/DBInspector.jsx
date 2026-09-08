@@ -582,6 +582,387 @@ function ScrapeMonitorTab({ theme }) {
   );
 }
 
+// ── Enrichment round trip: export → enrich elsewhere → import ────────────────────────────────
+//
+// U5.1 — THE INJECTION SIDE, AS A CONTROL AND NOT ONLY AN ENDPOINT. The Schema Explorer shipped
+// Export CSV and Download .sql and nothing that writes back, so the owner went looking for a way
+// to inject externally-enriched rows and found none. POST /api/admin/enrichment/import existed the
+// whole time. An endpoint nobody can find is a feature that does not exist, so it lives here, next
+// to the two export controls, where somebody looking for the other half of the round trip is
+// already standing.
+//
+// ⛔ THE TWO DANGEROUS FLAGS ARE NOT CHECKBOXES. `overwrite` replaces values that are already
+// there and `allowStale` applies enrichment derived from text that has since changed. A checkbox
+// sitting next to the Apply button is a thing you tick without deciding. Both are rendered as
+// armed/disarmed switches that state the consequence in the label and turn red when armed, and
+// both reset to disarmed whenever the file changes — an arming decision belongs to the file it was
+// made for, not to the panel.
+//
+// ⛔ APPLY IS UNREACHABLE UNTIL A DRY RUN HAS PASSED ON THE EXACT TEXT IN THE BOX. Not "a dry run
+// was run at some point" — the panel keeps the text the plan was computed from and re-locks the
+// moment a byte differs. Otherwise an operator dry-runs a good file, pastes a different one, and
+// applies the first file's verdict to the second file's rows.
+function EnrichmentTransferPanel({ theme }) {
+  const [open, setOpen]           = useState(false);
+  const [text, setText]           = useState("");
+  const [overwrite, setOverwrite] = useState(false);
+  const [allowStale, setAllowStale] = useState(false);
+  const [busy, setBusy]           = useState(null);   // 'dry' | 'apply' | 'revert' | null
+  const [dry, setDry]             = useState(null);   // { forText, body }
+  const [result, setResult]       = useState(null);
+  const [err, setErr]             = useState(null);
+  const [exportRows, setExportRows] = useState(100);
+  const [allRows, setAllRows]     = useState(false);
+  const fileRef = useRef(null);
+
+  // Any change to the file invalidates the plan AND disarms both flags. See the header comment:
+  // a verdict belongs to the bytes it was computed from.
+  const setFile = (t) => {
+    setText(t); setDry(null); setResult(null); setErr(null);
+    setOverwrite(false); setAllowStale(false);
+  };
+
+  // Raw application/x-ndjson rather than {"jsonl":"…"} in a JSON body. At the volume the owner
+  // intends (the whole board) the JSON-string form is ~5% larger AND is capped by the global 4mb
+  // express.json limit, which 790 exported rows exceed — a 413 with a non-JSON body, i.e. an
+  // unexplained failure at exactly the scale that matters. See routes/enrichment.js.
+  const post = async ({ apply }) => {
+    const qs = new URLSearchParams();
+    if (apply) qs.set("apply", "1");
+    if (overwrite) qs.set("overwrite", "1");
+    if (allowStale) qs.set("allowStale", "1");
+    const ctx = authContextQuery();
+    if (ctx) for (const [k, v] of new URLSearchParams(ctx)) qs.set(k, v);
+    const r = await fetch(`/api/admin/enrichment/import?${qs}`, {
+      method: "POST", credentials: "include",
+      headers: authHeaders({ "Content-Type": "application/x-ndjson" }),
+      body: text,
+    });
+    // 422 is the malformed-batch refusal and its body carries the rejected rows — the most useful
+    // response this panel can render, so it is read rather than thrown away as an HTTP error.
+    const payload = await r.json().catch(() => ({ error: `HTTP ${r.status} (no JSON body)` }));
+    return { ok: r.ok, status: r.status, payload };
+  };
+
+  const runDry = async () => {
+    setBusy("dry"); setErr(null); setResult(null);
+    try {
+      const { ok, payload } = await post({ apply: false });
+      if (!ok) { setErr(payload.error || "Dry run failed."); setDry(null); }
+      else setDry({ forText: text, body: payload });
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(null); }
+  };
+
+  const runApply = async () => {
+    setBusy("apply"); setErr(null);
+    try {
+      const { ok, payload } = await post({ apply: true });
+      if (!ok) { setErr(payload.error || "Import refused."); setResult(null); }
+      else { setResult(payload); setDry(null); }
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(null); }
+  };
+
+  const revert = async (batchId) => {
+    setBusy("revert"); setErr(null);
+    try {
+      await api(`/api/admin/enrichment/batches/${batchId}/revert`, {
+        method: "POST", body: JSON.stringify({ apply: true }),
+      });
+      setResult(r => ({ ...r, reverted: true }));
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(null); }
+  };
+
+  const plan      = dry?.body?.plan;
+  const planFresh = dry && dry.forText === text;
+  const canApply  = Boolean(planFresh && plan?.valid && plan?.wouldWrite > 0) && !busy;
+
+  const exportHref = () => {
+    const qs = new URLSearchParams();
+    if (allRows) qs.set("allRows", "1");
+    if (exportRows) qs.set("limit", String(exportRows));
+    const ctx = authContextQuery();
+    if (ctx) for (const [k, v] of new URLSearchParams(ctx)) qs.set(k, v);
+    return `/api/admin/enrichment/export?${qs}`;
+  };
+
+  const btn = (extra = {}) => ({
+    padding: "6px 14px", borderRadius: 8, border: `1px solid ${theme.border}`,
+    background: theme.surfaceHigh, color: theme.text, cursor: "pointer",
+    fontSize: 12, fontWeight: 600, ...extra,
+  });
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} style={btn()}>
+        ⬆ Import Enrichment
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ flexBasis: "100%", order: 99, marginTop: 12, padding: 16,
+                  border: `1px solid ${theme.border}`, borderRadius: 10, background: theme.surfaceHigh }}>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>Enrichment Round Trip</span>
+        <div style={{ flex: 1 }} />
+        <button type="button" onClick={() => setOpen(false)} style={btn({ padding: "4px 10px" })}>✕ Close</button>
+      </div>
+
+      <div style={{ fontSize: 11, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 }}>
+        Export candidates as JSONL, fill the <code>enrichment</code> object on each line elsewhere,
+        then import the file back. Only the <code>enrichment</code> keys are writable — the{" "}
+        <code>source</code> block is context and is ignored on import. Rows are matched on{" "}
+        <code>job_id</code>; unknown ids are rejected, never inserted.
+      </div>
+
+      {/* Step 1 — export */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                      letterSpacing: "0.07em", color: theme.textMuted, marginBottom: 6 }}>
+          1 · Export
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}>
+            rows
+            <input type="number" min={1} max={5000} value={exportRows}
+              onChange={e => setExportRows(Number(e.target.value))}
+              style={{ width: 70, background: theme.surface, color: theme.text,
+                       border: `1px solid ${theme.border}`, borderRadius: 6, padding: "3px 6px", fontSize: 11 }}/>
+          </label>
+          <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 5 }}>
+            <input type="checkbox" checked={allRows} onChange={e => setAllRows(e.target.checked)}/>
+            all rows (not just candidates)
+          </label>
+          <a href={exportHref()} style={{ ...btn({ textDecoration: "none", color: ACCENT }), display: "inline-block" }}>
+            ⬇ Export JSONL
+          </a>
+        </div>
+        {/* Measured, not guessed — see routes/enrichment.js. 790 rows with their source blocks is
+            5.06 MB as a JSON body, over the 4mb limit; this panel uploads raw, but chunking still
+            keeps each batch individually revertible. */}
+        <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 6 }}>
+          JSONL, not CSV — CSV cannot represent <code>skills_json</code>'s nested array or tell a
+          blank cell from a null. Keep batches to ~500 rows; each import is its own revertible batch.
+        </div>
+      </div>
+
+      {/* Step 2 — the file */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                      letterSpacing: "0.07em", color: theme.textMuted, marginBottom: 6 }}>
+          2 · Enriched file
+        </div>
+        <input ref={fileRef} type="file" accept=".jsonl,.ndjson,.json,text/plain"
+          onChange={async e => {
+            const f = e.target.files?.[0];
+            if (f) setFile(await f.text());
+          }}
+          style={{ fontSize: 11, color: theme.textMuted, marginBottom: 8, display: "block" }}/>
+        <textarea value={text} onChange={e => setFile(e.target.value)} rows={6}
+          placeholder='{"job_id":"…","content_hash":"…","enrichment":{"summary":"…","skills_json":[{"skill":"Python","type":"hard"}]}}'
+          style={{ width: "100%", boxSizing: "border-box", background: "#0f0f0f", color: "#e5e7eb",
+                   border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px",
+                   fontSize: 11, fontFamily: "monospace", lineHeight: 1.5, resize: "vertical" }}/>
+        <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 4 }}>
+          {text ? `${text.split("\n").filter(l => l.trim()).length} non-empty line(s), ${(new Blob([text]).size / 1024).toFixed(1)} KB` : "no file loaded"}
+        </div>
+      </div>
+
+      {/* Step 3 — the two armed switches */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                      letterSpacing: "0.07em", color: theme.textMuted, marginBottom: 6 }}>
+          3 · Write mode
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <ArmedSwitch theme={theme} armed={overwrite} onToggle={() => setOverwrite(v => !v)}
+            disarmedLabel="Fill empty columns only"
+            armedLabel="⚠ OVERWRITE existing values"
+            hint={overwrite
+              ? "Values already on the board WILL be replaced by this file."
+              : "A column that already has a value is left alone and the skip is reported."}/>
+          <ArmedSwitch theme={theme} armed={allowStale} onToggle={() => setAllowStale(v => !v)}
+            disarmedLabel="Refuse changed postings"
+            armedLabel="⚠ APPLY to changed postings"
+            hint={allowStale
+              ? "Rows whose text changed since export WILL be written from stale enrichment."
+              : "A row whose content_hash moved since export is refused and reported."}/>
+        </div>
+      </div>
+
+      {/* Step 4 — dry run, then apply */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <button type="button" onClick={runDry} disabled={!text || !!busy}
+          style={btn({ background: ACCENT, color: "#0f0f0f", border: "none", fontWeight: 700,
+                       opacity: !text || busy ? 0.5 : 1 })}>
+          {busy === "dry" ? "Planning…" : "Dry Run"}
+        </button>
+        <button type="button" onClick={runApply} disabled={!canApply}
+          style={btn({ background: canApply ? "#dc2626" : "transparent",
+                       color: canApply ? "#fff" : theme.textMuted,
+                       border: `1px solid ${canApply ? "#dc2626" : theme.border}`,
+                       fontWeight: 700, cursor: canApply ? "pointer" : "not-allowed" })}>
+          {busy === "apply" ? "Applying…" : "Apply Import"}
+        </button>
+        <span style={{ fontSize: 10, color: theme.textMuted }}>
+          {!text ? "Load a file to begin."
+            : !planFresh ? "Dry run required — Apply unlocks only after a clean plan for this exact file."
+            : !plan?.valid ? "This file is rejected. Apply stays locked until every row validates."
+            : plan.wouldWrite === 0 ? "Nothing to write — the board already matches this file."
+            : `Ready: ${plan.wouldWrite} row(s) would be written.`}
+        </span>
+      </div>
+
+      <ErrBox msg={err} theme={theme}/>
+      {planFresh && <ImportPlanView body={dry.body} theme={theme}/>}
+      {result && <ImportResultView result={result} theme={theme}
+                    onRevert={revert} reverting={busy === "revert"}/>}
+    </div>
+  );
+}
+
+// A two-state switch whose label states the CONSEQUENCE, not the setting name. Red when armed so
+// the dangerous state is visible from across the panel rather than being a tick in a box.
+function ArmedSwitch({ theme, armed, onToggle, disarmedLabel, armedLabel, hint }) {
+  return (
+    <button type="button" onClick={onToggle}
+      // Capped rather than flex:1 — stretched across a 1300px admin panel these read as two lines
+      // of prose, and a control that does not look like a control does not get treated as a choice.
+      style={{ flex: "1 1 300px", maxWidth: 460, textAlign: "left", padding: "8px 12px", borderRadius: 8,
+               border: `1px solid ${armed ? "#dc2626" : theme.border}`,
+               background: armed ? "#dc262618" : theme.surface,
+               color: armed ? "#f87171" : theme.text, cursor: "pointer" }}>
+      <div style={{ fontSize: 11, fontWeight: 700 }}>{armed ? armedLabel : disarmedLabel}</div>
+      <div style={{ fontSize: 10, color: armed ? "#f8717199" : theme.textMuted, marginTop: 2 }}>{hint}</div>
+    </button>
+  );
+}
+
+// The dry run, rendered. Coverage first and counts second, deliberately: "790 rows matched" is the
+// number that proves nothing, and putting it above the per-column delta is how a null-extraction
+// batch gets waved through.
+function ImportPlanView({ body, theme }) {
+  const p = body.plan;
+  const cell = { padding: "3px 8px", fontSize: 11 };
+  return (
+    <div style={{ marginTop: 12, padding: 12, border: `1px solid ${theme.border}`, borderRadius: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 800, marginBottom: 8 }}>
+        DRY RUN — nothing was written
+      </div>
+      {body.warning && (
+        <div style={{ background: "#dc262618", border: "1px solid #dc262655", borderRadius: 6,
+                      padding: "8px 10px", fontSize: 11, color: "#f87171", marginBottom: 10 }}>
+          {body.warning}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11, marginBottom: 10 }}>
+        <span>rows in file <b>{fmt(p.rowsInFile)}</b></span>
+        <span>matched <b>{fmt(p.matched)}</b></span>
+        <span>would write <b style={{ color: ACCENT }}>{fmt(p.wouldWrite)}</b></span>
+        <span>nothing to write <b>{fmt(p.unchanged)}</b></span>
+        <span>rejected <b style={{ color: p.rejected.length ? "#f87171" : theme.text }}>{fmt(p.rejected.length)}</b></span>
+        <span style={{ color: theme.textMuted }}>{p.mode}</span>
+      </div>
+
+      {/* U5.9 — the per-column fill delta, which is the only thing that distinguishes a real
+          batch from 790 rows of nulls. */}
+      {body.coverage?.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: theme.textMuted, marginBottom: 4 }}>
+            PROJECTED FILL RATE over the {fmt(p.matched)} matched row(s) — columns would climb:{" "}
+            <b style={{ color: body.columnsWouldClimb ? "#4ade80" : "#f87171" }}>{body.columnsWouldClimb}</b>
+          </div>
+          <table style={{ borderCollapse: "collapse" }}>
+            <tbody>
+              {body.coverage.filter(c => c.delta !== 0).map(c => (
+                <tr key={c.column}>
+                  <td style={{ ...cell, color: theme.textMuted }}>{c.column}</td>
+                  <td style={cell}>{c.before} → <b>{c.after}</b></td>
+                  <td style={{ ...cell, color: c.delta > 0 ? "#4ade80" : "#f87171" }}>
+                    {c.delta > 0 ? `+${c.delta}` : c.delta}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {p.skippedNonNull?.length > 0 && (
+        <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 8 }}>
+          {p.skippedNonNull.length} row(s) had values skipped because the column was already
+          non-null — arm OVERWRITE to replace them.
+        </div>
+      )}
+
+      {p.rejected.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#f87171", marginBottom: 4 }}>
+            REJECTED — the file is applied as a whole or not at all
+          </div>
+          <div style={{ maxHeight: 180, overflowY: "auto" }}>
+            {p.rejected.slice(0, 50).map((r, i) => (
+              <div key={i} style={{ fontSize: 10, fontFamily: "monospace", color: "#f87171", padding: "1px 0" }}>
+                line {r.line}{r.jobId ? ` (${r.jobId})` : ""} [{r.kind}]: {r.error}
+              </div>
+            ))}
+            {p.rejected.length > 50 && (
+              <div style={{ fontSize: 10, color: theme.textMuted }}>…and {p.rejected.length - 50} more</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImportResultView({ result, theme, onRevert, reverting }) {
+  const cell = { padding: "3px 8px", fontSize: 11 };
+  return (
+    <div style={{ marginTop: 12, padding: 12, borderRadius: 8,
+                  border: `1px solid ${result.warning ? "#dc262655" : "#4ade8055"}`,
+                  background: result.warning ? "#dc26260d" : "#4ade800d" }}>
+      <div style={{ fontSize: 11, fontWeight: 800, marginBottom: 8 }}>
+        IMPORTED — {fmt(result.written)} row(s) written
+        {result.batchId != null && <span style={{ color: theme.textMuted, fontWeight: 400 }}> · batch #{result.batchId}</span>}
+      </div>
+      {result.warning && (
+        <div style={{ background: "#dc262618", border: "1px solid #dc262655", borderRadius: 6,
+                      padding: "8px 10px", fontSize: 11, color: "#f87171", marginBottom: 10 }}>
+          {result.warning}
+        </div>
+      )}
+      {result.coverage?.length > 0 && (
+        <table style={{ borderCollapse: "collapse", marginBottom: 10 }}>
+          <tbody>
+            {result.coverage.filter(c => c.delta !== 0).map(c => (
+              <tr key={c.column}>
+                <td style={{ ...cell, color: theme.textMuted }}>{c.column}</td>
+                <td style={cell}>{c.before} → <b>{c.after}</b></td>
+                <td style={{ ...cell, color: c.delta > 0 ? "#4ade80" : "#f87171" }}>
+                  {c.delta > 0 ? `+${c.delta}` : c.delta}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {result.batchId != null && (
+        result.reverted
+          ? <span style={{ fontSize: 11, color: "#4ade80" }}>✓ Batch #{result.batchId} reverted to its before-image.</span>
+          : <button type="button" onClick={() => onRevert(result.batchId)} disabled={reverting}
+              style={{ padding: "5px 12px", borderRadius: 7, border: `1px solid ${theme.border}`,
+                       background: "transparent", color: theme.text, cursor: "pointer", fontSize: 11 }}>
+              {reverting ? "Reverting…" : `↩ Revert batch #${result.batchId}`}
+            </button>
+      )}
+    </div>
+  );
+}
+
 // ── Tab 2: Schema Explorer ───────────────────────────────────
 function SchemaExplorerTab({ theme }) {
   const [data, setData] = useState(null);
@@ -630,8 +1011,9 @@ function SchemaExplorerTab({ theme }) {
 
   return (
     <div>
-    {/* Controls bar */}
-    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:16 }}>
+    {/* Controls bar. flexWrap so the import panel can take a full row of its own below the
+        buttons (it sets flexBasis:100% / order:99) instead of squeezing them. */}
+    <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:16, flexWrap:"wrap" }}>
       {["tables","map"].map(v => (
         <button key={v} type="button" onClick={() => setSchemaView(v)}
           style={{
@@ -686,6 +1068,9 @@ function SchemaExplorerTab({ theme }) {
         }}>
         ⬇ Download .sql
       </button>
+      {/* The other half of the round trip, beside the two exports rather than in a tab of its own —
+          see EnrichmentTransferPanel's header comment. */}
+      <EnrichmentTransferPanel theme={theme}/>
     </div>
     {schemaView === "map" ? <SchemaMapView theme={theme}/> : (
     <div style={{ display:"flex", gap:0, height:"calc(100vh - 260px)", minHeight:400 }}>

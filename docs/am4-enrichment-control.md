@@ -97,7 +97,10 @@ which needs no hash to resolve. The audit script says so rather than guessing.
 | `routes/enrichment.js` | **new.** Admin-gated HTTP surface, every spending/writing route dry by default. |
 | `scripts/am4EnrichBacklogAudit.mjs` | **new.** U1.1 measurement, local + production, read-only. |
 | `scripts/am4Enrich.mjs` | **new.** CLI: `run` / `export` / `import` / `batches` / `batch` / `revert`. |
-| `services/jobs/enrichJob.js` | uses the shared selector; freshness gate; coverage reporting; batch provenance. `computeContentHash` moved out and is re-exported. |
+| `services/jobs/enrichJob.js` | uses the shared selector; freshness gate; coverage reporting; batch provenance. `computeContentHash` moved out and is re-exported. **U5:** returns `ran` / `skippedReason` so a refused invocation cannot read as a completed one. |
+| `client/src/pages/admin/DBInspector.jsx` | **U5.** `EnrichmentTransferPanel` — the import control, in the Schema Explorer beside the two exports. Armed switches, dry-run gate, coverage delta, inline revert. |
+| `scripts/u5EnrichmentTransferVerify.mjs` | **U5.** 39 assertions over real HTTP against the real router: round trip, whole-file refusal, staleness, overwrite, batch revert, the 4mb ceiling, and the concurrency refusal. No model is called. |
+| `scripts/u5ImportPanelUi.mjs` | **U5.** 22 assertions in real Chrome against real Vite — the control exists, Apply is locked until a fresh dry run, and the dangerous flags are disarmed by default. |
 | migration `101_enrichment_batches` | additive, dual-path, byte-identical in `scripts/migrations.js` and the `server.js` array. |
 
 ### U1.2 — the freshness gate keys on `scraped_at`, and its default is not arbitrary
@@ -215,7 +218,8 @@ re-run under the Groq pin) correctly reads `openai/gpt-oss-20b`.
 
 ### U2/U3 — export and import
 
-JSONL, not CSV (CSV loses `skills_json`'s nested shape). Each line is
+JSONL, not CSV — but **not for the reason this document originally gave**, which was tested in U5
+and is false. See "Why JSONL, corrected" below. Each line is
 `{ job_id, content_hash, stored_content_hash, source: {...}, enrichment: {...} }`. **`source` is
 read-only and ignored on import; `enrichment` is the 12-column writable surface** — a flat row leaves
 a filler guessing which of thirty keys they may touch, and guessing plus "we then write it to the
@@ -244,13 +248,116 @@ Verified on real board rows:
 | a row where nothing was filled | **no `enriched_at` stamp** — the row stays a candidate |
 | failure mid-apply | one transaction, so nothing is partially applied |
 
-### Honest framing, restated
+### Honest framing, restated — ⚠ SUPERSEDED BY U5, see below
 
-Export/import does **not** save cost (whoever enriches externally still pays the tokens) and does
-**not** reduce verification effort — data crossing a trust boundary needs *more* validation. Most of
-`enrichmentTransfer.js` is that validation, which is the honest measure of what the boundary costs.
-What it buys is **control and separability**: enrich a deliberate subset, re-import a corrected batch
-without re-running a model, keep the outsourcing door open.
+> Export/import does **not** save cost (whoever enriches externally still pays the tokens) and does
+> **not** reduce verification effort — data crossing a trust boundary needs *more* validation. Most of
+> `enrichmentTransfer.js` is that validation, which is the honest measure of what the boundary costs.
+> What it buys is **control and separability**: enrich a deliberate subset, re-import a corrected batch
+> without re-running a model, keep the outsourcing door open.
+
+The paragraph above was true of the path task U had in view — metered API credits, where the tokens
+get paid either way and only *who pays them* moves. It is **false of the path the owner actually
+uses**: enrichment is done under a flat-rate subscription, so exporting the board, enriching it
+there, and importing costs ~$0 at the margin instead of the same tokens. The validation cost is
+unchanged and still real; the token cost is not. Import is therefore the **primary** enrichment
+route, not a corrective one, which is why U5 gave it a UI and sized it for the whole board.
+
+---
+
+## U5 — the injection side, as a control
+
+### Why JSONL, corrected
+
+The original claim was "CSV loses `skills_json`'s nested shape". **Tested against 200 real rows with
+populated `skills_json`, that is not true**: the escape in `routes/adminDb.js` quotes and doubles
+correctly, and a strict RFC4180 parser round-trips all 200 values byte-identically — 0 mismatches, 0
+unparseable, 0 field-count errors. Repeating a convenient reason without checking it is how a
+document stops being evidence, so the real reasons:
+
+1. **CSV cannot tell "not supplied" from "explicitly null".** Both are an empty cell. The importer's
+   entire default posture is *fill nulls only*, which depends on that distinction; and
+   `is_h1b_sponsor` / `requires_work_auth` / `is_clearance_required` are **tri-state**, where blank
+   and `0` mean genuinely different things.
+2. **CSV has no read-only surface.** The `source` / `enrichment` split is what stops a filler
+   guessing which of thirty columns they may touch. A flat row re-creates the guess.
+3. Every one of the 200 rows has a description containing newlines, so every record is a multi-line
+   quoted cell — correct per RFC4180, and the first thing a naive parser or a spreadsheet round trip
+   damages.
+
+### Volume — measured, not assumed
+
+Against the real board (1266 active rows):
+
+| shape | 790 rows | verdict |
+|---|---|---|
+| exported row **with** its `source` block | ~5.3 KB/row → **5.06 MB** as `{"jsonl":"…"}` | ❌ exceeds `express.json({limit:"4mb"})` |
+| same file as a raw `application/x-ndjson` body | 4.79 MB | ✅ accepted (route limit 32 MB) |
+| import-shaped row (`job_id` + `content_hash` + `enrichment`) | ~1.2 KB/row → **0.92 MB** | ✅ fits either way |
+
+So **the whole board does not fit in one request in the obvious shape** — a filler returning the
+export file unmodified would have hit a 413, and since `server.js` installs no error handler that
+413 is a non-JSON page, i.e. an unexplained failure at exactly the scale the owner cares about. The
+admin panel therefore uploads raw NDJSON, and `GET /export?format=json` reports
+`practicalImportRows: 500` so the UI can chunk. Chunking is safe by design: each chunk is its own
+batch and is independently revertible. Both figures are asserted in
+`scripts/u5EnrichmentTransferVerify.mjs` — the 413 is *verified to happen*, not assumed.
+
+### Do the three export paths duplicate each other? No — keep all three
+
+Checked before building, because two export paths that drift is this codebase's most-repeated
+defect:
+
+| path | what it emits | scope |
+|---|---|---|
+| **Download .sql** (`/api/admin/db/schema/export`) | **DDL only — no rows at all.** | schema |
+| **Export CSV** (`/api/admin/db/export/:table`) | `SELECT *` over one of 10 allow-listed tables, `LIMIT 100000` | generic DB inspection |
+| **Export JSONL** (`/api/admin/enrichment/export`) | candidate-selected rows, `source`/`enrichment` split, recomputed `content_hash` | the round trip |
+
+Download .sql is not a data export and never overlapped with anything. Export CSV and Export JSONL
+both emit `scraped_jobs` rows, but they are not two answers to one question: the CSV is a
+whole-table dump for looking at, and the JSONL is a *contract* — it carries the staleness interlock
+the importer refuses without, and restricts the writable surface to twelve columns. Retiring the
+JSONL export would break `POST /import`; retiring the CSV would remove table inspection for nine
+other tables. **Neither is redundant, so nothing was retired.** The drift risk that remains is
+narrow and named: both read `scraped_jobs`, so a column added to the enrichment set must be added
+to `ENRICHMENT_COLUMNS`, which the JSONL path derives from — the CSV picks it up automatically via
+`SELECT *`.
+
+### The UI
+
+`EnrichmentTransferPanel` in `client/src/pages/admin/DBInspector.jsx`, in the Schema Explorer's
+control bar beside Export CSV and Download .sql — where the owner looked and found nothing. Export →
+paste/upload → dry run → apply, with:
+
+- **Apply locked** until a dry run has passed *for the exact bytes in the box*; editing the file
+  re-locks it. A verdict belongs to the file it was computed from.
+- **`overwrite` and `allowStale` are armed switches, not checkboxes** — red when armed, labelled
+  with the consequence ("⚠ OVERWRITE existing values / Values already on the board WILL be
+  replaced"), and **both disarm whenever the file changes**.
+- Coverage rendered as a **per-column fill delta**, above the row counts.
+- The resulting batch and its revert button shown inline.
+
+Verified by `scripts/u5ImportPanelUi.mjs` (real Chrome, real Vite, stubbed `/api/*`): 22 assertions,
+including that the panel really sends `application/x-ndjson`, that the bytes received equal the
+bytes in the box, and that no `apply` flag is sent by the dry run.
+
+### Coverage, not row counts
+
+`POST /import` now reports the per-column fill rate over **the rows in the file that matched a
+posting** — the same denominator for the dry run's projection and the applied result, so the two are
+comparable. `columnsClimbed: 0` alongside `written > 0` raises a loud `warning` naming the batch to
+revert. "imported: 790" proves nothing; the enrichment trigger learned that when a model returned
+HTTP 200 and a null extraction 49 times in 50.
+
+### The concurrency guard reported a refusal as success
+
+Running the trigger twice returned `applied: true, enriched: 0, failed: 0, empty: 0, batchId: null,
+warning: null` — indistinguishable from a healthy pass with nothing to do — while the only record of
+the refusal was a log line. The owner read it as a failure twice, correctly: the run did not happen.
+`runEnrichment` now returns `ran: false, skippedReason: 'already_running'`, and `POST /run` answers
+**409** with `applied: false, skipped: true`. This was the pipeline's own defect signature —
+success-shaped output over an empty result — inside the tool built to detect it.
 
 ---
 
@@ -291,7 +398,11 @@ node scripts/am4Enrich.mjs batches | batch <id> | revert <id> [--apply]
 GET  /api/admin/enrichment/candidates        # the dry run as a read
 POST /api/admin/enrichment/run               # DRY unless {apply:true}; capped at 100 rows/request
 GET  /api/admin/enrichment/export            # JSONL (?format=json for the object)
-POST /api/admin/enrichment/import            # DRY unless {apply:true}; 422 + 0 writes if invalid
+POST /api/admin/enrichment/import            # DRY unless apply; 422 + 0 writes if invalid
+     #   two body shapes, one handler:
+     #     application/x-ndjson  — the file IS the body, flags in the query string (32mb)
+     #     application/json      — { jsonl, apply, overwrite, allowStale }   (global 4mb)
+POST /api/admin/enrichment/run               # 409 + {skipped:true} if a pass is already running
 GET  /api/admin/enrichment/batches           # provenance
 GET  /api/admin/enrichment/batches/:id
 POST /api/admin/enrichment/batches/:id/revert  # DRY unless {apply:true}
