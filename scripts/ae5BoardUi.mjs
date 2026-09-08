@@ -29,9 +29,13 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
-import { getKnownLogoUrl } from '../shared/companyLogos.js';
+import { getKnownLogoUrl, LOGO_HOST } from '../shared/companyLogos.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// A feed-supplied logo, deliberately NOT on LOGO_HOST — see the Shopify fixture. Stubbed for the
+// same reason LOGO_HOST is: an un-stubbed external image escapes onto the live network, and its
+// failure then looks exactly like the board refusing to render a feed logo it actually honoured.
+const FEED_LOGO = 'https://media.licdn.com/dms/image/shopify-logo_200_200.png';
 const OUT_DIR = path.join(os.tmpdir(), 'ae5-board-ui');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -76,7 +80,10 @@ const JOBS = [
     url: 'https://jobs.lever.co/shopify/1', applyUrl: 'https://jobs.lever.co/shopify/1',
     source: 'lever', sourcePlatform: 'lever', automationTier: 'direct',
     postedAt: null, scrapedAt: now - 10800, discoveredAt: now - 10800, isActive: true,
-    companyIconUrl: 'https://logo.clearbit.com/shopify.com', baseAtsScore: 81, minYearsExp: 4,
+    // A FEED-supplied logo, deliberately not on LOGO_HOST: the point of this row is that a URL
+    // the crawler carried beats anything the domain table derives. Using the logo provider's own
+    // host here made the assertion below true for the wrong reason.
+    companyIconUrl: FEED_LOGO, baseAtsScore: 81, minYearsExp: 4,
     visited: false, starred: true, disliked: false, alreadyApplied: false },
 ];
 
@@ -151,16 +158,19 @@ async function main() {
 
     await page.setRequestInterception(true);
     const served = new Set();
-    // Clearbit is a real third party and this harness must not depend on it being reachable — nor
-    // on the network at all. Logo requests are answered with a 1x1 PNG, so "an <img> rendered"
-    // stays a claim about the BOARD rather than about clearbit.com's uptime.
+    // The logo provider is a real third party and this harness must not depend on it being
+    // reachable — nor on the network at all. Logo requests are answered with a 1x1 PNG, so "an
+    // <img> rendered" stays a claim about the BOARD rather than about a third party's uptime.
+    // Matched against the shared LOGO_HOST, not a hostname literal: this guard named Clearbit,
+    // and would have kept stubbing a host the app no longer calls while the real requests —
+    // to the NEW provider — escaped the harness onto the live network.
     const PNG = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
       'base64');
     const logoRequests = [];
     page.on('request', (req) => {
       const raw = req.url();
-      if (/logo\.clearbit\.com/.test(raw)) {
+      if (raw.startsWith(LOGO_HOST) || raw === FEED_LOGO) {
         logoRequests.push(raw);
         return req.respond({ status: 200, contentType: 'image/png', body: PNG });
       }
@@ -270,7 +280,7 @@ async function main() {
       KNOWN.every(c => imgs.some(i => i.alt === c && i.src === getKnownLogoUrl(c))),
       `e.g. OpenAI -> ${imgs.find(i => i.alt === 'OpenAI')?.src}`);
     check('AE5  a feed-supplied companyIconUrl still wins over the table lookup',
-      imgs.some(i => i.alt === 'Shopify' && i.src === 'https://logo.clearbit.com/shopify.com'),
+      imgs.some(i => i.alt === 'Shopify' && i.src === FEED_LOGO),
       imgs.find(i => i.alt === 'Shopify')?.src || 'no Shopify icon');
     check('AE5  a company the table does NOT know falls back to the lettered tile, not a broken image',
       letters.some(l => l.letter === 'B') && !imgs.some(i => i.alt === UNKNOWN),

@@ -10,6 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const jobCard   = fs.readFileSync("client/src/components/JobCard.jsx", "utf8");
 const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
@@ -49,9 +50,24 @@ test("the avatar prefers the row's own logo, then the known table, then the lett
   // found the job and is the most specific thing we know; the table fills in the majority of rows,
   // whose feeds carry no logo at all; the lettered tile is what an unknown company gets.
   assert.match(icon, /const resolved = iconUrl \|\| getKnownLogoUrl\(company\)/);
-  assert.match(icon, /if \(resolved && !failed\)/);
-  assert.match(icon, /onError=\{\(\) => setFailed\(true\)\}/,
+  assert.match(icon, /if \(resolved && !failedLogoUrls\.has\(resolved\)\)/);
+  assert.match(icon, /onError=\{\(\) => \{ failedLogoUrls\.add\(resolved\)/,
     "a URL that 404s has to fall back to the letter at runtime");
+});
+
+test("a logo URL that fails is not re-requested by the next card, or the next render", () => {
+  // TASK X. The memo used to be per-component `useState`, so it silenced only the card it was set
+  // on — and the board unmounts and remounts cards as it scrolls, each remount starting again at
+  // "not failed". A dead logo host was therefore re-requested per card, per scroll, all session.
+  // With Clearbit's DNS gone that was the real cost of the bug; the missing image was the visible
+  // half. Module scope is load-bearing: inside the component it is the bug.
+  assert.match(icon, /^const failedLogoUrls = new Set\(\);$/m,
+    "the memo must be module-level so one failure silences every card, not just its own");
+  const componentBody = icon.slice(at(icon, "export default function CompanyIcon"));
+  assert.ok(!/new Set\(/.test(componentBody),
+    "a Set constructed inside the component is rebuilt on every render and remembers nothing");
+  assert.ok(!/useState\(false\)/.test(icon),
+    "the per-instance `failed` flag is what this replaced");
 });
 
 // ── One domain table ─────────────────────────────────────────────────────────
@@ -81,7 +97,11 @@ test("A GUESS IS NOT A LOGO — an unknown company resolves to null, not a slug"
   // Handing the same guess to an <img> would render a broken image for every small employer.
   assert.equal(companyToDomain("Brightmoor Analytics Group"), "brightmooranalytics.com");
   assert.equal(getKnownLogoUrl("Brightmoor Analytics Group"), null);
-  assert.equal(getKnownLogoUrl("OpenAI"), "https://logo.clearbit.com/openai.com");
+  // Asserted against the shared module's own LOGO_HOST rather than a second copy of the hostname:
+  // this line pinned `logo.clearbit.com` and went on passing for the whole time that host was dead,
+  // because a URL-shaped string is all it ever checked.
+  const { LOGO_HOST } = await import("../shared/companyLogos.js");
+  assert.equal(getKnownLogoUrl("OpenAI"), `${LOGO_HOST}/openai.com.ico`);
 });
 
 // ── Two per row ──────────────────────────────────────────────────────────────

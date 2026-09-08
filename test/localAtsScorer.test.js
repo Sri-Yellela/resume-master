@@ -71,7 +71,7 @@ test("hard profile facts and experience misses affect local ATS score", () => {
 
 test("server precomputed and generated ATS paths use local scorer instead of LLM ATS calls", () => {
   const server = fs.readFileSync("server.js", "utf8");
-  const scrapeBlock = server.slice(at(server, "ATS scoring for newly inserted jobs"), at(server, "Async clearbit icon fallback"));
+  const scrapeBlock = server.slice(at(server, "ATS scoring for newly inserted jobs"), at(server, "Async company icon fallback"));
   const keywordBlock = server.slice(at(server, 'app.post("/api/jobs/:id/keywords"'), at(server, 'app.get("/api/jobs/pending"'));
   const generateBlock = server.slice(at(server, "const resumeStripped = stripResumeHtml(formattedHtml)"), at(server, "const version = (db.prepare"));
 

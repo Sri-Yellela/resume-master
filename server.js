@@ -119,6 +119,7 @@ import {
 } from "./services/jobs/jobCursor.js";
 import { deriveAutomationTier } from "./services/jobs/automationTier.js";
 import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
+import { backfillCompanyLogos } from "./services/jobs/backfillCompanyLogos.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { suggest } from "./services/jobs/searchSuggestions.js";
 // Bounds the blast radius of one expiry pass — see services/jobs/cleanupBrake.js and cleanup_log 85.
@@ -127,6 +128,7 @@ import { assessCleanupScope, cleanupBrakeOptions } from "./services/jobs/cleanup
 // GET /api/jobs validates against it (rejectInvalidFilterValues below) so an unknown value is a
 // 400 rather than a board that silently matches nothing. See shared/jobFilterOptions.js.
 import { FILTER_DIMENSIONS, invalidEntries, ageDaysMap } from "./shared/jobFilterOptions.js";
+import { logoUrlForDomain } from "./shared/companyLogos.js";
 import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
 import { assertResumeClaims, profileContradictionFindings } from "./services/resumeClaimGuard.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
@@ -3495,6 +3497,22 @@ try {
   console.error("[boot] automation_tier backfill failed (board falls back to 'unknown'):", e.message);
 }
 
+// Repair company_icon_url rows still pointing at a retired logo provider (TASK X). Same reasoning
+// as the tier backfill above and never fatal for the same reason: a row whose logo URL is wrong
+// renders CompanyIcon's lettered tile, so failing the boot over it would trade a missing image for
+// an outage. Offline — no HEAD request — because a boot path that waits on a third party is a boot
+// path that hangs when that third party is precisely what broke.
+try {
+  const logoFill = backfillCompanyLogos(db);
+  if (logoFill.updated > 0 || logoFill.cleared > 0) {
+    console.log(`[boot] company_icon_url repaired: ${logoFill.updated} repointed, ` +
+      `${logoFill.cleared} cleared to NULL, ${logoFill.kept} feed-supplied left untouched ` +
+      `(of ${logoFill.scanned} scanned)`);
+  }
+} catch (e) {
+  console.error("[boot] company_icon_url backfill failed (board falls back to lettered tiles):", e.message);
+}
+
 // Drain the out-of-process failure sink now that the database is known reachable. Anything the
 // sink caught while it was NOT reachable is imported as source='sink_recovered', so coverage
 // becomes complete again instead of permanently short by however many calls happened during the
@@ -3696,15 +3714,21 @@ function extractDomain(url) {
   catch { return null; }
 }
 
+// The logo URL is built by shared/companyLogos.js, not here. This function used to hold its own
+// `https://logo.clearbit.com/${domain}` literal — a third copy of a host that the shared module and
+// enrichLogos.js also carried, which is why retiring one provider (TASK X) touched three files.
 async function fetchCompanyIcon(domain) {
   if (!domain) return null;
-  const clearbitUrl = `https://logo.clearbit.com/${domain}`;
+  const url = logoUrlForDomain(domain);
   try {
-    const r = await fetch(clearbitUrl, { method:"HEAD", signal:AbortSignal.timeout(3000) });
-    if (r.ok) return clearbitUrl;
+    const r = await fetch(url, { method:"HEAD", signal:AbortSignal.timeout(3000) });
+    if (r.ok) return url;
   } catch {}
-  // Fallback: Google S2 favicon (always returns an image)
-  return `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+  // No second provider on failure. The Google S2 favicon that used to sit here was reached on
+  // EVERY call once Clearbit's DNS died — a silent switch of who sees the user's browsing, from
+  // the provider the privacy policy names to one it does not. A null leaves company_icon_url
+  // untouched and CompanyIcon renders the lettered tile, which is the disclosed behaviour.
+  return null;
 }
 
 // ── Scraping ──────────────────────────────────────────────────
@@ -4166,7 +4190,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
     });
   }
 
-  // ── Async clearbit icon fallback (non-blocking, only for jobs without a logo) ──
+  // ── Async company icon fallback (non-blocking, only for jobs without a logo) ──
   setImmediate(async () => {
     const updateIcon = db.prepare(
       "UPDATE scraped_jobs SET company_icon_url=? WHERE _hash=? AND company_icon_url IS NULL"

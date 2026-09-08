@@ -64,11 +64,31 @@ export const KNOWN_DOMAINS = {
   'digitalocean': 'digitalocean.com','linode':      'linode.com',
 };
 
+/**
+ * Does `lower` name this company, as a WHOLE word?
+ *
+ * Was `lower.includes(key)`, which matched a key buried inside a longer word and so rendered a
+ * completely different employer's logo. Real rows and realistic names it got wrong:
+ *
+ *   Physical Super**intel**ligence → intel.com      **Square**space   → squareup.com
+ *   Al**together** Labs            → together.ai    **Meta**bolic     → meta.com
+ *   **Neon**atal Care Group        → neon.tech      **Apple**cart     → apple.com
+ *
+ * That is the one outcome this module's own doctrine rules out: a wrong logo is worse than the
+ * lettered tile, not better, because a letter admits it does not know. Word boundaries keep every
+ * genuine match — including the keys with punctuation and spaces ('fly.io', 'c3.ai', 'x.com',
+ * 'hugging face', 'scale ai'), which is why the key is escaped rather than split on.
+ */
+function namesCompany(lower, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(lower);
+}
+
 export function companyToDomain(name) {
   if (!name) return null;
   const lower = name.toLowerCase().trim();
   for (const [key, domain] of Object.entries(KNOWN_DOMAINS)) {
-    if (lower.includes(key)) return domain;
+    if (namesCompany(lower, key)) return domain;
   }
   // Naive fallback — strip legal suffixes, append .com
   const slug = lower
@@ -79,15 +99,48 @@ export function companyToDomain(name) {
 }
 
 /**
- * Returns the Clearbit logo URL for a known company without a network request.
+ * The logo host. ONE literal, because it is written into `scraped_jobs.company_icon_url` by the
+ * server AND resolved client-side by CompanyIcon, and the last provider outlived its own URLs in
+ * the database by however long nobody looked.
+ *
+ * WAS logo.clearbit.com, until Clearbit retired it (TASK X). Not slow, not rate-limited, not
+ * blocked: `logo.clearbit.com` has no A record at all, while `clearbit.com` still resolves —
+ * Google and Cloudflare both answer NOERROR with an empty answer and an SOA from Clearbit's own
+ * Route53 nameserver, which is a deliberate removal by the operator. There is no status code for
+ * that, which is why `fetchLogoUrl`'s HEAD check could not detect it: the request never reached
+ * a server to be answered.
+ *
+ * DuckDuckGo's icon service is keyless like Clearbit's was, returns a real per-domain icon (the
+ * four spot-checked were byte-distinct, not one shared placeholder), and 404s honestly for a
+ * domain it does not have — which is what `isKnownLogoUrlHost` and CompanyIcon's onError need.
+ */
+export const LOGO_HOST = 'https://icons.duckduckgo.com/ip3';
+
+export function logoUrlForDomain(domain) {
+  return domain ? `${LOGO_HOST}/${domain}.ico` : null;
+}
+
+/**
+ * True for a URL this module would produce TODAY. Used to find rows still carrying a retired
+ * provider's URL, so the swap is one edit here plus a backfill rather than a grep for a hostname
+ * that has already been deleted from the source.
+ */
+export function isKnownLogoUrlHost(url) {
+  return typeof url === 'string' && url.startsWith(LOGO_HOST + '/');
+}
+
+/**
+ * Returns the logo URL for a known company without a network request.
  * Use this for offline/cold-start enrichment.
  */
 export function getKnownLogoUrl(companyName) {
   const domain = companyToDomain(companyName);
   if (!domain) return null;
-  // Only return URLs for domains we explicitly know, not slug guesses
+  // Only return URLs for domains we explicitly know, not slug guesses. Same matcher
+  // companyToDomain used to pick the domain — asking the question two different ways is how a
+  // "known" company could be resolved by one rule and admitted by another.
   const lower = companyName.toLowerCase().trim();
-  const isKnown = Object.keys(KNOWN_DOMAINS).some(k => lower.includes(k));
+  const isKnown = Object.keys(KNOWN_DOMAINS).some(k => namesCompany(lower, k));
   if (!isKnown) return null;
-  return 'https://logo.clearbit.com/' + domain;
+  return logoUrlForDomain(domain);
 }

@@ -131,7 +131,8 @@ export function normaliseItem(raw) {
   // Applicant count
   const applicantCount = raw.applicants ?? raw.applies ?? raw.applicantCount ?? null;
 
-  // Company logo (use from HarvestAPI if available, otherwise clearbit fallback later)
+  // Company logo (use from HarvestAPI if available, otherwise resolved from the shared domain
+  // table later — see shared/companyLogos.js; this used to say clearbit, which is retired)
   const companyLogoUrl = raw.company?.logo || raw.companyLogo || null;
 
   // Real LinkedIn job ID (string)

@@ -16,6 +16,7 @@
  * Excluded from verify:harness: screenshots, and it needs a built client + a browser.
  */
 import fs from 'node:fs';
+import { LOGO_HOST } from '../shared/companyLogos.js';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -103,7 +104,7 @@ async function main() {
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       const raw = req.url();
-      if (/logo\.clearbit\.com/.test(raw)) {
+      if (raw.startsWith(LOGO_HOST)) {
         return req.respond({ status: 200, contentType: 'image/png', body: Buffer.from(
           'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', 'base64') });
       }

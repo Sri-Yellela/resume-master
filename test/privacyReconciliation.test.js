@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs";
+import { LOGO_HOST } from "../shared/companyLogos.js";
 
 // TASK E4 — the manifest, the privacy policy and the store listing must not contradict each other.
 //
@@ -189,11 +190,32 @@ test("the manifest's privacy_policy_url is the page this repo actually serves", 
 
 test("third parties named in the policy are ones the code actually uses", () => {
   // A false sharing disclosure is the mirror-image failure of an undisclosed one.
-  const named = ["Railway", "Anthropic", "SerpApi", "Apify", "Adzuna", "Clearbit"];
+  const named = ["Railway", "Anthropic", "SerpApi", "Apify", "Adzuna", "DuckDuckGo"];
   for (const n of named) {
     assert.ok(policyText.includes(n), `expected the policy to name ${n}`);
   }
-  assert.ok(fs.existsSync("services/jobs/enrichLogos.js"), "Clearbit is disclosed; its caller should exist");
+  assert.ok(fs.existsSync("services/jobs/enrichLogos.js"), "the logo provider is disclosed; its caller should exist");
+
+  // The disclosed logo host must be the one the code actually loads from. These were allowed to
+  // drift once already: the policy named Clearbit for months after logo.clearbit.com stopped
+  // resolving, and server.js quietly fell through to a Google favicon URL on every call — a
+  // different third party seeing the user's browsing than the one the policy names. Asserted
+  // against the shared module's own constant, not a second copy of the hostname.
+  const host = new URL(LOGO_HOST).hostname;             // icons.duckduckgo.com
+  const brand = host.split(".").at(-2);                 // duckduckgo
+  assert.ok(policyText.toLowerCase().includes(brand),
+    `the policy must name the operator of ${host}, which is what browsers actually request`);
+  // Comments stripped, following boardListingLayout.test.js: these modules EXPLAIN the swap by
+  // naming the host they no longer call, and a check that fails on its own rationale is a check
+  // nobody keeps. What must not survive is a live reference.
+  const stripped = ["shared/companyLogos.js", "services/jobs/enrichLogos.js", "server.js"]
+    .map(f => fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ""))
+    .join("\n");
+  assert.ok(!/logo\.clearbit\.com/.test(stripped),
+    "a retired logo host must not survive in code the policy no longer discloses");
+  assert.ok(!/s2\/favicons/.test(stripped),
+    "the Google favicon fallback sent browsing to an undisclosed third party whenever the " +
+    "disclosed one failed — which, once its DNS went, was every single call");
   assert.match(fs.readFileSync("package.json", "utf8"), /apify-client/,
     "Apify is disclosed as a third party; the client library should be a real dependency");
 });

@@ -21,11 +21,25 @@
 // every small company on the board, which is worse than a letter, not better.
 //
 // `onError` keeps the last line of defence: a URL that 404s falls back to the letter at runtime.
+//
+// WHY THE FAILURE MEMO IS MODULE-LEVEL, NOT COMPONENT STATE (TASK X)
+// `failed` is per-instance, so it only ever silenced the card it was set on. The board unmounts and
+// remounts cards as it scrolls and paginates, and a remount starts at `failed = false` — so a dead
+// logo host was re-requested per card, and again per scroll, for the whole session. With Clearbit's
+// DNS gone that was a failing request on every board render, which is the actual cost of this bug;
+// the missing image was only the visible half.
+//
+// A Set keyed by URL fixes that for every card at once: the first failure anywhere is remembered,
+// and no component asks for that URL again. It is deliberately session-scoped and deliberately not
+// state — persisting it would cache a transient network blip forever, and making it state would put
+// a shared value back inside one component's lifecycle, which is the bug.
 import { useState } from "react";
 import { getKnownLogoUrl } from "../../../../shared/companyLogos.js";
 
+const failedLogoUrls = new Set();
+
 export default function CompanyIcon({ company, iconUrl, size = 48, radius = 10 }) {
-  const [failed, setFailed] = useState(false);
+  const [, forceRender] = useState(0);
   const letter = (company || "?")[0].toUpperCase();
   // Deterministic colour from the company name, so a given employer's tile is always the same one.
   const colors = ["#0A66C2", "#7c3aed", "#0891b2", "#16a34a", "#dc2626", "#d97706", "#9333ea"];
@@ -35,9 +49,10 @@ export default function CompanyIcon({ company, iconUrl, size = 48, radius = 10 }
 
   const resolved = iconUrl || getKnownLogoUrl(company);
 
-  if (resolved && !failed) {
+  if (resolved && !failedLogoUrls.has(resolved)) {
     return (
-      <img src={resolved} alt={company} onError={() => setFailed(true)}
+      <img src={resolved} alt={company}
+        onError={() => { failedLogoUrls.add(resolved); forceRender(n => n + 1); }}
         style={{ width: size, height: size, borderRadius: radius, objectFit: "contain",
                  border: "1px solid transparent", background: "transparent", flexShrink: 0 }}/>
     );
