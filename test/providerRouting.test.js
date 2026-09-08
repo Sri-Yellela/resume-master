@@ -527,7 +527,11 @@ test("a 429 during enrichment leaves the row a candidate — it is never stamped
       salary_min_usd INTEGER, salary_max_usd INTEGER, salary_period TEXT, skills_json TEXT,
       is_h1b_sponsor INTEGER, requires_work_auth INTEGER, is_clearance_required INTEGER,
       org_unit_raw TEXT, content_hash TEXT, enriched_at INTEGER,
-      is_active INTEGER DEFAULT 1, discovered_at INTEGER DEFAULT 0, updated_at INTEGER DEFAULT 0
+      is_active INTEGER DEFAULT 1, discovered_at INTEGER DEFAULT 0, updated_at INTEGER DEFAULT 0,
+      -- Columns the shared candidate selector reads (services/jobs/enrichmentSelection.js).
+      -- scraped_at is the freshness gate's key and is left NULL here, which the selector treats as
+      -- UNGATED — so this test still exercises the 429 path rather than the gate's clock.
+      source TEXT, posted_at INTEGER, scraped_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS company_technographics (
       company TEXT NOT NULL, skill TEXT NOT NULL, skill_type TEXT, weight REAL DEFAULT 0,

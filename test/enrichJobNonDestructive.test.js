@@ -20,7 +20,27 @@ function makeDb() {
       salary_min_usd INTEGER, salary_max_usd INTEGER, salary_period TEXT, skills_json TEXT,
       is_h1b_sponsor INTEGER, requires_work_auth INTEGER, is_clearance_required INTEGER,
       org_unit_raw TEXT, content_hash TEXT, enriched_at INTEGER,
-      is_active INTEGER DEFAULT 1, discovered_at INTEGER DEFAULT 0, updated_at INTEGER DEFAULT 0
+      is_active INTEGER DEFAULT 1, discovered_at INTEGER DEFAULT 0, updated_at INTEGER DEFAULT 0,
+      -- U1/U4 columns the selector and the batch recorder read. scraped_at is left NULL on
+      -- purpose: enrichmentSelection.js treats a null last-sighting as UNGATED, so these fixtures
+      -- exercise the enrichment logic without also depending on the freshness gate's clock.
+      -- source and posted_at are selected by the shared selector; omitting them made every
+      -- call here fail with "no such column" rather than testing anything.
+      source TEXT, posted_at INTEGER, scraped_at INTEGER, enrichment_batch_id INTEGER
+    );
+    -- U4 provenance. runEnrichment degrades to an unprovenanced pass with a warning when these are
+    -- absent, so their presence here is what keeps the batch assertions meaningful.
+    CREATE TABLE IF NOT EXISTS enrichment_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, provider TEXT, model TEXT,
+      started_at INTEGER NOT NULL, finished_at INTEGER,
+      rows_attempted INTEGER NOT NULL DEFAULT 0, rows_written INTEGER NOT NULL DEFAULT 0,
+      rows_failed INTEGER NOT NULL DEFAULT 0, rows_empty INTEGER NOT NULL DEFAULT 0,
+      input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+      est_cost_usd REAL NOT NULL DEFAULT 0, coverage_json TEXT, reverted_at INTEGER, notes TEXT
+    );
+    CREATE TABLE IF NOT EXISTS enrichment_batch_rows (
+      batch_id INTEGER NOT NULL, job_id TEXT NOT NULL, before_json TEXT NOT NULL,
+      filled_json TEXT, written_at INTEGER NOT NULL, PRIMARY KEY (batch_id, job_id)
     );
     -- Enrichment now records usage through callModel (services/modelCall.js), so these fixtures
     -- have to carry the tracking tables. Without them every enriched job produced a tracking

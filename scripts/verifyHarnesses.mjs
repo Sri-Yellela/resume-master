@@ -92,6 +92,8 @@ const EXCLUDED = {
   am1PurgeImpactAudit: "read-only forensics report against the real database and a backup; asserts nothing",
   am3RestoreBoard:     "mutates the developer's database — restores scraped_jobs from the pinned evidence DB. --dry-run and --report-only are read-only, but the default is a 1291-row INSERT, so it is run by hand",
   am3ProdSchemaDiff:   "authenticates to PRODUCTION with the admin credentials and reads its schema. Read-only, but it points at a live deployment and is nobody's business to run on a timer",
+  am4EnrichBacklogAudit: "read-only backlog measurement; --prod authenticates to PRODUCTION and reads its board. Asserts nothing, and like am3ProdSchemaDiff it points at a live deployment",
+  am4Enrich:           "the manual enrichment path — `run --apply` spends model tokens per row, and `import --apply` / `revert --apply` write to the developer's database. Every subcommand defaults to a dry run, but the whole point of the script is the apply, so it is run by hand. test/enrichmentTransfer.test.js is the half that asserts, and it stays in `npm test`",
   ak2BandSurfaces:     "screenshots; drives the real board in a browser to prove the bands reach pixels",
   fakeAts:             "the fixture server itself",
   verifyHarnesses:     "this runner",

@@ -36,11 +36,24 @@
  * extraction is treated as a failure, so the row is not stamped and stays a candidate).
  */
 
-import crypto from 'crypto';
 import { recordPipelineRun } from './pipelineRunLog.js';
+// U1 — candidate selection, the freshness gate, cost estimation and coverage all live in one
+// module now, because the dry run, the real run and the export must not be able to disagree about
+// which rows they mean. computeContentHash moved there with them and is re-exported below, so
+// existing importers (scripts/runEnrichment.mjs) are unaffected.
+import {
+  selectCandidates, computeContentHash, columnCoverage,
+  enrichSelectionOptions, ENRICHMENT_COLUMNS,
+} from './enrichmentSelection.js';
+// U4 — provenance. Additive: no read path changes, mapJobRow is untouched.
+import {
+  openBatch, closeBatch, captureBefore, recordBatchRow, columnChanges, batchProvenanceAvailable,
+} from './enrichmentBatches.js';
 import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
 import { callModel, SYSTEM_USER_ID } from '../modelCall.js';
-import { DATA_CLASS } from '../../shared/modelProviders.js';
+// resolveProvider is imported for PROVENANCE only — it is the transport's own routing decision, so
+// the batch record can name the model that will actually serve the calls. It does not route here.
+import { DATA_CLASS, resolveProvider } from '../../shared/modelProviders.js';
 // G3 — the same canonical key the stack surface merges on. One vocabulary, used twice.
 import { canonicalSkillKey } from '../kb/technographics.js';
 import { loadConfirmedSynonyms } from '../kb/skillSynonyms.js';
@@ -70,10 +83,6 @@ const DECAY_HALFLIFE_DAYS = 30;
 // persisted or billed anywhere, just visibility into what a background pass costs.
 const EST_INPUT_COST_PER_M  = 1.0;
 const EST_OUTPUT_COST_PER_M = 5.0;
-
-function computeContentHash(title, description) {
-  return crypto.createHash('sha1').update(`${title || ''}|${description || ''}`).digest('hex');
-}
 
 function buildPrompt(title, company, description) {
   return `Extract structured signals from this job posting. Only state what the text actually
@@ -232,7 +241,20 @@ let enrichmentInProgress = false;
  * @param {import('better-sqlite3').Database} db
  * @param {import('@anthropic-ai/sdk').default | null} anthropic
  */
-async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, recordRun = true } = {}) {
+async function runEnrichment(db, anthropic, {
+  batchSize = ENRICH_BATCH_SIZE,
+  recordRun = true,
+  // U1.2 — the freshness gate. Defaults to the env-configured horizon (7 days, matching the
+  // expiry), and a caller may override it explicitly; 0 disables the gate.
+  maxLastSeenDays = enrichSelectionOptions().maxLastSeenDays,
+  // U1.3 — a manual trigger names itself, so the batch record says what caused the spend.
+  batchSource = 'cron',
+  // Restrict the pass to specific rows or one feed. Used by the manual trigger's "prove it on 10
+  // rows before 837" mode; the cron never passes either.
+  jobIds = null,
+  source = null,
+  batchNotes = null,
+} = {}) {
   const runStartedAt = Math.floor(Date.now() / 1000);
   // User-triggered passes (a single-URL import) opt out: pipeline_runs is meant to answer "is
   // the SCHEDULED pipeline healthy?", and one row per import would interleave dozens of
@@ -263,34 +285,77 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
     // nothing to extract from an empty posting, so calling the model just burns tokens to get
     // an all-null answer back. Filtering in SQL also stops those rows from consuming batch
     // slots every run and starving rows that DO have text.
-    const rows = db.prepare(`
-      SELECT job_id, title, company, description, content_hash
-      FROM scraped_jobs
-      WHERE is_active = 1
-        AND description IS NOT NULL AND TRIM(description) != ''
-        AND (enriched_at IS NULL OR content_hash IS NULL OR updated_at > enriched_at)
-      ORDER BY discovered_at DESC
-    `).all();
+    // ONE SELECTOR, shared with the dry run and the export — see enrichmentSelection.js. It applies
+    // the cheap SQL pre-filter, the U1.2 freshness gate on `scraped_at`, and then the exact
+    // content-hash comparison. `noDescription` is counted, not just excluded: "how many rows can't
+    // be enriched because they have no text" is the single number that would have surfaced the
+    // missing-description bug on day one, so the monitor needs it explicitly rather than inferring
+    // it from a coverage gap.
+    const selection = selectCandidates(db, { maxLastSeenDays, jobIds, source });
+    const { candidates, noDescription, gatedOut, prefilterCount } = selection;
 
-    // Counted, not just excluded: "how many rows can't be enriched because they have no text"
-    // is the single number that would have surfaced the missing-description bug on day one, so
-    // the monitor needs it explicitly rather than inferring it from a coverage gap.
-    const noDescription = db.prepare(`
-      SELECT COUNT(*) n FROM scraped_jobs
-      WHERE is_active = 1 AND (description IS NULL OR TRIM(description) = '')
-    `).get().n;
+    // The pre-filter/candidate gap, logged every pass. On the restored board it is 1252 vs 5, and
+    // seeing that ratio is what tells an operator the board was bulk-touched rather than changed.
+    if (prefilterCount !== candidates.length) {
+      console.log(`[enrichJob] pre-filter matched ${prefilterCount} rows; ${candidates.length} ` +
+                  `differ from their content_hash and are real candidates`);
+    }
+    if (gatedOut) {
+      console.log(`[enrichJob] freshness gate excluded ${gatedOut} row(s) not seen in ` +
+                  `${maxLastSeenDays} days — they are awaiting expiry, not fresh postings`);
+    }
 
-    const candidates = rows.filter(r => computeContentHash(r.title, r.description) !== r.content_hash);
     if (!candidates.length) {
       console.log(`[enrichJob] No rows need enrichment (${noDescription} active rows have no description and can never be enriched)`);
       record({
         runKind: 'enrichment', status: 'ok', startedAt: runStartedAt,
-        skipped: noDescription, details: { reason: 'no_candidates' },
+        skipped: noDescription, details: { reason: 'no_candidates', gatedOut },
       });
-      return { enriched: 0, failed: 0, empty: 0, skipped: 0, noDescription };
+      return { enriched: 0, failed: 0, empty: 0, skipped: 0, noDescription, gatedOut };
     }
 
     const batch = candidates.slice(0, batchSize);
+
+    // U1.4 — COVERAGE, NOT CALL COUNTS. Snapshot the per-column fill rates for exactly the rows
+    // this pass will touch, before it touches them, so the run can report whether coverage CLIMBED
+    // rather than reporting a count that is equally consistent with 25 null extractions.
+    const batchIds = batch.map(r => r.job_id);
+    const coverageBefore = columnCoverage(db, { jobIds: batchIds });
+
+    // U4 — open the batch. Provenance is additive and must never be the reason enrichment does not
+    // run, so a database that predates migration 101 gets a loud warning and an unprovenanced pass
+    // rather than a refusal.
+    // ⛔ THE BATCH MUST RECORD THE MODEL THAT ACTUALLY SERVES THE CALLS, NOT THE ONE THIS FILE ASKS
+    // FOR. enrichJob passes `model: MODEL_ID` (Haiku) to callModel, but for PUBLIC traffic the
+    // routing layer may override it from ENRICH_PROVIDER/ENRICH_MODEL — and it did: a rehearsal of
+    // this pass recorded a batch reading `anthropic / claude-haiku-4-5-20251001` while every
+    // usage_events row for it said `groq / openai/gpt-oss-20b`. Provenance that names the wrong
+    // model is worse than none, because it is the thing you would consult to explain a bad batch.
+    // resolveProvider is the same function the transport consults, so the two cannot disagree.
+    let routed = { provider: 'anthropic', model: MODEL_ID };
+    try {
+      const r = resolveProvider(process.env);
+      routed = { provider: r.provider, model: r.model || MODEL_ID };
+    } catch {
+      // An unpinned ENRICH_MODEL throws here exactly as it will throw in the transport. Recording
+      // the requested pin is the useful thing to say about a batch that is about to fail that way.
+      routed = { provider: String(process.env.ENRICH_PROVIDER || 'anthropic'), model: String(process.env.ENRICH_MODEL || MODEL_ID) };
+    }
+
+    // Checked BEFORE the UPDATE is built, because the UPDATE's shape depends on it.
+    const provenance = batchProvenanceAvailable(db);
+    let batchId = null;
+    if (!provenance) {
+      console.warn('[enrichJob] batch provenance unavailable — run migration 101_enrichment_batches. ' +
+                   'Enriching WITHOUT provenance.');
+    } else {
+      try {
+        batchId = openBatch(db, { source: batchSource, provider: routed.provider, model: routed.model, notes: batchNotes });
+      } catch (err) {
+        console.warn(`[enrichJob] could not open an enrichment batch (${err.message}) — ` +
+                     'enriching WITHOUT provenance.');
+      }
+    }
     // COALESCE(@x, x) throughout: enrichment may only ADD information, never remove it.
     // Ingestion already populates normalized_title/experience_level/workplace_type/salary from
     // the source feed, and a plain `col = @col` overwrote those with NULL whenever the model
@@ -312,11 +377,22 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
         is_clearance_required = COALESCE(@is_clearance_required, is_clearance_required),
         org_unit_raw = COALESCE(@org_unit_raw, org_unit_raw),
         content_hash = @content_hash, enriched_at = @enriched_at
+        -- U4: which run wrote this row. Appended only when the column EXISTS — naming it
+        -- unconditionally is what made the "degrade gracefully without migration 101" path throw
+        -- SQLITE_ERROR instead of degrading. The newest batch to touch a row owns it, so a non-null
+        -- @enrichment_batch_id always wins; COALESCE covers the other direction, where a pass ran
+        -- without provenance and must LEAVE an existing pointer alone rather than erasing what a
+        -- previous run legitimately recorded.
+        ${provenance ? ', enrichment_batch_id = COALESCE(@enrichment_batch_id, enrichment_batch_id)' : ''}
       WHERE job_id = @job_id
     `);
 
     let enriched = 0, failed = 0, empty = 0;
     let totalInputTokens = 0, totalOutputTokens = 0;
+    // Column CORRECTIONS (non-null replaced by a different non-null). Counted separately from
+    // fills because a correction moves no fill rate, so without this a correction-only pass is
+    // indistinguishable from a pass that extracted nothing at all.
+    let correctedTotal = 0;
 
     for (const row of batch) {
       try {
@@ -336,6 +412,10 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
         }
 
         const now = Math.floor(Date.now() / 1000);
+        // U4 — the before-image, read BEFORE the write. This is what makes a revert exact: after
+        // the UPDATE it is no longer knowable which non-null columns this batch filled and which
+        // arrived from ingestion, and guessing would re-create the bug that nulled 120 rows.
+        const before = batchId ? captureBefore(db, row.job_id) : null;
         updateStmt.run({
           job_id:                row.job_id,
           summary:               signals.summary,
@@ -352,7 +432,22 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
           org_unit_raw:          signals.org_unit,
           content_hash:          computeContentHash(row.title, row.description),
           enriched_at:           now,
+          // Only when the statement above actually names it: better-sqlite3 rejects a named
+          // parameter the SQL does not use, so passing this unconditionally would turn the
+          // no-provenance path from one error into a different one.
+          ...(provenance ? { enrichment_batch_id: batchId } : {}),
         });
+
+        // Record what the write actually CHANGED, not what it attempted. A row whose every
+        // extracted field lost to COALESCE contributed nothing, and the batch's own record has to
+        // be able to say so — otherwise `rows_written` inherits the exact weakness of `enriched:
+        // 837` that U1.4 exists to remove.
+        if (batchId) {
+          const after = captureBefore(db, row.job_id);
+          const changes = columnChanges(before, after);
+          recordBatchRow(db, batchId, row.job_id, before, changes);
+          correctedTotal += changes.corrected.length;
+        }
 
         upsertTechnographics(db, row.company, signals.skills, now);
         enriched++;
@@ -378,6 +473,45 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
       console.warn(`[enrichJob] WARNING: all ${empty} rows this pass yielded no signal — check that descriptions are being stored`);
     }
 
+    // U1.4 — REPORT COVERAGE, NOT CALL COUNTS. The same rows, measured again, per column. `enriched
+    // = 25` is compatible with 25 rows that gained nothing; a per-column delta is not.
+    const coverageAfter = columnCoverage(db, { jobIds: batchIds });
+    const coverage = { before: coverageBefore, after: coverageAfter };
+    // ⛔ enriched_at IS EXCLUDED FROM THE VERDICT, and that exclusion is the whole point.
+    // enriched_at gains by definition on every successful write — it is the stamp, not a signal —
+    // so including it here made `gains.length` non-zero for ANY pass that wrote a row, which is
+    // precisely the pass this check exists to catch. With it counted, the warning below could
+    // never fire and U1.4 would have measured nothing.
+    const gains = ENRICHMENT_COLUMNS
+      .map(c => [c, (coverageAfter.columns[c]?.filled ?? 0) - (coverageBefore.columns[c]?.filled ?? 0)])
+      .filter(([, d]) => d > 0);
+    const stampDelta = (coverageAfter.columns.enriched_at?.filled ?? 0)
+                     - (coverageBefore.columns.enriched_at?.filled ?? 0);
+    console.log(`[enrichJob] coverage over the ${batchIds.length} rows in this pass: ` +
+      (gains.length ? gains.map(([c, d]) => `${c} +${d}`).join(', ') : 'NO COLUMN GAINED A VALUE') +
+      `  (enriched_at +${stampDelta}, ${correctedTotal} value(s) corrected in place)`);
+    // A pass that wrote rows but filled no column is the A2 failure mode exactly: HTTP 200,
+    // success:true, a clean usage row, and nothing to show for it.
+    //
+    // The corrections count is part of the test, not decoration. A pass can legitimately fill
+    // nothing and still have done work — replacing a wrong experience_level with a right one moves
+    // no fill rate at all — so "no column gained AND nothing was corrected" is the condition that
+    // actually indicts the extraction. Warning on a flat fill rate alone would cry wolf at every
+    // correction-only pass, and an alarm that fires on correct behaviour gets ignored.
+    if (enriched && !gains.length && !correctedTotal) {
+      console.warn(`[enrichJob] WARNING: ${enriched} row(s) were stamped enriched but NO column ` +
+                   `gained a value and nothing was corrected — this is the shape of a model ` +
+                   `returning empty extractions (see task A2: 49 of 50 HTTP 200s were NULL).`);
+    }
+
+    if (batchId) {
+      closeBatch(db, batchId, {
+        rowsAttempted: batch.length, rowsWritten: enriched, rowsFailed: failed, rowsEmpty: empty,
+        inputTokens: totalInputTokens, outputTokens: totalOutputTokens,
+        estCostUsd: Number(estCostUsd.toFixed(4)), coverage,
+      });
+    }
+
     record({
       runKind: 'enrichment', status: 'ok', startedAt: runStartedAt,
       fetched: batch.length, written: enriched, failed, skipped: noDescription,
@@ -386,10 +520,15 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
         remainingCandidates: candidates.length - batch.length,
         inputTokens: totalInputTokens, outputTokens: totalOutputTokens,
         estCostUsd: Number(estCostUsd.toFixed(4)),
+        batchId, gatedOut, batchSource,
+        coverageGains: Object.fromEntries(gains),
       },
     });
 
-    return { enriched, failed, empty, skipped: candidates.length - batch.length, noDescription, totalInputTokens, totalOutputTokens };
+    return {
+      enriched, failed, empty, skipped: candidates.length - batch.length, noDescription,
+      totalInputTokens, totalOutputTokens, batchId, gatedOut, coverage,
+    };
   } finally {
     enrichmentInProgress = false;
   }
@@ -399,4 +538,12 @@ async function runEnrichment(db, anthropic, { batchSize = ENRICH_BATCH_SIZE, rec
 // THIS prompt. It is exported rather than copied into the harness deliberately: a copy would drift
 // and the harness would then measure a prompt the pipeline does not use — two sides, each
 // self-consistent, joined to nothing, which is the shape this codebase keeps finding.
+// computeContentHash now LIVES in enrichmentSelection.js, beside the predicate that uses it, and is
+// re-exported here so existing importers keep working. Re-exported rather than duplicated for the
+// reason buildPrompt is exported rather than copied: a second copy of the fingerprint function
+// would let the selector and its callers disagree about which rows have changed.
+// The selection/coverage/estimate helpers are deliberately NOT re-exported: they have exactly one
+// home, services/jobs/enrichmentSelection.js, and callers import them from there. Offering a second
+// path to them would recreate in the import graph the very thing this task removed from the
+// queries — two ways to reach one answer, which is how the two drift.
 export { runEnrichment, computeContentHash, decayedWeight, hasAnySignal, buildPrompt, DECAY_HALFLIFE_DAYS, ENRICH_BATCH_SIZE };

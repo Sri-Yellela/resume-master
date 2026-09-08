@@ -1,17 +1,45 @@
 # Next Work
 
-**Last reconciled:** 2026-09-07 — **AM3 landed S and T** (`docs/am3-board-restore-and-schema.md`).
-The local board is refilled and ρ reproduces from the table. Two more claims in this file were
-stale and are corrected below.
-**Baseline:** **2245** passing, 0 failing — unchanged by the restore. Migration high-water **100**,
-confirmed identical in production. Contract **v1.1.1**.
+**Last reconciled:** 2026-09-08 — **AM4 landed U** (`docs/am4-enrichment-control.md`). Enrichment now
+has a manual path, a freshness gate, export/import and batch provenance — and **task U's central
+premise turned out to be wrong**, which is corrected below rather than quietly worked around.
+**Baseline:** **2301** passing, 0 failing (was 2245; +56 from task U). Migration high-water **101**,
+byte-identical in both paths; **production is still at 100** until the next deploy. Contract **v1.1.1**.
 
-> ⛔ **THE CLEANUP BRAKE IS NOT DEPLOYED — measured 2026-09-07, task T.** `bd95d20` is in `main`
+✅ **THE REDEPLOY HAPPENED — 2026-09-08, and BOTH items it was blocking are now resolved.** Verified
+read-only against production the same day:
+
+- ✅ **THE CLEANUP BRAKE IS DEPLOYED.** `GET /api/apply/pending` now serves task Q's `approvalCap`
+  (`{limit:30, approvedLast24h:0, remaining:30}`), so the running build is at or past `abea2c9` and
+  therefore carries `bd95d20`. **1255 active postings are no longer one process start away from the
+  id-85 predicate.** This was described in this file as the highest-value open item; it is closed.
+- ✅ **PRODUCTION ENRICHMENT IS ALIVE.** `ENRICH_PROVIDER`/`ENRICH_MODEL` were deleted from Railway
+  and enrichment fell back to Haiku exactly as A2's verdict said. Its own `usage_events` bound the
+  outage precisely: **25 calls/day with 0 ok on 09-05, 09-06 and 09-07; 25 calls with 25 ok on
+  09-08**, `anthropic/claude-haiku-4-5-20251001`, zero rows with zero output tokens.
+
+⛔ **BUT TASK U IS NOT DEPLOYED, because it is not committed.** Production is still at migration
+high-water **100_form_field_mappings** (107 rows); `enrichment_batches`, `enrichment_batch_rows` and
+`scraped_jobs.enrichment_batch_id` are all absent. The task U work sits uncommitted in the working
+tree. Nothing about it reached production and none of its routes exist there.
+
+⚠ **AND A 200 DOES NOT MEAN A ROUTE EXISTS ON THIS APP.** `GET /api/admin/enrichment/coverage`
+returns **HTTP 200** against production — with the SPA's `index.html`, because the client catch-all
+answers 200 for any unknown path. A status-code-only probe "confirmed" a deployment that had not
+happened. Task T's `approvalCap` probe is the right shape and the reason it worked: **assert a
+specific JSON key, never a 200.**
+
+> ✅ **THE CLEANUP BRAKE IS DEPLOYED — re-measured 2026-09-08 after the redeploy.** The block below
+> is the 2026-09-07 finding and is **superseded**; it is kept because the probe technique is the
+> reusable part. `GET /api/apply/pending` now serves `approvalCap`, so the running build is at or
+> past `abea2c9` and carries `bd95d20`.
+>
+> ~~⛔ **THE CLEANUP BRAKE IS NOT DEPLOYED — measured 2026-09-07, task T.** `bd95d20` is in `main`
 > and is NOT on production's code path: `GET /api/apply/pending` does not serve task Q's
 > `approvalCap`, so the running build predates `abea2c9`, which was committed **49 seconds after**
 > the brake. **1248 live postings are one process start away from the id-85 predicate with nothing
 > counting the rows first.** This is a redeploy, not a code change, and it is the highest-value
-> open item in this file.
+> open item in this file.~~
 
 > ⚠ **This file has been the stale thing twice in three sessions.** AK2 picked up five tasks and
 > found three already done. AL1 picked up three and found two already done — B and C, both landed
@@ -53,10 +81,212 @@ notice — a stub answers for any model id, including a retired one. Re-pinned t
 | **S** | Restore the local board | desktop | — | ✅ **DONE 2026-09-07** — `docs/am3-board-restore-and-schema.md`; 1291 restored, 1296/1266 active, ρ 0.737 from board == fixture |
 | **A2** | Provider quality verdict | desktop | S ✅ + key ✅ | ✅ **DONE 2026-09-07** — `docs/am3-provider-verdict.md`; **KEEP HAIKU**, skillsHard Jaccard **30.5%** |
 | **T** | Is the brake deployed? + a real prod/dev schema check | desktop | — | ✅ **DONE 2026-09-07** — schemas match; ⛔ **THE BRAKE IS NOT DEPLOYED** — redeploy |
-| — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/PHASE_1_AUDIT.md` |
+| **U** | Enrichment control, export/import, batch provenance | desktop | — | ✅ **DONE 2026-09-08** — `docs/am4-enrichment-control.md`; **the 837 are NOT stale** — all were last seen within 3 days |
+| — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/IOS.md` |
 
 **Open: the iOS audit only** — and it needs a Mac. Everything else in this table is ✅ DONE; do not
 re-run it. Their prompt bodies are retained below for reference only.
+
+✅ **RESOLVED 2026-09-08 — the two variables were deleted and production redeployed.** Enrichment is
+back on Haiku and succeeding (25/25 on 09-08). The block below is the 2026-09-07 diagnosis, kept
+because the *shape* of the failure is the reusable part: the instrumentation was perfect and nobody
+was reading it, three days running.
+
+⛔ **AND THE BACKLOG STILL WILL NOT CLEAR ON ITS OWN — measured 2026-09-08.** Enrichment working is
+not the same as the backlog draining:
+
+```
+enrich_job calls per day, 14 days straight:   EXACTLY 25/day
+  09-05  25 calls,  0 ok  |  09-06  25 calls,  0 ok  |  09-07  25 calls,  0 ok   <- the outage
+  09-08  25 calls, 25 ok                                                          <- recovered
+backlog:  837 never-enriched (09-07)  ->  818 (09-08)      i.e. -19 in a day
+```
+
+`ENRICH_BATCH_SIZE` is **25** and there is **one** scheduled pass a day, so the drain rate is capped
+at 25 rows/day *minus* new arrivals. **818 rows is ~6 weeks at the current arrival rate (5-7/day),
+and it GROWS on any burst** — arrivals were 22, 28, 27 and 36/day on 09-01 to 09-04. Candidate
+selection is `ORDER BY discovered_at DESC`, **newest first**, so every burst pushes the oldest
+unenriched rows further back rather than nearer.
+
+They will not expire meanwhile — all 818 are re-sighted daily, which resets the 7-day window — so
+this is not data loss. It is **~6 weeks of 818 postings contributing nothing to `skills_json`**, and
+`skills_json` is what feeds `company_technographics` and the ATS scorer.
+
+**Task U's manual trigger is the fix and it is one deploy away:** 818 rows is ~$3.00 at the Haiku
+ceiling and clears in ~9 calls at the router's 100-row cap, inside a single expiry window.
+
+~~⛔ **PRODUCTION ENRICHMENT IS DEAD AND HAS BEEN FOR DAYS — measured 2026-09-07.** Railway carries
+`ENRICH_PROVIDER=groq` and `ENRICH_MODEL=llama-3.1-8b-instant`, a model Groq has retired, so every
+enrichment call 404s. Production's own `usage_events` recorded ten consecutive `success=0`,
+`in=0 out=0` rows at 08:00 today. **The instrumentation worked perfectly; nobody was reading it.**
+**837 of ~1248 active rows are unenriched.** Owner action: delete BOTH `ENRICH_PROVIDER` and
+`ENRICH_MODEL` from Railway so enrichment falls back to Haiku, per A2's verdict. Leaving
+`ENRICH_MODEL` alone still points at a dead model id.~~ **(done 2026-09-08)**
+
+⛔ **AND TASK U FOUND A SECOND, INDEPENDENT REASON TO DELETE BOTH — 2026-09-08.** Re-pinning to a
+*live* Groq model does not fix this. **Local `.env` carries `ENRICH_PROVIDER=groq` and
+`ENRICH_MODEL=openai/gpt-oss-20b`, and 10 of 10 real enrichment calls failed** with
+`Unexpected end of JSON input`: gpt-oss is a **reasoning** model and spends the entire
+`max_tokens: 500` output budget reasoning, returning truncated content. Output was exactly 500 tokens
+on every call.
+
+**`usage_events` recorded `success = 1` on all ten.** A2 found the null-extraction variant of this;
+this is the truncated-JSON variant, and the usage row looks clean either way — the instrumentation
+cannot tell "the call returned" from "the call returned something usable". The same 10 rows on Haiku:
+**10/10 enriched, nine columns climbed, $0.0251.** So local enrichment has been silently broken in
+this exact way for as long as those two variables have been set, and **`.env` needs the same fix
+Railway does.**
+
+⚠ **`max_tokens: 500` is a latent trap for any reasoning model.** Ample for Haiku (~263 output tokens
+per posting, measured) and not enough for a model that thinks first. Same class as A2's Groq TPM
+finding: a limit the code does not know exists.
+
+✅ **BUT THE 837 ARE WORTH ENRICHING, WHICH IS THE OPPOSITE OF WHAT TASK U ASSUMED.** Task U was
+written on "most of those 837 are STALE". Measured against production: **809 of 837 (96.7%) are
+14-60 days old by `discovered_at`, and 837 of 837 (100%) were last seen within THREE DAYS by
+`scraped_at`** — which `aggregator.js:319` re-stamps on every re-sight. They are long-lived *live*
+postings, not dead ones. **A `discovered_at` age gate would have refused 809 live postings and looked
+like it was working.** The gate that shipped keys on `scraped_at` instead. ~$3.07 ceiling for all 837,
+and the gain is `skills_json` **0 → 837**, which feeds `company_technographics` and the ATS scorer —
+`summary`, `normalized_title` and `experience_level` are already 837/837 from ingestion.
+
+---
+
+## TASK U — ✅ DONE 2026-09-08. DO NOT RE-RUN.
+
+`docs/am4-enrichment-control.md`. All four parts landed, +56 tests (baseline **2301**, 0 failing),
+migration **101_enrichment_batches** dual-path and byte-identical, `mapJobRow` unchanged and pinned.
+
+**What shipped:** `services/jobs/enrichmentSelection.js` (one candidate selector shared by the cron
+pass, the dry run, the manual trigger and the export, so they cannot disagree) ·
+`enrichmentBatches.js` (provenance + per-row before-image + exact revert) · `enrichmentTransfer.js`
+(JSONL export/import with all-or-nothing validation) · `routes/enrichment.js` (admin-gated, every
+spending/writing route **dry by default**) · `scripts/am4EnrichBacklogAudit.mjs` (the U1.1
+measurement, local + prod, read-only) · `scripts/am4Enrich.mjs` (CLI).
+
+**Four things worth not rediscovering:**
+
+1. ⛔ **The premise was wrong — the 837 are live, not stale.** See the corrected block above. The
+   freshness gate keys on `scraped_at` (last seen), defaulting to the **same 7 days** as
+   `runExpiredJobsCleanup`'s cutoff, so it means "never spend a token on a row the next cleanup pass
+   would delete". A test pins the two sevens to each other by reading server.js's source.
+2. ⛔ **The cheap SQL pre-filter over-counts candidates 250x on the restored board** (1252 vs 5):
+   task S's restore stamped one bulk `updated_at` onto 1247 rows whose text never changed. Pricing
+   the pre-filter would have quoted ~$2.10 to send nothing. Every surface reports both numbers.
+3. ⛔ **`enriched_at` must be excluded from any "did coverage climb?" verdict.** It gains by
+   definition on every successful write, so counting it made the "no column gained a value" warning
+   unable to ever fire — U1.4 would have measured nothing. Fills and *corrections* are also tracked
+   separately, because a correction moves no fill rate.
+4. ⛔ **A revert cannot null the enrichment columns.** COALESCE means enrichment only filled what was
+   NULL, and afterwards it is unknowable which columns those were — ingestion populated many of them.
+   Blanket-nulling is the 120-row bug pointed the other way. A per-row before-image is recorded
+   before the write and replayed verbatim; `enriched_at`/`content_hash` are restored too, which is
+   what returns the row to the candidate set.
+
+**Nothing was enriched in production and no production row was written** (every prod call was a
+read-only SELECT). The live local board got only migration 101; all real model calls ran against a
+copy in the scratchpad. The rollup brake was not touched.
+
+### original prompt (SUPERSEDED)
+
+```
+WHY THIS EXISTS — read before designing anything
+Enrichment has three triggers, all automatic, none controllable: the 04:00 ET cron, setImmediate
+after cacheJobs/cacheJoboFeed, and enrichJob.js's own row selection. There is NO manual path. That
+is how 837 of ~1248 active rows accumulated unenriched during the Groq 404 outage with nothing
+anyone could do short of waiting for tomorrow.
+
+THE OWNER'S REASON, which shapes the whole task: most of those 837 are STALE. This work is testing
+and extending the enrichment pipeline, not paying to enrich dead postings. So the first requirement
+is not "enrich them better" — it is "do not enrich the ones that do not matter." A manual trigger
+that carefully enriches 837 expired jobs still wastes the money, just deliberately.
+
+HONEST FRAMING OF THE EXPORT/IMPORT HALF: it does NOT save cost (whoever enriches externally still
+pays the tokens) and it does NOT reduce verification effort (data crossing a trust boundary needs
+MORE validation, not less). What it buys is CONTROL and SEPARABILITY: enrich a deliberate subset,
+re-import a corrected batch without re-running a model, keep the outsourcing door open. Build it for
+those reasons; do not claim the others.
+
+─── U1 — FRESHNESS GATE + MANUAL TRIGGER (first; it is the actual problem) ───
+
+1. MEASURE BEFORE BUILDING. Break the 837 down by age and state — count, active, posted_at nulls,
+   and min/max discovered_at, bucketed by age. Report how many are worth enriching AT ALL. If most
+   are stale, the answer to "clear the backlog" may be "do not" — say so rather than enriching them
+   dutifully.
+2. A FRESHNESS GATE in the candidate selector. Selection is currently
+   `enriched_at IS NULL OR content_hash IS NULL OR updated_at > enriched_at` with no age condition.
+   Add one, configurable, and state the default with reasoning.
+   ⛔ The restored board's rows were REBASED and all expire together ~7 days from the restore, so a
+   naive age gate will behave strangely on this dataset. Measure real discovered_at values.
+3. A MANUAL TRIGGER — bounded, admin-gated, with a DRY RUN reporting what WOULD be enriched and the
+   estimated cost without calling anything. Haiku is ~$0.0025/row, so 837 is ~$2.10. Show the number
+   before spending it.
+4. REPORT COVERAGE, NOT CALL COUNTS. A2 found a model returning HTTP 200, success:true, a clean
+   usage row and a NULL extraction 49 times in 50. `enriched: 837` proves nothing. Every run reports
+   per-column fill rates: skills_json, summary, experience_level, workplace_type, salary_*, visa.
+   ⛔ EXPECT THE VISA COLUMNS NEAR ZERO. 0 of 1261 postings mention H-1B, 36 mention sponsorship at
+   all. That is the source material, not a failure.
+5. PROVE IT ON 10 ROWS BEFORE 837. Enrichment has poisoned rows before — writing NULL over good
+   greenhouse values and stamping enriched_at so they never retried. COALESCE and
+   don't-stamp-on-empty are in, but this is the first real pass since the provider work touched
+   callModel. If coverage does not climb with the count, STOP.
+
+─── U2 — EXPORT ───
+
+1. JSONL, not CSV — CSV loses nested skills_json. Filterable by the same predicates the trigger
+   uses (unenriched, active, age, source) so the export set and the enrich set can be identical.
+2. SEPARATE SOURCE COLUMNS FROM ENRICHMENT COLUMNS in the output shape, so the importer's writable
+   surface is obvious to whoever fills the file in.
+3. Include job_id AND content_hash on every row. content_hash is what tells the importer whether the
+   posting changed since export — without it, stale enrichment silently overwrites a newer posting.
+4. Admin-gated. This is the entire board's text.
+
+─── U3 — IMPORT (most of the risk is here) ───
+
+⛔ EXTERNAL DATA MUST NEVER SILENTLY CLOBBER GOOD VALUES. That bug nulled 120 rows from the inside;
+from outside it is worse, because there is no code to inspect afterwards.
+
+1. Match on job_id. Unknown job_id is REJECTED, never inserted.
+2. VALIDATE EVERY COLUMN before writing anything: experience_level and workplace_type against the
+   shared option registry (do NOT accept free text); skills_json as a parseable array; salary_* as
+   integers; visa flags as 0/1/NULL and nothing else. A malformed batch fails AS A WHOLE, loudly,
+   naming the offending rows. Never partially apply.
+3. FILL NULLS ONLY unless an explicit --overwrite flag is passed. Default additive, matching
+   enrichJob's own COALESCE rule.
+4. STALENESS CHECK: if a row's current content_hash differs from the exported one, the posting
+   changed after export. Refuse by default and report — never apply enrichment derived from text
+   that no longer exists.
+5. DRY RUN ALWAYS FIRST: rows matched, rows that would be written, rows rejected and why, per
+   column. Then apply.
+6. Never write enriched_at for a row where nothing was filled. That is the poisoning shape — a row
+   marked done and empty leaves the candidate set forever.
+
+─── U4 — BATCH PROVENANCE ───
+
+The owner asked about splitting enrichment into its own table for separate manipulation and joins.
+Achievable but expensive: mapJobRow is a field whitelist feeding the board, the mobile contract, the
+ATS scorer and the KB rollups — every one would need the join, and this codebase's entire bug
+history is contract mismatches.
+
+RECOMMENDED CHEAPER VERSION — build this unless the owner asks for the full split:
+1. An enrichment_batches table: id, source (cron | manual | import), provider, model, started_at,
+   finished_at, rows_attempted, rows_written, per-column fill rates, cost.
+2. A batch id on each enriched row. Columns stay where they are, so NO read path changes.
+3. Gives provenance, the ability to identify and revert a bad batch, and a natural export/import
+   unit — without touching mapJobRow at all.
+4. Migration additive + dual-path, byte-identical in BOTH scripts/migrations.js and the server.js
+   MIGRATIONS array.
+If the owner does want the full split, report the cost first: every consumer of the enrichment
+columns and what each would need.
+
+─── VERIFY ───
+U1 age breakdown reported · dry run shows count and cost with no calls · 10 rows enriched with
+   per-column coverage climbing · a stated decision on the remaining backlog.
+U2 round-trips: export, change nothing, import, assert ZERO rows written.
+U3 malformed batch rejected whole · changed content_hash refused · --overwrite required to replace a
+   non-null · a batch filling nothing writes no enriched_at.
+U4 a batch is identifiable and revertible · mapJobRow unchanged, board response byte-identical.
+```
 
 ⛔ **The one thing that needs doing is not a task in this table: REDEPLOY.** Task R's cleanup brake
 is in `main` and is not on production's code path (task T). Nothing else in this file protects 1248

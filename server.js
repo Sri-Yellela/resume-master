@@ -24,6 +24,7 @@ import applyRoutes, { capturedAtsAtApply } from "./routes/apply.js";
 import { createAccountRouter } from "./routes/account.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createAdminDbRouter } from "./routes/adminDb.js";
+import { createEnrichmentRouter } from "./routes/enrichment.js";
 import { createDomainProfilesRouter } from "./routes/domainProfiles.js";
 import { createImportJobRouter } from "./routes/importJob.js";
 import { createCompanyKbRouter } from "./routes/companyKb.js";
@@ -3304,6 +3305,65 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON form_field_mappings(platform, status);
       `,
     },
+    {
+      // U4 — BATCH PROVENANCE FOR ENRICHMENT, and the cheap version of it on purpose.
+      //
+      // The owner asked whether enrichment should move into its own table so it could be
+      // manipulated and joined separately. It could, and the cost is the reason it does not:
+      // mapJobRow is a field whitelist feeding the board, the mobile contract, the ATS scorer and
+      // the KB rollups, and every one of those would need the join. This codebase's bug history is
+      // contract mismatches; buying provenance with four new read paths would be paying in the
+      // exact currency it keeps losing.
+      //
+      // So the enrichment columns STAY ON scraped_jobs and this migration adds only a pointer.
+      // NO READ PATH CHANGES — mapJobRow is untouched and the board response is byte-identical.
+      // What it buys: which run wrote a row, what that run cost, what it actually filled, and the
+      // ability to identify and revert one bad batch.
+      //
+      // enrichment_batch_rows IS WHY A REVERT IS SAFE. Knowing "batch 7 touched these 25 rows" is
+      // not enough to undo batch 7: enrichment writes through COALESCE, so it only ever filled
+      // columns that were NULL — but on any given row it is unknowable afterwards WHICH columns
+      // those were. Nulling every enrichment column would destroy values that came from ingestion
+      // and predate the batch entirely. That is the same shape as the bug that nulled 120 rows
+      // from the inside. So the before-image is recorded per row, and a revert restores it
+      // exactly rather than reconstructing it.
+      id: "101_enrichment_batches",
+      sql: `
+        CREATE TABLE IF NOT EXISTS enrichment_batches (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          source         TEXT    NOT NULL,
+          provider       TEXT,
+          model          TEXT,
+          started_at     INTEGER NOT NULL,
+          finished_at    INTEGER,
+          rows_attempted INTEGER NOT NULL DEFAULT 0,
+          rows_written   INTEGER NOT NULL DEFAULT 0,
+          rows_failed    INTEGER NOT NULL DEFAULT 0,
+          rows_empty     INTEGER NOT NULL DEFAULT 0,
+          input_tokens   INTEGER NOT NULL DEFAULT 0,
+          output_tokens  INTEGER NOT NULL DEFAULT 0,
+          est_cost_usd   REAL    NOT NULL DEFAULT 0,
+          coverage_json  TEXT,
+          reverted_at    INTEGER,
+          notes          TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_enrichment_batches_source
+          ON enrichment_batches(source, started_at);
+        CREATE TABLE IF NOT EXISTS enrichment_batch_rows (
+          batch_id    INTEGER NOT NULL REFERENCES enrichment_batches(id) ON DELETE CASCADE,
+          job_id      TEXT    NOT NULL,
+          before_json TEXT    NOT NULL,
+          filled_json TEXT,
+          written_at  INTEGER NOT NULL,
+          PRIMARY KEY (batch_id, job_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_enrichment_batch_rows_job
+          ON enrichment_batch_rows(job_id);
+        ALTER TABLE scraped_jobs ADD COLUMN enrichment_batch_id INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_enrichment_batch
+          ON scraped_jobs(enrichment_batch_id);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -6207,6 +6267,11 @@ app.get("/api/admin/users/:id/applications", requireAdmin, (req, res) => {
 // Analytics admin routes (usage tracking, limits, timeseries)
 app.use("/api/admin/analytics", createAdminRouter(db));
 app.use("/api/admin/db", createAdminDbRouter(db, { dbPath: DB_PATH, scrapeJobs }));
+// U1/U2/U3/U4 — the manual enrichment path: dry-run trigger, JSONL export/import, and batch
+// provenance. Enrichment previously had three triggers and all three were automatic, which is how
+// 837 of ~1252 active production rows sat unenriched through the Groq 404 outage with no way to
+// intervene. The router is admin-gated and every spending or writing route is DRY BY DEFAULT.
+app.use("/api/admin/enrichment", requireAdmin, createEnrichmentRouter(db, requireAdmin, { anthropic }));
 
 app.use(createAccountRouter({
   db,
