@@ -3364,6 +3364,93 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON scraped_jobs(enrichment_batch_id);
       `,
     },
+    {
+      // Task W. The lever seed in 056 has recorded `no_results` on every crawl since it landed —
+      // five consecutive runs, watermark never advanced, zero lever rows ever on the board — and
+      // the cause is neither a broken fetcher nor a missing company list. Lever's public postings
+      // API is alive (api.lever.co/v0/postings/spotify?mode=json → 200, 75 postings); all THREE
+      // seeded slugs return 404 {"ok":false,"error":"Document not found"} because those companies
+      // have since moved off Lever. The plugin swallows per-company failures, so three dead slugs
+      // are indistinguishable from one healthy empty board.
+      //
+      // Each company was re-probed across all three single-slug providers before being moved:
+      //   Mercury → greenhouse/mercury   200, 59 postings (40 survive classification)
+      //   Ramp    → ashby/ramp           200, 141 postings (96 survive classification)
+      //   Retool  → 404 on greenhouse, lever AND ashby alike — no board found.
+      //
+      // Retool is deactivated rather than deleted or guessed, exactly as 070 did for Rippling:
+      // active=0 is honoured by cacheJobs (`WHERE active = 1`), so it stops costing a failed
+      // request every crawl while the row survives as a record to reactivate once someone finds
+      // the real board. Guessing a slug is the failure this codebase has already learned from.
+      //
+      // Corrected forward rather than by editing 056, which has already run everywhere.
+      id: "102_fix_dead_lever_slugs",
+      sql: `
+        UPDATE company_ats_list
+           SET ats_type = 'greenhouse', ats_slug = 'mercury'
+         WHERE company = 'Mercury' AND ats_type = 'lever' AND ats_slug = 'mercury';
+
+        UPDATE company_ats_list
+           SET ats_type = 'ashby', ats_slug = 'ramp'
+         WHERE company = 'Ramp' AND ats_type = 'lever' AND ats_slug = 'ramp';
+
+        UPDATE company_ats_list
+           SET active = 0
+         WHERE company = 'Retool' AND ats_type = 'lever' AND ats_slug = 'retool';
+      `,
+    },
+    {
+      // Task W. Company lists for the ATS providers that were registered in aggregator.js, wired
+      // into cacheJobs and mapped in automationTier.js, but had never held a single company row —
+      // so every crawl recorded `skipped_unconfigured` and the board carried greenhouse and ashby
+      // only. The missing piece was the list, not the code.
+      //
+      // Every slug below was probed live and every number is measured, not estimated. `fetched`
+      // is what the provider's API returns; `kept` is what survives classifyJob's blue-collar
+      // eject and its roleKey===null drop inside cacheJobs — the only figure that becomes board
+      // rows. All ACTIVE entries carry 100% description coverage, checked on the normalized rows.
+      //
+      // ACTIVE — adds ~141 rows to a ~1266-active board:
+      //   lever/spotify       75 → 54     lever/matchgroup    74 → 54
+      //   lever/wealthfront   23 → 17     lever/openx          7 →  4    lever/tala   7 → 2
+      //   workable/blueground 20 →  2     workable/skroutz    12 →  2    workable/persado 3 → 2
+      //   recruitee/channable 12 →  3     recruitee/hygraph    2 →  1
+      //
+      // INACTIVE — seeded as a record with its measured reason, the Rippling/Retool pattern.
+      // Neither reason is "we did not check":
+      //   lever/veeva            899 → 596 — real, complete rows, but +47% board size from one
+      //                          company while enrichment drains at 25/day. Volume, not quality.
+      //   smartrecruiters/Ubisoft2   282 →  97  ⎫ 0% description coverage. SmartRecruiters' and
+      //   smartrecruiters/BoschGroup 900 → 334  ⎬ Workday's list endpoints carry no job text at
+      //   workday/adobe              300 → 217  ⎭ all — unlike Workable, whose text turned out to
+      //   need only `?details=true` on the same request, these two genuinely require a
+      //   per-posting detail fetch, and an N+1 of that size has no budget model in cacheJobs'
+      //   shared crawl loop. enrichJob.js skips description-less rows, so switching these on
+      //   would add 648 permanently unenrichable rows to the board. See docs/w1-ats-providers.md.
+      //
+      // Workday's ats_slug is "wdNumber|tenant|site" (sources/workday.js parseSlug), not a bare
+      // slug: a Workday board is per-tenant and needs three pieces of information, and the wd#
+      // subdomain varies per tenant. Stored in the same column by encoding rather than by adding
+      // Workday-only columns every other provider would leave null.
+      id: "103_seed_remaining_ats_companies",
+      sql: `
+        INSERT OR IGNORE INTO company_ats_list (company, ats_type, ats_slug, active, bucket_role) VALUES
+          ('Spotify',     'lever',          'spotify',                     1, 'software_engineer'),
+          ('Match Group', 'lever',          'matchgroup',                  1, 'software_engineer'),
+          ('Wealthfront', 'lever',          'wealthfront',                 1, 'software_engineer'),
+          ('OpenX',       'lever',          'openx',                       1, 'software_engineer'),
+          ('Tala',        'lever',          'tala',                        1, 'software_engineer'),
+          ('Blueground',  'workable',       'blueground',                  1, 'software_engineer'),
+          ('Skroutz',     'workable',       'skroutz',                     1, 'software_engineer'),
+          ('Persado',     'workable',       'persado',                     1, 'software_engineer'),
+          ('Channable',   'recruitee',      'channable',                   1, 'software_engineer'),
+          ('Hygraph',     'recruitee',      'hygraph',                     1, 'software_engineer'),
+          ('Veeva Systems','lever',         'veeva',                       0, 'software_engineer'),
+          ('Ubisoft',     'smartrecruiters','Ubisoft2',                    0, 'software_engineer'),
+          ('Bosch',       'smartrecruiters','BoschGroup',                  0, 'software_engineer'),
+          ('Adobe',       'workday',        '5|adobe|external_experienced',0, 'software_engineer');
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -6951,11 +7038,12 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Enter a job title or location to search.', jobs: [] });
     }
 
-    // Load ATS company lists for direct-ATS plugins
-    const atsCos = db.prepare("SELECT * FROM company_ats_list WHERE active = 1").all();
-    const _ghCompanies    = atsCos.filter(r => r.ats_type === 'greenhouse');
-    const _leverCompanies = atsCos.filter(r => r.ats_type === 'lever');
-    const _ashbyCompanies = atsCos.filter(r => r.ats_type === 'ashby');
+    // Load ATS company lists for direct-ATS plugins. Passed as ONE list, not pre-split per
+    // provider: searchJobs groups it by ats_type through the same helper cacheJobs uses, so
+    // every registered ATS source is polled. Splitting it here into three named parameters is
+    // what capped live search at greenhouse/lever/ashby while four other plugins sat wired but
+    // permanently empty-handed.
+    const _atsCompanies = db.prepare("SELECT * FROM company_ats_list WHERE active = 1").all();
 
     // `domain` and `experience` arrive as the UI's ENUM values (bucket_domain /
     // experience_level), and this endpoint folds them into a free-text aggregator query rather
@@ -6969,7 +7057,7 @@ app.post("/api/jobs/search", requireAuth, async (req, res) => {
       query: [query.trim(), asKeywords(domain), asKeywords(experience)].filter(Boolean).join(' '),
       location, contractType, remote, page, pageSize,
       sort: 'dateDesc',
-      _ghCompanies, _leverCompanies, _ashbyCompanies,
+      _atsCompanies,
     });
 
     // Attach user interaction state for returned jobs

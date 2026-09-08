@@ -66,6 +66,25 @@ if (inactiveSources.length) {
 // Canonical direct-ATS set lives in directApplyFilter.js — it's also the top dedup tier below.
 const ATS_SOURCE_NAMES = DIRECT_ATS_SOURCES;
 
+/**
+ * company_ats_list rows → { [sourceName]: rows[] }, the shape every ATS plugin's `_companies`
+ * expects. Both call sites (live searchJobs and the cacheJobs cron) group the SAME table the
+ * SAME way, so they share one function rather than each restating the source names — a second
+ * copy of that list is what let live search silently poll three of seven sources.
+ *
+ * Keyed off ATS_SOURCE_NAMES, so a provider added to directApplyFilter.js's DIRECT_ATS_SOURCES
+ * gets an entry here automatically. Unknown ats_type values are ignored rather than dropped
+ * silently into a bucket no plugin reads.
+ */
+function groupCompaniesByAtsType(rows) {
+  const map = Object.fromEntries([...ATS_SOURCE_NAMES].map(name => [name, []]));
+  for (const row of rows || []) {
+    const bucket = map[row?.ats_type];
+    if (bucket) bucket.push(row);
+  }
+  return map;
+}
+
 // Cross-source dedup priority tiers (highest wins as canonical):
 //   Tier 3 — direct ATS (company's own board): greenhouse/lever/ashby + future Tier-A additions.
 //   Tier 2 — managed provider (direct-apply but not a Tier-A ATS integration) — the default for
@@ -555,7 +574,7 @@ function reconcileFingerprint(db, job) {
  */
 async function searchJobs({ query = '', location = '', country = 'us', page = 1, pageSize = 10,
                             sort, employmentType, remote, maxResults = 0,
-                            _ghCompanies = [], _leverCompanies = [], _ashbyCompanies = [] } = {}) {
+                            _atsCompanies = [] } = {}) {
   const configured = SOURCES.filter(s => s.isConfigured());
 
   if (configured.length === 0) {
@@ -563,11 +582,13 @@ async function searchJobs({ query = '', location = '', country = 'us', page = 1,
     return { jobs: [], total: 0, page, pageSize, sources: [], attribution: [] };
   }
 
-  const companyMap = {
-    greenhouse: _ghCompanies,
-    lever:      _leverCompanies,
-    ashby:      _ashbyCompanies,
-  };
+  // Grouped by ats_type, NOT three named parameters. The old signature took _ghCompanies /
+  // _leverCompanies / _ashbyCompanies, so the four other registered ATS plugins could only ever
+  // be handed an empty list here however many companies company_ats_list held for them — live
+  // search was structurally capped at three of the seven sources, while cacheJobs (which builds
+  // its map by iterating ats_type) already covered all seven. Onboarding a source is now one
+  // decision — a company_ats_list row — instead of also editing this function and its caller.
+  const companyMap = groupCompaniesByAtsType(_atsCompanies);
 
   const results = await Promise.allSettled(
     configured.map(source =>
@@ -664,15 +685,7 @@ async function cacheJobs(db, anthropic = null) {
       return 0;
     }
 
-    const companyMap = {
-      greenhouse:      atsCos.filter(r => r.ats_type === 'greenhouse'),
-      lever:           atsCos.filter(r => r.ats_type === 'lever'),
-      ashby:           atsCos.filter(r => r.ats_type === 'ashby'),
-      workday:         atsCos.filter(r => r.ats_type === 'workday'),
-      smartrecruiters: atsCos.filter(r => r.ats_type === 'smartrecruiters'),
-      workable:        atsCos.filter(r => r.ats_type === 'workable'),
-      recruitee:       atsCos.filter(r => r.ats_type === 'recruitee'),
-    };
+    const companyMap = groupCompaniesByAtsType(atsCos);
 
     const atsSources = SOURCES.filter(s => s.isConfigured() && ATS_SOURCE_NAMES.has(s.name));
 
@@ -1279,5 +1292,6 @@ function getSourceStatus() {
 export {
   searchJobs, cacheJobs, cacheJoboFeed, getSourceStatus, reconcileFingerprint,
   decideJoboBackfillMode, resolveJoboIncrementalBatch, upsertCanonicalJob, fingerprintJob,
+  groupCompaniesByAtsType,
   JOBO_INCREMENTAL_BATCH_DEFAULT, JOBO_INCREMENTAL_BATCH_MAX,
 };

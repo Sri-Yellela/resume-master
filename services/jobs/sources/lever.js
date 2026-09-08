@@ -1,5 +1,8 @@
 import axios from 'axios';
 import { normalizeJob } from '../schema.js';
+import {
+  htmlToText, truncateWithTail, JOB_DESCRIPTION_MAX_LENGTH, JOB_DESCRIPTION_TAIL_LENGTH,
+} from '../htmlToText.js';
 
 const BASE_URL = 'https://api.lever.co/v0/postings';
 
@@ -26,7 +29,17 @@ function normalizeLeverPosting(posting, companyName) {
     location:       posting.categories?.location || posting.workplaceType || 'Remote',
     url:            posting.hostedUrl || posting.applyUrl,
     source:         'lever',
-    description:    posting.descriptionPlain?.slice(0, 3000) || null,
+    // A bare slice(0, 3000) is a prefix-only cut at a limit no other source uses. Both halves
+    // matter: compensation, benefits and EEO text sit at the BOTTOM of a posting, so dropping the
+    // tail drops exactly what enrichment is looking for — the reason ashby keeps a tail slice too.
+    // Falls back to the HTML body because Lever omits descriptionPlain on some postings (9 of 60
+    // on the Spotify board), which the old expression turned into a null description outright.
+    description:    posting.descriptionPlain
+      ? truncateWithTail(posting.descriptionPlain, JOB_DESCRIPTION_MAX_LENGTH, JOB_DESCRIPTION_TAIL_LENGTH)
+      : htmlToText(posting.description ?? posting.descriptionBodyHtml, {
+          maxLength: JOB_DESCRIPTION_MAX_LENGTH,
+          tailLength: JOB_DESCRIPTION_TAIL_LENGTH,
+        }),
     posted_at:      posting.createdAt ? new Date(posting.createdAt).toISOString() : null,
     remote:         posting.workplaceType === 'remote',
     _raw:           posting,

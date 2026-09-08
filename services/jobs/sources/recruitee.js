@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { normalizeJob } from '../schema.js';
+import { htmlToText, JOB_DESCRIPTION_MAX_LENGTH, JOB_DESCRIPTION_TAIL_LENGTH } from '../htmlToText.js';
 
 function queryWords(query) {
   return (query || '')
@@ -27,7 +28,14 @@ function normalizeRecruiteeJob(job, companyName) {
     location:        job.remote ? 'Remote' : loc,
     url:             job.careers_url,
     source:          'recruitee',
-    description:     job.description || job.requirements || null,
+    // Recruitee sends `description` and `requirements` as HTML fragments, not text — stored raw
+    // they reached the board and enrichJob.js still carrying `<p>`/`<span style=…>` markup, which
+    // every other source strips. Both halves are joined because Recruitee genuinely splits a
+    // posting across them: `requirements` routinely holds the qualifications enrichment reads.
+    description:     htmlToText([job.description, job.requirements].filter(Boolean).join('\n\n'), {
+      maxLength: JOB_DESCRIPTION_MAX_LENGTH,
+      tailLength: JOB_DESCRIPTION_TAIL_LENGTH,
+    }),
     posted_at:       job.published_at || job.created_at || null,
     remote:          !!job.remote,
     workplace_type:  workplaceType,
