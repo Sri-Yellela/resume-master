@@ -3076,4 +3076,39 @@ export const MIGRATIONS = [
           ('Adobe',       'workday',        '5|adobe|external_experienced',0, 'software_engineer');
       `,
     },
+    {
+      // Task AA. `salary_period` is a three-value vocabulary — annual | hourly | monthly — shared
+      // by the board filters, enrichJob's validation and the enrichment importer. 30 production
+      // rows held the string `peryearsalary`, every one of them from lever.
+      //
+      // Ingestion put it there. sources/lever.js passes `salaryRange.interval` through verbatim,
+      // Lever's own value is `per-year-salary`, and schema.js's normalizeSalaryPeriod stripped the
+      // separators and then FELL THROUGH TO `return p` — so an unrecognised token became the
+      // stored value instead of null. Fixed in the same commit as this migration; that stops new
+      // rows acquiring it, and this repairs the ones that already have.
+      //
+      // FOUND BY THE EXPORT -> IMPORT ROUND TRIP, which is the part worth keeping: posting a
+      // 500-row export straight back reported `wouldWrite 0` (correct — nothing changed) and
+      // `rejected 30`. The importer validates against the same vocabulary and is all-or-nothing by
+      // design, so these 30 rows made every export batch containing one of them un-importable. A
+      // silent ingestion defect was disabling the transfer path, and nothing else had noticed.
+      //
+      // Mapped rather than nulled where Lever's meaning is unambiguous: per-year-salary IS annual.
+      // The intervals with no honest target in the vocabulary (`per-week-salary`, `per-day-wage`,
+      // `one-time-payment`) are set to NULL instead of being rounded to the nearest allowed value,
+      // because inventing a period would misstate the pay. The final catch-all nulls anything
+      // outside the vocabulary, so this repairs values no one has seen yet as well.
+      id: "104_repair_salary_period_vocabulary",
+      sql: `
+        UPDATE scraped_jobs SET salary_period = 'annual'
+         WHERE salary_period IN ('peryearsalary', 'per-year-salary', 'per_year_salary');
+        UPDATE scraped_jobs SET salary_period = 'hourly'
+         WHERE salary_period IN ('perhourwage', 'per-hour-wage', 'per_hour_wage');
+        UPDATE scraped_jobs SET salary_period = 'monthly'
+         WHERE salary_period IN ('permonthsalary', 'per-month-salary', 'per_month_salary');
+        UPDATE scraped_jobs SET salary_period = NULL
+         WHERE salary_period IS NOT NULL
+           AND salary_period NOT IN ('annual', 'hourly', 'monthly');
+      `,
+    },
   ];

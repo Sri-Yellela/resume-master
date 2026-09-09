@@ -50,13 +50,31 @@ function normalizeWorkplaceType(explicit, remoteBool, title, location) {
   return null;
 }
 
+// ⛔ THE FALL-THROUGH RETURNS null, NOT THE INPUT. It used to `return p`, which put whatever
+// unrecognised token a provider sent straight into a column with a three-value vocabulary.
+// Found by task AA's export -> import round trip: lever passes `salaryRange.interval` verbatim
+// (sources/lever.js), Lever's own value is `per-year-salary`, stripping separators gives
+// `peryearsalary`, nothing matched, and 30 production rows ended up holding that string.
+//
+// It cost more than an odd-looking cell. The importer validates against the SAME shared
+// vocabulary, and it is all-or-nothing by design, so those 30 rows made every 500-row export
+// batch containing one of them un-importable — a data defect from ingestion disabling the
+// transfer path entirely. An unrecognised period is NO period: null is a value the board already
+// handles everywhere, and a bogus enum member is not.
+//
+// Lever's remaining intervals (`per-week-salary`, `per-day-wage`, `one-time-payment`) have no
+// honest target in annual|hourly|monthly and so become null rather than being rounded to the
+// nearest one — inventing a period would misstate the pay.
 function normalizeSalaryPeriod(period) {
   if (!period) return null;
-  const p = period.toLowerCase().replace(/[-_\s]+/g, '');
-  if (p === 'annual' || p === 'yearly' || p === 'year' || p === 'peryear') return 'annual';
-  if (p === 'hourly' || p === 'hour' || p === 'perhour') return 'hourly';
-  if (p === 'monthly' || p === 'month' || p === 'permonth') return 'monthly';
-  return p;
+  const p = String(period).toLowerCase().replace(/[-_\s]+/g, '');
+  if (p === 'annual' || p === 'yearly' || p === 'year' || p === 'peryear'
+      || p === 'peryearsalary')  return 'annual';
+  if (p === 'hourly' || p === 'hour' || p === 'perhour'
+      || p === 'perhourwage')    return 'hourly';
+  if (p === 'monthly' || p === 'month' || p === 'permonth'
+      || p === 'permonthsalary') return 'monthly';
+  return null;
 }
 
 function inferClearanceRequired(title) {
