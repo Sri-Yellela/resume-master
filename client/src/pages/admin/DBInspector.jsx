@@ -38,6 +38,10 @@ function Pill({ color, children }) {
       display:"inline-block", padding:"2px 8px", borderRadius:999,
       fontSize:10, fontWeight:700, background:color+"22", color,
       border:`1px solid ${color}44`, letterSpacing:"0.05em",
+      // nowrap because a wrapped label breaks OUT of the rounded background rather than growing
+      // it — two-line "LIVE SEARCH ONLY" and "NOT CONFIGURED" spilled over the pill's own border,
+      // which no assertion on the label text can see. Screenshot-only defect.
+      whiteSpace:"nowrap",
     }}>{children}</span>
   );
 }
@@ -257,6 +261,21 @@ const HEALTH_STYLE = {
   // Deliberately red, not grey: an unconfigured provider reading as a benign "off" is exactly
   // how Jobo went unnoticed for its entire lifetime.
   not_configured:  { color:"#dc2626", label:"NOT CONFIGURED" },
+  // A run that reported success and wrote nothing. Red, and ABOVE stale in the route's ordering,
+  // because production logged three consecutive days of `status: 'ok'` with `written: 0`.
+  wrote_nothing:   { color:"#dc2626", label:"WROTE NOTHING" },
+  // An ACTIVE company slug at zero rows — a dead slug, or postings dropped before the write.
+  no_rows_company: { color:"#dc2626", label:"NO ROWS" },
+  // Rows exist but none has a description, so enrichJob skips every one of them forever.
+  no_descriptions: { color:"#dc2626", label:"NO DESCRIPTIONS" },
+  // The one genuinely benign state, and the only grey one. adzuna and serpapi are configured,
+  // correct, and outside the crawl — reading them as NEVER RAN put two warnings on the panel that
+  // could never be cleared, and a permanent warning is one nobody reads.
+  live_search_only:{ color:"#6b7280", label:"LIVE SEARCH ONLY" },
+  // Also benign, and also grey. A company seeded after its source's last successful crawl has not
+  // had a chance to produce yet; migration 103 added ten at once, and calling those ten failures
+  // would have put ten false positives at the top of the alert list on the day it shipped.
+  awaiting_first_crawl:{ color:"#6b7280", label:"AWAITING CRAWL" },
 };
 
 // 0% must be visually alarming — skills_json sat at 0/684 while nothing surfaced it.
@@ -315,8 +334,16 @@ function ScrapeMonitorTab({ theme }) {
     return { label:"ENRICHED", color:"#16a34a" };
   };
 
-  const problemSources = (health?.sources || []).filter(s => s.health !== "ok");
+  // `live_search_only` is a healthy resting state, not a problem: adzuna and serpapi are
+  // configured and correct and the crawl never calls them. Counting them here put two permanent
+  // entries in "Sources Healthy" that could never be cleared, which is how a warning stops being
+  // read at all.
+  const problemSources = (health?.sources || [])
+    .filter(s => s.health !== "ok" && s.health !== "live_search_only");
   const worstCoverage  = (health?.enrichment?.coverage || []).filter(c => c.pct === 0).length;
+  const alerts         = health?.alerts || [];
+  const deadCompanies  = (health?.companies || [])
+    .filter(c => c.health !== "ok" && c.health !== "awaiting_first_crawl");
 
   return (
     <div>
@@ -340,6 +367,53 @@ function ScrapeMonitorTab({ theme }) {
           Refresh
         </button>
       </div>
+
+      {/*
+        ALERTS, ABOVE EVERYTHING. AC item 2: a configured source producing zero rows is "an ALERT
+        — not a quiet entry in a log nobody reads." Every one of this project's three silent
+        failures was already visible in a panel below this point; what was missing was anything
+        that made you look. So the findings come first, ranked, before the stat cards.
+
+        The healthy state renders too, deliberately. A panel that shows nothing when all is well
+        is indistinguishable from one that computed nothing — which is the state this whole route
+        was built to stop being possible.
+      */}
+      {health && (
+        alerts.length > 0 ? (
+          <div style={{ border:`1px solid #dc2626`, borderRadius:10, overflow:"hidden", marginBottom:16 }}>
+            <div style={{ padding:"8px 14px", background:"rgba(220,38,38,0.12)", fontSize:11,
+                          fontWeight:800, color:"#dc2626", textTransform:"uppercase",
+                          letterSpacing:0.4 }}>
+              {health.alertCounts.critical} critical
+              {health.alertCounts.warn > 0 && ` · ${health.alertCounts.warn} warning`}
+            </div>
+            {alerts.map((a, i) => (
+              <div key={`${a.kind}-${a.subject}-${i}`} style={{
+                display:"grid", gridTemplateColumns:"84px 190px 1fr", gap:10,
+                padding:"8px 14px", fontSize:11, alignItems:"baseline",
+                background: i % 2 ? ROW_STRIPE : "transparent",
+                borderTop:`1px solid ${theme.border}`,
+              }}>
+                <span style={{ fontWeight:800, fontSize:9, letterSpacing:0.5,
+                               textTransform:"uppercase",
+                               color: a.severity === "critical" ? "#dc2626" : "#d97706" }}>
+                  {a.severity}
+                </span>
+                <span style={{ fontFamily:"monospace", color:theme.text }}>
+                  <span style={{ color:theme.textMuted }}>{a.kind}</span> {a.subject}
+                </span>
+                <span style={{ color:theme.textMuted }}>{a.detail}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ border:`1px solid #16a34a`, borderRadius:10, marginBottom:16,
+                        padding:"8px 14px", fontSize:11, fontWeight:700, color:"#16a34a" }}>
+            No alerts — every configured source wrote rows, every active company produced them,
+            and no enrichment column is empty.
+          </div>
+        )
+      )}
 
       {health && (
         <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
@@ -372,7 +446,7 @@ function ScrapeMonitorTab({ theme }) {
       {health?.sources?.length > 0 && (
         <div style={{ border:`1px solid ${theme.border}`, borderRadius:10, overflow:"hidden", marginBottom:16 }}>
           <div style={{
-            display:"grid", gridTemplateColumns:"1.3fr 110px 70px 70px 80px 1fr 100px",
+            display:"grid", gridTemplateColumns:"1.1fr 148px 70px 70px 80px 1fr 100px",
             padding:"8px 14px", background:theme.surfaceHigh,
             fontSize:10, fontWeight:700, textTransform:"uppercase",
             letterSpacing:"0.06em", color:theme.textMuted,
@@ -384,7 +458,7 @@ function ScrapeMonitorTab({ theme }) {
             const hs = HEALTH_STYLE[s.health] || { color:theme.textMuted, label:s.health };
             return (
               <div key={s.name} style={{
-                display:"grid", gridTemplateColumns:"1.3fr 110px 70px 70px 80px 1fr 100px",
+                display:"grid", gridTemplateColumns:"1.1fr 148px 70px 70px 80px 1fr 100px",
                 padding:"9px 14px", fontSize:12, alignItems:"center",
                 borderTop:`1px solid ${theme.border}`,
                 background: i%2===0 ? "transparent" : ROW_STRIPE,
@@ -412,6 +486,58 @@ function ScrapeMonitorTab({ theme }) {
         </div>
       )}
 
+      {/*
+        PER-COMPANY-SLUG — the grain the source table cannot express, and the one that matters.
+        greenhouse reported OK with 621 active rows while SIX of its nine active slugs contributed
+        zero, because all seven plugins capped the CONCATENATION of their per-company fetches at
+        900 postings and severed everything past the cut. lever's three dead slugs only surfaced
+        because ALL of them died at once; one of three dying is invisible one row up.
+
+        Unhealthy first, then the rest, because the list is 23 rows and the interesting ones must
+        not need scrolling to find.
+      */}
+      {health?.companies?.length > 0 && (
+        <div style={{ border:`1px solid ${theme.border}`, borderRadius:10, overflow:"hidden", marginBottom:16 }}>
+          <div style={{
+            display:"grid", gridTemplateColumns:"1.1fr 1fr 130px 70px 70px 80px 90px",
+            padding:"8px 14px", background:theme.surfaceHigh,
+            fontSize:10, fontWeight:700, textTransform:"uppercase",
+            letterSpacing:"0.06em", color:theme.textMuted,
+          }}>
+            <div>Company</div><div>Source / Slug</div><div>Health</div><div>Active</div>
+            <div>No Desc</div><div>Enriched</div><div>Last Row</div>
+          </div>
+          {[...deadCompanies,
+            ...health.companies.filter(c => c.health === "ok" || c.health === "awaiting_first_crawl"),
+          ].map((c, i) => {
+            const key = c.health === "no_rows" ? "no_rows_company" : c.health;
+            const hs = HEALTH_STYLE[key] || { color:theme.textMuted, label:c.health };
+            return (
+              <div key={`${c.source}/${c.slug}`} style={{
+                display:"grid", gridTemplateColumns:"1.1fr 1fr 130px 70px 70px 80px 90px",
+                padding:"9px 14px", fontSize:12, alignItems:"center",
+                borderTop:`1px solid ${theme.border}`,
+                background: i%2===0 ? "transparent" : ROW_STRIPE,
+              }}>
+                <div style={{ fontWeight:600 }}>{c.company}</div>
+                <div style={{ fontFamily:"monospace", fontSize:11, color:theme.textMuted }}>
+                  {c.source}/{c.slug}
+                </div>
+                <div><Pill color={hs.color}>{hs.label}</Pill></div>
+                <div style={{ color: c.active === 0 ? "#dc2626" : theme.textMuted }}>{fmt(c.active)}</div>
+                <div style={{ color: c.noDescription > 0 ? "#dc2626" : theme.textMuted }}>
+                  {c.active ? fmt(c.noDescription) : "—"}
+                </div>
+                <div style={{ color:theme.textMuted }}>{c.active ? fmt(c.enriched) : "—"}</div>
+                <div style={{ color: c.health === "stale" ? "#d97706" : theme.textMuted, fontSize:11 }}>
+                  {ago(c.lastRowAt)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Enrichment coverage — the panel that would have made the outage obvious. */}
       {health?.enrichment?.coverage?.length > 0 && (
         <div style={{ border:`1px solid ${theme.border}`, borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
@@ -427,9 +553,18 @@ function ScrapeMonitorTab({ theme }) {
               <span style={{ fontWeight:700 }}>Last enrichment run: </span>
               {(() => {
                 const r = health.enrichment.recentRuns[0];
+                // `health` is derived from `written`, not from `status`, and BOTH are shown. The
+                // recorded status is evidence and must not be hidden — it is what read 'ok' for
+                // three consecutive days while every one of 25 rows failed.
+                const rs = HEALTH_STYLE[r.health]?.color
+                  ?? (r.health === "failed" ? "#dc2626" : r.health === "degraded" ? "#d97706" : "#16a34a");
                 return (
                   <span>
-                    {ago(r.started_at)} · {r.status} · {fmt(r.written)} enriched, {fmt(r.failed)} failed,
+                    {ago(r.started_at)} ·{" "}
+                    <span style={{ color:rs, fontWeight:700 }}>{String(r.health).toUpperCase()}</span>
+                    {r.health === "failed" && r.status === "ok" &&
+                      <span style={{ color:"#dc2626" }}> (recorded as “{r.status}”)</span>}
+                    {" "}· {fmt(r.written)} enriched, {fmt(r.failed)} failed,
                     {" "}{fmt(r.details?.noSignal ?? 0)} no-signal, {fmt(r.skipped)} skipped (no description)
                     {r.details?.remainingCandidates ? ` · ${fmt(r.details.remainingCandidates)} still queued` : ""}
                     {r.error_text && <span style={{ color:"#dc2626" }}> · {truncate(r.error_text, 80)}</span>}

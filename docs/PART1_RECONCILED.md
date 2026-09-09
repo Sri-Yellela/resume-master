@@ -369,7 +369,7 @@ The audit moves three things and removes two.
 | | Task | Why here |
 |---|---|---|
 | **1** | **§0 — the 900-posting cross-company cap** | A live 60%-loss defect on the only two sources producing rows. It also makes AA's and AE's inputs wrong: sizing an enrichment drain against a board that is missing ~1,550 postings per crawl is sizing against the wrong number. One-line-ish fix, then a crawl, then measure |
-| **2** | **AC residual only** | Do not rebuild. Two changes: alert on `written`/coverage not `status`, and report per-company-slug. Both are directly motivated by §0 and item 5.1, and per-slug health is what would have caught §0 on day one |
+| **2** | ~~**AC residual only**~~ **DONE** | See below. Not a rebuild — three additions to the existing route, plus the alert surface item 2 actually asked for |
 | 3 | **AA** — 20-row loop | Unchanged in substance, but run it *after* §0 so the batch-size and coverage numbers are measured against the real board |
 | 4 | **AE** — cron trickle | Its input is the backlog size, which §0 will change |
 | 5 | **Y** — SmartRecruiters / Workday | After AC, as the doc argues. Its N+1 budget model must account for the cap in §0 |
@@ -380,3 +380,110 @@ The audit moves three things and removes two.
 
 **Owner, unchanged:** extension upload · AF5 · the 196 synonym proposals · and the ~1,422 rewrites,
 which §4 now gives you evidence on rather than just a count.
+
+---
+
+# AC RESIDUAL — completed 2026-09-09
+
+Not a rebuild. `GET /api/admin/db/pipeline-health` already satisfied AC items 1, 3 and 4; these are
+the three things it did not do, each tied to a failure that really happened and really went unseen.
+
+## 1 · Health is derived from `written`, never from `status`
+
+Production's own enrichment history is the argument:
+
+```
+2026-09-08 08:00   ok   fetched 25   written 25   failed  0
+2026-09-07 08:00   ok   fetched 25   written  0   failed 25
+2026-09-06 08:00   ok   fetched 25   written  0   failed 25
+2026-09-05 08:00   ok   fetched 25   written  0   failed 25
+```
+
+Three consecutive days of total failure recorded as `ok`. Every status-keyed check read that as
+healthy, and `pipeline-health` classified on `lastRun?.status === "failed"`, so it did too.
+
+Now: a `source_sync` that fetched rows and wrote none is `wrote_nothing`, ordered **above** `stale`
+so a source failing every run cannot hide behind having gone quiet. Enrichment runs carry a derived
+`health` (`failed` / `degraded` / `idle` / `ok`) alongside the recorded `status`, and **both are
+shown** — the contradiction is the finding, so hiding either half would lose it.
+
+## 2 · Per-company-slug health, which is the grain that matters
+
+The source grain reported greenhouse `ok` with 621 active rows while six of its nine active slugs
+contributed zero. lever's three dead slugs surfaced only because *all* of them died at once; one of
+three dying is invisible one row up.
+
+`companies[]` now carries per-slug rows, description coverage, enrichment count and staleness,
+joined on `company` **scoped by `source = ats_type`**. That join is exact rather than fuzzy: every
+ATS plugin writes `company: companyName` straight from the `company_ats_list.company` value the
+crawl handed it, so both sides are the same string by construction. The scoping matters because
+jobo, adzuna and imported rows carry the *provider's* spelling and would otherwise vouch for a dead
+ATS slug by coincidence.
+
+Two false-positive suppressions, both load-bearing:
+
+- **`awaiting_first_crawl`** — a company seeded after its source's last successful crawl has not had
+  a chance to produce. Migration 103 added ten companies at 04:27Z while the last crawl ran at
+  08:00Z the previous day, so without this the panel would have opened with ten false criticals on
+  the day it shipped. An alert list with ten false positives is one that gets closed.
+- **per-company `stale` is suppressed when the source already reported it** — otherwise one finding
+  becomes N identical warnings and buries the per-company results. The per-company table still
+  shows each slug's own `staleHours`, which genuinely differ.
+
+Both suppressions are tested in the negative too: a long-standing company at zero rows still
+alerts, and a company gone quiet under a *healthy* source still alerts, because nothing else says
+it.
+
+## 3 · `live_search_only`, so "never ran" means "should have and did not"
+
+`adzuna` and `serpapi` are configured, correct, and outside the crawl — `cacheJobs` only iterates
+`DIRECT_ATS_SOURCES` plus jobo's feed. They read `never_ran`, a warning shape indistinguishable
+from Jobo's real months-long failure, and a permanent warning is one nobody reads. `inCrawl` is
+derived from `DIRECT_ATS_SOURCES` rather than restated, so a provider added there joins here too.
+
+`not_configured` also now says **which kind**: no API key versus no active companies. One shared
+sentence had been telling workday, smartrecruiters, workable and recruitee they were missing a key
+none of them uses.
+
+## 4 · The alert surface — what item 2 was actually asking for
+
+Everything above is a table, and a table is a log with better spacing. All three silent failures
+were already visible in a panel somebody had to think to open and then read a row of. So findings
+are collected into a ranked `alerts[]` with `alertCounts`, rendered **above the stat cards** in a
+red-bordered block. An empty list renders too, in green, and says so — a panel that shows nothing
+because it computed nothing is indistinguishable from one that checked and found nothing.
+
+Measured against the real local board: **33 alerts before the suppressions, 17 after**, and every
+survivor is a genuine finding — the six greenhouse zero-row slugs and `ashby/ramp` among them,
+which is §0's defect stated in the surface that should always have been reporting it.
+
+## Verification
+
+- `test/pipelineHealth.test.js` — 11 tests to 27. **All four behaviours proved to fail** against
+  the old logic by reverting the route: `wrote_nothing`, the stale ordering, enrichment health, and
+  `live_search_only` each failed and were restored.
+- One of those tests was **blind on its first pass**: the `live_search_only` test read
+  `configured: false` in a test process with no keys and `continue`d past every assertion, passing
+  identically against old and new code. It now sets the keys and asserts `configured === true`
+  first. That is this project's Shape 5 caught in the act of being written.
+- The fixture's `company_ats_list` was missing `active` and `bucket_role`, which made per-company
+  health 500 rather than degrade — an under-specified fixture reporting a route defect that did not
+  exist. Fixture corrected to the real shape; the route now also degrades to `[]` on any
+  per-company query failure, because this panel must never be the thing that breaks.
+- `scripts/acPipelineHealthUi.mjs` — new browser harness, 12 assertions, screenshots in
+  `data/screenshots/ac-residual/`. It found a layout defect on its first run that no string
+  assertion could see: `LIVE SEARCH ONLY` and `NOT CONFIGURED` wrapped to two lines and broke out
+  of the pill's rounded background.
+- **That guard was itself blind at first.** `getClientRects().length` is always 1 for an
+  `inline-block` pill however many lines sit inside it, and `scrollWidth > clientWidth` is always
+  false because the box grows in height. Both passed against the broken layout. A `Range` over the
+  text contents returns one rect per rendered line, which does work — verified in both directions.
+- Suite: **2,351 pass, 0 fail.** Client builds.
+
+## Still open in AC's own terms
+
+AC item 1 asks for field coverage "on those rows" — the rows a given run wrote. What is reported is
+coverage per company and per column over all active rows, which is the more useful aggregate but is
+not per-run. `pipeline_runs.details_json` records `{ companies: companies.length }` — the count
+attempted, never the per-company outcome — so per-run field coverage needs the writer to record it
+first. Worth doing when something needs it; nothing does today.

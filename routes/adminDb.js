@@ -4,6 +4,7 @@ import { Router } from "express";
 import fs from "fs";
 import { classifyTitle } from "../services/jobClassifier.js";
 import { getSourceStatus } from "../services/jobs/aggregator.js";
+import { DIRECT_ATS_SOURCES } from "../services/jobs/directApplyFilter.js";
 import { buildJobFilters } from "../services/jobs/jobQuery.js";
 import { deriveProfileFilters } from "../services/jobs/profileFilterBridge.js";
 import { profileTitleSql } from "../services/profileTitleFilter.js";
@@ -20,6 +21,13 @@ const ENRICHMENT_COLUMNS = [
   "description", "summary", "normalized_title", "experience_level", "workplace_type",
   "skills_json", "salary_max_usd", "is_h1b_sponsor", "requires_work_auth",
 ];
+
+// Sources the DAILY CRAWL actually calls: cacheJobs iterates the direct-ATS set, and jobo has its
+// own whole-catalogue feed via cacheJoboFeed. adzuna and serpapi are live-search-only — they are
+// configured and healthy and will never appear in a crawl, so "never ran" is not a finding about
+// them. DERIVED from DIRECT_ATS_SOURCES rather than restated, so a provider added there joins the
+// crawl here too and this cannot drift into the second copy of the list it exists to avoid.
+const CRAWL_SOURCES = new Set([...DIRECT_ATS_SOURCES, "jobo"]);
 
 export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
   const router = Router();
@@ -118,14 +126,32 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         const lastSuccess = lastOk.get(name) || null;
         const lastActivityAt = lastSuccess?.started_at ?? rows?.last_row_at ?? null;
 
+        // Does the DAILY CRAWL call this source at all? cacheJobs iterates ATS_SOURCE_NAMES plus
+        // jobo's separate feed; adzuna and serpapi are live-search-only and `cacheJobs` never
+        // touches them. Without this distinction both read `never_ran` — a warning shape
+        // indistinguishable from Jobo's real months-long failure, which is the confusion AC item 3
+        // exists to remove. "Never ran" must mean "should have run and did not".
+        const inCrawl = CRAWL_SOURCES.has(name);
+
+        // ⛔ CLASSIFY ON `written`, NOT ON `status`. Production recorded three consecutive days of
+        // enrichment as `status: 'ok'` with `written: 0, failed: 25` — a total outage that every
+        // status-keyed check reads as healthy. The same hole exists on the crawl side: a
+        // source_sync can succeed, fetch rows, and write none. A run that wrote nothing is not a
+        // successful run, whatever it called itself.
+        const wroteNothing = lastRun != null && Number(lastRun.written || 0) === 0;
+
         // Ordered by severity — the first matching condition wins, so a misconfiguration is
         // never masked by a downstream symptom.
         let health;
         if (!configured)                       health = "not_configured";
+        else if (!inCrawl)                     health = "live_search_only";
         else if (!rows && !lastRun)            health = "never_ran";
         else if (lastRun?.status === "failed") health = "failed";
         else if (lastRun?.status === "skipped_unconfigured") health = "not_configured";
         else if (lastRun?.status === "no_results")           health = "no_results";
+        // Ahead of `stale`, because a source writing nothing on every run is a harder failure
+        // than one that has merely gone quiet, and `stale` would mask it after 48h.
+        else if (wroteNothing)                 health = "wrote_nothing";
         else if (lastActivityAt && lastActivityAt < staleBefore) health = "stale";
         else if (!rows?.active)                health = "no_rows";
         else                                   health = "ok";
@@ -133,6 +159,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         return {
           name,
           configured,
+          inCrawl,
           companies:       companyCounts.get(name) ?? null,
           total:           rows?.total ?? 0,
           active:          rows?.active ?? 0,
@@ -152,6 +179,90 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         };
       });
 
+      // ── PER-COMPANY-SLUG HEALTH ─────────────────────────────────────────────────────────────
+      // The grain that matters, and the one this route did not have. Aggregating per SOURCE
+      // reported greenhouse `ok` with 621 active rows while SIX of its nine active slugs
+      // contributed zero — because all seven plugins capped the CONCATENATION of their
+      // per-company fetches at 900, so every company past the cut was silently severed
+      // (fixed in services/jobs/sources/base.js; this is the surface that would have caught it on
+      // day one). lever's three dead slugs only became visible because ALL of them died at once
+      // and the source fell to `no_results`; one of three dying is invisible at source grain.
+      //
+      // A dead slug and a capped-out slug are the same observation — zero rows — and both need to
+      // be loud. This does NOT try to tell them apart: it reports the zero, which is the fact,
+      // and leaves the cause to whoever reads it.
+      //
+      // JOINED ON `company`, WHICH IS EXACT HERE and is not the fuzzy company-name matching the
+      // LCA layer needs. Every ATS plugin writes `company: companyName` straight from the
+      // `company_ats_list.company` value the crawl passed it, so the two sides are the same
+      // string by construction. Scoped by `source = ats_type` as well, because jobo, adzuna and
+      // imported rows carry the PROVIDER's company spelling and would join by coincidence.
+      //
+      // WRAPPED, and the catch returns [] rather than propagating. This panel's entire job is to
+      // be the thing that notices, so it must never be the thing that breaks: a deployment whose
+      // company_ats_list predates the `active` column should lose the per-company table and keep
+      // every other signal, not 500 and take the whole health view with it. Same reasoning as
+      // recordPipelineRun's "observability must never be able to break ingestion".
+      // Last SUCCESSFUL crawl per source, so a company added since then can be told apart from one
+      // that has been crawled and produced nothing. Without this the panel screams about every
+      // newly-seeded company — migration 103 added ten at once — and an alert list with ten
+      // false positives in it is an alert list that gets closed.
+      const lastOkBySource = new Map([...lastOk].map(([k, v]) => [k, v.started_at]));
+
+      const companyHealth = (() => {
+      try {
+      return assertReadableTable("company_ats_list")
+        ? db.prepare(`
+            SELECT c.ats_type AS source, c.company, c.ats_slug AS slug, c.active, c.created_at,
+                   COUNT(s.job_id)                                     AS total,
+                   SUM(COALESCE(s.is_active, 0) = 1)                   AS active_rows,
+                   SUM(COALESCE(s.is_active, 0) = 1 AND (s.description IS NULL OR TRIM(s.description) = '')) AS no_description,
+                   SUM(COALESCE(s.is_active, 0) = 1 AND s.enriched_at IS NOT NULL)                           AS enriched,
+                   MAX(COALESCE(s.discovered_at, s.scraped_at, s.updated_at)) AS last_row_at
+            FROM company_ats_list c
+            LEFT JOIN scraped_jobs s
+                   ON s.company = c.company AND s.source = c.ats_type
+            WHERE c.active = 1
+            GROUP BY c.ats_type, c.company, c.ats_slug, c.active, c.created_at
+            ORDER BY c.ats_type, active_rows DESC, c.company
+          `).all().map(r => {
+            const activeRows = r.active_rows || 0;
+            const noDesc = r.no_description || 0;
+            const lastCrawlOk = lastOkBySource.get(r.source) ?? null;
+            // A company seeded AFTER its source's last successful crawl has not yet had a chance
+            // to produce anything, so zero rows is the expected state and not a finding. This is
+            // exactly the position the ten companies migration 103 added are in right now: the
+            // migration landed 2026-09-09 04:27Z and the last crawl ran 2026-09-08 08:00Z, twenty
+            // hours EARLIER. Reporting those as failures would be reporting the calendar.
+            const awaitingFirstCrawl = activeRows === 0 && r.created_at != null
+              && (lastCrawlOk == null || r.created_at > lastCrawlOk);
+            let health;
+            if (awaitingFirstCrawl)                      health = "awaiting_first_crawl";
+            // An ACTIVE company with no rows is the alert. It is configured, so somebody meant it
+            // to produce; producing nothing is a failure regardless of what the source says.
+            else if (activeRows === 0)                   health = "no_rows";
+            // 0% descriptions is AC item 2's other disqualifier: enrichJob.js skips
+            // description-less rows, so these can NEVER be enriched and inflate every coverage
+            // metric they enter. This is why Ubisoft, Bosch and Adobe were seeded inactive.
+            else if (noDesc === activeRows)              health = "no_descriptions";
+            else if (r.last_row_at && r.last_row_at < staleBefore) health = "stale";
+            else                                         health = "ok";
+            return {
+              source: r.source, company: r.company, slug: r.slug,
+              total: r.total || 0, active: activeRows, noDescription: noDesc,
+              enriched: r.enriched || 0, lastRowAt: r.last_row_at ?? null,
+              addedAt: r.created_at ?? null,
+              staleHours: r.last_row_at ? Math.floor((now - r.last_row_at) / 3600) : null,
+              health,
+            };
+          })
+        : [];
+      } catch (e) {
+        console.warn("[pipeline-health] per-company health unavailable:", e.message);
+        return [];
+      }
+      })();
+
       // Enrichment coverage: % non-null per column over ACTIVE rows. 0% must be alarming, which
       // is the whole point — skills_json sat at 0/684 while the admin panel looked healthy.
       const activeTotal = db.prepare(`SELECT COUNT(*) n FROM scraped_jobs WHERE is_active = 1`).get().n;
@@ -169,12 +280,30 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         };
       });
 
+      // ⛔ `health` HERE IS DERIVED FROM `written`, NOT FROM `status`. Production's own history is
+      // the argument: 2026-09-05, -06 and -07 each recorded `status: 'ok'` with
+      // `fetched 25, written 0, failed 25` — the retired-model-id outage, logged perfectly and
+      // read as healthy by everything that looked at `status`. Three days invisible. A run that
+      // attempted work and wrote none of it is `failed`, whatever it called itself.
       const enrichmentRuns = hasRunLog
         ? db.prepare(`
             SELECT status, started_at, fetched, written, failed, skipped, error_text, details_json
             FROM pipeline_runs WHERE run_kind = 'enrichment'
             ORDER BY started_at DESC LIMIT 10
-          `).all().map(r => ({ ...r, details: r.details_json ? JSON.parse(r.details_json) : null }))
+          `).all().map(r => {
+            const written = Number(r.written || 0);
+            const fetched = Number(r.fetched || 0);
+            const failed  = Number(r.failed || 0);
+            let health;
+            if (fetched > 0 && written === 0) health = "failed";
+            else if (failed > 0)              health = "degraded";
+            else if (fetched === 0)           health = "idle";
+            else                              health = "ok";
+            return {
+              ...r, health,
+              details: r.details_json ? JSON.parse(r.details_json) : null,
+            };
+          })
         : [];
 
       // Dedup: a sources_seen array with more than one entry means at least one duplicate was
@@ -186,11 +315,97 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         FROM scraped_jobs WHERE is_active = 1
       `).get();
 
+      // ── ALERTS ──────────────────────────────────────────────────────────────────────────────
+      // AC item 2: "a configured source producing zero rows, or rows with 0% descriptions, is an
+      // ALERT — not a quiet entry in a log nobody reads." Everything above is a table, and a
+      // table is a log with better spacing: each of this project's three silent failures was
+      // sitting in plain view in a panel somebody had to think to open and then read a row of.
+      //
+      // So the findings are collected HERE, pre-ranked, as a first-class part of the payload. An
+      // empty array is the healthy answer and is meaningful — it says the checks ran and found
+      // nothing, which is different from a panel that shows nothing because it computed nothing.
+      const alerts = [];
+      const push = (severity, kind, subject, detail) => alerts.push({ severity, kind, subject, detail });
+
+      const unhealthySources = new Set();
+      for (const s of sources) {
+        if (s.health === "ok" || s.health === "live_search_only") continue;
+        unhealthySources.add(s.name);
+        // `not_configured` is reached two different ways and they need different words. A source
+        // whose isConfigured() is false is missing a KEY; a source whose last run recorded
+        // `skipped_unconfigured` has the key and no active COMPANIES. Collapsing both into one
+        // sentence told four sources they were missing a key they do not use — and AC item 3 is
+        // specifically about not blurring configuration states together.
+        const notConfiguredDetail = !s.configured
+          ? "the provider reports itself unconfigured — an API key is missing from the environment"
+          : "the crawl skipped it: no active companies are configured for this source";
+        const detail = {
+          not_configured: notConfiguredDetail,
+          never_ran:      "in the daily crawl and has never produced a run or a row",
+          failed:         `last run failed: ${s.lastRun?.error || "no error recorded"}`,
+          no_results:     "ran and returned nothing — every configured slug came back empty",
+          wrote_nothing:  `last run reported '${s.lastRun?.status}' but wrote 0 rows from ${s.lastRun?.fetched ?? 0} fetched`,
+          stale:          `no successful run in ${s.staleHours}h (threshold ${STALE_AFTER_HOURS}h)`,
+          no_rows:        "has run but holds no active rows",
+        }[s.health] || s.health;
+        push(s.health === "stale" ? "warn" : "critical", "source", s.name, detail);
+      }
+
+      // Per-slug, and deliberately AFTER the source loop: a source can read `ok` while individual
+      // companies inside it are dead, which is the failure the source grain cannot express.
+      for (const c of companyHealth) {
+        if (c.health === "ok" || c.health === "awaiting_first_crawl") continue;
+        // A stale SOURCE makes every company under it stale, which produced one identical warning
+        // per slug and buried the findings that were actually per-company. The source alert
+        // already says it, and the per-company table still carries each slug's own staleHours —
+        // which do differ and are worth reading. Suppressed here, not computed away.
+        if (c.health === "stale" && unhealthySources.has(c.source)) continue;
+        const detail = {
+          no_rows:         "active company, zero rows on the board — a dead slug, or its postings were dropped before they were written",
+          no_descriptions: `all ${c.active} rows have no description, so none of them can ever be enriched`,
+          stale:           `no row seen in ${c.staleHours}h (threshold ${STALE_AFTER_HOURS}h)`,
+        }[c.health] || c.health;
+        push(c.health === "stale" ? "warn" : "critical", "company",
+          `${c.source}/${c.slug}`, `${c.company}: ${detail}`);
+      }
+
+      // Enrichment: the column at 0% is the shape that hid the original outage, and the run that
+      // wrote nothing is the shape that hid the model-id outage. Both are alerts, not cells.
+      for (const c of coverage) {
+        if (c.pct === 0 && c.total > 0) {
+          push("critical", "coverage", c.column, `0% of ${c.total} active rows have a value`);
+        }
+      }
+      const lastEnrichment = enrichmentRuns[0];
+      if (lastEnrichment?.health === "failed") {
+        push("critical", "enrichment", "last run",
+          `recorded status '${lastEnrichment.status}' but wrote 0 of ${lastEnrichment.fetched} fetched` +
+          (lastEnrichment.error_text ? ` — ${String(lastEnrichment.error_text).slice(0, 160)}` : ""));
+      }
+      const consecutiveFailed = (() => {
+        let n = 0;
+        for (const r of enrichmentRuns) { if (r.health !== "failed") break; n++; }
+        return n;
+      })();
+      if (consecutiveFailed > 1) {
+        push("critical", "enrichment", "consecutive failures",
+          `the last ${consecutiveFailed} enrichment runs wrote nothing — this is the shape that ran for three days undetected`);
+      }
+
+      const SEVERITY_ORDER = { critical: 0, warn: 1 };
+      alerts.sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
+
       res.json({
         generatedAt: now,
         staleAfterHours: STALE_AFTER_HOURS,
         hasRunLog,
+        alerts,
+        alertCounts: {
+          critical: alerts.filter(a => a.severity === "critical").length,
+          warn:     alerts.filter(a => a.severity === "warn").length,
+        },
         sources,
+        companies: companyHealth,
         enrichment: {
           activeTotal,
           coverage,
