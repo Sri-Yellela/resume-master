@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { normalizeJob } from '../schema.js';
+import { collectCompanyJobs } from './base.js';
 
 // Workday's public career-site JSON API lives at a tenant- AND site-specific path, and the
 // "wd#" subdomain number varies per tenant (wd1, wd3, wd5, ...) — unlike Greenhouse/Lever/
@@ -101,7 +102,9 @@ const workdayPlugin = {
   // but intentionally unused here.
   async search({ query, _companies = [], pageSize = 50 }) {
     const words = queryWords(query);
-    const MAX = pageSize * 3;
+    // PER COMPANY, not across the concatenation. This was `MAX` applied to the flattened array,
+    // which silently dropped every company past the 900th posting — see collectCompanyJobs.
+    const PER_COMPANY_MAX = pageSize * 3;
 
     const results = await Promise.allSettled(
       _companies.map(({ ats_slug, company }) =>
@@ -112,9 +115,7 @@ const workdayPlugin = {
       )
     );
 
-    const jobs = results
-      .flatMap(r => (r.status === 'fulfilled' ? r.value : []))
-      .slice(0, MAX);
+    const jobs = collectCompanyJobs(results, PER_COMPANY_MAX);
 
     return {
       jobs,

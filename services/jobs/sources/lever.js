@@ -3,6 +3,7 @@ import { normalizeJob } from '../schema.js';
 import {
   htmlToText, truncateWithTail, JOB_DESCRIPTION_MAX_LENGTH, JOB_DESCRIPTION_TAIL_LENGTH,
 } from '../htmlToText.js';
+import { collectCompanyJobs } from './base.js';
 
 const BASE_URL = 'https://api.lever.co/v0/postings';
 
@@ -69,7 +70,9 @@ const leverPlugin = {
 
   async search({ query, _companies = [], pageSize = 50 }) {
     const words = queryWords(query);
-    const MAX = pageSize * 3;
+    // PER COMPANY, not across the concatenation. This was `MAX` applied to the flattened array,
+    // which silently dropped every company past the 900th posting — see collectCompanyJobs.
+    const PER_COMPANY_MAX = pageSize * 3;
 
     const results = await Promise.allSettled(
       _companies.map(({ ats_slug, company }) =>
@@ -80,9 +83,7 @@ const leverPlugin = {
       )
     );
 
-    const jobs = results
-      .flatMap(r => (r.status === 'fulfilled' ? r.value : []))
-      .slice(0, MAX);
+    const jobs = collectCompanyJobs(results, PER_COMPANY_MAX);
 
     return {
       jobs,
