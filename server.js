@@ -42,6 +42,7 @@ import { callModel, SYSTEM_USER_ID } from "./services/modelCall.js";
 import { recordAtsOutcome } from "./services/usageTracker.js";
 import { drainInto as drainTrackingFailureSink } from "./services/trackingFailureSink.js";
 import { MODEL_SONNET, MODEL_HAIKU } from "./shared/anthropicModels.js";
+import { assertPinnedModelsLive } from "./services/modelCatalogue.js";
 import { classifyGenerationError } from "./shared/failureAttribution.js";
 import { checkLimit } from "./services/limitEnforcer.js";
 import { loadAllPrompts, assemblePrompt } from "./services/promptAssembler.js";
@@ -3618,6 +3619,34 @@ if (!ANTHROPIC_KEY) {
   console.error("[startup] WARNING: ANTHROPIC_KEY is not set in .env — PDF parsing and resume generation will fail.");
 }
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
+
+// ── PINNED-MODEL LIVENESS (task AD, requirement 2) ────────────────────────────────────────────
+//
+// Ask each provider whether the model we are pinned to still exists. This file's own history is
+// the argument: a Haiku bump updated 8 of ~20 inline model literals and left Sonnet on
+// `claude-sonnet-4-20250514`, which Anthropic retired on 2026-06-15 — every Sonnet call 404'd and
+// four features degraded silently for about two months. Nothing asked, so nothing knew.
+//
+// ⛔ IT REFUSES TO START RATHER THAN SUBSTITUTING. A model picked for you is a model whose
+// behaviour nobody checked; the last automatic replacement on this project returned HTTP 200 with
+// an empty extraction 49 times in 50. See services/modelCatalogue.js.
+//
+// Deliberately NOT awaited: the probe is a network call and the server must not refuse to serve
+// static pages because a catalogue endpoint was slow. It runs alongside boot and exits the process
+// on a definite GONE verdict — which is the "refuse to start" the requirement asks for, a second
+// later. An UNREACHABLE verdict warns and is not fatal: that is evidence about the network, not
+// about the catalogue, and converting a blip into an outage is worse than the problem.
+assertPinnedModelsLive({
+  anthropic: ANTHROPIC_KEY ? anthropic : null,
+  anthropicModels: [MODEL_HAIKU, MODEL_SONNET],
+  env: process.env,
+}).catch(err => {
+  if (err?.code === "PINNED_MODEL_GONE") {
+    console.error("\n" + err.message + "\n");
+    process.exit(1);
+  }
+  console.error("[models] liveness check itself failed (not fatal):", err?.message || err);
+});
 
 // Warm job cache from ATS sources (non-blocking — runs after server starts)
 {

@@ -93,12 +93,37 @@ export const PROVIDERS = Object.freeze({
     // verdict has to say so.
     defaultModel: "openai/gpt-oss-20b",
     models: Object.freeze(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]),
-    // RATE LIMITS ARE THE CONSTRAINT HERE, NOT PRICE. 30 req/min is the binding one: enrichment
-    // paces at 25 per batch / 250ms, which is 240 req/min — eight times over. The transport
-    // throttles to this rather than leaving it to each caller, so a future PUBLIC call site
-    // inherits it instead of rediscovering it as a wall of 429s.
+    // ⛔ THESE MODELS REASON BEFORE THEY ANSWER, AND max_tokens BOUNDS BOTH (task AD, item 3).
+    //
+    // A reasoning model spends output tokens on its own reasoning first. Cap the total low enough
+    // and the budget is gone before the answer starts — so the call returns HTTP 200, success=1, a
+    // clean usage row, and NOTHING USABLE. Measured twice on this pipeline, both at exactly
+    // max_tokens 500: an empty extraction 49 times in 50, and 10 of 10 truncated at precisely 500
+    // output tokens with success=1 on every one.
+    //
+    // That is indistinguishable from "this posting says nothing" at every layer above it, which is
+    // why it is a hard refusal in the transport rather than a comment somewhere. enrichJob sends
+    // max_tokens: 500 today and is correct to — it runs on Haiku, which does not reason — so the
+    // trap is armed and waiting for the first person to set ENRICH_PROVIDER=groq.
+    reasoningModels: Object.freeze(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]),
+    minOutputTokens: 2_048,
+    // RATE LIMITS ARE THE CONSTRAINT HERE, NOT PRICE. The transport throttles to these rather than
+    // leaving it to each caller, so a future PUBLIC call site inherits them instead of
+    // rediscovering them as a wall of 429s.
     requestsPerMinute: 30,
     requestsPerDay: 14_400,
+    // ⛔ 30 req/min IS NOT THE BINDING LIMIT — TOKENS ARE, AND THIS FILE SAID OTHERWISE FOR WEEKS.
+    //
+    // Measured against the live free-tier key: the account is cut off at 8,000 TOKENS per minute
+    // long before it reaches 30 requests. An enrichment call is ~900 input + up to 500 output, so
+    // the real ceiling is about SIX calls a minute, not thirty — and a pass of 847 rows takes
+    // hours rather than half an hour. Pacing on requests alone satisfies a limit that never binds
+    // while walking straight into the one that does, which reads as 429s from a throttle that
+    // believes it is well under budget.
+    //
+    // The two axes are both enforced; whichever runs out first wins. See throttle() in
+    // services/providerTransport.js.
+    tokensPerMinute: 8_000,
   }),
   [PROVIDER.GOOGLE]: Object.freeze({
     id: PROVIDER.GOOGLE,

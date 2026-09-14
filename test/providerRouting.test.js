@@ -267,7 +267,7 @@ test("a routed call records the PROVIDER and the model actually called", async (
       anthropic: fakeAnthropic(), db, purpose: "enrich_job", userId: SYSTEM_USER_ID,
       dataClass: DATA_CLASS.PUBLIC,
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 500,
+      max_tokens: 4096,   // above the reasoning floor — see assertOutputBudget
       messages: [{ role: "user", content: "a job advert" }],
     });
     // The Anthropic-shaped result every caller already destructures.
@@ -319,7 +319,7 @@ test("the OpenAI-compatible adapter returns an ANTHROPIC-shaped message", async 
   }));
   const msg = await callProvider({
     provider: PROVIDER.GROQ, apiKey: "gsk_test", fetchImpl: impl,
-    params: { model: "openai/gpt-oss-20b", max_tokens: 100,
+    params: { model: "openai/gpt-oss-20b", max_tokens: 4096,
               messages: [{ role: "user", content: "hi" }], system: "be terse" },
   });
   // `content` MUST be an array of blocks: every caller does `.content.map(b => b.text || '')`.
