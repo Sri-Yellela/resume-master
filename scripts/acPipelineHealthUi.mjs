@@ -27,9 +27,11 @@ import puppeteer from "puppeteer-core";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = path.join(ROOT, "data", "screenshots", "ac-residual");
-// Its own port. abPanelUi holds 5199 and --strictPort means a collision is a hard failure rather
-// than a silent move to another port that the banner scrape would then miss.
-const PORT = 5207;
+// Its own port, and the harnesses keep a register of who owns what because every one of them uses
+// --strictPort: a collision is a hard failure rather than a silent move to a port the banner scrape
+// would then miss. ak2BandSurfaces 5207 · abPanelUi/aj2BoardCursor 5199 · ag1/ae5 5198 ·
+// ag2/ah3 5197 · ah4 5196 · ah5 5195 · ah6 5194. This took 5207 first and collided with ak2.
+const PORT = 5206;
 
 let pass = 0, fail = 0;
 const ok   = (m) => { pass++; console.log("PASS " + m); };

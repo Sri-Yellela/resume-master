@@ -30,6 +30,10 @@ import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
 import { getKnownLogoUrl, LOGO_HOST } from '../shared/companyLogos.js';
+// The badge's vocabulary comes from the module JobCard renders from, never restated here — a
+// hand-written copy of it is what made this harness report a working board as broken. See the ATS
+// badge check below.
+import { ATS_BAND_LABELS, atsBandFor, atsBandLabel } from '../shared/atsBands.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // A feed-supplied logo, deliberately NOT on LOGO_HOST — see the Shopify fixture. Stubbed for the
@@ -314,9 +318,68 @@ async function main() {
     ]) {
       check(`AE5  ${what} is still on the row`, !!ok, strip?.map(b => b.title).join(' | ') || '');
     }
+    // ── THE ATS BADGE (task Z) ──────────────────────────────────────────────────────────────────
+    //
+    // ⛔ THIS CHECK WAS WRONG FOR EIGHT DAYS AND REPORTED A HEALTHY BOARD AS BROKEN.
+    //
+    // It used to be `['the ATS badge', /\b7[0-9]\b/]` — a search of document.body.innerText for a
+    // raw two-digit number, written at ed13f45 (2026-08-23) when the badge rendered `ATS {score}`.
+    // 7494289 (2026-08-31) deliberately replaced the number with a BAND label, and
+    // scripts/ak2BandSurfaces.mjs asserts in as many words that "the raw number is nowhere on the
+    // board". So the two harnesses contradicted each other and this one lost: it reported
+    // "the ATS badge survived — MISSING" against a board that was rendering the badge correctly,
+    // and task X filed it as a regression (task Z) on that evidence.
+    //
+    // The board never lost its ATS badge. This harness lost track of what the badge says.
+    //
+    // WHAT HAS TO BE TRUE FOR A BROWSER CHECK TO CATCH A MISSING BADGE — the generalisable part,
+    // and the reason this is not simply a new regex:
+    //
+    //   1. THE EXPECTATION IS DERIVED, NOT RESTATED. The label comes from atsBandLabel() in
+    //      shared/atsBands.js, the same module JobCard renders from. A hand-written literal is a
+    //      second copy of a product decision with nothing tying it to the first, which is exactly
+    //      how this went stale. When the vocabulary changes again, this follows it.
+    //   2. IT LOOKS FOR AN ELEMENT, NOT A SUBSTRING. `body.innerText.includes('Strong')` would
+    //      pass on the word appearing in a description, a tooltip, or another panel entirely. The
+    //      badge has to be found INSIDE the card for a known listing.
+    //   3. IT CHECKS THE VALUE, NOT THE PRESENCE. A chip reading the wrong band is a worse defect
+    //      than a missing one, and "rendered" cannot distinguish itself from "rendered correctly"
+    //      unless the assertion knows which band THIS row's score should produce.
+    //
+    // That is the same repair the logo stubs got: derive the fixture from the constant the product
+    // uses, so the check cannot describe a product that no longer exists.
+    const badges = await page.evaluate((labels) => {
+      const known = new Set(labels);
+      const out = [];
+      for (const el of document.querySelectorAll('div')) {
+        const t = (el.innerText || '').trim();
+        // The card for a specific listing, identified the same way the control-strip check does.
+        if (!/Software Engineer \d/.test(t)) continue;
+        if (!el.parentElement || getComputedStyle(el.parentElement).display !== 'grid') continue;
+        const chip = [...el.querySelectorAll('span')]
+          .map(s => (s.textContent || '').trim())
+          .find(text => known.has(text));
+        if (chip) out.push({ card: (t.match(/Software Engineer \d/) || [''])[0], chip });
+      }
+      return out;
+    }, Object.values(ATS_BAND_LABELS).map(l => l.short));
+
+    // Every fixture listing scores 66-81, all of which are at or above the `strong` cutpoint, so
+    // the band the product must produce is computed rather than assumed.
+    const expectedBand = atsBandLabel(atsBandFor(70)).short;
+    check('AE5  the ATS badge survived, as a band chip inside the card',
+      badges.length > 0 && badges.every(b => b.chip === expectedBand),
+      badges.length
+        ? `${badges.length} chip(s): ${[...new Set(badges.map(b => b.chip))].join(', ')} (expected ${expectedBand})`
+        : 'MISSING — no band chip found inside any listing card');
+
     const boardText = await page.evaluate(() => document.body.innerText);
+    // Still asserted, because AK2 made it a product decision rather than a side effect: the board
+    // shows the BAND, never the number. A raw score reappearing is a regression in its own right.
+    check('AE5  and the raw score is NOT on the board', !/\b(6[6-9]|7[0-9]|8[01])\b/.test(boardText),
+      (boardText.match(/\b(6[6-9]|7[0-9]|8[01])\b/) || ['absent'])[0]);
+
     for (const [what, re] of [
-      ['the ATS badge',   /\b7[0-9]\b/],
       ['freshness',       /\b\d+[hmd]\b|just now|ago/i],
       ['the meta chips',  /Remote|Hybrid/],
       ['the visited state', /visited/],

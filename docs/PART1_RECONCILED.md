@@ -598,3 +598,95 @@ The prefilter's 1,361 → 847 lossiness is real but costs only reads and sha1, a
 passes therefore hashes the prefiltered set ~20 times. It is sub-second at this board size and
 tightening it would mean changing the writer, so it is recorded rather than fixed — worth revisiting
 if the board reaches five figures.
+
+---
+
+# Z — the ATS badge, 2026-09-13
+
+## The board never lost its ATS badge
+
+Task Z's premise is wrong, and the way it is wrong is the finding.
+
+`scripts/ae5BoardUi.mjs` checked for the badge like this:
+
+```js
+['the ATS badge',   /\b7[0-9]\b/],        // searched document.body.innerText
+```
+
+A search for a raw two-digit number. That was correct when it was written at **`ed13f45`
+(2026-08-23)**, because the badge then rendered `ATS {score}` — literally "ATS 78".
+
+**`7494289` (2026-08-31)** replaced the number with a BAND label as part of the ATS-bands work:
+
+```diff
+-  if (score == null) return null;
+-      ATS {score}
++  const band = atsBandFor(score ?? null);
++      {meta.short}
+```
+
+That change was deliberate, and `scripts/ak2BandSurfaces.mjs` asserts it in as many words — *"the
+raw number is nowhere on the board"*. So from 2026-08-31 the two harnesses **contradicted each
+other**: one asserting the number is absent, the other asserting it is present. Task X hit the
+second on 2026-09-09 and filed the regression.
+
+**Answer to item 1 — why it regressed and when:** it did not regress. The badge has rendered
+correctly since 2026-08-31. The harness went stale on that date and reported a working board as
+broken for eight days.
+
+Verified by screenshot, per item 3 — all ten listings carry a green **Strong** chip:
+`%TEMP%/ae5-board-ui/ae5-controls.png`. `ak2BandSurfaces` also passes all 14 of its checks against
+the real board, rendering 26 band chips on the cutpoints.
+
+## Item 2 — what has to be true for a browser check to catch a missing badge
+
+This is the *inverse* of the `ae5BoardUi`/Clearbit failure, and it has the same root. There, a stub
+made a broken thing pass; here, a stale literal made a working thing fail. Both come from **an
+assertion restating a product decision with nothing tying the two copies together.** Three
+properties, now all present in the rewritten check:
+
+1. **The expectation is DERIVED, not restated.** The label comes from `atsBandLabel()` in
+   `shared/atsBands.js` — the same module `JobCard` renders from — and the vocabulary from
+   `ATS_BAND_LABELS`. A hand-written literal is a second copy of a product decision, which is
+   exactly how this went stale. When the vocabulary changes again, the harness follows it.
+2. **It looks for an ELEMENT, not a substring.** `body.innerText.includes('Strong')` would pass on
+   the word appearing in a description, a tooltip, or another panel. The chip must be found inside
+   the card for a known listing.
+3. **It checks the VALUE, not the presence.** A chip reading the wrong band is worse than a missing
+   one, and "rendered" cannot distinguish itself from "rendered correctly" unless the assertion
+   knows which band *this row's* score must produce.
+
+This is the same repair the logo stubs got after the Clearbit incident: derive the fixture from the
+constant the product uses, so the check cannot go on describing a product that no longer exists.
+
+## The new check was PROVED to fail, twice — and the first attempt was blind
+
+A replacement assertion that merely passes would have swapped a false negative for a false positive,
+so both failure modes were forced:
+
+| what was broken | result |
+|---|---|
+| badge removed from **one** of JobCard's two call sites | **PASSED** — blind |
+| badge removed from **both** call sites | `FAIL — MISSING, no band chip found inside any listing card` |
+| `atsBandFor(0)` so every chip renders the wrong band | `FAIL — 8 chip(s): Weak (expected Strong)` |
+
+The first row is worth keeping. `JobCard` renders the badge from two different layout branches, and
+disabling one changes nothing on the board — so a proof that stopped at "I removed the badge and it
+failed" would have been testing the branch the board does not use. The check is only trustworthy
+because the *first* proof of it failed to fail.
+
+`harnessBaseline.json` moves 25 → 26: twenty-five checks with one permanently failing becomes
+twenty-six all passing (the raw-score assertion is now explicit rather than implied).
+
+## Unrelated defect found and fixed in passing
+
+`scripts/acPipelineHealthUi.mjs`, added for the AC residual, took port **5207** — which
+`ak2BandSurfaces` already owns, both with `--strictPort`. Running the two together, or running one
+with a stray Vite from the other, would have been a hard failure with a misleading message. Moved to
+5206, and the ownership register the other harnesses keep in comments is now written down in one
+place: ak2 5207 · abPanelUi/aj2 5199 · ag1/ae5 5198 · ag2/ah3 5197 · ah4 5196 · ah5 5195 · ah6 5194.
+
+## No product code changed
+
+`JobCard.jsx` is untouched — verified against git after the fault-injection proofs. The whole task
+is three harness files. Suite **2,368 pass, 0 fail**.
