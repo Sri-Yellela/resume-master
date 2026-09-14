@@ -19,7 +19,16 @@ import {
 import { mapJobRow } from "../services/jobs/mapJobRow.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const NOW = 1788800000;
+// ⛔ RELATIVE TO THE REAL CLOCK, NOT A FROZEN EPOCH. This was `1788800000` (2026-09-07), while
+// selectCandidates gates `scraped_at` against `Date.now()` — so the fixture aged against a moving
+// cutoff and the freshness-gate tests passed only while the calendar stayed within a few days of
+// that literal. "U2: the JSONL _meta header records the predicate" passed on 2026-09-09 and failed
+// on the 11th with no code change at all: maxLastSeenDays 3 put the cutoff past the fixture's
+// scraped_at and the export came back empty.
+//
+// Every offset below is expressed as NOW - n, so making NOW live preserves all the relationships
+// the fixtures actually depend on and removes the only absolute the tests never meant to assert.
+const NOW = Math.floor(Date.now() / 1000);
 const DAY = 86400;
 
 // The schema these modules touch, matching migration 101. Kept in one helper so a column added to

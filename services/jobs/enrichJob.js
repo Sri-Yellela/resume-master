@@ -71,8 +71,40 @@ const VALID_SALARY_PERIODS    = new Set(['annual', 'hourly', 'monthly']);
 
 // Cost/time bounds per background pass — this is a nice-to-have signal, never something the
 // board query waits on, so it stays small and paced rather than racing through everything.
+//
+// ⛔ THIS IS A PASS SIZE, NOT A DAILY CEILING, and for a long time it was doing the job of both.
+// The cron fires ONE pass (aggregator.js, inside cacheJobs), so 25 was also the daily throughput.
+// Measured 2026-09-13: backlog 847, inflow ~25-32 rows/day. At 25/day the queue drains at roughly
+// the rate it fills, which is why 837 rows once accumulated with nothing surfacing it and why the
+// manual trigger had to be built at all. See drainEnrichment below.
 const ENRICH_BATCH_SIZE = 25;
 const ENRICH_DELAY_MS   = 250;
+
+// ── THE DAILY BUDGET (task AE) ──────────────────────────────────────────────────────────────────
+//
+// Enrichment had NO spend ceiling of any kind. ENRICH_BATCH_SIZE was the de facto one, so raising
+// it — or looping without a budget — would have removed the only bound that existed. These three
+// are the real ceiling, and the drain stops at whichever binds first.
+//
+// Three axes rather than one because they fail differently: rows bound the work, USD bounds the
+// bill when a model's pricing or a posting's length changes underneath the row count, and minutes
+// bound a pass that is retrying or hanging. Any one of them alone can be satisfied while another
+// runs away.
+//
+// Defaults sized against measured numbers, not guessed: real cost is ~$0.002/row (enrichment_batches
+// 8-11: 25 rows, $0.05-0.06 each), throughput ~2.8s/row. 300 rows is therefore ~$0.60 and ~14
+// minutes at full tilt — inside all three bounds, and enough to clear an 847-row backlog in about
+// four days net of inflow. In steady state the drain stops early because the queue is empty, so the
+// budget only binds while there is a backlog, which is exactly when it should.
+const envNum = (name, dflt) => {
+  const n = Number.parseFloat(process.env[name] ?? '');
+  return Number.isFinite(n) && n >= 0 ? n : dflt;
+};
+const enrichBudget = () => ({
+  maxRows:    envNum('ENRICH_DAILY_MAX_ROWS', 300),
+  maxUsd:     envNum('ENRICH_DAILY_MAX_USD', 1.0),
+  maxMinutes: envNum('ENRICH_MAX_RUN_MINUTES', 20),
+});
 
 // Technographic decay: a skill's accumulated weight halves every DECAY_HALFLIFE_DAYS without
 // a new posting reinforcing it, so a company's stack signal fades over time instead of
@@ -558,6 +590,152 @@ async function runEnrichment(db, anthropic, {
   }
 }
 
+/**
+ * TASK AE — drain the candidate set instead of nibbling at it.
+ *
+ * THE DECISION, AND WHY IT IS A LOOP RATHER THAN A BIGGER CONSTANT.
+ *
+ * AE offered two options: a much larger batch size, or a cron that loops until the candidate set is
+ * empty within a bounded budget. A larger constant is a guess with a shelf life — it has to be
+ * re-picked every time the board changes size, and the board went 1,255 -> 1,388 active rows in
+ * four days with task Y's sources still pending. Worse, a constant is wrong in both directions at
+ * once: too small on the day a spike lands (2026-09-09 ingested 161 rows in one tick), and pure
+ * overhead on the ~300 days a year when 28 rows arrive.
+ *
+ * A loop makes the BUDGET the thing being chosen, which is the thing actually worth controlling,
+ * and it self-limits: when the queue holds 28 rows the drain does 28 and stops, whatever the
+ * ceiling says. The budget only binds while there is a backlog.
+ *
+ * ⛔ THE BUDGET IS NOT OPTIONAL DECORATION. Before this, enrichment had no spend ceiling at all —
+ * ENRICH_BATCH_SIZE was the only bound on what a day could cost. Looping without adding a real
+ * ceiling would have removed the single thing standing between a runaway pass and the wallet.
+ *
+ * WHAT STOPS THE LOOP, in the order checked:
+ *   drained          the selector returned nothing — the real terminal state
+ *   no_progress      a pass wrote nothing. Without this the loop spins forever on rows that fail
+ *                    every time, re-charging for each attempt; three such passes in a row during
+ *                    the retired-model-id outage would have been 3x the bill for 0 rows
+ *   max_rows / max_usd / max_minutes   the budget
+ *   refused          another pass is already in flight (the concurrency guard) — NOT a completion
+ *
+ * Reports COVERAGE PER COLUMN across the whole drain, not a row count, because "enriched: 300" is
+ * compatible with 300 rows of nulls (task A2: 49 of 50 HTTP 200s were empty extractions).
+ *
+ * ONE pipeline_runs record for the whole drain, not one per pass. Ten records a day would push the
+ * real history out of the recent-runs view, and the number an operator needs is what the DAY
+ * achieved. The per-pass detail survives in enrichment_batches, which is per pass by design.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {import('@anthropic-ai/sdk').default | null} anthropic
+ */
+async function drainEnrichment(db, anthropic, {
+  batchSize = ENRICH_BATCH_SIZE,
+  budget = enrichBudget(),
+  batchSource = 'cron',
+  now = () => Date.now(),
+} = {}) {
+  const startedAt = Math.floor(now() / 1000);
+  const startedMs = now();
+  const before = columnCoverage(db);
+
+  let passes = 0, enriched = 0, failed = 0, empty = 0;
+  let inputTokens = 0, outputTokens = 0, usd = 0;
+  let stopReason = null, skippedReason = null;
+  const batchIds = [];
+
+  while (true) {
+    // Checked BEFORE the pass, so the budget is never exceeded by the pass that discovers it.
+    // Ordering matters: a drain that has already spent its rows must not send one more batch.
+    const elapsedMin = (now() - startedMs) / 60000;
+    if (enriched >= budget.maxRows)   { stopReason = 'max_rows';    break; }
+    if (usd >= budget.maxUsd)         { stopReason = 'max_usd';     break; }
+    if (elapsedMin >= budget.maxMinutes) { stopReason = 'max_minutes'; break; }
+
+    // Never overshoot the row budget on the last pass: ask for exactly what is left.
+    const room = Math.min(batchSize, budget.maxRows - enriched);
+    const pass = await runEnrichment(db, anthropic, {
+      batchSize: room, batchSource, recordRun: false,
+    });
+    passes++;
+
+    if (!pass.ran) {
+      // unconfigured / already_running. Neither is a completed drain and neither may report as one.
+      stopReason = 'refused';
+      skippedReason = pass.skippedReason;
+      break;
+    }
+
+    enriched += pass.enriched;
+    failed   += pass.failed;
+    empty    += pass.empty;
+    inputTokens  += pass.totalInputTokens  || 0;
+    outputTokens += pass.totalOutputTokens || 0;
+    usd = (inputTokens / 1e6) * EST_INPUT_COST_PER_M + (outputTokens / 1e6) * EST_OUTPUT_COST_PER_M;
+    if (pass.batchId) batchIds.push(pass.batchId);
+
+    // `skipped` is what the selector had left over after this batch. Zero means the queue is empty,
+    // which is the only clean terminal state.
+    if (pass.skipped === 0)  { stopReason = 'drained';     break; }
+    if (pass.enriched === 0) { stopReason = 'no_progress'; break; }
+  }
+
+  const after = columnCoverage(db);
+  const gains = [];
+  for (const c of ENRICHMENT_COLUMNS) {
+    const b = before.columns[c]?.filled ?? 0;
+    const a = after.columns[c]?.filled ?? 0;
+    if (a !== b) gains.push([c, a - b]);
+  }
+  const remaining = selectCandidates(db, { limit: 1 }).totalMatched;
+
+  console.log(
+    `[enrichJob] drain complete: ${passes} pass(es), ${enriched} enriched, ${failed} failed, ` +
+    `${empty} no-signal, ~$${usd.toFixed(4)}, stopped because ${stopReason}` +
+    (skippedReason ? ` (${skippedReason})` : '') + `, ${remaining} still queued`
+  );
+  if (gains.length) {
+    console.log('[enrichJob] coverage moved: ' + gains.map(([c, d]) => `${c} ${d > 0 ? '+' : ''}${d}`).join('  '));
+  } else if (enriched) {
+    console.warn(`[enrichJob] WARNING: ${enriched} row(s) enriched and NO column gained a value ` +
+                 `across the whole drain.`);
+  }
+
+  // ⛔ AN OVERLAP IS NOT AN OUTAGE. cacheJobs and cacheJoboFeed BOTH schedule a drain in the same
+  // 04:00 tick, so the second one is routinely refused by the concurrency guard while the first is
+  // still working. Recording that as a run would write a failed-looking enrichment entry every
+  // single day, and the AC health check alerts on exactly that — a permanent false alarm, which is
+  // an alarm nobody reads. The drain that IS running records the day's real numbers.
+  //
+  // `unconfigured` still records, because that one is a genuine finding: it is Jobo's shape, a
+  // provider that never ran while everything downstream reported zeros.
+  const overlapped = skippedReason === 'already_running';
+  if (!overlapped) recordPipelineRun(db, {
+    runKind: 'enrichment',
+    // `ok` only when the loop reached a real terminal state. A refusal is not a run, and the AC
+    // health check reads `written` rather than this anyway — both are recorded so neither has to
+    // be inferred from the other.
+    status: stopReason === 'refused' ? 'skipped_unconfigured' : 'ok',
+    startedAt,
+    fetched: enriched + failed + empty,
+    written: enriched,
+    failed,
+    details: {
+      passes, stopReason, skippedReason, batchIds,
+      inputTokens, outputTokens, estCostUsd: Number(usd.toFixed(4)),
+      budget, remainingCandidates: remaining,
+      coverageGains: Object.fromEntries(gains),
+    },
+  });
+
+  return {
+    passes, enriched, failed, empty, inputTokens, outputTokens,
+    estCostUsd: Number(usd.toFixed(4)), stopReason, skippedReason, batchIds,
+    remainingCandidates: remaining, coverageBefore: before, coverageAfter: after,
+    coverageGains: Object.fromEntries(gains),
+    ran: stopReason !== 'refused',
+  };
+}
+
 // buildPrompt is exported for scripts/al1ProviderQualityDiff.mjs, which compares two providers on
 // THIS prompt. It is exported rather than copied into the harness deliberately: a copy would drift
 // and the harness would then measure a prompt the pipeline does not use — two sides, each
@@ -570,4 +748,4 @@ async function runEnrichment(db, anthropic, {
 // home, services/jobs/enrichmentSelection.js, and callers import them from there. Offering a second
 // path to them would recreate in the import graph the very thing this task removed from the
 // queries — two ways to reach one answer, which is how the two drift.
-export { runEnrichment, computeContentHash, decayedWeight, hasAnySignal, buildPrompt, DECAY_HALFLIFE_DAYS, ENRICH_BATCH_SIZE };
+export { runEnrichment, drainEnrichment, enrichBudget, computeContentHash, decayedWeight, hasAnySignal, buildPrompt, DECAY_HALFLIFE_DAYS, ENRICH_BATCH_SIZE };

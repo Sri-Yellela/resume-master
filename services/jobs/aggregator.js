@@ -5,7 +5,7 @@ import { filterDirectApplyOnly, DIRECT_ATS_SOURCES } from './directApplyFilter.j
 import { deriveAutomationTier } from './automationTier.js';
 import { classifyJob, ROLE_KEY_FALLBACK } from './classifyJob.js';
 import { getKnownLogoUrl } from './enrichLogos.js';
-import { runEnrichment } from './enrichJob.js';
+import { drainEnrichment } from './enrichJob.js';
 import { recordPipelineRun } from './pipelineRunLog.js';
 
 // ─── REGISTER SOURCES HERE ───────────────────────────────────────────────────
@@ -915,8 +915,14 @@ async function cacheJobs(db, anthropic = null) {
 
     // Background job-description enrichment (non-blocking — never delays the board query
     // or this function's return). Skips cleanly when no Anthropic client is configured.
+    //
+    // DRAINS rather than taking one 25-row bite (task AE). This is the only scheduled enrichment
+    // in the system — there is no separate enrichment cron, it rides the 04:00 ET tick from here —
+    // so a single pass made 25 rows/day the whole daily throughput against a ~28 rows/day inflow,
+    // and the queue drained at about the rate it filled. drainEnrichment loops until the candidate
+    // set is empty or its daily budget binds, whichever comes first.
     setImmediate(() => {
-      runEnrichment(db, anthropic).catch(e => console.warn('[enrichJob] Background pass failed:', e.message));
+      drainEnrichment(db, anthropic).catch(e => console.warn('[enrichJob] Background drain failed:', e.message));
     });
 
     console.log(`[cacheJobs] Total: ${totalCached} jobs cached across ${atsSources.length} sources`);
@@ -1153,7 +1159,7 @@ async function cacheJoboFeed(db, anthropic = null) {
   // rows unenriched until the next day's tick for no reason.
   const scheduleEnrichment = () => {
     setImmediate(() => {
-      runEnrichment(db, anthropic).catch(e => console.warn('[cacheJoboFeed] Background enrichment failed:', e.message));
+      drainEnrichment(db, anthropic).catch(e => console.warn('[cacheJoboFeed] Background drain failed:', e.message));
     });
   };
 

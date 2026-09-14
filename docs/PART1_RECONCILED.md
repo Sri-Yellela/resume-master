@@ -487,3 +487,114 @@ coverage per company and per column over all active rows, which is the more usef
 not per-run. `pipeline_runs.details_json` records `{ companies: companies.length }` — the count
 attempted, never the per-company outcome — so per-run field coverage needs the writer to record it
 first. Worth doing when something needs it; nothing does today.
+
+---
+
+# AE — the cron trickle, 2026-09-13
+
+## What the premise got right, and the two things it got wrong
+
+Right, and the important part: **any backlog above the daily batch is effectively permanent.**
+Measured — inflow is ~25-32 rows/day and throughput was 25/day, so the queue drained at about the
+rate it filled.
+
+Wrong in two details worth correcting in the source docs:
+
+1. **`ENRICH_BATCH_SIZE` is not an env-configurable default.** It is a hardcoded literal in
+   `services/jobs/enrichJob.js`. There was nothing to set.
+2. **There is no enrichment cron.** Enrichment has never had its own schedule — it is fired
+   fire-and-forget inside `cacheJobs` *and* `cacheJoboFeed` (`aggregator.js`), both riding the one
+   04:00 ET tick. So one pass of 25 was the entire day's throughput, and the second invocation is
+   routinely refused by the concurrency guard. "The cron runs once daily" is true by accident.
+
+And a third, from re-deriving rather than trusting my own earlier reading: the SQL predicate
+`(enriched_at IS NULL OR content_hash IS NULL OR updated_at > enriched_at)` is only a **prefilter**.
+`selectCandidates` then compares `computeContentHash(title, description)` against the stored hash in
+JS, so rows whose text has not changed never reach the model.
+
+That matters because the prefilter is badly lossy and looks alarming on its own: **1,361 rows
+prefiltered → 847 real candidates.** 514 rows are discarded by the hash gate. `touchSeenStmt` sets
+`updated_at = now` on every crawl even for unchanged rows, so essentially every previously-enriched
+row re-enters the prefilter daily — I sampled 200 of them and **185 (92.5%) had a `content_hash`
+still matching their current text**. It costs reads and sha1, not money, and the design is already
+correct. I initially called this waste; it isn't.
+
+## The decision — a bounded loop, not a bigger constant
+
+A larger constant is a guess with a shelf life. It has to be re-picked every time the board changes
+size (1,255 → 1,388 active rows in four days, with task Y's sources still pending) and it is wrong
+in both directions at once: too small on the day a spike lands — 2026-09-09 ingested 161 rows in one
+tick — and pure overhead on the ~300 days a year when 28 arrive.
+
+A loop makes the **budget** the thing being chosen, which is the thing actually worth controlling,
+and it self-limits: with 28 rows queued it does 28 and stops, whatever the ceiling says.
+
+⛔ **The budget is not decoration.** Enrichment had *no* spend ceiling of any kind —
+`ENRICH_BATCH_SIZE` was the only bound on what a day could cost. Looping without adding a real one
+would have removed the single thing between a runaway pass and the wallet. Item 2 asks the drain to
+"respect the daily spend ceiling"; there was none to respect, so this creates it.
+
+Three axes, because they fail differently and any one can be satisfied while another runs away:
+
+| knob | default | why |
+|---|---|---|
+| `ENRICH_DAILY_MAX_ROWS` | 300 | bounds the work |
+| `ENRICH_DAILY_MAX_USD` | 1.00 | bounds the bill when pricing or description length moves under the row count |
+| `ENRICH_MAX_RUN_MINUTES` | 20 | bounds a pass that is retrying or hanging |
+
+Sized against measured numbers, not guessed: **$0.00225/row** and **2.8s/row** (batches 8-11 —
+25 rows at $0.0508-$0.0626, 59-78s each). A full 300-row day is ~$0.67 and ~14 minutes, so all three
+bounds are *simultaneously* near their limits. That is deliberate: a ceiling no realistic run can
+reach is not a ceiling.
+
+Stop reasons, in the order checked — `drained` · `no_progress` · `max_rows` · `max_usd` ·
+`max_minutes` · `refused`. `no_progress` is the expensive one: during the retired-model-id outage
+every call failed for three days at 25 rows/day. Without that exit a drain would retry until the
+budget ran out and bill for every attempt — the same outage at twelve times the cost.
+
+## Item 3 — drain time
+
+| day | enriched | backlog after | spend |
+|---|---|---|---|
+| 1 | 300 | 575 | $0.67 |
+| 2 | 300 | 303 | $0.67 |
+| 3 | 300 | 31 | $0.67 |
+| 4 | 31 | 28 | $0.07 |
+
+**Cleared in 4 days for ~$2.09**, then steady state ~28 rows/day at ~$0.06/day. Before this, at
+25/day against 28/day inflow, the net was **−3/day and the backlog never cleared at all.**
+
+## Other decisions worth stating
+
+- **One `pipeline_runs` record per drain, not per pass.** Ten records a day would push the real
+  history out of the recent-runs view, and the number an operator needs is what the *day* achieved.
+  Per-pass detail already lives in `enrichment_batches`, which is per pass by design.
+- **An overlapped drain records nothing.** `cacheJobs` and `cacheJoboFeed` both schedule one in the
+  same tick, so the second is refused daily. Recording that would write a failed-looking enrichment
+  run every day, and the AC health check alerts on exactly that shape — a permanent false alarm is
+  an alarm nobody reads. An *unconfigured* drain still records, because that one is Jobo's shape.
+- **Coverage per column across the whole drain**, per item 2 — `enriched: 300` is compatible with
+  300 rows of nulls.
+
+## Verification
+
+`test/enrichmentDrain.test.js` — 12 tests, one per stop reason plus the counterfactual that a single
+old-size pass leaves the rest queued. `max_rows` is asserted not to overshoot on the final pass
+(budget 7, batch 5 → exactly 7 enriched and 7 model calls, not 10). Suite **2,368 pass, 0 fail**.
+
+**A pre-existing test was rotting on the calendar and is fixed here.**
+`test/enrichmentTransfer.test.js` froze `NOW = 1788800000` (2026-09-07) while `selectCandidates`
+gates `scraped_at` against `Date.now()`. "U2: the JSONL _meta header records the predicate" passed
+on 2026-09-09 and failed on the 11th with no code change — the moving cutoff simply overtook the
+fixture. `NOW` is now relative to the real clock; every offset in the file is expressed as `NOW - n`,
+so the relationships the fixtures depend on are preserved and the only absolute they never meant to
+assert is gone. Swept the rest of the suite: the two other frozen epochs are used for relative
+ordering only and cannot rot this way.
+
+## Not done, and why
+
+The prefilter's 1,361 → 847 lossiness is real but costs only reads and sha1, and each
+`selectCandidates` call additionally re-runs itself ungated to compute `gatedOut`. A drain of ten
+passes therefore hashes the prefiltered set ~20 times. It is sub-second at this board size and
+tightening it would mean changing the writer, so it is recorded rather than fixed — worth revisiting
+if the board reaches five figures.
