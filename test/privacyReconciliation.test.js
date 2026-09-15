@@ -26,8 +26,18 @@ const recon     = fs.readFileSync("extension/submission/PRIVACY_RECONCILIATION.m
 const listing   = fs.readFileSync("extension/submission/STORE_LISTING.md", "utf8");
 const policy    = fs.readFileSync("client/src/pages/marketing/PrivacyPage.jsx", "utf8");
 
-/** The policy is JSX. Reduce it to the prose a reader actually sees. */
+/**
+ * The policy is JSX. Reduce it to the prose a reader actually sees.
+ *
+ * ⛔ SOURCE COMMENTS FIRST, AND THIS ORDER MATTERS. Stripping only tags left the file's own
+ * comments in the "prose" — 1,099 characters of them — so any assertion here could be satisfied by
+ * a code comment explaining the thing instead of by text a user can read. Found by deleting a
+ * user-facing sentence and watching the matching assertion still pass, because the comment above
+ * EFFECTIVE_DATE happened to describe the same change.
+ */
 const policyText = policy
+  .replace(/\/\*[\s\S]*?\*\//g, " ")   // block comments
+  .replace(/^\s*\/\/[^\n]*$/gm, " ")   // line comments
   .replace(/<[^>]+>/g, " ")        // tags
   .replace(/\{"\s*"\}/g, " ")      // {" "} spacers
   .replace(/\s+/g, " ");

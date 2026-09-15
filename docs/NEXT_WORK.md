@@ -103,21 +103,26 @@ checked the *policy* against the code and never this file's own enumeration.
 
 ### Still open against the extension submission
 
-1. ⛔ **Google Fonts is a third party the policy does not name.** `client/index.html` preconnects
-   `fonts.googleapis.com` and `fonts.gstatic.com` and loads a stylesheet from the former on **every
-   page, including the privacy page itself** — confirmed in the deployed shell. Google receives the
-   visitor's IP and user-agent on every visit and *Third-Party Services* does not mention it. Same
-   shape as the Google S2 favicon task X removed, except this one is live. Fix by naming it or by
-   self-hosting the two families; **not** done in the 09-15 commit because adding a processor to the
-   policy is an owner-facing legal statement.
-2. ⚠ **Adzuna is over-disclosed.** `isConfigured()` needs `ADZUNA_APP_ID` *and* `ADZUNA_APP_KEY`;
+1. ⚠ **Adzuna is over-disclosed.** `isConfigured()` needs `ADZUNA_APP_ID` *and* `ADZUNA_APP_KEY`;
    neither is in the Railway inventory, so in production Adzuna receives **nothing** while the policy
    states flatly that search terms "are sent to Adzuna when you search". True on a dev box, where
    both are set. Either narrow the wording or provision the keys — an owner decision about whether
    Adzuna is coming back.
-3. **Follow-up, deliberately unbundled:** `sweepExpiredPackets()` arguably should cover every session
+2. **Follow-up, deliberately unbundled:** `sweepExpiredPackets()` arguably should cover every session
    key rather than only `gate:`, since the policy promised an expiry two of four did not get. That is
    a behaviour change and belongs in its own commit.
+
+### Google Fonts — FIXED 2026-09-15, and the finding undercounted it
+
+Self-hosted via four `@fontsource/*` packages imported in `client/src/main.jsx`, and the policy now
+names Google Fonts as a former recipient that receives nothing — the same pattern it uses for
+Clearbit. **The original finding named one call site and two families; there were two and four.**
+`client/src/index.css` line 1 also `@import`ed Instrument Serif and Inter from
+`fonts.googleapis.com`, live in the deployed CSS, and self-hosting only the two from `index.html`
+would have left Google receiving the same request on the same page while the policy claimed
+otherwise. `test/selfHostedFonts.test.js` therefore walks the whole `client/` tree instead of
+checking the files that happened to be wrong; five guards, each proved to fail by injection.
+`EFFECTIVE_DATE` moved to September 15, 2026.
 
 ---
 

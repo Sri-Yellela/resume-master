@@ -1,4 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500&display=swap');
+/* Instrument Serif and Inter used to be @imported from fonts.googleapis.com here. They are now
+   self-hosted — see the font imports in main.jsx for why that is a privacy commitment rather than
+   a build preference. */
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 

@@ -6,7 +6,13 @@ import { Footer } from "../../components/Footer.jsx";
 // Effective date, not just "last touched". The Chrome Web Store rules that took effect on
 // 2026-08-01 require a policy to state when it takes effect and to commit to telling users about
 // material changes to data handling — see the "Changes to This Policy" section.
-const EFFECTIVE_DATE = 'August 19, 2026';
+// 2026-09-15: bumped for two changes, both of which REDUCE what leaves the browser, so neither
+// triggers the advance-notice commitment below — that covers changes adverse to a user, and these
+// are a disclosure the policy was missing and the removal of a recipient. (1) The extension storage
+// section now enumerates all four keys it writes rather than the two it used to claim. (2) Web
+// fonts were pulled off Google Fonts and self-hosted, retiring a recipient this policy had never
+// named. Leaving the date at August 19 would have been the inaccuracy, not the fix.
+const EFFECTIVE_DATE = 'September 15, 2026';
 const CONTACT_EMAIL  = 'privacy@resumemaster.one';
 
 function Section({ title, children }) {
@@ -408,6 +414,17 @@ export function PrivacyPage() {
               terms. We do not receive any other LinkedIn data.
             </LI>
           </UL>
+          <P>
+            <Strong>Web fonts are served from our own origin, and Google Fonts is not used.</Strong>{" "}
+            Until September 15, 2026 the four typefaces this site uses — Barlow Condensed, DM Sans,
+            Instrument Serif and Inter — were downloaded from Google Fonts by your browser on every
+            page. That meant Google received your IP address and browser user-agent every time you
+            visited, including on this page, and this policy did not tell you so. The fonts are now
+            part of the site itself: nothing is requested from fonts.googleapis.com or
+            fonts.gstatic.com, and we send Google nothing at all any more. It is named here
+            because it was a real recipient until that
+            date, and because a reader who checks what this page loads should find it accounted for.
+          </P>
         </Section>
 
         {/* Your Rights */}

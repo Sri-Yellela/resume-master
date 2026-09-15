@@ -117,16 +117,26 @@ disclosure in the same way an undisclosed one is a gap, so each entry now carrie
 | **LinkedIn OAuth** | name, email, on opt-in sign-in | OAuth callback | **live, optional** |
 | *Clearbit Logo API* | **nothing** | appears only in `services/jobs/backfillCompanyLogos.js` `RETIRED_LOGO_HOSTS`, a repair list that rewrites bad rows | **retired.** Named in the policy only as the thing DuckDuckGo replaced, which is the correct way to name it |
 | *THEIRSTACK* | **nothing** | only consumer is the offline `scripts/providerEval` harness | **vestigial, and correctly NOT named in the policy** |
+| *Google Fonts* | **nothing** — self-hosted since 2026-09-15 | four `@fontsource/*` packages imported in `client/src/main.jsx`, served from our own origin. Guarded by `test/selfHostedFonts.test.js` | **retired.** Was a real recipient of every visitor's IP and user-agent until that date, on every page, and the policy had never named it. Now named the way Clearbit is — as a former recipient that receives nothing |
 
-⛔ **One recipient the policy does not name: Google Fonts.** `client/index.html` preconnects
-`fonts.googleapis.com` and `fonts.gstatic.com` and loads a stylesheet from the former on **every
-page, including the privacy page itself** — confirmed present in the deployed shell. Google
-therefore receives the visitor's IP address and user-agent on every visit, and *Third-Party
-Services* does not mention it. This is the same shape as the Google S2 favicon fallback task X
-removed — a third party seeing browsing that the policy does not disclose — except this one is still
-live. It is **not** fixed here: adding a processor to the policy is an owner-facing legal statement
-and this commit's scope is the two contradictions above. **Recommended before submitting**, either
-by naming Google Fonts in the policy or by self-hosting the two families.
+✅ **Google Fonts — FIXED 2026-09-15, and it was worse than first reported.** The finding was that
+`client/index.html` preconnected `fonts.googleapis.com` / `fonts.gstatic.com` and loaded two
+families, handing Google every visitor's IP and user-agent on every page including the privacy page
+itself, while *Third-Party Services* named no such recipient — the same shape as the Google S2
+favicon fallback task X removed.
+
+**There were TWO call sites and FOUR families, not one and two.** `client/src/index.css` line 1 also
+carried `@import url('https://fonts.googleapis.com/…Instrument+Serif…Inter…')`, which the first
+sweep of `index.html` missed entirely and which was confirmed live in the deployed CSS. Self-hosting
+only the two families named in the original finding would have left Google receiving the same
+request on the same page and made the policy's new claim false. That second site is the reason
+`test/selfHostedFonts.test.js` walks the whole `client/` tree rather than checking the two files
+that were wrong.
+
+All four are now `@fontsource/*` packages imported in `client/src/main.jsx` — exactly the weights
+the two retired requests asked for — served from our own origin. `EFFECTIVE_DATE` moved to
+September 15, 2026 for this and the storage change; both reduce what leaves the browser, so neither
+triggers the policy's advance-notice commitment, which covers changes adverse to a user.
 
 ### What is machine-guarded, and what is not
 
