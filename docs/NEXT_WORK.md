@@ -1,16 +1,35 @@
 # Next Work
 
-**Last reconciled:** 2026-09-08, after tasks W and X. Closed findings moved to
-**`docs/FINDINGS_ARCHIVE.md`** — this file now holds only what is open.
+**Last reconciled:** 2026-09-15, against the repo and a full suite run — not against this file's
+own previous claims. Closed findings are in **`docs/FINDINGS_ARCHIVE.md`**; the reconciled
+evidence and the three landed task reports are in **`docs/PART1_RECONCILED.md`**, which supersedes
+everything this file said between 09-08 and 09-13.
 
-**Baseline:** 2326 passing, 0 failing. Migration high-water **103** local, **101** production —
-⚠ **102 and 103 are NOT deployed**; the new ATS company lists do nothing until they are.
-Contract **v1.1.1**.
+**Baseline:** **2387 passing, 0 failing** — measured 2026-09-15, not carried forward. Contract
+**v1.1.1**. Migrations 102 and 103 **are** in production (verified by Part 1 on 09-09; the old
+"NOT deployed" warning here was stale).
 
-> ⚠ **Re-derive state from the repo before starting anything.** This file has been the stale thing
-> four times: AK2 found three of five tasks already done, AL1 found two of three, AM3 found two
-> claims wrong, AM4 found the central premise of its own task inverted. Agents land work faster than
-> the doc reconciles. The check has caught it every time.
+> ⚠ **Re-derive state from the repo before starting anything.** This file has now been the stale
+> thing **five** times: AK2 found three of five tasks already done, AL1 two of three, AM3 two claims
+> wrong, AM4 the central premise of its own task inverted — and on 09-15 an audit found six landed
+> commits this file still listed as open, including one (**Z**) whose premise was backwards. Agents
+> land work faster than the doc reconciles. The check has caught it every time.
+
+---
+
+## ⛔ SIX COMMITS ARE UNPUSHED AND UNDEPLOYED
+
+```
+origin/main              8abd5a4   task X (Clearbit)      ← what production is running
+main                     8abd5a4   (same)
+fix/ats-per-company-cap  34bb047   task AD                ← 6 commits, NO UPSTREAM, local only
+```
+
+Everything in "Recently landed" below exists on one local branch with no upstream configured.
+Production is still taking the 1,551-postings-per-crawl loss that `0de67c8` fixes, still deriving
+pipeline health from `status` instead of `written`, and still pacing the provider on requests
+instead of tokens. **Deploying this branch is the highest-value action available**, and it is
+blocked on nothing.
 
 ---
 
@@ -18,15 +37,35 @@ Contract **v1.1.1**.
 
 | # | Task | Repo | Needs | State |
 |---|---|---|---|---|
-| **V** | Enrichment import: UI + guards, concurrency-report bug | desktop | — | **done** — see `am4-enrichment-control.md` § U5 |
-| **W** | Wire the remaining ATS providers | desktop | — | **done** — see `w1-ats-providers.md` |
-| **X** | Clearbit is dead — logos all failing | desktop | — | **done** — see `x1-clearbit-dead.md` |
-| **Y** | SmartRecruiters + Workday descriptions (needs an N+1 budget) | desktop | — | open — from W |
-| **Z** | The board lost its ATS badge | desktop | — | open — from X |
-| — | iOS Phase 1 audit | ios | **a Mac** | open — `resume-master-ios/IOS.md` |
+| **Y** | SmartRecruiters + Workday descriptions (needs an N+1 budget) | desktop | — | open — and its budget model must now account for the per-company cap in `0de67c8` |
+| **AB + AH** | Vestigial keys, version endpoint, small deferred items | desktop | — | open — three of six sub-items already answered, see below |
+| **AF residual** | A write path for `app_settings.apply_full_auto_disabled` | desktop | — | open — not a build; the switch exists, it just needs flipping without a restart |
+| **AG** | Mobile corruption sweep | android | — | **partly done** — `f337767` repaired SYNC.md's encoding. The BOM/toolchain half and a verifying build remain |
+| **Monetisation audit** | `docs/MONETISATION_AUDIT.md` | desktop | — | **queued, not started** — a repo-wide grep finds the string in that brief and nowhere else |
+| — | iOS Phase 1 audit | ios | **a Mac** | open — brief written at `resume-master-ios/PHASE_1_AUDIT.md` |
 
-Android's open work is in `resume-master-android/ANDROID.md`: admin build flavour, backup excludes,
-then the feed and review queue.
+**AB/AH, item by item, so nobody re-derives them:** AB-1 THEIRSTACK **confirmed vestigial** (only
+consumer is the offline `scripts/providerEval`). AB-2 "SERPAPI half-wired" — **premise wrong**: the
+key is read, `searchJobs` includes serpapi, and `POST /api/jobs/search` reaches it. It is absent
+only from `cacheJobs`, by design (`ATS_SOURCE_NAMES`). AH-1 version endpoint **not done**. AH-2 drop
+`import_extension_tokens` **not done** — 3 rows in production, zero code references repo-wide.
+AH-3 local board expiry **has not fired**. AH-4 retire `QUEUED_PROMPTS.md` **not done**.
+
+Android's remaining work is in `resume-master-android/ANDROID.md` and the annotated header of
+`PHASE_2A.md` (uncommitted): admin build flavour, backup excludes, then the feed and review queue.
+
+---
+
+## Recently landed — all six on `fix/ats-per-company-cap`
+
+| Commit | Date | What it was |
+|---|---|---|
+| `0de67c8` | 09-09 | **The 900-posting cross-company cap.** All seven ATS plugins sliced the *flattened* cross-company array at `pageSize*3`. `_companies` arrives in sqlite rowid order with no `ORDER BY`, so the cut fell at stripe 616 + airbnb 170 + figma 114 = exactly 900, and every company past it contributed nothing while the run recorded `status: 'ok'`. Eighteen of twenty-three active slugs sat at zero; all seven probed were healthy HTTP 200. Fixed as a **per-company** cap in `collectCompanyJobs` (`sources/base.js`) — deliberately not a total, because a total is what let adding a company silently evict another. Recovers **1,551 postings per crawl** (greenhouse +1,365, ashby +186). |
+| `260e656` | 09-09 | **AC residual.** Health derived from `written`, never `status` — production had logged three consecutive days of `fetched 25 / written 0` as `ok`. Adds `wrote_nothing` ordered above `stale`, per-company-slug grain scoped by `source = ats_type`, and the alert surface AC item 2 actually asked for. AC itself was already built and deployed; rebuilding it would have been the AK2 failure for the sixth time. |
+| `0364855` | 09-09 | **AA — the export → enrich → import loop, proved at 20 rows** against production. Dry run (`perColumn {skills_json: 20}`, `skippedNonNull 20`), apply, verify (only the gain plus three documented stamps changed), revert (**0 differences across 20 rows × 15 columns**), re-apply. Every row carried a deliberately wrong `summary` so that "nothing else is touched" was testable rather than merely unobserved. ⛔ Proves the pipeline, **not** model obedience — no provider was called. Found ingestion writing a bogus enum in passing. |
+| `1e1f91a` | 09-13 | **AE — a bounded drain, not a bigger constant.** Plus `ENRICH_DAILY_MAX_ROWS 300`, the first spend ceiling enrichment has ever had. Clears the backlog in 4 days for ~$2.09; the old 25/day against 28/day inflow was **−3/day and never cleared**. Two premises corrected: `ENRICH_BATCH_SIZE` was a hardcoded literal with nothing to set, and **there is no enrichment cron** — it is fire-and-forget inside `cacheJobs` *and* `cacheJoboFeed`, both on the single 04:00 ET tick, so the second is refused daily by the concurrency guard. |
+| `f670b24` | 09-13 | **Z — premise inverted. The board never lost its badge.** `ae5BoardUi` searched `body.innerText` for `/\b7[0-9]\b/`, correct until `7494289` (08-31) replaced the number with a band label. From that day two harnesses asserted opposite things — `ak2BandSurfaces` that the raw number is absent, this one that it is present — and this one lost. Task X filed a regression against a board that had rendered correctly for eight days. **No product code changed.** The check now derives its expectation from `shared/atsBands.js`. |
+| `34bb047` | 09-13 | **AD.** Pace on **tokens**, not requests: Groq is documented at 30 req/min and *measured* at 8,000 TPM, so an ~1,400-token enrichment call exhausts the account after about six — the limiter sat under its own ceiling and handed back a wall of 429s. One window carries `{at, tokens}` so the two limits cannot disagree. Plus `services/modelCatalogue.js`, a boot-time `GET /v1/models/{id}` that **refuses to boot on a retired model id** — the failure that degraded four Sonnet paths silently for two months. |
 
 ---
 
@@ -34,17 +73,68 @@ then the feed and review queue.
 
 | | |
 |---|---|
+| **Extension submission** | **In flight.** The dashboard's Privacy practices tab was filled from `STORE_LISTING.md` on 2026-09-15 and verified against the shipped manifest and the deployed policy — no contradiction in permissions, data-use ticks or description. Two documentation contradictions found and **fixed 09-15** — ⚠ the `storage` justification must be **re-pasted** from the revised `STORE_LISTING.md`. Two items still open below. Still needs the Google login and the `CWS_*` credentials to upload |
 | **AF5** — 30 real applications, 10 per ATS | the only test of whether ρ = 0.746 predicts anything about **employers** rather than about your own judgement |
-| **Extension submission** | ~20 min. Preflight green, screenshots taken, policy live. Needs your Google login and the `CWS_*` credentials |
-| **Judge the ~2,000 in-place rewrites** | see below |
+| **Judge the ~1,422–2,000 in-place rewrites** | §4 of `PART1_RECONCILED.md` now gives you evidence rather than just a count |
+| **196 synonym proposals** | low value — G1 moved ρ by **+0.000**. Skim the obvious or leave the table dormant |
 | **Jobo** | deferred to launch readiness, not pending |
+
+### Extension submission — the two documentation contradictions are FIXED
+
+Both landed 2026-09-15. The policy now enumerates **four** stored keys with their real storage areas
+and real lifetimes — `lastCapture` (local, until uninstall), the `gate:{tabId}` packet (session, ten
+minutes, cleared on tab close), `lastGatedHandoff` (session, until restart) and `batch:{tabId}`
+(session, until tab close or the queue empties) — and states explicitly that the ten-minute expiry
+covers only the packet, because `sweepExpiredPackets()` filters on `startsWith('gate:')`. **The fix
+was to the policy, not the code:** two undisclosed session keys were honest behaviour with dishonest
+documentation. `PRIVACY_RECONCILIATION.md` gained a verified third-party table (DuckDuckGo in,
+Clearbit recorded as retired) and `STORE_LISTING.md`'s storage justification was rewritten.
+
+⚠ **The owner must re-paste ONE dashboard field**: the `storage` permission justification, from the
+revised `STORE_LISTING.md`. Nothing else in the dashboard changed — permissions, data-use ticks,
+single purpose and description are all untouched.
+
+Three new guards in `test/privacyReconciliation.test.js`, each **proved to fail** by injecting the
+violation: the policy's stated count is pinned to the number of `chrome.storage.*.set` sites in the
+extension (a fifth key fails the suite); the ten-minute caveat is pinned to the sweep's `gate:`
+filter; and the reconciliation table's third-party set is pinned to the set the policy names, in
+both directions. The last one is the gap that let the Clearbit row rot — the pre-existing test
+checked the *policy* against the code and never this file's own enumeration.
+
+### Still open against the extension submission
+
+1. ⛔ **Google Fonts is a third party the policy does not name.** `client/index.html` preconnects
+   `fonts.googleapis.com` and `fonts.gstatic.com` and loads a stylesheet from the former on **every
+   page, including the privacy page itself** — confirmed in the deployed shell. Google receives the
+   visitor's IP and user-agent on every visit and *Third-Party Services* does not mention it. Same
+   shape as the Google S2 favicon task X removed, except this one is live. Fix by naming it or by
+   self-hosting the two families; **not** done in the 09-15 commit because adding a processor to the
+   policy is an owner-facing legal statement.
+2. ⚠ **Adzuna is over-disclosed.** `isConfigured()` needs `ADZUNA_APP_ID` *and* `ADZUNA_APP_KEY`;
+   neither is in the Railway inventory, so in production Adzuna receives **nothing** while the policy
+   states flatly that search terms "are sent to Adzuna when you search". True on a dev box, where
+   both are set. Either narrow the wording or provision the keys — an owner decision about whether
+   Adzuna is coming back.
+3. **Follow-up, deliberately unbundled:** `sweepExpiredPackets()` arguably should cover every session
+   key rather than only `gate:`, since the policy promised an expiry two of four did not get. That is
+   a behaviour change and belongs in its own commit.
 
 ---
 
-## Enrichment drain — live
+## Enrichment — no longer a trickle
 
-Candidates **837 → 790** over four manual passes; ~$0.10 spent. `enrichment_batches` confirms
-`anthropic / claude-haiku-4-5-20251001` via `resolveProvider`.
+`ENRICH_DAILY_MAX_ROWS 300` bounds the day's work and the day's spend; the drain loops within that
+budget and self-limits, doing 28 and stopping when only 28 are queued. Measured: backlog cleared in
+**4 days for ~$2.09**, then steady state ~28 rows/day at ~$0.06/day.
+
+⚠ **Still true and still unjudged: ~19–25 values are CORRECTED IN PLACE per 10 rows** — overwhelmingly
+`summary` and `normalized_title`, which ingestion had already filled, so they move no fill rate and
+are invisible in `columnsClimbed`. `normalized_title` feeds `profileTitleSql`'s board narrowing *and*
+the ATS scorer, so they are not cosmetic. **Only `skills_json` is a real gain.** Before-image:
+`POST /api/admin/enrichment/batches/{id}/revert {apply:false}`
+
+Manual trigger, unchanged — `apply: true` now answers **409 `{skipped:true,
+skippedReason:'already_running'}`** when it refuses, instead of `applied:true` with zeros:
 
 ```js
 // DRY RUN — nothing sent, nothing charged
@@ -54,190 +144,9 @@ await (await fetch('/api/admin/enrichment/run', { method: 'POST', headers: {'con
 await (await fetch('/api/admin/enrichment/run', { method: 'POST', headers: {'content-type': 'application/json'}, credentials: 'include', body: JSON.stringify({ limit: 10, apply: true }) })).json()
 ```
 
-⚠ **Running `apply: true` twice returns `applied:true` with all zeros and `batchId:null`.** That is
-the concurrency guard refusing an overlapping invocation, reported as a completed run. Misread as a
-failure twice. Fixed in task V.
-
-⚠ **~19–25 values are CORRECTED IN PLACE per 10 rows** — overwhelmingly `summary` and
-`normalized_title`, which ingestion had already filled, so they move no fill rate and are invisible
-in `columnsClimbed`. That is **~2,000 rewrites** across the backlog. `normalized_title` feeds
-`profileTitleSql`'s board narrowing *and* the ATS scorer, so they are not cosmetic. **Nobody has
-judged whether they are improvements** — only that they differ. Before-image:
-`POST /api/admin/enrichment/batches/{id}/revert {apply:false}`
-
-**Only `skills_json` is a real gain.** `summary`, `normalized_title` and `experience_level` are
-already 1255/1255 from ingestion.
-
----
-
-## ⚠ The economics changed — supersedes task U's framing
-
-Task U said export/import "does NOT save cost, because whoever enriches externally still pays the
-tokens." **True of metered API credits; false now.** Enrichment runs under a flat-rate subscription,
-so an external round trip costs ~$0 at the margin.
-
-So export/import is the **primary** enrichment route, and **more ATS providers is desirable** rather
-than a backlog risk — more rows to enrich at no marginal cost. Hence tasks V and W.
-
----
-
-## TASK V — Enrichment import — DONE
-
-**Outcome, against the brief below.** Task U's endpoints were sound; what was missing was the UI,
-the coverage reporting, and the volume ceiling. Built: `EnrichmentTransferPanel` in the Schema
-Explorer beside the two exports; per-column fill delta on both the dry run and the apply, with a
-loud `columnsClimbed: 0` warning; a raw `application/x-ndjson` upload path. Concurrency guard fixed
-— `POST /run` now answers **409 `{skipped:true, skippedReason:'already_running'}`** instead of
-`applied:true` with zeros. Verified by 61 real-run assertions across two new harnesses.
-
-Two of the brief's own premises turned out to be wrong and are corrected in the doc:
-
-- **Export CSV does NOT mangle `skills_json`.** Tested on 200 real rows: a strict RFC4180 parser
-  round-trips every value byte-identically. JSONL is still right, but for different reasons — CSV
-  cannot distinguish "not supplied" from "explicitly null" (which the fill-nulls-only default and
-  the tri-state visa flags both depend on), and it has no read-only surface.
-- **The three export paths are not duplicates and none was retired.** Download .sql is DDL only,
-  with no rows; Export CSV is a generic dump of 10 allow-listed tables; the JSONL export is the
-  round-trip contract carrying the staleness interlock. Retiring either real one loses something.
-
-<details><summary>Original brief</summary>
-
-```
-EXPORT ALREADY EXISTS — the Schema Explorer's Export CSV and Download .sql. Task U's export endpoint
-may duplicate it: report, and retire one. Two export paths that drift is the most-repeated defect
-in this codebase.
-
-⛔ FIRST, TEST WHETHER Export CSV MANGLES skills_json. Nested array, and CSV has no nested type. If
-it flattens, the round trip is broken before it starts — and skills_json is the ONLY column
-enrichment actually gains.
-
-WHAT IS MISSING IS INJECTION. No import control exists anywhere in the admin panel. Task U built
-endpoints with no UI, and an endpoint nobody can find is a feature that does not exist.
-
-GUARDS, non-negotiable:
-  · FILL NULLS ONLY by default; overwrite needs an explicit deliberate flag.
-  · Validate every column first — experience_level / workplace_type against the shared option
-    registry (NOT free text), skills_json parses as an array, salary_* integers, visa flags
-    0/1/NULL only.
-  · Malformed batch FAILS AS A WHOLE, naming offending rows. Never partially apply.
-  · Match on job_id. Unknown ids REJECTED, never inserted.
-  · content_hash staleness check — refuse rows whose posting changed after export.
-  · DRY RUN is the default.
-  · Record as a batch, source='import', with a before-image so revert works identically.
-  · NEVER write enriched_at where nothing was filled — that poisoning cost 120 rows once.
-  · Report per-column coverage, not row counts.
-  · State the practical batch size. 790 job descriptions may not fit in one request.
-
-ALSO: the concurrency guard returns applied:true with zeros and warning:null when it refuses.
-Return a distinct skipped state naming the reason.
-```
-</details>
-
----
-
-## TASK W — Wire the remaining ATS providers — DONE
-
-**Outcome.** The brief's premise held for four of five and was wrong for lever, which had a company
-list all along: three active rows, five crawls of `no_results`, all three slugs 404. Mercury had
-moved to greenhouse, Ramp to ashby; Retool is on no board we can find and is deactivated rather
-than guessed (the 070 Rippling precedent). Per-source causes came straight out of `pipeline_runs` —
-`no_results` for lever, `skipped_unconfigured` for the other four. They do not share a cause.
-
-Bigger find, not in the brief: **live search was structurally capped at three of seven sources**.
-`searchJobs` took `_ghCompanies`/`_leverCompanies`/`_ashbyCompanies` as three named parameters, so
-the other four plugins could only ever be handed an empty list however many companies the table
-held — invisible, because a plugin with no companies returns an empty result rather than an error.
-Both call sites now group `company_ats_list` through one `groupCompaniesByAtsType()`.
-
-Three source defects, all found by measuring field coverage on NORMALIZED rows rather than endpoint
-reachability: **workable** descriptions 0/20 → 20/20 (`?details=true` returns them in the SAME
-request — the code comment claiming a per-posting N+1 was needed was simply wrong), **recruitee**
-was storing raw HTML, **lever** 51/60 → 60/60 with a prefix-only `slice(0,3000)` replaced by the
-shared tail-preserving helper.
-
-Enabled +141 rows, all 100% description coverage, plus Mercury 40 and Ramp 96. **Veeva (596),
-Ubisoft (97), Bosch (334) and Adobe (217) are seeded INACTIVE with the measured reason recorded** —
-Veeva on volume alone, the other three because SmartRecruiters' and Workday's list endpoints carry
-no job text and `enrichJob.js` skips description-less rows.
-
-Verified with a real `cacheJobs` run against a **copy** of the live database: every predicted count
-matched, and 0 NULL `automation_tier`/`fingerprint`/`req_uid` on the new rows. Items 3–5 are
-answered in the doc — all three production writers route through the shared derivations;
-**THEIRSTACK_API_KEY is vestigial**; **SERPAPI_KEY is live but half-wired**.
-
----
-
-## TASK X — Clearbit is dead — DONE
-
-**Outcome.** Confirmed **gone, not blocked and not rate-limited**: `logo.clearbit.com` has no A
-record while `clearbit.com` still resolves, and the SOA comes from Clearbit's own Route53
-nameserver — Google and Cloudflare agree. No status code can report that, which is exactly why
-`fetchLogoUrl`'s HEAD check missed it, and its `catch` then returned **another Clearbit URL**. The
-fallback for "this provider is unreachable" was that provider; hence 1290 of 1296 rows holding a
-dead address.
-
-Replaced with DuckDuckGo icons behind a single `LOGO_HOST` — the hostname had been written out
-longhand in three files, which is why retiring it was a hunt rather than an edit. The per-render
-request is genuinely stopped: CompanyIcon's failure memo was component-local `useState`, so it
-silenced one card while the board re-requested on every remount; it is now a module-level Set keyed
-by URL. `server.js` was also silently falling through to a **Google** favicon on every call, sending
-browsing to a third party the privacy policy does not name — removed, and both retired hosts are
-swept by `backfillCompanyLogos` (boot + admin script, offline, feed-supplied logos never touched).
-
-Found while verifying the backfill: `companyToDomain` matched with a bare `includes()`, so
-**Physical Super*intel*ligence rendered Intel's logo** — along with Squarespace→squareup,
-Applecart→apple, Metabolic→meta. Now word-boundary matched, with all 81 table entries asserted to
-still resolve to themselves.
-
-The harness had been stubbing `logo.clearbit.com` with a 1x1 PNG, so its logo assertions passed for
-the entire time every logo on the board was dead. It now stubs `LOGO_HOST`.
-
-⚠ **The general lesson is bigger than the sweep.** A DNS sweep of all 24 external hosts found
-exactly one dead name — but it would have caught only one of the three failures hit so far. The
-Groq model id and task W's lever slugs were **identifiers retired while their host stayed up**,
-which no host probe can see and which always surface as a plausible empty success.
-
----
-
-## TASK Y — SmartRecruiters and Workday descriptions
-
-```
-Both are seeded in company_ats_list but INACTIVE, because their list endpoints carry no job text:
-measured 0% description coverage across Ubisoft (97 kept), Bosch (334) and Adobe (217).
-enrichJob.js skips description-less rows, so enabling them today adds 648 permanently unenrichable
-rows to the board.
-
-Unlike Workable — where the fix turned out to be one ?details=true on the same request — these two
-genuinely need a per-posting detail fetch:
-  smartrecruiters  GET /v1/companies/{id}/postings/{id} → jobAd.sections{companyDescription,
-                   jobDescription, qualifications, additionalInformation}
-  workday          per-posting detail call; the CXS search response has no description field at all
-
-1. The blocker is a BUDGET MODEL, not parsing. cacheJobs' shared crawl loop has no notion of a
-   per-source request budget, and Bosch alone is 900 postings. Design that first.
-2. Workday needs three more things besides descriptions — see docs/w1-ats-providers.md item 2:
-   posted_at is approximated from "Posted 30+ Days Ago", locationsText is sometimes a COUNT
-   ("2 Locations") rather than a place, and a wrong wd#/site is an opaque HTTP 422.
-3. test/companyAtsList.test.js FAILS if either provider is activated — deliberately. Fix the
-   descriptions first, then flip the seed.
-4. Also inactive: lever/veeva, 596 kept rows. Nothing is wrong with it; it is +47% board size from
-   one company while enrichment drains at 25/day. A volume decision, not an engineering one.
-5. SmartRecruiters ids are opaque and case-sensitive, and an unknown one returns 200 with
-   totalFound:0 rather than a 404 — validate a slug by asserting a non-zero count, never a status.
-```
-
----
-
-## TASK Z — The board lost its ATS badge
-
-```
-scripts/ae5BoardUi.mjs reports `AE5  the ATS badge survived — MISSING` on a real Chrome render.
-PRE-EXISTING: it fails identically on HEAD and was not introduced by task X.
-scripts/harnessBaseline.json expects 25 passes; HEAD and current both deliver 24.
-
-The node suite is green at 2326 and cannot see this — it is a rendered fact, which is the whole
-reason ae5BoardUi exists. Find when the badge disappeared, and whether the data or the render went.
-```
+**The economics, unchanged:** enrichment runs under a flat-rate subscription, so an external
+export/import round trip costs ~$0 at the margin. That makes export/import the **primary** route and
+more ATS providers **desirable** rather than a backlog risk — which is what task Y is for.
 
 ---
 
@@ -253,54 +162,65 @@ Present in Railway: `ANTHROPIC_KEY` · `APP_BASE_URL` · `FRONTEND_URL` · `GOOG
 - `ENRICH_PROVIDER` / `ENRICH_MODEL` are **correctly absent** — enrichment falls back to Haiku per
   A2's verdict. ⛔ **Do not set them again without re-reading A2**: Groq scored 30.5% Jaccard on
   `skills_json`, which feeds both the technographics table and the ATS scorer.
-- `GROQ_API_KEY` and `GOOGLE_API_KEY` are therefore **dormant** in production. Harmless, and correct
-  to keep for when volume justifies a measured cheaper model.
-- `THEIRSTACK_API_KEY` is **vestigial** — task W traced its only consumer to the offline
-  `scripts/providerEval` harness. No production import, no write path, and it is not set locally.
-  Safe to remove unless the provider eval will be re-run.
-- `SERPAPI_KEY` is **live but half-wired** — the key works (probed, returned rows), but cacheJobs
-  never crawls serpapi, its `search()` early-returns on the empty query the cron passes, and half
-  its results are dropped by `filterDirectApplyOnly` as aggregator URLs. Zero rows have landed.
+- `GROQ_API_KEY` and `GOOGLE_API_KEY` are **dormant** in production. Harmless, and correct to keep.
+  AD's token pacer is what makes Groq usable when volume justifies it — the free tier binds on
+  **8,000 TPM**, not on 30 req/min.
+- `THEIRSTACK_API_KEY` is **vestigial** — the only consumer is the offline `scripts/providerEval`
+  harness. Safe to remove unless the provider eval will be re-run.
+- `SERPAPI_KEY` is **live and correctly wired** for live search; it is absent from `cacheJobs` by
+  design. The old "half-wired" note here was wrong.
 - Caps default in code: `APPLY_DAILY_CAP` 25, `APPLY_DAILY_QUEUE_CAP` 40,
-  `APPLY_DAILY_APPROVAL_CAP` 30, `ENRICH_BATCH_SIZE` 25. Set them explicitly only to override.
-- ⚠ **`ENRICH_BATCH_SIZE` 25 × one daily cron = ~6 weeks to drain 790.** The cron is a trickle; the
-  manual trigger is the only thing that can clear a backlog. Worth raising, or looping the cron
-  within a bounded budget.
-- **No full-auto kill switch variable is visible.** AF3 specced one. Confirm whether it exists under
-  another name before the first unattended run.
+  `APPLY_DAILY_APPROVAL_CAP` 30, `ENRICH_DAILY_MAX_ROWS` 300. Set them explicitly only to override.
+  `routes/apply.js:431-437` already reports when a cap ordering makes another unreachable.
+- **The full-auto kill switch EXISTS.** `fullAutoDisabled()` (`routes/apply.js:513`) reads
+  `app_settings.apply_full_auto_disabled`, with `APPLY_FULL_AUTO_DISABLED` as a boot default, and
+  it is re-checked per job at `:981`, not only at admission. The old "a scan found NO such variable"
+  note was looking at env; the switch is in **config**. What is missing is only a write path — see
+  AF residual.
 
 ---
 
 ## Lessons still in force
 
-These are load-bearing for work in progress. The full catalogue is in `docs/FINDINGS_ARCHIVE.md`.
+Load-bearing for work in progress. The full catalogue is in `docs/FINDINGS_ARCHIVE.md`.
 
-**Assert a JSON key, never a 200.** The SPA catch-all answers 200 for any unknown path, and a
-status-code probe once "confirmed" a deployment that had not happened.
+**Assert a JSON key, never a 200.** The SPA catch-all answers 200 for any unknown path. It bit again
+on 09-15: `https://resumemaster.one/privacy` returns 200 anonymously and contains **none** of the
+policy text, because the page is rendered from the JS bundle. Verifying a deployed policy means
+fetching `/assets/index-*.js` and grepping it.
+
+**A silent cap is worse than a loud failure.** The 900-posting slice discarded 43% of the crawl for
+weeks while every run recorded `ok` and every affected provider answered 200. Cap per unit, never
+per concatenation — a total makes the survivors depend on insertion order, which is precisely what
+made it undetectable.
+
+**Two harnesses can assert opposite things and neither will say so.** `ak2BandSurfaces` asserted the
+raw ATS number is absent; `ae5BoardUi` asserted it is present. Both passed their own suites for eight
+days and task Z was filed against working code. **Derive the expectation from the module the product
+renders from**, never restate it as a literal.
 
 **A guard never seen to fail is not evidence.** Verify by injecting a violation. Three guards have
 shipped blind to the thing they guarded.
 
-**Route by payload, not by call-site name.** `purpose classifier` sends 2000 chars of résumé;
-`classify_job` does not.
-
-**`max_tokens: 500` silently breaks reasoning models.** Seen twice, both times as HTTP 200 with a
-clean usage row and nothing extracted.
+**Health must be derived from what was WRITTEN, not from what was RECORDED.** Three consecutive days
+of `fetched 25 / written 0` were logged `ok`, and everything that looked at `status` agreed.
 
 **Report coverage, not counts.** `enriched: 10` is true whether ten rows gained everything or
-nothing. Task W's version: an ATS source is only wired when its NORMALIZED rows carry the fields —
-workable's fetcher worked perfectly while every description came back null.
+nothing. An ATS source is only wired when its NORMALIZED rows carry the fields.
 
 **A fallback that returns the same provider is not a fallback.** Both `fetchLogoUrl` and
 `fetchCompanyIcon` answered "this provider is unreachable" with that provider's own URL. 1290 rows.
 
-**A dead IDENTIFIER outlives its host, and no host probe sees it.** Three for three now: the Groq
-model id, task W's three lever slugs, and Clearbit. Only Clearbit was a dead hostname; the other two
-sat on hosts that resolve and return 200. Each failed as a plausible empty success.
+**A dead IDENTIFIER outlives its host, and no host probe sees it.** Three for three: the Groq model
+id, task W's lever slugs, Clearbit. Only Clearbit was a dead hostname. AD's boot-time catalogue probe
+is the general answer — ask the provider whether the id still exists, once, at startup.
 
-**A harness that stubs a third party cannot report that third party dying.** `ae5BoardUi` answered
-`logo.clearbit.com` with a 1x1 PNG — correctly — and so its logo assertions passed for the whole
-time every logo on the board was dead. Stub the SHARED constant, never a hostname literal.
+**Pace on the limit that BINDS.** A limiter throttling the wrong axis reports success while the thing
+it guards fails. And price the pre-send estimate at full `max_tokens`, or the limiter throttles
+harder than the provider does for the mirror-image reason.
+
+**A harness that stubs a third party cannot report that third party dying.** Stub the SHARED
+constant, never a hostname literal.
 
 **Do not undo the reverted ATS floor fix.** Measured worse: ρ 0.448 → 0.242. Pinned by a test.
 
@@ -308,6 +228,8 @@ time every logo on the board was dead. Stub the SHARED constant, never a hostnam
 
 ## Cross-references
 
-`docs/FINDINGS_ARCHIVE.md` · `docs/CORRUPTION_SWEEP.md` · `resume-master-android/ANDROID.md` ·
-`resume-master-ios/IOS.md` · `docs/AUTOAPPLY_PROMPTS.md` · `docs/GATED_HANDOFF_ARCHITECTURE.md` ·
-`docs/PIPELINE_DIAGNOSIS.md` · per-task reports `docs/a{j,k,l,m}*.md`
+`docs/PART1_RECONCILED.md` (current state of record) · `docs/MONETISATION_AUDIT.md` (queued) ·
+`docs/FINDINGS_ARCHIVE.md` · `docs/RECONCILE_AND_RESIDUAL.md` · `docs/CORRUPTION_SWEEP.md` ·
+`resume-master-android/ANDROID.md` · `resume-master-ios/IOS.md` · `docs/AUTOAPPLY_PROMPTS.md` ·
+`docs/GATED_HANDOFF_ARCHITECTURE.md` · `docs/PIPELINE_DIAGNOSIS.md` ·
+per-task reports `docs/a{j,k,l,m}*.md`, `docs/w1-ats-providers.md`, `docs/x1-clearbit-dead.md`

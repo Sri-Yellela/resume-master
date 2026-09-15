@@ -98,16 +98,29 @@ by the generic path and works. Verified against live postings on all of the abov
 `extractJobPayload()` and `showCaptureToast()`; `gated-handoff.js` `probeFormShape()`, `applyPlan()`
 and `applyOverlayEdit()`; `review-overlay.js` `renderOverlay()`; `popup.js` for the ATS Score Tool.)*
 
-**`storage`**
-> Persists the result of the user's most recent capture, so the popup can show the outcome of a
-> capture made with the keyboard while the popup was closed; and — during a handoff only — the
-> prepared answers for the tab they are working in, held in `chrome.storage.session` (memory-backed,
-> cleared on browser restart) with a 10-minute expiry and cleared when the tab closes.
+**`storage`** — ⚠ **REVISED 2026-09-15. Re-paste this field in the dashboard.**
+> Four values, none of them sent anywhere by the extension. In `chrome.storage.local`: the result of
+> the user's most recent capture, so the popup can show the outcome of a capture made with the
+> keyboard while the popup was closed. In `chrome.storage.session` (memory-backed, discarded on
+> browser restart): the prepared answers for an application in progress, with a 10-minute expiry and
+> cleared when the tab closes; the result of the most recent form fill, so the popup can report a
+> fill started with the keyboard; and, when several applications are queued for one employer site,
+> that site's origin and how many remain, so a batch can resume in the same tab — no answers and
+> nothing about the user in that one. Only the prepared-answers packet carries the 10-minute expiry;
+> the other two session values live until the browser restarts, or until the tab closes in the case
+> of the batch.
 
-*(Code: `background.js` `reportCapture()` (`storage.local`) and `reportHandoff()`; `gated-handoff.js`
-`savePacketForTab()` / `clearPacketForTab()` / `sweepExpiredPackets()` (`storage.session`).
-`options.js` touches `storage.sync` only to delete a value the retired shortcut recorder left
-behind.)*
+*(Code: `background.js` `reportCapture()` → `lastCapture` (`storage.local`) and `reportHandoff()` →
+`lastGatedHandoff` (`storage.session`); `gated-handoff.js` `savePacketForTab()` /
+`clearPacketForTab()` / `sweepExpiredPackets()` → `gate:{tabId}`, and `saveBatchForTab()` /
+`clearBatchForTab()` → `batch:{tabId}` (`storage.session`). `options.js` touches `storage.sync` only
+to delete a value the retired shortcut recorder left behind.)*
+
+> ⚠ **Why this changed.** The earlier text described two values, matching a privacy-policy paragraph
+> that said the extension "keeps two things". It keeps four. The two undisclosed ones are session-only
+> and never transmitted, but "two things" is a claim a reviewer can falsify by opening the
+> extension's storage, so the policy and this field were corrected to match the code rather than the
+> reverse. See `PRIVACY_RECONCILIATION.md` § Permissions.
 
 **Host permissions** — one, and it is our own backend
 > `https://resumemaster.one/*` is our own server, which the extension fetches from with the user's

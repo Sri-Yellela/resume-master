@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs";
 import { LOGO_HOST } from "../shared/companyLogos.js";
+import { at } from "../test-support/sourceAnchors.js";
 
 // TASK E4 — the manifest, the privacy policy and the store listing must not contradict each other.
 //
@@ -155,6 +156,50 @@ test("the policy discloses what the extension keeps in browser storage", () => {
   }
 });
 
+test("THE POLICY'S COUNT OF STORED ITEMS MATCHES THE NUMBER OF KEYS THE CODE WRITES", () => {
+  // The policy said "two things" for as long as the extension had been writing four. The two
+  // undisclosed ones — lastGatedHandoff and batch:{tabId} — are session-only and never leave the
+  // browser, so the substance was fine and the documentation was not; "two things" is a claim a
+  // reviewer falsifies by opening the extension's storage. Counting the write sites is what ties
+  // the sentence to the code, so the next key added fails this instead of quietly making the
+  // policy wrong again.
+  const sources = ["background.js", "gated-handoff.js", "popup.js", "options.js", "extractor.js",
+                   "review-overlay.js"]
+    .filter(f => fs.existsSync(`extension/${f}`))
+    .map(f => fs.readFileSync(`extension/${f}`, "utf8"));
+  const writes = sources.join("\n").match(/chrome\.storage\.(?:local|session)\.set\(/g) || [];
+  assert.equal(writes.length, 4,
+    `the extension writes ${writes.length} storage keys; the policy enumerates four. Update ` +
+    `"What the Extension Stores in Your Browser", PRIVACY_RECONCILIATION.md's storage row and ` +
+    `STORE_LISTING.md's storage justification together — the dashboard field is pasted from the last one`);
+  assert.match(policyText, /keeps four things/,
+    "the policy must state the same count the code writes");
+
+  // Each of the four, named in prose a user can match to what they would see.
+  for (const [key, re] of [
+    ["lastCapture",      /result of your most recent capture/i],
+    ["gate:{tabId}",     /prepared answers for an application in progress/i],
+    ["lastGatedHandoff", /result of your most recent form fill/i],
+    ["batch:{tabId}",    /part-way through applying/i],
+  ]) {
+    assert.match(policyText, re, `the policy does not describe the ${key} key`);
+  }
+
+  // sweepExpiredPackets() filters on 'gate:', so only ONE of the four gets the ten-minute expiry.
+  // Promising it for all four would replace one false claim with another.
+  const handoff = fs.readFileSync("extension/gated-handoff.js", "utf8");
+  assert.match(handoff, /startsWith\(['"]gate:['"]\)/,
+    "the sweep no longer scopes to gate: — if it now covers every session key, the policy's " +
+    "'the ten-minute expiry does not apply' caveats are stale and should be removed");
+  assert.match(policyText, /ten-minute expiry above does not apply/i,
+    "the policy must say which keys the ten-minute expiry does NOT cover");
+
+  // The dashboard field is pasted from STORE_LISTING.md, so it drifts silently unless pinned here.
+  assert.match(listing, /Four values/,
+    "STORE_LISTING.md's storage justification still describes a different number of values than " +
+    "the policy — the owner would paste a contradiction into the Privacy practices tab");
+});
+
 test("the policy carries an effective date and a proactive-change commitment", () => {
   // Required by the 2026-08-01 rules: not just "we may update this", but notice before a material
   // change to data handling takes effect.
@@ -218,4 +263,52 @@ test("third parties named in the policy are ones the code actually uses", () => 
     "disclosed one failed — which, once its DNS went, was every single call");
   assert.match(fs.readFileSync("package.json", "utf8"), /apify-client/,
     "Apify is disclosed as a third party; the client library should be a real dependency");
+});
+
+test("THE RECONCILIATION'S THIRD-PARTY TABLE MATCHES THE SET THE POLICY NAMES", () => {
+  // This is the row that rotted. The test above checks the POLICY against the code, and it passed
+  // throughout — it was PRIVACY_RECONCILIATION.md's own enumeration that named Clearbit as a
+  // recipient and omitted DuckDuckGo for five weeks after task X swapped them. Nothing compared
+  // the two documents, so the join looked enforced while its third-party row was not covered in
+  // either direction.
+  //
+  // Convention the table encodes, and this asserts: **bold** = a live recipient the policy names,
+  // *italic* = a party named only to say it receives nothing (Clearbit, THEIRSTACK).
+  // Both ends via at(), not indexOf: a reworded heading would otherwise return -1, and slice reads
+  // -1 as an offset from the end of the file — the region widens instead of failing.
+  const secStart = at(policy, '<Section title="Third-Party Services">', 0, "PrivacyPage.jsx");
+  const section = policy.slice(secStart, at(policy, "</Section>", secStart, "PrivacyPage.jsx"));
+  // The FIRST <Strong> in each <LI> is the recipient's name; later ones are inline emphasis inside
+  // the prose ("It is <Strong>not</Strong> used by ordinary job search"), which is not a party.
+  const policyNames = [...section.matchAll(/<LI>([\s\S]*?)<\/LI>/g)]
+    .map(li => li[1].match(/<Strong>([^<]+)<\/Strong>/))
+    .filter(Boolean)
+    .map(m => m[1].replace(/\s+/g, " ").trim());
+  assert.ok(policyNames.length >= 6, `expected the policy to name recipients, found ${policyNames.length}`);
+
+  // The table used to be a flat list inside the negative-disclosures row, which is how it went
+  // stale unnoticed. at() throws by name if either heading is reworded away.
+  const tblStart = at(recon, "## Third-party recipients", 0, "PRIVACY_RECONCILIATION.md");
+  const table = recon.slice(
+    tblStart, at(recon, "### What is machine-guarded", tblStart, "PRIVACY_RECONCILIATION.md"));
+  const reconNames = [...table.matchAll(/^\|\s*\*\*([^*|]+)\*\*\s*\|/gm)]
+    .map(m => m[1].replace(/\s+/g, " ").trim());
+
+  for (const name of policyNames) {
+    assert.ok(reconNames.includes(name),
+      `the policy names "${name}" as a third party, but PRIVACY_RECONCILIATION.md's table does ` +
+      `not list it as a recipient — an undisclosed recipient in the join`);
+  }
+  for (const name of reconNames) {
+    assert.ok(policyNames.includes(name),
+      `PRIVACY_RECONCILIATION.md lists "${name}" as a live recipient, but the policy does not ` +
+      `name it — this is the direction that let "Clearbit Logo API" outlive its own retirement`);
+  }
+
+  // The specific rot, pinned by name in both directions.
+  assert.ok(!reconNames.some(n => /clearbit/i.test(n)),
+    "Clearbit must not be listed as a live recipient: logo.clearbit.com has no A record and the " +
+    "only surviving reference is RETIRED_LOGO_HOSTS, a repair list");
+  assert.ok(reconNames.some(n => /duckduckgo/i.test(n)),
+    "the live logo provider must appear in the table as a recipient");
 });

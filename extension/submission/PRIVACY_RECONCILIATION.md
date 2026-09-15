@@ -35,7 +35,21 @@ from — so this table cannot drift the way the line numbers did.
 |---|---|---|---|
 | `activeTab` | `background.js` `captureActiveTab()`, `previewActiveTab()` and `handleGatedHandoff()`, each reached only from `chrome.commands.onCommand` or a popup message; `popup.js` `getCurrentTab()`. The grant IS the invocation. | *Browser Extension* — "reads nothing until you invoke it… only that one tab". *Filling an Application* — "It holds no standing permission for any employer or job-portal site". | Granted only on explicit invocation; used to read the job posting in view and to fill an application form the user opened. No host permission exists for any site the extension reads a job from, so this per-tab grant is the only access there is. |
 | `scripting` | `background.js` `captureActiveTab()` and `reportCapture()`, which inject the two functions in `extractor.js` — `extractJobPayload()` and `showCaptureToast()`; `gated-handoff.js` `probeFormShape()`, `applyPlan()`, `applyOverlayEdit()`; `review-overlay.js` `renderOverlay()`; `popup.js` ATS Score Tool. | *Browser Extension* — "If you click **ATS Score Tool** … it copies the visible text of that page". *Filling an Application* — "enters them into that employer's form". | Injects a one-off script into the invoked tab to read the posting, collect text for an ATS score, fill the form and render the review panel. Nothing is injected into any other tab, and nothing is registered to run persistently. |
-| `storage` | `background.js` `reportCapture()` (`storage.local`, last capture) and `reportHandoff()`; `gated-handoff.js` `savePacketForTab()`, `loadPacketForTab()`, `clearPacketForTab()`, `sweepExpiredPackets()` (`storage.session`). `options.js` uses `storage.sync` only to DELETE a value the retired shortcut recorder left behind. | *What the Extension Stores in Your Browser* — both items, each with its lifetime, plus the retired third. | Stores the result of the most recent capture so the popup can show the outcome of a hotkey capture it was not open for, and — during a handoff only — the prepared answers, in memory-backed session storage with a 10-minute expiry, cleared when the tab closes. |
+| `storage` | **Four keys, two areas.** `background.js` `reportCapture()` → `lastCapture` (`storage.local`); `background.js` `reportHandoff()` → `lastGatedHandoff` (`storage.session`); `gated-handoff.js` `savePacketForTab()`, `loadPacketForTab()`, `clearPacketForTab()`, `sweepExpiredPackets()` → `gate:{tabId}` (`storage.session`); `gated-handoff.js` `saveBatchForTab()`, `loadBatchForTab()`, `clearBatchForTab()` → `batch:{tabId}` (`storage.session`). `options.js` uses `storage.sync` only to DELETE a value the retired shortcut recorder left behind. | *What the Extension Stores in Your Browser* — **all four items**, each with the area it lives in and its real lifetime. ⚠ Only `gate:` gets the ten-minute expiry; the policy now says so rather than implying it covers everything. | Stores the result of the most recent capture so the popup can show the outcome of a hotkey capture it was not open for; the result of the most recent form fill, for the same reason; — during a handoff only — the prepared answers, in memory-backed session storage with a 10-minute expiry, cleared when the tab closes; and, when several applications are queued for one employer site, that site's origin and how many remain, so a batch can resume in the same tab. |
+
+⚠ **The storage row was wrong until 2026-09-15, and this is how.** The policy said the extension
+keeps "two things" and enumerated `lastCapture` and the packet. It writes four.
+`background.js` `reportHandoff()` was cited in this table's code column while the policy paragraph
+it pointed at described only the other two, and `gated-handoff.js` `saveBatchForTab()` was cited
+nowhere at all — so the join looked complete in both directions while an undisclosed key sat on each
+side of it. `gated-handoff.js` `sweepExpiredPackets()` filters on `k.startsWith('gate:')`, which
+means `lastGatedHandoff` and `batch:{tabId}` never got the expiry the policy promised; they live
+until the browser restarts, or until `chrome.tabs.onRemoved` fires for `batch:`. The fix was to the
+**policy**, not the code: two undisclosed session keys are honest behaviour with dishonest
+documentation, and deleting a key to make a sentence true would have been the wrong direction.
+**Follow-up, deliberately not done here:** the sweep arguably should cover every session key rather
+than just `gate:`, since the policy promised an expiry two of four did not get. That is a behaviour
+change and belongs in its own commit.
 
 **Declared nowhere, deliberately:** `tabs`, `cookies`, `notifications`, `history`, `webNavigation`,
 `<all_urls>`. Each is asserted absent by `test/manifestMinimumPermission.test.js`; the reasoning is
@@ -80,8 +94,50 @@ and each still needs a policy paragraph.
 | No scraping of job lists or saved-job lists | `saved-jobs-content.js` and `SCRAPE_SAVED_JOBS` are absent from source and from the packed zip — asserted by `test/extensionSubmission.test.js`. |
 | Nothing is read until you invoke it, and only that tab | No content script and no job-board host permission exist, so there is no origin the extension can run on unbidden. Every read — capture, ATS, handoff — is an `executeScript` into the tab an invocation just granted. |
 | No remotely hosted code | CSP `script-src 'self'`; no `eval`, `new Function`, `importScripts` or remote `<script src>` anywhere in the bundle. |
-| No sale of personal data; no unrelated transfer; no creditworthiness use | No such code path exists. Third parties are enumerated in *Third-Party Services*: Railway, Anthropic, SerpApi, Apify, Adzuna, Clearbit Logo API, LinkedIn OAuth. |
+| No sale of personal data; no unrelated transfer; no creditworthiness use | No such code path exists. Third parties are enumerated in *Third-Party Services* — see the verified table below, which replaces the stale enumeration this row used to carry. |
 | Nothing pushes data into the extension | `externally_connectable` absent — no website can message it. |
+
+## Third-party recipients — verified against live code, 2026-09-15
+
+This row used to be a flat list inside the negative-disclosures table, and it went stale for five
+weeks: it named **Clearbit Logo API** as a recipient and omitted **DuckDuckGo Icons**, which is the
+provider browsers actually request. Task X swapped them on 2026-09-08 and the deployed policy has
+been right ever since — only this file was wrong. A named processor that receives nothing is a false
+disclosure in the same way an undisclosed one is a gap, so each entry now carries its live status.
+
+| Named in the policy | What reaches it | Code | Live status |
+|---|---|---|---|
+| **Railway** | hosting; everything | the deployment itself | **live** |
+| **Anthropic** | job descriptions, résumé content | `services/jobs/enrichJob.js` and generation, via `resolveProvider()` | **live** — `ANTHROPIC_KEY` set, Haiku per A2 |
+| **SerpApi** | search terms and filters | `services/jobs/aggregator.js` `searchJobs()`; reached by `POST /api/jobs/search` | **live in production** (`SERPAPI_KEY` set). Absent from `cacheJobs` by design — `ATS_SOURCE_NAMES` only. ⚠ Not set locally, which is the only reason a local boot logs `Inactive (not configured): adzuna, serpapi`; that line describes the dev box, not production |
+| **Apify** | job titles, locations, filters for one refresh | per-user `apify_token` set via `/api/settings/apify-token`; reached only by `adminDb.js` `scrapeJobs()` behind an admin force-scrape | **conditional, and the policy says so** — "if you have not connected a token, nothing is ever sent". True whether or not any user has |
+| **Adzuna** | search terms and filters | `services/jobs/sources/adzuna.js` `isConfigured()` requires **both** `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` | ⚠ **OVER-DISCLOSED.** Neither variable is in the Railway inventory, so in production Adzuna is inactive and receives **nothing**. Both are set locally. The policy states flatly that search terms "are sent to Adzuna when you search" — true on a dev box, not true of the deployed product |
+| **Job boards we search directly** | search terms and filters | the seven ATS plugins, all now reached via `services/jobs/aggregator.js` `groupCompaniesByAtsType()` | **live** |
+| **DuckDuckGo Icons** | a company domain, in an image URL | `LOGO_HOST` in `shared/companyLogos.js` | **live** — the only logo provider |
+| **LinkedIn OAuth** | name, email, on opt-in sign-in | OAuth callback | **live, optional** |
+| *Clearbit Logo API* | **nothing** | appears only in `services/jobs/backfillCompanyLogos.js` `RETIRED_LOGO_HOSTS`, a repair list that rewrites bad rows | **retired.** Named in the policy only as the thing DuckDuckGo replaced, which is the correct way to name it |
+| *THEIRSTACK* | **nothing** | only consumer is the offline `scripts/providerEval` harness | **vestigial, and correctly NOT named in the policy** |
+
+⛔ **One recipient the policy does not name: Google Fonts.** `client/index.html` preconnects
+`fonts.googleapis.com` and `fonts.gstatic.com` and loads a stylesheet from the former on **every
+page, including the privacy page itself** — confirmed present in the deployed shell. Google
+therefore receives the visitor's IP address and user-agent on every visit, and *Third-Party
+Services* does not mention it. This is the same shape as the Google S2 favicon fallback task X
+removed — a third party seeing browsing that the policy does not disclose — except this one is still
+live. It is **not** fixed here: adding a processor to the policy is an owner-facing legal statement
+and this commit's scope is the two contradictions above. **Recommended before submitting**, either
+by naming Google Fonts in the policy or by self-hosting the two families.
+
+### What is machine-guarded, and what is not
+
+`test/privacyReconciliation.test.js` now asserts that **this table's named set matches the set the
+policy names** — that was the actual reason the Clearbit row rotted unnoticed. The existing
+third-party test only ever checked the *policy* against the code, never this file's own
+enumeration, so both directions of that row were unguarded while the rest of the join was covered.
+
+Still **manually maintained and unguarded**: the *Live status* column above (it depends on
+deployment environment variables, which no offline test can read), and whether a paragraph is
+honest prose. Those need a human.
 
 ## Dashboard — Privacy practices tab
 

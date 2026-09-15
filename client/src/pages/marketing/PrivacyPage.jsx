@@ -220,22 +220,40 @@ export function PrivacyPage() {
 
           <H3>What the Extension Stores in Your Browser</H3>
           <P>
-            The extension keeps two things in your browser's own extension storage. Neither is sent
-            anywhere by the extension, and both disappear when you uninstall it. (Earlier versions
-            also stored a custom keyboard shortcut; that setting was removed, and any value it left
-            behind is deleted when you open the extension's options page. Shortcuts are now managed
-            by Chrome itself.)
+            The extension keeps four things in your browser's own extension storage. None of them is
+            sent anywhere by the extension. One is ordinary local storage and stays until you
+            uninstall the extension; the other three are memory-backed session storage, which your
+            browser discards when you restart it. (Earlier versions also stored a custom keyboard
+            shortcut; that setting was removed, and any value it left behind is deleted when you
+            open the extension's options page. Shortcuts are now managed by Chrome itself.)
           </P>
           <UL>
             <LI>
               <Strong>The result of your most recent capture</Strong> — the job title and whether
               it succeeded — so the popup can show you the outcome of a capture you made with the
-              keyboard while the popup was closed. Overwritten by the next capture.
+              keyboard while the popup was closed. Local storage: overwritten by the next capture,
+              and kept until you uninstall the extension.
             </LI>
             <LI>
               <Strong>The prepared answers for an application in progress</Strong>, during a form
-              fill only. Held in memory-backed storage that is cleared when you restart your
-              browser, expiring after ten minutes and deleted when the tab closes.
+              fill only. Session storage: expiring after ten minutes, deleted when that tab closes,
+              and gone when you restart your browser.
+            </LI>
+            <LI>
+              <Strong>The result of your most recent form fill</Strong> — whether it succeeded, the
+              message you were shown, and which tab it happened in — so the popup can report the
+              outcome of a fill you started with the keyboard. Session storage: overwritten by the
+              next fill and gone when you restart your browser. The ten-minute expiry above does
+              not apply to it.
+            </LI>
+            <LI>
+              <Strong>Which employer's site you are part-way through applying on</Strong>, when you
+              have more than one application queued for the same site — that site's web address and
+              how many are left to do, so the extension can carry on where it stopped without
+              sending you through the sign-in again. This one records an employer, so it is worth
+              stating plainly: it holds no answers and nothing about you. Session storage: deleted
+              when that tab closes or when the queue for that site empties, and gone when you
+              restart your browser. The ten-minute expiry does not apply to it either.
             </LI>
           </UL>
 
