@@ -40,20 +40,26 @@ const CASES = [
   { score: ATS_BAND_CUTPOINTS.strong - 1,   expect: 'Moderate' },  // 43
   { score: ATS_BAND_CUTPOINTS.moderate,     expect: 'Moderate' },  // 26
   { score: ATS_BAND_CUTPOINTS.moderate - 1, expect: 'Weak'     },  // 25
-  { score: null, expect: 'No signal' },
+  { score: null, expect: null },   // no score -> NO CHIP. See the note on ATSBadge in JobCard.jsx.
 ];
 
 const now = Math.floor(Date.now() / 1000);
 const POOL = CASES.map((c, i) => ({
   jobId: `b${i}`, id: `b${i}`,
   company: `Co${i}`,
-  title: `${c.expect} case — score ${c.score === null ? 'null (declined)' : c.score}`,
+  title: `${c.expect || 'No chip'} case — score ${c.score === null ? 'null (unscored)' : c.score}`,
   location: 'Remote', workType: 'Remote',
   url: `https://example.invalid/${i}`, applyUrl: `https://example.invalid/${i}`,
   source: 'ashby', sourcePlatform: 'ashby', automationTier: 'direct',
   postedAt: null, scrapedAt: now - i, discoveredAt: now - i,
   isActive: true, companyIconUrl: null,
-  baseAtsScore: c.score,
+  // ⛔ matchScore, NOT baseAtsScore. This stub used to set `baseAtsScore`, which GET /api/jobs
+  // has never emitted — services/jobs/mapJobRow.js emits the stored ats_score as `matchScore`.
+  // So this harness fed the board a field the real endpoint does not send, and went green while
+  // every real card fell to the null branch and read "No signal". A fixture that invents the
+  // field under test measures the fixture. The client now normalises matchScore -> baseAtsScore
+  // in JobsPanel.normalizeApiJob, and this stub exercises that path instead of bypassing it.
+  matchScore: c.score,
   visited: false, starred: false, disliked: false, alreadyApplied: false,
 }));
 
@@ -141,25 +147,35 @@ async function main() {
 
     console.log(`      rendered ${seen.length} band chips\n`);
     for (const c of CASES) {
-      const label = c.score === null ? 'null (declined)' : String(c.score);
+      const label = c.score === null ? 'null (unscored)' : String(c.score);
       const hit = seen.find(s => s.title.includes(`score ${label}`));
-      check(`score ${label.padEnd(15)} renders "${c.expect}"`, hit?.chip?.text === c.expect,
-        hit ? `got "${hit.chip.text}"` : 'no chip found');
+      if (c.expect === null) {
+        // The absence IS the assertion: an unscored row must carry no band chip at all.
+        check(`score ${label.padEnd(15)} renders NO chip`, !hit,
+          hit ? `got a chip reading "${hit.chip.text}"` : 'absent, as required');
+      } else {
+        check(`score ${label.padEnd(15)} renders "${c.expect}"`, hit?.chip?.text === c.expect,
+          hit ? `got "${hit.chip.text}"` : 'no chip found');
+      }
     }
 
-    const weak = seen.find(s => s.chip.text === 'Weak')?.chip;
-    const none = seen.find(s => s.chip.text === 'No signal')?.chip;
-    check('"Not enough signal" is VISUALLY distinct from "Weak"',
-      !!weak && !!none && (weak.bg !== none.bg || weak.fg !== none.fg),
-      weak && none ? `weak ${weak.bg}/${weak.fg} vs none ${none.bg}/${none.fg}` : 'one of them did not render');
+    // "No signal" is no longer a BOARD state, so the old distinct-from-Weak check has nothing to
+    // compare on this surface. The band itself still exists and is still distinct — asserted
+    // against the shared module instead, and ATSPanel remains its rendering surface.
+    check('"No signal" never appears on the board at all',
+      !seen.some(s => s.chip.text === 'No signal'),
+      seen.filter(s => s.chip.text === 'No signal').length + ' found');
+    check('the decline band is still DEFINED and distinct from Weak',
+      atsBandLabel(atsBandFor(null)).short !== atsBandLabel(atsBandFor(25)).short,
+      `${atsBandLabel(atsBandFor(null)).short} vs ${atsBandLabel(atsBandFor(25)).short}`);
     check('the raw number is nowhere on the board',
       !/ATS \d/.test(await page.evaluate(() => document.body.innerText)));
 
     // The expected mapping, computed from the shared module, must agree with the DOM — so this
     // harness fails if the module and the surface ever disagree, not merely if the surface breaks.
-    for (const c of CASES) {
+    for (const c of CASES.filter(c => c.expect !== null)) {
       const expected = atsBandLabel(atsBandFor(c.score)).short;
-      check(`shared module agrees for ${c.score === null ? 'null' : c.score}`, expected === c.expect,
+      check(`shared module agrees for ${c.score}`, expected === c.expect,
         `module says "${expected}"`);
     }
 

@@ -62,6 +62,24 @@ function normalizeApiJob(job) {
     // row rather than a mapped one (the poll feed), so the card gets the same field either way.
     // null stays null: JobCard's TierChip renders null exactly as it renders 'unknown'.
     automationTier: job.automationTier ?? job.automation_tier ?? null,
+    // THE SCORE ARRIVES UNDER A NAME NOTHING ON THIS SIDE READ.
+    //
+    // /api/jobs maps rows through services/jobs/mapJobRow.js, which emits the stored ats_score as
+    // `matchScore` — the name the mobile contract documents. Every desktop surface reads
+    // `baseAtsScore`, which comes from a DIFFERENT mapper (server.js's /api/jobs/poll shape) over
+    // the same column. So on the board, baseAtsScore was undefined on every row, the badge fell to
+    // its null branch, and all 1,266 cards read "No signal" — while clicking one opened a panel
+    // that scored the job for real and showed a band. The badge and the panel disagreed because
+    // they were reading two different fields.
+    //
+    // test/matchScoreReachesTheClient.test.js already documents this exact drift and fixed the
+    // SERVER half of it. This is the client half: the desktop half was never joined up, and the
+    // test's own comment ("the desktop client never reads it") records the gap rather than closing
+    // it.
+    //
+    // ?? NOT ||, for the reason that test spells out: a score of 0 is a real score that bands as
+    // Weak, and `||` would collapse it into null, which means the scorer DECLINED.
+    baseAtsScore:   job.baseAtsScore   ?? job.matchScore ?? null,
   };
 }
 

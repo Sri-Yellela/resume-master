@@ -232,9 +232,27 @@ function SkillChips({ skills, max = 5 }) {
 // different scale. Cutpoints now come from shared/atsBands.js, which is also what JobsPanel's copy
 // of this badge reads, so the two cannot drift into disagreeing about the same job.
 function ATSBadge({ score, onClick }) {
-  // A null score is "not enough signal", which IS a band and must render — it is the scorer
-  // declining rather than fabricating, and hiding it makes the honest answer invisible.
-  const band = atsBandFor(score ?? null);
+  // NO SCORE RENDERS NOTHING, and this reverses an earlier decision here on purpose.
+  //
+  // The note this replaces said a null score "IS a band and must render — it is the scorer
+  // declining rather than fabricating". That reasoning is sound for the surfaces it was written
+  // for and wrong for this one, because on a card `null` does not mean the scorer declined. It
+  // means NOBODY EVER SCORED THIS ROW: 1,262 of the board's 1,266 active postings have a NULL
+  // ats_score, so "the scorer declined" and "there is no score" arrive here as the same value and
+  // the badge cannot tell them apart. Rendering the decline band for both turned a state that
+  // shared/atsBands.js measured at 0.1% of the board into a chip on essentially every card —
+  // which is not the honest answer made visible, it is one word repeated 1,266 times.
+  //
+  // It also actively misinformed: clicking the chip opens the ATS panel, which scores the job on
+  // demand and shows a real band, so the card said "No signal" about a job the very next click
+  // proved it had an opinion on.
+  //
+  // ⛔ THE FOURTH BAND IS NOT DELETED AND MUST NOT BE. atsBandFor still returns
+  // NOT_ENOUGH_SIGNAL for null and ATSPanel still renders it, which is where it belongs: a
+  // surface that RAN the scorer and got a decline. This guard only stops a card from reporting an
+  // absent score as a scorer's verdict. See test/atsBadgeAbsentWithoutScore.test.js.
+  if (score == null || Number.isNaN(score)) return null;
+  const band = atsBandFor(score);
   const meta = atsBandLabel(band);
   return (
     <span title={meta.blurb}
@@ -571,11 +589,10 @@ export default function JobCard({
                 {job.company}
               </span>
               <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt, job.scrapedAt)}</span>
-              {/* NOT gated on a non-null score. null is the scorer DECLINING, which is its own
-                  band ("Not enough signal") and the one a user most needs distinguished from a poor
-                  match. The old `score != null` guard here is why that band could never appear on a
-                  card even after the badge learned to render it — caught by scripts/ak2BandSurfaces.mjs,
-                  not by any source test. */}
+              {/* The null guard that used to live here, then was removed, now lives INSIDE
+                  ATSBadge — one copy rather than one per call site, so the two rows on this card
+                  cannot disagree about when a badge appears. See the note on ATSBadge for why a
+                  card treats "no score" as nothing to say rather than as a verdict. */}
               {!isLoggedOut && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore ?? null} onClick={onAts}/>}
               {!isLoggedOut && (
                 <ToggleIconBtn
