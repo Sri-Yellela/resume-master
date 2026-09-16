@@ -101,8 +101,16 @@ export function FeaturesPage() {
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
             {[
-              { path: "/tools/ats",      title: "ATS Scorer",       desc: "Score your resume against any job description.", limit: "3 free scores / month" },
-              { path: "/tools/generate", title: "Resume Generator", desc: "Generate a focused resume for any job in 30 seconds.", limit: "2 free resumes / month" },
+              // THE QUOTAS HERE ARE THE ONES THE SERVER ACTUALLY ENFORCES, which two of them were
+              // not. standaloneRateLimit takes (service, anonMax, userMax): ATS is (1, 3), so "3
+              // free scores" was the SIGNED-IN number printed under a heading that says no account
+              // is required — an anonymous visitor got one. Generate now requires a standalone
+              // account at all, so its old unqualified "2 free resumes" would be a promise the
+              // route refuses outright. Same class of error as the privacy policy claiming the
+              // extension stored "two things" when it stored four: a public page stating a number
+              // nobody checked against the code.
+              { path: "/tools/ats",      title: "ATS Scorer",       desc: "Score your resume against any job description.", limit: "1 free score / month, 3 with an account" },
+              { path: "/tools/generate", title: "Resume Generator", desc: "Generate a focused resume for any job in 30 seconds.", limit: "2 free resumes / month (sign in required)" },
               { path: "/tools/apply",    title: "Auto Apply",       desc: "Fill applications at any job portal automatically.", limit: "2 free runs / month (sign in required)" },
             ].map(t => (
               <div key={t.path} style={{

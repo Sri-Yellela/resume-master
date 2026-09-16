@@ -27,7 +27,10 @@ export function GenerateToolPage() {
       fd.append("jd_text", jdText);
       const r = await fetch("/api/standalone/generate", { method: "POST", credentials: "include", body: fd });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Generation failed");
+      // `message` first, `error` second. `error` is a machine-readable code — the new
+      // standalone_auth_required among them — and showing the code to a person turns a normal,
+      // recoverable "please sign in" into what looks like a crash.
+      if (!r.ok) throw new Error(d.message || d.error || "Generation failed");
       setResult(d);
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
@@ -55,6 +58,7 @@ export function GenerateToolPage() {
         </h1>
         <p style={{ fontSize: 15, color: theme.textMuted, marginBottom: 36, lineHeight: 1.6 }}>
           Upload your resume and a job description. Our AI rewrites it to beat ATS filters.
+          {" "}Generating a resume needs a free account; scoring one does not.
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

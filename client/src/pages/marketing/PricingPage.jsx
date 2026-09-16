@@ -86,7 +86,11 @@ export function PricingPage() {
                 <div style={{
                   position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)",
                   background: t.recommended ? "var(--color-primary)" : "var(--color-surface-offset)",
-                  color: t.recommended ? "var(--color-primary-text)" : "var(--color-text-muted)",
+                  // --color-primary-text IS the accent colour (theme.jsx maps it to accentText),
+                  // so on a --color-primary fill it painted orange on orange and the badge read as
+                  // empty. --color-on-primary is the token that exists for exactly this pairing,
+                  // and is what every other primary-filled control in the app already uses.
+                  color: t.recommended ? "var(--color-on-primary, #0f0f0f)" : "var(--color-text-muted)",
                   fontSize: 11, fontWeight: 700, padding: "3px 12px", borderRadius: 999,
                   border: "1px solid var(--color-border)", whiteSpace: "nowrap",
                 }}>
@@ -121,7 +125,10 @@ export function PricingPage() {
                   display: "block", textAlign: "center", padding: "11px 0",
                   borderRadius: 999, textDecoration: "none", fontWeight: 700, fontSize: 14,
                   background: t.recommended ? "var(--color-primary)" : "transparent",
-                  color: "var(--color-primary-text)",
+                  // Same defect, and worse here because it is the call to action on the card the
+                  // page is steering people to. Unrecommended cards keep the accent-on-transparent
+                  // pairing, which is legible; only the filled one needs the contrasting token.
+                  color: t.recommended ? "var(--color-on-primary, #0f0f0f)" : "var(--color-primary-text)",
                   border: "1.5px solid var(--color-primary)",
                 }}>
                   {t.cta}

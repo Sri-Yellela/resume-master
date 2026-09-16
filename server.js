@@ -3500,6 +3500,23 @@ console.log(`[boot] database ready: ${DB_PATH}`);
            AND salary_period NOT IN ('annual', 'hourly', 'monthly');
       `,
     },
+    {
+      // 105 — ANONYMOUS SPEND WAS BOUNDED BY A COOKIE THE CALLER CONTROLS.
+      // standaloneRateLimit counted an anonymous caller's runs by req.sessionID, so the quota
+      // reset with a new cookie: clearing site data, or a fresh incognito window, restored a full
+      // allowance. /api/standalone/generate runs Sonnet at 8192 max_tokens and is the single
+      // largest per-call cost in the system, so the bound that mattered most was the one anybody
+      // with a browser could step around. client_ip is the coarse identity that does not reset on
+      // demand. Nullable and additive: existing rows keep counting under their session id.
+      id: "105_standalone_usage_client_ip",
+      sql: `
+        ALTER TABLE standalone_usage ADD COLUMN client_ip TEXT;
+        CREATE INDEX IF NOT EXISTS idx_standalone_usage_ip
+          ON standalone_usage(client_ip, service, used_at);
+        CREATE INDEX IF NOT EXISTS idx_standalone_usage_service_time
+          ON standalone_usage(service, used_at);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -9135,17 +9152,63 @@ app.post("/api/standalone/auth/logout", (req, res) => {
   res.json({ ok: true });
 });
 
-// Standalone rate-limit middleware
-// anonMax: max uses per session (anonymous); userMax: max per registered user per month
+// ── STANDALONE SPEND CONTROLS ──────────────────────────────────────────
+//
+// ⛔ THESE ARE COST CONTROLS, NOT COMMERCIAL SURFACES. They protect the owner's bill, which is the
+// only real money in this system today, and they are deliberately NOT behind the monetisation
+// lever — an unmetered public endpoint that calls a paid model needs bounding whether or not the
+// product is ever commercial. See shared/monetisation.js.
+//
+// THE QUOTA USED TO BE KEYED ON A COOKIE THE CALLER CONTROLS. An anonymous caller was counted by
+// req.sessionID, so the allowance reset with a new cookie: clear site data, or open an incognito
+// window, and the "1 free run per 30 days" started over. It was not a bound, it was a speed bump.
+// Anonymous callers are now counted by client IP (migration 105), which is coarse — a shared
+// office NAT counts as one caller — and accepted as such, because the alternative on an
+// unauthenticated route is no bound at all.
+//
+// ANON_DAILY_SERVICE_CEILING is the backstop for the case where IP keying is itself circumvented,
+// which for anyone willing to rotate addresses it can be. It caps TOTAL anonymous runs of a
+// service per 24h across every caller, so the worst case is bounded by a number rather than by
+// how many addresses an attacker has. It is a blunt instrument and it is meant to be: it trades
+// availability for a ceiling on the bill, and the ceiling is the point.
+const ANON_DAILY_SERVICE_CEILING = Number(process.env.ANON_DAILY_SERVICE_CEILING || 50);
+
+// req.ip is trustworthy here: app.set("trust proxy", 1) above, required for Railway anyway.
+// Falls back to the session id rather than to a constant — one shared bucket for every caller
+// whose address could not be read would let one of them exhaust the allowance for all of them.
+function anonKey(req) {
+  return req.ip || req.socket?.remoteAddress || `session:${req.sessionID}`;
+}
+
+// anonMax: max uses per IP per 30 days (anonymous); userMax: max per registered user per month
 function standaloneRateLimit(service, anonMax, userMax) {
   return (req, res, next) => {
     const userId    = req.session?.standaloneUserId;
     const sessionId = req.sessionID;
+    const ip        = anonKey(req);
     const since     = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
+    const dayAgo    = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
+
+    if (!userId) {
+      // The global backstop is checked BEFORE the per-caller one. A caller who is inside their own
+      // allowance must still be refused once the service's daily total is spent, or the ceiling
+      // would only ever bind callers who were already over their individual limit — which is to
+      // say, never.
+      const today = db.prepare(
+        "SELECT COUNT(*) as c FROM standalone_usage WHERE standalone_user_id IS NULL AND service=? AND used_at>?"
+      ).get(service, dayAgo).c;
+      if (today >= ANON_DAILY_SERVICE_CEILING) {
+        console.warn(`[standalone] anonymous daily ceiling hit for ${service}: ${today}/${ANON_DAILY_SERVICE_CEILING}`);
+        return res.status(429).json({
+          error: "service_busy", service,
+          message: `Free ${service} runs are at today's limit. Sign in, or try again tomorrow.`,
+        });
+      }
+    }
 
     const count = userId
       ? db.prepare("SELECT COUNT(*) as c FROM standalone_usage WHERE standalone_user_id=? AND service=? AND used_at>?").get(userId, service, since).c
-      : db.prepare("SELECT COUNT(*) as c FROM standalone_usage WHERE session_id=? AND service=? AND used_at>?").get(sessionId, service, since).c;
+      : db.prepare("SELECT COUNT(*) as c FROM standalone_usage WHERE client_ip=? AND service=? AND used_at>?").get(ip, service, since).c;
 
     const limit = userId ? userMax : anonMax;
     if (count >= limit) {
@@ -9154,10 +9217,20 @@ function standaloneRateLimit(service, anonMax, userMax) {
         message: `You have used ${count} of ${limit} free ${service} runs this month.`,
       });
     }
-    db.prepare("INSERT INTO standalone_usage (standalone_user_id, session_id, service) VALUES (?,?,?)")
-      .run(userId || null, sessionId, service);
+    db.prepare("INSERT INTO standalone_usage (standalone_user_id, session_id, service, client_ip) VALUES (?,?,?,?)")
+      .run(userId || null, sessionId, service, userId ? null : ip);
     next();
   };
+}
+
+// Standalone auth guard. 401 with a machine-readable reason, so the tools page can prompt for a
+// sign-in rather than showing a generic failure for what is a normal, recoverable state.
+function requireStandaloneAuth(req, res, next) {
+  if (req.session?.standaloneUserId) return next();
+  return res.status(401).json({
+    error: "standalone_auth_required",
+    message: "Sign in to generate a resume. Scoring a resume stays free without an account.",
+  });
 }
 
 // Multer for standalone uploads
@@ -9197,8 +9270,20 @@ app.post("/api/standalone/ats", standaloneRateLimit("ats", 1, 3), standaloneUplo
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/standalone/generate — Generate resume (no main-app auth)
-app.post("/api/standalone/generate", standaloneRateLimit("generate", 1, 2), standaloneUpload.single("resume"), async (req, res) => {
+// POST /api/standalone/generate — Generate resume (requires STANDALONE auth, not main-app auth)
+//
+// ⛔ THE ONE ANONYMOUS SURFACE WORTH CLOSING OUTRIGHT. This runs Sonnet at 8192 max_tokens and
+// was the largest per-call cost in the system reachable by anyone with a browser.
+// /api/standalone/ats stays anonymous on purpose: it is Haiku at 900 max_tokens, it is the hook
+// that makes the tools pages worth visiting, and a free ATS score costs little enough to give
+// away. A free tailored resume does not. Requiring a standalone account here costs almost nothing
+// in funnel terms — the caller has already uploaded a resume by this point — and removes the
+// expensive unauthenticated surface entirely.
+//
+// requireStandaloneAuth runs BEFORE the rate limiter, so an anonymous caller is refused without
+// writing a usage row. anonMax is 0 rather than 1 to say the anonymous allowance is gone, instead
+// of leaving a number behind that reads like one.
+app.post("/api/standalone/generate", requireStandaloneAuth, standaloneRateLimit("generate", 0, 2), standaloneUpload.single("resume"), async (req, res) => {
   const jdText = req.body?.jd_text || "";
   if (!req.file || !jdText.trim()) return res.status(400).json({ error: "resume PDF and jd_text required" });
   if (!ANTHROPIC_KEY) return res.status(500).json({ error: "ANTHROPIC_KEY not configured" });

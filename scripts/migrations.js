@@ -3111,4 +3111,21 @@ export const MIGRATIONS = [
            AND salary_period NOT IN ('annual', 'hourly', 'monthly');
       `,
     },
+    {
+      // 105 — ANONYMOUS SPEND WAS BOUNDED BY A COOKIE THE CALLER CONTROLS.
+      // standaloneRateLimit counted an anonymous caller's runs by req.sessionID, so the quota
+      // reset with a new cookie: clearing site data, or a fresh incognito window, restored a full
+      // allowance. /api/standalone/generate runs Sonnet at 8192 max_tokens and is the single
+      // largest per-call cost in the system, so the bound that mattered most was the one anybody
+      // with a browser could step around. client_ip is the coarse identity that does not reset on
+      // demand. Nullable and additive: existing rows keep counting under their session id.
+      id: "105_standalone_usage_client_ip",
+      sql: `
+        ALTER TABLE standalone_usage ADD COLUMN client_ip TEXT;
+        CREATE INDEX IF NOT EXISTS idx_standalone_usage_ip
+          ON standalone_usage(client_ip, service, used_at);
+        CREATE INDEX IF NOT EXISTS idx_standalone_usage_service_time
+          ON standalone_usage(service, used_at);
+      `,
+    },
   ];
