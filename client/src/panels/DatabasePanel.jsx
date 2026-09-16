@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api, printResume } from "../lib/api.js";
+import { useMonetisationEnabled } from "../lib/monetisation.jsx";
 import { useTheme } from "../styles/theme.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import JobCard      from "../components/JobCard.jsx";
@@ -263,6 +264,7 @@ function DetailModal({ modal, onClose, theme }) {
 
 // ── Main panel ────────────────────────────────────────────────
 export function DatabasePanel({ user }) {
+  const monetisationEnabled = useMonetisationEnabled();
   const { theme } = useTheme();
   const { activeProfileId, setActiveProfileId } = useJobBoard() || {};
   const [activeSheet,  setActiveSheet]  = useState("applications");
@@ -342,7 +344,8 @@ export function DatabasePanel({ user }) {
 
   const generateForSaved = useCallback(async (job, force = false, tool = "generate") => {
     const planTier = String(user?.planTier || "BASIC").toUpperCase();
-    if (planTier === "BASIC") { alert("Upgrade from Plans to unlock Generate."); return; }
+    // OFF MEANS ABSENT: with the lever off there is no refusal and no upsell — the tool just runs.
+    if (monetisationEnabled && planTier === "BASIC") { alert("Upgrade from Plans to unlock Generate."); return; }
     if (tool === "a_plus_resume") { return; } // A+ is silently applied server-side for eligible users
     if (!baseResume) { alert("Upload this job profile's base resume in Job Profiles first."); return; }
     setGenLoading(p => ({...p, [job.jobId]: true}));
@@ -1013,6 +1016,7 @@ function PendingJobsPane({ jobs, theme, onRefresh, onDislike }) {
 // ── Saved Jobs pane ───────────────────────────────────────────
 function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasResume,
                           theme, onGenerate, onExport, onUnsave, onRefresh }) {
+  const monetisationEnabled = useMonetisationEnabled();
 
   if (jobs.length === 0) return (
     <div style={{ flex:1, display:"flex", flexDirection:"column",
@@ -1067,7 +1071,7 @@ function SavedJobsPane({ jobs, generated, genLoading, applyMode, planTier, hasRe
               done={done}
               st={st}
               applyMode={applyMode}
-              canUseGenerate={String(planTier || "BASIC").toUpperCase() !== "BASIC"}
+              canUseGenerate={!monetisationEnabled || String(planTier || "BASIC").toUpperCase() !== "BASIC"}
               canUseAPlusResume={false}
               onGenerate={() => onGenerate(job, done && g?.html !== "__exists__")}
               onExport={() => done && g?.html !== "__exists__" && onExport(job, g.html)}

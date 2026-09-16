@@ -6,7 +6,11 @@ import { at } from "../test-support/sourceAnchors.js";
 test("public routes render public pages without eager jobs-board restore", () => {
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
 
-  for (const route of ["/features", "/pricing", "/about", "/contact", "/faq", "/privacy", "/terms"]) {
+  // /pricing is deliberately absent from this list. It is the one marketing route whose element is
+  // conditional on the monetisation lever — with the lever off it renders NotFoundPage — so it
+  // cannot be asserted to render a marketing page unconditionally. Its two states are covered by
+  // test/monetisationLever.test.js and, against a real server, scripts/an1MonetisationLever.mjs.
+  for (const route of ["/features", "/about", "/contact", "/faq", "/privacy", "/terms"]) {
     assert.match(app, new RegExp(`<Route path="${route}"\\s+element=\\{<`));
   }
 

@@ -38,6 +38,7 @@ import NavBar         from "./components/NavBar.jsx";
 import ProductsPage   from "./pages/ProductsPage.jsx";
 import BlogPage       from "./pages/BlogPage.jsx";
 import NotFoundPage   from "./pages/NotFoundPage.jsx";
+import { MonetisationProvider, useMonetisationEnabled } from "./lib/monetisation.jsx";
 
 // Marketing pages (lazy-loaded is fine but direct imports work too)
 import { FeaturesPage }    from "./pages/marketing/FeaturesPage.jsx";
@@ -255,6 +256,12 @@ function BoardControlIcons() {
 }
 
 function AppDashboard({ authUser, setAuthUser }) {
+  const monetisationEnabled = useMonetisationEnabled();
+  // With the lever off the tool is simply AVAILABLE — the tier is never consulted. This mirrors the
+  // server, where requireToolEntitlement returns true before it looks at a plan, so the button the
+  // client offers and the answer the server gives cannot disagree.
+  const canUseAPlusResumeHere =
+    !monetisationEnabled || String(authUser?.planTier || "BASIC").toUpperCase() === "PRO";
   const { theme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
@@ -290,11 +297,14 @@ function AppDashboard({ authUser, setAuthUser }) {
   // The console is handled by its own branch above (it has a legacy-route alias and a refresh key),
   // so it is excluded here. The three extras are reachable from the profile menu rather than the
   // tab row, and have always been navigable.
+  // "plans" is in this set only when the lever is on. It is the set BOTH handlePanelChange and the
+  // route guard read, so dropping it here makes /app/plans bounce to the board the same way any
+  // other non-tab path does — the panel is absent, not an empty panel that renders nothing.
   const NAVIGABLE_TABS = useMemo(
     () => new Set([...appTabs.map(t => t.id).filter(id => id !== "console"),
-                   "plans", "profile", "integrations"]),
+                   ...(monetisationEnabled ? ["plans"] : []), "profile", "integrations"]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [monetisationEnabled],
   );
 
   const handleLogout = useCallback(async () => {
@@ -395,7 +405,7 @@ function AppDashboard({ authUser, setAuthUser }) {
         lets the tab carry a needs-attention count while the board is showing. */}
     <AutoApplyProvider
       user={authUser}
-      canUseAPlusResume={String(authUser?.planTier || "BASIC").toUpperCase() === "PRO"}>
+      canUseAPlusResume={canUseAPlusResumeHere}>
       <AppScrollProvider>
         {/* data-app-shell marks the element whose children are the app's own surfaces, so the panel
             host can make the BOARD inert while a panel is open without hunting for it by class or
@@ -527,7 +537,7 @@ function AppDashboard({ authUser, setAuthUser }) {
             {activeTab === "auto-apply"   && <AutoApplyPanel/>}
             {activeTab === "database"     && <DatabasePanel user={authUser}/>}
             {activeTab === "integrations" && <IntegrationsPanel/>}
-            {activeTab === "plans"        && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
+            {activeTab === "plans" && monetisationEnabled && <PlansPanel user={authUser} onUserChange={setAuthUser}/>}
             {activeTab === "profile"      && <ProfilePanel user={authUser} onOpenJobProfiles={() => handlePanelChange("job-profiles")}/>}
             {activeTab === "job-profiles" && <JobProfilesPanel/>}
             {activeTab === "recruiter"    && <RecruiterPanel/>}
@@ -621,6 +631,10 @@ function AppRouter() {
     </div>
   );
 
+  // The lever. Read once here and passed down, rather than re-read in each route element, so the
+  // route table and the nav cannot disagree about whether /pricing exists.
+  const monetisationEnabled = useMonetisationEnabled();
+
   // NavBar helper — renders the shared public nav with current auth state
   const navBar = (
     <NavBar user={authUser} onLogout={handlePublicLogout}
@@ -638,7 +652,10 @@ function AppRouter() {
         {/* Marketing pages — always public */}
         <Route path="/features"     element={<FeaturesPage/>}/>
         <Route path="/how-it-works" element={<HowItWorksPage/>}/>
-        <Route path="/pricing"      element={<PricingPage/>}/>
+        {/* OFF MEANS ABSENT. Not a disabled page, not a "pricing coming soon" placeholder — with
+            the lever off the URL is simply not part of this product, and answers exactly as any
+            other unknown path does. */}
+        <Route path="/pricing"      element={monetisationEnabled ? <PricingPage/> : <>{navBar}<NotFoundPage/></>}/>
         <Route path="/about"        element={<AboutPage/>}/>
         <Route path="/contact"      element={<ContactPage/>}/>
         <Route path="/faq"          element={<FAQPage/>}/>
@@ -722,7 +739,10 @@ function AppRouter() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AppRouter/>
+      {/* Outside AppRouter so the marketing routes, which render logged out, are inside it too. */}
+      <MonetisationProvider>
+        <AppRouter/>
+      </MonetisationProvider>
     </BrowserRouter>
   );
 }

@@ -8,6 +8,7 @@
 // corrected to what it always rendered. position:fixed, full width, transparent, no elevation.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "../styles/theme.jsx";
+import { useMonetisationEnabled } from "../lib/monetisation.jsx";
 import { useJobBoard } from "../contexts/JobBoardContext.jsx";
 import { useSyncEvents } from "../hooks/useSyncEvents.js";
 import { api } from "../lib/api.js";
@@ -211,6 +212,7 @@ function NotificationsSection({ theme, notifs, unread, markAll }) {
 // because there was no behaviour to preserve.
 
 function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, profiles, onActivateProfile, onDeleteProfile }) {
+  const monetisationEnabled = useMonetisationEnabled();
   const [open,        setOpen]        = useState(false);
   const [rect,        setRect]        = useState(null);
   const triggerRef = useRef(null);
@@ -374,18 +376,25 @@ function UserAvatarMenu({ theme, user, onLogout, onTabChange, onUserChange, prof
             </div>
           )}
 
-          {/* Plan */}
+          {/* Plan heading, tier label, tool label and "View Plans" are all tier claims and go
+              together when the lever is off. INTEGRATIONS IS NOT ONE and stays either way — it
+              lived inside this same block, so hiding the block wholesale would have quietly
+              removed a feature that has nothing to do with monetisation. */}
           <div style={{ padding: "8px 16px", borderBottom: `1px solid ${theme.border}` }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-                           letterSpacing: "0.08em", color: theme.textDim, marginBottom: 6 }}>
-              Plan
-            </div>
-            <div style={{ fontSize: 13, color: theme.text, fontWeight: 700 }}>{planLabel}</div>
-            <div style={{ fontSize: 11, color: theme.textDim, marginTop: 2 }}>{toolLabel}</div>
-            <button onClick={() => { setOpen(false); onTabChange?.("plans"); }}
-              style={{ ...menuItemStyle, marginTop:4, color:theme.accentText, fontWeight:700 }}>
-              View Plans
-            </button>
+            {monetisationEnabled && (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                               letterSpacing: "0.08em", color: theme.textDim, marginBottom: 6 }}>
+                  Plan
+                </div>
+                <div style={{ fontSize: 13, color: theme.text, fontWeight: 700 }}>{planLabel}</div>
+                <div style={{ fontSize: 11, color: theme.textDim, marginTop: 2 }}>{toolLabel}</div>
+                <button onClick={() => { setOpen(false); onTabChange?.("plans"); }}
+                  style={{ ...menuItemStyle, marginTop:4, color:theme.accentText, fontWeight:700 }}>
+                  View Plans
+                </button>
+              </>
+            )}
             <button onClick={() => { setOpen(false); onTabChange?.("integrations"); }}
               style={{ ...menuItemStyle, marginTop:2, color:theme.accentText, fontWeight:700 }}>
               Integrations

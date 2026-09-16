@@ -1,6 +1,12 @@
 import { Router } from "express";
+import { monetisationEnabledFromEnv } from "../shared/monetisation.js";
 import { SPONSORSHIP_NEEDS } from "../services/applyAutomation.js";
+
 import { readAnswerStore } from "../services/customAnswers.js";
+
+// One lever, live read through the one shared parser. ⛔ See shared/monetisation.js before
+// flipping it: ON obliges a Chrome Web Store trader-declaration update in the same change.
+const monetisationEnabled = () => monetisationEnabledFromEnv(process.env);
 
 const DEFAULT_DOCK_ITEMS = ["profile_switcher", "notifications", "quick_actions", "settings", "user_avatar"];
 
@@ -218,7 +224,15 @@ export function createAccountRouter({
   router.get("/api/plans", requireAuth, (req, res) => {
     const row = db.prepare("SELECT plan_tier, apply_mode FROM users WHERE id=?").get(req.user.id);
     const planTier = normalisePlanTier(row?.plan_tier);
-    const changeOptions = ["BASIC", "PLUS", "PRO"].filter(tier => tier !== planTier);
+    // With the lever off there is no tier to move between, so there is nothing to offer and no
+    // upgrade to have pending. The user's REAL tier and mode still ship — the apply pipeline and
+    // the extension both read applyMode from here, and neither is a commercial surface — but every
+    // capability reads true, matching the gates, which are no longer consulted. A client that
+    // rendered "Request upgrade" from a changeOptions this endpoint still populated would be a
+    // second opinion about the lever; there isn't one.
+    const changeOptions = monetisationEnabled()
+      ? ["BASIC", "PLUS", "PRO"].filter(tier => tier !== planTier)
+      : [];
     const pending = db.prepare(`
       SELECT * FROM plan_upgrade_requests
       WHERE user_id=? AND status='pending'
@@ -229,16 +243,21 @@ export function createAccountRouter({
       applyMode: row?.apply_mode,
       allowedModes: allowedModesForTier(planTier),
       capabilities: {
-        canUseGenerate: canUseGenerate(planTier),
-        canUseAPlusResume: canUseAPlusResume(planTier),
+        canUseGenerate: monetisationEnabled() ? canUseGenerate(planTier) : true,
+        canUseAPlusResume: monetisationEnabled() ? canUseAPlusResume(planTier) : true,
       },
-      nextPlan: nextPlan(planTier),
+      nextPlan: monetisationEnabled() ? nextPlan(planTier) : null,
       changeOptions,
-      pendingRequest: pending || null,
+      pendingRequest: monetisationEnabled() ? (pending || null) : null,
+      monetisationEnabled: monetisationEnabled(),
     });
   });
 
   router.post("/api/plans/request-upgrade", requireAuth, (req, res) => {
+    // 404, not 403-with-an-upsell. OFF MEANS ABSENT: a route that answers "upgrades are disabled"
+    // still tells the caller upgrades exist. With the lever off this endpoint is simply not a
+    // thing the product has.
+    if (!monetisationEnabled()) return res.status(404).json({ error: "Not found" });
     const row = db.prepare("SELECT plan_tier FROM users WHERE id=?").get(req.user.id);
     const current = normalisePlanTier(row?.plan_tier);
     const requested = normalisePlanTier(req.body?.requestedTier || nextPlan(current));

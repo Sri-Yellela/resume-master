@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
 import { useScrollCollapsed } from "../hooks/useScrollCollapsed.js";
+import { useMonetisationEnabled } from "../lib/monetisation.jsx";
 
 // ── Logo (nested-box Lucy brand mark) ────────────────────────
 function LucyLogo({ theme, mini = false }) {
@@ -124,6 +125,7 @@ function HamburgerOverlay({ open, onClose, theme, links, ctaLinks }) {
 // Marketing / Tools dock (scroll-collapse pill)
 // ══════════════════════════════════════════════════════════════
 function MarketingToolsDock({ variant }) {
+  const monetisationEnabled = useMonetisationEnabled();
   const { theme } = useTheme();
   const { mode: vpMode } = useViewport();
   const isMobile = vpMode === "mobile" || vpMode === "tablet";
@@ -137,7 +139,7 @@ function MarketingToolsDock({ variant }) {
   const MARKETING_LINKS = [
     { label: "Features",     to: "/features" },
     { label: "How It Works", to: "/how-it-works" },
-    { label: "Pricing",      to: "/pricing" },
+    ...(monetisationEnabled ? [{ label: "Pricing", to: "/pricing" }] : []),
     { label: "About",        to: "/about" },
   ];
   const MARKETING_CTAS = [

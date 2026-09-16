@@ -2,12 +2,20 @@
 import { Link } from "react-router-dom";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
+import { useMonetisationEnabled } from "../../lib/monetisation.jsx";
 
-const FEATURES = [
+// Two vocabularies for the same five features, chosen by the lever. The tier-named strings are
+// kept rather than rewritten, because they are the copy this page carries the moment monetisation
+// turns on — deleting them would mean writing them again from memory later. The untiered strings
+// describe the SAME product: with the lever off, every tool here is available to every account, so
+// "Plus unlocks Generate" would not merely be a commercial claim, it would be false.
+const FEATURES = (monetisationEnabled) => [
   {
     icon: "✦",
     title: "Generate",
-    body: "Plus unlocks Generate inside expanded job cards. The tool reads the job description, matches your experience, and drafts a focused resume.",
+    body: monetisationEnabled
+      ? "Plus unlocks Generate inside expanded job cards. The tool reads the job description, matches your experience, and drafts a focused resume."
+      : "Generate lives inside expanded job cards. The tool reads the job description, matches your experience, and drafts a focused resume.",
   },
   {
     icon: "🎯",
@@ -17,7 +25,9 @@ const FEATURES = [
   {
     icon: "🔍",
     title: "Job Discovery",
-    body: "Basic starts in one shared jobs console with ATS Search, ATS Sort, role filters, and profile-isolated listings.",
+    body: monetisationEnabled
+      ? "Basic starts in one shared jobs console with ATS Search, ATS Sort, role filters, and profile-isolated listings."
+      : "One shared jobs console with ATS Search, ATS Sort, role filters, and profile-isolated listings.",
   },
   {
     icon: "⚡",
@@ -27,11 +37,15 @@ const FEATURES = [
   {
     icon: "📋",
     title: "A+ Resume",
-    body: "Pro unlocks A+ Resume inside expanded job cards for deeper JD-driven resume generation.",
+    body: monetisationEnabled
+      ? "Pro unlocks A+ Resume inside expanded job cards for deeper JD-driven resume generation."
+      : "A+ Resume sits inside expanded job cards for deeper JD-driven resume generation.",
   },
 ];
 
 export function FeaturesPage() {
+  const monetisationEnabled = useMonetisationEnabled();
+  const features = FEATURES(monetisationEnabled);
   return (
     <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
                   background: "transparent", color: "var(--color-text)",
@@ -44,10 +58,12 @@ export function FeaturesPage() {
           Everything you need to land the interview
         </h1>
         <p style={{ fontSize: 16, color: "var(--color-text-muted)", lineHeight: 1.6, marginBottom: 56, maxWidth: 560 }}>
-          Resume Master starts with one jobs console. Upgrades add Generate and A+ Resume where you already review jobs.
+          {monetisationEnabled
+            ? "Resume Master starts with one jobs console. Upgrades add Generate and A+ Resume where you already review jobs."
+            : "Resume Master is one jobs console, with Generate and A+ Resume where you already review jobs."}
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
-          {FEATURES.map((f, i) => (
+          {features.map((f, i) => (
             <div key={i} style={{
               display: "flex", gap: 24, padding: "28px 32px",
               background: "var(--color-surface)", border: "1px solid var(--color-border)",

@@ -1,14 +1,20 @@
 // client/src/pages/marketing/HowItWorksPage.jsx
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
+import { useMonetisationEnabled } from "../../lib/monetisation.jsx";
 
-const STEPS = [
+// Step 3 is the only tiered step; the other four describe the product identically either way.
+// Both wordings are kept so turning the lever on restores the tier copy exactly, rather than
+// obliging someone to reconstruct it.
+const STEPS = (monetisationEnabled) => [
   { n: 1, title: "Upload your base resume",
     body: "We extract your experience, skills, and history. This is your foundation — we do the rest." },
   { n: 2, title: "Search for roles",
     body: "Type any role. ATS Search and ATS Sort run in the shared jobs console." },
-  { n: 3, title: "Use unlocked tools",
-    body: "Plus adds Generate on expanded job cards. Pro adds A+ Resume for deeper JD-driven resume generation." },
+  { n: 3, title: monetisationEnabled ? "Use unlocked tools" : "Use the tools",
+    body: monetisationEnabled
+      ? "Plus adds Generate on expanded job cards. Pro adds A+ Resume for deeper JD-driven resume generation."
+      : "Generate sits on expanded job cards. A+ Resume goes deeper on the job description." },
   { n: 4, title: "Review your ATS score",
     body: "See your match score instantly. Green keywords you already cover, red keywords to watch." },
   { n: 5, title: "Apply",
@@ -16,6 +22,8 @@ const STEPS = [
 ];
 
 export function HowItWorksPage() {
+  const monetisationEnabled = useMonetisationEnabled();
+  const steps = STEPS(monetisationEnabled);
   return (
     <div className="scroll-dock-page" style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
                   background: "transparent", color: "var(--color-text)",
@@ -28,10 +36,12 @@ export function HowItWorksPage() {
           From job listing to submitted application in minutes
         </h1>
         <p style={{ fontSize: 16, color: "var(--color-text-muted)", lineHeight: 1.6, marginBottom: 56, maxWidth: 560 }}>
-          One jobs console. Simple Apply is built in, and upgrades add tools when you need them.
+          {monetisationEnabled
+            ? "One jobs console. Simple Apply is built in, and upgrades add tools when you need them."
+            : "One jobs console, with Simple Apply built in and every tool available."}
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-          {STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <div key={i} style={{ display: "flex", gap: 24, paddingBottom: 40, position: "relative" }}>
               {/* Connector line */}
               {i < STEPS.length - 1 && (

@@ -1,7 +1,9 @@
 // client/src/components/MarketingNav.jsx
 import { Link } from "react-router-dom";
+import { useMonetisationEnabled } from "../lib/monetisation.jsx";
 
 export function MarketingNav() {
+  const monetisationEnabled = useMonetisationEnabled();
   return (
     <nav style={{
       background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)",
@@ -19,7 +21,9 @@ export function MarketingNav() {
         {[
           { label: "Features",     to: "/features" },
           { label: "How It Works", to: "/how-it-works" },
-          { label: "Pricing",      to: "/pricing" },
+          // The Pricing link is the nav's only commercial surface. With the lever off it is absent
+          // rather than dead: a link to a page that 404s is worse than no link.
+          ...(monetisationEnabled ? [{ label: "Pricing", to: "/pricing" }] : []),
         ].map(({ label, to }) => (
           <Link key={to} to={to} style={{
             fontSize: 13, fontWeight: 600, color: "var(--color-text-muted)",

@@ -4,11 +4,15 @@ import { Menu, X } from 'lucide-react';
 import { StampLogo } from './StampLogo.jsx';
 import { useLogoSize } from '../hooks/useLogoSize.js';
 import InlineLoginPopover from './InlineLoginPopover.jsx';
+import { useMonetisationEnabled } from '../lib/monetisation.jsx';
 import './NavBar.css';
 
-const PUBLIC_LINKS = [
+// The FOURTH nav carrying a Pricing link, and the one the 404 page renders — which is how it was
+// caught: with the lever off, /pricing correctly fell through to NotFoundPage, and the nav above
+// that page still offered "Pricing". A link is a claim that the destination exists.
+const publicLinks = (monetisationEnabled) => [
   { to: '/products', label: 'Products' },
-  { to: '/pricing',  label: 'Pricing'  },
+  ...(monetisationEnabled ? [{ to: '/pricing', label: 'Pricing' }] : []),
   { to: '/about',    label: 'About'    },
   { to: '/blog',     label: 'Blog'     },
 ];
@@ -17,6 +21,8 @@ const PUBLIC_LINKS = [
 // onLogout: async function
 // onLogin: callback(user) invoked after successful inline login
 export default function NavBar({ user = null, onLogout, onLogin }) {
+  const monetisationEnabled = useMonetisationEnabled();
+  const PUBLIC_LINKS = publicLinks(monetisationEnabled);
   const loc = useLocation();
   const [open, setOpen] = useState(false);
   const isWide = useLogoSize(); // true when >=768px → show full "RESUME MASTER"

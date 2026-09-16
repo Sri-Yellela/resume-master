@@ -1,7 +1,9 @@
 // client/src/components/Footer.jsx
 import { Link } from "react-router-dom";
+import { useMonetisationEnabled } from "../lib/monetisation.jsx";
 
 export function Footer() {
+  const monetisationEnabled = useMonetisationEnabled();
   return (
     <footer style={{
       background: "#0a0a0a", borderTop: "1px solid #1f1f1f",
@@ -32,7 +34,7 @@ export function Footer() {
             {[
               { label: "Features",     to: "/features" },
               { label: "How It Works", to: "/how-it-works" },
-              { label: "Pricing",      to: "/pricing" },
+              ...(monetisationEnabled ? [{ label: "Pricing", to: "/pricing" }] : []),
               { label: "FAQ",          to: "/faq" },
             ].map(({ label, to }) => (
               <Link key={to} to={to} style={{

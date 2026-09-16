@@ -64,6 +64,7 @@ import { hashPassword, verifyPassword, validatePassword } from "./services/authS
 import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } from "./services/passwordResetService.js";
 import { sendPasswordResetEmail } from "./services/emailService.js";
 import { allowedModesForTier, canUseAPlusResume, canUseGenerate, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
+import { monetisationEnabledFromEnv } from "./shared/monetisation.js";
 import {
   normalizeResumeHtml as formatterNormalizeResumeHtml,
   stripResumeHtml as formatterStripResumeHtml,
@@ -365,6 +366,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // previous path, so nothing changes unless something asks it to.
 const DATA_DIR  = process.env.RM_DATA_DIR || path.join(__dirname, "data");
 const DB_PATH   = path.join(DATA_DIR, "resume_master.db");
+
+// Read from the environment EVERY TIME it is consulted, through the one shared parser, rather than
+// cached into a module constant. The env var does not change under a running process in any real
+// deployment, so this costs a string compare on gated requests and buys the thing a cached copy
+// took away: both states are reachable in one test process, so "lever on refuses / lever off
+// serves" can be asserted against the real gate instead of against its source text.
+// ⛔ Read shared/monetisation.js before flipping it: ON obliges you to update the Chrome Web Store
+// trader declaration in the same change.
+const monetisationEnabled = () => monetisationEnabledFromEnv(process.env);
+console.log(`[boot] monetisation: ${monetisationEnabled() ? "ENABLED — commercial surfaces live, trader declaration must say TRADER" : "disabled — product presents as free and untiered"}`);
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 console.log(`[boot] data directory ready: ${path.dirname(DB_PATH)}`);
 
@@ -5515,7 +5526,13 @@ async function fetchOAuthUserInfo(provider, tokenSet, req) {
   return normalizeOAuthIdentity(provider, claims);
 }
 
+// The three gates below are the ONLY places a 403 upgrade_required is minted in this file, so the
+// lever is consulted here rather than at each of their six call sites. A call site that forgot to
+// ask would be a gate that still refuses with the lever off — the "two switches that disagree"
+// shape shared/monetisation.js exists to prevent. The gate bodies are untouched: with the lever on
+// they compute exactly what they computed before this flag existed.
 function requireModeEntitlement(req, res, mode = req.user?.applyMode) {
+  if (!monetisationEnabled()) return true;
   const planTier = normalisePlanTier(req.user?.planTier);
   if (canUseMode(planTier, mode)) return true;
   res.status(403).json({
@@ -5528,6 +5545,7 @@ function requireModeEntitlement(req, res, mode = req.user?.applyMode) {
 }
 
 function requireToolEntitlement(req, res, tool) {
+  if (!monetisationEnabled()) return true;
   const planTier = normalisePlanTier(req.user?.planTier);
   const allowed = tool === "a_plus_resume"
     ? canUseAPlusResume(planTier)
@@ -5544,6 +5562,7 @@ function requireToolEntitlement(req, res, tool) {
 }
 
 function requirePlan(req, res, requiredTier) {
+  if (!monetisationEnabled()) return true;
   const planTier = normalisePlanTier(req.user?.planTier);
   if (hasPlanAtLeast(planTier, requiredTier)) return true;
   res.status(403).json({
@@ -9321,6 +9340,17 @@ REQUIREMENTS:
 // HEALTH + SPA
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/health", (_req,res) => res.json({ ok:true, time:new Date().toISOString() }));
+
+// PUBLIC, AND DELIBERATELY SO. The marketing pages that carry the commercial copy — /pricing,
+// /features, /how-it-works — are reachable logged out, so the client has to be able to learn the
+// lever's state before it knows who (or whether) anyone is signed in. Requiring auth here would
+// mean an anonymous visitor rendering the default, and the default has to be "hide", which would
+// then hide the pricing page from logged-out visitors even with monetisation ON.
+//
+// This is the client's ONLY source for the flag. It is not baked into the bundle at build time,
+// because a client built with one value and served by a server holding the other is exactly the
+// two-sources-of-truth failure shared/monetisation.js forbids.
+app.get("/api/config", (_req, res) => res.json({ monetisationEnabled: monetisationEnabled() }));
 
 
 // ── Profile isolation diagnostic ─────────────────────────────

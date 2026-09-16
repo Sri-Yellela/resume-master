@@ -37,6 +37,13 @@ const PUBLIC = new Set([
   "POST /api/auth/provider/:provider",
   "POST /api/auth/password-reset/request",
   "POST /api/auth/password-reset/confirm",
+  // The monetisation lever's only client-facing reader. Anonymous BY NECESSITY: the pages carrying
+  // the commercial copy (/pricing, /features, /how-it-works) render logged out, so the client must
+  // learn the flag's value before it knows whether anyone is signed in. Behind auth, an anonymous
+  // visitor would fall back to the safe default — hide — which would hide the pricing page from
+  // logged-out visitors even with monetisation ON. It discloses one boolean about the product's
+  // own configuration and nothing user-scoped. See shared/monetisation.js.
+  "GET /api/config",
   "GET /api/domain-metadata",
   "GET /api/domain-metadata/:key",
   "POST /api/contact",

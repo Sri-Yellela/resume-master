@@ -150,7 +150,13 @@ test("the client's `tool` field reaches tool_type, so an A+ run is no longer dow
   } finally { server.close(); }
 });
 
-test("honouring `tool` does not open a plan-tier bypass for A+", async () => {
+test("honouring `tool` does not open a plan-tier bypass for A+ — WITH MONETISATION ON", async () => {
+  // The gate from §5.15 is unchanged; what changed is that it is only CONSULTED when the
+  // monetisation lever is on. This half asserts the original contract in the state where it
+  // applies. The lever is read live from the environment on every call, which is what lets one
+  // test process exercise both states — see shared/monetisation.js.
+  const previous = process.env.MONETISATION_ENABLED;
+  process.env.MONETISATION_ENABLED = "1";
   const { db, server, baseUrl } = setupServer({ planTier: "BASIC" });
   try {
     const res = await startRun(baseUrl, { jobIds: ["j1"], tool: "a_plus_resume" });
@@ -164,7 +170,32 @@ test("honouring `tool` does not open a plan-tier bypass for A+", async () => {
     // The same user can still start an ordinary generate run.
     const ok = await startRun(baseUrl, { jobIds: ["j1"], tool: "generate" });
     assert.equal(ok.status, 202);
-  } finally { server.close(); }
+  } finally {
+    server.close();
+    if (previous === undefined) delete process.env.MONETISATION_ENABLED;
+    else process.env.MONETISATION_ENABLED = previous;
+  }
+});
+
+test("with monetisation OFF the same BASIC user reaches A+ and is not refused", async () => {
+  // The other half of the same gate, and the one that ships today. OFF MEANS ABSENT: the user is
+  // not refused-with-an-upsell, they are served — and the run is actually QUEUED, which is the
+  // difference between "the 403 stopped appearing" and "the feature works".
+  const previous = process.env.MONETISATION_ENABLED;
+  delete process.env.MONETISATION_ENABLED;      // the absent-variable case, as deployed
+  const { db, server, baseUrl } = setupServer({ planTier: "BASIC" });
+  try {
+    const res = await startRun(baseUrl, { jobIds: ["j1"], tool: "a_plus_resume" });
+    assert.equal(res.status, 202, "with the lever off a BASIC user must be served, not upsold");
+    const body = await res.json();
+    assert.notEqual(body.error, "upgrade_required");
+    assert.equal(db.prepare("SELECT tool_type FROM apply_runs WHERE id=?").get(body.runId).tool_type,
+      "a_plus_resume", "the run must actually record the A+ tool, not silently downgrade");
+  } finally {
+    server.close();
+    if (previous === undefined) delete process.env.MONETISATION_ENABLED;
+    else process.env.MONETISATION_ENABLED = previous;
+  }
 });
 
 test("the response reports the queued ids the client's success message counts", async () => {

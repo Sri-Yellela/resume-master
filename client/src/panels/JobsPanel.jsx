@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { api, printResume, dislikeJob, authHeaders, authContextQuery } from "../lib/api.js";
+import { useMonetisationEnabled } from "../lib/monetisation.jsx";
 import { TileGrid } from "../components/ui/TileCard.jsx";
 import { GENERATE_TOOL, A_PLUS_TOOL, TOOL_LABELS, normalizeTool } from "../lib/applyTools.js";
 import { planPageFetch, recordPageCursor } from "../lib/boardPaging.js";
@@ -1213,6 +1214,7 @@ function buildAtsPayload(job, artifact = null) {
 
 // -- Main panel ------------------------------------------------
 export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive = true }) {
+  const monetisationEnabled = useMonetisationEnabled();
   const { theme } = useTheme();
   const { mode: vpMode, w: vpWidth } = useViewport();
   const navigate = useNavigate();
@@ -1780,8 +1782,10 @@ export default function JobsPanel({ user, onUserChange, refreshKey = 0, isActive
   jobCountRef.current = jobs.length;
   const applyMode = user?.applyMode || "SIMPLE";
   const planTier = String(user?.planTier || "BASIC").toUpperCase();
-  const canUseGenerate = planTier === "PLUS" || planTier === "PRO";
-  const canUseAPlusResume = planTier === "PRO";
+  // The tier is consulted only when the lever is on. Off, both tools are simply available, which is
+  // what the server now answers too — an offer the server would refuse is worse than no offer.
+  const canUseGenerate = !monetisationEnabled || planTier === "PLUS" || planTier === "PRO";
+  const canUseAPlusResume = !monetisationEnabled || planTier === "PRO";
 
   // The panel-size rebalancing effect that lived here is gone, along with getPanelDefaults and the
   // sandbox/ats/detail Panel refs it drove. It redistributed react-resizable-panels PERCENTAGES

@@ -26,6 +26,12 @@ import { detectPlatformFromUrl } from "../services/platformDetector.js";
 import { classifyRuntimeError } from "../shared/failureAttribution.js";
 import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
 import { canUseAPlusResume, normalisePlanTier } from "../services/entitlements.js";
+import { monetisationEnabledFromEnv } from "../shared/monetisation.js";
+
+// Live read through the one shared parser, exactly as server.js does — same flag, same function,
+// so this route and the gates over there cannot disagree. ⛔ See shared/monetisation.js: ON is a
+// legal statement about the trader declaration, not merely a UI change.
+const monetisationEnabled = () => monetisationEnabledFromEnv(process.env);
 // TASK AC4: the three outcome groups of the dated history. In shared/ because the panel renders
 // the same partition — a copy on each side is how "COMPLETED" comes to mean two things.
 import { OUTCOME, OUTCOME_STATUSES, outcomeGroupFor } from "../shared/applyOutcomeGroups.js";
@@ -1643,7 +1649,10 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
     // server-side so repairing the plumbing does not open a plan-tier bypass. Same 403 shape as
     // requireToolEntitlement in server.js, which this route cannot reach (positional signature,
     // pinned by applyPipeline.test.js).
-    if (resolvedTool === "a_plus_resume" && !canUseAPlusResume(planTier)) {
+    // This is the fourth enforcement point and the only one outside server.js, so it has to consult
+    // the lever for itself — it cannot reach requireToolEntitlement. Same flag, same parser, read
+    // from shared/monetisation.js: one lever, four readers, no independent decisions.
+    if (monetisationEnabled() && resolvedTool === "a_plus_resume" && !canUseAPlusResume(planTier)) {
       return respond(403, {
         error: "upgrade_required",
         message: "A+ Resume requires the PRO plan.",
