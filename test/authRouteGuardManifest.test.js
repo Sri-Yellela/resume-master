@@ -44,6 +44,13 @@ const PUBLIC = new Set([
   // logged-out visitors even with monetisation ON. It discloses one boolean about the product's
   // own configuration and nothing user-scoped. See shared/monetisation.js.
   "GET /api/config",
+  // AH-1. Anonymous on purpose: its entire job is to answer "what is deployed?" from outside, and
+  // a deploy check that needs credentials is one nobody runs. It discloses a short commit SHA, the
+  // contract version and which migrations have applied — facts about the build, not about anyone's
+  // data. The SHA is already public: this is an open deployment of a repository whose history the
+  // owner controls, and knowing which commit is live is exactly what a reviewer, a mobile client
+  // or a future reconciliation of docs/NEXT_WORK.md needs.
+  "GET /api/version",
   "GET /api/domain-metadata",
   "GET /api/domain-metadata/:key",
   "POST /api/contact",

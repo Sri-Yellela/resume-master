@@ -9437,6 +9437,81 @@ app.get("/api/health", (_req,res) => res.json({ ok:true, time:new Date().toISOSt
 // two-sources-of-truth failure shared/monetisation.js forbids.
 app.get("/api/config", (_req, res) => res.json({ monetisationEnabled: monetisationEnabled() }));
 
+// ── AH-1: WHAT IS ACTUALLY RUNNING ─────────────────────────────────────────────
+//
+// This exists because answering "is X deployed?" has repeatedly cost an archaeology pass, and has
+// repeatedly been answered WRONG. docs/NEXT_WORK.md carried a banner saying six commits were
+// undeployed while all six were live; the cleanup brake was "confirmed deployed" by a probe that
+// only ever saw the SPA catch-all; and a policy was verified against a page whose text lives in a
+// JS bundle. The standing lesson is "assert a JSON key, never a 200" — this is the JSON key.
+//
+// ⛔ IT MUST NEVER REPORT A COMMIT IT IS NOT SURE OF. A confidently wrong SHA is worse than no
+// SHA: it ends the investigation with the wrong answer, which is exactly the failure mode above.
+// So `commit` is null and `commitSource` is "unknown" when it cannot be established, and the
+// caller can tell the difference.
+function resolveCommit() {
+  // Platform-injected first. Railway sets RAILWAY_GIT_COMMIT_SHA on every build; the others are
+  // here so this keeps working if the host changes, rather than silently returning to "unknown".
+  for (const key of ["RAILWAY_GIT_COMMIT_SHA", "SOURCE_COMMIT", "GIT_COMMIT", "VERCEL_GIT_COMMIT_SHA"]) {
+    const v = process.env[key];
+    if (v && /^[0-9a-f]{7,40}$/i.test(v.trim())) return { commit: v.trim().slice(0, 7), commitSource: key };
+  }
+  // Local checkouts: read .git directly rather than shelling out to git, which may not exist in a
+  // container and would be a process spawn on a route that should be free to call.
+  try {
+    const head = fs.readFileSync(path.join(__dirname, ".git", "HEAD"), "utf8").trim();
+    const ref = head.startsWith("ref: ") ? head.slice(5).trim() : null;
+    const sha = ref
+      ? fs.readFileSync(path.join(__dirname, ".git", ref), "utf8").trim()
+      : head;
+    if (/^[0-9a-f]{40}$/i.test(sha)) return { commit: sha.slice(0, 7), commitSource: "git" };
+  } catch { /* not a checkout, or .git not copied into the image */ }
+  return { commit: null, commitSource: "unknown" };
+}
+// The contract version is READ from the contract, not restated here. A second copy of "1.1.1"
+// in this file is the two-sources-of-truth shape this repo keeps getting bitten by, and it would
+// drift the moment generateMobileContract.mjs bumps the real one.
+function resolveContractVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, "contract", "mobile-api.v1.json"), "utf8"))?.info?.version ?? null;
+  } catch { return null; }
+}
+const CONTRACT_VERSION = resolveContractVersion();
+const BUILD_INFO = { ...resolveCommit(), startedAt: new Date().toISOString() };
+console.log(`[boot] version: commit ${BUILD_INFO.commit || "unknown"} (${BUILD_INFO.commitSource})`);
+
+app.get("/api/version", (_req, res) => {
+  // ⛔ NOT `ORDER BY id DESC`. The ids are TEXT and the table holds both numbered migrations and
+  // legacy named ones — `contact_messages` sorts after `105_...`, so ordering by id reports a
+  // migration from years ago as the newest. Ordering by applied_at answers "what ran last", and
+  // the numeric high-water mark answers "has NNN landed", which is the question actually asked.
+  let migrations = { count: null, latestApplied: null, highestNumbered: null };
+  try {
+    // rowid is the tie-break, and it is load-bearing. On a freshly migrated database every row
+    // gets the same applied_at second, so ordering by applied_at alone resolved the tie
+    // arbitrarily and reported `001_initial_schema` as the most recent migration — a confidently
+    // wrong answer, which is the exact failure this endpoint exists to stop. rowid is insertion
+    // order, which is application order.
+    const rows = db.prepare("SELECT rowid AS seq, id, applied_at FROM schema_migrations").all();
+    const numbered = rows
+      .map(r => ({ id: r.id, n: /^(\d+)_/.test(r.id) ? Number(r.id.match(/^(\d+)_/)[1]) : null }))
+      .filter(r => r.n !== null)
+      .sort((a, b) => a.n - b.n);
+    migrations = {
+      count: rows.length,
+      latestApplied: rows.slice().sort((a, b) => (b.applied_at - a.applied_at) || (b.seq - a.seq))[0]?.id ?? null,
+      highestNumbered: numbered.length ? numbered[numbered.length - 1].id : null,
+    };
+  } catch { /* reported as nulls rather than failing the endpoint */ }
+
+  res.json({
+    ...BUILD_INFO,
+    contract: CONTRACT_VERSION,
+    migrations,
+    monetisationEnabled: monetisationEnabled(),
+  });
+});
+
 
 // ── Profile isolation diagnostic ─────────────────────────────
 app.get("/api/debug/verify-isolation", requireAuth, (req, res) => {

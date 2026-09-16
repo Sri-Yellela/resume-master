@@ -1,35 +1,50 @@
 # Next Work
 
-**Last reconciled:** 2026-09-15, against the repo and a full suite run — not against this file's
-own previous claims. Closed findings are in **`docs/FINDINGS_ARCHIVE.md`**; the reconciled
-evidence and the three landed task reports are in **`docs/PART1_RECONCILED.md`**, which supersedes
-everything this file said between 09-08 and 09-13.
+**Last reconciled:** 2026-09-16, against `git`, a full suite run and a live probe of production —
+not against this file's own previous claims. Closed findings are in **`docs/FINDINGS_ARCHIVE.md`**;
+the reconciled evidence and the three landed task reports are in **`docs/PART1_RECONCILED.md`**.
 
-**Baseline:** **2387 passing, 0 failing** — measured 2026-09-15, not carried forward. Contract
-**v1.1.1**. Migrations 102 and 103 **are** in production (verified by Part 1 on 09-09; the old
-"NOT deployed" warning here was stale).
+**Baseline:** **2419 passing, 0 failing** — measured 2026-09-16, not carried forward. Contract
+**v1.1.1**. Migrations 102 and 103 are in production. **Migration 105 is NOT** — it is in the four
+unpushed commits below.
+
+**This file was stale again, for the sixth time, in its single largest claim.** The banner here
+said six commits were unpushed and undeployed and that deploying them was "the highest-value
+action available". All six (`0de67c8` `260e656` `0364855` `1e1f91a` `f670b24` `34bb047`) are on
+`main` and on `origin/main`, verified with `git merge-base --is-ancestor`. The per-company cap,
+the AC residual, AA, AE, Z and AD are all **live**. The branch they were on,
+`fix/ats-per-company-cap`, has an upstream and is merged.
 
 > ⚠ **Re-derive state from the repo before starting anything.** This file has now been the stale
-> thing **five** times: AK2 found three of five tasks already done, AL1 two of three, AM3 two claims
-> wrong, AM4 the central premise of its own task inverted — and on 09-15 an audit found six landed
-> commits this file still listed as open, including one (**Z**) whose premise was backwards. Agents
-> land work faster than the doc reconciles. The check has caught it every time.
+> thing **six** times: AK2 found three of five tasks already done, AL1 two of three, AM3 two claims
+> wrong, AM4 the central premise of its own task inverted, on 09-15 an audit found six landed
+> commits this file still listed as open including one (**Z**) whose premise was backwards — and on
+> 09-16 its own headline banner was wrong about what production is running. Agents land work faster
+> than the doc reconciles. The check has caught it every time, which is the argument for AH-1: a
+> version endpoint turns this reconciliation from git archaeology into one curl.
 
 ---
 
-## ⛔ SIX COMMITS ARE UNPUSHED AND UNDEPLOYED
+## ⛔ FOUR COMMITS ARE UNPUSHED — and one of them is a live cost exposure
 
 ```
-origin/main              8abd5a4   task X (Clearbit)      ← what production is running
-main                     8abd5a4   (same)
-fix/ats-per-company-cap  34bb047   task AD                ← 6 commits, NO UPSTREAM, local only
+origin/main   f4a6c2d   e4PolicyVerify date fix      ← what production is running, verified 09-16
+main          857fa32   anonymous spend controls     ← 4 commits ahead, local only
 ```
 
-Everything in "Recently landed" below exists on one local branch with no upstream configured.
-Production is still taking the 1,551-postings-per-crawl loss that `0de67c8` fixes, still deriving
-pipeline health from `status` instead of `written`, and still pacing the provider on requests
-instead of tokens. **Deploying this branch is the highest-value action available**, and it is
-blocked on nothing.
+Verified by probe rather than assumed, per this file's own rule: `GET /api/health` on
+resumemaster.one answers JSON, and `GET /api/config` — which exists only in `c4320e1` — answers
+**200 with the SPA shell**. That is the catch-all, not the route. Production does not have it.
+
+| Commit | What production is missing |
+|---|---|
+| `c4320e1` | The monetisation lever. **`/pricing` is live right now saying "paid upgrades are being prepared"**, with tier badges and upgrade prompts, while the Chrome Web Store trader declaration says NON-TRADER. |
+| `a9d70c6` | The six lever screenshots (docs only). |
+| `2c28507` | The ATS badge fix. Every card on the production board still reads "No signal" and still contradicts the panel one click away. |
+| `857fa32` | ⚠ **The anonymous spend controls.** `/api/standalone/generate` is live, unauthenticated, running Sonnet at 8192 max_tokens, with a quota keyed on a cookie the caller resets by opening an incognito window. Migration 105 is not applied. This is the one with a running meter. |
+
+**Pushing is the highest-value action available and is blocked on nothing.** Railway deploys from
+`main` only, ~190s, and builds the client itself.
 
 ---
 
@@ -39,15 +54,17 @@ blocked on nothing.
 |---|---|---|---|---|
 | **Y** | SmartRecruiters + Workday descriptions (needs an N+1 budget) | desktop | — | open — and its budget model must now account for the per-company cap in `0de67c8` |
 | **AB + AH** | Vestigial keys, version endpoint, small deferred items | desktop | — | open — three of six sub-items already answered, see below |
-| **AF residual** | A write path for `app_settings.apply_full_auto_disabled` | desktop | — | open — not a build; the switch exists, it just needs flipping without a restart |
+| **AF residual** | A write path for `app_settings.apply_full_auto_disabled` | desktop | — | open, **and now the top unblocked pick** — the switch exists and is re-checked per job; a kill switch that needs a restart to flip is not a kill switch |
 | **AG** | Mobile corruption sweep | android | — | **partly done** — `f337767` repaired SYNC.md's encoding. The BOM/toolchain half and a verifying build remain |
-| **Monetisation audit** | `docs/MONETISATION_AUDIT.md` | desktop | — | **queued, not started** — a repo-wide grep finds the string in that brief and nowhere else |
+| ~~**Monetisation audit**~~ | `docs/MONETISATION_AUDIT.md` | desktop | — | ✅ **DONE 09-16.** Part 1 audit + Part 2 lever, `c4320e1`. See "Recently landed". |
+| ~~**AH-1**~~ | A version endpoint | desktop | — | ✅ **DONE 09-16.** `GET /api/version` — commit SHA, contract version, migration high-water mark. Answers "is 105 deployed?" in one curl. Undeployed until the push. |
+| **sweepExpiredPackets** | extension | — | — | open, deliberately unbundled — the sweep filters `startsWith('gate:')`, so two of four session keys never got the expiry the policy promises |
 | — | iOS Phase 1 audit | ios | **a Mac** | open — brief written at `resume-master-ios/PHASE_1_AUDIT.md` |
 
 **AB/AH, item by item, so nobody re-derives them:** AB-1 THEIRSTACK **confirmed vestigial** (only
 consumer is the offline `scripts/providerEval`). AB-2 "SERPAPI half-wired" — **premise wrong**: the
 key is read, `searchJobs` includes serpapi, and `POST /api/jobs/search` reaches it. It is absent
-only from `cacheJobs`, by design (`ATS_SOURCE_NAMES`). AH-1 version endpoint **not done**. AH-2 drop
+only from `cacheJobs`, by design (`ATS_SOURCE_NAMES`). AH-1 version endpoint **DONE 09-16** (`GET /api/version`). AH-2 drop
 `import_extension_tokens` **not done** — 3 rows in production, zero code references repo-wide.
 AH-3 local board expiry **has not fired**. AH-4 retire `QUEUED_PROMPTS.md` **not done**.
 
@@ -56,7 +73,23 @@ Android's remaining work is in `resume-master-android/ANDROID.md` and the annota
 
 ---
 
-## Recently landed — all six on `fix/ats-per-company-cap`
+## Recently landed — 2026-09-16, on `main`, UNPUSHED
+
+| Commit | What it was |
+|---|---|
+| `857fa32` | **Anonymous spend, bounded three ways.** The quota was keyed on `req.sessionID` — a cookie the caller resets at will — in front of the largest per-call cost in the system. Now: IP keying (migration 105), a standalone-auth requirement on `generate` only (`/ats` stays anonymous; Haiku, and it is the hook), and `ANON_DAILY_SERVICE_CEILING` (50/day) as a backstop against rotating addresses. ⛔ The ceiling is checked BEFORE the per-caller allowance, or it would only ever bind callers already over their own limit. Not behind the monetisation lever — a cost control must bind whether or not the product is commercial. Also corrected two public claims: `/features` advertised "3 free scores / month" (the signed-in number) under a "no account required" heading, and the recommended `/pricing` card rendered `--color-primary-text` on a `--color-primary` fill, i.e. invisible. `scripts/an2StandaloneSpend.mjs` proves all of it against a real server **and spends nothing** — the limiter sits in front of multer, so a malformed request consumes quota and reaches no model. |
+| `2c28507` | **The ATS badge and the panel it opens were reading two different fields.** `/api/jobs` emits `matchScore` (mapJobRow); every desktop surface reads `baseAtsScore` (the poll mapper). Nothing on the client read `matchScore` — zero references — so all 1,266 cards took the null branch and read "No signal" while the panel scored for real. `test/matchScoreReachesTheClient.test.js` had already fixed the SERVER half and its own comment records the client half as the reason the bug survived. Second, separate half: on a card `null` means *nobody scored this row* (1,262 of 1,266), not "the scorer declined", so a 0.1% band rendered on ~100% of cards. The badge is now absent without a score; the fourth band is untouched and still renders in ATSPanel. ⛔ `scripts/ak2BandSurfaces.mjs` had been green throughout because its stub set `baseAtsScore`, a key `/api/jobs` has never emitted — a fixture that invents the field under test measures the fixture. |
+| `a9d70c6` | The six lever screenshots. **5.8 MB, not the ~186 KB assumed when approved** — recorded in the commit body rather than quietly accepted. |
+| `c4320e1` | **Monetisation: one lever, off by default.** Part 1 established that the deployed product *cannot* take money (no processor, no key, twelve probed payment routes all answering with the SPA shell) but *does* claim it will. `shared/monetisation.js` is the single flag; OFF means ABSENT, not disabled — `/pricing` 404s, the Pricing link goes from all **four** navs (the fourth was found by a screenshot, not by reading), tier copy is replaced, and `/api/plans/request-upgrade` answers 404 rather than a 403 upsell. Gates and their tests are intact; the lever decides whether they are CONSULTED. The flag is read LIVE rather than cached, because a module constant made both states unreachable in one test process. `scripts/an1MonetisationLever.mjs` boots the server twice and shares ONE BASIC user across both. |
+
+⚠ **The first run of the lever harness passed its most important check for the wrong reason** — "a
+BASIC user is SERVED by a PLUS-gated route" went green on a **401**, because registration had
+failed and nobody was logged in. An unauthenticated refusal is not evidence that a gate opened.
+Same shape as the three guards that shipped blind. It now rejects 401 explicitly.
+
+---
+
+## Landed earlier — all six formerly on `fix/ats-per-company-cap`, now on `main` and DEPLOYED
 
 | Commit | Date | What it was |
 |---|---|---|
@@ -205,7 +238,18 @@ days and task Z was filed against working code. **Derive the expectation from th
 renders from**, never restate it as a literal.
 
 **A guard never seen to fail is not evidence.** Verify by injecting a violation. Three guards have
-shipped blind to the thing they guarded.
+shipped blind to the thing they guarded — and on 09-16 a fourth passed on a 401, proving only that
+nobody was logged in.
+
+**A fixture that invents the field under test measures the fixture.** `ak2BandSurfaces` stubbed
+`/api/jobs` with `baseAtsScore`, which that endpoint has never emitted, and stayed green for
+months while every real card read "No signal". Stub what the server actually sends. This is the
+browser-level twin of "stub the SHARED constant, never a hostname literal".
+
+**Two names for one column across two mappers is the same defect as two copies of one constant.**
+`matchScore` (mapJobRow, the mobile contract) and `baseAtsScore` (the poll shape) read the same
+`ats_score`, and the client only ever read one of them. The server half was found and fixed in
+AJ2; the client half sat untouched for weeks *with a comment in the test describing it*.
 
 **Health must be derived from what was WRITTEN, not from what was RECORDED.** Three consecutive days
 of `fetched 25 / written 0` were logged `ok`, and everything that looked at `status` agreed.
