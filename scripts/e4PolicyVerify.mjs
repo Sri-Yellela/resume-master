@@ -16,10 +16,31 @@
  * Usage:  node scripts/e4PolicyVerify.mjs
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
 
 const URL_ = 'https://resumemaster.one/privacy';
+
+// The effective date is read from the page that renders it, never written down twice. Hardcoding it
+// here meant the check failed on 2026-09-15 for the one reason it is not supposed to catch: the
+// policy had been updated correctly and deployed correctly, and only this file still believed in
+// August 19. A copy of the date here tests whether somebody remembered to edit two files; reading
+// the constant tests what the docstring above actually promises — that the deploy has caught up
+// with the source.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SOURCE = path.join(ROOT, 'client/src/pages/marketing/PrivacyPage.jsx');
+const dateMatch = fs.readFileSync(SOURCE, 'utf8').match(/^const EFFECTIVE_DATE\s*=\s*'([^']+)'/m);
+if (!dateMatch) {
+  console.error(`FAIL  could not read EFFECTIVE_DATE from ${path.relative(ROOT, SOURCE)}`);
+  console.error('      The constant was renamed or restyled; this check cannot assert a date it');
+  console.error('      cannot find, and silently skipping it would be worse than stopping.');
+  process.exit(1);
+}
+const EFFECTIVE_DATE = dateMatch[1];
+console.log(`source   EFFECTIVE_DATE = ${EFFECTIVE_DATE}`);
 
 // 1. Anonymous HTTP fetch — no cookies, no session, no redirect.
 const res = await fetch(URL_, { redirect: 'manual' });
@@ -44,7 +65,7 @@ await browser.close();
 console.log(`length   ${text.length} chars of rendered prose\n`);
 
 const MUST = [
-  ['effective date',            /Effective:\s*August 19, 2026/i],
+  ['effective date matches source', new RegExp(`Effective:\\s*${EFFECTIVE_DATE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i')],
   ['ONE capture action',        /one capture action/i],
   ['no job lists collected',    /does not collect lists of jobs/i],
   ['saved-jobs capability gone',/saved-jobs list.{0,80}removed|capability was removed/i],
