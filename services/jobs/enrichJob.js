@@ -45,6 +45,11 @@ import {
   selectCandidates, computeContentHash, columnCoverage,
   enrichSelectionOptions, ENRICHMENT_COLUMNS,
 } from './enrichmentSelection.js';
+// Y2A — the description fetch, folded into this pass so there is ONE spend budget rather than one
+// here and one in the crawl. detailFetch.js's header explains why this is the right seam; the
+// short version is that content_hash = sha1(title|description), so a description arriving there
+// makes the row a candidate HERE with no new selector logic at all.
+import { fillMissingDescriptions } from './detailFetch.js';
 // U4 — provenance. Additive: no read path changes, mapJobRow is untouched.
 import {
   openBatch, closeBatch, captureBefore, recordBatchRow, columnChanges, batchProvenanceAvailable,
@@ -633,10 +638,42 @@ async function drainEnrichment(db, anthropic, {
   budget = enrichBudget(),
   batchSource = 'cron',
   now = () => Date.now(),
+  // 2A — injectable so tests drive the detail fetch without reaching SmartRecruiters or Adobe,
+  // and so a caller can turn it off without an env var.
+  fillDescriptions = fillMissingDescriptions,
+  detailHttp = undefined,
 } = {}) {
   const startedAt = Math.floor(now() / 1000);
   const startedMs = now();
   const before = columnCoverage(db);
+
+  // ── 2A · STEP ZERO: BUY THE MISSING DESCRIPTIONS, UNDER THIS SAME DAY'S BUDGET ───────────────
+  //
+  // Rows from SmartRecruiters and Workday arrive with no description, because their list endpoints
+  // carry none and Phase 1 proved no parameter changes that. The text is bought HERE rather than
+  // in the crawl, and the reason is arithmetic rather than taste: a crawl wants 1,500 detail
+  // requests while this budget is 300 rows/day, so a crawl-time fetch would buy 1,200 descriptions
+  // a day that nothing could ever enrich. See services/jobs/detailBudget.js.
+  //
+  // ⛔ THE FETCH BUDGET IS THE DAY'S *REMAINING* ROWS, WHICH IS WHAT MAKES IT ONE BUDGET AND NOT
+  // TWO. If the queue already holds enough text-bearing rows to fill the day, this buys NOTHING —
+  // there is no point owning a description that today's ceiling cannot reach. That subtraction is
+  // the entire mechanism by which the two spends cannot disagree.
+  //
+  // ⛔ AND IT ONLY RUNS IF THERE IS A CLIENT TO ENRICH WITH. Without one, runEnrichment refuses
+  // below and the descriptions would sit unenriched — which is exactly the waste being removed,
+  // relocated. `anthropic` is checked here rather than trusted from a flag.
+  let detail = null;
+  if (anthropic) {
+    const alreadyQueued = selectCandidates(db, { limit: 1 }).totalMatched;
+    const roomForFetches = Math.max(0, budget.maxRows - alreadyQueued);
+    if (roomForFetches > 0) {
+      detail = await fillDescriptions(db, { limit: roomForFetches, http: detailHttp });
+    } else {
+      console.log(`[enrichJob] detail fetch skipped — ${alreadyQueued} row(s) already queued fill ` +
+                  `the day's ${budget.maxRows}-row budget; a description bought now could not be used`);
+    }
+  }
 
   let passes = 0, enriched = 0, failed = 0, empty = 0;
   let inputTokens = 0, outputTokens = 0, usd = 0;
@@ -693,6 +730,17 @@ async function drainEnrichment(db, anthropic, {
     `${empty} no-signal, ~$${usd.toFixed(4)}, stopped because ${stopReason}` +
     (skippedReason ? ` (${skippedReason})` : '') + `, ${remaining} still queued`
   );
+  // 2A — the detail fetch reports its own COVERAGE DELTA, not its request count. `attempted: 300`
+  // is true whether 300 descriptions arrived or none did, which is the standing lesson of this
+  // pipeline and the reason the two numbers are printed side by side rather than one of them.
+  if (detail?.enabled && detail.selected) {
+    console.log(
+      `[enrichJob] detail fetch: ${detail.attempted} request(s) spent, description coverage ` +
+      `${detail.describedBefore} -> ${detail.describedAfter} (+${detail.coverageDelta}) over ` +
+      `${detail.selected} selected row(s)` +
+      (detail.failed ? `, ${detail.failed} failed ${JSON.stringify(detail.byReason)}` : '')
+    );
+  }
   if (gains.length) {
     console.log('[enrichJob] coverage moved: ' + gains.map(([c, d]) => `${c} ${d > 0 ? '+' : ''}${d}`).join('  '));
   } else if (enriched) {
@@ -721,6 +769,14 @@ async function drainEnrichment(db, anthropic, {
     failed,
     details: {
       passes, stopReason, skippedReason, batchIds,
+      // Recorded so the admin health view can answer "did descriptions arrive?" for a day without
+      // re-deriving it from the coverage table. Null when there was no client or no room.
+      detailFetch: detail ? {
+        selected: detail.selected, attempted: detail.attempted,
+        withText: detail.withText, failed: detail.failed,
+        coverageDelta: detail.coverageDelta, byReason: detail.byReason,
+        prioritisedByProfiles: detail.prioritised, throttledSources: detail.throttledSources,
+      } : null,
       inputTokens, outputTokens, estCostUsd: Number(usd.toFixed(4)),
       budget, remainingCandidates: remaining,
       coverageGains: Object.fromEntries(gains),
@@ -729,6 +785,7 @@ async function drainEnrichment(db, anthropic, {
 
   return {
     passes, enriched, failed, empty, inputTokens, outputTokens,
+    detail,
     estCostUsd: Number(usd.toFixed(4)), stopReason, skippedReason, batchIds,
     remainingCandidates: remaining, coverageBefore: before, coverageAfter: after,
     coverageGains: Object.fromEntries(gains),

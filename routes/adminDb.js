@@ -5,6 +5,10 @@ import fs from "fs";
 import { classifyTitle } from "../services/jobClassifier.js";
 import { getSourceStatus } from "../services/jobs/aggregator.js";
 import { DIRECT_ATS_SOURCES } from "../services/jobs/directApplyFilter.js";
+// Y2D — the attempt cap is read from the SAME parser the fetch pass uses. A literal here would
+// be a second copy of the threshold, so raising ENRICH_DETAIL_MAX_ATTEMPTS would silently make
+// this panel report "exhausted" about rows that are still being retried.
+import { detailFetchFromEnv } from "../services/jobs/detailBudget.js";
 import { buildJobFilters } from "../services/jobs/jobQuery.js";
 import { deriveProfileFilters } from "../services/jobs/profileFilterBridge.js";
 import { profileTitleSql } from "../services/profileTitleFilter.js";
@@ -68,6 +72,26 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
 
   function assertReadableTable(table) {
     return tableNames().includes(table);
+  }
+
+  /**
+   * Y2D — does this database have migration 107's detail-fetch columns?
+   *
+   * ⛔ THIS PANEL MUST NEVER BE THE THING THAT BREAKS. It is the surface whose entire job is to
+   * notice when something else has, so naming a column a deployment has not migrated yet would
+   * take the whole health view down in order to report a missing metric — the same rule
+   * recordPipelineRun follows ("observability must never be able to break ingestion") and the same
+   * one the company_ats_list.active check below already follows.
+   *
+   * Not theoretical: the pipeline-health fixtures build a hand-written minimal scraped_jobs, and
+   * naming these columns unconditionally failed seven of them at once — which is precisely what a
+   * pre-107 production deployment would have experienced.
+   */
+  function hasDetailFetchColumns() {
+    try {
+      const cols = db.prepare("PRAGMA table_info(scraped_jobs)").all().map(c => c.name);
+      return cols.includes("detail_fetch_attempts") && cols.includes("detail_fetched_at");
+    } catch { return false; }
   }
 
   // ── Route 0: Pipeline Health ──────────────────────────────────
@@ -209,6 +233,29 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       // false positives in it is an alert list that gets closed.
       const lastOkBySource = new Map([...lastOk].map(([k, v]) => [k, v.started_at]));
 
+      const hasDetailCols = hasDetailFetchColumns();
+      // Y2D · DESCRIPTIONS OBTAINED PER REQUEST SPENT, per company.
+      //
+      // SmartRecruiters and Workday need a second HTTP request per posting for their text (Phase 1
+      // proved no list parameter avoids it), so "this company yields no descriptions" and "we have
+      // not paid for this company's descriptions yet" are different findings that no_description
+      // alone cannot tell apart. Spend is not derivable from outcomes: a description-less row might
+      // have cost zero requests or three.
+      //
+      // Both halves of the ratio are scoped to ACTIVE rows so they describe the same population —
+      // mixing all-time spend with active-only outcomes would understate yield for any company
+      // whose older rows have since been pruned.
+      const detailCols = hasDetailCols
+        ? `SUM(CASE WHEN COALESCE(s.is_active, 0) = 1 THEN COALESCE(s.detail_fetch_attempts, 0) ELSE 0 END) AS detail_attempts,
+           SUM(COALESCE(s.is_active, 0) = 1 AND s.detail_fetched_at IS NOT NULL)                     AS detail_fetched,
+           SUM(COALESCE(s.is_active, 0) = 1 AND COALESCE(s.detail_fetch_attempts, 0) >= @attemptCap
+               AND (s.description IS NULL OR TRIM(s.description) = ''))                              AS detail_exhausted,`
+        // NULL, not 0. "This deployment does not record detail spend" and "this company has spent
+        // nothing" are different statements, and a 0 would assert the second while meaning the
+        // first — success-shaped output over an absent measurement, which is the failure this
+        // whole panel exists to catch.
+        : `NULL AS detail_attempts, NULL AS detail_fetched, NULL AS detail_exhausted,`;
+
       const companyHealth = (() => {
       try {
       return assertReadableTable("company_ats_list")
@@ -218,6 +265,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
                    SUM(COALESCE(s.is_active, 0) = 1)                   AS active_rows,
                    SUM(COALESCE(s.is_active, 0) = 1 AND (s.description IS NULL OR TRIM(s.description) = '')) AS no_description,
                    SUM(COALESCE(s.is_active, 0) = 1 AND s.enriched_at IS NOT NULL)                           AS enriched,
+                   ${detailCols}
                    MAX(COALESCE(s.discovered_at, s.scraped_at, s.updated_at)) AS last_row_at
             FROM company_ats_list c
             LEFT JOIN scraped_jobs s
@@ -225,7 +273,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
             WHERE c.active = 1
             GROUP BY c.ats_type, c.company, c.ats_slug, c.active, c.created_at
             ORDER BY c.ats_type, active_rows DESC, c.company
-          `).all().map(r => {
+          `).all(hasDetailCols ? { attemptCap: detailFetchFromEnv().maxAttempts } : {}).map(r => {
             const activeRows = r.active_rows || 0;
             const noDesc = r.no_description || 0;
             const lastCrawlOk = lastOkBySource.get(r.source) ?? null;
@@ -244,15 +292,29 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
             // 0% descriptions is AC item 2's other disqualifier: enrichJob.js skips
             // description-less rows, so these can NEVER be enriched and inflate every coverage
             // metric they enter. This is why Ubisoft, Bosch and Adobe were seeded inactive.
+            //
+            // ⛔ IT NO LONGER MEANS WHAT IT MEANT, AND IT IS STILL RIGHT TO REPORT. Since Y2A a
+            // description-less row from a fetchable source is a row whose text has not been BOUGHT
+            // yet, not a row that can never have one — which is why `detailAttempts` is reported
+            // beside this. A company reading `no_descriptions` with `detailAttempts: 0` is waiting
+            // in a queue; the same company with `detailAttempts: 900` and `detailYield: 0` is a
+            // real finding. The health WORD cannot carry that distinction, so the numbers do.
             else if (noDesc === activeRows)              health = "no_descriptions";
             else if (r.last_row_at && r.last_row_at < staleBefore) health = "stale";
             else                                         health = "ok";
+            const attempts = r.detail_attempts;
+            const obtained = r.detail_fetched;
             return {
               source: r.source, company: r.company, slug: r.slug,
               total: r.total || 0, active: activeRows, noDescription: noDesc,
               enriched: r.enriched || 0, lastRowAt: r.last_row_at ?? null,
               addedAt: r.created_at ?? null,
               staleHours: r.last_row_at ? Math.floor((now - r.last_row_at) / 3600) : null,
+              // Y2D. Reported, never acted on — see the ⛔ below.
+              detailAttempts: attempts ?? null,
+              detailObtained: obtained ?? null,
+              detailYield: attempts ? Number((obtained / attempts).toFixed(3)) : null,
+              detailExhausted: r.detail_exhausted ?? null,
               health,
             };
           })
@@ -262,6 +324,25 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         return [];
       }
       })();
+      // ⛔ Y2D DELIBERATELY STOPS HERE: MEASURED AND SURFACED, NEVER AUTO-DEACTIVATED.
+      //
+      // The brief asked for a company returning 0% descriptions to be auto-deactivated with the
+      // reason recorded — "one crawl to learn that, not one crawl per crawl forever". Phase 1
+      // measured the premise and it does not hold: sampling 25 postings spread across each board,
+      // Ubisoft, Bosch and Adobe ALL returned 100% descriptions, 75 of 75, zero failures. The 0%
+      // coverage that got them seeded inactive was the absence of our own second request, not a
+      // property of the sources.
+      //
+      // So an auto-deactivator would guard a condition that does not occur, while introducing a
+      // brand-new way to lose a healthy company to one bad crawl — silent data loss, this
+      // project's single most-repeated failure shape, added to protect against a measured
+      // non-problem. The per-row attempt cap already removes the "one crawl per crawl" waste it
+      // was aimed at, bounded at three requests per row rather than per company, and a human
+      // reads the numbers above to decide anything larger.
+      //
+      // If a future session revisits this: the finding that would justify auto-deactivation is a
+      // company with high `detailAttempts` and `detailYield: 0`. That is now visible. Nothing is
+      // stopping it being acted on except that it has never been observed.
 
       // Enrichment coverage: % non-null per column over ACTIVE rows. 0% must be alarming, which
       // is the whole point — skills_json sat at 0/684 while the admin panel looked healthy.

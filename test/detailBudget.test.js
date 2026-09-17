@@ -1,95 +1,124 @@
-// TASK Y — a budget for the N+1 that SmartRecruiters and Workday require.
+// THE BOUND ON THE DETAIL FETCH — the primitive, not the pass.
 //
-// Both sources' LIST endpoints carry no job text. Migration 103 measured the cost of switching
-// them on regardless — 648 rows at 0% description coverage, and enrichJob.js skips
-// description-less rows, so they would be permanently unenrichable — and seeded both companies
-// INACTIVE instead. This is the budget that makes turning them on survivable.
+// The pass and its write invariants live in test/detailFetch.test.js. This file covers the
+// allowance itself: the two caps, the refusal counting, the env parsing and the concurrency runner.
 //
-// ⛔ EVERY TEST HERE INJECTS THE FETCHER. Not one request goes to SmartRecruiters, Adobe or
-// anyone else, which matters more than usual because the thing being bounded IS outbound requests
-// to them. A test that verified this by hitting a real careers API would be the defect.
+// ⛔ WHAT THIS FILE USED TO TEST AND NO LONGER CAN. Task Y's version asserted that the budget was
+// OFF BY DEFAULT (`total: 0`) and that `attachDescriptions` spent it inside each plugin's crawl.
+// Both are gone: the fetch moved into the enrichment pass, `attachDescriptions` was deleted, and
+// the default is no longer zero. That is not a loosening, and the reasoning is worth keeping here
+// because a future reader will notice the assertion disappear:
+//
+//   Off-by-default was RIGHT for a crawl-time fetch. "Off" had to mean zero outbound requests to
+//   Ubisoft, Bosch and Adobe, because a daily cron that quietly starts making hundreds of
+//   third-party requests is not a conservative default.
+//
+//   It is WRONG for the enrichment-side fetch, because the capability and the sources are separate
+//   switches and the SOURCES are the ones that are off — all three companies are `active = 0` in
+//   company_ats_list, so nothing is ingested from them and the selector finds no description-less
+//   rows to act on. An enabled allowance over an empty candidate set makes exactly zero requests;
+//   that is proved in detailFetch.test.js ("rows that already have text are never selected") and
+//   is a property of the SELECTOR, which is where it belongs. Keeping `total: 0` would have meant
+//   that enabling a source later ALSO silently required finding a second unrelated flag.
+//
+// The replacement guarantee — one kill switch, and it works — is the first test below.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  createDetailBudget, detailBudgetFromEnv, attachDescriptions,
-  mapWithConcurrency, DETAIL_BUDGET_DEFAULTS,
+  createDetailBudget, detailFetchFromEnv, mapWithConcurrency, DETAIL_FETCH_DEFAULTS,
 } from "../services/jobs/detailBudget.js";
-import smartrecruiters from "../services/jobs/sources/smartrecruiters.js";
-import workday from "../services/jobs/sources/workday.js";
 
-test("OFF BY DEFAULT means zero requests, not a small number of them", () => {
-  assert.equal(DETAIL_BUDGET_DEFAULTS.total, 0);
-  assert.equal(detailBudgetFromEnv({}).total, 0);
-  assert.equal(createDetailBudget().enabled, false);
-  // A malformed or hostile value must not become an allowance.
-  for (const bad of ["", "abc", "-5", null, undefined, "NaN"]) {
-    assert.equal(detailBudgetFromEnv({ ATS_DETAIL_FETCH_BUDGET: bad }).total, 0, String(bad));
+test("ENRICH_DETAIL_FETCH=0 is one kill switch and it zeroes the allowance", () => {
+  for (const off of ["0", "false", "off", "no", "OFF", " 0 "]) {
+    assert.equal(detailFetchFromEnv({ ENRICH_DETAIL_FETCH: off }).total, 0, String(off));
+    assert.equal(createDetailBudget(detailFetchFromEnv({ ENRICH_DETAIL_FETCH: off })).enabled, false);
   }
-  assert.equal(detailBudgetFromEnv({ ATS_DETAIL_FETCH_BUDGET: "30" }).total, 30);
+  // Anything else is not a kill switch, including the empty string — "I could not read the
+  // setting" must not silently become "make no requests", which is a different decision.
+  for (const on of ["", "1", "true", undefined, null, "yes"]) {
+    assert.equal(detailFetchFromEnv({ ENRICH_DETAIL_FETCH: on }).total,
+      DETAIL_FETCH_DEFAULTS.total, String(on));
+  }
 });
 
-test("a disabled budget performs no fetches at all", async () => {
-  let calls = 0;
-  const jobs = [{ company: "A", description: null }, { company: "A", description: null }];
-  const report = await attachDescriptions(jobs, createDetailBudget(), () => { calls++; return "text"; });
-  assert.equal(calls, 0, "the fetcher must never be invoked when the budget is off");
-  assert.equal(report.enabled, false);
-  assert.equal(jobs[0].description, null, "rows must be untouched — today's behaviour exactly");
+test("an unparseable knob falls back to the MEASURED default, never to zero", () => {
+  // The distinction this pins: a typo in ENRICH_DETAIL_MAX_ROWS must not disable the feature. The
+  // old crawl-time parser deliberately read a bad value as OFF; here OFF has its own switch, so
+  // reading a bad value as zero would be a silent outage with no operator behind it.
+  for (const bad of ["", "abc", "-5", "NaN", undefined, null]) {
+    const cfg = detailFetchFromEnv({ ENRICH_DETAIL_MAX_ROWS: bad });
+    assert.equal(cfg.total, DETAIL_FETCH_DEFAULTS.total, String(bad));
+  }
+  assert.equal(detailFetchFromEnv({ ENRICH_DETAIL_MAX_ROWS: "42" }).total, 42);
+  assert.equal(detailFetchFromEnv({ ENRICH_DETAIL_MAX_ROWS: "0" }).total, 0,
+    "an explicit 0 IS a decision and must be honoured");
 });
 
-test("the total bounds the crawl and the per-company cap bounds one company", async () => {
-  const budget = createDetailBudget({ total: 5, perCompany: 2, concurrency: 1 });
-  const jobs = [
-    ...Array.from({ length: 4 }, () => ({ company: "A", description: null })),
-    ...Array.from({ length: 4 }, () => ({ company: "B", description: null })),
-  ];
-  const report = await attachDescriptions(jobs, budget, () => "desc");
+test("a zero concurrency or attempt cap is a broken value, not a decision", () => {
+  // These two differ from `total` on purpose. A 0 total means "fetch nothing this pass", which is
+  // a thing somebody might mean. A 0 concurrency leaves mapWithConcurrency with an empty runner
+  // pool and a 0 attempt cap makes every row permanently ineligible — both silent, neither
+  // anything anyone wants, and "turn it off" already has its own switch. So they fall back.
+  const cfg = detailFetchFromEnv({ ENRICH_DETAIL_CONCURRENCY: "0", ENRICH_DETAIL_MAX_ATTEMPTS: "0" });
+  assert.equal(cfg.concurrency, DETAIL_FETCH_DEFAULTS.concurrency);
+  assert.equal(cfg.maxAttempts, DETAIL_FETCH_DEFAULTS.maxAttempts);
+  assert.equal(detailFetchFromEnv({ ENRICH_DETAIL_CONCURRENCY: "-3" }).concurrency,
+    DETAIL_FETCH_DEFAULTS.concurrency);
+  // A real override still lands.
+  assert.equal(detailFetchFromEnv({ ENRICH_DETAIL_CONCURRENCY: "4" }).concurrency, 4);
+});
+
+test("the default concurrency is Workday's MEASURED knee, not a guess", () => {
+  // Phase 1: zero 429s from either API in 124 requests at up to 32 concurrent, and no
+  // RateLimit-*/Retry-After header exists on either to read. The one thing that showed a limit was
+  // Workday's backpressure — throughput plateaus near 8 while tail latency triples (584ms ->
+  // 1882ms). This project has already paid for pacing on a guess once: it paced Groq on 30
+  // requests/minute against a binding limit of 8,000 TOKENS/minute.
+  assert.equal(DETAIL_FETCH_DEFAULTS.concurrency, 8);
+});
+
+test("the total bounds the pass and the per-company cap bounds one company", () => {
+  const budget = createDetailBudget({ total: 5, perCompany: 2 });
+  const taken = [];
+  for (const co of ["A", "A", "A", "A", "B", "B", "B", "B"]) {
+    taken.push(budget.take(co));
+  }
+  const report = budget.report(4);
   assert.equal(report.spent, 4, "2 per company across two companies, under the total of 5");
   assert.deepEqual(report.byCompany, { A: 2, B: 2 });
   assert.equal(report.skipped, 4, "the refusals must be COUNTED, not silent");
-  assert.equal(jobs.filter(j => j.description).length, 4);
+  assert.equal(taken.filter(Boolean).length, 4);
 });
 
-test("the total wins when it is the tighter of the two", async () => {
-  const budget = createDetailBudget({ total: 3, perCompany: 10, concurrency: 1 });
-  const jobs = Array.from({ length: 8 }, () => ({ company: "A", description: null }));
-  const report = await attachDescriptions(jobs, budget, () => "desc");
+test("the total wins when it is the tighter of the two", () => {
+  const budget = createDetailBudget({ total: 3, perCompany: 10 });
+  for (let i = 0; i < 8; i++) budget.take("A");
+  const report = budget.report(3);
   assert.equal(report.spent, 3);
   assert.equal(report.skipped, 5);
+  assert.equal(budget.remaining, 0);
 });
 
-test("coverage is reported separately from spend, because they are different numbers", async () => {
-  // A fetch can succeed and return nothing. `spent: 4` is true whether four rows gained text or
-  // zero did — the standing "report coverage, not counts" lesson.
-  const budget = createDetailBudget({ total: 10, perCompany: 10, concurrency: 1 });
-  const jobs = Array.from({ length: 4 }, (_, i) => ({ company: "A", description: null, i }));
-  const report = await attachDescriptions(jobs, budget, (j) => (j.i % 2 ? "text" : null));
-  assert.equal(report.spent, 4);
-  assert.equal(report.withText, 2, "only half actually gained a description");
+test("a refusal is counted rather than silent, which is the whole point", () => {
+  // ⛔ A budget that silently declines is indistinguishable from a source that has no descriptions
+  // — which is the exact state this task exists to fix, so the fix must not be able to imitate it.
+  const budget = createDetailBudget({ total: 0 });
+  assert.equal(budget.take("A"), false);
+  assert.equal(budget.report(0).skipped, 1);
+  assert.equal(budget.report(0).enabled, false);
 });
 
-test("rows that already have text do not consume budget", async () => {
-  const budget = createDetailBudget({ total: 10, perCompany: 10, concurrency: 1 });
-  const jobs = [{ company: "A", description: "already here" }, { company: "A", description: null }];
-  const report = await attachDescriptions(jobs, budget, () => "new");
-  assert.equal(report.spent, 1);
-  assert.equal(jobs[0].description, "already here", "an existing description must not be overwritten");
+test("coverage is reported separately from spend, because they are different numbers", () => {
+  // `spent: 4` is true whether four rows gained text or zero did — the standing "report coverage,
+  // not counts" lesson. The budget cannot know, so the caller supplies it.
+  const budget = createDetailBudget({ total: 10 });
+  for (let i = 0; i < 4; i++) budget.take("A");
+  assert.equal(budget.report(2).spent, 4);
+  assert.equal(budget.report(2).withText, 2);
 });
 
-test("one failing detail fetch does not abort the pass", async () => {
-  const budget = createDetailBudget({ total: 10, perCompany: 10, concurrency: 2 });
-  const jobs = Array.from({ length: 5 }, (_, i) => ({ company: "A", description: null, i }));
-  const report = await attachDescriptions(jobs, budget, (j) => {
-    if (j.i === 2) throw new Error("third-party 500");
-    return "desc";
-  });
-  // The list rows are already good; a missing description is the status quo, not a regression.
-  assert.equal(report.withText, 4);
-  assert.equal(jobs[2].description, null);
-});
-
-test("concurrency is respected, so a crawl cannot stampede a third party", async () => {
+test("concurrency is respected, so a pass cannot stampede a third party", async () => {
   let inFlight = 0, peak = 0;
   await mapWithConcurrency(Array.from({ length: 12 }, (_, i) => i), 3, async () => {
     inFlight++; peak = Math.max(peak, inFlight);
@@ -99,65 +128,32 @@ test("concurrency is respected, so a crawl cannot stampede a third party", async
   assert.ok(peak <= 3, `peak concurrency ${peak} exceeded the limit`);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-// ⛔ THE ORDERING. This is the one that matters most, and the reason the task brief said the
-// budget model "must account for the per-company cap in 0de67c8".
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-
-test("detail fetches happen AFTER the per-company cap, never before", async () => {
-  // 0de67c8 fixed a cap that sliced the flattened cross-company array. Either way, rows past the
-  // cap are DISCARDED \u2014 so fetching their descriptions first spends real requests against a third
-  // party on rows that are then thrown away. Invisible without counting, exactly like the cap bug.
-  //
-  // \u26d4 THE FIRST VERSION OF THIS TEST WAS BLIND, AND IT TOOK A REAL NETWORK REQUEST TO NOTICE.
-  // It called smartrecruiters.search() against a made-up company, let the live list fetch fail,
-  // and asserted that nothing was detail-fetched. That passes whether the ordering is right or
-  // wrong \u2014 nothing was fetched because there were no jobs at all \u2014 and it hit
-  // api.smartrecruiters.com to do it, in a test file whose whole premise is that it never should.
-  // This composes the two real functions instead, with no plugin and no network.
-  const { collectCompanyJobs } = await import("../services/jobs/sources/base.js");
-
-  const PER_COMPANY_MAX = 3;
-  const perCompanyResults = [
-    { status: "fulfilled", value: Array.from({ length: 10 }, (_, i) => ({ company: "Acme", title: `acme-${i}`, description: null })) },
-    { status: "fulfilled", value: Array.from({ length: 10 }, (_, i) => ({ company: "Bosch", title: `bosch-${i}`, description: null })) },
-  ];
-
-  const capped = collectCompanyJobs(perCompanyResults, PER_COMPANY_MAX);
-  assert.equal(capped.length, 6, "the cap must discard 14 of the 20 postings");
-
-  const fetched = [];
-  await attachDescriptions(
-    capped,
-    createDetailBudget({ total: 100, perCompany: 100, concurrency: 1 }),
-    (job) => { fetched.push(job.title); return "described"; },
-  );
-
-  assert.equal(fetched.length, 6, "exactly the survivors, never the pre-cap population of 20");
-  assert.deepEqual(fetched.sort(), ["acme-0", "acme-1", "acme-2", "bosch-0", "bosch-1", "bosch-2"].sort());
-  // The discarded rows must never have been asked about.
-  assert.ok(!fetched.some(t => /-([3-9])$/.test(t)), "a discarded posting was detail-fetched");
+test("one rejecting worker does not abort the rest of the pass", async () => {
+  // The list row is already good and a missing description is the status quo, not a regression —
+  // so one posting's failure must never cost the other 299 their fetch.
+  const done = [];
+  await mapWithConcurrency([0, 1, 2, 3, 4], 2, async (i) => {
+    if (i === 2) throw new Error("third-party 500");
+    done.push(i);
+  });
+  assert.deepEqual(done.sort(), [0, 1, 3, 4]);
 });
 
-test("the cap is what bounds the candidate set, proved without any network", async () => {
-  // The same property, isolated from the plugin's HTTP: attachDescriptions receives an ALREADY
-  // CAPPED array, so its candidate count can never exceed what the cap let through.
-  const capped = Array.from({ length: 3 }, (_, i) => ({ company: "Acme", description: null, i }));
-  const budget = createDetailBudget({ total: 100, perCompany: 100, concurrency: 1 });
-  let calls = 0;
-  await attachDescriptions(capped, budget, () => { calls++; return "d"; });
-  assert.equal(calls, 3, "exactly the surviving rows, never the pre-cap population");
-});
-
-test("both plugins take the budget and the injected fetcher, and default to OFF", () => {
-  // Signature parity: if one source grows its own private flag, the budget stops being one lever.
-  for (const [name, plugin] of [["smartrecruiters", smartrecruiters], ["workday", workday]]) {
-    const src = plugin.search.toString();
-    assert.match(src, /_detailBudget/, `${name} must accept an injected budget`);
-    assert.match(src, /_fetchDetail/, `${name} must accept an injected fetcher`);
-    assert.match(src, /collectCompanyJobs\(results, PER_COMPANY_MAX\)[\s\S]{0,400}attachDescriptions/,
-      `${name} must cap BEFORE attaching descriptions`);
-    assert.doesNotMatch(src, /process\.env\.ATS_DETAIL/,
-      `${name} must not read the budget env directly — detailBudgetFromEnv is the one parser`);
-  }
+test("the crawl-time env vars are gone from the parser, not merely unread", () => {
+  // ATS_DETAIL_FETCH_BUDGET and friends configured a path that no longer exists. Leaving them
+  // parseable would be a lever that appears to work and does nothing — the shape of
+  // `_ghCompanies`, which capped live search at three of seven sources invisibly.
+  const cfg = detailFetchFromEnv({
+    ATS_DETAIL_FETCH_BUDGET: "999",
+    ATS_DETAIL_FETCH_PER_COMPANY: "999",
+    ATS_DETAIL_FETCH_CONCURRENCY: "999",
+    ATS_DETAIL_FETCH_TIMEOUT_MS: "999",
+  });
+  assert.deepEqual(cfg, {
+    total: DETAIL_FETCH_DEFAULTS.total,
+    perCompany: DETAIL_FETCH_DEFAULTS.perCompany,
+    concurrency: DETAIL_FETCH_DEFAULTS.concurrency,
+    timeoutMs: DETAIL_FETCH_DEFAULTS.timeoutMs,
+    maxAttempts: DETAIL_FETCH_DEFAULTS.maxAttempts,
+  }, "a retired env var must have no effect at all");
 });

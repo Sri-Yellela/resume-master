@@ -105,6 +105,70 @@ function stubClient({ tokensPerCall = 1000, failAll = false } = {}) {
 
 const BIG = { maxRows: 1e6, maxUsd: 1e6, maxMinutes: 1e6 };
 
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+// Y2A · STEP ZERO — the description fetch, and why it shares THIS budget
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("the fetch budget is the day's REMAINING rows, which is what makes it ONE budget", async () => {
+  // ⛔ THE SUBTRACTION IS THE MECHANISM. Task Y had a budget in the crawl and a budget here,
+  // with no way to notice they disagreed — and they could not have agreed even in principle: a
+  // crawl wants 1,500 detail requests (Ubisoft 300 + Bosch 900 + Adobe 300, measured) while this
+  // ceiling is 300 rows/day, so a crawl-time fetch buys 1,200 descriptions a day that nothing can
+  // ever enrich. Asking for exactly `maxRows - alreadyQueued` is what collapses the two.
+  const db = makeDb(4);                       // 4 rows already have text, so 4 are already queued
+  const { client } = stubClient();
+  const asked = [];
+  await drainEnrichment(db, client, {
+    batchSize: 10, budget: { ...BIG, maxRows: 10 },
+    fillDescriptions: async (_db, opts) => { asked.push(opts.limit); return null; },
+  });
+  assert.deepEqual(asked, [6], "10-row ceiling minus 4 already-enrichable rows");
+});
+
+test("a full queue buys NO descriptions, because today could not use them", async () => {
+  const db = makeDb(10);
+  const { client } = stubClient();
+  let called = 0;
+  await drainEnrichment(db, client, {
+    batchSize: 10, budget: { ...BIG, maxRows: 5 },   // 10 queued against a 5-row day
+    fillDescriptions: async () => { called++; return null; },
+  });
+  assert.equal(called, 0,
+    "there is no point owning a description the day's ceiling cannot reach");
+});
+
+test("no client means no descriptions are bought either", async () => {
+  // Without a client runEnrichment refuses, so a description fetched now would sit unenriched —
+  // which is exactly the waste this task removed, relocated one step later.
+  const db = makeDb(4);
+  let called = 0;
+  const r = await drainEnrichment(db, null, {
+    batchSize: 10, budget: { ...BIG, maxRows: 10 },
+    fillDescriptions: async () => { called++; return null; },
+  });
+  assert.equal(called, 0);
+  assert.equal(r.ran, false, "and the drain must still report that it did not run");
+});
+
+test("the drain reports the detail fetch as COVERAGE, and passes it through", async () => {
+  const db = makeDb(2);
+  const { client } = stubClient();
+  const r = await drainEnrichment(db, client, {
+    batchSize: 10, budget: { ...BIG, maxRows: 10 },
+    fillDescriptions: async () => ({
+      enabled: true, selected: 3, attempted: 3, withText: 2, failed: 1,
+      byReason: { no_text: 1 }, describedBefore: 0, describedAfter: 2, coverageDelta: 2,
+      prioritised: 1, throttledSources: [],
+    }),
+  });
+  assert.equal(r.detail.coverageDelta, 2);
+  const run = db.prepare("SELECT details_json FROM pipeline_runs WHERE run_kind='enrichment' ORDER BY id DESC LIMIT 1").get();
+  const details = JSON.parse(run.details_json);
+  assert.equal(details.detailFetch.coverageDelta, 2);
+  assert.equal(details.detailFetch.attempted, 3,
+    "requests spent and descriptions gained are both recorded, because they are different numbers");
+});
+
 test("the drain LOOPS past one batch — the defect was that it never did", async () => {
   const db = makeDb(12);
   const { client, calls } = stubClient();

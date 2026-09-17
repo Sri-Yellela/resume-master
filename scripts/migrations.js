@@ -3144,4 +3144,55 @@ export const MIGRATIONS = [
         DROP TABLE IF EXISTS import_extension_tokens;
       `,
     },
+    {
+      // 107 — DETAIL-FETCH BOOKKEEPING (task Y phase 2, sections 2A and 2D).
+      //
+      // The description for a SmartRecruiters or Workday posting now arrives from a SECOND HTTP
+      // request, made inside the enrichment pass rather than the crawl (services/jobs/detailFetch.js
+      // explains why that seam). Three columns, each answering a question the pass cannot answer
+      // without persisting it:
+      //
+      //   detail_fetched_at      when a fetch last SUCCEEDED for this row. Distinguishes "has a
+      //                          description because the list carried one" from "has one because
+      //                          we bought it" — which is the difference between a source that
+      //                          needs the N+1 and one that does not, per row rather than per
+      //                          assumption.
+      //
+      //   detail_fetch_attempts  how many requests this row has cost. 2D asks for
+      //                          descriptions-obtained-per-request-SPENT per company, and spend is
+      //                          not derivable from outcomes: a row with no description might have
+      //                          cost zero requests or five, and those are opposite findings.
+      //                          Also the bound on re-spending — a posting deleted upstream 404s
+      //                          forever, and "one crawl to learn that, not one crawl per crawl"
+      //                          is the whole point.
+      //
+      //   detail_fetch_error     the last reason, as a tag ('http_404', 'no_text', 'http_429', …).
+      //                          A count without a reason cannot tell "the posting is gone" from
+      //                          "we were rate-limited", and those want opposite responses.
+      //
+      // ⛔ NOTHING HERE MARKS A ROW DONE, AND THAT IS DELIBERATE. `content_hash` and `enriched_at`
+      // remain the only "this row has been processed" signals, and the detail fetch never writes
+      // either — on success OR failure. Stamping a row as complete when nothing was filled is what
+      // once cost this project 120 rows, and a 429 mid-fetch is the obvious way to recreate it. A
+      // row that has burned its attempts is still a candidate forever; it has simply stopped being
+      // worth another request until somebody clears the counter, which is one UPDATE and is
+      // surfaced in the admin health view rather than buried.
+      //
+      // ADDITIVE AND NULLABLE. Every existing row reads NULL/0, which is the correct history:
+      // no row in the board today was obtained through a detail fetch, because the path did not
+      // exist. No backfill, because there is nothing true to backfill with.
+      id: "107_detail_fetch_bookkeeping",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN detail_fetched_at     INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN detail_fetch_attempts INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE scraped_jobs ADD COLUMN detail_fetch_error    TEXT;
+
+        -- The fetch pass's own selector: active, description-less, attempts under the cap. Without
+        -- this it is a full scan of scraped_jobs on every enrichment run, and the whole design
+        -- premise is that this pass is cheap enough to run unconditionally.
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_detail_pending
+          ON scraped_jobs(is_active, source, detail_fetch_attempts)
+          WHERE description IS NULL OR TRIM(description) = '';
+      `,
+    },
   ];

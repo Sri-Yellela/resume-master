@@ -1,42 +1,64 @@
 # Next Work
 
-**Last reconciled:** 2026-09-16, against `git`, a full suite run and a live probe of production —
-not against this file's own previous claims. Closed findings are in **`docs/FINDINGS_ARCHIVE.md`**;
-the reconciled evidence and the three landed task reports are in **`docs/PART1_RECONCILED.md`**.
+**Last reconciled:** 2026-09-17, after the ATS/curation audit. Closed findings are in
+**`docs/FINDINGS_ARCHIVE.md`**; every wrong claim this project has made, with what replaced it, is in
+**`docs/CORRECTIONS_REGISTER.md`**.
 
-**Baseline:** **2443 passing, 0 failing** — measured 2026-09-16, not carried forward. Contract
-**v1.1.1**. Migrations 102 and 103 are in production. **Migration 105 is NOT** — it is in the four
-unpushed commits below.
+**Baseline: 2443 passing, 0 failing.** Production is **`eecbe09`**, contract **v1.1.1**, migration
+high-water **106**, `monetisationEnabled: false` — confirmed by
+`GET https://resumemaster.one/api/version`, which is now the one-curl answer to "what is deployed".
 
-**This file was stale again, for the sixth time, in its single largest claim.** The banner here
-said six commits were unpushed and undeployed and that deploying them was "the highest-value
-action available". All six (`0de67c8` `260e656` `0364855` `1e1f91a` `f670b24` `34bb047`) are on
-`main` and on `origin/main`, verified with `git merge-base --is-ancestor`. The per-company cap,
-the AC residual, AA, AE, Z and AD are all **live**. The branch they were on,
-`fix/ats-per-company-cap`, has an upstream and is merged.
+**The unpushed-commits banner below is HISTORICAL and resolved.** Those four commits shipped; the
+full merge deployed ten including the monetisation lever, anonymous spend controls, the version
+endpoint, migration 106 and task Y.
 
 > ⚠ **Re-derive state from the repo before starting anything.** This file has now been the stale
-> thing **six** times: AK2 found three of five tasks already done, AL1 two of three, AM3 two claims
-> wrong, AM4 the central premise of its own task inverted, on 09-15 an audit found six landed
-> commits this file still listed as open including one (**Z**) whose premise was backwards — and on
-> 09-16 its own headline banner was wrong about what production is running. Agents land work faster
-> than the doc reconciles. The check has caught it every time, which is the argument for AH-1: a
-> version endpoint turns this reconciliation from git archaeology into one curl.
+> thing **seven** times — AK2 found three of five tasks already done, AL1 two of three, AM3 two
+> claims wrong, AM4 the central premise of its own task inverted, 09-15 found six landed commits
+> still listed as open, 09-16 its own headline banner wrong about production, and 09-17 the
+> `skills_json` figure it had carried for weeks **wrong by 2.7×**.
+>
+> `/api/version` turned "what is deployed" into one curl. **Nothing has done the same for "what is
+> true"** — which is why every brief now instructs measuring the premise first, and why three briefs
+> in a row had their central premise inverted by the first measurement taken.
 
 ---
 
-## ⛔ FOUR COMMITS ARE UNPUSHED — and one of them is a live cost exposure
+## ⭐ Current work — curation consolidation
 
-```
-origin/main   f4a6c2d   e4PolicyVerify date fix      ← what production is running, verified 09-16
-main          857fa32   anonymous spend controls     ← 4 commits ahead, local only
-```
+The ATS/curation audit of 2026-09-17 found **three systems deciding one question**, and the one that
+actually decides the board had never been measured.
 
-Verified by probe rather than assumed, per this file's own rule: `GET /api/health` on
-resumemaster.one answers JSON, and `GET /api/config` — which exists only in `c4320e1` — answers
-**200 with the SPA shell**. That is the catch-all, not the route. Production does not have it.
+| | what it is | agreement with the scorer |
+|---|---|---|
+| **A** `profileTitleSql` + the `job_role_map` INNER JOIN | **hard board membership** | — |
+| **B** the profile→board bridge | 3-valued sieve; top band **217 rows deep, internally unordered** | ρ **0.3797** best case · **0.1508** thin résumé · **−0.0222** owner's profile as stored |
+| **C** `scoreAtsLocally` | the band on the card | ρ 0.737 against human grading |
 
-| Commit | What production is missing |
+⛔ **A excludes the best matches before either scorer runs.** Of the 30 postings the owner graded,
+only **8** survive a `["Software Engineer"]` board. 22 excluded, including **5 of the 12 graded 5** —
+among them `Backend Engineer, Credit Decisions @ Stripe`, which the engine scores **60, its
+second-highest**, excluded because the title lacks the literal word "software".
+
+**Plan and five sequential tasks: `docs/CURATION_CONSOLIDATION.md`.** CC1 runs alone and first.
+
+**Two claims that audit retired:**
+- `skills_json` is **99.8%** covered (1,263/1,266), not 37%. The constraint is whole-value `LIKE`
+  against a 6,130-string vocabulary that is **70% singletons**, capped at 6 terms drawn from a
+  hardcoded list of 32.
+- G1's synonym table did not measure "+0.000" — **it has no effect path.** No server call site passes
+  `synonyms` to the scorer. The 196 proposals awaiting review are for a table nothing that scores
+  reads.
+
+---
+
+## ✓ RESOLVED — the section below is historical
+
+Those four commits shipped on 09-16/17; production is `eecbe09`. Kept only because the probe method
+it records — `GET /api/config` answering **200 with the SPA shell** rather than the route — is the
+third time a catch-all 200 stood in for evidence, and the reason `/api/version` now exists.
+
+| Commit | What production was missing (RESOLVED) |
 |---|---|
 | `c4320e1` | The monetisation lever. **`/pricing` is live right now saying "paid upgrades are being prepared"**, with tier badges and upgrade prompts, while the Chrome Web Store trader declaration says NON-TRADER. |
 | `a9d70c6` | The six lever screenshots (docs only). |
@@ -52,7 +74,7 @@ resumemaster.one answers JSON, and `GET /api/config` — which exists only in `c
 
 | # | Task | Repo | Needs | State |
 |---|---|---|---|---|
-| **Y** | SmartRecruiters + Workday descriptions | desktop | — | **budget BUILT 09-17, and OFF.** `services/jobs/detailBudget.js`. Switching it on is two deliberate acts — see below |
+| **Y** | SmartRecruiters + Workday descriptions | desktop | — | **PHASE 1 PROBED + PHASE 2 BUILT 09-17.** The N+1 is real, nothing rate-limits, yield is 100%. Fetch moved crawl → enrichment. **The SOURCES are still off** — see below |
 | **AB + AH** | Vestigial keys, small deferred items | desktop | — | **all but AB-1 closed** — AH-1/2/3/4 done or answered 09-16/17, see below. AB-1 is an owner action (remove `THEIRSTACK_API_KEY`) |
 | ~~**AF residual**~~ | A write path for `app_settings.apply_full_auto_disabled` | desktop | — | ✅ **DONE 09-17**, `1bb2a29`. GET/PUT/DELETE `/api/admin/full-auto`, three states, strict boolean. One definition in `services/appSettings.js` so the admin surface and the pipeline cannot disagree |
 | **AG** | Mobile corruption sweep | android | — | **partly done** — `f337767` repaired SYNC.md's encoding. The BOM/toolchain half and a verifying build remain |
@@ -99,46 +121,91 @@ survive as an active board, rebase `scraped_at` forward again — the same step 
 **Production is unaffected**: it is refilled daily, so its rows never all age past the cutoff
 together.
 
-### Task Y — the N+1 budget exists; turning it on is TWO acts, not one
+### Task Y — probed, restructured, and the SOURCES are still off
 
-`services/jobs/detailBudget.js` is the budget model the task asked for, wired into
-`smartrecruiters.js` and `workday.js`. ⛔ **It is off, and off means zero requests, not a small
-number of them.** `ATS_DETAIL_FETCH_BUDGET` defaults to **0**, which disables the path entirely:
-the plugins skip the detail step and behave exactly as they do today.
+Two documents carry the detail: **`docs/DETAIL_FETCH_PHASE1_FINDINGS.md`** (what the sources
+actually do) and the header of **`services/jobs/detailFetch.js`** (why the code is shaped this way).
+The short version:
 
-**Two independent gates stand between here and live traffic, and both are deliberate:**
+**Phase 1 answered the two questions the brief asked.** The N+1 is **real** for both sources — 11
+SmartRecruiters query variants and 19 Workday body/query variants against live boards, every
+response **byte-identical**, and no RSS/Atom/sitemap on either. So nothing was deleted. But the
+problem the budget was built to solve **does not exist**: ramping concurrency 2→32 produced **zero
+429s** in 124 requests per source, and neither API emits a `RateLimit-*` or `Retry-After` header at
+all. Requests were never the scarce thing.
 
-1. `ATS_DETAIL_FETCH_BUDGET` is 0. Nothing is fetched at any volume.
-2. All three companies are still `active = 0` in `company_ats_list` (migration 103) —
-   smartrecruiters/Ubisoft2, smartrecruiters/BoschGroup, workday/adobe. They are not crawled at
-   all, so the budget has nothing to spend on even if it were set.
+**What was scarce is enrichment.** A crawl wants **1,500 detail requests** (Ubisoft 300 + Bosch 900
++ Adobe 300, measured with the real plugins — `aggregator.js` passes an empty query, so there is no
+title filter at crawl time and the cap is 900). `ENRICH_DAILY_MAX_ROWS` is 300. A crawl-time fetch
+therefore buys 1,200 descriptions a day that nothing can ever enrich, **by construction**. That, not
+politeness, is why the fetch moved.
 
-Turning this on therefore means setting the env var **and** activating companies. Neither alone
-does anything, which is the intended shape for a feature whose cost is paid in outbound requests
-to someone else's API.
+| | before (task Y) | now (phase 2) |
+|---|---|---|
+| where the fetch happens | inside each plugin's `search()` | inside the enrichment drain, step zero |
+| what bounds it | `ATS_DETAIL_FETCH_BUDGET`, its own budget | the day's **remaining** enrichment rows |
+| Workday's door | CXS detail API + a threaded tenant/site slug | the public page's **JSON-LD**, a GET of the URL already on the row |
+| concurrency | 2 (guessed) | 8 (Workday's **measured** knee) |
+| per-company yield | assumed 0% | **measured 100%**, 75 of 75 sampled |
 
-**Conservative defaults when it IS enabled:** `perCompany` 25, `concurrency` 2, `timeoutMs` 8000.
-The per-company cap exists so one company cannot consume a whole crawl's budget; the total is the
-one that actually bounds the bill, because a concurrency limit alone bounds how FAST requests go
-out and not how many.
+**The one-budget mechanism is a subtraction**, and it is the load-bearing line: the drain asks for
+`maxRows - alreadyQueued` descriptions, so if the queue already fills the day it buys **none**.
+Two budgets that cannot disagree because there is only one. Pinned by `test/enrichmentDrain.test.js`.
 
-⛔ **The ordering is the load-bearing part.** Detail fetches happen AFTER `collectCompanyJobs`,
-never before. Rows past the per-company cap are discarded, so fetching their descriptions first
-would spend real requests against a third party on rows that are then thrown away — the same
-defect `0de67c8` fixed, one layer up, and equally invisible without counting. Pinned by
-`test/detailBudget.test.js`, which composes the real cap with the real budget.
+**Migration 103's "648 rows at 0% description coverage" was wrong**, and it is the stated reason
+those companies are inactive. Sampling 25 postings spread across each board returned **25/25 with
+text, every company, zero failures**. The 0% was the absence of our own second request.
 
-**Suggested first run, when you want it:** set `ATS_DETAIL_FETCH_BUDGET=25` and activate ONE
-company (Ubisoft2, the smallest at 97 rows). That is 25 requests in a crawl, spread two at a time.
-Read `[smartrecruiters] detail fetch: N spent, M skipped, K gained text` from the log before
-widening — `K` is the number that matters, because a fetch can succeed and return nothing.
+⛔ **THE SOURCES REMAIN OFF, AND THAT IS NOW THE ONLY GATE.** All three companies are still
+`active = 0` in `company_ats_list`, so the crawl ingests nothing from them and the fetch pass finds
+nothing to do — today's board is 1,266 of 1,266 rows already described. The **capability** is on by
+default (`ENRICH_DETAIL_FETCH=0` is the kill switch), deliberately: keeping a second `0` default
+would mean enabling a source later ALSO required finding an unrelated flag, which is how a feature
+ships broken. Enabling a source is a separate decision, and the numbers to decide it on are: **1,500
+detail requests per crawl, ~$3.90 and 5 days of enrichment for the first full pass, against ~1% of
+those rows matching any current profile's target titles.**
 
-⚠ **Not yet measured against a real tenant.** Every test injects the fetcher; nothing in this
-change has issued a single request to SmartRecruiters or Adobe. The detail endpoints and their
-response shapes are written from their public API documentation, so the FIRST live run is also
-the first check that `jobAd.sections` and `jobPostingInfo.jobDescription` are what those APIs
-actually return. Expect to adjust the two `fetchPostingDescription` functions, and treat a run
-that reports `spent: 25, withText: 0` as exactly that — not as "the source has no descriptions".
+**What phase 2 deliberately did NOT build, with reasons:**
+
+- **Auto-deactivation of low-yield companies (2D).** Downgraded to measurement. Its premise —
+  companies returning 0% descriptions — is false, so it would guard a condition that does not occur
+  while adding a new way to lose a healthy company to one bad crawl. `pipeline-health` now reports
+  `detailAttempts`, `detailObtained`, `detailYield` and `detailExhausted` per company; a human reads
+  them. The finding that *would* justify it is high attempts with zero yield, and it is now visible.
+- **Conditional requests (2E).** SmartRecruiters honours `If-None-Match` with a real 0-byte 304 on
+  both endpoints (Workday sends no validator and `no-store`). Implemented **nowhere**: this pass only
+  fetches rows with NO description, so there is never a prior ETag to send, and a dormant second path
+  is the `_ghCompanies` failure. Recorded as an unbuilt opportunity for a future re-fetch design.
+- **Overwriting `posted_at` from JSON-LD's exact `datePosted`.** It is strictly better than
+  `parsePostedOn`'s reading of "Posted 30+ Days Ago", but ingestion already fills the column on 100%
+  of rows, so a COALESCE can never reach it and replacing it would mean an overwriting write.
+
+**Two defects found while counting, both pre-existing:**
+
+- `workday.js` maps `contract_type` from `job.timeType`, and `timeType` is **absent from 100/100**
+  live list postings — NULL on every Workday row, always. The fetch now fills the real stored column
+  (`employment_type`, via the shared `normalizeEmploymentType`) from JSON-LD's `employmentType`.
+- **Silent truncation.** Bosch is capped at **900 of 4,840** postings (SmartRecruiters caps its page
+  size at 100 without saying so; deep offsets to 4800 do work), and Adobe at **300 of 711** (Workday
+  returns 400 for any page size above 20). Both are the `0de67c8` shape — a cap that discards without
+  saying so. Neither is fixed; both are recorded.
+
+⛔ **ON WORKDAY, "GONE" AND "NO DESCRIPTION" ARE THE SAME RESPONSE.** Verified live: a deleted or
+invented posting path returns **200 with the SPA shell and no ld+json**, not a 404 — the same
+catch-all that makes `/external_experienced/feed` answer 200 for a feed that does not exist. No
+status code will separate them, which is why the per-row attempt cap (`ENRICH_DETAIL_MAX_ATTEMPTS`,
+3) is the only thing bounding spend on a taken-down Workday posting. The cap never marks a row done:
+`content_hash` and `enriched_at` are never written by the fetch, on any path.
+
+**Measured user-visible latency for fetch-on-open**, through the real route against live sources:
+SmartRecruiters **604ms**, Workday **561ms** on a first open; **5-6ms** once cached; **4ms** for a
+source with no fetcher. That is why the panel has a real loading state rather than showing
+"No description available." for half a second and then correcting itself.
+
+⛔ **`scripts/migrations.js` IS NOT THE ONLY MIGRATION LIST.** `server.js` carries its own inline
+copy and *that* is the one the boot runner executes. A migration added only to `scripts/migrations.js`
+**never runs in production**. Migration 107 was written to the wrong one first;
+`test/migrationListsAgree.test.js` now fails if the two disagree.
 
 Android's remaining work is in `resume-master-android/ANDROID.md` and the annotated header of
 `PHASE_2A.md` (uncommitted): admin build flavour, backup excludes, then the feed and review queue.
@@ -283,9 +350,15 @@ Present in Railway: `ANTHROPIC_KEY` · `APP_BASE_URL` · `FRONTEND_URL` · `GOOG
   `APPLY_DAILY_APPROVAL_CAP` 30, `ENRICH_DAILY_MAX_ROWS` 300. Set them explicitly only to override.
 - `ANON_DAILY_SERVICE_CEILING` 50 — total anonymous runs of one standalone service per 24h,
   across every caller. A cost control, not a commercial one; unaffected by the monetisation lever.
-- `ATS_DETAIL_FETCH_BUDGET` **0 = OFF** (task Y), with `ATS_DETAIL_FETCH_PER_COMPANY` 25,
-  `ATS_DETAIL_FETCH_CONCURRENCY` 2, `ATS_DETAIL_FETCH_TIMEOUT_MS` 8000. Absent in Railway and
-  correct to leave absent until someone decides to spend outbound requests on descriptions.
+- ⛔ `ATS_DETAIL_FETCH_*` **NO LONGER EXIST** — all four were deleted with the crawl-time fetch they
+  configured (task Y phase 2). Setting one now does nothing at all, and `test/detailBudget.test.js`
+  pins that: a retired lever that still parses is the `_ghCompanies` failure. The replacements live
+  on the enrichment side and are **on by default**, because the SOURCES are the gate:
+  `ENRICH_DETAIL_FETCH=0` is the one kill switch, with `ENRICH_DETAIL_MAX_ROWS` 300 (the drain passes
+  the day's *remaining* rows instead, which is normally smaller), `ENRICH_DETAIL_PER_COMPANY` 100,
+  `ENRICH_DETAIL_CONCURRENCY` **8** (Workday's measured knee — not a guess),
+  `ENRICH_DETAIL_TIMEOUT_MS` 15000, `ENRICH_DETAIL_MAX_ATTEMPTS` 3. All absent in Railway and correct
+  to leave absent. An unreadable value falls back to the measured default, never to zero.
   `routes/apply.js:431-437` already reports when a cap ordering makes another unreachable.
 - **The full-auto kill switch EXISTS.** `fullAutoDisabled()` (`routes/apply.js:513`) reads
   `app_settings.apply_full_auto_disabled`, with `APPLY_FULL_AUTO_DISABLED` as a boot default, and

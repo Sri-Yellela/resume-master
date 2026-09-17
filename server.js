@@ -127,6 +127,10 @@ import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { suggest } from "./services/jobs/searchSuggestions.js";
 // Bounds the blast radius of one expiry pass — see services/jobs/cleanupBrake.js and cleanup_log 85.
 import { assessCleanupScope, cleanupBrakeOptions } from "./services/jobs/cleanupBrake.js";
+// Y2B — the SAME fetcher and the SAME writer the enrichment pass uses. One implementation, two
+// triggers: the background pass buys descriptions for rows it is about to enrich, and this buys
+// one for a job a user actually opened. See services/jobs/detailFetch.js.
+import { fetchDescription, persistDetailOutcome, hasDetailFetcher } from "./services/jobs/detailFetch.js";
 // The filter option contract — the ONE definition of every board filter's value vocabulary.
 // GET /api/jobs validates against it (rejectInvalidFilterValues below) so an unknown value is a
 // 400 rather than a board that silently matches nothing. See shared/jobFilterOptions.js.
@@ -3532,6 +3536,46 @@ console.log(`[boot] database ready: ${DB_PATH}`);
       id: "106_drop_import_extension_tokens",
       sql: `
         DROP TABLE IF EXISTS import_extension_tokens;
+      `,
+    },
+    {
+      // 107 — DETAIL-FETCH BOOKKEEPING (task Y phase 2).
+      //
+      // ⛔ THIS LIST AND scripts/migrations.js ARE TWO COPIES OF THE SAME THING, AND *THIS* ONE IS
+      // THE RUNNER. The loop below is what executes at boot; scripts/migration.js reads the other
+      // copy. A migration added only to scripts/migrations.js never runs in production, and a
+      // migration added only here is invisible to the standalone tool. Both were updated together
+      // for 107. test/migrationListsAgree.test.js pins them to each other so the next one cannot
+      // land in only one.
+      //
+      // The three columns exist because the description for a SmartRecruiters or Workday posting
+      // now arrives from a SECOND HTTP request, made inside the enrichment pass rather than the
+      // crawl (services/jobs/detailFetch.js explains that seam):
+      //
+      //   detail_fetched_at      when a fetch last SUCCEEDED — distinguishes "the list carried a
+      //                          description" from "we bought one", per row rather than per guess.
+      //   detail_fetch_attempts  what this row has COST. Yield is descriptions-obtained per
+      //                          request-SPENT, and spend is not derivable from outcomes: a
+      //                          description-less row might have cost zero requests or three.
+      //                          Also the bound on re-spending on a posting deleted upstream.
+      //   detail_fetch_error     the last reason ('http_404', 'no_text', 'http_429', …). A count
+      //                          with no reason cannot tell "the posting is gone" from "we were
+      //                          rate-limited", and those want opposite responses.
+      //
+      // ⛔ NOTHING HERE MARKS A ROW DONE. content_hash and enriched_at remain the only "processed"
+      // signals and the detail fetch writes neither, on success OR failure — stamping a row
+      // complete when nothing was filled is what once nulled 120 rows, and a 429 mid-fetch is the
+      // obvious way to recreate it. A row that has burned its attempts stays a candidate forever;
+      // it has only stopped being worth another request, which one UPDATE re-arms.
+      id: "107_detail_fetch_bookkeeping",
+      sql: `
+        ALTER TABLE scraped_jobs ADD COLUMN detail_fetched_at     INTEGER;
+        ALTER TABLE scraped_jobs ADD COLUMN detail_fetch_attempts INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE scraped_jobs ADD COLUMN detail_fetch_error    TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_scraped_jobs_detail_pending
+          ON scraped_jobs(is_active, source, detail_fetch_attempts)
+          WHERE description IS NULL OR TRIM(description) = '';
       `,
     },
   ];
@@ -7786,6 +7830,87 @@ app.get("/api/jobs/by-id/:jobId", requireAuth, (req, res) => {
   `).get(userId, profile?.id ?? null, jobId);
   if (!row) return res.status(404).json({ error: "Job not found" });
   res.json({ success: true, job: { ...mapJobRow(row), scrapedAt: row.scraped_at } });
+});
+
+// POST /api/jobs/by-id/:jobId/description — Y2B, FETCH ON OPEN.
+//
+// SmartRecruiters and Workday postings arrive with no description: their list endpoints carry
+// none, and Phase 1 proved no list-level parameter changes that (11 and 19 variants respectively,
+// every response byte-identical). The background pass buys descriptions for the rows it is about
+// to enrich, bounded by the enrichment day's row budget — which means on any given day most
+// description-less rows still have none. This is the other trigger: a user opened this specific
+// job, so buy exactly this one.
+//
+// ⛔ ONE REQUEST FOR A JOB SOMEBODY ACTUALLY CARES ABOUT. That is the whole economic argument of
+// this task. A crawl would spend 1,500 requests a day on rows nobody opens; this spends one, on
+// demand, and caches it permanently.
+//
+// ⛔ THE SAME FETCHER AND THE SAME WRITER AS THE PASS, imported rather than reimplemented. Two
+// implementations of "get this row's text and store it" is how the pass and the panel would come
+// to disagree about what a fetch means — the popup-vs-hotkey split, again, and this codebase's
+// bug history is almost entirely two sides that each made sense alone.
+//
+// POST rather than GET because it SPENDS: it makes an outbound third-party request and writes a
+// row. A GET that does both would be cached, prefetched and retried by things that assume GETs
+// are free.
+//
+// ⛔ IT MUST DEGRADE HONESTLY. Every failure path returns `success: false` WITH a reason, never an
+// empty description and never a 200 that looks like it worked. The panel renders the reason. A
+// route that reported success over a missing description would be this pipeline's own signature
+// defect — success-shaped output over an empty result — on the one surface a user sees directly.
+app.post("/api/jobs/by-id/:jobId/description", requireAuth, async (req, res) => {
+  const jobId = String(req.params.jobId || "");
+  if (!jobId) return res.status(400).json({ error: "jobId required" });
+
+  const row = db.prepare(`
+    SELECT job_id, source, url, company, title, description, detail_fetch_attempts
+    FROM scraped_jobs WHERE job_id = ?
+  `).get(jobId);
+  if (!row) return res.status(404).json({ error: "Job not found" });
+
+  // CACHED PERMANENTLY. content_hash already exists to notice a posting whose text CHANGED; a
+  // description we already hold is never re-bought, so an open on an already-described job costs
+  // nothing and the panel's retry is idempotent.
+  if (row.description && String(row.description).trim()) {
+    return res.json({ success: true, description: row.description, cached: true });
+  }
+
+  // Not every source needs a second request — greenhouse and the rest carry their text in the
+  // list — so "this source has no detail door" is a distinct answer from "the fetch failed", and
+  // the panel says different things about them.
+  if (!hasDetailFetcher(row.source)) {
+    return res.json({
+      success: false, reason: "no_fetcher",
+      message: `The ${row.source || "source"} feed does not publish a separate description for this posting.`,
+    });
+  }
+
+  try {
+    const outcome = await fetchDescription(row);
+    // ⛔ The attempt cap is deliberately NOT consulted here. It bounds the BACKGROUND pass's
+    // re-spending on a posting that keeps failing; a person who just opened this job asked for
+    // this request, and refusing them to protect a budget measured in single requests against an
+    // API that produced zero 429s in 124 requests would be a cost saving of nothing. The attempt
+    // is still RECORDED, so the yield metric stays true.
+    persistDetailOutcome(db, jobId, outcome);
+
+    if (outcome.ok) {
+      return res.json({ success: true, description: outcome.text, cached: false });
+    }
+    return res.json({
+      success: false, reason: outcome.reason,
+      message: outcome.reason === "http_404"
+        ? "This posting is no longer available at the source."
+        : outcome.reason === "no_text"
+          ? "The source returned this posting without any description text."
+          : "Could not load the description from the source just now.",
+    });
+  } catch (err) {
+    // fetchDescription is documented never to throw; this is the belt for the braces, and it must
+    // still not report success.
+    console.error(`[POST /api/jobs/by-id/${jobId}/description]`, err.message);
+    return res.status(502).json({ success: false, reason: "fetch_error", message: "Could not load the description from the source just now." });
+  }
 });
 
 app.get("/api/jobs/pending", requireAuth, (req, res) => {

@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { normalizeJob } from '../schema.js';
 import { collectCompanyJobs } from './base.js';
-import { attachDescriptions, createDetailBudget, detailBudgetFromEnv } from '../detailBudget.js';
 
 // Workday's public career-site JSON API lives at a tenant- AND site-specific path, and the
 // "wd#" subdomain number varies per tenant (wd1, wd3, wd5, ...) — unlike Greenhouse/Lever/
@@ -48,11 +47,19 @@ function normalizeWorkdayJob(job, companyName, baseUrl) {
     location:    job.locationsText || 'Not specified',
     url:         job.externalPath ? `${baseUrl}${job.externalPath}` : baseUrl,
     source:      'workday',
-    // Still null HERE, and correctly so: Workday's CXS SEARCH response carries no job text. The
-    // description now arrives in a second pass, after capping, and only within a budget that is
-    // OFF by default — see fetchPostingDescription below and services/jobs/detailBudget.js.
+    // NULL HERE, AND THE CRAWL LEAVES IT NULL. Workday's CXS SEARCH response carries no job text
+    // — Phase 1 tried 12 extra POST-body keys and 7 query strings against a live tenant and every
+    // response was byte-identical, and a list posting has exactly five keys. The text arrives
+    // later, from services/jobs/detailFetch.js, inside the ENRICHMENT pass. See detailBudget.js.
     description: null,
     posted_at:   parsePostedOn(job.postedOn),
+    // ⛔ THIS READ IS DEAD FROM THE LIST, MEASURED: `timeType` is absent from 100/100 live list
+    // postings, so this has been NULL on every Workday row since the source was added — the same
+    // shape as the `_atsSlug` bug, code that compiles, runs and reads nothing. Kept rather than
+    // deleted because it is the correct mapping IF Workday ever returns the field, and because
+    // deleting it would hide that the column has a real source: detailFetch.js now fills
+    // contract_type from the JSON-LD page's `employmentType` ("FULL_TIME" -> "full time"), in the
+    // request it already makes for the description, through a COALESCE that can only ever add.
     contract_type: job.timeType || null,
     _raw:        job,
   });
@@ -89,37 +96,6 @@ async function fetchCompanyJobs(atsSlug, companyName, words) {
     .map(j => normalizeWorkdayJob(j, companyName, baseUrl));
 }
 
-// ONE posting's description. Injectable (`_fetchDetail`) so the budget and the ordering can be
-// tested without issuing a single request to a real Workday tenant — which matters because the
-// thing being bounded IS outbound requests to Adobe's careers API.
-//
-// Workday's CXS detail endpoint mirrors the search path: the same
-// /wday/cxs/{tenant}/{site} prefix, plus the posting's externalPath. Returns null on any failure,
-// leaving the list row description-less, which is the status quo rather than a regression.
-//
-// The slug is PASSED IN rather than read off the row. The first version of this carried it on the
-// normalized job as `_atsSlug` — which compiled, ran, and did nothing, because normalizeJob in
-// schema.js is a field WHITELIST that builds its result field by field and silently drops
-// anything it does not name. search() owns the company -> slug mapping, so it supplies it.
-async function fetchPostingDescription(job, atsSlug, injected = null) {
-  if (injected) return injected(job);
-  const externalPath = job?._raw?.externalPath;
-  if (!externalPath || !atsSlug) return null;
-  const { wdNumber, tenant, site } = parseSlug(atsSlug);
-  if (!wdNumber || !tenant || !site) return null;
-  try {
-    const res = await axios.get(
-      `https://${tenant}.wd${wdNumber}.myworkdayjobs.com/wday/cxs/${tenant}/${site}${externalPath}`,
-      { timeout: 8000, headers: { Accept: 'application/json' } },
-    );
-    // jobDescription is HTML; the board stores HTML elsewhere too and htmlToText handles it
-    // downstream, so it is passed through rather than stripped here.
-    return res.data?.jobPostingInfo?.jobDescription || null;
-  } catch {
-    return null;
-  }
-}
-
 const workdayPlugin = {
   name: 'workday',
 
@@ -131,8 +107,7 @@ const workdayPlugin = {
   // the store-side watermark/fingerprint path in aggregator.js still makes repeat crawls
   // cheap). _updatedAfter is accepted for signature parity with sources that do support it,
   // but intentionally unused here.
-  async search({ query, _companies = [], pageSize = 50,
-                 _detailBudget = null, _fetchDetail = null }) {
+  async search({ query, _companies = [], pageSize = 50 }) {
     const words = queryWords(query);
     // PER COMPANY, not across the concatenation. This was `MAX` applied to the flattened array,
     // which silently dropped every company past the 900th posting — see collectCompanyJobs.
@@ -147,31 +122,24 @@ const workdayPlugin = {
       )
     );
 
-    // ⛔ CAP FIRST, THEN FETCH DETAIL — see the same note in smartrecruiters.js and the header of
-    // services/jobs/detailBudget.js. Rows past PER_COMPANY_MAX are discarded, so fetching their
-    // descriptions first spends real requests on rows that are thrown away.
     const jobs = collectCompanyJobs(results, PER_COMPANY_MAX);
 
-    // company -> ats_slug, because the detail endpoint needs the tenant/site triple and the
-    // normalized row cannot carry it (see fetchPostingDescription).
-    const slugByCompany = new Map(_companies.map(c => [c.company, c.ats_slug]));
-
-    const budget = _detailBudget || createDetailBudget(detailBudgetFromEnv());
-    const detail = await attachDescriptions(
-      jobs, budget,
-      (job) => fetchPostingDescription(job, slugByCompany.get(job.company), _fetchDetail),
-      (job) => job.company || '_',
-    );
-    if (detail?.enabled) {
-      console.log(`[workday] detail fetch: ${detail.spent} spent, ${detail.skipped} skipped, ${detail.withText} gained text`);
-    }
-
+    // ⛔ NO DETAIL FETCH HERE, AND NO SLUG MAP EITHER. Task Y fetched one CXS detail request per
+    // surviving posting, which needed the tenant/wd#/site triple threaded through from
+    // `_companies` — and its first attempt lost it, because it rode on the normalized row and
+    // normalizeJob is a field WHITELIST that silently drops what it does not name.
+    //
+    // That whole problem is gone rather than fixed. detailFetch.js reaches Workday through the
+    // PUBLIC job page's schema.org JSON-LD, which is a GET of the URL ALREADY ON THE ROW — no
+    // triple to reassemble, and Phase 1 measured its description as COMPLETE (1.12-1.16x more
+    // readable text than CXS, which returns HTML with undecoded entities). A fetcher that works
+    // from a stored row alone is what lets the enrichment pass and the user-opens-a-job path be
+    // one implementation.
     return {
       jobs,
       total:    jobs.length,
       page:     1,
       pageSize: jobs.length,
-      _detail:  detail,
     };
   },
 };

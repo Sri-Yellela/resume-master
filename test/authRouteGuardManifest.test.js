@@ -140,6 +140,11 @@ const AUTHENTICATED = new Set([
   // AH2: resolves ONE posting for a job-detail deep link. User-scoped in the sense that matters —
   // the user_jobs flags on the row are the caller's own — over a global postings table.
   "GET /api/jobs/by-id/:jobId",
+  // Y2B. AUTHENTICATED, and deliberately not PUBLIC even though the description it returns is
+  // public text on the employer's own careers page: this route SPENDS — it makes an outbound
+  // third-party request and writes a row — so an unauthenticated caller could drive our
+  // outbound traffic to Ubisoft, Bosch and Adobe at will.
+  "POST /api/jobs/by-id/:jobId/description",
   "GET /api/jobs/poll",
   "POST /api/jobs/search",
   "PATCH /api/jobs/interact",

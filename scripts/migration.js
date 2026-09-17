@@ -20,8 +20,15 @@ db.exec(`
   );
 `);
 
-// Migration definitions live in ./migrations.js — the single source of truth shared
-// with server.js's boot-time runner. Add new migrations there, never here.
+// Migration definitions live in ./migrations.js.
+//
+// ⛔ IT IS NOT THE SINGLE SOURCE OF TRUTH, WHICH THIS COMMENT CLAIMED FOR A LONG TIME.
+// server.js carries its OWN inline `const MIGRATIONS = [...]`, and THAT is the list which runs at
+// boot in production. This script reads the other copy. A migration added only to ./migrations.js
+// never runs on the deployed app; added only to server.js, it is invisible to this tool and a
+// fixture database silently diverges from production. Both must be updated together —
+// test/migrationListsAgree.test.js now fails if they disagree, which is the only reason the
+// duplication is survivable. Add new migrations to BOTH, never just here.
 
 // ── Runner ────────────────────────────────────────────────────
 function runMigrations() {
