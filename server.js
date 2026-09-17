@@ -3518,6 +3518,22 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           ON standalone_usage(service, used_at);
       `,
     },
+    {
+      // 106 — CREDENTIAL-SHAPED RESIDUE OF A DELETED FEATURE.
+      // The extension token copy/paste flow was removed in c818b9c. SQLite does not drop a table
+      // when its CREATE statement leaves the source, so production kept `import_extension_tokens`
+      // — 3 rows of token hashes bound to users(id) that no code can expire, consume or rotate,
+      // because the code that did was deleted. Zero references repo-wide, verified before writing
+      // this: the only mentions are docs and the schema-diff harness that reports the table.
+      // Filed by task T, restated by AH-2, never done.
+      //
+      // IF EXISTS because the table is PRODUCTION-ONLY — a local checkout that never ran the
+      // removed feature has nothing to drop, and this must be a no-op there rather than a failure.
+      id: "106_drop_import_extension_tokens",
+      sql: `
+        DROP TABLE IF EXISTS import_extension_tokens;
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");

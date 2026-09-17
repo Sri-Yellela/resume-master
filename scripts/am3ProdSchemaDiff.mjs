@@ -187,9 +187,10 @@ const shared = [...prod.tables.keys()].filter((t) => localTables.has(t)).sort();
 // investigation starts and an unexplained entry here is indistinguishable from real drift.
 const TABLE_NOTES = {
   import_extension_tokens:
-    "the REMOVED extension token copy/paste flow. Deleted in c818b9c; SQLite does not drop a\n" +
-    "       table when its CREATE statement leaves the source, so production still carries it —\n" +
-    "       with 3 stale token hashes that no code will ever expire or consume.",
+    "⛔ SHOULD NO LONGER EXIST. Dropped by migration 106. If this line ever prints again, the\n" +
+    "       migration did not run in production — which is REAL DRIFT and the point of this\n" +
+    "       harness, not a known difference to wave through. (It was the removed extension token\n" +
+    "       copy/paste flow from c818b9c: 3 token hashes no code could expire or consume.)",
   provider_eval_jobs:
     "a deliberate SCRATCH table, created by scripts/providerEval/db.js with CREATE TABLE IF NOT\n" +
     "       EXISTS when that harness runs. Outside the migration system by design, dev-only, empty.",
