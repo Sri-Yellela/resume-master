@@ -1,3 +1,15 @@
+// ⛔ CC2: THE SCORER'S NORMALISER, IMPORTED RATHER THAN RE-IMPLEMENTED.
+//
+// services/localAtsScorer.js already owns term normalisation — NFKC, case, apostrophes, the CI/CD
+// and REST-API special cases, punctuation to spaces, plural collapsing. The bridge used to emit raw
+// `LIKE '%"<skill>"%'` with no normalisation at all, which is why AG1's and AH3's term-quality work
+// "could not have been inherited": both live inside candidateTermsFromJob, which the bridge never
+// calls. A third normalisation here would be exactly that shape again, so there is not one.
+//
+// No import cycle: localAtsScorer imports only skillVocabulary and shared/atsBands, and neither
+// reaches back here.
+import { normaliseAtsTerm } from '../localAtsScorer.js';
+
 /**
  * SQL WHERE-clause + facet builder for the /api/jobs board query.
  *
@@ -200,6 +212,94 @@ function titleTokens(rawTitle) {
     .map(w => w.trim())
     .filter(w => w.length > 2 && !TITLE_STOP_WORDS.has(w))
     .slice(0, 4);
+}
+
+/**
+ * "No skills are known for this row" — NULL *or* an empty array, in any whitespace spelling.
+ *
+ * ⛔ BOTH SPELLINGS, ONE PREDICATE, USED BY BOTH BRANCHES. The derived rank and the explicit
+ * filter must agree about what "unknown" means; two copies of this condition is how they would
+ * come to disagree, and the disagreement would be invisible — a row ranked as a mismatch on one
+ * path and kept on the other.
+ */
+const SKILLS_UNKNOWN_SQL =
+  `(sj.skills_json IS NULL OR REPLACE(REPLACE(sj.skills_json, ' ', ''), CHAR(9), '') = '[]')`;
+
+/**
+ * CC2 · DOES THIS ROW'S skills_json MENTION ANY OF THESE TERMS, AS A WHOLE WORD?
+ *
+ * ── WHAT WAS WRONG ────────────────────────────────────────────────────────────────────────────
+ * The rule was `sj.skills_json LIKE '%"<skill>"%'` — the quotes make it WHOLE-VALUE EQUALITY. So
+ * "python" matched the value "python" and NOTHING ELSE. Measured on this board's 4,775 distinct
+ * skill values, of which 85% are multi-word and 71% appear exactly once:
+ *
+ *     term                exact value   whole word inside a value
+ *     "api"                         0                          33
+ *     "communication"               1                          41
+ *     "machine learning"            1                          17
+ *     "sql"                         1                           6
+ *
+ * "api" matched NOTHING, on a board holding 33 values that mention it. The extracted vocabulary is
+ * phrases ("stripe api", "api design", "verbal communication"), so whole-value equality can only
+ * ever reach the handful of values that happen to be exactly one term long.
+ *
+ * ── WHY NOT A BARE SUBSTRING, WHICH IS THE OBVIOUS FIX ────────────────────────────────────────
+ * Because it is wrong in this vocabulary, measurably. `LIKE '%api%'` credits "api" to
+ * "stripe capital knowledge" (c-API-tal). `'%java%'` credits "java" to "javascript". `'%sql%'`
+ * credits "sql" to "postgresql" and "mysql". AG1 spent a session removing exactly this class of
+ * artifact — its case was a résumé reading "I design learning materials for a coffee machine
+ * vendor" being credited with MACHINE LEARNING, 22.8% of all multi-word matches at the time.
+ *
+ * ── THE RULE ──────────────────────────────────────────────────────────────────────────────────
+ * Four patterns per spelling, using `"` and ` ` as boundaries — which, in COMPACT JSON, are the
+ * only characters that can bound a term inside a string value:
+ *
+ *     %"term"%    the value IS the term
+ *     %"term %    the value STARTS with it      ("machine learning pipelines")
+ *     % term"%    the value ENDS with it        ("stripe api")
+ *     % term %    the term is in the middle     ("api design patterns")
+ *
+ * ⛔ THIS DEPENDS ON THE STORED JSON BEING COMPACT, and that is worth stating because it is load-
+ * bearing rather than incidental: `JSON.stringify` emits no spaces around its commas, so a SPACE
+ * can only ever occur INSIDE a value. That is what makes `% term %` unable to match across two
+ * adjacent elements — `["machine","learning"]` holds no space at all, so it cannot be credited
+ * with "machine learning". A pretty-printed writer would break that guarantee; nothing writes one
+ * today (enrichJob.js stringifies compactly) and test/boardSkillMatching.test.js pins the case.
+ *
+ * Both the RAW term and `normaliseAtsTerm`'s output are tried, deduplicated. That is what reaches
+ * a stored "ci/cd tooling" from a profile term "CI/CD" (raw) and a stored "ci cd" from the same
+ * term (normalised), without either side re-implementing the other's rules.
+ *
+ * ── THE GAP THIS ACCEPTS, MEASURED ────────────────────────────────────────────────────────────
+ * Punctuation is not a boundary, so a term delimited by `/` or `-` INSIDE a stored value is still
+ * missed: "api" does not reach "api-first products", and "machine learning" does not reach
+ * "ai/machine learning". Measured on this vocabulary: api reaches 33 and misses 4, machine
+ * learning reaches 17 and misses 3, sql reaches 6 and misses 1.
+ *
+ * Closing it needs the STORED side normalised, which in SQL means a REPLACE chain — a partial
+ * re-implementation of normaliseAtsTerm in a second language, i.e. precisely the third
+ * normalisation this task was told not to write. So the gap is accepted and recorded rather than
+ * closed the cheap way. The honest fix is a normalised column written at enrichment time, which is
+ * a migration and its own task.
+ */
+function skillsIncludeSql(terms) {
+  const spellings = new Set();
+  for (const raw of terms) {
+    const trimmed = String(raw || '').trim().toLowerCase();
+    if (trimmed) spellings.add(trimmed);
+    const normalised = normaliseAtsTerm(raw);
+    // A normaliser that empties a term tells us nothing, so it contributes nothing rather than
+    // contributing a pattern that matches every row.
+    if (normalised) spellings.add(normalised);
+  }
+  const sql = [], params = [];
+  for (const term of spellings) {
+    sql.push('(sj.skills_json LIKE ? OR sj.skills_json LIKE ? OR sj.skills_json LIKE ? OR sj.skills_json LIKE ?)');
+    params.push(`%"${term}"%`, `%"${term} %`, `% ${term}"%`, `% ${term} %`);
+  }
+  // No usable spelling means no opinion. `0` rather than `1` so an unusable term list can never
+  // make every row a MATCH — the direction that would silently disable the dimension.
+  return sql.length ? { sql: sql.join(' OR '), params } : { sql: '0', params: [] };
 }
 
 // Every rank expression is three-valued and sorts ASC, so the three states mean the same thing on
@@ -471,25 +571,44 @@ function buildJobFilters(params = {}, opts = {}) {
   // to hide everything else.
   const skillsInclude = toArray(params.skills_include);
   if (skillsInclude.length) {
-    const likeList = skillsInclude.map(() => 'sj.skills_json LIKE ?').join(' OR ');
-    const likeArgs = skillsInclude.map(s => `%"${s}"%`);
+    const skillMatch = skillsIncludeSql(skillsInclude);
     if (isDerived('skills_include')) {
       ranks.skills_include = {
-        sql: `CASE WHEN sj.skills_json IS NULL THEN ${RANK_UNKNOWN}
-                   WHEN (${likeList}) THEN ${RANK_MATCH}
+        // ⛔ CC2 · '[]' IS NOT A MISMATCH. This read `WHEN sj.skills_json IS NULL` alone, so a row
+        // whose enrichment RAN and legitimately found no skills — stored as the empty array — fell
+        // through to RANK_MISS and was ranked as an EXPLICIT mismatch. That is the fifth
+        // NULL-propagation shape in this codebase and the second in the "unknown treated as
+        // mismatch" direction: '[]' and NULL are the same claim here ("no skills are known for
+        // this row"), and neither is evidence that the row does not match.
+        //
+        // Whitespace is stripped before the comparison because '[]' is only ONE of the spellings
+        // an empty array can arrive in — JSON.stringify produces '[]', but an importer or a hand
+        // edit can produce '[ ]', and a guard that catches one spelling of empty is a guard that
+        // will be wrong the first time the other appears.
+        sql: `CASE WHEN ${SKILLS_UNKNOWN_SQL} THEN ${RANK_UNKNOWN}
+                   WHEN (${skillMatch.sql}) THEN ${RANK_MATCH}
                    ELSE ${RANK_MISS} END`,
-        params: likeArgs,
+        params: skillMatch.params,
       };
     } else {
-      clauses.push(`(sj.skills_json IS NULL OR (${likeList}))`);
-      args.push(...likeArgs);
+      // EXPLICIT filters still exclude — but on the same soft-null footing, and '[]' belongs on the
+      // unknown side here too or an explicit skill filter would delete every legitimately
+      // skill-less row.
+      clauses.push(`(${SKILLS_UNKNOWN_SQL} OR (${skillMatch.sql}))`);
+      args.push(...skillMatch.params);
     }
   }
+  // skills_exclude is ALWAYS explicit (the bridge never derives it) and stays an exclusion. It
+  // gets the same two corrections: '[]' counts as unknown, and the term is matched as a whole word
+  // rather than as a whole value — otherwise "do not show me api roles" would fail to exclude
+  // every one of the 33 values that merely MENTION api, which is the same defect wearing a
+  // negation.
   const skillsExclude = toArray(params.skills_exclude);
-  skillsExclude.forEach(s => {
-    clauses.push(`(sj.skills_json IS NULL OR sj.skills_json NOT LIKE ?)`);
-    args.push(`%"${s}"%`);
-  });
+  if (skillsExclude.length) {
+    const ex = skillsIncludeSql(skillsExclude);
+    clauses.push(`(${SKILLS_UNKNOWN_SQL} OR NOT (${ex.sql}))`);
+    args.push(...ex.params);
+  }
 
   // Visa/sponsorship soft-filter (Profile→Board Bridge): excludes ONLY an explicit
   // disqualifying structured signal — never on absence of one. is_h1b_sponsor/requires_work_auth

@@ -6,12 +6,16 @@ project.
 
 **Run these in order. Each one changes the measurements the next depends on.** Do not parallelise.
 
-> **Status 2026-09-17: CC1 + CC1b are DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
-> `docs/CC1B_ROLE_KEY_SOFT_NULL.md`). CC2–CC5 are untouched.
-> CC1 and CC1b both changed the population CC2 measures over — the owner's board is now **849**
-> rows, not 405 — so CC2's "217 of 1,266 rows match on skills" must be re-measured before it is
-> acted on. Note that 277 of those 849 rows are still UNCLASSIFIED in job_role_map: nothing
-> backfills it, which is the obvious follow-up and is not done.
+> **Status 2026-09-17: CC1, CC1b and CC2 are DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
+> `docs/CC1B_ROLE_KEY_SOFT_NULL.md`, `docs/CC2_SKILL_MATCHING.md`). CC3–CC5 are untouched.
+> The owner's board is now **849** rows, not 405. 277 of them are still UNCLASSIFIED in
+> job_role_map — nothing backfills it, which remains the obvious follow-up and is not done.
+>
+> **CC3's premise should be re-checked before it is acted on.** CC2 measured rho(board, score)
+> at ~0.18 and unmovable by matching-rule changes, so CC3's "re-measure rho with synonyms live"
+> will measure the same tie-dominated ordering. CC3's real question — wire G1 or retire it — is
+> unaffected, but expect its rho delta to be ~0 for the reason in CC2 §4, not because synonyms
+> do nothing.
 
 ---
 
@@ -147,6 +151,43 @@ exists to move. A screenshot of the board for the owner's profile. Commit & push
 
 ---
 
+# CC2 — The bridge's matching rule ✅ DONE 2026-09-17 — see `docs/CC2_SKILL_MATCHING.md`
+
+```
+✅ Whole-value equality replaced with WHOLE-WORD-INSIDE-A-VALUE (four `"`/space-bounded patterns),
+   reusing normaliseAtsTerm from the scorer — no third normalisation. Match rate on a
+   multi-word term set: 467 -> 665 of 881 enriched rows (53.0% -> 75.5%). "api" matched 0 values
+   before and 33 now. All 7 guardrail cases pass, INCLUDING the coffee machine; a naive substring
+   fails 4 of them (it credits "api" to "stripe capital knowledge" and "java" to "javascript").
+
+✅ The '[]' bug is fixed and asserted in BOTH directions, on BOTH the derived and the explicit
+   path, plus the '[ ]' / '[\t]' spellings. ⛔ But 0 rows on this board hold '[]' — enrichJob writes
+   NULL, never '[]'. The brief verified it on a FIXTURE. Real in code, not reachable with real
+   data today; fixed anyway because it is one line.
+
+⛔ REQUIREMENT 5 STANDS AND IS NOW MEASURED TWICE: THE BRIDGE STILL CANNOT RANK. rho(board order,
+   score) went 0.1889 -> 0.1806 — nowhere — while the match rate rose 42% relative. Three values
+   on five dimensions tie in blocks of hundreds (top block 665 rows deep) and the tie-breaker is
+   discovered_at DESC. CC2 changed WHICH rows are in the top block, not that it is a block. As the
+   brief instructs, this is SCOPED SEPARATELY rather than half-done, and it is the highest-leverage
+   item left.
+
+⛔ REQUIREMENT 6 IS NOT REPRODUCIBLE: there are ZERO Strong rows for the owner's profile on this
+   board (weak 851, moderate 30), so "24 of 69 demoted" measures 0 of 0. The cause is upstream and
+   this brief already names it — basis.skills is 0, the two-extractors problem. No matching rule
+   can move it.
+
+⛔ MAX_DERIVED_SKILLS STAYS AT 6, on measurement rather than preference: at cap 24 the dimension
+   matches 881 of 881 enriched rows — identical to having no dimension — at 2.5x the query cost.
+
+CORRECTION to the text below: "skills_json coverage is 99.8%" is now the STALE figure. A crawl ran
+   and added 1,578 unenriched rows, so coverage is 881/2,460 = 35.8% (and 881/882 = 99.9% of the
+   PRE-CRAWL rows, which is the board the brief measured). The backlog is real again.
+```
+
+<details>
+<summary>The original CC2 brief, kept for the record</summary>
+
 # CC2 — The bridge's matching rule, and the `'[]'` MISS
 
 ```
@@ -199,6 +240,8 @@ VERIFY
 Match rate before/after. ρ between board order and scorer score before/after. Strong-row demotion
 count before/after. The coffee-machine case explicitly. Both '[]' and NULL directions asserted.
 ```
+
+</details>
 
 ---
 
