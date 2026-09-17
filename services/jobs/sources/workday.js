@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { normalizeJob } from '../schema.js';
 import { collectCompanyJobs } from './base.js';
+import { attachDescriptions, createDetailBudget, detailBudgetFromEnv } from '../detailBudget.js';
 
 // Workday's public career-site JSON API lives at a tenant- AND site-specific path, and the
 // "wd#" subdomain number varies per tenant (wd1, wd3, wd5, ...) — unlike Greenhouse/Lever/
@@ -47,10 +48,9 @@ function normalizeWorkdayJob(job, companyName, baseUrl) {
     location:    job.locationsText || 'Not specified',
     url:         job.externalPath ? `${baseUrl}${job.externalPath}` : baseUrl,
     source:      'workday',
-    // NOT a deliberate omission: Workday's CXS search response carries no job description, which
-    // needs a per-posting detail fetch (an N+1 against the API). Left unfixed while this source
-    // contributes no board rows — enrichJob.js skips description-less rows, so these land
-    // unenriched rather than silently blanked. See docs/PIPELINE_DIAGNOSIS.md.
+    // Still null HERE, and correctly so: Workday's CXS SEARCH response carries no job text. The
+    // description now arrives in a second pass, after capping, and only within a budget that is
+    // OFF by default — see fetchPostingDescription below and services/jobs/detailBudget.js.
     description: null,
     posted_at:   parsePostedOn(job.postedOn),
     contract_type: job.timeType || null,
@@ -89,6 +89,37 @@ async function fetchCompanyJobs(atsSlug, companyName, words) {
     .map(j => normalizeWorkdayJob(j, companyName, baseUrl));
 }
 
+// ONE posting's description. Injectable (`_fetchDetail`) so the budget and the ordering can be
+// tested without issuing a single request to a real Workday tenant — which matters because the
+// thing being bounded IS outbound requests to Adobe's careers API.
+//
+// Workday's CXS detail endpoint mirrors the search path: the same
+// /wday/cxs/{tenant}/{site} prefix, plus the posting's externalPath. Returns null on any failure,
+// leaving the list row description-less, which is the status quo rather than a regression.
+//
+// The slug is PASSED IN rather than read off the row. The first version of this carried it on the
+// normalized job as `_atsSlug` — which compiled, ran, and did nothing, because normalizeJob in
+// schema.js is a field WHITELIST that builds its result field by field and silently drops
+// anything it does not name. search() owns the company -> slug mapping, so it supplies it.
+async function fetchPostingDescription(job, atsSlug, injected = null) {
+  if (injected) return injected(job);
+  const externalPath = job?._raw?.externalPath;
+  if (!externalPath || !atsSlug) return null;
+  const { wdNumber, tenant, site } = parseSlug(atsSlug);
+  if (!wdNumber || !tenant || !site) return null;
+  try {
+    const res = await axios.get(
+      `https://${tenant}.wd${wdNumber}.myworkdayjobs.com/wday/cxs/${tenant}/${site}${externalPath}`,
+      { timeout: 8000, headers: { Accept: 'application/json' } },
+    );
+    // jobDescription is HTML; the board stores HTML elsewhere too and htmlToText handles it
+    // downstream, so it is passed through rather than stripped here.
+    return res.data?.jobPostingInfo?.jobDescription || null;
+  } catch {
+    return null;
+  }
+}
+
 const workdayPlugin = {
   name: 'workday',
 
@@ -100,7 +131,8 @@ const workdayPlugin = {
   // the store-side watermark/fingerprint path in aggregator.js still makes repeat crawls
   // cheap). _updatedAfter is accepted for signature parity with sources that do support it,
   // but intentionally unused here.
-  async search({ query, _companies = [], pageSize = 50 }) {
+  async search({ query, _companies = [], pageSize = 50,
+                 _detailBudget = null, _fetchDetail = null }) {
     const words = queryWords(query);
     // PER COMPANY, not across the concatenation. This was `MAX` applied to the flattened array,
     // which silently dropped every company past the 900th posting — see collectCompanyJobs.
@@ -115,13 +147,31 @@ const workdayPlugin = {
       )
     );
 
+    // ⛔ CAP FIRST, THEN FETCH DETAIL — see the same note in smartrecruiters.js and the header of
+    // services/jobs/detailBudget.js. Rows past PER_COMPANY_MAX are discarded, so fetching their
+    // descriptions first spends real requests on rows that are thrown away.
     const jobs = collectCompanyJobs(results, PER_COMPANY_MAX);
+
+    // company -> ats_slug, because the detail endpoint needs the tenant/site triple and the
+    // normalized row cannot carry it (see fetchPostingDescription).
+    const slugByCompany = new Map(_companies.map(c => [c.company, c.ats_slug]));
+
+    const budget = _detailBudget || createDetailBudget(detailBudgetFromEnv());
+    const detail = await attachDescriptions(
+      jobs, budget,
+      (job) => fetchPostingDescription(job, slugByCompany.get(job.company), _fetchDetail),
+      (job) => job.company || '_',
+    );
+    if (detail?.enabled) {
+      console.log(`[workday] detail fetch: ${detail.spent} spent, ${detail.skipped} skipped, ${detail.withText} gained text`);
+    }
 
     return {
       jobs,
       total:    jobs.length,
       page:     1,
       pageSize: jobs.length,
+      _detail:  detail,
     };
   },
 };

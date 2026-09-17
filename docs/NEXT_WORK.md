@@ -4,7 +4,7 @@
 not against this file's own previous claims. Closed findings are in **`docs/FINDINGS_ARCHIVE.md`**;
 the reconciled evidence and the three landed task reports are in **`docs/PART1_RECONCILED.md`**.
 
-**Baseline:** **2432 passing, 0 failing** — measured 2026-09-16, not carried forward. Contract
+**Baseline:** **2443 passing, 0 failing** — measured 2026-09-16, not carried forward. Contract
 **v1.1.1**. Migrations 102 and 103 are in production. **Migration 105 is NOT** — it is in the four
 unpushed commits below.
 
@@ -52,7 +52,7 @@ resumemaster.one answers JSON, and `GET /api/config` — which exists only in `c
 
 | # | Task | Repo | Needs | State |
 |---|---|---|---|---|
-| **Y** | SmartRecruiters + Workday descriptions (needs an N+1 budget) | desktop | — | open — and its budget model must now account for the per-company cap in `0de67c8` |
+| **Y** | SmartRecruiters + Workday descriptions | desktop | — | **budget BUILT 09-17, and OFF.** `services/jobs/detailBudget.js`. Switching it on is two deliberate acts — see below |
 | **AB + AH** | Vestigial keys, small deferred items | desktop | — | **all but AB-1 closed** — AH-1/2/3/4 done or answered 09-16/17, see below. AB-1 is an owner action (remove `THEIRSTACK_API_KEY`) |
 | ~~**AF residual**~~ | A write path for `app_settings.apply_full_auto_disabled` | desktop | — | ✅ **DONE 09-17**, `1bb2a29`. GET/PUT/DELETE `/api/admin/full-auto`, three states, strict boolean. One definition in `services/appSettings.js` so the admin surface and the pipeline cannot disagree |
 | **AG** | Mobile corruption sweep | android | — | **partly done** — `f337767` repaired SYNC.md's encoding. The BOM/toolchain half and a verifying build remain |
@@ -98,6 +98,47 @@ time the local server runs long enough to hit the 03:00 cron or a startup pass. 
 survive as an active board, rebase `scraped_at` forward again — the same step the restore needed.
 **Production is unaffected**: it is refilled daily, so its rows never all age past the cutoff
 together.
+
+### Task Y — the N+1 budget exists; turning it on is TWO acts, not one
+
+`services/jobs/detailBudget.js` is the budget model the task asked for, wired into
+`smartrecruiters.js` and `workday.js`. ⛔ **It is off, and off means zero requests, not a small
+number of them.** `ATS_DETAIL_FETCH_BUDGET` defaults to **0**, which disables the path entirely:
+the plugins skip the detail step and behave exactly as they do today.
+
+**Two independent gates stand between here and live traffic, and both are deliberate:**
+
+1. `ATS_DETAIL_FETCH_BUDGET` is 0. Nothing is fetched at any volume.
+2. All three companies are still `active = 0` in `company_ats_list` (migration 103) —
+   smartrecruiters/Ubisoft2, smartrecruiters/BoschGroup, workday/adobe. They are not crawled at
+   all, so the budget has nothing to spend on even if it were set.
+
+Turning this on therefore means setting the env var **and** activating companies. Neither alone
+does anything, which is the intended shape for a feature whose cost is paid in outbound requests
+to someone else's API.
+
+**Conservative defaults when it IS enabled:** `perCompany` 25, `concurrency` 2, `timeoutMs` 8000.
+The per-company cap exists so one company cannot consume a whole crawl's budget; the total is the
+one that actually bounds the bill, because a concurrency limit alone bounds how FAST requests go
+out and not how many.
+
+⛔ **The ordering is the load-bearing part.** Detail fetches happen AFTER `collectCompanyJobs`,
+never before. Rows past the per-company cap are discarded, so fetching their descriptions first
+would spend real requests against a third party on rows that are then thrown away — the same
+defect `0de67c8` fixed, one layer up, and equally invisible without counting. Pinned by
+`test/detailBudget.test.js`, which composes the real cap with the real budget.
+
+**Suggested first run, when you want it:** set `ATS_DETAIL_FETCH_BUDGET=25` and activate ONE
+company (Ubisoft2, the smallest at 97 rows). That is 25 requests in a crawl, spread two at a time.
+Read `[smartrecruiters] detail fetch: N spent, M skipped, K gained text` from the log before
+widening — `K` is the number that matters, because a fetch can succeed and return nothing.
+
+⚠ **Not yet measured against a real tenant.** Every test injects the fetcher; nothing in this
+change has issued a single request to SmartRecruiters or Adobe. The detail endpoints and their
+response shapes are written from their public API documentation, so the FIRST live run is also
+the first check that `jobAd.sections` and `jobPostingInfo.jobDescription` are what those APIs
+actually return. Expect to adjust the two `fetchPostingDescription` functions, and treat a run
+that reports `spent: 25, withText: 0` as exactly that — not as "the source has no descriptions".
 
 Android's remaining work is in `resume-master-android/ANDROID.md` and the annotated header of
 `PHASE_2A.md` (uncommitted): admin build flavour, backup excludes, then the feed and review queue.
@@ -240,6 +281,11 @@ Present in Railway: `ANTHROPIC_KEY` · `APP_BASE_URL` · `FRONTEND_URL` · `GOOG
   design. The old "half-wired" note here was wrong.
 - Caps default in code: `APPLY_DAILY_CAP` 25, `APPLY_DAILY_QUEUE_CAP` 40,
   `APPLY_DAILY_APPROVAL_CAP` 30, `ENRICH_DAILY_MAX_ROWS` 300. Set them explicitly only to override.
+- `ANON_DAILY_SERVICE_CEILING` 50 — total anonymous runs of one standalone service per 24h,
+  across every caller. A cost control, not a commercial one; unaffected by the monetisation lever.
+- `ATS_DETAIL_FETCH_BUDGET` **0 = OFF** (task Y), with `ATS_DETAIL_FETCH_PER_COMPANY` 25,
+  `ATS_DETAIL_FETCH_CONCURRENCY` 2, `ATS_DETAIL_FETCH_TIMEOUT_MS` 8000. Absent in Railway and
+  correct to leave absent until someone decides to spend outbound requests on descriptions.
   `routes/apply.js:431-437` already reports when a cap ordering makes another unreachable.
 - **The full-auto kill switch EXISTS.** `fullAutoDisabled()` (`routes/apply.js:513`) reads
   `app_settings.apply_full_auto_disabled`, with `APPLY_FULL_AUTO_DISABLED` as a boot default, and

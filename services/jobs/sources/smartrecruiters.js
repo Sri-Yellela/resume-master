@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { normalizeJob } from '../schema.js';
 import { collectCompanyJobs } from './base.js';
+import { attachDescriptions, createDetailBudget, detailBudgetFromEnv } from '../detailBudget.js';
 
 const BASE_URL = 'https://api.smartrecruiters.com/v1/companies';
 
@@ -45,10 +46,11 @@ function normalizeSmartRecruitersJob(job, companyName) {
     location,
     url,
     source:          'smartrecruiters',
-    // NOT a deliberate omission: the postings list endpoint omits jobAd content, which needs a
-    // per-posting detail fetch (an N+1 against the API). Left unfixed while this source
-    // contributes no board rows — enrichJob.js skips description-less rows, so these land
-    // unenriched rather than silently blanked. See docs/PIPELINE_DIAGNOSIS.md.
+    // Still null HERE, and that is correct: the postings LIST endpoint omits jobAd content. The
+    // text now arrives in a second pass, after capping, and only within a budget that is OFF by
+    // default — see fetchPostingDescription below and services/jobs/detailBudget.js. Leaving it
+    // null at this point keeps normalizeSmartRecruitersJob a pure mapping of what the list
+    // returned, so importJob.js's single-URL reuse is unaffected.
     description:     null,
     posted_at:       job.releasedDate || null,
     remote:          !!loc.remote,
@@ -80,6 +82,37 @@ async function fetchCompanyJobs(slug, companyName, words, updatedAfterIso) {
     .map(j => normalizeSmartRecruitersJob(j, companyName));
 }
 
+// ONE posting's jobAd text. Separate and injectable (`_fetchDetail`) so the budget, the ordering
+// and the plugin can all be tested without making a single request to SmartRecruiters — which
+// matters more than usual here, because the thing being bounded IS outbound requests to them.
+//
+// Returns null rather than throwing: a posting whose detail fetch fails keeps its list row and
+// stays description-less, which is exactly the status quo and not a regression. attachDescriptions
+// contains the rejection too, but returning null keeps the intent local and readable.
+async function fetchPostingDescription(job, injected = null) {
+  if (injected) return injected(job);
+  const raw = job?._raw || {};
+  const companyIdentifier = raw.company?.identifier;
+  const postingId = raw.id || job?.id;
+  if (!companyIdentifier || !postingId) return null;
+  try {
+    const res = await axios.get(
+      `${BASE_URL}/${encodeURIComponent(companyIdentifier)}/postings/${encodeURIComponent(postingId)}`,
+      { timeout: 8000 },
+    );
+    const sections = res.data?.jobAd?.sections || {};
+    // SmartRecruiters splits the ad into named sections; concatenated in the order a human reads
+    // them. Falls back to whatever text is present rather than returning nothing for an ad that
+    // uses only some of them.
+    return ['companyDescription', 'jobDescription', 'qualifications', 'additionalInformation']
+      .map(k => sections[k]?.text)
+      .filter(Boolean)
+      .join('\n\n') || null;
+  } catch {
+    return null;
+  }
+}
+
 const smartrecruitersPlugin = {
   name: 'smartrecruiters',
 
@@ -96,7 +129,8 @@ const smartrecruitersPlugin = {
   // two crawls. Using this for real requires the prune model to distinguish a deliberately
   // partial (incremental) fetch from a full one — a follow-up, not this task's scope. Callable
   // directly (e.g. a scheduled true-delta sync) with a real _updatedAfter today regardless.
-  async search({ query, _companies = [], pageSize = 50, _updatedAfter = null }) {
+  async search({ query, _companies = [], pageSize = 50, _updatedAfter = null,
+                 _detailBudget = null, _fetchDetail = null }) {
     const words = queryWords(query);
     // PER COMPANY, not across the concatenation. This was `MAX` applied to the flattened array,
     // which silently dropped every company past the 900th posting — see collectCompanyJobs.
@@ -112,13 +146,28 @@ const smartrecruitersPlugin = {
       )
     );
 
+    // ⛔ CAP FIRST, THEN FETCH DETAIL. collectCompanyJobs discards everything past PER_COMPANY_MAX,
+    // so fetching descriptions before this point spends real requests against SmartRecruiters on
+    // rows that are then thrown away — the same defect as the cap `0de67c8` fixed, one layer up,
+    // and equally invisible without counting. Pinned by test/detailBudget.test.js.
     const jobs = collectCompanyJobs(results, PER_COMPANY_MAX);
+
+    const budget = _detailBudget || createDetailBudget(detailBudgetFromEnv());
+    const detail = await attachDescriptions(
+      jobs, budget,
+      (job) => fetchPostingDescription(job, _fetchDetail),
+      (job) => job.company || '_',
+    );
+    if (detail?.enabled) {
+      console.log(`[smartrecruiters] detail fetch: ${detail.spent} spent, ${detail.skipped} skipped, ${detail.withText} gained text`);
+    }
 
     return {
       jobs,
       total:    jobs.length,
       page:     1,
       pageSize: jobs.length,
+      _detail:  detail,
     };
   },
 };
@@ -126,4 +175,4 @@ const smartrecruitersPlugin = {
 export default smartrecruitersPlugin;
 // Named exports for services/jobs/importJob.js's single-URL reuse of this source's already-
 // working fetch+normalize (see importJob.js's fetchKnownAtsJob) — no change to the above.
-export { fetchCompanyJobs, normalizeSmartRecruitersJob };
+export { fetchCompanyJobs, normalizeSmartRecruitersJob, fetchPostingDescription };
