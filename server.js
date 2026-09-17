@@ -130,6 +130,8 @@ import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { suggest } from "./services/jobs/searchSuggestions.js";
 // Bounds the blast radius of one expiry pass — see services/jobs/cleanupBrake.js and cleanup_log 85.
 import { assessCleanupScope, cleanupBrakeOptions } from "./services/jobs/cleanupBrake.js";
+// CC3 — the confirmed synonym map, read on the scoring path. See atsSynonyms() below.
+import { loadConfirmedSynonyms } from "./services/kb/skillSynonyms.js";
 // Y2B — the SAME fetcher and the SAME writer the enrichment pass uses. One implementation, two
 // triggers: the background pass buys descriptions for rows it is about to enrich, and this buys
 // one for a job a user actually opened. See services/jobs/detailFetch.js.
@@ -4308,6 +4310,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
                 job: item,
                 runtimeBasis,
                 termWeights: atsTermWeightsForJob(item),
+                synonyms: atsSynonyms(),
               });
               updateAts.run(report.score, JSON.stringify(report), item.jobId);
               if (domainProfile?.id) {
@@ -5769,6 +5772,27 @@ const activeScrapes = new Map();
  * unweighted", which is exactly v3 behaviour — degraded, never wrong.
  */
 const _atsWeightCache = new Map();
+/**
+ * CC3 · THE SYNONYM MAP, ON THE SCORING PATH AT LAST.
+ *
+ * G1 built `skill_synonyms` and a review UI for it. `scoreAtsLocally` has always accepted a
+ * `synonyms` argument. NOT ONE CALL SITE PASSED IT — the table's only production reader was
+ * enrichJob.js's technographics de-dup, so the owner was being asked to review 196 proposals for a
+ * table nothing that scores read. That is why it measured "+0.000": not a weak effect, NO EFFECT
+ * PATH. This is the path.
+ *
+ * ⛔ CONFIRMED ROWS ONLY, and that gate is in loadConfirmedSynonyms rather than here. A false
+ * equivalence is a CONFIDENTLY WRONG match — the same class as the coffee machine, and worse in
+ * reach, because a wrong synonym moves every score on the board in one direction invisibly. The
+ * 196 proposals stay out until a human moves them.
+ *
+ * Memoised per database inside skillSynonyms.js, and invalidated by its own writers, so scoring 25
+ * jobs in a batch costs one read and a confirmation takes effect without a restart.
+ */
+function atsSynonyms() {
+  return loadConfirmedSynonyms(db);
+}
+
 function atsTermWeightsForJob(job) {
   let family = null;
   try {
@@ -7859,7 +7883,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
       signalProfile,
       domainProfile: activeProfile,
     });
-    const result = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
+    const result = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
 
     // Save to cache — INSERT OR REPLACE via ON CONFLICT
     db.prepare(`
@@ -8180,7 +8204,8 @@ ${originalText}` }],
           domainProfile: profile,
         });
         return scoreAtsLocally({ job: { title: profile.profile_name, description: templateJd }, runtimeBasis,
-          termWeights: atsTermWeightsForJob({ title: profile.profile_name }) });
+          termWeights: atsTermWeightsForJob({ title: profile.profile_name }),
+          synonyms: atsSynonyms() });
       } catch { return null; }
     };
 
@@ -8294,7 +8319,7 @@ async function adoptEnhancedProfileResume(req, res) {
         const batch = jobsToRescore.slice(i, i + 25);
         await Promise.all(batch.map(async job => {
           try {
-            const report = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
+            const report = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
             updateAts.run(report.score, JSON.stringify(report), job.job_id);
           } catch(e) {
             console.warn(`[adopt-enhanced] rescore failed for ${job.job_id}:`, e.message);
@@ -8446,6 +8471,7 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
         domainProfile: beforeProfile,
       }),
       termWeights: atsTermWeightsForJob(job),
+      synonyms: atsSynonyms(),
     }).score;
   } catch (e) {
     console.warn("[generate] could not score the base resume for lift measurement:", e.message);
@@ -8600,7 +8626,7 @@ RULES:
     signalProfile,
     domainProfile: activeProfile,
   });
-  const atsReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
+  const atsReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
   const atsScore = atsReport.score;
   const atsCacheKey = buildAtsCacheKey(formattedHtml, job);
 
@@ -8683,7 +8709,7 @@ function scoreBaseResumeForApply(userId, jobId) {
       signalProfile: loadOrCreateSimpleApplyProfile(db, { userId, profileId: activeProfile.id }),
       domainProfile: activeProfile,
     });
-    const report = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
+    const report = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
     return {
       score: report.score,
       band: atsBandFor(report),
@@ -8989,7 +9015,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
         signalProfile,
         domainProfile: activeProfile,
       });
-      const freshReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job) });
+      const freshReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
       const freshScoreVal = freshReport.score;
         db.prepare(
           "UPDATE resumes SET ats_score=?,ats_report=?,ats_cache_key=?,ats_prompt_version=?,updated_at=unixepoch() WHERE user_id=? AND job_id=?"

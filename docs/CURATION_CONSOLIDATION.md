@@ -6,8 +6,9 @@ project.
 
 **Run these in order. Each one changes the measurements the next depends on.** Do not parallelise.
 
-> **Status 2026-09-17: CC1, CC1b and CC2 are DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
-> `docs/CC1B_ROLE_KEY_SOFT_NULL.md`, `docs/CC2_SKILL_MATCHING.md`). CC3–CC5 are untouched.
+> **Status 2026-09-17: CC1, CC1b, CC2 and CC3 are DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
+> `docs/CC1B_ROLE_KEY_SOFT_NULL.md`, `docs/CC2_SKILL_MATCHING.md`,
+> `docs/CC3_SYNONYMS_WIRED.md`). CC4 and CC5 are untouched.
 > The owner's board is now **849** rows, not 405. 277 of them are still UNCLASSIFIED in
 > job_role_map — nothing backfills it, which remains the obvious follow-up and is not done.
 >
@@ -245,6 +246,41 @@ count before/after. The coffee-machine case explicitly. Both '[]' and NULL direc
 
 ---
 
+# CC3 — Wire G1 into the scorer ✅ DONE 2026-09-17 — see `docs/CC3_SYNONYMS_WIRED.md`
+
+```
+✅ DECISION: option (a), WIRE IT. All 8 scoreAtsLocally call sites in server.js now pass
+   `synonyms`, pinned by a source scan (the failure mode is a NEW call site, which no behavioural
+   test over existing ones can see). loadConfirmedSynonyms is memoised per database and invalidated
+   by confirmSynonym / rejectSynonym / recordSynonymProposals — a cache a confirmation did not clear
+   would reproduce the exact bug CC3 fixes. Confirmed rows only; the 196 proposals stay out.
+
+✅ THE PATH IS LIVE, NOT MERELY WIRED. Proved on a copy of the real board: a PROPOSED pair moves
+   the score 0 points, a CONFIRMED pair moves it 20 -> 27 and moves the term from
+   competencies_missing to competencies_matched. All of requirement 2's invariants still pass.
+
+⛔ REQUIREMENT 4, THE NUMBER: rho delta is +0.0000 on both profiles, 0 of 30 scores changed. A
+   synonym needs BOTH halves: the scorer must ASK about term A and the résumé must CONTAIN term B.
+   4 of the 12 confirmed pairs do name a term the scorer asks about — so the first half lands — but
+   the owner's résumé contains neither side of any of those four. The table is connected; the
+   intersection is empty.
+
+✅ AND THE REVIEW QUEUE IS NOW AIMED. 54 of the 196 proposals name a term the scorer asks about, so
+   they can move a score; the other 142 cannot, for this corpus. Separately, 241 of the 311 terms
+   the scorer asks about have NO synonym row at all — topped by cross functional (11 postings),
+   reliability (10), python (10), strategy (10). That is where extraction should be aimed.
+
+⛔ A CORRECTION TO CC1 AND CC2, BOTH MINE: they said "basis.skills is 0 on both profiles". WRONG —
+   a harness defect (the raw DB row was passed to buildRuntimeAtsBasis, which wants the PARSED
+   arrays loadSimpleApplyProfile produces). Profile 5 has 28 terms. Every conclusion survives,
+   verified not assumed: 0 of 30 graded scores differ and the band distribution is identical. The
+   28 terms are noise ("near","provided","tasks","college"), so 28 terms score exactly as 0 do —
+   which is a MEASUREMENT of the two-extractors problem. Both docs corrected in place.
+```
+
+<details>
+<summary>The original CC3 brief, kept for the record</summary>
+
 # CC3 — Wire G1 into the scorer, or retire it
 
 ```
@@ -276,6 +312,8 @@ REQUIREMENTS
    and the review UI must put the risky claims first (it already does).
 4. Report the measured ρ delta either way. A number, not a claim.
 ```
+
+</details>
 
 ---
 

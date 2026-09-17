@@ -214,10 +214,22 @@ Three premises were stale or wrong. All were caught by measuring them, which is 
 | "1,266 active rows"; "960 reachable by NEITHER" | **2,460 active**, **1,888** reachable by neither. The board grew when a crawl ran; every count in the brief is against the smaller population. |
 | "test baseline 2443" (`CORRECTIONS_REGISTER.md`) | **2,475** at `eecbe09`, **2,484** now. The register's own figure was already stale. |
 
-One more, not a correction but worth recording: **`basis.skills` is 0 on both active profiles.** The
-scorer is ranking on a résumé basis with no extracted skills at all, which bears on the brief's
-out-of-scope note about `MIN_PROFILE_SKILLS: 8` and "noise suppressing the warning about noise". It
-also caps how much any membership rule can achieve.
+One more, not a correction but worth recording: the résumé basis contributes almost nothing to the
+score, which caps how much any membership rule can achieve.
+
+⛔ **CORRECTION (made in CC3): this section originally said "`basis.skills` is 0 on both active
+profiles". That was wrong, and it was my measurement harness's fault.** `buildRuntimeAtsBasis` reads
+`signalProfile.skills` — a PARSED array — and the harness handed it the raw
+`profile_simple_apply_profiles` row, which carries `skills_json`. Through the real
+`loadSimpleApplyProfile`: **profile 5 has 28 terms**, profile 6 genuinely has 0 (no simple-apply row
+at all).
+
+Every conclusion above is unaffected, and that was checked rather than assumed: with the corrected
+basis, **0 of 30 graded scores differ** and the band distribution over all 881 enriched rows is
+identical. The reason the 28 terms change nothing is sharper than their absence would be — they are
+`["javascript","java","technical","university","college","near","provided","tasks", …]`, the noise
+the brief's own out-of-scope note describes, and the scorer's rejector discards essentially all of
+them. See `docs/CC3_SYNONYMS_WIRED.md` §4.
 
 ---
 

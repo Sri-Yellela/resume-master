@@ -173,10 +173,19 @@ Strong rows demoted by the skills dimension:  BEFORE 0 of 0   AFTER 0 of 0
 
 **There are no Strong rows at all**, so the before/after is 0 of 0 and the brief's 24-of-69 is not
 reproducible on this board. The reason is upstream and the brief already names it in its own
-out-of-scope list: **`basis.skills` is 0** — the résumé basis has no extracted skills, so the
-scorer has almost nothing to score with. That is the two-extractors problem
-(`SKILL_HINTS`, noise suppressing `resumeDepthWarning` at `MIN_PROFILE_SKILLS: 8`), and no
-matching-rule change can move it.
+out-of-scope list: the résumé basis contributes almost nothing, so the scorer has almost nothing to
+score with. That is the two-extractors problem (`SKILL_HINTS`, noise suppressing
+`resumeDepthWarning` at `MIN_PROFILE_SKILLS: 8`), and no matching-rule change can move it.
+
+⛔ **CORRECTION (made in CC3): this paragraph originally said "`basis.skills` is 0". That was wrong
+— a defect in my measurement harness, which passed the raw `profile_simple_apply_profiles` row to
+`buildRuntimeAtsBasis` where it expects the PARSED arrays that `loadSimpleApplyProfile` produces.
+Profile 5 actually has 28 terms.** The finding above survives the correction unchanged, and that was
+verified rather than assumed: with the corrected basis, 0 of 30 graded scores differ and the band
+distribution over all 881 enriched rows is identical (`weak 851, moderate 30`). The 28 terms are
+`["javascript","java","technical","university","college","near","provided","tasks", …]` — so
+28 terms in produce exactly the scores 0 terms in produce, which is a measurement OF the
+two-extractors problem rather than a guess about it. See `docs/CC3_SYNONYMS_WIRED.md` §4.
 
 ### ⛔ Requirement 5 — the bridge still cannot rank, and ρ proves it
 

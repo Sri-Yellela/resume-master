@@ -15,9 +15,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { scoreAtsLocally, buildRuntimeAtsBasis } from "../services/localAtsScorer.js";
+import fs from "node:fs";
 import {
   recordSynonymProposals, loadConfirmedSynonyms, confirmSynonym, rejectSynonym,
-  listProposals, canonicalPair, synonymStats,
+  listProposals, canonicalPair, synonymStats, invalidateSynonymCache,
 } from "../services/kb/skillSynonyms.js";
 
 function makeDb() {
@@ -248,4 +249,95 @@ test("the review queue puts the risky claims first", () => {
   const q = listProposals(db);
   assert.equal(q[0].relation, "alias");
   db.close();
+});
+
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+// CC3 — THE EFFECT PATH. G1 was dead code in the scoring path until this.
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+
+test("⛔ EVERY scoreAtsLocally CALL SITE IN server.js PASSES synonyms", () => {
+  // THE DEFECT THIS EXISTS FOR, and it is not hypothetical: scoreAtsLocally has always ACCEPTED a
+  // `synonyms` argument, the table and its review UI were built, and not one of the eight call
+  // sites passed it. So the table's only production reader was enrichJob's technographics de-dup,
+  // and the owner was asked to review 196 proposals for a table nothing that scores read. It
+  // measured "+0.000" — not a weak effect, no effect path.
+  //
+  // A source scan rather than a behavioural test, deliberately: the failure mode is a NEW call
+  // site forgetting the argument, and no behavioural test over existing sites can see that.
+  const server = fs.readFileSync("server.js", "utf8");
+  const missing = [];
+  const re = /scoreAtsLocally\(\{/g;
+  let m;
+  while ((m = re.exec(server))) {
+    // The argument object ends well within 500 chars at every current site; a site that spread
+    // further would still be caught, because it would simply read as missing.
+    const segment = server.slice(m.index, m.index + 500);
+    if (!/synonyms\s*:/.test(segment)) {
+      missing.push(`server.js:${server.slice(0, m.index).split("\n").length}`);
+    }
+  }
+  assert.deepEqual(missing, [],
+    "these scoreAtsLocally call sites do not pass `synonyms`, so confirmed synonyms cannot " +
+    "affect their score:\n  " + missing.join("\n  ") +
+    "\n\nPass `synonyms: atsSynonyms()`. If a call site deliberately must not use synonyms, " +
+    "pass `synonyms: null` explicitly so the omission is a decision rather than an oversight.");
+});
+
+test("the map is memoised per database, and a CONFIRMATION invalidates it", () => {
+  // ⛔ THE FAILURE THIS PREVENTS LOOKS IDENTICAL TO THE BUG CC3 FIXED. The map is now read per
+  // scored job, so it is cached — and a cache that a confirmation does not clear means the
+  // confirmation takes effect only after a restart, i.e. "synonyms have no effect" all over again.
+  const db = makeDb();
+  recordSynonymProposals(db, [{ term: "k8s", equivalent: "kubernetes", relation: "alias", jobId: "j1" }]);
+  assert.equal(loadConfirmedSynonyms(db).size, 0, "a proposal is not confirmed");
+
+  const first = loadConfirmedSynonyms(db);
+  assert.equal(loadConfirmedSynonyms(db), first, "the same Map instance comes back — it is cached");
+
+  assert.equal(confirmSynonym(db, "k8s", "kubernetes"), true);
+  const after = loadConfirmedSynonyms(db);
+  assert.notEqual(after, first, "the confirmation must have invalidated the cache");
+  assert.equal(after.size, 2, "both directions of the confirmed pair");
+  assert.deepEqual(after.get("k8s"), ["kubernetes"]);
+
+  // And the other direction: a rejection must REMOVE it, not leave a stale equivalence scoring.
+  assert.equal(rejectSynonym(db, "k8s", "kubernetes"), true);
+  assert.equal(loadConfirmedSynonyms(db).size, 0,
+    "a rejected pair must leave the confirmed map immediately, not at the next restart");
+  db.close();
+});
+
+test("two databases get their own map — the cache cannot cross-serve", () => {
+  const a = makeDb(), b = makeDb();
+  recordSynonymProposals(a, [{ term: "k8s", equivalent: "kubernetes", relation: "alias", jobId: "j1" }]);
+  confirmSynonym(a, "k8s", "kubernetes");
+  assert.equal(loadConfirmedSynonyms(a).size, 2);
+  assert.equal(loadConfirmedSynonyms(b).size, 0,
+    "b has no confirmed rows and must not be served a's map");
+  a.close(); b.close();
+});
+
+test("an absent table is NOT cached as empty", () => {
+  // A database that predates migration 098 returns an empty map — correctly, "no synonyms". But
+  // caching that would make a database which LATER gains the table permanently synonym-less, and
+  // the symptom would look like the table being ignored rather than a stale cache.
+  const db = new Database(":memory:");
+  assert.equal(loadConfirmedSynonyms(db).size, 0, "no table -> no synonyms, and no throw");
+  db.exec(`CREATE TABLE skill_synonyms (
+    term TEXT NOT NULL, equivalent TEXT NOT NULL, relation TEXT NOT NULL DEFAULT 'related',
+    confidence REAL NOT NULL DEFAULT 0, corroboration_count INTEGER NOT NULL DEFAULT 0,
+    source_postings_json TEXT, status TEXT NOT NULL DEFAULT 'proposed',
+    reviewed_at INTEGER, reviewed_by TEXT, first_seen INTEGER, last_seen INTEGER,
+    updated_at INTEGER, PRIMARY KEY (term, equivalent));`);
+  db.prepare("INSERT INTO skill_synonyms (term, equivalent, status) VALUES ('k8s','kubernetes','confirmed')").run();
+  assert.equal(loadConfirmedSynonyms(db).size, 2,
+    "the table appearing later must be picked up, not masked by a cached empty map");
+  db.close();
+});
+
+test("invalidateSynonymCache is a no-op without a db, and never throws", () => {
+  // It is exported so a caller writing the table by other means can say so; a stray call with
+  // nothing to invalidate must not be a crash.
+  invalidateSynonymCache();
+  invalidateSynonymCache(null);
 });
