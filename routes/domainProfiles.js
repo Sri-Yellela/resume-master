@@ -345,6 +345,22 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
     });
   });
 
+  // ── CC4 · REQUIREMENT 4 · THE SILENT OVERWRITE ───────────────────────────────────────────────
+  //
+  // `upsertSimpleApplyProfile` rebuilds `profile_simple_apply_profiles` from the résumé and
+  // replaces whatever is there — including hand edits a user made through PUT /:id/signals. The
+  // UI called that list "Extracted", which was accurate, and gave no warning that a refresh or a
+  // résumé re-upload would discard the edits.
+  //
+  // ⛔ USER-ASSERTED TERMS ARE NOW SAFE BY CONSTRUCTION, NOT BY CAREFULNESS. They live in
+  // `profile_signal_suggestions` (the canonical store since CC4), which this route does not touch
+  // at all — so a refresh cannot destroy a claim, and no code has to remember not to. That is the
+  // property worth having; a warning that has to be maintained is not.
+  //
+  // What a refresh DOES still replace is the extracted list, and the response now says so
+  // explicitly rather than leaving the caller to infer it from a silent 200. The two kinds of term
+  // are distinguishable because they are in different tables, which is requirement 4's
+  // "auto-extracted and user-claimed must be DISTINGUISHABLE in the store".
   router.post("/:id/signals/refresh", (req, res) => {
     const profile = db.prepare("SELECT * FROM domain_profiles WHERE id=? AND user_id=?")
       .get(req.params.id, req.user.id);
@@ -358,7 +374,14 @@ export function createDomainProfilesRouter(db, anthropic, emitToUser = () => {})
       base.content,
       roleTitles,
     );
-    res.json(signals);
+    res.json({
+      ...signals,
+      // CC4. Stated, not implied: what this replaced and what it could not touch.
+      replaced: "extracted",
+      preserved: "claims",
+      notice: "Re-extracted from your resume. Any hand edits to these lists were replaced. "
+            + "Terms you claimed are stored separately and were not affected.",
+    });
   });
 
   router.put("/:id/signals", (req, res) => {

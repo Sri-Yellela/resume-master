@@ -248,13 +248,18 @@ try {
 
   // ── AG2's copy, untouched ────────────────────────────────────────────────────────────────
   const panelSrc = fs.readFileSync(path.join(ROOT, 'client', 'src', 'panels', 'ATSPanel.jsx'), 'utf8');
+  // "It does not change this score" was in this list and is gone: since CC4 a claim counts toward
+  // the score and toward the board's ranking, so that sentence became false. The two describing
+  // unchanged behaviour stay, and the new sentence is pinned beside them.
   for (const sentence of [
     'Claiming a term says it is true of you',
     'never rewrites one you already have',
-    'It does not change this score',
+    'counts toward this',
   ]) {
-    check(`AG2 copy kept: "${sentence}"`, panelSrc.includes(sentence));
+    check(`AG2/CC4 copy kept: "${sentence}"`, panelSrc.includes(sentence));
   }
+  check('CC4  the stale "does not change this score" promise is gone',
+    !panelSrc.includes('It does not change this score'));
 } finally {
   if (browser) await browser.close().catch(() => {});
   // Kill the TREE. vite spawns esbuild children, and killing only the node parent orphans them;

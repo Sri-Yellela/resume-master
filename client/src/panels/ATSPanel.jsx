@@ -427,9 +427,21 @@ export function ATSPanel({ report, score, jobId, resumeText, activeProfileId }) 
  * making a claim they will have to defend in an interview, which is the only direction this can
  * safely run. So the chip must never read as "add this to improve your score": that invites
  * someone to tick things because a number goes up, and the number is not the thing being decided.
- * Hence "is true of you" / "You claimed this", and a line saying in plain words that claiming does
- * not move the score. It does not: claims are deliberately kept out of the scoring basis, so a
- * claim cannot flatter its own number.
+ * Hence "is true of you" / "You claimed this".
+ *
+ * ⛔ CC4 CHANGED WHAT IS TRUE HERE, SO THE COPY CHANGED WITH IT. This block used to end: "a line
+ * saying in plain words that claiming does not move the score. It does not: claims are
+ * deliberately kept out of the scoring basis, so a claim cannot flatter its own number."
+ *
+ * A claim now DOES count — toward this score and toward where the job sits on the board — because a
+ * person's fit is not limited to what their current résumé happens to spell out, and that is what
+ * the owner asked for. Leaving the old line would have been the worse outcome of the two: copy
+ * promising one thing while the code does another, which is a lie rather than a caveat.
+ *
+ * What replaces the old guarantee is not nothing. The scorer keeps résumé evidence and claims in
+ * separate indexes and reports every match that rested on a claim alone, so the number is never
+ * silently inflated — and the incentive is still fought where it is created, in the interaction:
+ * nothing is pre-checked, and the copy asks for the truth rather than offering a reward.
  *
  * NOTHING IS PRE-SELECTED. `claimedLookup` holds only what the person actually claimed.
  */
@@ -477,7 +489,7 @@ function TagSection({
             title={interactive
               ? (claimed
                   ? `You claimed "${k}". Click to withdraw it.`
-                  : `Claim "${k}" — only if it is true of you. It informs future resumes; it does not change this score.`)
+                  : `Claim "${k}" — only if it is true of you. It counts toward this score and toward where this job ranks, and it is used in future resumes.`)
               : provenance}
             style={{
               background:claimed ? "#0a1f0a" : bg,
@@ -491,8 +503,10 @@ function TagSection({
       </div>
       {onToggleClaim && (
         <div style={{ fontSize:10, color:"var(--color-text-muted)", marginTop:6, fontStyle:"italic" }}>
-          Claiming a term says it is true of you. It is used in resumes generated from now on, and
-          never rewrites one you already have. It does not change this score.
+          Claiming a term says it is true of you — claim it only if it is. It counts toward this
+          score and toward where jobs rank on your board, and it is used in resumes generated from
+          now on; it never rewrites one you already have. Withdraw it at any time and all three go
+          back.
         </div>
       )}
     </div>

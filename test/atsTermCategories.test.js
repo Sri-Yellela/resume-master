@@ -227,9 +227,15 @@ test("the panel renders both new buckets, and AG2's copy is untouched", () => {
   // Competencies matched must count as evidenced, or a term shown as matched above renders as
   // unevidenced below.
   assert.match(panel, /\.\.\.\(activeReport\.competencies_matched \|\| \[\]\)/);
+  // ⛔ CC4 CHANGED ONE OF THESE SENTENCES, BECAUSE IT STOPPED BEING TRUE. This list used to
+  // include "It does not change this score". A claim now counts toward the score and toward where
+  // the job ranks, so that sentence had to go — copy promising one thing while the code does
+  // another is a lie, not a caveat. The two that describe unchanged behaviour stay.
   for (const sentence of [
     "Claiming a term says it is true of you",
     "never rewrites one you already have",
-    "It does not change this score",
+    "counts toward this",
   ]) assert.ok(panel.includes(sentence), sentence);
+  assert.ok(!panel.includes("It does not change this score"),
+    "the panel must not still claim that a claim does not affect the score — since CC4 it does");
 });

@@ -514,9 +514,21 @@ async function main() {
     // defend in an interview, for a number that is not the thing being decided. The panel has to
     // say the opposite in so many words, on screen, where it is read.
     const panelText = await page.evaluate(() => document.body.innerText);
-    check('AG2  the panel says in plain words that claiming does not change the score',
-      /does not change this score/i.test(panelText),
-      /does not change this score/i.test(panelText) ? 'the disclaimer is on screen' : 'the disclaimer is absent');
+    // ⛔ CC4 CHANGED WHAT THE PANEL MUST SAY. This used to require the panel to state that claiming
+    // does NOT change the score, and that was true — claims were kept out of the scoring basis. A
+    // claim now counts, toward the score and toward where the job ranks, so the panel must say THAT
+    // instead: copy promising one thing while the code does another is a lie, not a caveat. The
+    // anti-bait check below is unchanged and is now the whole of the incentive guard — the panel may
+    // say a claim counts, and may never offer it as a way to raise a number.
+    check('CC4  the panel says in plain words that a claim DOES count',
+      /counts toward this/i.test(panelText),
+      /counts toward this/i.test(panelText) ? 'on screen' : 'absent');
+    check('CC4  and no longer carries the old promise that it does not',
+      !/does not change this score/i.test(panelText),
+      /does not change this score/i.test(panelText) ? 'the stale disclaimer is still rendered' : 'gone');
+    check('CC4  and asks for the truth rather than for the number',
+      /only if it is/i.test(panelText),
+      /only if it is/i.test(panelText) ? 'on screen' : 'absent');
     const SCORE_BAIT = [/improve your score/i, /boost your score/i, /increase your score/i];
     const bait = SCORE_BAIT.filter(re => re.test(panelText)).map(re => re.source);
     check('AG2  and nowhere offers a claim as a way to raise the score',

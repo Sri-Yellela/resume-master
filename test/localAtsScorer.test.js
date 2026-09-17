@@ -306,16 +306,26 @@ test("AG2: nothing is pre-selected — only what the candidate claimed reads as 
   assert.match(aggregator, /CLAIM_ASSERTIONS = new Set\(\[ASSERTIONS\.CLAIMED, ASSERTIONS\.APPLIED\]\)/);
   assert.match(aggregator, /ASSERTIONS = \{ NONE: "none", CLAIMED: "claimed", APPLIED: "applied" \}/);
 
-  // A claim must never be a score lever: claims are not written into domain_profiles.selected_*,
-  // which is what buildRuntimeAtsBasis scores the resume against.
+  // ⛔ CC4 REVERSED WHAT THIS ASSERTS, AND KEPT THE PROPERTY IT WAS PROTECTING.
+  //
+  // It used to require the panel to say "It does not change this score", on the reasoning that
+  // claims were kept out of the scoring basis so a claim could not flatter its own number. Claims
+  // now DO count — that is the feature — so the panel must say so instead. What has NOT changed is
+  // the thing that actually fights the bad incentive: the copy asks for the truth and never offers
+  // a reward, and nothing is pre-checked.
   //
   // Checked against the code with COMMENTS STRIPPED. The comment explaining why the copy must not
   // say "add this to improve your score" contains that phrase, and matching it there would fail on
   // the very sentence that documents the rule.
   const visible = panel.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
-  assert.doesNotMatch(visible, /improve your score|boost your score|increase your score/i);
-  assert.match(visible, /It does not change this score/,
-    "the panel must say plainly that claiming does not move the number");
+  assert.doesNotMatch(visible, /improve your score|boost your score|increase your score/i,
+    "the chip must never be framed as a reward — that is the incentive this feature must not create");
+  assert.match(visible, /counts toward this/,
+    "the panel must say plainly that a claim DOES count, now that it does");
+  assert.doesNotMatch(visible, /does not change this score/i,
+    "and must not still carry the old promise, which is now false");
+  assert.match(visible, /only if it is|claim it only if/i,
+    "the ask must be for the truth, not for the number");
   assert.match(visible, /is true of you|You claimed this/,
     "the copy must read as the candidate claiming, not as the product advising");
 });

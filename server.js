@@ -4285,6 +4285,7 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
           resumeText: baseResumeRow?.enhanced_content || baseResumeText,
           signalProfile: simpleProfile,
           domainProfile,
+          claims: atsClaims(domainProfile),
         });
 
         // Find newly inserted jobs that have no ats_score yet
@@ -5793,6 +5794,30 @@ function atsSynonyms() {
   return loadConfirmedSynonyms(db);
 }
 
+/**
+ * CC4 · THE TERMS THE CANDIDATE HAS CLAIMED, on the scoring path.
+ *
+ * A claim used to reach exactly one place: the generation prompt. `listProfileClaims` had a single
+ * consumer and AG2's own copy said so — "it does not change this score" — which was literally
+ * true. So the user-enrichable layer that changes RANKING did not exist: the only way to influence
+ * the board was an unlabelled "Extracted …" textarea that a résumé re-upload silently overwrote.
+ *
+ * ⛔ KEYED OFF `profile.user_id`, NOT A `userId` IN SCOPE. A profile's claims belong to its owner
+ * by definition, and eight call sites with eight different local variable names is eight chances to
+ * pass the wrong one. Reading the owner off the row makes that impossible rather than unlikely.
+ *
+ * Returns null on any failure: a claim lookup may never be the reason a score does not happen.
+ */
+function atsClaims(profile) {
+  if (!profile?.id || !profile?.user_id) return null;
+  try {
+    return listProfileClaims(db, { userId: profile.user_id, profileId: profile.id });
+  } catch (e) {
+    console.warn(`[ats-claims] could not load claims for profile ${profile.id}: ${e.message}`);
+    return null;
+  }
+}
+
 function atsTermWeightsForJob(job) {
   let family = null;
   try {
@@ -6986,9 +7011,28 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     // explicit query param for the same dimension always wins (checked per-key below);
     // ?curate=off skips derivation entirely, reproducing pre-bridge behavior exactly.
     const baseFilterParams = { q, ...req.query };
+    // ── CC4 · CLAIMED TERMS REACH THE BOARD'S RANKING, not only the generation prompt ────────────
+    //
+    // Requirement 6: the bridge could not see anything the user asserted. It reads
+    // `profile_simple_apply_profiles`, which is EXTRACTED from the résumé — and CC2 measured that
+    // extraction to be largely noise ("near", "provided", "tasks", "college"). So the one store
+    // holding what the person actually said about themselves reached neither scorer.
+    //
+    // ⛔ CLAIMS ARE PREPENDED, AND THE ORDER IS THE POINT. profileFilterBridge caps the derived
+    // skills at MAX_DERIVED_SKILLS = 6 by taking the FIRST six, so appending would mean a profile
+    // with six extracted terms silently drops every claim. An explicit assertion outranks an
+    // extraction — that is the whole premise of letting a person claim anything — so they go first.
+    //
+    // A SEPARATE object rather than mutating `signals`, which has another reader (the YoE
+    // constraint above). Widening a value in place for one consumer is how the other one starts
+    // disagreeing about what it holds.
+    const boardClaims = savedTab ? null : atsClaims(sessionActiveProfile);
+    const curationSignals = boardClaims?.skills?.length
+      ? { ...signals, skills: [...boardClaims.skills, ...(signals?.skills || [])] }
+      : signals;
     const derivedFilters = (req.query.curate === 'off' || savedTab)
       ? {}
-      : deriveProfileFilters(sessionActiveProfile, signals);
+      : deriveProfileFilters(sessionActiveProfile, curationSignals);
     const filterParams = { ...baseFilterParams };
     // Which derived keys ACTUALLY took effect (an explicit query param for the same dimension wins,
     // so a derived key can be computed and then not used). Only these are reported to the client,
@@ -7882,6 +7926,7 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
       resumeText,
       signalProfile,
       domainProfile: activeProfile,
+      claims: atsClaims(activeProfile),
     });
     const result = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
 
@@ -8202,6 +8247,7 @@ ${originalText}` }],
           resumeText: resumeContent,
           signalProfile: scoreSignalProfile,
           domainProfile: profile,
+          claims: atsClaims(profile),
         });
         return scoreAtsLocally({ job: { title: profile.profile_name, description: templateJd }, runtimeBasis,
           termWeights: atsTermWeightsForJob({ title: profile.profile_name }),
@@ -8305,6 +8351,7 @@ async function adoptEnhancedProfileResume(req, res) {
         resumeText: newContent,
         signalProfile,
         domainProfile: profile,
+        claims: atsClaims(profile),
       });
 
       const jobsToRescore = db.prepare(`
@@ -8469,6 +8516,7 @@ async function coreGenerateResume({ userId, jobId, job, tool, resumeText = "", e
           ? loadOrCreateSimpleApplyProfile(db, { userId, profileId: beforeProfile.id })
           : null,
         domainProfile: beforeProfile,
+        claims: atsClaims(beforeProfile),
       }),
       termWeights: atsTermWeightsForJob(job),
       synonyms: atsSynonyms(),
@@ -8625,6 +8673,7 @@ RULES:
     resumeText: resumeStripped,
     signalProfile,
     domainProfile: activeProfile,
+    claims: atsClaims(activeProfile),
   });
   const atsReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
   const atsScore = atsReport.score;
@@ -8708,6 +8757,7 @@ function scoreBaseResumeForApply(userId, jobId) {
       resumeText,
       signalProfile: loadOrCreateSimpleApplyProfile(db, { userId, profileId: activeProfile.id }),
       domainProfile: activeProfile,
+      claims: atsClaims(activeProfile),
     });
     const report = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
     return {
@@ -9014,6 +9064,7 @@ app.post("/api/generate", requireAuth, async (req, res) => {
         resumeText: cachedResumeText,
         signalProfile,
         domainProfile: activeProfile,
+        claims: atsClaims(activeProfile),
       });
       const freshReport = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
       const freshScoreVal = freshReport.score;

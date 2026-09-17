@@ -233,7 +233,19 @@ function parseJsonArray(value) {
   try { return JSON.parse(value || "[]"); } catch { return []; }
 }
 
-export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, domainProfile = {}, termWeights = null } = {}) {
+/**
+ * CC4 · `claims` — terms the CANDIDATE has asserted are true of them.
+ *
+ * ⛔ KEPT SEPARATE FROM `skills`, DELIBERATELY, AND THAT SEPARATION IS THE INTEGRITY PROPERTY.
+ * Everything in `skills` is résumé-derived or profile-declared; `claims` is the candidate saying
+ * "I have this" about a term a job asked for. Both COUNT toward the score — that is CC4's whole
+ * point, because a person's fit is not limited to what their current document happens to spell out
+ * — but the scorer reports which matches rested on a claim alone (`claimed_matches`), so the
+ * number can never be quietly inflated by ticking boxes. Merging the two lists would have been two
+ * lines shorter and would have destroyed exactly that.
+ */
+export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, domainProfile = {}, termWeights = null,
+                                       claims = null } = {}) {
   const profileKeywords = parseJsonArray(domainProfile.selected_keywords);
   const profileSkills = parseJsonArray(domainProfile.selected_tools);
   const profileVerbs = parseJsonArray(domainProfile.selected_verbs);
@@ -246,6 +258,9 @@ export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, doma
     titles: compactUnique([...(signalProfile?.titles || []), ...profileTitles], 24),
     skills: compactUnique([...(signalProfile?.skills || []), ...(signalProfile?.keywords || []), ...profileSkills, ...profileKeywords], 64),
     actionVerbs: compactUnique(profileVerbs, 32),
+    // CC4. Separate lists, so `claimed_matches` can name what rested on a claim.
+    claimedSkills: compactUnique(claims?.skills || [], 64),
+    claimedActionVerbs: compactUnique(claims?.actionVerbs || [], 32),
     yearsExperience: signalProfile?.yearsExperience ?? null,
     // The profile's own declared level, used by the seniority guard below. Read from the DOMAIN
     // PROFILE rather than parsed out of the resume, deliberately — see the guard's note.
@@ -952,8 +967,24 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
     job.requirements,
     job.skills,
   ].filter(Boolean).join("\n");
-  const matchText = [basis.resumeText, basis.skills.join(" "), basis.titles.join(" "), basis.actionVerbs.join(" ")].join("\n");
+  // ── CC4 · TWO INDEXES, AND THE SECOND ONE IS WHY THE SCORE STAYS HONEST ──────────────────────
+  //
+  // `evidenceText` is what the résumé and the declared profile actually say. `matchText` adds the
+  // terms the candidate has CLAIMED. Scoring runs against matchText, so a claim counts — which is
+  // CC4's requirement, and it is the right direction: a person's fit is not limited to what their
+  // current document happens to spell out.
+  //
+  // ⛔ BUT A CLAIM MUST NEVER BE INDISTINGUISHABLE FROM EVIDENCE. Anything matched by matchText and
+  // NOT by evidenceText rested on the candidate's word alone, and the report says so
+  // (`claimed_matches`). That is what replaces the old guarantee — which was "claims cannot affect
+  // the score at all" — with one that still holds when they can: the effect is real and it is
+  // never hidden. Without the second index this change would be a silent self-inflation channel.
+  const claimedTerms = [...(basis.claimedSkills || []), ...(basis.claimedActionVerbs || [])];
+  const evidenceText = [basis.resumeText, basis.skills.join(" "), basis.titles.join(" "), basis.actionVerbs.join(" ")].join("\n");
+  const matchText = claimedTerms.length ? [evidenceText, claimedTerms.join(" ")].join("\n") : evidenceText;
   const matchIndex = buildMatchIndex(matchText);
+  // Built only when there is a claim to attribute — a profile with none pays nothing for this.
+  const evidenceIndex = claimedTerms.length ? buildMatchIndex(evidenceText) : matchIndex;
 
   const { skills: jobTerms, competencies: jobCompetencies } = candidateTermsFromJob(jobText, basis, {
     company: job.company || "",
@@ -963,6 +994,12 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   const missingSkills = jobTerms.filter(term => !hasTerm(matchIndex, term, synonyms));
   const matchedCompetencies = jobCompetencies.filter(term => hasTerm(matchIndex, term, synonyms));
   const missingCompetencies = jobCompetencies.filter(term => !hasTerm(matchIndex, term, synonyms));
+
+  // CC4 · which matches rested on a claim rather than on résumé evidence. Computed from the two
+  // indexes rather than by re-deriving the claim list, so it cannot disagree with what was scored.
+  const claimedMatches = claimedTerms.length
+    ? [...matchedSkills, ...matchedCompetencies].filter(t => !hasTerm(evidenceIndex, t, synonyms))
+    : [];
 
   const { verbs: jobVerbs, generic: genericVerbs } = candidateActionVerbsFromJob(jobText, basis);
   const matchedVerbs = jobVerbs.filter(verb => hasVerb(matchIndex, verb));
@@ -1011,7 +1048,8 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   if (scoredTerms < MIN_SCORABLE_TERMS) {
     declineReasons.push(`Only ${scoredTerms} scorable term${scoredTerms === 1 ? "" : "s"} could be extracted from this posting.`);
   }
-  if (!(basis.resumeText || "").trim() && !basis.skills.length && !basis.titles.length) {
+  if (!(basis.resumeText || "").trim() && !basis.skills.length && !basis.titles.length
+      && !claimedTerms.length) {
     declineReasons.push("No resume text and no profile skills to score against.");
   }
 
@@ -1078,6 +1116,9 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
     // See the THIN_RESUME note in shared/atsBands.js for why this is a distinct state rather than
     // profile-relative cutpoints.
     resume_depth: resumeDepthWarning(basis),
+    // CC4. Present on every report; empty when the candidate has claimed nothing. A consumer that
+    // shows a score should be able to say how much of it rested on a claim.
+    claimed_matches: claimedMatches,
     tier1_matched: compactUnique(matchedSkills, 40),
     tier1_missing: compactUnique(missingSkills, 40),
     // AH3's third bucket. Competencies are real and wanted, but they are qualities, not skills —

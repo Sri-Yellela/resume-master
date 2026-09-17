@@ -6,9 +6,10 @@ project.
 
 **Run these in order. Each one changes the measurements the next depends on.** Do not parallelise.
 
-> **Status 2026-09-17: CC1, CC1b, CC2 and CC3 are DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
+> **Status 2026-09-17: CC1, CC1b, CC2, CC3 and CC4 are DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
 > `docs/CC1B_ROLE_KEY_SOFT_NULL.md`, `docs/CC2_SKILL_MATCHING.md`,
-> `docs/CC3_SYNONYMS_WIRED.md`). CC4 and CC5 are untouched.
+> `docs/CC3_SYNONYMS_WIRED.md`, `docs/CC4_CLAIMS_REACH_CURATION.md`). **CC5 is the last one**,
+> and CC4 added a second caller that depends on it — see CC4 §7.
 > The owner's board is now **849** rows, not 405. 277 of them are still UNCLASSIFIED in
 > job_role_map — nothing backfills it, which remains the obvious follow-up and is not done.
 >
@@ -317,6 +318,48 @@ REQUIREMENTS
 
 ---
 
+# CC4 — user-claimed terms reach curation ✅ DONE 2026-09-17 — `docs/CC4_CLAIMS_REACH_CURATION.md`
+
+```
+✅ A claim now counts toward the ATS band AND toward where jobs rank on the board, not only toward
+   the next generated résumé. Verified end to end against the real server: claiming "Kubernetes"
+   adds skills_include to the ranked keys, CHANGES the board order and moves demoted 372 -> 526;
+   withdrawing it reverts the order EXACTLY; /signals/refresh leaves the claim untouched.
+
+⛔ THE CODE ARGUED THE OPPOSITE, AND THE COMMENT IS NOW CORRECTED RATHER THAN DELETED. It read: "a
+   claim informs GENERATION; it never scores itself... writing a claim there would mean ticking a
+   box raised your own score with no résumé evidence behind it." CC4 reverses the CONCLUSION and
+   keeps the CONCERN: the scorer holds résumé evidence and claims in SEPARATE indexes and reports
+   every match that rested on a claim alone (`claimed_matches`), so the effect is real and never
+   hidden. Without that, this change would have been a silent self-inflation channel.
+
+✅ requirement 3 — profile_signal_suggestions is CANONICAL; selected_* is read-only legacy (still
+   read, never written with a new assertion).
+✅ requirement 4 — claims are safe BY CONSTRUCTION: refresh does not touch their table. The
+   response now states replaced="extracted", preserved="claims".
+✅ requirement 5 — an 'applied' term is withdrawable at last, and the withdrawal prunes BOTH
+   stores in one transaction, matched on the normalised key. That was an acknowledged omission
+   whose effect was a ONE-WAY DOOR on the user's own assertion about themselves.
+✅ requirement 6 — claimed skills are PREPENDED to the bridge's derived list, because
+   MAX_DERIVED_SKILLS takes the FIRST six and appending would drop every claim.
+⛔ requirement 7 — NOT fixed, as instructed. It is CC5's, and CC5 now has a second caller
+   depending on it: a claim moves the PER-REQUEST band, and scraped_jobs.ats_score is a cross-user
+   cache that cannot express a per-profile claim even in principle.
+
+⛔ THE ONE THING NOT VERIFIED, and it matters more here than in CC1-CC3 because CC4 changes
+   user-visible COPY: scripts/ag2ClaimsUi.mjs drives the real panel in a browser and CANNOT RUN on
+   this board — it needs scraped_jobs id=1974, domain_profiles id=1 and a base résumé for profile 1,
+   all destroyed by the deletion in docs/am1-recovery.md. PRE-EXISTING, not caused by CC4. So the
+   copy assertions updated INSIDE that harness are themselves unexecuted; the copy is still verified
+   at source level by two node tests that do run and pass. The in-browser render is not.
+
+Also found: profile_signal_suggestions was EMPTY and every selected_* was '[]', so there were no
+   claims to carry. This is a path being built, not data being migrated.
+```
+
+<details>
+<summary>The original CC4 brief, kept for the record</summary>
+
 # CC4 — Make user-claimed terms reach curation ⭐ the feature the owner asked for
 
 ```
@@ -362,6 +405,8 @@ Claim a term, then measure: board order changes, the band changes, generation st
 it and confirm all three revert. Trigger /signals/refresh and confirm claimed terms survive or the
 user was warned. Confirm nothing is pre-checked. Screenshot the claim surface.
 ```
+
+</details>
 
 ---
 

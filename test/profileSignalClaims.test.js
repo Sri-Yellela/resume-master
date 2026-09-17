@@ -129,19 +129,65 @@ test("AG2: a claim on a term seen only once is still shown", () => {
   assert.deepEqual(listProfileSignalSuggestions(db, ctx).claimedSkills.map(s => s.label), ["Kubernetes"]);
 });
 
-test("AG2: a term applied through the old one-way path still reads as a claim", () => {
+test("CC4: a term APPLIED through the old one-way path is now withdrawable", () => {
+  // ⛔ THIS TEST ASSERTED THE OPPOSITE UNTIL CC4, and it was honest about why: "it is not
+  // withdrawable here: it also lives in domain_profiles.selected_tools, and removing it from only
+  // one of the two stores would leave them disagreeing."
+  //
+  // That was an acknowledged omission whose effect was a ONE-WAY DOOR on the user's own assertion
+  // about themselves — the one thing this feature must not have. Requirement 5 says to fix it as
+  // part of unifying the stores, and unifying them is what makes it fixable: the withdrawal now
+  // removes the term from BOTH, in one transaction, so the disagreement the old comment feared
+  // cannot happen. The test asserts that consequence, not just the withdrawal.
   const db = freshDb();
   setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes" });
   db.prepare("UPDATE profile_signal_suggestions SET assertion='applied', status='applied' WHERE signal_label='Kubernetes'").run();
+  // The legacy store, as the old 'applied' path would have left it.
+  db.prepare("UPDATE domain_profiles SET selected_tools = ?, selected_keywords = ? WHERE id = ?")
+    .run(JSON.stringify(["Kubernetes", "Terraform"]), JSON.stringify(["kubernetes"]), ctx.profileId);
 
   // It was the user clicking an ATS chip, which was them asserting the skill just the same.
   assert.ok(CLAIM_ASSERTIONS.has("applied"));
   assert.deepEqual(listProfileClaims(db, ctx).skills, ["Kubernetes"]);
 
-  // But it is not withdrawable here: it also lives in domain_profiles.selected_tools, and removing
-  // it from only one of the two stores would leave them disagreeing.
   setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes", claimed: false });
-  assert.deepEqual(listProfileClaims(db, ctx).skills, ["Kubernetes"]);
+
+  assert.deepEqual(listProfileClaims(db, ctx).skills, [],
+    "an applied term must be withdrawable — an assertion the user cannot take back is a trap");
+
+  // ⛔ AND BOTH STORES MOVED. This is the half the old comment was protecting: if the canonical
+  // store says "withdrawn" while buildRuntimeAtsBasis keeps folding selected_* into the scored
+  // text, the withdrawal silently does not work.
+  const row = db.prepare("SELECT selected_tools, selected_keywords FROM domain_profiles WHERE id = ?").get(ctx.profileId);
+  assert.deepEqual(JSON.parse(row.selected_tools), ["Terraform"],
+    "the withdrawn term must leave the legacy list, and nothing else may leave with it");
+  assert.deepEqual(JSON.parse(row.selected_keywords), [],
+    "matched on the normalised key, so a different spelling in the legacy store is still pruned");
+});
+
+test("CC4: withdrawal prunes the legacy list by NORMALISED key, not by raw label", () => {
+  // The two stores were written by different paths and do not agree on spelling or case, so an
+  // exact-string prune would leave the term scoring after it was withdrawn.
+  const db = freshDb();
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "CI/CD" });
+  db.prepare("UPDATE domain_profiles SET selected_tools = ? WHERE id = ?")
+    .run(JSON.stringify(["ci/cd", "Docker"]), ctx.profileId);
+
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "CI/CD", claimed: false });
+  const tools = JSON.parse(db.prepare("SELECT selected_tools FROM domain_profiles WHERE id = ?").get(ctx.profileId).selected_tools);
+  assert.deepEqual(tools, ["Docker"]);
+});
+
+test("CC4: withdrawing something never claimed touches neither store", () => {
+  const db = freshDb();
+  db.prepare("UPDATE domain_profiles SET selected_tools = ? WHERE id = ?")
+    .run(JSON.stringify(["Kubernetes"]), ctx.profileId);
+  setProfileSignalClaim(db, { ...ctx, kind: "skill", label: "Kubernetes", claimed: false });
+  // No assertion row existed, so nothing was withdrawn and the legacy list is NOT pruned — the
+  // prune is a consequence of a withdrawal, not an independent delete.
+  const tools = JSON.parse(db.prepare("SELECT selected_tools FROM domain_profiles WHERE id = ?").get(ctx.profileId).selected_tools);
+  assert.deepEqual(tools, ["Kubernetes"],
+    "a no-op withdrawal must not quietly edit the legacy store");
 });
 
 // ── Migration 089: the two axes are independent ─────────────────────────────────────────────────

@@ -179,14 +179,69 @@ export function listProfileSignalSuggestions(db, { userId, profileId }) {
  * 'claimed' is the candidate's own assertion, and it is REVERSIBLE. status is a plain TEXT column
  * with no CHECK constraint, so this needs no migration.
  *
- * WHY IT DOES NOT WRITE domain_profiles
- * buildRuntimeAtsBasis folds selected_tools/selected_keywords straight into the text the ATS report
- * scores the resume against. Writing a claim there would mean ticking a box raised your own score
- * with no resume evidence behind it — which is exactly the "add this to improve your score"
- * incentive this feature must not create. A claim informs GENERATION; it never scores itself.
+ * ── CC4 · THIS TABLE IS THE CANONICAL STORE FOR USER ASSERTIONS ────────────────────────────────
+ *
+ * There were two stores for one idea: this table (assertion / claimed_at / withdrawal / history)
+ * and `domain_profiles.selected_keywords|tools|verbs` (a flat list, written only by the legacy
+ * 'applied' path). Two stores for one concept is the defect shape this codebase pays for most, so
+ * one of them is now canonical and it is THIS one — it is the only one that records WHO said it,
+ * WHEN, and can express a withdrawal.
+ *
+ * `selected_*` is now READ-ONLY LEGACY: buildRuntimeAtsBasis still folds it in, so nothing a user
+ * previously applied is lost, but no new user assertion is written there. Claims reach the scorers
+ * through `claims` on the runtime basis instead (server.js's atsClaims), and reach the board's
+ * ranking through the bridge's derived skills.
+ *
+ * ⛔ THE COMMENT THAT USED TO BE HERE SAID THE OPPOSITE, AND IT WAS RIGHT AT THE TIME. It read:
+ * "Writing a claim there would mean ticking a box raised your own score with no resume evidence
+ * behind it — which is exactly the 'add this to improve your score' incentive this feature must
+ * not create. A claim informs GENERATION; it never scores itself."
+ *
+ * CC4 reverses the CONCLUSION and keeps the CONCERN. A claim now does affect the score, because a
+ * person's fit is not limited to what their current document happens to spell out — that was the
+ * whole reason the owner asked for this. What replaces the old guarantee is not nothing: the
+ * scorer keeps résumé evidence and claims in SEPARATE indexes and reports every match that rested
+ * on a claim alone (`claimed_matches`), so the effect is real and never hidden. And the incentive
+ * is still fought where it is actually created — in the copy and the interaction: nothing is ever
+ * pre-checked, and the chip reads "I have this", never "add this to improve your score".
  *
  * @returns the same shape listProfileSignalSuggestions returns, so callers refresh in one round trip.
  */
+/**
+ * CC4 · Removes a term from the LEGACY `domain_profiles.selected_*` lists.
+ *
+ * Only ever called on WITHDRAWAL. `selected_*` is read-only for new assertions — nothing writes a
+ * claim there any more — but a term the user is taking back must leave both stores or the canonical
+ * one says "withdrawn" while buildRuntimeAtsBasis keeps folding it into the scored text, and the
+ * withdrawal would appear not to work.
+ *
+ * Matched on the normalised signal key rather than the raw label, because the two stores were
+ * written by different paths and will not agree on spelling or case.
+ */
+function pruneLegacySelectedTerm(db, { userId, profileId, label }) {
+  const key = profileSignalKey(label);
+  if (!key) return;
+  const row = db.prepare(
+    "SELECT selected_keywords, selected_tools, selected_verbs FROM domain_profiles WHERE id = ? AND user_id = ?"
+  ).get(profileId, userId);
+  if (!row) return;
+  const prune = (json) => {
+    let list;
+    try { list = JSON.parse(json || "[]"); } catch { return { json, changed: false }; }
+    if (!Array.isArray(list)) return { json, changed: false };
+    const kept = list.filter(v => profileSignalKey(v) !== key);
+    return { json: JSON.stringify(kept), changed: kept.length !== list.length };
+  };
+  const kw = prune(row.selected_keywords), tl = prune(row.selected_tools), vb = prune(row.selected_verbs);
+  if (!kw.changed && !tl.changed && !vb.changed) return;
+  db.prepare(`
+    UPDATE domain_profiles
+    SET selected_keywords = ?, selected_tools = ?, selected_verbs = ?, updated_at = unixepoch()
+    WHERE id = ? AND user_id = ?
+  `).run(kw.json, tl.json, vb.json, profileId, userId);
+  console.log(`[profile-claims] pruned "${label}" from the legacy selected_* lists on profile ${profileId}`);
+}
+
 export function setProfileSignalClaim(db, { userId, profileId, kind = "skill", label, claimed = true }) {
   const allowedKind = kind === "action_verb" ? "action_verb" : "skill";
   const nextLabel = cleanProfileSignalLabel(label);
@@ -217,17 +272,35 @@ export function setProfileSignalClaim(db, { userId, profileId, kind = "skill", l
     // gathered is not the user's to lose by changing their mind. Its queue state is untouched: if
     // they had also queued it for enhancement, that is a different answer to a different question.
     //
-    // Only a CLAIMED row is withdrawable. An 'applied' one also lives in
-    // domain_profiles.selected_tools, and silently un-claiming it here would leave the two stores
-    // disagreeing; that legacy path has never had a remove and this is not the place to add one.
-    db.prepare(`
-      UPDATE profile_signal_suggestions
-      SET assertion = 'none',
-          status = CASE WHEN queue_state = 'queued' THEN 'selected' ELSE 'inactive' END,
-          claimed_at = NULL,
-          updated_at = unixepoch()
-      WHERE user_id = ? AND profile_id = ? AND signal_key = ? AND assertion = 'claimed'
-    `).run(userId, profileId, nextKey);
+    // ⛔ CC4 · AN 'applied' TERM IS NOW WITHDRAWABLE TOO, which it was not.
+    //
+    // The old code matched `assertion = 'claimed'` only, and said so: "an 'applied' one also lives
+    // in domain_profiles.selected_tools, and silently un-claiming it here would leave the two
+    // stores disagreeing; that legacy path has never had a remove and this is not the place to add
+    // one." That was an acknowledged omission, and its effect was that a term the user had applied
+    // could never be taken back — a one-way door on the user's own assertion about themselves,
+    // which is the one thing this feature must not have.
+    //
+    // Requirement 5 says to fix it as part of unifying the stores, and unifying them is what makes
+    // it fixable: the withdrawal below removes the term from BOTH, in one transaction, so they
+    // cannot be left disagreeing. `selected_*` is read-only for new assertions but a REMOVE is not
+    // a new assertion — it is the legacy store being brought into line with the canonical one.
+    const removed = db.transaction(() => {
+      const r = db.prepare(`
+        UPDATE profile_signal_suggestions
+        SET assertion = 'none',
+            status = CASE WHEN queue_state = 'queued' THEN 'selected' ELSE 'inactive' END,
+            claimed_at = NULL,
+            updated_at = unixepoch()
+        WHERE user_id = ? AND profile_id = ? AND signal_key = ?
+          AND assertion IN ('claimed', 'applied')
+      `).run(userId, profileId, nextKey);
+      if (r.changes) pruneLegacySelectedTerm(db, { userId, profileId, label: nextLabel });
+      return r.changes;
+    })();
+    if (!removed) {
+      console.log(`[profile-claims] nothing to withdraw for "${nextLabel}" on profile ${profileId}`);
+    }
   }
   console.log(`[profile-claims] ${claimed ? "claimed" : "withdrew"} ${allowedKind} "${nextLabel}" on profile ${profileId} for user ${userId}`);
   return listProfileSignalSuggestions(db, { userId, profileId });
