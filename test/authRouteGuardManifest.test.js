@@ -73,6 +73,12 @@ const PUBLIC = new Set([
 
 // ── ADMIN: requires an admin session ─────────────────────────────────────────────────────────
 const ADMIN = new Set([
+  // AF residual. The full-auto kill switch, reachable without a SQL console. Admin-only and
+  // deliberately not user-facing: it stops applications going out to real employers for EVERY
+  // user, not for the caller.
+  "GET /api/admin/full-auto",
+  "PUT /api/admin/full-auto",
+  "DELETE /api/admin/full-auto",
   "GET /api/admin/backups",
   "POST /api/admin/backups",
   "POST /api/admin/backups/restore",

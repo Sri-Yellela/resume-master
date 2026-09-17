@@ -27,6 +27,7 @@ import { classifyRuntimeError } from "../shared/failureAttribution.js";
 import { getAutomationReadiness, getMissingApplyPrerequisites } from "../services/integrationReadiness.js";
 import { canUseAPlusResume, normalisePlanTier } from "../services/entitlements.js";
 import { monetisationEnabledFromEnv } from "../shared/monetisation.js";
+import { fullAutoDisabled as sharedFullAutoDisabled } from "../services/appSettings.js";
 
 // Live read through the one shared parser, exactly as server.js does — same flag, same function,
 // so this route and the gates over there cannot disagree. ⛔ See shared/monetisation.js: ON is a
@@ -505,21 +506,18 @@ export default function applyRoutes(app, db, requireAuth, buildAutofillPayload, 
   const ATS_AUTO_APPLY_THRESHOLD = envInt("ATS_AUTO_APPLY_THRESHOLD", 30);
   let activeWorkers = 0;
 
-  const getSetting = (key) => {
-    try { return db.prepare("SELECT value FROM app_settings WHERE key=?").get(key)?.value ?? null; }
-    catch { return null; }   // table absent on an un-migrated DB: fall through to env
-  };
-  const truthy = (v) => ["1", "true", "yes", "on"].includes(String(v ?? "").trim().toLowerCase());
-
   /**
    * KILL SWITCH (requirement 4). Blocks all full-auto submission; semi mode keeps working.
    * The DB row wins so it can be flipped with no restart and no deploy; the env var is the
    * boot-level default. Read at request time — never cached — which is the whole point.
+   *
+   * The body of this moved to services/appSettings.js when the admin write path was added, so the
+   * surface that FLIPS the switch and the pipeline that OBEYS it cannot disagree about what it
+   * currently says. Behaviour is unchanged and pinned by applyGuards.test.js, which drives both
+   * the env default and a DB override that reverses it.
    */
   function fullAutoDisabled() {
-    const row = getSetting("apply_full_auto_disabled");
-    if (row !== null) return truthy(row);
-    return truthy(process.env.APPLY_FULL_AUTO_DISABLED);
+    return sharedFullAutoDisabled(db);
   }
 
   /** Applications actually submitted for this user in the trailing 24h. */

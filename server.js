@@ -65,6 +65,7 @@ import { createPasswordReset, consumePasswordReset, findUserForPasswordReset } f
 import { sendPasswordResetEmail } from "./services/emailService.js";
 import { allowedModesForTier, canUseAPlusResume, canUseGenerate, canUseMode, hasPlanAtLeast, nextPlan, normalisePlanTier, planForMode } from "./services/entitlements.js";
 import { monetisationEnabledFromEnv } from "./shared/monetisation.js";
+import { fullAutoState, setSetting, clearSetting, FULL_AUTO_KEY } from "./services/appSettings.js";
 import {
   normalizeResumeHtml as formatterNormalizeResumeHtml,
   stripResumeHtml as formatterStripResumeHtml,
@@ -6470,6 +6471,48 @@ app.patch("/api/admin/domain-profile-requests/:id/status", requireAdmin, (req, r
 app.get("/api/admin/users/:id/profile", requireAdmin, (req, res) => {
   res.json(db.prepare("SELECT * FROM user_profile WHERE user_id=?").get(parseInt(req.params.id))||{});
 });
+// ── AF residual: A WRITE PATH FOR THE FULL-AUTO KILL SWITCH ────────────────────────────
+//
+// The switch has worked since 072. `fullAutoDisabled()` reads app_settings first and falls back to
+// APPLY_FULL_AUTO_DISABLED, and routes/apply.js re-checks it PER JOB, not only at admission — so a
+// run already in flight stops submitting the moment it flips. What was missing was any way to flip
+// it without opening a SQL console or redeploying, and a kill switch you cannot reach in a hurry
+// is not a kill switch. That is the whole of this change: reach, not mechanism.
+//
+// THREE STATES, NOT TWO, which is why DELETE exists alongside PUT. "forced off", "forced on" and
+// "inherit whatever the deploy sets" are genuinely different, and without a way to remove the row
+// there is no way back to the third. A PUT of `false` is NOT the same as clearing: it pins the
+// switch open even if a later deploy sets APPLY_FULL_AUTO_DISABLED=1.
+app.get("/api/admin/full-auto", requireAdmin, (_req, res) => {
+  res.json(fullAutoState(db));
+});
+
+app.put("/api/admin/full-auto", requireAdmin, (req, res) => {
+  // Strict boolean. A kill switch must never be flipped by a typo coercing to truthy — "flase"
+  // would otherwise read as ON and quietly resume submitting to real employers.
+  const { disabled } = req.body || {};
+  if (typeof disabled !== "boolean") {
+    return res.status(400).json({
+      error: "disabled must be a boolean",
+      hint: 'PUT {"disabled": true} to stop full-auto submission, {"disabled": false} to pin it on, DELETE to inherit the deploy default.',
+    });
+  }
+  setSetting(db, FULL_AUTO_KEY, disabled);
+  const state = fullAutoState(db);
+  // Logged rather than silent: this is the one setting whose change has a real-world consequence
+  // — applications going out to employers — and app_settings keeps only the current value, so the
+  // log is the only record that it moved and who moved it.
+  console.warn(`[killswitch] full-auto ${state.disabled ? "DISABLED" : "ENABLED"} by admin ${req.user?.id} (override)`);
+  res.json(state);
+});
+
+app.delete("/api/admin/full-auto", requireAdmin, (req, res) => {
+  clearSetting(db, FULL_AUTO_KEY);
+  const state = fullAutoState(db);
+  console.warn(`[killswitch] full-auto override CLEARED by admin ${req.user?.id}; now ${state.disabled ? "disabled" : "enabled"} from env`);
+  res.json(state);
+});
+
 app.get("/api/admin/users/:id/applications", requireAdmin, (req, res) => {
   res.json(db.prepare("SELECT * FROM job_applications WHERE user_id=? ORDER BY applied_at DESC").all(parseInt(req.params.id)));
 });
