@@ -6989,6 +6989,14 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       filterParams.target_titles = profileTargetTitles;
       appliedDerivedKeys.push('target_title_exact', 'target_title_role');
     }
+    // CC1b — rank the rows the softened role join now admits. A posting in the profile's declared
+    // bucket leads; one nobody has classified follows. It ranks AHEAD of the title keys (see
+    // DERIVED_RANK_ORDER) because the declared role is coarser than a target title: "the kind of
+    // work you said you do" before "the words you used for it".
+    //
+    // ⛔ Only on a board that HAS the jrm join. The Saved tab drops the join, so asking for this
+    // key there would reference an alias that does not exist.
+    if (!savedTab) appliedDerivedKeys.push('role_key');
     // PROVENANCE, carried rather than re-derived. buildJobFilters cannot tell a value the user typed
     // from one this bridge inferred — the merged object looks identical either way — and X2's rule
     // turns entirely on that distinction: a filter the USER SET excludes rows, a filter DERIVED on
@@ -7065,13 +7073,30 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       }
       const offset  = (pg - 1) * ps;
 
-      // The role_key join is what makes this board profile-scoped, and it is an INNER JOIN — so it
-      // is also what can make a row unreachable. On the Saved tab it is dropped entirely (see
-      // savedTab above): the user's own star already answers "does this belong on your board?", and
-      // no classifier bucket may overrule it. Everywhere else it stays exactly as it was.
+      // ── CC1b · THE ROLE JOIN IS NOW A *LEFT* JOIN, AND ABSENCE NO LONGER HIDES A ROW ──────────
+      //
+      // This was an INNER JOIN, and it was the board's last silent exclusion: 277 of 2,460 active
+      // rows have no job_role_map row at all — 148 of them titled "...Engineer" — and were
+      // unreachable on EVERY profile, whatever their title. Three of the four graded-5 postings
+      // CC1 still could not reach were in that set. `am3RestoreBoard` restores scraped_jobs without
+      // job_role_map, so a restore silently un-boards a quarter of what it restores.
+      //
+      // ⛔ role_key STAYS IN THE ON CLAUSE, and that is a correctness requirement rather than a
+      // leftover. job_role_map's PRIMARY KEY is (job_id, role_key), so a job MAY hold several
+      // buckets; joining on job_id alone would emit one board row per bucket and duplicate
+      // postings. With role_key in the ON clause at most one row can ever match. (Zero jobs hold
+      // more than one bucket today — but the schema permits it, and a duplicate-emitting board is
+      // not a failure anyone would read as a join bug.)
+      //
+      // The consequence is that `jrm.role_key IS NULL` now means EITHER "never classified" OR
+      // "classified as something else", which are exactly the two states that must be told apart —
+      // hence the NOT EXISTS in the WHERE clause below. It costs one indexed probe on the PK.
+      //
+      // On the Saved tab the join is dropped entirely (see savedTab above): the user's own star
+      // already answers "does this belong on your board?", and no classifier bucket may overrule it.
       const joinClause = `
         FROM scraped_jobs sj
-        ${savedTab ? '' : 'JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?'}
+        ${savedTab ? '' : 'LEFT JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?'}
         LEFT JOIN user_jobs uj
           ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
       `;
@@ -7088,8 +7113,19 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       // `is_active = 1` here the row would have been preserved in the database and still invisible to
       // its owner, which is the same disappearance with extra steps. mapJobRow exposes isActive so
       // the card can label it.
+      // CC1b — the soft-null role predicate. "On the board if it is in my declared bucket, OR if
+      // nobody has classified it yet." An explicit mismatch is still excluded, which is what keeps
+      // the board's SCOPE hard; only ABSENCE was ever the defect. Same shape and same reasoning as
+      // the work_type / employment_type / category clauses above, which say it outright: a row must
+      // never be hidden purely because we have not classified it, only on an explicit mismatch once
+      // we have. Takes no bound parameter — the roleKey is already bound in the LEFT JOIN.
+      const roleSql = savedTab ? '' : `AND (
+            jrm.role_key IS NOT NULL
+            OR NOT EXISTS (SELECT 1 FROM job_role_map m WHERE m.job_id = sj.job_id)
+          )`;
       const whereClauseFor = (rich) => `
         WHERE ${savedTab ? '1 = 1' : 'sj.is_active = 1'}
+          ${roleSql}
           ${keyFilter}
           ${locFilter}
           AND ${titleFilter.sql}

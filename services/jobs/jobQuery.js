@@ -121,14 +121,15 @@ function buildQSql(q) {
  * applied from the profile's own declared role and target titles, i.e. things the user set". The
  * second half was wrong, and CC1 removed it: the user set the target TITLES, not the substring-AND
  * matching RULE, so the titles now rank here like everything else (see target_title_exact /
- * target_title_role below). What remains hard is the job_role_map role_key INNER JOIN — the
- * profile's DECLARED role, a value and a rule chosen together when the profile was created.
+ * target_title_role below). What remains hard is ONE thing — a posting classified into a role the
+ * profile did not declare. The declared role is a value and a rule the user chose together, so an
+ * explicit mismatch may still exclude.
  *
- * ⛔ THAT JOIN IS NOW THE BOARD'S BINDING EXCLUSION, and it is an INNER JOIN on a DERIVED table:
- * 277 of 2,460 active rows have no job_role_map row at all and are invisible on every profile,
- * 148 of them titled "...Engineer". By this list's own rule — "a row must never be hidden purely
- * because we have not classified it" — an unclassified row is RANK_UNKNOWN, not an explicit
- * mismatch. Measured and reported in docs/CC1_BOARD_MEMBERSHIP.md §4; tracked as CC1b.
+ * ⛔ CC1b SOFTENED THAT JOIN WITHOUT REMOVING THE SCOPE. It was an INNER JOIN on a DERIVED table,
+ * so 277 of 2,460 active rows — no map row at all, 148 of them titled "...Engineer" — were
+ * invisible on every profile. They are now IN and ranked as NOT ESTABLISHED; a row classified into
+ * a DIFFERENT role is still excluded, because the declared role is a value and a rule the user
+ * chose together. See the role_key rank below and docs/CC1B_ROLE_KEY_SOFT_NULL.md.
  *
  * Order is relevance precedence, coarsest first: is this the kind of job you asked for, at your
  * level, using your skills, that you could actually accept.
@@ -173,7 +174,7 @@ function buildQSql(q) {
 // candidate (b) of the brief implemented as ordering. One key with the broad rule would have made
 // "Backend Engineer" and "Software Engineer" indistinguishable to a user who asked for the latter.
 const DERIVED_RANK_ORDER = [
-  'q', 'target_title_exact', 'target_title_role',
+  'q', 'role_key', 'target_title_exact', 'target_title_role',
   'experience_levels', 'skills_include', 'sponsorship_friendly', 'company_sponsorship',
 ];
 
@@ -274,6 +275,45 @@ function buildJobFilters(params = {}, opts = {}) {
   // there is no `else` branch that turns it into a WHERE predicate. That asymmetry is deliberate
   // and is the fix: an explicit user filter may exclude, and this is not one. The caller decides
   // whether to ask for the ranking at all by whether it passes `target_titles`.
+  // ── CC1b · role_key RANKS THE UNCLASSIFIED; IT STILL EXCLUDES A REAL MISMATCH ─────────────────
+  //
+  // The board's remaining hard gate was `JOIN job_role_map jrm ON ... AND jrm.role_key = ?`, an
+  // INNER JOIN on a DERIVED table. It conflated two states that this file's own vocabulary insists
+  // are different:
+  //
+  //   classified as something else  -> an EXPLICIT MISMATCH. Still excluded, and rightly: the user
+  //                                   DECLARED their role when they created the profile, so both
+  //                                   the value and the rule are theirs. Scope stays hard.
+  //   never classified at all       -> NOT ESTABLISHED. Measured: 277 of 2,460 active rows had no
+  //                                   map row, 148 of them titled "...Engineer", and they were
+  //                                   invisible on EVERY profile. `am3RestoreBoard` restores
+  //                                   scraped_jobs without job_role_map, so a restore silently
+  //                                   un-boards a quarter of what it restores.
+  //
+  // The soft-null rule three other columns in this query already follow says the second must not be
+  // hidden: "a row must never be hidden purely because we have not classified it — only on an
+  // explicit mismatch once we have." This is that rule, applied to the one column that got a hard
+  // join instead of a soft-null predicate.
+  //
+  // ⛔ TWO VALUES ONLY, AND RANK_MISS IS UNREACHABLE HERE BY DESIGN. The caller's WHERE clause has
+  // already dropped explicit mismatches, so this expression can only ever produce RANK_MATCH (this
+  // row is in the profile's declared bucket) or RANK_UNKNOWN (nobody has classified it). That is
+  // why it contributes nothing to `demotedSql`, which counts RANK_MISS only — and correctly so: an
+  // unclassified row has not been judged, so reporting it as "demoted" would be a claim nobody made.
+  //
+  // ⛔ IT NAMES THE `jrm` ALIAS, WHICH ONLY THE BOARD QUERY DEFINES. Every other expression in this
+  // file is `sj.`-prefixed for the same reason — the SQL is written against the caller's aliases —
+  // but this one is the only key that requires a join the caller might not have. It activates ONLY
+  // when `derivedKeys` names it, and the board is the only caller that names it. A caller that
+  // passes `role_key` without the LEFT JOIN gets a SQL error at prepare time, which is the loud
+  // failure rather than a silently wrong board.
+  if (isDerived('role_key')) {
+    ranks.role_key = {
+      sql: `CASE WHEN jrm.role_key IS NOT NULL THEN ${RANK_MATCH} ELSE ${RANK_UNKNOWN} END`,
+      params: [],
+    };
+  }
+
   const targetTitles = toArray(params.target_titles)
     .map(t => titleTokens(t))
     .filter(tokens => tokens.length);

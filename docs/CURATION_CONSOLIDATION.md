@@ -6,9 +6,12 @@ project.
 
 **Run these in order. Each one changes the measurements the next depends on.** Do not parallelise.
 
-> **Status 2026-09-17: CC1 is DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`). CC2–CC5 are untouched.
-> CC1 changed the population CC2 measures over — the owner's board is now 572 rows, not 405 — so
-> CC2's "217 of 1,266 rows match on skills" must be re-measured before it is acted on.
+> **Status 2026-09-17: CC1 + CC1b are DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
+> `docs/CC1B_ROLE_KEY_SOFT_NULL.md`). CC2–CC5 are untouched.
+> CC1 and CC1b both changed the population CC2 measures over — the owner's board is now **849**
+> rows, not 405 — so CC2's "217 of 1,266 rows match on skills" must be re-measured before it is
+> acted on. Note that 277 of those 849 rows are still UNCLASSIFIED in job_role_map: nothing
+> backfills it, which is the obvious follow-up and is not done.
 
 ---
 
@@ -44,12 +47,19 @@ gutted.
    deleted are disclosed as `demoted` instead of being absent. Graded-5 reachability DOUBLED
    (2 -> 4 of the 8 still active). A target title matching nothing can no longer empty a board.
 
-⛔ THE ACCEPTANCE CRITERION IS MET FOR THE RULE UNDER TEST AND NOT FOR THE BOARD. The title rule
-   now excludes nothing at all, but 4 of 8 active graded-5 postings are still unreachable — all of
-   them blocked by the OTHER gate, the job_role_map INNER JOIN. 277 active rows have no map row and
-   are invisible on every profile (148 titled "...Engineer"). Requirement 4 asked for that to be
-   REPORTED, so it is reported and not fixed. Tracked as CC1b; the fix is a LEFT JOIN with role_key
-   as a third rank dimension, which reaches 8 of 8 but puts unclassified rows on every board.
+✅ CC1b ALSO DONE — see `docs/CC1B_ROLE_KEY_SOFT_NULL.md`. The other gate, the job_role_map INNER
+   JOIN, hid 277 active rows (148 titled "...Engineer") from EVERY profile because nobody had
+   classified them; am3RestoreBoard restores scraped_jobs without job_role_map, so a restore
+   silently un-boards much of what it restores. It is now a LEFT JOIN with a soft-null predicate
+   (in my declared bucket OR never classified) plus a role_key rank key. Board 572 -> 849, zero
+   duplicate rows, zero rows from another role, graded-5 reachability 4/8 -> 7/8.
+
+⛔ 7 OF 8, NOT 8 OF 8 — AND AN EARLIER NOTE HERE SAID 8. The eighth, Applied AI Engineer/Digital
+   Natives, is classified role_key='data' at 0.795 by a deliberate taxonomy where ML/AI is data
+   (same bucket as "Machine Learning Engineer"). That is an EXPLICIT mismatch, so excluding it is
+   the scope working. docs/ak2-ats-bands.md section 5 already recorded ML/AI as a PROFILE-ROUTING
+   question; reaching it needs a Data Science profile, not a looser board. 8 of 8 would require
+   letting explicit mismatches onto every board — what "WHAT NOT TO DO" warns against.
 
 ⛔ rho(board order, score) CANNOT be moved by CC1. Board order is discovered_at DESC; a membership
    rule changes WHICH rows are present, never their order. CC1 took it from -0.3193 to +0.0963 by

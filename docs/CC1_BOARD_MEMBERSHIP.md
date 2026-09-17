@@ -160,16 +160,29 @@ Every graded-5 posting still unreachable is blocked here, not by a title:
 
 The 18 active graded postings sit in map buckets `(none) 8 · engineering 4 · general 3 · data 3`.
 
-**Recommendation, not done here.** The same principle resolves it: an unclassified row is
-`RANK_UNKNOWN` — *not established* — and the codebase already holds that "a row must never be hidden
-purely because we have not classified it — only on an explicit mismatch once we have." A `LEFT JOIN`
-with `role_key` as a third rank dimension would reach 8 of 8. It is **not** in this commit because
-the brief scoped requirement 4 to *report*, and because it puts unclassified rows on every profile's
-board (572 → 849 for engineering), which is a product decision of its own. Track it as **CC1b**.
+**Recommendation — DONE as CC1b, see `docs/CC1B_ROLE_KEY_SOFT_NULL.md`.** The same principle
+resolves it: an unclassified row is `RANK_UNKNOWN` — *not established* — and the codebase already
+holds that "a row must never be hidden purely because we have not classified it — only on an
+explicit mismatch once we have." A `LEFT JOIN` with a soft-null predicate and `role_key` as a rank
+dimension takes the board to 849 rows and graded-5 reachability to **7 of 8**.
+
+⛔ **CORRECTION: this section originally said "would reach 8 of 8". It reaches 7 of 8.** The 8-of-8
+figure came from a measurement in which role mismatches ALSO merely ranked — i.e. with role scoping
+removed entirely and all 2,460 active rows on every profile's board, which is exactly what the
+brief's "WHAT NOT TO DO" warns against and not what CC1b does. The eighth posting
+(`Applied AI Engineer, Digital Natives`) is classified `role_key='data'` at 0.795 confidence by a
+deliberate taxonomy in which ML/AI is `data` — the same bucket `classifyTitle` gives "Machine
+Learning Engineer". `docs/ak2-ats-bands.md` §5 already recorded that as a **profile-routing**
+question, not a scoring or membership one. Reaching it needs a Data Science profile, not a looser
+board.
 
 ⛔ So: the acceptance criterion is met **for the rule under test** — the title rule now excludes
 nothing at all — and is **not** met for the board as a whole. Stating it the other way round would
 be the more comfortable sentence and the false one.
+
+**Update after CC1b:** the board now reaches **7 of 8**, and the eighth is out because it is
+classified into a role this profile did not declare. That is the scope working, not the gate
+failing.
 
 ---
 
@@ -210,7 +223,8 @@ also caps how much any membership rule can achieve.
 
 ## 7 · What was NOT done, and why
 
-- **The `job_role_map` INNER JOIN.** Reported above as requirement 4 asks; recommended as CC1b.
+- **The `job_role_map` INNER JOIN.** Reported above as requirement 4 asks. ✅ **Done as CC1b** in the
+  following commit — `docs/CC1B_ROLE_KEY_SOFT_NULL.md`.
 - **A screenshot of the board.** CC1 changes membership and ordering, and contains **no client
   change at all** — verification was done at the API, which is where the change lives. A screenshot
   would need a harness user seeded with a base résumé (the board otherwise renders "Upload a profile

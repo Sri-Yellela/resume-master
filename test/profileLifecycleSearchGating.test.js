@@ -76,8 +76,14 @@ test("target_titles ranks in TWO keys, so specialisation demotes instead of disa
   // a user who asked for the latter; one narrow key would have buried the five graded-5 postings at
   // the bottom instead of excluding them, which is barely better. Two keys order them: the user's
   // own phrasing, then the same role noun, then everything else.
-  assert.match(jobQuery, /'q', 'target_title_exact', 'target_title_role',/,
-    "both keys must be in DERIVED_RANK_ORDER, and ahead of the other dimensions");
+  // Sliced to the declaration rather than matched against the whole file, so a failure prints the
+  // array and not 30KB of module.
+  const rankOrder = jobQuery.slice(
+    at(jobQuery, "const DERIVED_RANK_ORDER = ["),
+    at(jobQuery, "profileTitleSql's tokenisation"));
+  assert.match(rankOrder, /'q', 'role_key', 'target_title_exact', 'target_title_role',/,
+    "both title keys must be in DERIVED_RANK_ORDER, behind role_key (the declared role is " +
+    "coarser than the words used for it) and ahead of level/skills/sponsorship");
   // ⛔ NEITHER KEY MAY EVER REACH THE WHERE CLAUSE. Every other dimension in buildJobFilters has an
   // `else` branch that pushes it to `clauses` when the value is explicit rather than derived. These
   // two do not, and that asymmetry IS the fix.
@@ -98,8 +104,17 @@ test("the Saved tab is exempt from discovery narrowing, and only the Saved tab i
   // The three narrowings the Saved tab drops — role_key join, profileTitleSql, profile bridge — and
   // the proof that each drop is conditional on savedTab rather than removed outright. A regression
   // here is invisible in behaviour until someone stars a job the classifier bucketed elsewhere.
-  assert.match(server, /\$\{savedTab \? '' : 'JOIN job_role_map jrm ON jrm\.job_id = sj\.job_id AND jrm\.role_key = \?'\}/,
-    "the role_key INNER JOIN must still be present for every non-Saved board");
+  // ⛔ CC1b: the role join is a LEFT JOIN now, and the scope moved into a soft-null predicate.
+  // This assertion is STRICTER than the INNER JOIN one it replaces, because a LEFT JOIN on its own
+  // would drop the scope entirely and hand every profile every posting — the exact thing the brief
+  // said not to do. So both halves are pinned: the join must be LEFT, and the WHERE must still
+  // exclude an explicit mismatch.
+  assert.match(server, /\$\{savedTab \? '' : 'LEFT JOIN job_role_map jrm ON jrm\.job_id = sj\.job_id AND jrm\.role_key = \?'\}/,
+    "the role join must be a LEFT JOIN, keeping role_key in the ON clause so it cannot duplicate rows");
+  assert.match(server, /jrm\.role_key IS NOT NULL\s*\n\s*OR NOT EXISTS \(SELECT 1 FROM job_role_map m WHERE m\.job_id = sj\.job_id\)/,
+    "scope must survive as a soft-null predicate: in my bucket, OR never classified");
+  assert.match(server, /if \(!savedTab\) appliedDerivedKeys\.push\('role_key'\)/,
+    "and the rows the softened join admits must be RANKED, not merely let in");
   assert.match(server, /const derivedFilters = \(req\.query\.curate === 'off' \|\| savedTab\)/,
     "the profile bridge must not curate the user's own saved jobs");
   // The args list has to track the join, or every bound parameter after it shifts by one.
