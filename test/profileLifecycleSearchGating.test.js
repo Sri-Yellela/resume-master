@@ -2,8 +2,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { at } from "../test-support/sourceAnchors.js";
 
 const server = fs.readFileSync("server.js", "utf8");
+const jobQuery = fs.readFileSync("services/jobs/jobQuery.js", "utf8");
 const profileTitleFilter = fs.readFileSync("services/profileTitleFilter.js", "utf8");
 const domainProfiles = fs.readFileSync("routes/domainProfiles.js", "utf8");
 const jobsPanel = fs.readFileSync("client/src/panels/JobsPanel.jsx", "utf8");
@@ -22,24 +24,74 @@ test("jobs and scrape endpoints expose controlled no-profile and no-resume state
   assert.match(jobsPanel, /Upload the active profile's base resume before searching jobs/);
 });
 
-test("job grouping requires selected profile title predicates in addition to role family", () => {
-  assert.match(server, /import \{ profileTitleSql \} from "\.\/services\/profileTitleFilter\.js"/);
-  assert.match(profileTitleFilter, /export function profileTitleSql\(column, profile\)/);
-  // The board's filter was renamed activeProfileTitleFilter -> titleFilter, and
-  // scrapeProfileTitleFilter went with the retired scrape route. The three query paths that
-  // still exist must each apply it — that is the invariant this test is for (wrong-profile jobs
-  // must not leak into any of them), and it holds.
+test("the QUEUES narrow by target title; the BOARD ranks by it and excludes nothing", () => {
+  // ⛔ THIS TEST CHANGED MEANING IN CC1, AND IT WAS NOT RELAXED TO DO SO.
   //
-  // ONE deliberate exemption, added with the Saved-tab fix: the board's own path applies the title
-  // filter unless `savedTab`. The Saved ★ tab lists jobs the user explicitly starred, so narrowing it
-  // by the profile's target titles hid the user's own saved jobs from them — measured at 1 of 3.
-  // The exemption is asserted here, rather than the test simply being relaxed, so that it stays a
-  // named exception to a live invariant instead of quietly becoming the rule.
-  assert.match(server, /const titleFilter = savedTab \? \{ sql: "1 = 1", params: \[\] \}\s*\n\s*: profileTitleSql\("sj\.title", sessionActiveProfile\)/);
-  assert.match(server, /const savedTab = starred === '1'/,
-    "the exemption must be keyed off the Saved tab alone, not off any broader condition");
+  // It used to assert that all three query paths apply profileTitleSql as a WHERE predicate, on the
+  // invariant "wrong-profile jobs must not leak into any of them". Two of the three still do. The
+  // BOARD no longer does, deliberately, and the old assertion is replaced by a stricter pair: the
+  // board must apply NO title predicate AND must rank by the titles instead. Both halves are
+  // asserted, because dropping the filter without adding the ranking would be the regression this
+  // test now exists to catch — an unscoped board rather than a reordered one.
+  //
+  // Why: profileTitleSql requires EVERY token of a target title to appear in the posting title. The
+  // user set `target_titles`; they did not set that rule. Measured on 2,460 active rows for the
+  // owner's profile, it kept 405 rows and 8 of their own 30 graded postings — excluding 5 of the 12
+  // they graded 5, all of them titled "...Engineer". See the note on DERIVED_RANK_ORDER.
+  assert.match(server, /import \{ profileTitleSql, parseProfileArray \} from "\.\/services\/profileTitleFilter\.js"/);
+  assert.match(profileTitleFilter, /export function profileTitleSql\(column, profile\)/,
+    "the matcher still exists — the queues below use it");
+
+  // 1. THE BOARD BINDS NO TITLE PREDICATE. `titleFilter` survives as a literal so the SQL template
+  //    and its argument list keep their shape; what matters is that it can never be anything else.
+  assert.match(server, /const titleFilter = \{ sql: "1 = 1", params: \[\] \};/,
+    "the board must not splice a title predicate into its WHERE clause");
+  // Comment lines are stripped first: the note above the change deliberately QUOTES the call it
+  // replaced, and an assertion that cannot tell prose from code would be satisfied by deleting the
+  // explanation. The invariant is about executable lines.
+  const serverCode = server
+    .split("\n")
+    .filter(line => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .join("\n");
+  assert.doesNotMatch(serverCode, /profileTitleSql\("sj\.title", sessionActiveProfile\)/,
+    "the board's own path must no longer call the hard matcher at all");
+
+  // 2. AND IT RANKS INSTEAD. Without this the change is a widening, not a reordering.
+  assert.match(server, /appliedDerivedKeys\.push\('target_title_exact', 'target_title_role'\)/,
+    "the titles must reach buildJobFilters as DERIVED rank keys");
+  assert.match(server, /filterParams\.target_titles = profileTargetTitles/);
+  assert.match(server, /const profileTargetTitles = savedTab \? \[\] : parseProfileArray\(sessionActiveProfile\?\.target_titles\)/,
+    "the Saved tab contributes no titles, so it is not reordered by them either");
+
+  // 3. THE QUEUES STILL NARROW, and that is a separate decision recorded rather than assumed.
+  //    /api/jobs/poll drives new-job notifications and /api/jobs/pending drives a work queue;
+  //    widening either changes how much a user is interrupted, which is not CC1's question. They
+  //    keep the hard matcher until someone decides otherwise on purpose.
   assert.match(server, /const pollProfileTitleFilter = profileTitleSql\("sj\.title", activeProfile\)/);
   assert.match(server, /const pendingProfileTitleFilter = profileTitleSql\("sj\.title", activeProfile\)/);
+});
+
+test("target_titles ranks in TWO keys, so specialisation demotes instead of disappearing", () => {
+  // One broad key would have made "Backend Engineer" and "Software Engineer" indistinguishable to
+  // a user who asked for the latter; one narrow key would have buried the five graded-5 postings at
+  // the bottom instead of excluding them, which is barely better. Two keys order them: the user's
+  // own phrasing, then the same role noun, then everything else.
+  assert.match(jobQuery, /'q', 'target_title_exact', 'target_title_role',/,
+    "both keys must be in DERIVED_RANK_ORDER, and ahead of the other dimensions");
+  // ⛔ NEITHER KEY MAY EVER REACH THE WHERE CLAUSE. Every other dimension in buildJobFilters has an
+  // `else` branch that pushes it to `clauses` when the value is explicit rather than derived. These
+  // two do not, and that asymmetry IS the fix.
+  // `at` rather than indexOf: a missing anchor returns -1, and slice reads -1 as an offset from
+  // the END — so the region silently becomes far too wide and the assertions below keep passing
+  // while they check most of the file instead of this block. See test/sourceAnchorGuard.test.js.
+  const block = jobQuery.slice(
+    at(jobQuery, "const targetTitles = toArray(params.target_titles)"),
+    at(jobQuery, "const locations = toArray(params.locations)"));
+  assert.ok(block.length > 200, "the target-title rank block must exist");
+  assert.doesNotMatch(block, /clauses\.push/,
+    "a target-title predicate in the WHERE clause is the defect CC1 removed");
+  assert.match(block, /ranks\.target_title_exact/);
+  assert.match(block, /ranks\.target_title_role/);
 });
 
 test("the Saved tab is exempt from discovery narrowing, and only the Saved tab is", () => {

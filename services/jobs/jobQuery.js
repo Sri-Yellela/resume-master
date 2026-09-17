@@ -116,9 +116,19 @@ function buildQSql(q) {
  *
  * Membership here is what makes the rule general rather than a special case for experience: every
  * key deriveProfileFilters() can emit is in this list, so the bridge has no way to exclude anything.
- * The board's SCOPE is still hard, and deliberately so — but scope is not the bridge's. It is the
- * job_role_map role_key join and profileTitleSql, both applied by the caller from the profile's own
- * declared role and target titles, i.e. things the user set when they created the profile.
+ * The board's SCOPE is still hard, and deliberately so — but scope is narrower than this comment
+ * used to claim. It said scope was "the job_role_map role_key join AND profileTitleSql, both
+ * applied from the profile's own declared role and target titles, i.e. things the user set". The
+ * second half was wrong, and CC1 removed it: the user set the target TITLES, not the substring-AND
+ * matching RULE, so the titles now rank here like everything else (see target_title_exact /
+ * target_title_role below). What remains hard is the job_role_map role_key INNER JOIN — the
+ * profile's DECLARED role, a value and a rule chosen together when the profile was created.
+ *
+ * ⛔ THAT JOIN IS NOW THE BOARD'S BINDING EXCLUSION, and it is an INNER JOIN on a DERIVED table:
+ * 277 of 2,460 active rows have no job_role_map row at all and are invisible on every profile,
+ * 148 of them titled "...Engineer". By this list's own rule — "a row must never be hidden purely
+ * because we have not classified it" — an unclassified row is RANK_UNKNOWN, not an explicit
+ * mismatch. Measured and reported in docs/CC1_BOARD_MEMBERSHIP.md §4; tracked as CC1b.
  *
  * Order is relevance precedence, coarsest first: is this the kind of job you asked for, at your
  * level, using your skills, that you could actually accept.
@@ -126,9 +136,70 @@ function buildQSql(q) {
 // company_sponsorship sits LAST, after sponsorship_friendly: the posting's own visa signal, thin as
 // it is, is a statement about the actual role, and company-level LCA evidence is a statement about
 // the employer. When the two disagree the more specific one should lead.
+//
+// ── CC1: target_titles JOINED THIS LIST, AND THAT IS THE WHOLE TASK ────────────────────────────
+//
+// The note above used to end "the board's SCOPE is still hard, and deliberately so — but scope is
+// not the bridge's. It is the job_role_map role_key join and profileTitleSql, both applied by the
+// caller from the profile's own declared role and target titles, i.e. things the user set."
+//
+// The second half of that was wrong, and it cost the board its best matches. The user DID set
+// `target_titles`. They did NOT set the MATCHING RULE. profileTitleSql tokenises each target title
+// and requires EVERY token to appear as a substring of the posting title — so someone who typed
+// "Software Engineer" was silently taken to mean "every title containing both the token software
+// and the token engineer". That rule is DERIVED, and under X2's own principle a derived rule ranks.
+//
+// Measured on this board before the change (2,460 active rows, profile 5, target ["Software
+// Engineer"]), and the acceptance criterion is the graded corpus:
+//
+//   rule                      board rows   graded kept   graded-5 kept
+//   substring-AND (before)           405         8/30            7/12   <- EXCLUDED 5 of the best
+//   token-OR                         533        22/30           12/12
+//   head-noun                        532        22/30           12/12
+//   rank, no title gate              572        30/30           12/12
+//
+// The five it excluded are all titled "...Engineer" and were graded 5 by the owner: Frontend
+// Engineer/Expansion, Full Stack Engineer/Fleet Scheduling, Backend Engineer/Credit Decisions,
+// Applied AI Engineer/Digital Natives, Full Stack Engineer/Link. The scorer rates Backend
+// Engineer/Credit Decisions its SECOND HIGHEST. They were removed before either scorer ran.
+//
+// And the ordering agreement moved with it — Spearman rho between the scorer's score and the
+// owner's own grades, over the graded corpus: -0.1769 under substring-AND, +0.1894 under token-OR,
+// +0.5340 with no title gate. A hard filter was actively ANTI-correlated with the owner's judgement.
+//
+// ⛔ TWO KEYS, NOT ONE, and the second is what makes this a rank rather than a widening.
+// `target_title_exact` keeps the user's own phrasing at the top; `target_title_role` puts the same
+// ROLE NOUN next; everything else follows. So specialisation DEMOTES instead of excluding, which is
+// candidate (b) of the brief implemented as ordering. One key with the broad rule would have made
+// "Backend Engineer" and "Software Engineer" indistinguishable to a user who asked for the latter.
 const DERIVED_RANK_ORDER = [
-  'q', 'experience_levels', 'skills_include', 'sponsorship_friendly', 'company_sponsorship',
+  'q', 'target_title_exact', 'target_title_role',
+  'experience_levels', 'skills_include', 'sponsorship_friendly', 'company_sponsorship',
 ];
+
+/**
+ * profileTitleSql's tokenisation, and the ONE place it is defined for ranking purposes.
+ *
+ * ⛔ IT MUST STAY IDENTICAL TO services/profileTitleFilter.js's. That function still exists and is
+ * still the matcher for the surfaces that legitimately narrow (the poll and pending queues), so a
+ * second, drifting tokenisation here would mean the board and the notifications disagreed about
+ * what a profile wants — the two-sides-joined-to-nothing shape. The stop list is copied verbatim,
+ * including the note that 'engineer'/'engineering' are deliberately NOT stop words: dropping them
+ * made "Senior Lead Engineer" produce zero tokens and match the entire board.
+ */
+const TITLE_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'ing', 'a', 'an', 'of', 'in', 'at', 'by', 'to', 'or',
+  'senior', 'junior', 'staff', 'principal', 'lead', 'entry', 'level', 'mid',
+  'ii', 'iii', 'iv', 'i',
+]);
+
+function titleTokens(rawTitle) {
+  return String(rawTitle || '').toLowerCase()
+    .split(/[\s,/\-()]+/)
+    .map(w => w.trim())
+    .filter(w => w.length > 2 && !TITLE_STOP_WORDS.has(w))
+    .slice(0, 4);
+}
 
 // Every rank expression is three-valued and sorts ASC, so the three states mean the same thing on
 // every dimension and the disclosure can count "demoted" once, uniformly:
@@ -183,6 +254,46 @@ function buildJobFilters(params = {}, opts = {}) {
     } else {
       clauses.push(qSql.clause); args.push(...qSql.params);
     }
+  }
+
+  // ── CC1 · target_titles RANKS, IT NEVER EXCLUDES ───────────────────────────────────────────────
+  //
+  // Two two-valued keys, in the vocabulary every other rank dimension uses (RANK_MATCH first,
+  // RANK_MISS last). There is no RANK_UNKNOWN state here for the same reason `q` has none: a
+  // posting's title is NOT NULL, so "we have not established this yet" cannot arise.
+  //
+  //   target_title_exact  every token of some target title appears in the posting title. This is
+  //                       EXACTLY what profileTitleSql used to require for MEMBERSHIP, so the rows
+  //                       that made up the old board are still the rows that lead the new one —
+  //                       which is what keeps this a reordering rather than a different product.
+  //   target_title_role   the ROLE NOUN of some target title appears. "Software Engineer" -> the
+  //                       last meaningful token, `engineer`, so Backend/Frontend/Full Stack
+  //                       Engineer rank here: the same role, a different specialisation.
+  //
+  // ⛔ NEVER PUSHED TO `clauses`, ON ANY PATH — unlike every other dimension in this function,
+  // there is no `else` branch that turns it into a WHERE predicate. That asymmetry is deliberate
+  // and is the fix: an explicit user filter may exclude, and this is not one. The caller decides
+  // whether to ask for the ranking at all by whether it passes `target_titles`.
+  const targetTitles = toArray(params.target_titles)
+    .map(t => titleTokens(t))
+    .filter(tokens => tokens.length);
+  if (targetTitles.length) {
+    // AND within a title, OR across titles — profileTitleSql's own shape.
+    const exactClause = targetTitles
+      .map(tokens => `(${tokens.map(() => 'LOWER(sj.title) LIKE ?').join(' AND ')})`)
+      .join(' OR ');
+    ranks.target_title_exact = {
+      sql: `CASE WHEN (${exactClause}) THEN ${RANK_MATCH} ELSE ${RANK_MISS} END`,
+      params: targetTitles.flatMap(tokens => tokens.map(t => `%${t}%`)),
+    };
+
+    // De-duplicated: two target titles sharing a role noun must not bind the same term twice, or
+    // the params and the placeholders stop lining up.
+    const nouns = [...new Set(targetTitles.map(tokens => tokens[tokens.length - 1]))];
+    ranks.target_title_role = {
+      sql: `CASE WHEN (${nouns.map(() => 'LOWER(sj.title) LIKE ?').join(' OR ')}) THEN ${RANK_MATCH} ELSE ${RANK_MISS} END`,
+      params: nouns.map(n => `%${n}%`),
+    };
   }
 
   const locations = toArray(params.locations);

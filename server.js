@@ -57,7 +57,10 @@ import { resolveFromClassifier, getDomainModuleKey, getSearchQueryTemplates } fr
 import { normaliseRole, buildApifyQueries, isTitleRelevant as isTitleRelevantNew, isTitleRelevantToProfile } from "./services/searchQueryBuilder.js";
 import { getRoleKeyForProfile as _getRoleKeyForProfile, classifyForIngest, getRoleFamilyDomainForKey } from "./services/jobClassifier.js";
 import { inferWorkType, jobHash, normaliseItem, isFullTimeNorm, isEmploymentTypeWanted, parseYearsExperience, ghostJobScoreNorm, isReposted } from "./services/jobNormalization.js";
-import { profileTitleSql } from "./services/profileTitleFilter.js";
+// profileTitleSql still narrows the poll and pending QUEUES — see the verdict recorded at its
+// remaining call sites. parseProfileArray is the same parser it uses, so the board's ranking
+// and those queues cannot disagree about what target_titles contains.
+import { profileTitleSql, parseProfileArray } from "./services/profileTitleFilter.js";
 import { resolveSponsorshipNeed } from "./services/applyAutomation.js";
 import { readAnswerStore, effectiveCustomAnswers } from "./services/customAnswers.js";
 import { hashPassword, verifyPassword, validatePassword } from "./services/authSecurity.js";
@@ -6815,10 +6818,39 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
     // 'general' — which is nobody's.
     const savedTab = starred === '1';
 
-    // profileTitleSql: additive narrowing within the already role-correct board. Skipped on the
-    // Saved tab (see above) — a saved job must not have to match the profile's target titles.
-    const titleFilter = savedTab ? { sql: "1 = 1", params: [] }
-                                 : profileTitleSql("sj.title", sessionActiveProfile);
+    // ── CC1 · TARGET TITLES RANK HERE, THEY NO LONGER EXCLUDE ──────────────────────────────────
+    //
+    // This was `profileTitleSql("sj.title", sessionActiveProfile)` spliced into the WHERE clause,
+    // and it was HARD BOARD MEMBERSHIP: a posting whose title did not contain every token of some
+    // target title was not on the board at all, for either scorer to rank.
+    //
+    // Measured on 2,460 active rows for profile 5 (target_titles ["Software Engineer"]): it kept
+    // 405 rows, and of the 30 postings the OWNER personally graded it kept 8 — excluding 5 of the
+    // 12 they graded 5. All five are titled "...Engineer": Frontend Engineer/Expansion, Full Stack
+    // Engineer/Fleet Scheduling, Backend Engineer/Credit Decisions, Applied AI Engineer/Digital
+    // Natives, Full Stack Engineer/Link. The scorer rates Backend Engineer/Credit Decisions its
+    // SECOND HIGHEST of the corpus. Spearman rho between the scorer's score and the owner's own
+    // grades was -0.1769 under this filter and +0.5340 without it: the filter was actively
+    // ANTI-correlated with the judgement it exists to serve.
+    //
+    // The reason is X2's rule, applied one level deeper than X2 applied it. The user SET
+    // `target_titles`; they did not set the substring-AND MATCHING RULE. Somebody who typed
+    // "Software Engineer" was taken to have asked for "every title containing both the token
+    // software and the token engineer". That rule is DERIVED, and a derived rule ranks.
+    //
+    // So the titles now flow into buildJobFilters as two DERIVED rank dimensions
+    // (target_title_exact, target_title_role) and the WHERE clause keeps nothing. The rows that
+    // made up the old board still LEAD the new one — target_title_exact is byte-for-byte the old
+    // predicate — so this is a reordering with a longer tail, not a different board.
+    //
+    // ⛔ SCOPE IS STILL HARD, and that is not a contradiction. The job_role_map role_key INNER JOIN
+    // below is untouched: it is the profile's DECLARED role, a value and a rule the user chose
+    // together when they created the profile. It bounds the board to 572 engineering rows out of
+    // 2,460. What changed is only the rule nobody chose.
+    //
+    // ⛔ THE SAVED TAB IS UNAFFECTED, and now trivially so — with no title predicate there is
+    // nothing for it to opt out of. `savedTab` still skips the role_key join and the bridge.
+    const titleFilter = { sql: "1 = 1", params: [] };
 
     // Keyword + location (opt-in)
     const keyFilter = rawQuery ? `AND (sj.title LIKE ? OR sj.company LIKE ? OR sj.description LIKE ?)` : '';
@@ -6943,6 +6975,19 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       const explicitVal = baseFilterParams[key];
       const isExplicit  = explicitVal !== undefined && explicitVal !== null && explicitVal !== '';
       if (!isExplicit) { filterParams[key] = derivedFilters[key]; appliedDerivedKeys.push(key); }
+    }
+    // CC1 — the profile's target titles, as a RANK rather than the WHERE predicate they used to be.
+    // Declared derived for the same reason every bridge key is: the VALUE is the user's, the
+    // matching RULE is ours, and under X2's rule ours may only rank. Skipped on the Saved tab,
+    // which is a record of what the user already chose and not a discovery surface.
+    //
+    // Both keys are named in appliedDerivedKeys so `curation.rankedKeys` discloses them and
+    // `rank.demotedSql` counts the rows they push down — the count that makes requirement 3's "the
+    // user must be able to see that N rows exist and are ranked below" true rather than claimed.
+    const profileTargetTitles = savedTab ? [] : parseProfileArray(sessionActiveProfile?.target_titles);
+    if (profileTargetTitles.length) {
+      filterParams.target_titles = profileTargetTitles;
+      appliedDerivedKeys.push('target_title_exact', 'target_title_role');
     }
     // PROVENANCE, carried rather than re-derived. buildJobFilters cannot tell a value the user typed
     // from one this bridge inferred — the merged object looks identical either way — and X2's rule
