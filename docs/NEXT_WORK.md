@@ -4,7 +4,7 @@
 not against this file's own previous claims. Closed findings are in **`docs/FINDINGS_ARCHIVE.md`**;
 the reconciled evidence and the three landed task reports are in **`docs/PART1_RECONCILED.md`**.
 
-**Baseline:** **2419 passing, 0 failing** — measured 2026-09-16, not carried forward. Contract
+**Baseline:** **2432 passing, 0 failing** — measured 2026-09-16, not carried forward. Contract
 **v1.1.1**. Migrations 102 and 103 are in production. **Migration 105 is NOT** — it is in the four
 unpushed commits below.
 
@@ -53,8 +53,8 @@ resumemaster.one answers JSON, and `GET /api/config` — which exists only in `c
 | # | Task | Repo | Needs | State |
 |---|---|---|---|---|
 | **Y** | SmartRecruiters + Workday descriptions (needs an N+1 budget) | desktop | — | open — and its budget model must now account for the per-company cap in `0de67c8` |
-| **AB + AH** | Vestigial keys, version endpoint, small deferred items | desktop | — | open — three of six sub-items already answered, see below |
-| **AF residual** | A write path for `app_settings.apply_full_auto_disabled` | desktop | — | open, **and now the top unblocked pick** — the switch exists and is re-checked per job; a kill switch that needs a restart to flip is not a kill switch |
+| **AB + AH** | Vestigial keys, small deferred items | desktop | — | **all but AB-1 closed** — AH-1/2/3/4 done or answered 09-16/17, see below. AB-1 is an owner action (remove `THEIRSTACK_API_KEY`) |
+| ~~**AF residual**~~ | A write path for `app_settings.apply_full_auto_disabled` | desktop | — | ✅ **DONE 09-17**, `1bb2a29`. GET/PUT/DELETE `/api/admin/full-auto`, three states, strict boolean. One definition in `services/appSettings.js` so the admin surface and the pipeline cannot disagree |
 | **AG** | Mobile corruption sweep | android | — | **partly done** — `f337767` repaired SYNC.md's encoding. The BOM/toolchain half and a verifying build remain |
 | ~~**Monetisation audit**~~ | `docs/MONETISATION_AUDIT.md` | desktop | — | ✅ **DONE 09-16.** Part 1 audit + Part 2 lever, `c4320e1`. See "Recently landed". |
 | ~~**AH-1**~~ | A version endpoint | desktop | — | ✅ **DONE 09-16.** `GET /api/version` — commit SHA, contract version, migration high-water mark. Answers "is 105 deployed?" in one curl. Undeployed until the push. |
@@ -62,11 +62,42 @@ resumemaster.one answers JSON, and `GET /api/config` — which exists only in `c
 | — | iOS Phase 1 audit | ios | **a Mac** | open — brief written at `resume-master-ios/PHASE_1_AUDIT.md` |
 
 **AB/AH, item by item, so nobody re-derives them:** AB-1 THEIRSTACK **confirmed vestigial** (only
-consumer is the offline `scripts/providerEval`). AB-2 "SERPAPI half-wired" — **premise wrong**: the
-key is read, `searchJobs` includes serpapi, and `POST /api/jobs/search` reaches it. It is absent
-only from `cacheJobs`, by design (`ATS_SOURCE_NAMES`). AH-1 version endpoint **DONE 09-16** (`GET /api/version`). AH-2 drop
-`import_extension_tokens` **not done** — 3 rows in production, zero code references repo-wide.
-AH-3 local board expiry **has not fired**. AH-4 retire `QUEUED_PROMPTS.md` **not done**.
+consumer is the offline `scripts/providerEval`) — removing the key is an owner action, not a build.
+AB-2 "SERPAPI half-wired" — **premise wrong**: the key is read, `searchJobs` includes serpapi, and
+`POST /api/jobs/search` reaches it. It is absent only from `cacheJobs`, by design
+(`ATS_SOURCE_NAMES`). AH-1 version endpoint ✅ **DONE 09-16**, `GET /api/version`. AH-2 drop
+`import_extension_tokens` ✅ **DONE 09-17**, migration 106. AH-4 retire `QUEUED_PROMPTS.md`
+✅ **DONE 09-17** — replaced with a tombstone rather than deleted, because `ak2-session-report.md`
+cites it twice.
+
+### AH-3 — ANSWERED, and the answer is "not yet, and it is now armed at 100%"
+
+The question was whether the restored local board's synchronised 7-day expiry had already fired.
+**It has not.** The last `runExpiredJobsCleanup` was `cleanup_log` id 95 on **2026-09-08T17:57**,
+which deleted 0, and nothing has run in the nine days since — the cron only runs while the process
+lives, and the local server has not been left up.
+
+But every row is now past the cutoff:
+
+```
+active rows           1266
+scraped_at range      2026-09-02 → 2026-09-07     (all of it, from the restore rebase)
+cutoff today          2026-09-10
+would expire NOW      1266 of 1266   = 100% of the board
+```
+
+⛔ **The next pass is a whole-board event.** What stands in front of it is the brake
+(`services/jobs/cleanupBrake.js`, wired at `server.js:4394`): the board is 1266, above
+`DEFAULT_MIN_BOARD` 50, and the share is 1.0, above `DEFAULT_MAX_SHARE` 0.5 — so the pass is
+**refused and the rows are RETIRED (`is_active = 0`) instead of deleted**. That is the designed
+behaviour, it is reversible, and it is exactly the case the brake was written for after
+`cleanup_log` id 85 destroyed 1288 of 1291 rows.
+
+So the local board will not be LOST, but it will go inactive and vanish from discovery the first
+time the local server runs long enough to hit the 03:00 cron or a startup pass. If you want it to
+survive as an active board, rebase `scraped_at` forward again — the same step the restore needed.
+**Production is unaffected**: it is refilled daily, so its rows never all age past the cutoff
+together.
 
 Android's remaining work is in `resume-master-android/ANDROID.md` and the annotated header of
 `PHASE_2A.md` (uncommitted): admin build flavour, backup excludes, then the feed and review queue.
