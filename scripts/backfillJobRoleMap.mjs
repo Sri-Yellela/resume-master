@@ -77,7 +77,14 @@
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-import { classifyJob, ROLE_KEY_FALLBACK } from "../services/jobs/classifyJob.js";
+import { ROLE_KEY_FALLBACK } from "../services/jobs/classifyJob.js";
+// ⛔ THE RULE LIVES IN services/, NOT HERE. server.js runs the same backfill at boot — that is the
+// only way it reaches production, since a script on a developer machine cannot touch the
+// deployment's database. Two copies of a classification rule is the exact failure this backfill
+// exists to avoid, one level up.
+import {
+  backfillRoleMap, backfillDecision, UNMAPPED_SQL, MATCHED_BY, MATCHED_BY_UNCLASSIFIED,
+} from "../services/jobs/backfillRoleMap.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbArg   = process.argv.indexOf("--db");
@@ -88,31 +95,7 @@ const DB_PATH = dbArg >= 0
 const APPLY   = process.argv.includes("--apply");
 const VERBOSE = process.argv.includes("--verbose");
 
-export const MATCHED_BY = "backfill_classifier";
-export const MATCHED_BY_UNCLASSIFIED = `${MATCHED_BY}_unclassified`;
-
-/**
- * What this backfill would write for one posting. Exported so the test exercises THIS decision
- * rather than a copy of it — the whole risk here is diverging from the ingest path, and a test
- * against a re-implementation could not see that.
- *
- * @returns {{action: "bucket"|"fallback"|"skip", roleKey: string|null, verdict: object}}
- */
-export function backfillDecision(row) {
-  const verdict = classifyJob(row.title || "", row.description || "", row.company || "");
-  if (verdict.collar === "blue") return { action: "skip", roleKey: null, verdict };
-  if (verdict.roleKey != null)   return { action: "bucket", roleKey: verdict.roleKey, verdict };
-  return { action: "fallback", roleKey: ROLE_KEY_FALLBACK, verdict };
-}
-
-/** The candidate set: active postings with no job_role_map row of any kind. */
-export const UNMAPPED_SQL = `
-  SELECT sj.job_id, sj.title, sj.company, sj.description
-  FROM scraped_jobs sj
-  WHERE sj.is_active = 1
-    AND NOT EXISTS (SELECT 1 FROM job_role_map m WHERE m.job_id = sj.job_id)
-  ORDER BY sj.job_id
-`;
+export { backfillDecision, UNMAPPED_SQL, MATCHED_BY, MATCHED_BY_UNCLASSIFIED };
 
 function main() {
   const db = new Database(DB_PATH, { readonly: !APPLY });
@@ -160,26 +143,14 @@ function main() {
     return 0;
   }
 
-  // INSERT only, never REPLACE: the candidate set is already "has no row", so a conflict here
-  // would mean the set was computed against a different database state than the write — which is
-  // a bug worth failing on rather than papering over.
-  const insert = db.prepare(`
-    INSERT INTO job_role_map (job_id, role_key, role_family, domain, source_profile_id, confidence, matched_by)
-    VALUES (?, ?, ?, ?, NULL, ?, ?)
-  `);
-  const run = db.transaction((ds) => {
-    for (const d of ds) {
-      insert.run(
-        d.row.job_id, d.roleKey, d.roleKey, d.verdict.domain || null,
-        d.verdict.confidence || 0,
-        d.action === "fallback" ? MATCHED_BY_UNCLASSIFIED : MATCHED_BY,
-      );
-    }
-  });
-  run(writable);
+  // ⛔ THE WRITE IS THE SERVICE'S, NOT THIS FILE'S. server.js runs the identical call at boot, and
+  // that is the only path that reaches production. An insert loop here as well would be two
+  // implementations of one rule — which is the shape of the defect this whole backfill exists to
+  // repair, one level up. Everything above this line is presentation.
+  const result = backfillRoleMap(db);
 
   const left = db.prepare(UNMAPPED_SQL).all().length;
-  console.log(`\n  inserted ${writable.length} row(s). Active postings still unmapped: ${left}`
+  console.log(`\n  inserted ${result.inserted} row(s). Active postings still unmapped: ${left}`
     + `${left ? " (blue-collar, deliberately)" : ""}`);
   console.log(`  provenance: matched_by='${MATCHED_BY}' / '${MATCHED_BY_UNCLASSIFIED}', `
     + `source_profile_id NULL — reversible with:`);

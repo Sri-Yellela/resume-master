@@ -148,12 +148,44 @@ DELETE FROM job_role_map WHERE matched_by LIKE 'backfill_classifier%';
 
 ---
 
-## 6 · Not done
+## 6 · It also runs at boot, which is the only way it reaches production
 
-- ⛔ **Production is NOT backfilled.** This ran against the local database. Railway has its own, and
-  a script on a laptop cannot reach it. The `automation_tier` backfill solved the same problem by
-  running at boot — NULL-only, idempotent, never fatal — and that is the obvious mechanism here,
-  but it makes a deploy change board membership, which is a decision to take deliberately rather
-  than as a side effect of this commit.
+A script runs against whatever database the operator can reach, which is a laptop's. Production's
+lives inside the deployment. Without a boot hook the fix would be permanently local — which is how
+these rows got into this state to begin with: a restore path nobody re-ran anywhere else.
+
+So `server.js` calls the same `backfillRoleMap(db)` at boot, beside the `automation_tier` backfill
+it is modelled on: same NULL-only shape, same idempotence, same never-fatal `try`. The RULE lives in
+`services/jobs/backfillRoleMap.js` and both callers import it — two copies of a classification rule
+is the exact failure this backfill exists to repair, one level up.
+
+⛔ **It differs from `automation_tier` in one way that matters: that one fills in a LABEL, this one
+changes BOARD MEMBERSHIP.** So it is not silent:
+
+```
+[boot] job_role_map backfilled: 277 of 277 unbucketed posting(s) classified
+       (engineering=83 general=70 pm=33 data=29 sales=26 hr=8 marketing=8 operations=7
+        design=5 legal=3 engineering_embedded_firmware=3 finance=2)
+[boot] job_role_map backfill is reversible:
+       DELETE FROM job_role_map WHERE matched_by LIKE 'backfill_classifier%';
+```
+
+- logs the bucket breakdown, not just a count, whenever it does anything;
+- logs its own undo, because 277 rows in a scoping table with no way to tell them from the
+  crawler's is how a backfill becomes permanent by accident;
+- warns separately if any row is left unmapped, because that means a blue-collar posting is sitting
+  on every board;
+- **`ROLE_MAP_BACKFILL=off`** disables it. `automation_tier` needs no such flag; this one does,
+  because an operator who sees a board change after a deploy needs a way to stop it that is not a
+  revert.
+
+Verified by actually reversing the local backfill and restarting the server: the hook fired and
+logged the block above, the board returned to 655, a **second** boot logged nothing at all, and a
+boot with `ROLE_MAP_BACKFILL=off` logged only that it was disabled.
+
+Cost: 0.163 ms/row measured over 2,460 real postings, so even a wholly unbucketed board is ~0.4 s
+once and nothing on every boot after.
+
+## 7 · Not done
 - **The classifier's gap on "Forward Deployed Engineer"** (§4) — a `SIGNALS` question.
 - **The board still is not ordered by fit.** Unchanged by this; still CC2's finding.

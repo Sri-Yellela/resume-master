@@ -29,11 +29,13 @@ import Database from "better-sqlite3";
 import { MIGRATIONS } from "../scripts/migrations.js";
 import { at } from "../test-support/sourceAnchors.js";
 import {
-  backfillDecision, UNMAPPED_SQL, MATCHED_BY, MATCHED_BY_UNCLASSIFIED,
-} from "../scripts/backfillJobRoleMap.mjs";
+  backfillRoleMap, backfillDecision, UNMAPPED_SQL, MATCHED_BY, MATCHED_BY_UNCLASSIFIED,
+} from "../services/jobs/backfillRoleMap.js";
 import { ROLE_KEY_FALLBACK } from "../services/jobs/classifyJob.js";
 
 const SCRIPT = fs.readFileSync("scripts/backfillJobRoleMap.mjs", "utf8");
+const SERVICE = fs.readFileSync("services/jobs/backfillRoleMap.js", "utf8");
+const SERVER = fs.readFileSync("server.js", "utf8");
 const AGGREGATOR = fs.readFileSync("services/jobs/aggregator.js", "utf8");
 
 /**
@@ -98,7 +100,7 @@ test("white-collar with no confident family falls back to 'general', as ingest d
 
 test("⛔ the backfill applies INGEST's rule, not classifyForIngest's", () => {
   // The two differ exactly on the strong-white-anchor case, which is 70 of the 277 rows.
-  assert.match(SCRIPT, /import \{ classifyJob, ROLE_KEY_FALLBACK \} from "\.\.\/services\/jobs\/classifyJob\.js"/,
+  assert.match(SERVICE, /import \{ classifyJob, ROLE_KEY_FALLBACK \} from "\.\/classifyJob\.js"/,
     "it must classify with the same function the ingest path calls");
   assert.deepEqual(
     codeLines(SCRIPT).filter(l => /\bclassifyForIngest\b/.test(l)), [],
@@ -113,9 +115,9 @@ test("⛔ the backfill applies INGEST's rule, not classifyForIngest's", () => {
   );
   assert.match(write, /if \(verdict\.roleKey != null\) \{/, "ingest: a verdict writes its own bucket");
   assert.match(write, /role_key:\s*ROLE_KEY_FALLBACK/, "ingest: otherwise the general fallback");
-  const decide = SCRIPT.slice(
-    at(SCRIPT, "export function backfillDecision(row)"),
-    at(SCRIPT, "/** The candidate set"),
+  const decide = SERVICE.slice(
+    at(SERVICE, "export function backfillDecision(row)"),
+    at(SERVICE, "@param {import('better-sqlite3').Database} db"),
   );
   assert.match(decide, /verdict\.roleKey != null/);
   assert.match(decide, /ROLE_KEY_FALLBACK/);
@@ -125,7 +127,7 @@ test("⛔ it never touches scraped_jobs, and never deletes anything", () => {
   // scripts/reclassifyJobs.js — the existing, similarly-named script — DELETEs board rows: it
   // ejects blue-collar postings and drops no-signal ones. On a board restored from a backup that
   // is a second purge, not a backfill. The distinction is the whole safety property here.
-  const statements = preparedSql(SCRIPT);
+  const statements = preparedSql(SERVICE).concat(preparedSql(SCRIPT));
   assert.ok(statements.length > 0, "the extractor must actually find the statements");
   const writes = statements.filter(s => /\b(DELETE|UPDATE|REPLACE|DROP|ALTER)\b/i.test(s));
   assert.deepEqual(writes, [],
@@ -159,7 +161,7 @@ test("a backfilled row is a CLASSIFIER row, so a later crawl can retire it", () 
   // `source_profile_id IS NULL`, and its comment says that column — not the matched_by string — is
   // what separates a classifier row from a profile-derived one, precisely so a new matched_by
   // value cannot quietly opt out. A backfilled row must be retireable like any other.
-  assert.match(SCRIPT, /VALUES \(\?, \?, \?, \?, NULL, \?, \?\)/,
+  assert.match(SERVICE, /VALUES \(\?, \?, \?, \?, NULL, \?, \?\)/,
     "source_profile_id must be written NULL, not left to a default");
   assert.match(AGGREGATOR, /WHERE job_id = \? AND role_key != \? AND source_profile_id IS NULL/);
 });
@@ -171,10 +173,89 @@ test("the provenance is attributable and the run is reversible", () => {
   assert.equal(MATCHED_BY_UNCLASSIFIED, "backfill_classifier_unclassified");
   assert.match(SCRIPT, /DELETE FROM job_role_map WHERE matched_by LIKE/,
     "the script must print how to undo itself");
+  assert.match(SERVER, /DELETE FROM job_role_map WHERE matched_by LIKE/,
+    "and so must the boot hook, where nobody is watching a terminal");
 });
 
 test("dry run is the default; writing takes --apply", () => {
   assert.match(SCRIPT, /const APPLY\s*=\s*process\.argv\.includes\("--apply"\)/);
   assert.match(SCRIPT, /new Database\(DB_PATH, \{ readonly: !APPLY \}\)/,
     "a dry run must open the database READ-ONLY, so a coding error cannot write during one");
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// THE SERVICE, BEHAVIOURALLY — and the boot hook, which is the only path that reaches production
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+/** A board with one confidently-bucketed posting, one blue-collar, and one already mapped. */
+function seedBoard() {
+  const db = new Database(":memory:");
+  for (const m of MIGRATIONS) db.exec(m.sql);
+  const job = db.prepare(`INSERT INTO scraped_jobs (job_id,title,company,description,search_query,_hash,is_active)
+                          VALUES (?,?,?,?,'q',?,?)`);
+  job.run("eng",     CONFIDENT.title, CONFIDENT.company, CONFIDENT.description, "h1", 1);
+  job.run("blue",    BLUE.title,      BLUE.company,      BLUE.description,      "h2", 1);
+  job.run("already", CONFIDENT.title, CONFIDENT.company, CONFIDENT.description, "h3", 1);
+  job.run("gone",    CONFIDENT.title, CONFIDENT.company, CONFIDENT.description, "h4", 0);
+  db.prepare("INSERT INTO job_role_map (job_id, role_key, matched_by) VALUES ('already','sales','ats_cache')").run();
+  return db;
+}
+
+test("the backfill inserts a bucket, leaves blue alone, and touches nothing already mapped", () => {
+  const db = seedBoard();
+  try {
+    const r = backfillRoleMap(db);
+    assert.equal(r.scanned, 2, "only the two unmapped ACTIVE rows are candidates");
+    assert.equal(r.inserted, 1);
+    assert.equal(r.skippedBlue, 1);
+    assert.deepEqual(r.byBucket, { engineering: 1 });
+
+    const rows = db.prepare("SELECT job_id, role_key, matched_by, source_profile_id FROM job_role_map ORDER BY job_id").all();
+    assert.deepEqual(rows, [
+      { job_id: "already", role_key: "sales",       matched_by: "ats_cache",  source_profile_id: null },
+      { job_id: "eng",     role_key: "engineering", matched_by: MATCHED_BY,   source_profile_id: null },
+    ], "the pre-existing 'sales' bucket is untouched, and the new row is a classifier row");
+    // The blue-collar posting and the inactive one got nothing.
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM job_role_map WHERE job_id IN ('blue','gone')").get().n, 0);
+  } finally { db.close(); }
+});
+
+test("running it twice inserts nothing the second time", () => {
+  const db = seedBoard();
+  try {
+    assert.equal(backfillRoleMap(db).inserted, 1);
+    const second = backfillRoleMap(db);
+    assert.equal(second.inserted, 0);
+    assert.equal(second.scanned, 1, "only the blue-collar row is still a candidate, forever");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM job_role_map").get().n, 2, "no duplicate row");
+  } finally { db.close(); }
+});
+
+test("a dry run writes nothing but still reports what it would do", () => {
+  const db = seedBoard();
+  try {
+    const r = backfillRoleMap(db, { dryRun: true });
+    assert.equal(r.candidates, 1, "it says what it WOULD insert");
+    assert.equal(r.inserted, 0, "and reports honestly that it inserted nothing");
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM job_role_map").get().n, 1, "only the seeded row");
+  } finally { db.close(); }
+});
+
+test("⛔ the boot hook runs it, logs it, and can be switched off", () => {
+  // The boot hook is the ONLY path that reaches production — a script runs against whatever
+  // database the operator can reach, which is a laptop's. Without this, the fix is permanently
+  // local, which is how these rows got into this state to begin with.
+  const hook = SERVER.slice(
+    at(SERVER, "// ── job_role_map backfill (CC1b's follow-up)"),
+    at(SERVER, "// Repair company_icon_url rows still pointing at a retired logo provider"),
+  );
+  assert.match(hook, /backfillRoleMap\(db\)/, "it must actually run");
+  assert.match(hook, /roleFill\.inserted > 0/, "and log only when it did something");
+  assert.match(hook, /byBucket/, "the log must carry the bucket breakdown, not just a count");
+  assert.match(hook, /roleFill\.skippedBlue > 0/, "a blue-collar row left on every board is a warning");
+  assert.match(hook, /ROLE_MAP_BACKFILL/, "an operator needs a way to stop it without a revert");
+  assert.match(hook, /catch \(e\)/, "never fatal — an unbucketed board still works");
+  // ⛔ It must not be able to take the boot down. The board is degraded without it, not broken:
+  // CC1b's soft-null keeps unbucketed rows visible.
+  assert.doesNotMatch(hook, /process\.exit/);
 });

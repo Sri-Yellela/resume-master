@@ -128,6 +128,7 @@ import {
 } from "./services/jobs/jobCursor.js";
 import { deriveAutomationTier } from "./services/jobs/automationTier.js";
 import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
+import { backfillRoleMap } from "./services/jobs/backfillRoleMap.js";
 import { backfillCompanyLogos } from "./services/jobs/backfillCompanyLogos.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { suggest } from "./services/jobs/searchSuggestions.js";
@@ -3695,6 +3696,61 @@ try {
   }
 } catch (e) {
   console.error("[boot] automation_tier backfill failed (board falls back to 'unknown'):", e.message);
+}
+
+// ── job_role_map backfill (CC1b's follow-up) ────────────────────────────────────────────────────
+//
+// Same shape and the same reasoning as automation_tier above: a derived value that some rows never
+// got, re-derived at boot through the SAME function the ingest writer uses, and a no-op once every
+// active posting carries a bucket.
+//
+// WHY IT HAS TO RUN HERE AND NOT ONLY IN THE SCRIPT. scripts/backfillJobRoleMap.mjs runs against
+// whatever database the operator can reach, which is a laptop's. Production's lives inside the
+// deployment and no script on a developer machine can touch it — so without a boot hook the fix
+// would be permanently local, which is how the rows got into this state in the first place (a
+// restore path that nobody re-ran anywhere else).
+//
+// ⛔ AND IT CHANGES WHAT USERS SEE, WHICH NOTHING ELSE IN THIS BLOCK DOES. automation_tier fills in
+// a LABEL. This changes BOARD MEMBERSHIP: a posting nobody had classified appears on every
+// profile's board under CC1b's soft-null, and once it is bucketed it appears only on its own. The
+// local run moved the owner-shaped engineering board 849 -> 655. That is the intended correction —
+// the rows that left were sales and PM roles that were only ever there because they were
+// unclassified — but it is not a silent kind of change, so:
+//
+//   · it LOGS, with the bucket breakdown, whenever it does anything at all;
+//   · it logs how to undo itself, because 277 rows appearing in a scoping table with no way to
+//     tell them from the crawler's is how a backfill becomes permanent by accident;
+//   · ROLE_MAP_BACKFILL=off disables it, which automation_tier has no need of. An operator who
+//     sees a board change after a deploy needs a way to stop it that does not require a revert.
+//
+// Never fatal, for automation_tier's reason: an unbucketed board still works — CC1b's soft-null
+// predicate keeps those rows visible — so failing the boot over this would trade a scoping
+// imprecision for an outage.
+//
+// COST: 0.163 ms/row measured over 2,460 real postings, so even a whole unbucketed board is ~0.4 s
+// once, and nothing on every boot after.
+if (String(process.env.ROLE_MAP_BACKFILL || "").toLowerCase() === "off") {
+  console.log("[boot] job_role_map backfill: DISABLED by ROLE_MAP_BACKFILL=off");
+} else {
+  try {
+    const roleFill = backfillRoleMap(db);
+    if (roleFill.inserted > 0) {
+      console.log(`[boot] job_role_map backfilled: ${roleFill.inserted} of ${roleFill.scanned} `
+        + `unbucketed posting(s) classified `
+        + `(${Object.entries(roleFill.byBucket).sort((a, b) => b[1] - a[1])
+              .map(([k, n]) => `${k}=${n}`).join(" ")})`);
+      console.log(`[boot] job_role_map backfill is reversible: `
+        + `DELETE FROM job_role_map WHERE matched_by LIKE 'backfill_classifier%';`);
+    }
+    // Loud, because "left unmapped" means a blue-collar posting is sitting on the board and will
+    // stay on EVERY profile's board until somebody ejects it. Deliberately not ejected here.
+    if (roleFill.skippedBlue > 0) {
+      console.warn(`[boot] job_role_map backfill: ${roleFill.skippedBlue} blue-collar posting(s) `
+        + `left unmapped — they remain visible on every board. See scripts/reclassifyJobs.js.`);
+    }
+  } catch (e) {
+    console.error("[boot] job_role_map backfill failed (unbucketed rows stay visible everywhere):", e.message);
+  }
 }
 
 // Repair company_icon_url rows still pointing at a retired logo provider (TASK X). Same reasoning
