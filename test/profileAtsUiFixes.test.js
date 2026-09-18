@@ -56,11 +56,24 @@ test("jobs UI opens ATS panel from stored base ATS reports without requiring reg
   assert.match(jobsPanel, /job\?\.baseAtsReport/);
   assert.match(jobsPanel, /openAtsPanel\(buildAtsPayload\(job, g\)\)/);
   assert.match(detailPanel, /const atsScore = g\?\.atsScore \?\? job\?\.baseAtsScore \?\? null/);
-  // The SQL alias was dropped — the row mapper now reads sj.ats_report directly rather than
-  // renaming it to base_ats_report in the SELECT. Same data reaching the client under the same
-  // baseAtsReport key, one fewer indirection.
-  assert.match(server, /baseAtsReport:\s*parseJsonMaybe\(j\.ats_report, null\)/);
-  assert.match(server, /SELECT ats_report FROM scraped_jobs WHERE job_id=\?/);
+  // ⛔ CC5 REVERSED BOTH OF THESE, AND THEY WERE THE LEAK.
+  //
+  // This used to assert that the poll shape reads `sj.ats_report` directly and that the keywords
+  // route selects `ats_report FROM scraped_jobs WHERE job_id=?`. Both served ONE CELL PER JOB —
+  // written at ingest from whichever user's résumé basis triggered the crawl — as the caller's own
+  // ATS report. An ATS report is a statement about a particular résumé against a particular
+  // posting, so a per-job cell cannot hold one for anybody, and the fix is removal rather than a
+  // narrower read.
+  //
+  // The client half of this test is unchanged and still passes: the panel still opens from
+  // `baseAtsScore`/`baseAtsReport`, those field names still exist, and they are now always null
+  // from the poll — which is what they already were on 100% of rows. A real per-(user, profile)
+  // score reaches the client through the board's ats_only_reports join and the ATS panel.
+  assert.match(server, /baseAtsScore:\s*null/,
+    "the poll must not serve the shared per-job cell as this caller's score");
+  assert.match(server, /baseAtsReport:\s*null/);
+  assert.doesNotMatch(server, /SELECT ats_report FROM scraped_jobs WHERE job_id=\?\s*\n\s*\)\.get\(jobId\)/,
+    "the cross-user priority-2 cache read must stay deleted");
 });
 
 test("profile selector exposes direct manage-profiles access from the jobs flow", () => {

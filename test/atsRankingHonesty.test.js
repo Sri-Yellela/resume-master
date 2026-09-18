@@ -197,13 +197,37 @@ test("migration 094 is byte-identical in both runners and only ADDS columns", ()
     "an additive migration may not rewrite existing rows");
 });
 
+// ⛔ CC5 CHANGED WHERE THIS STAMP MAY COME FROM, AND THESE THREE TESTS SEEDED THE SOURCE IT
+// DELETED. They each wrote the report into `scraped_jobs.ats_report` — one cell per POSTING, with
+// no user and no profile on it — and asserted the stamp picked it up. That read is gone: it served
+// whichever user had crawled the posting first their own fit, and stamped it permanently into
+// another candidate's `job_applications` row. `job_applications` is the only table that can ever
+// correlate a score with an employer's reply, so a stranger's score in it is precisely the
+// fabricated data point AK1's own comment forbids — with a plausible provenance stamp attached.
+//
+// The seeds move to `ats_only_reports`, keyed (user_id, domain_profile_id, job_id) as of migration
+// 108. What each test pins is unchanged; only the table it is pinned against is, and the last test
+// here is new: it pins the deletion in the direction the defect actually ran.
+const seedReport = (db, { userId = 1, profileId = null, jobId, report }) =>
+  db.prepare(`INSERT INTO ats_only_reports (user_id, domain_profile_id, job_id, ats_report, ats_score)
+              VALUES (?, ?, ?, ?, ?)`)
+    .run(userId, profileId, jobId, JSON.stringify(report), report.score ?? null);
+
+// `ats_only_reports.user_id` is `NOT NULL REFERENCES users(id)`, which the per-job cell these tests
+// used to seed was not, so every one of them now needs its candidate to exist.
+const seedUsers = (db, ...ids) => {
+  for (const id of ids) {
+    db.prepare("INSERT OR IGNORE INTO users (id,username,password_hash) VALUES (?,?,'x')")
+      .run(id, `u${id}`);
+  }
+};
+
 test("an application records the score AND the scorer version that produced it", () => {
   const db = new Database(":memory:");
   for (const m of MIGRATIONS) db.exec(m.sql);
+  seedUsers(db, 1);
 
-  db.prepare("INSERT INTO scraped_jobs (job_id,title,company,search_query,_hash,ats_report) VALUES (?,?,?,?,?,?)")
-    .run("j1", "Backend Engineer", "Acme", "t", "h1",
-      JSON.stringify({ source: LOCAL_ATS_SOURCE, score: 61, tier1_missing: ["kafka"] }));
+  seedReport(db, { jobId: "j1", report: { source: LOCAL_ATS_SOURCE, score: 61, tier1_missing: ["kafka"] } });
 
   const stamped = capturedAtsAtApply(db, 1, "j1");
   assert.equal(stamped.score, 61);
@@ -212,9 +236,7 @@ test("an application records the score AND the scorer version that produced it",
   assert.match(stamped.report, /kafka/, "the missing terms are kept — that is the useful half");
 
   // A DECLINED report carries no score, and must not be recorded as one.
-  db.prepare("INSERT INTO scraped_jobs (job_id,title,company,search_query,_hash,ats_report) VALUES (?,?,?,?,?,?)")
-    .run("j2", "Engineer", "Acme", "t", "h2",
-      JSON.stringify({ source: LOCAL_ATS_SOURCE, score: null, scorable: false }));
+  seedReport(db, { jobId: "j2", report: { source: LOCAL_ATS_SOURCE, score: null, scorable: false } });
   assert.equal(capturedAtsAtApply(db, 1, "j2").score, null,
     "a declined score must not become a data point in the only dataset that can validate this number");
 
@@ -226,14 +248,67 @@ test("an application records the score AND the scorer version that produced it",
 test("the version stamped is the report's OWN source, not today's constant", () => {
   const db = new Database(":memory:");
   for (const m of MIGRATIONS) db.exec(m.sql);
+  seedUsers(db, 1);
   // A cached report produced by an older scorer. Stamping today's version onto it is exactly the
   // lie the column exists to prevent: v3 and v4 disagree by ~17 points on the same fit.
-  db.prepare("INSERT INTO scraped_jobs (job_id,title,company,search_query,_hash,ats_report) VALUES (?,?,?,?,?,?)")
-    .run("old", "Engineer", "Acme", "t", "h",
-      JSON.stringify({ source: "local_ats_v3", score: 45 }));
+  seedReport(db, { jobId: "old", report: { source: "local_ats_v3", score: 45 } });
   const stamped = capturedAtsAtApply(db, 1, "old");
   assert.equal(stamped.version, "local_ats_v3");
   assert.notEqual(stamped.version, LOCAL_ATS_SOURCE);
+  db.close();
+});
+
+test("⛔ one candidate's score is NEVER stamped onto another candidate's application (CC5)", () => {
+  const db = new Database(":memory:");
+  for (const m of MIGRATIONS) db.exec(m.sql);
+
+  seedUsers(db, 1, 2);
+
+  // The exact shape of the old defect: a posting scored by somebody else, and the per-job cell the
+  // deleted read used still holding their answer. User 1 has nothing of their own for this job.
+  db.prepare("INSERT INTO scraped_jobs (job_id,title,company,search_query,_hash,ats_score,ats_report) VALUES (?,?,?,?,?,?,?)")
+    .run("shared", "Backend Engineer", "Acme", "t", "h1", 61,
+      JSON.stringify({ source: LOCAL_ATS_SOURCE, score: 61, tier1_matched: ["kafka"] }));
+  seedReport(db, { userId: 2, jobId: "shared", report: { source: LOCAL_ATS_SOURCE, score: 88 } });
+
+  assert.deepEqual(capturedAtsAtApply(db, 1, "shared"), { score: null, version: null, report: null },
+    "no score of their own means NO score — not the posting's cell, and not user 2's");
+  assert.equal(capturedAtsAtApply(db, 2, "shared").score, 88,
+    "and user 2 still gets their own");
+  db.close();
+});
+
+test("two profiles of ONE user do not share a stamp (CC5)", () => {
+  const db = new Database(":memory:");
+  for (const m of MIGRATIONS) db.exec(m.sql);
+  seedUsers(db, 1);
+  const mkProfile = (id, name, active) => db.prepare(
+    `INSERT INTO domain_profiles (id,user_id,profile_name,role_family,domain,is_active)
+     VALUES (?,1,?,'software_engineering','software',?)`
+  ).run(id, name, active);
+  mkProfile(10, "Engineering", 1);
+  mkProfile(11, "Data", 0);
+
+  // A report against each profile's own résumé. Only the ACTIVE profile's may be stamped.
+  seedReport(db, { profileId: 10, jobId: "j9", report: { source: LOCAL_ATS_SOURCE, score: 71 } });
+  seedReport(db, { profileId: 11, jobId: "j9", report: { source: LOCAL_ATS_SOURCE, score: 12 } });
+  assert.equal(capturedAtsAtApply(db, 1, "j9").score, 71);
+
+  // Switch profiles and the same job stamps the other number, because it is a different résumé.
+  // Two statements, because `idx_domain_profiles_active` is UNIQUE(user_id) WHERE is_active = 1:
+  // one UPDATE touching both rows can transiently hold two actives and trip it.
+  db.prepare("UPDATE domain_profiles SET is_active=0 WHERE user_id=1").run();
+  db.prepare("UPDATE domain_profiles SET is_active=1 WHERE id=11").run();
+  assert.equal(capturedAtsAtApply(db, 1, "j9").score, 12);
+
+  // A row cached before profiles were distinguished carries NULL and is a LAST resort, never a
+  // winner over a profile-matched one — otherwise migrating a user would downgrade their stamp.
+  seedReport(db, { profileId: null, jobId: "j9", report: { source: "local_ats_v3", score: 99 } });
+  assert.equal(capturedAtsAtApply(db, 1, "j9").score, 12, "the profile-matched report still wins");
+  assert.equal(capturedAtsAtApply(db, 1, "legacy-only").score, null);
+  seedReport(db, { profileId: null, jobId: "legacy-only", report: { source: "local_ats_v3", score: 34 } });
+  assert.equal(capturedAtsAtApply(db, 1, "legacy-only").score, 34,
+    "but an old report of your own beats no report at all");
   db.close();
 });
 

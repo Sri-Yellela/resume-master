@@ -20,6 +20,15 @@ export default function AtsReportPanel({
   jobId, resumeText, activeProfileId,
   historyContent,
 }) {
+  // ⛔ CC5 · THE JOB THE REPORT IS ABOUT, WHICH IS NOT NECESSARILY THE SELECTED ONE.
+  //
+  // `jobId` arrives from JobsPanel's `selectedJob` — the JD drawer's state. That is the right answer
+  // only when the report was opened from the drawer. Opened from a card's chip, or from the history
+  // list, the two disagree, and ATSPanel's on-demand fetch would then score the wrong posting or
+  // (with nothing selected, the usual case for a card click) not fire at all — which is why an
+  // unscored row had no route to its term list. The payload names its own job now; the prop stays
+  // as the fallback for callers that pass a report without one.
+  const reportJobId = activeAts?.jobId ?? jobId;
   const header = (
     <div style={{ minWidth: 0 }}>
       <div style={{ fontWeight: 700, fontSize: 14, color: "var(--color-text)", overflow: "hidden",
@@ -78,7 +87,7 @@ export default function AtsReportPanel({
           <ATSPanel
             report={activeAts?.report}
             score={activeAts?.score}
-            jobId={jobId}
+            jobId={reportJobId}
             resumeText={resumeText}
             activeProfileId={activeProfileId}
           />

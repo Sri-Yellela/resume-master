@@ -1225,6 +1225,13 @@ function buildAtsPayload(job, artifact = null) {
   return {
     score,
     report,
+    // ⛔ CC5 · THE PAYLOAD CARRIES ITS OWN JOB ID, and without it the empty-payload route above
+    // cannot work. AtsReportPanel used to take the job to fetch from `selectedJob`, which is the
+    // JD panel's state and has nothing to do with which report is on screen: opening a report from
+    // a card, or from the history list, left the panel asking the server about whatever job
+    // happened to be selected — or about nothing at all, on a board with no selection, which is
+    // when a card's chip is clicked. Now the report says which job it is about.
+    jobId: job?.jobId || job?.id || null,
     company: activeArtifact?.company || job?.company,
     title: activeArtifact?.title || job?.title || job?.role,
   };
@@ -3883,11 +3890,20 @@ function JobsColumn({ jobs, scraping, scrapeError, onClearScrapeError,
                     visitUrl(job);
                   }
                 } : undefined}
-                onAts={() => {
-                  if (g?.atsReport || g?.atsScore != null || job?.baseAtsReport || job?.baseAtsScore != null) {
-                    openAtsPanel(buildAtsPayload(job, g));
-                  }
-                }}
+                // ⛔ CC5 · THE GATE HERE WAS THE OTHER HALF OF THE DEAD END. It read
+                //
+                //   if (g?.atsReport || g?.atsScore != null || job?.baseAtsReport || job?.baseAtsScore != null)
+                //
+                // i.e. the report could only be opened for a row that ALREADY had one — and 0 of
+                // 2,458 active postings do, because nothing scores a board row until somebody asks.
+                // So the chip that opens this was hidden on every card AND the handler behind it
+                // was a no-op on every card, two independent locks on the same door.
+                //
+                // Opening with an EMPTY payload is the working case, not a degraded one: ATSPanel
+                // fetches POST /api/jobs/:id/keywords when it is handed no report, which scores the
+                // posting against this caller's own résumé and caches it per profile. That is the
+                // answer to "backfill or per request" — per request, on the one row being looked at.
+                onAts={() => openAtsPanel(buildAtsPayload(job, g))}
                 onResume={() => generate(job, false)}
               />
             );

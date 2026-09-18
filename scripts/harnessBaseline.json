@@ -71,6 +71,9 @@
   "al8DerivedMappingVerify": {
     "pass": 9
   },
+  "cc5PerProfileScores": {
+    "pass": 16
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

@@ -69,15 +69,47 @@ const GATE_EXCHANGE_WINDOW_SEC = 10 * 60;
 /**
  * AK1 — the ATS score to stamp on an application, and the scorer version that produced it.
  *
- * Reads an EXISTING report rather than scoring. Three sources, most-specific first:
+ * Reads an EXISTING report rather than scoring. Two sources, most-specific first:
  *   1. resumes.ats_report      — the generated document that was actually sent
  *   2. ats_only_reports        — the report the candidate saw on the board before applying
- *   3. scraped_jobs.ats_report — the scrape-time score against the base resume
  *
  * The version is read out of the stored report's own `source` field rather than from the current
  * LOCAL_ATS_SOURCE constant. Those two differ exactly when a cached report predates a scorer
  * change, which is the case the version column exists to keep straight — stamping today's version
  * onto a report produced by an older one would be the specific lie this field is meant to prevent.
+ *
+ * ── ⛔ CC5 · THE THIRD SOURCE WAS DELETED, AND IT WAS A CROSS-USER READ ───────────────────────────
+ *
+ * It was:
+ *
+ *     || pick(db.prepare("SELECT ats_report FROM scraped_jobs WHERE job_id=?").get(jobId))
+ *
+ * described here as "the scrape-time score against the base resume" — WHOSE base resume was never
+ * asked. `scraped_jobs.ats_report` is ONE CELL PER JOB, written at ingest from whichever user's
+ * résumé basis happened to trigger the crawl. So a candidate who applied to a posting somebody else
+ * had crawled got THAT PERSON'S score, their matched terms and their missing terms, written into
+ * their own `job_applications` row and into `ats_report_at_apply` verbatim.
+ *
+ * That is worse here than on any display surface. A wrong number on a card is a wrong number on a
+ * card; this one is PERMANENT and it is the training signal — `job_applications` is the only table
+ * that can ever correlate a score with whether an employer replied, and AK1's own comment says a
+ * fabricated point in it would poison the only dataset that can validate the scorer. A stranger's
+ * score against the same posting is a fabricated point with a plausible provenance stamp on it.
+ *
+ * There is no narrower read that fixes it: a score is a statement about (résumé, posting), and a
+ * per-job cell cannot hold one. Falling through to nulls is correct and already handled — see the
+ * "NULL IS AN HONEST ANSWER" note at the insert site.
+ *
+ * ── CC5 · AND BOTH SURVIVING SOURCES ARE NOW SCOPED TO THE PROFILE ──────────────────────────────
+ *
+ * Both tables carry `domain_profile_id` and both reads ignored it, so a user with an engineering
+ * profile and a data profile stamped whichever report existed first. Rows predating the column
+ * carry NULL and are accepted as a LAST resort — an old report of your own beats none, and
+ * `ORDER BY (domain_profile_id IS NULL) ASC` puts the profile-matched one first when both exist.
+ *
+ * The profile is resolved here rather than passed in, from the same rule the rest of the server
+ * uses (`is_active = 1`). Two callers with two local variable names is two chances to hand this the
+ * wrong profile, and neither call site has a reason to mean anything but "the active one".
  *
  * Returns nulls when nothing has scored this job. That is left as null: see the insert site.
  */
@@ -94,9 +126,20 @@ export function capturedAtsAtApply(db, userId, jobId) {
     return { score: parsed.score, version: parsed.source || null, report: row.ats_report };
   };
   try {
-    return pick(db.prepare("SELECT ats_report FROM resumes WHERE user_id=? AND job_id=?").get(userId, jobId))
-      || pick(db.prepare("SELECT ats_report FROM ats_only_reports WHERE user_id=? AND job_id=?").get(userId, jobId))
-      || pick(db.prepare("SELECT ats_report FROM scraped_jobs WHERE job_id=?").get(jobId))
+    const profileId = db.prepare(
+      "SELECT id FROM domain_profiles WHERE user_id=? AND is_active=1"
+    ).get(userId)?.id ?? null;
+    // One statement per table, differing only in the table name, so the two cannot drift into
+    // disagreeing about what "this user's report for this profile" means.
+    const forProfile = (table) => db.prepare(`
+      SELECT ats_report FROM ${table}
+      WHERE user_id = ? AND job_id = ?
+        AND (domain_profile_id IS NULL OR domain_profile_id = ?)
+      ORDER BY (domain_profile_id IS NULL) ASC
+      LIMIT 1
+    `).get(userId, jobId, profileId);
+    return pick(forProfile("resumes"))
+      || pick(forProfile("ats_only_reports"))
       || empty;
   } catch {
     // Recording an application must never fail because a score could not be found for it.

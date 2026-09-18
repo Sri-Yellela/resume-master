@@ -3583,6 +3583,69 @@ console.log(`[boot] database ready: ${DB_PATH}`);
           WHERE description IS NULL OR TRIM(description) = '';
       `,
     },
+    {
+      // 108 — THE ATS REPORT CACHE IS PER (USER, PROFILE, JOB), NOT PER (USER, JOB).
+      //
+      // ⛔ THE SERIOUS DEFECT CC5 FIXED IS NOT THIS ONE — it was `scraped_jobs.ats_report`, one cell
+      // per JOB, served to any user who opened the posting (a candidate's matched/missing terms,
+      // computed against their résumé, handed to a stranger). That is removed in server.js and needs
+      // no migration. This is the narrower sibling: `ats_only_reports` was correctly scoped to a
+      // user and incorrectly scoped across their PROFILES, so a user with an engineering profile and
+      // a data profile got one cached report per posting and the second profile read the first's.
+      //
+      // SQLite cannot widen a UNIQUE constraint in place, so the table is rebuilt and refilled.
+      // Existing rows carry `domain_profile_id NULL`, which honestly means "cached before profiles
+      // were distinguished" — the reads treat it as a last-resort fallback rather than deleting
+      // history. There are 0 rows on this database, so the rebuild is a no-op here and the code path
+      // still has to be right for a deployment that has some.
+      //
+      // ⛔ scorer_version AND scored_at ARE NOT DECORATION. A stored score with neither is
+      // unfalsifiable: the one row that ever carried a score stored 43 and scored null on the same
+      // day, and nothing recorded which engine produced the 43 — so a stale cache and a changed
+      // scorer were indistinguishable. Any surviving stored score now says what computed it, which
+      // is what lets a later version invalidate it instead of guessing.
+      id: "108_ats_reports_per_profile",
+      sql: `
+        -- The per-user ATS report cache was UNIQUE(user_id, job_id): one row per user per job, with
+        -- no profile. A user with an engineering profile and a data profile got ONE cached report
+        -- for a posting, whichever they opened first, and the other profile silently read it.
+        --
+        -- SQLite cannot drop or widen a UNIQUE constraint in place, so the table is rebuilt. It is
+        -- additive in the sense that matters: every existing row is carried over with
+        -- domain_profile_id NULL, which reads as "cached before profiles were distinguished" and is
+        -- honoured by the reads as a last-resort fallback rather than being thrown away.
+        --
+        -- scorer_version and scored_at exist because a stored score with neither is UNFALSIFIABLE.
+        -- The one row that used to carry a score stored 43 while scoring null on the same day, and
+        -- nothing recorded which engine produced the 43, so there was no way to tell a stale cache
+        -- from a changed scorer. Any stored score now says what computed it and when.
+        CREATE TABLE IF NOT EXISTS ats_only_reports_v2 (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          domain_profile_id INTEGER REFERENCES domain_profiles(id) ON DELETE CASCADE,
+          job_id            TEXT NOT NULL,
+          ats_report        TEXT NOT NULL,
+          ats_score         INTEGER,
+          scorer_version    TEXT,
+          scored_at         INTEGER,
+          created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(user_id, domain_profile_id, job_id)
+        );
+
+        INSERT INTO ats_only_reports_v2
+          (user_id, domain_profile_id, job_id, ats_report, ats_score, scorer_version, scored_at, created_at)
+        SELECT user_id, NULL, job_id, ats_report, ats_score, NULL, created_at, created_at
+        FROM ats_only_reports;
+
+        DROP TABLE ats_only_reports;
+        ALTER TABLE ats_only_reports_v2 RENAME TO ats_only_reports;
+
+        -- The board LEFT JOINs this per (user, profile, job) on every page, so the lookup has to be
+        -- an index seek rather than a scan of one user's whole history.
+        CREATE INDEX IF NOT EXISTS idx_ats_only_reports_lookup
+          ON ats_only_reports(user_id, domain_profile_id, job_id);
+      `,
+    },
   ];
 
   console.log("[boot] migrations: checking schema");
@@ -4288,17 +4351,30 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
           claims: atsClaims(domainProfile),
         });
 
-        // Find newly inserted jobs that have no ats_score yet
-        const newlyInserted = classified.filter(item => {
-          const row = db.prepare("SELECT ats_score FROM scraped_jobs WHERE job_id=?").get(item.jobId);
-          return row && row.ats_score === null;
-        });
+        // ⛔ CC5 · SCORED FOR THIS USER AND PROFILE, NOT ONTO THE POSTING.
+        //
+        // This block used to `UPDATE scraped_jobs SET ats_score=?, ats_report=?` — one cell per
+        // posting — from `runtimeBasis`, which is built three lines above out of THIS user's base
+        // résumé, their signal profile and their claims. So whoever crawled a posting first wrote
+        // their own fit onto it, and every other user of the board read that number as theirs.
+        //
+        // Two consequences, and the second was the quieter one:
+        //   · the leak. Every reader of the column served one candidate's score to all of them.
+        //   · the suppression. The "already scored?" marker was the same shared cell, so a second
+        //     user crawling the same posting was skipped for having a score they did not have.
+        //
+        // Both go away by keying the write on (user, profile, job), which is what the basis was
+        // always specific to.
+        //
+        // The `SELECT ... FROM scraped_jobs` this replaces also served as an existence check, so
+        // that survives as its own clause: a row that failed to insert would otherwise get a cache
+        // entry pointing at a posting nobody can open.
+        const newlyInserted = classified.filter(item =>
+          db.prepare("SELECT 1 FROM scraped_jobs WHERE job_id=?").get(item.jobId)
+          && !hasAtsReportForProfile({ userId, profileId: domainProfile?.id ?? null, jobId: item.jobId })
+        );
 
         if (!newlyInserted.length) return;
-
-        const updateAts = db.prepare(
-          "UPDATE scraped_jobs SET ats_score=?, ats_report=? WHERE job_id=?"
-        );
 
         let attempted = 0;
         let failed = 0;
@@ -4313,7 +4389,9 @@ async function scrapeJobs(query, apifyToken, scrapeParams = {}, domainProfileId 
                 termWeights: atsTermWeightsForJob(item),
                 synonyms: atsSynonyms(),
               });
-              updateAts.run(report.score, JSON.stringify(report), item.jobId);
+              storeAtsReportForProfile({
+                userId, profileId: domainProfile?.id ?? null, jobId: item.jobId, report,
+              });
               if (domainProfile?.id) {
                 const aggregation = aggregateAtsMissingSignals(db, {
                   userId,
@@ -5835,6 +5913,69 @@ function atsTermWeightsForJob(job) {
   return _atsWeightCache.get(key);
 }
 
+/**
+ * CC5 · THE ONE PLACE A COMPUTED ATS REPORT IS STORED, and it is keyed by whose résumé produced it.
+ *
+ * Every writer in this file used to `UPDATE scraped_jobs SET ats_score=?, ats_report=?` — one cell
+ * per POSTING for a number that is a statement about (résumé, posting). Three writers did it (the
+ * scrape scorer, adopt-enhanced, the keywords route) and four readers served it, so the same
+ * mistake had to be found and fixed seven times. It is one function now.
+ *
+ * ⛔ DELETE-THEN-INSERT RATHER THAN `ON CONFLICT`, AND THE REASON IS SQLITE'S NULL SEMANTICS.
+ * `UNIQUE(user_id, domain_profile_id, job_id)` does NOT constrain rows whose profile is NULL —
+ * NULLs compare distinct in a unique index — so `ON CONFLICT(user_id, domain_profile_id, job_id)`
+ * never fires for a user who has no active profile, and every open of the ATS panel would append
+ * another row. `WHERE domain_profile_id IS ?` is null-safe, so this holds one row per key including
+ * that one. Wrapped in a transaction because between the two statements there is no row at all.
+ *
+ * `scorer_version` is not decoration: a stored score with no engine and no timestamp is
+ * unfalsifiable. The one row that ever carried a stored score on this board held 43 while the
+ * scorer returned null on the same day, and nothing recorded which engine produced the 43 — a
+ * stale cache and a changed scorer were indistinguishable. The version comes off the REPORT's own
+ * `source`, never today's constant, for the same reason capturedAtsAtApply reads it that way.
+ */
+let _storeAtsReportTxn = null;
+function storeAtsReportForProfile({ userId, profileId = null, jobId, report }) {
+  if (!userId || !jobId || !report) return;
+  // A declaration rather than a `const` holding db.transaction(...), because the scrape scorer 1,500
+  // lines above calls this: a const would sit in its temporal dead zone for any caller that ran
+  // during module evaluation, and "it happens to be called from a callback" is not a property worth
+  // depending on. The transaction is built once, on first use.
+  if (!_storeAtsReportTxn) {
+    _storeAtsReportTxn = db.transaction((args) => {
+      db.prepare(
+        "DELETE FROM ats_only_reports WHERE user_id=? AND job_id=? AND domain_profile_id IS ?"
+      ).run(args.userId, args.jobId, args.profileId);
+      db.prepare(`
+        INSERT INTO ats_only_reports
+          (user_id, domain_profile_id, job_id, ats_report, ats_score, scorer_version, scored_at)
+        VALUES (?, ?, ?, ?, ?, ?, unixepoch())
+      `).run(
+        args.userId, args.profileId, args.jobId,
+        JSON.stringify(args.report), args.report.score ?? null,
+        args.report.source || LOCAL_ATS_SOURCE,
+      );
+    });
+  }
+  _storeAtsReportTxn({ userId, profileId: profileId ?? null, jobId: String(jobId), report });
+}
+
+/**
+ * CC5 · has THIS user, on THIS profile, already got a report for this job?
+ *
+ * The scrape scorer used to ask `SELECT ats_score FROM scraped_jobs WHERE job_id=?` and skip any
+ * row that was non-NULL — which meant one user's crawl suppressed scoring for everybody else's,
+ * because the marker it read was shared. Asking per (user, profile) is both correct and what makes
+ * the skip meaningful: a second user crawling the same posting genuinely has no score yet.
+ */
+function hasAtsReportForProfile({ userId, profileId = null, jobId }) {
+  try {
+    return !!db.prepare(
+      "SELECT 1 FROM ats_only_reports WHERE user_id=? AND job_id=? AND domain_profile_id IS ? LIMIT 1"
+    ).get(userId, String(jobId), profileId ?? null);
+  } catch { return false; }
+}
+
 const atsScoreQueue = [];
 let atsScoreQueueRunning = false;
 let anthropicAtsUnavailableUntil = 0;
@@ -7162,11 +7303,36 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       //
       // On the Saved tab the join is dropped entirely (see savedTab above): the user's own star
       // already answers "does this belong on your board?", and no classifier bucket may overrule it.
+      // ── CC5 · THE SCORE ON A CARD COMES FROM THE CALLER'S OWN CACHE, NOT A SHARED CELL ────────
+      //
+      // `matchScore` used to be read from `scraped_jobs.ats_score` — ONE CELL PER JOB, written at
+      // ingest from whichever user's résumé basis triggered the crawl. Every user saw the same
+      // stranger's number. An earlier task wired that column up deliberately, to fix a mobile
+      // client banding every job "Not enough signal"; it was right about the symptom and wrong
+      // about the cure.
+      //
+      // The score now comes from `ats_only_reports`, keyed (user_id, domain_profile_id, job_id) as
+      // of migration 108 — so it is THIS caller's score for THIS profile or it is absent. The ATS
+      // panel writes that cache when a user opens a report, so opening a job is what makes its
+      // badge appear, per profile.
+      //
+      // ⛔ A JOIN AND NOT PER-REQUEST SCORING, AND THAT IS A MEASUREMENT RATHER THAN A PREFERENCE.
+      // Scoring is local and costs no money, but it is not free in time: 6.67ms mean per posting
+      // (median 6.32, p95 9.99, n = 300 real rows, term weights and synonyms warm, median
+      // description 5,000 chars). A board PAGE is 50 rows = 0.33s, the owner's curated board is
+      // 849 = 5.7s, and SORTING by score needs every row scored — 2,458 = 16.4s. So the board reads
+      // a cache and the panel does the scoring. Re-measure with scripts/, not from this comment.
+      //
+      // The profile match is `IS` rather than `=` so a row cached before migration 108 — which
+      // carries domain_profile_id NULL — is not silently unreachable; it simply never matches a
+      // real profile id, which is the honest reading of "we do not know which profile this was for".
       const joinClause = `
         FROM scraped_jobs sj
         ${savedTab ? '' : 'LEFT JOIN job_role_map jrm ON jrm.job_id = sj.job_id AND jrm.role_key = ?'}
         LEFT JOIN user_jobs uj
           ON uj.job_id = sj.job_id AND uj.user_id = ? AND uj.domain_profile_id = ?
+        LEFT JOIN ats_only_reports aor
+          ON aor.job_id = sj.job_id AND aor.user_id = ? AND aor.domain_profile_id IS ?
       `;
       // Parameterised over the rich-filter fragment alone so the curated and uncurated counts are
       // guaranteed to differ in nothing else — a hand-copied second WHERE would drift the first time
@@ -7216,6 +7382,8 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
         // Must track joinClause exactly: no role_key placeholder on the Saved tab, so no roleKey arg.
         ...(savedTab ? [] : [roleKey]),
         req.user.id, sessionActiveProfile.id,
+        // CC5 · the ats_only_reports join, in TEXT ORDER after user_jobs.
+        req.user.id, sessionActiveProfile.id,
         ...keyArgs, ...locArgs, ...titleFilter.params,
         ...wtArgs, ...etArgs, ...catArgs, ...domArgs, ...srcArgs,
         ...maxAppArgs, ...ageArgs, ...yoeArgs, ...minYoeArgs,
@@ -7235,7 +7403,11 @@ app.get("/api/jobs", requireAuth, async (req, res) => {
       // (rank params) -> LIMIT. Getting this wrong does not throw; it returns plausible wrong rows.
       const cursorSql = cursorClause.sql ? `AND ${cursorClause.sql}` : "";
       const fetched = db.prepare(
-        `SELECT ${selectCols}, uj.visited, uj.applied, uj.starred, uj.disliked${cursorCols.sql}
+        // CC5 · `matchScore` is selected from the CALLER's cache, aliased to the name mapJobRow
+        // reads. sj.ats_score is deliberately not selected under that name any more — see the
+        // joinClause note.
+        `SELECT ${selectCols}, uj.visited, uj.applied, uj.starred, uj.disliked,
+                aor.ats_score AS matchScore${cursorCols.sql}
          ${joinClause} ${whereClause} ${cursorSql} ORDER BY ${order.sql} LIMIT ?${rawCursor ? "" : " OFFSET ?"}`
       ).all(
         ...cursorCols.params,
@@ -7726,8 +7898,21 @@ app.get("/api/jobs/poll", requireAuth, (req, res) => {
     minYearsExp:     j.min_years_exp,
     maxYearsExp:     j.max_years_exp,
     expRaw:          j.exp_raw,
-    baseAtsScore:    j.ats_score ?? null,
-    baseAtsReport:   parseJsonMaybe(j.ats_report, null),
+    // ⛔ CC5 · THE SECOND SURFACE OF THE SAME LEAK. These read scraped_jobs.ats_score/ats_report —
+    // ONE CELL PER JOB, written at ingest from whichever user's résumé basis triggered the crawl —
+    // and served them to whoever polled. An ATS report is a statement about a particular résumé
+    // against a particular posting, so a per-job cell cannot hold one for anybody.
+    //
+    // Now always null, which is what they ALREADY were on 100% of rows (0 of 2,460 carry either
+    // value), so no client loses anything it was actually receiving. The field names stay so the
+    // response shape is unchanged for the desktop and mobile clients that read them; what changes
+    // is that they can no longer carry another candidate's answer.
+    //
+    // A real per-(user, profile) score reaches the client through the ATS panel, which scores
+    // against the CALLER's basis on demand (6.67ms mean for one posting, measured over 300 real
+    // rows). See docs/CC5_PER_PROFILE_SCORES.md for why the board cannot do that for 50 at once.
+    baseAtsScore:    null,
+    baseAtsReport:   null,
     salaryMin:       j.salary_min,
     salaryMax:       j.salary_max,
     salaryCurrency:  j.salary_currency,
@@ -7880,10 +8065,27 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   const { resumeText } = req.body;
   if (!resumeText) return res.status(400).json({ error: "resumeText required" });
 
-  // Priority 1: return ats_report from an existing generated resume (most accurate)
-  const existingResume = db.prepare(
-    "SELECT ats_report FROM resumes WHERE user_id=? AND job_id=?"
-  ).get(userId, jobId);
+  const keywordsProfile = getOrRepairActiveProfile(userId);
+  const keywordsProfileId = keywordsProfile?.id ?? null;
+
+  // Priority 1: return ats_report from an existing generated resume (most accurate).
+  //
+  // ⛔ CC5 · NOW SCOPED TO THE PROFILE. `resumes` has carried `domain_profile_id` since it was
+  // added and this read ignored it, so a user with an engineering profile and a data profile was
+  // served whichever résumé they generated FIRST for that posting — a report computed against a
+  // different résumé of their own. Less serious than the cross-USER leak below, and the same
+  // mistake one level in.
+  //
+  // Rows predating the column carry NULL, so they are accepted as a fallback rather than discarded:
+  // an old report of your own is worth more than none, and `ORDER BY domain_profile_id IS NULL`
+  // puts the profile-matched one first when both exist.
+  const existingResume = db.prepare(`
+    SELECT ats_report FROM resumes
+    WHERE user_id = ? AND job_id = ?
+      AND (domain_profile_id IS NULL OR domain_profile_id = ?)
+    ORDER BY (domain_profile_id IS NULL) ASC
+    LIMIT 1
+  `).get(userId, jobId, keywordsProfileId);
   if (existingResume?.ats_report) {
     try {
       const parsed = JSON.parse(existingResume.ats_report);
@@ -7891,21 +8093,40 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
     } catch {}
   }
 
-  // Priority 2: reuse scrape-time ATS report when it already exists for this job.
-  const scrapeTimeReport = db.prepare(
-    "SELECT ats_report FROM scraped_jobs WHERE job_id=?"
-  ).get(jobId);
-  if (scrapeTimeReport?.ats_report) {
-    try {
-      const parsed = JSON.parse(scrapeTimeReport.ats_report);
-      if (parsed?.source === LOCAL_ATS_SOURCE) return res.json(parsed);
-    } catch {}
-  }
+  // ── CC5 · PRIORITY 2 IS DELETED, AND IT WAS A CROSS-USER LEAK ────────────────────────────────
+  //
+  // It read:
+  //
+  //     const scrapeTimeReport = db.prepare(
+  //       "SELECT ats_report FROM scraped_jobs WHERE job_id=?"
+  //     ).get(jobId);
+  //     if (scrapeTimeReport?.ats_report) { … return res.json(parsed); }
+  //
+  // ⛔ NO user_id. NO profile. `scraped_jobs.ats_report` is ONE CELL PER JOB, written at ingest
+  // from whichever user's résumé basis happened to trigger the crawl, and overwritten wholesale by
+  // adopt-enhanced for one profile. So this served ONE CANDIDATE'S ATS REPORT — their matched and
+  // missing terms, computed against their résumé — TO ANY OTHER USER who opened the same posting.
+  //
+  // There is no version of this cache that is correct. An ATS report is a statement about a
+  // particular résumé against a particular posting; a per-job cell cannot hold one, so the fix is
+  // removal rather than a narrower read. The remaining chain is already per-user
+  // (`resumes`, `ats_only_reports`) and priority 4 scores against the caller's own basis.
+  //
+  // Not currently exploitable, which is luck rather than design: `ats_report` is non-NULL on 0 of
+  // 2,460 active rows today, so there was nothing to serve. The ingest writer at the top of this
+  // file still populates it, so the next crawl that scores a row would have armed it.
 
-  // Priority 3: return cached ats_only_reports entry (avoids re-running Haiku)
-  const cached = db.prepare(
-    "SELECT ats_report FROM ats_only_reports WHERE user_id=? AND job_id=?"
-  ).get(userId, jobId);
+  // Priority 3: return cached ats_only_reports entry (avoids re-running the scorer).
+  //
+  // CC5 · keyed on the profile too, as of migration 108. Same reasoning as priority 1, and the same
+  // NULL fallback for rows cached before profiles were distinguished.
+  const cached = db.prepare(`
+    SELECT ats_report FROM ats_only_reports
+    WHERE user_id = ? AND job_id = ?
+      AND (domain_profile_id IS NULL OR domain_profile_id = ?)
+    ORDER BY (domain_profile_id IS NULL) ASC
+    LIMIT 1
+  `).get(userId, jobId, keywordsProfileId);
   if (cached?.ats_report) {
     try {
       const parsed = JSON.parse(cached.ats_report);
@@ -7917,7 +8138,9 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
   const job = db.prepare("SELECT * FROM scraped_jobs WHERE job_id=?").get(jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
 
-  const activeProfile = getOrRepairActiveProfile(userId);
+  // Resolved once at the top of the route now (keywordsProfile), because the two cache reads above
+  // need it too and resolving it twice is two chances to disagree about which profile is active.
+  const activeProfile = keywordsProfile;
   const signalProfile = activeProfile
     ? loadOrCreateSimpleApplyProfile(db, { userId, profileId: activeProfile.id })
     : null;
@@ -7930,15 +8153,19 @@ app.post("/api/jobs/:id/keywords", requireAuth, async (req, res) => {
     });
     const result = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
 
-    // Save to cache — INSERT OR REPLACE via ON CONFLICT
-    db.prepare(`
-      INSERT INTO ats_only_reports (user_id, job_id, ats_report, ats_score)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id, job_id) DO UPDATE SET
-        ats_report=excluded.ats_report,
-        ats_score=excluded.ats_score,
-        created_at=unixepoch()
-    `).run(userId, jobId, JSON.stringify(result), result.score ?? null);
+    // Save to cache, through the one writer every scoring path in this file shares.
+    //
+    // ⛔ IT IS NOT AN `ON CONFLICT` UPSERT, and that is not a style choice — a user with no active
+    // profile writes `domain_profile_id NULL`, SQLite treats NULLs as distinct in a unique index,
+    // and `ON CONFLICT(user_id, domain_profile_id, job_id)` would therefore never fire for them:
+    // every open of this panel would append another row forever. See storeAtsReportForProfile.
+    //
+    // This write is also what makes the board's badge appear: GET /api/jobs reads `matchScore` out
+    // of this table for (caller, active profile, job), so opening a report is what scores a row for
+    // the user who opened it — per profile, and visible to nobody else.
+    storeAtsReportForProfile({
+      userId, profileId: keywordsProfileId, jobId, report: result,
+    });
 
     res.json(result);
   } catch (e) {
@@ -8360,14 +8587,21 @@ async function adoptEnhancedProfileResume(req, res) {
         WHERE sj.description IS NOT NULL
       `).all(userId, profileId);
 
-      const updateAts = db.prepare("UPDATE scraped_jobs SET ats_score=?, ats_report=? WHERE job_id=?");
-
+      // ⛔ CC5 · THE MOST DESTRUCTIVE OF THE THREE WRITERS, AND IT IS THE ONE THE BRIEF NAMED.
+      //
+      // It read this user's rows out of `user_jobs` — correctly scoped to (user, profile) — scored
+      // them against THIS profile's newly enhanced résumé, and then wrote the results to
+      // `scraped_jobs.ats_score`, which is not scoped to anything. Adopting an enhanced résumé
+      // therefore overwrote, for every other user of every posting this one had saved, the score
+      // they were being shown. One user pressing a button changed strangers' boards.
+      //
+      // Same rows, same basis, same batching; the destination is now keyed by whose résumé it was.
       for (let i = 0; i < jobsToRescore.length; i += 25) {
         const batch = jobsToRescore.slice(i, i + 25);
         await Promise.all(batch.map(async job => {
           try {
             const report = scoreAtsLocally({ job, runtimeBasis, termWeights: atsTermWeightsForJob(job), synonyms: atsSynonyms() });
-            updateAts.run(report.score, JSON.stringify(report), job.job_id);
+            storeAtsReportForProfile({ userId, profileId, jobId: job.job_id, report });
           } catch(e) {
             console.warn(`[adopt-enhanced] rescore failed for ${job.job_id}:`, e.message);
           }

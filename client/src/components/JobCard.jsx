@@ -224,6 +224,41 @@ function SkillChips({ skills, max = 5 }) {
   );
 }
 
+// ── The ATS slot on a card ──────────────────────────────────────
+// ⛔ CC5 · THERE WAS NO ROUTE TO THE TERM LIST ON A ROW NOBODY HAD SCORED, WHICH WAS ALMOST EVERY
+// ROW. The badge below is the only thing on a card that opens the ATS report, and it renders
+// nothing without a score — deliberately, because a card must not report an absent score as a
+// verdict (see its own note). Two correct decisions composed into a dead end: 0 of 2,458 active
+// postings carry a score, so the report — the matched and missing terms, and the chips a candidate
+// claims from — was unreachable from the board on 100% of rows.
+//
+// The fix is not to render a band nobody computed. It is a SECOND, deliberately non-committal
+// control that says only "there is an answer here if you ask for it", which is true: the panel it
+// opens scores the posting against the caller's own résumé on demand (~7ms, measured over 300 real
+// postings) and writes the result to that user's per-profile cache, which is where the badge then
+// comes from. So a row heals by being looked at — though not instantly: the badge is part of the
+// board response, so it appears on the next board fetch rather than the moment the panel answers.
+// That is a deliberately small promise. The term list, which is the thing that was unreachable, is
+// on screen immediately.
+//
+// It is NOT styled as a band: no band colour, no band word, a dashed border and muted text, so it
+// cannot be mistaken for the engine having an opinion it does not have. And it only appears when
+// there is somewhere to go — no onClick, no chip.
+function AtsSlot({ score, onClick }) {
+  if (score != null && !Number.isNaN(score)) return <ATSBadge score={score} onClick={onClick}/>;
+  if (!onClick) return null;
+  return (
+    <span title="Score this job against your resume and see which terms match"
+      onClick={e => { e.stopPropagation(); onClick(); }}
+      style={{ background:"transparent", color:"var(--color-text-muted, #6b7280)",
+               padding:"1px 7px", borderRadius:999, fontSize:10, fontWeight:600,
+               cursor:"pointer", border:"1px dashed var(--color-border, #d1d5db)",
+               whiteSpace:"nowrap", flexShrink:0 }}>
+      Check match
+    </span>
+  );
+}
+
 // ── ATS badge ───────────────────────────────────────────────────
 // A BAND, NOT A NUMBER. "ATS 43" claims a precision the engine does not have (rho 0.746 against the
 // owner's graded 30, 12.2% of pairs still mis-ordered). The old thresholds here were >=80 green /
@@ -590,10 +625,11 @@ export default function JobCard({
               </span>
               <span style={{ fontSize:10, color:"#16a34a", fontWeight:600, flexShrink:0 }}>{ago(job.postedAt, job.scrapedAt)}</span>
               {/* The null guard that used to live here, then was removed, now lives INSIDE
-                  ATSBadge — one copy rather than one per call site, so the two rows on this card
-                  cannot disagree about when a badge appears. See the note on ATSBadge for why a
-                  card treats "no score" as nothing to say rather than as a verdict. */}
-              {!isLoggedOut && <ATSBadge score={g?.atsScore ?? job?.baseAtsScore ?? null} onClick={onAts}/>}
+                  the badge — one copy rather than one per call site, so the two rows on this card
+                  cannot disagree about when a badge appears. See its note for why a card treats
+                  "no score" as nothing to say rather than as a verdict, and AtsSlot's for why the
+                  card still has to offer a way IN when there is no score. */}
+              {!isLoggedOut && <AtsSlot score={g?.atsScore ?? job?.baseAtsScore ?? null} onClick={onAts}/>}
               {!isLoggedOut && (
                 <ToggleIconBtn
                   bg="#f59e0b"
@@ -723,7 +759,7 @@ export default function JobCard({
             <span style={{ fontSize:11, color:"#16a34a", fontWeight:600 }}>{ago(job.postedAt, job.scrapedAt)}</span>
 
             {!isLoggedOut && (
-              <ATSBadge score={g?.atsScore ?? job?.baseAtsScore ?? null} onClick={onAts}/>
+              <AtsSlot score={g?.atsScore ?? job?.baseAtsScore ?? null} onClick={onAts}/>
             )}
             {!isLoggedOut && done && (
               <span onClick={onResume ? e => { e.stopPropagation(); onResume(); } : undefined}

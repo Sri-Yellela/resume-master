@@ -33,7 +33,15 @@ const JOBS_PANEL = "client/src/panels/JobsPanel.jsx";
 test("the score the board sends is the score the card reads", () => {
   // Behavioural on the server side, because the defect was a key name and a source test asserting
   // the wrong name would pass just as happily as one asserting the right name.
-  assert.equal(mapJobRow({ job_id: "a", ats_score: 44 }).matchScore, 44);
+  //
+  // ⛔ CC5 CHANGED WHERE THE SCORE COMES FROM. It used to be `ats_score: 44` here — the stored
+  // per-JOB column — and that column is written from one user's résumé basis and read by everyone.
+  // The route now supplies `matchScore` from `ats_only_reports`, keyed (user, profile, job), so the
+  // number on a card is the caller's own or absent. The contract between board and card is
+  // unchanged; only its source is.
+  assert.equal(mapJobRow({ job_id: "a", matchScore: 44 }).matchScore, 44);
+  assert.equal(mapJobRow({ job_id: "a", ats_score: 44 }).matchScore, null,
+    "the shared per-job cell must never reach a card as this user's score");
 
   // The client half: normalizeApiJob must accept what mapJobRow actually emits.
   const src = fs.readFileSync(JOBS_PANEL, "utf8");

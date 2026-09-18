@@ -26,9 +26,12 @@ import { resumeDepthWarning } from "../shared/atsBands.js";
  * The report format's version, and the cache key for every stored report.
  *
  * BUMPED FROM local_ats_v1 BECAUSE THE TERMS CHANGED, NOT THE SHAPE.
- * Reports are cached in four places — scraped_jobs.ats_report, ats_only_reports, resumes.ats_report
- * and resume_versions.ats_report — and the read path serves a cached report whenever its `source`
- * matches. A v1 report is a list of sentence fragments. Leaving the version alone would have meant
+ * Reports are cached in three places — ats_only_reports, resumes.ats_report and
+ * resume_versions.ats_report — and the read path serves a cached report whenever its `source`
+ * matches. There used to be a fourth, `scraped_jobs.ats_report`, and CC5 removed it: a report is a
+ * statement about (résumé, posting) and that column is one cell per POSTING, so it served one
+ * candidate's matched and missing terms to every other user who opened the same job. The three
+ * that remain all carry a user, and since migration 108 a domain profile as well. A v1 report is a list of sentence fragments. Leaving the version alone would have meant
  * every job already scored kept showing "and scalable. We" forever, and the fix would have appeared
  * to work only on jobs nobody had looked at yet.
  *

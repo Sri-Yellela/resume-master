@@ -3195,4 +3195,67 @@ export const MIGRATIONS = [
           WHERE description IS NULL OR TRIM(description) = '';
       `,
     },
+    {
+      // 108 — THE ATS REPORT CACHE IS PER (USER, PROFILE, JOB), NOT PER (USER, JOB).
+      //
+      // ⛔ THE SERIOUS DEFECT CC5 FIXED IS NOT THIS ONE — it was `scraped_jobs.ats_report`, one cell
+      // per JOB, served to any user who opened the posting (a candidate's matched/missing terms,
+      // computed against their résumé, handed to a stranger). That is removed in server.js and needs
+      // no migration. This is the narrower sibling: `ats_only_reports` was correctly scoped to a
+      // user and incorrectly scoped across their PROFILES, so a user with an engineering profile and
+      // a data profile got one cached report per posting and the second profile read the first's.
+      //
+      // SQLite cannot widen a UNIQUE constraint in place, so the table is rebuilt and refilled.
+      // Existing rows carry `domain_profile_id NULL`, which honestly means "cached before profiles
+      // were distinguished" — the reads treat it as a last-resort fallback rather than deleting
+      // history. There are 0 rows on this database, so the rebuild is a no-op here and the code path
+      // still has to be right for a deployment that has some.
+      //
+      // ⛔ scorer_version AND scored_at ARE NOT DECORATION. A stored score with neither is
+      // unfalsifiable: the one row that ever carried a score stored 43 and scored null on the same
+      // day, and nothing recorded which engine produced the 43 — so a stale cache and a changed
+      // scorer were indistinguishable. Any surviving stored score now says what computed it, which
+      // is what lets a later version invalidate it instead of guessing.
+      id: "108_ats_reports_per_profile",
+      sql: `
+        -- The per-user ATS report cache was UNIQUE(user_id, job_id): one row per user per job, with
+        -- no profile. A user with an engineering profile and a data profile got ONE cached report
+        -- for a posting, whichever they opened first, and the other profile silently read it.
+        --
+        -- SQLite cannot drop or widen a UNIQUE constraint in place, so the table is rebuilt. It is
+        -- additive in the sense that matters: every existing row is carried over with
+        -- domain_profile_id NULL, which reads as "cached before profiles were distinguished" and is
+        -- honoured by the reads as a last-resort fallback rather than being thrown away.
+        --
+        -- scorer_version and scored_at exist because a stored score with neither is UNFALSIFIABLE.
+        -- The one row that used to carry a score stored 43 while scoring null on the same day, and
+        -- nothing recorded which engine produced the 43, so there was no way to tell a stale cache
+        -- from a changed scorer. Any stored score now says what computed it and when.
+        CREATE TABLE IF NOT EXISTS ats_only_reports_v2 (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          domain_profile_id INTEGER REFERENCES domain_profiles(id) ON DELETE CASCADE,
+          job_id            TEXT NOT NULL,
+          ats_report        TEXT NOT NULL,
+          ats_score         INTEGER,
+          scorer_version    TEXT,
+          scored_at         INTEGER,
+          created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+          UNIQUE(user_id, domain_profile_id, job_id)
+        );
+
+        INSERT INTO ats_only_reports_v2
+          (user_id, domain_profile_id, job_id, ats_report, ats_score, scorer_version, scored_at, created_at)
+        SELECT user_id, NULL, job_id, ats_report, ats_score, NULL, created_at, created_at
+        FROM ats_only_reports;
+
+        DROP TABLE ats_only_reports;
+        ALTER TABLE ats_only_reports_v2 RENAME TO ats_only_reports;
+
+        -- The board LEFT JOINs this per (user, profile, job) on every page, so the lookup has to be
+        -- an index seek rather than a scan of one user's whole history.
+        CREATE INDEX IF NOT EXISTS idx_ats_only_reports_lookup
+          ON ats_only_reports(user_id, domain_profile_id, job_id);
+      `,
+    },
   ];

@@ -106,7 +106,24 @@ const EXP = (dir) => [
 const SORT_KEYS = {
   dateDesc:       RECENCY,
   dateAsc:        OLDEST,
-  atsScore:       [NULLS_LAST("sj.ats_score"),       KEY("sj.ats_score", "DESC"),       ...RECENCY],
+  // ⛔ CC5 · THIS SORTED ON A COLUMN THAT IS NULL ON EVERY ROW, i.e. it was a dead control: the
+  // NULLS_LAST key was equal for all 2,460 active rows and the order collapsed to RECENCY, so
+  // picking "Best match" silently gave you "Newest". `sj.ats_score` was also the wrong column even
+  // when populated — one cell per JOB, written from whichever user's résumé triggered the crawl.
+  //
+  // It now sorts on `aor.ats_score`, the caller's OWN cached score for their active profile
+  // (migration 108). Rows they have never had scored still sort last, which is honest: the control
+  // orders what it actually knows and says nothing about the rest.
+  //
+  // ⛔ IT IS NOT SCORED PER REQUEST, AND THAT IS MEASURED RATHER THAN ASSUMED. Scoring the whole
+  // board to sort it costs 2,458 rows x 6.67ms = 16.4 SECONDS. A cache read is the only affordable
+  // source, so the sort is only as complete as the user's own history — stated here so nobody
+  // reads a short "Best match" list as a bug.
+  //
+  // `aor` is the board query's own LEFT JOIN alias. Every other key here is `sj.`-prefixed for the
+  // same reason: these expressions are written against the caller's aliases, and buildOrderKeys has
+  // exactly one caller (server.js's board), which defines both.
+  atsScore:       [NULLS_LAST("aor.ats_score"),      KEY("aor.ats_score", "DESC"),      ...RECENCY],
   applicantCount: [NULLS_LAST("sj.applicant_count"), KEY("sj.applicant_count", "ASC"),  ...RECENCY],
   compHigh:       [NULLS_LAST("sj.salary_max"),      KEY("sj.salary_max", "DESC"),      ...RECENCY],
   compLow:        [NULLS_LAST("sj.salary_min"),      KEY("sj.salary_min", "ASC"),       ...RECENCY],

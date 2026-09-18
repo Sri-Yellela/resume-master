@@ -36,8 +36,16 @@ import {
 //   NULLs in a sorted column     posted_at is NULL for a third of rows. `=` yields NULL in SQLite,
 //                                so a cursor using `=` for equality stops dead partway down the
 //                                feed — reporting the end of the board in the middle of it.
-//   an ENTIRELY NULL column      ats_score/salary/min_years_exp are never populated on a crawled
-//                                board, so those sorts degenerate to the tie-break alone.
+//   an ENTIRELY NULL column      salary/min_years_exp are never populated on a crawled board, and
+//                                since CC5 the score sorts on the CALLER's own cache — empty until
+//                                they open a report — so those sorts degenerate to the tie-break.
+//
+// CC5 · the schema gained `ats_only_reports`, because `SORT_KEYS.atsScore` now reads the CALLER's
+// own cached score for their active profile rather than `sj.ats_score` — a cell shared by every
+// user of a posting. The alias belongs to the board query, so this fixture has to define it too or
+// that sort cannot be walked here at all. It is left EMPTY on purpose: that is the state of a board
+// whose user has never opened a report, which is every board on day one, and it is the case the
+// NULL-partition test at the bottom of this file is about.
 function board({ rows = 60 } = {}) {
   const db = new Database(":memory:");
   db.exec(`
@@ -49,6 +57,10 @@ function board({ rows = 60 } = {}) {
       min_years_exp INTEGER, experience_level TEXT, applicant_count INTEGER
     );
     CREATE TABLE user_jobs (job_id TEXT PRIMARY KEY, disliked INTEGER DEFAULT 0);
+    CREATE TABLE ats_only_reports (
+      user_id INTEGER, domain_profile_id INTEGER, job_id TEXT,
+      ats_report TEXT, ats_score INTEGER, scorer_version TEXT, scored_at INTEGER
+    );
   `);
   const ins = db.prepare(`INSERT INTO scraped_jobs
     (job_id,title,company,scraped_at,discovered_at,posted_at,experience_level,salary_max)
@@ -69,7 +81,13 @@ function board({ rows = 60 } = {}) {
 }
 
 const WHERE = "WHERE sj.is_active = 1 AND COALESCE(uj.disliked,0) = 0";
-const JOIN  = "FROM scraped_jobs sj LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id";
+// CC5 · the second LEFT JOIN mirrors the board's, because `SORT_KEYS.atsScore` is written against
+// its alias. The user and profile are LITERALS rather than placeholders on purpose: every helper
+// below binds `proj.params` then `ob.params` positionally, and a third source of placeholders in
+// the join would silently shift that list rather than throw.
+const JOIN  = "FROM scraped_jobs sj LEFT JOIN user_jobs uj ON uj.job_id = sj.job_id"
+            + " LEFT JOIN ats_only_reports aor"
+            + " ON aor.job_id = sj.job_id AND aor.user_id = 1 AND aor.domain_profile_id IS 1";
 
 /** The full ordering, as the board would render it in one shot. */
 function fullOrder(db, keys) {
@@ -218,12 +236,14 @@ test("a NULL in a sorted column does not end the feed early", () => {
 });
 
 test("an entirely NULL sort column still walks the whole board", () => {
-  // ats_score is never populated on a crawled board, so `atsScore` degenerates to the tie-break
-  // alone. Every row is in the same NULL partition and the comparison rests entirely on RECENCY.
+  // `atsScore` reads the CALLER's own cached score (CC5), which is empty until they open a report,
+  // so the sort degenerates to the tie-break alone. Every row is in the same NULL partition and the
+  // comparison rests entirely on RECENCY. This is not a corner case: it is the default state of
+  // every board, which is exactly why the walk has to survive it.
   const db = board();
   try {
     const keys = buildOrderKeys("atsScore", []);
-    assert.equal(db.prepare("SELECT COUNT(*) n FROM scraped_jobs WHERE ats_score IS NOT NULL").get().n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM ats_only_reports").get().n, 0);
     const expected = fullOrder(db, keys);
     const seen = [];
     let cursor = null, guard = 0;

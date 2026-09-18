@@ -93,8 +93,14 @@ test("AG1: the report version was bumped, so cached fragment reports are not ser
   assert.notEqual(LOCAL_ATS_SOURCE, "local_ats_v1", "the report content changed; the version must too");
 
   // Every cache gate compares against the constant, so a future bump cannot strand a reader on an
-  // old string. Three read gates in the keywords route, plus the scrape-time log.
-  assert.equal((server.match(/parsed\?\.source === LOCAL_ATS_SOURCE/g) || []).length, 3);
+  // old string.
+  //
+  // ⛔ TWO GATES NOW, NOT THREE. CC5 deleted the keywords route's priority-2 read, which served
+  // `scraped_jobs.ats_report` — ONE CELL PER JOB — to whoever asked, i.e. one candidate's report to
+  // another user. A version gate on a cache that must not exist is not a safeguard. The count is
+  // pinned rather than loosened so that RE-ADDING a gate is a test failure too: a third gate would
+  // mean somebody reintroduced a cache, and the version check would not make it safe.
+  assert.equal((server.match(/parsed\?\.source === LOCAL_ATS_SOURCE/g) || []).length, 2);
   assert.doesNotMatch(server, /"local_ats_v1"/, "no gate may still spell the old version");
 
   // The panel hides the LLM-only sections for the whole local family, not one version of it.

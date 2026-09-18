@@ -381,9 +381,15 @@ test("the pair is complete: score in, outcome out, joined on one row", async () 
   // The whole point of AK1's ground-truth work, asserted end to end.
   const { db, base, stop } = mount();
   try {
-    db.prepare("INSERT INTO scraped_jobs (job_id,title,company,search_query,_hash,ats_report) VALUES (?,?,?,?,?,?)")
-      .run("j1", "Backend Engineer", "Acme", "t", "h",
-        JSON.stringify({ source: "local_ats_v4", score: 57 }));
+    db.prepare("INSERT INTO scraped_jobs (job_id,title,company,search_query,_hash) VALUES (?,?,?,?,?)")
+      .run("j1", "Backend Engineer", "Acme", "t", "h");
+    // ⛔ CC5 · THE REPORT IS SEEDED AGAINST THE CANDIDATE, NOT THE POSTING. This used to write it
+    // into `scraped_jobs.ats_report` — one cell per job, no user on it — which is exactly the read
+    // capturedAtsAtApply deleted: it stamped whoever crawled a posting first onto everybody else's
+    // application row, poisoning the only dataset that can ever validate the score. Same number,
+    // same assertions; it now belongs to user 1, who is the one applying.
+    db.prepare("INSERT INTO ats_only_reports (user_id,domain_profile_id,job_id,ats_report,ats_score) VALUES (?,?,?,?,?)")
+      .run(1, null, "j1", JSON.stringify({ source: "local_ats_v4", score: 57 }), 57);
     await fetch(`${base}/api/apply`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ jobId: "j1", jobUrl: "https://x.test/j1" }),

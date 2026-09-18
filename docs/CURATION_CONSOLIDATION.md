@@ -6,12 +6,19 @@ project.
 
 **Run these in order. Each one changes the measurements the next depends on.** Do not parallelise.
 
-> **Status 2026-09-17: CC1, CC1b, CC2, CC3 and CC4 are DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
+> **Status 2026-09-18: ALL FIVE ARE DONE** (`docs/CC1_BOARD_MEMBERSHIP.md`,
 > `docs/CC1B_ROLE_KEY_SOFT_NULL.md`, `docs/CC2_SKILL_MATCHING.md`,
-> `docs/CC3_SYNONYMS_WIRED.md`, `docs/CC4_CLAIMS_REACH_CURATION.md`). **CC5 is the last one**,
-> and CC4 added a second caller that depends on it — see CC4 §7.
+> `docs/CC3_SYNONYMS_WIRED.md`, `docs/CC4_CLAIMS_REACH_CURATION.md`,
+> `docs/CC5_PER_PROFILE_SCORES.md`).
 > The owner's board is now **849** rows, not 405. 277 of them are still UNCLASSIFIED in
 > job_role_map — nothing backfills it, which remains the obvious follow-up and is not done.
+>
+> **CC5 found the defect on seven paths, not one.** Three writers filled `scraped_jobs.ats_score`
+> from one user's résumé basis and four readers served it back — including the apply stamp, which
+> wrote a stranger's score permanently into `job_applications`, the only table that can ever
+> validate the scorer. Every stored score is keyed `(user_id, domain_profile_id, job_id)` now, and
+> the per-job cell has no writer and no reader left. CC5 §1 has the table; CC4 §7's dependency is
+> discharged.
 >
 > **CC3's premise should be re-checked before it is acted on.** CC2 measured rho(board, score)
 > at ~0.18 and unmovable by matching-rule changes, so CC3's "re-measure rho with synonyms live"
@@ -410,7 +417,13 @@ user was warned. Confirm nothing is pre-checked. Screenshot the claim surface.
 
 ---
 
-# CC5 — The stored score is a cross-user cache
+# CC5 — The stored score is a cross-user cache ✅ DONE 2026-09-18 — `docs/CC5_PER_PROFILE_SCORES.md`
+
+> Two of this brief's own numbers were wrong and are corrected in that doc: `ats_score` is non-NULL
+> on **0 of 2,460** rows, not 4 of 1,296, and `aj2fixture::moderate-upper` — requirement 6's
+> disagreeing row — no longer exists. Requirement 3 was answered with a third option: the column is
+> **retired** (no writer, no reader, not dropped) rather than kept as a "profile-agnostic signal",
+> because it was never computed agnostically.
 
 ```
 Can run in parallel with CC4; independent of CC1–CC3.

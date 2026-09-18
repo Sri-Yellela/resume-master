@@ -57,7 +57,29 @@ function mapJobRow(j) {
     // Still null on two paths, correctly: /api/jobs/generic selects an explicit column list without
     // ats_score because a public unpersonalized feed has no per-user score, and live aggregator
     // results have never been scored. Both are "no opinion", which is what null means here.
-    matchScore:      j.ats_score ?? j.matchScore ?? null,
+    //
+    // ⛔ CC5 · IT NO LONGER READS sj.ats_score, AND THE REASON IS THE OPPOSITE OF THE NOTE ABOVE.
+    // That note fixed this field to read the STORED column, on the reasoning that a mobile client
+    // implementing the contract literally was banding every job "Not enough signal". The fix was
+    // right about the symptom and wrong about the cure: `scraped_jobs.ats_score` is ONE CELL PER
+    // JOB, written at ingest from whichever user's résumé basis happened to trigger the crawl and
+    // overwritten wholesale by adopt-enhanced for a single profile. Wiring it up here did not give
+    // the mobile client its user's score — it gave every user the same stranger's score, on every
+    // surface this mapper feeds (the board, by-id, import).
+    //
+    // A score is a statement about (résumé, posting). A per-job column cannot hold one, so this
+    // reads only an explicitly per-caller value passed in by the route (`j.matchScore`), and
+    // nothing derived from the shared cell.
+    //
+    // WHERE A REAL VALUE NOW COMES FROM: GET /api/jobs selects `aor.ats_score AS matchScore` off a
+    // LEFT JOIN of `ats_only_reports` keyed (user_id, domain_profile_id, job_id). So the mobile
+    // client's requirement is met from a source that CAN be correct — it is populated for the rows
+    // that caller has had scored on that profile, and null for the rest, which is the honest answer
+    // rather than a stranger's. Every other path this mapper feeds still passes nothing and still
+    // gets null: /api/jobs/generic is a public unpersonalized feed with no user to score against,
+    // by-id and import have no per-caller score to hand it, and live aggregator results have never
+    // been scored. Both of those are "no opinion", which is what null means here.
+    matchScore:      j.matchScore ?? null,
     starred:         Boolean(j.starred),
     visited:         Boolean(j.visited),
     disliked:        Boolean(j.disliked),
