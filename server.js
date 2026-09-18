@@ -20,6 +20,9 @@ import { fileURLToPath } from "url";
 import path           from "path";
 import fs             from "fs";
 import { createBackup, listBackups, restoreBackup } from "./scripts/backup.js";
+// The migration LOOP, shared with scripts/migration.js. Only the loop — the MIGRATIONS list below
+// is still this file's own copy on purpose; see the note at the top of scripts/migration.js.
+import { applyPendingMigrations } from "./scripts/applyMigrations.js";
 import applyRoutes, { capturedAtsAtApply } from "./routes/apply.js";
 import { createAccountRouter } from "./routes/account.js";
 import { createAdminRouter } from "./routes/admin.js";
@@ -3649,21 +3652,25 @@ console.log(`[boot] database ready: ${DB_PATH}`);
   ];
 
   console.log("[boot] migrations: checking schema");
-  const applied = new Set(
-    db.prepare("SELECT id FROM schema_migrations").all().map(r => r.id)
-  );
+  // ⛔ ONE TRANSACTION PER MIGRATION, INCLUDING THE ROW THAT RECORDS IT. The loop that stood here
+  // called `db.exec(m.sql)` bare, so a migration failing partway kept whatever it had already
+  // committed — survivable while every migration was additive, and not survivable from 108, which
+  // DROPs a table to widen a UNIQUE constraint. See scripts/applyMigrations.js for the two failure
+  // shapes and why the unit is one migration rather than the whole loop.
+  //
+  // The loop is shared with scripts/migration.js; the MIGRATIONS list above is still deliberately
+  // its own copy, guarded by test/migrationListsAgree.test.js.
   let migrationCount = 0;
-  for (const m of MIGRATIONS) {
-    if (applied.has(m.id)) continue;
-    try {
-      db.exec(m.sql);
-      db.prepare("INSERT INTO schema_migrations (id) VALUES (?)").run(m.id);
-      console.log(`[migrate] ✓ ${m.id}`);
-      migrationCount++;
-    } catch(e) {
-      console.error(`[migrate] ✗ FAILED ${m.id}:`, e.message);
-      process.exit(1);
-    }
+  try {
+    migrationCount = applyPendingMigrations(db, MIGRATIONS, {
+      onApplied: (m) => console.log(`[migrate] ✓ ${m.id}`),
+    });
+  } catch (e) {
+    // Still fatal, and deliberately so: booting on a schema the code does not expect fails later,
+    // further from the cause. What changed is that the failing migration left nothing behind, so a
+    // fix and a restart resume from a real migration boundary.
+    console.error(`[migrate] ✗ FAILED:`, e.message);
+    process.exit(1);
   }
   console.log(`[boot] migrations complete (${migrationCount} applied)`);
 
