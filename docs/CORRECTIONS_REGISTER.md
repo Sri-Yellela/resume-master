@@ -18,6 +18,8 @@ anyone measured them, and a wrong figure in a brief becomes a wrong premise in t
 | Claim | Repeated in | Reality | Consequence if believed |
 |---|---|---|---|
 | **`skills_json` coverage 37%** (465/1255) | `NEXT_WORK.md`, the curation brief, several chat turns | **99.8%** — 1,263 of 1,266 active | Led to "the data is the constraint". It is not. The constraint is whole-value `LIKE` against a 6,130-string vocabulary that is 70% singletons, capped at 6 terms. **Wrong by 2.7×** |
+| **`skills_json` coverage 99.8%** — the correction above | this register, `NEXT_WORK.md`, CC2 | **43.7%** in production (1,140 / 2,610 active), 2026-09-18 | THIRD value for one metric. 37% and 99.8% were both right about boards that no longer exist. The lesson is not the number: a coverage figure quoted without its board size has a shelf life of weeks |
+| **Enrichment backlog "790 candidates"** | `RECONCILE_AND_RESIDUAL.md` item 3d | **1,470** and growing — 1,373 `enrich_job` events in 30 days and still losing ground | The crawl outruns the drain. This is the binding constraint `DETAIL_FETCH_ECONOMICS.md` names |
 | **Enrichment "drains at 25 rows/day"** | `NEXT_WORK.md` lessons | Superseded by AE's bounded loop, now live | Would have justified a second batching mechanism |
 | **Migration high-water 068 → 090 → 095 → 101** | every prompt doc, repeatedly | **106** as of `eecbe09` | A new migration written at a stale id collides |
 | **Test baseline 45 → 600 → 1006 → 1858 → 2301** | every prompt doc | **2443** | Comparing against a stale baseline hides introduced failures |
