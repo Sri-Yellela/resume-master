@@ -430,12 +430,12 @@ async function runEnrichment(db, anthropic, {
     //
     // Every other column below is COALESCE(@model, column): a non-null extraction WINS, so a wrong
     // value can be corrected on a later pass. For normalized_title that permission was being used
-    // to destroy information. Measured over 200 recorded rewrites in production
+    // to destroy information. Measured over EVERY recorded rewrite in production — 475 of them
     // (docs/PART1_RECONCILED_2026-09-18.md §4):
     //
-    //     changed                            200 of 200  (100%)
-    //     SHORTER than the ingested value     197         (99% of changes)
-    //     seniority token changed or lost      17         (9% of changes)
+    //     changed                            475 of 475  (100%)
+    //     SHORTER than the ingested value     469         (98.7%)
+    //     seniority token changed or lost      17 of a 200-row sample (9%)
     //
     //     "staff software engineer, gtm systems"   -> "staff software engineer"
     //     "staff+ software engineer, grc platform" -> "software engineer, grc platform"

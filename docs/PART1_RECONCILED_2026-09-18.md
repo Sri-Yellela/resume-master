@@ -132,14 +132,19 @@ replaces it with something specific to the posting. Unambiguously better; no rea
 
 ### `normalized_title` — the rewrites are **lossy, and it feeds three consumers**
 
-Measured over 200 recorded rewrites with both values present:
+Measured over **every** recorded rewrite with both values present — 475 of them:
 
 | | |
 |---|---|
-| changed | **200 of 200 (100%)** |
-| **shorter than before** | **197 (99% of changes)** |
-| longer | 3 |
-| **seniority token changed or lost** | **17 (9% of changes)** |
+| changed | **475 of 475 (100%)** |
+| **shorter than before** | **469 (98.7%)** |
+| **seniority token changed or lost** | **17 of a 200-row sample (9%)** |
+
+⛔ **A first pass of this section quoted "200 of 200" as the population.** It was a capped sample:
+`/api/admin/db/raw-query` slices results at 200 rows, so any count taken by pulling rows and
+tallying them in JS silently tops out there. The aggregate above is computed server-side with
+`json_extract`. The sample turned out to be representative — but that was luck, not method, and
+the seniority figure is still only from those 200, because SQLite has no regex.
 
 Ten pairs, verbatim:
 
