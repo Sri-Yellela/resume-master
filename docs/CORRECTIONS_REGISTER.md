@@ -84,6 +84,27 @@ five-minute probe disproved it. `detailBudget.js` exists because that comment wa
 probe has not yet been run against SmartRecruiters or Workday — see
 `docs/DETAIL_FETCH_ECONOMICS.md`.
 
+**`job_applications` is not empty in production — it has 5 rows — and the pair is still empty
+anyway.** Read directly from the deployment on 2026-09-18 (`/api/admin/db/raw-query`, read-only).
+0 of the 5 carry `ats_score_at_apply`, a scorer version or an outcome, and the reason is timing
+rather than a broken writer: AK1's migration `094_application_ats_provenance` was applied at
+1788135030 and the **newest application predates it by two weeks** (1786928129). No application has
+been recorded since the stamping path existed, so the nulls are rows from before the columns. CC5
+pinned both writers with tests; the path is ready and has never been exercised.
+
+**`usage_events` carrying an ATS delta is 23, not 0.** The audit recorded "1,638 rows with 0
+carrying `ats_score_before`/`after`". Production now has 23, so the generation-lift half of the
+outcome dataset *is* collecting — it is only the application half that has never fired.
+
+**Production never had the `job_role_map` restore damage.** The 277 unbucketed postings were a
+LOCAL artefact of `am3RestoreBoard`. Production reports 0 unbucketed across 2,610 active rows and
+`job_role_map` holds only `ats_cache` rows, so the boot-time backfill correctly did nothing there.
+It stays as a guard against the next restore, not as a repair of a live defect.
+
+**The admin router is mounted at `/api/admin/db`, not `/api/admin-db`.** Worth recording because
+the wrong path returns **HTTP 200 with the SPA shell**, so a status-only probe reads as success and
+a `.json()` on it fails with `Unexpected token '<'`. Same catch-all trap as the cleanup-brake probe.
+
 **The cross-user ATS cache was on seven paths, not one.** The CC5 brief named the keywords route's
 priority-2 read. Measuring found **three writers** (`scrape`, `adopt-enhanced`, the keywords route)
 and **four readers** (board `matchScore`, the poll shape, that priority-2 read, and

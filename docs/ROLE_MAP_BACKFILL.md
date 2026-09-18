@@ -186,6 +186,26 @@ boot with `ROLE_MAP_BACKFILL=off` logged only that it was disabled.
 Cost: 0.163 ms/row measured over 2,460 real postings, so even a wholly unbucketed board is ~0.4 s
 once and nothing on every boot after.
 
+### What it actually did on production: nothing, correctly
+
+Deployed as `a110365` and then read back from the deployment (read-only, `/api/admin/db/raw-query`):
+
+| | production |
+|---|---|
+| active postings | 2,610 |
+| **still unbucketed** | **0** |
+| rows this backfill wrote | **none** |
+| `job_role_map` provenance | `ats_cache` only, 2,725 rows |
+
+⛔ **The 277 unbucketed postings were a LOCAL artefact.** `am3RestoreBoard` was run against the
+development database; production's rows all came through ingest and have carried a bucket all
+along. So the hook logged nothing at all on its first production boot, which is the designed
+behaviour and also the proof that the no-op path works.
+
+That does not make it pointless: the failure it repairs is a restore that does not carry
+`job_role_map`, and the next one will be caught on the following boot rather than silently putting
+sales postings on every engineering board until somebody notices.
+
 ## 7 · Not done
 - **The classifier's gap on "Forward Deployed Engineer"** (§4) — a `SIGNALS` question.
 - **The board still is not ordered by fit.** Unchanged by this; still CC2's finding.
