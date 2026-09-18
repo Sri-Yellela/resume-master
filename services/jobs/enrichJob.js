@@ -416,16 +416,54 @@ async function runEnrichment(db, anthropic, {
                      'enriching WITHOUT provenance.');
       }
     }
-    // COALESCE(@x, x) throughout: enrichment may only ADD information, never remove it.
-    // Ingestion already populates normalized_title/experience_level/workplace_type/salary from
+    // COALESCE(@x, x) for every column but one: enrichment may only ADD information, never remove
+    // it. Ingestion already populates normalized_title/experience_level/workplace_type/salary from
     // the source feed, and a plain `col = @col` overwrote those with NULL whenever the model
     // stayed silent on a field — which the prompt explicitly instructs it to do. The board then
     // lost data by running its own enrichment. A wrong value can still be corrected on a later
     // pass (a non-null extraction always wins); only nulls are now non-destructive.
+    //
+    // ⛔ THE ONE EXCEPTION IS normalized_title, WHOSE ARGUMENTS ARE REVERSED — see the note on that
+    // line. "A non-null extraction always wins" turned out to be the wrong permission for exactly
+    // one column, and it was measured rather than argued.
+    // ⛔ normalized_title IS THE ONE EXCEPTION, AND THE ARGUMENT ORDER IS REVERSED ON PURPOSE.
+    //
+    // Every other column below is COALESCE(@model, column): a non-null extraction WINS, so a wrong
+    // value can be corrected on a later pass. For normalized_title that permission was being used
+    // to destroy information. Measured over 200 recorded rewrites in production
+    // (docs/PART1_RECONCILED_2026-09-18.md §4):
+    //
+    //     changed                            200 of 200  (100%)
+    //     SHORTER than the ingested value     197         (99% of changes)
+    //     seniority token changed or lost      17         (9% of changes)
+    //
+    //     "staff software engineer, gtm systems"   -> "staff software engineer"
+    //     "staff+ software engineer, grc platform" -> "software engineer, grc platform"
+    //
+    // It is not a near-miss extraction that a later pass improves. It is a systematic truncation,
+    // and the column is 100% covered from ingestion (2,610 of 2,610), so enrichment was never
+    // filling a gap here — only overwriting a longer, better value with a shorter one.
+    //
+    // ⛔ AND IT IS READ BY THREE THINGS, WHICH IS WHY THIS IS NOT COSMETIC:
+    //   · profileTitleSql            — board membership ranking (CC1's two derived keys)
+    //   · the ATS scorer's detectSeniority — matches /staff|principal|senior|lead/ on the title
+    //   · roleFamilyForTitle         — buckets the ats_term_weights table per role family
+    //
+    // So a dropped "staff+" moves a posting's seniority, its band and its weight family at once.
+    //
+    // COALESCE(column, @model) keeps what is already there and uses the model's only to FILL a
+    // genuine gap. NULLIF('') because an empty string is a gap, not a value. This makes enrichment
+    // follow the rule the ingest upsert ALREADY applies to this column
+    // (`COALESCE(scraped_jobs.normalized_title, excluded.normalized_title)` — "enrichment's output
+    // outlives a re-crawl"), so the two writers finally agree.
+    //
+    // The consequence, stated rather than discovered later: normalized_title becomes effectively
+    // write-once at first ingestion. Nothing corrects it any more. That is already true across a
+    // re-crawl for the same reason, and the corrector being removed was making it worse.
     const updateStmt = db.prepare(`
       UPDATE scraped_jobs SET
         summary = COALESCE(@summary, summary),
-        normalized_title = COALESCE(@normalized_title, normalized_title),
+        normalized_title = COALESCE(NULLIF(normalized_title, ''), @normalized_title),
         experience_level = COALESCE(@experience_level, experience_level),
         workplace_type = COALESCE(@workplace_type, workplace_type),
         salary_min_usd = COALESCE(@salary_min_usd, salary_min_usd),
