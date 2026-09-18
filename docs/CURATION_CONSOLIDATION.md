@@ -10,8 +10,10 @@ project.
 > `docs/CC1B_ROLE_KEY_SOFT_NULL.md`, `docs/CC2_SKILL_MATCHING.md`,
 > `docs/CC3_SYNONYMS_WIRED.md`, `docs/CC4_CLAIMS_REACH_CURATION.md`,
 > `docs/CC5_PER_PROFILE_SCORES.md`).
-> The owner's board is now **849** rows, not 405. 277 of them are still UNCLASSIFIED in
-> job_role_map — nothing backfills it, which remains the obvious follow-up and is not done.
+> The owner's board is now **655** rows — not 405, and no longer 849. The 277 rows nobody had
+> classified are classified (`docs/ROLE_MAP_BACKFILL.md`), so the sales and PM postings that CC1b's
+> soft-null put on every board are on their own boards instead. Every graded-5 posting survived
+> that narrowing. The follow-up this line used to record is closed, and runs at boot from now on.
 >
 > **CC5 found the defect on seven paths, not one.** Three writers filled `scraped_jobs.ats_score`
 > from one user's résumé basis and four readers served it back — including the apply stamp, which
