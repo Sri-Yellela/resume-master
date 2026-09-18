@@ -60,6 +60,7 @@ const EXCLUDED = {
   af5CampaignReport:   "read-only campaign report against the real database",
   a5Rehearsal:         "waits for a HUMAN to submit the form",
   a5SeedFixture:       "mutates the developer's database",
+  backfillJobRoleMap:  "mutates the developer's database — classifies postings that carry no job_role_map bucket, which CHANGES WHICH BOARDS THEY APPEAR ON. Defaults to a dry run and `--db` can point it at a copy, but the whole point of the script is the apply, so it is run by hand. test/jobRoleMapBackfill.test.js is the half that asserts, and it stays in `npm test`",
   aj2SeedMobileBoard:  "mutates the developer's database — seeds band-boundary rows for the Android client; --clean removes them",
   ah1IdentityShots:    "screenshots; creates a user in the developer's database and needs a built client",
   ah2MultiTab:         "screenshots; drives the real board on :3001 and needs a built client",

@@ -156,10 +156,16 @@ for the queues.
 
 ## 6 · What this does not fix
 
-- **Nothing backfills `job_role_map`.** The 277 rows are now *reachable*, ranked last, but still
-  unclassified — so they are invisible to `role_key` facets and to anything else keyed on the bucket.
-  A backfill over the restored rows (`classifyForIngest` at 0.75 confidence, the same gate ingestion
-  uses) is the obvious follow-up and is not in this commit.
+- ~~**Nothing backfills `job_role_map`.**~~ **DONE 2026-09-18** — `scripts/backfillJobRoleMap.mjs`,
+  reported in `docs/ROLE_MAP_BACKFILL.md`. All 277 classified; the engineering board went
+  **849 → 655**, and the rows that left are the ones that were only ever there because nobody had
+  said what they were (26 sales, 33 PM, …).
+
+  ⛔ **And the function named above is the wrong one.** `classifyForIngest` returns null below 0.75
+  and nothing else — it does **not** carry the strong-white-anchor → `'general'` policy that the
+  ingest path actually applies through `classifyJob`. Following this note literally would have left
+  70 rows unclassified and made the backfill disagree with every future crawl. The backfill uses
+  `classifyJob`, which applies the same 0.75 threshold *plus* ingest's fallback.
 - **The 849-row board is not ordered by score.** CC1b adds members; it does not make the ordering
   track the scorer any more than CC1 did. That remains CC2's "the bridge cannot rank".
 - **A screenshot.** Same reasoning as CC1: no client change, and verification is at the API where
