@@ -101,7 +101,10 @@ import {
   LOCAL_ATS_SOURCE,
   scoreAtsLocally,
 } from "./services/localAtsScorer.js";
-import { loadTermWeights } from "./services/atsTermWeights.js";
+import {
+  loadTermWeights, atsWeightStatus, maybeRecomputeTermWeights, REFRESH_WEIGHT_AGE_DAYS,
+  MAX_WEIGHT_AGE_DAYS,
+} from "./services/atsTermWeights.js";
 // The band, not the number, is what a user is shown — see the header of shared/atsBands.js.
 import { atsBandFor } from "./shared/atsBands.js";
 import { roleFamilyForTitle } from "./services/searchQueryBuilder.js";
@@ -3753,6 +3756,39 @@ if (String(process.env.ROLE_MAP_BACKFILL || "").toLowerCase() === "off") {
   }
 }
 
+// ── ATS term weights: say what state they are in, then fix it if it needs fixing ────────────────
+//
+// ⛔ THE STATE THIS EXISTS TO MAKE VISIBLE WAS PRODUCTION'S ACTUAL STATE. `ats_term_weights` was
+// EMPTY there — never computed, not once — so every ATS score the product has ever served was
+// computed unweighted. Nothing said so: the only warning in the codebase required
+// `loaded.weights.size` to be non-zero, so an empty table was silent by construction. Measured
+// cost of unweighted scoring against this board: 20.4% of scores differ by up to 5 points, 2.8%
+// land in a different band, and rho against the owner's own grades falls 0.476 -> 0.415.
+//
+// So the status line below prints on EVERY boot, including the healthy case. "Weighted scoring is
+// on" is exactly the fact nobody could establish, and a log that only speaks up when something is
+// wrong cannot answer it. /api/version carries the same status for the same reason.
+//
+// The refresh is idempotent and costs 60 ms over 881 enriched postings, measured — which is what
+// makes doing it at boot reasonable rather than merely convenient.
+try {
+  const before = atsWeightStatus(db);
+  console.log(`[boot] ats_term_weights: ${before.state}`
+    + (before.state === "absent"
+        ? " — NEVER COMPUTED; every score is unweighted until this is fixed"
+        : ` — ${before.terms} terms over ${before.families.length} famil${before.families.length === 1 ? "y" : "ies"}, `
+          + `${before.ageDays?.toFixed(1)}d old (refresh at ${REFRESH_WEIGHT_AGE_DAYS}d, refused at ${MAX_WEIGHT_AGE_DAYS}d)`));
+  // ⛔ DEFERRED ONE TICK, AND NOT FOR LATENCY. This block runs during module evaluation, ~2,200
+  // lines before `_atsWeightCache` is declared — and `runTermWeightRefresh` clears that cache, so
+  // calling it here throws "Cannot access '_atsWeightCache' before initialization". The
+  // never-fatal wrapper caught it and the boot survived, which is precisely how a refresh that
+  // never runs would have gone unnoticed. setImmediate runs after the module finishes evaluating,
+  // when every declaration below exists.
+  setImmediate(() => runTermWeightRefresh("boot"));
+} catch (e) {
+  console.error("[boot] ats_term_weights check failed (scoring continues, possibly unweighted):", e.message);
+}
+
 // Repair company_icon_url rows still pointing at a retired logo provider (TASK X). Same reasoning
 // as the tier backfill above and never fatal for the same reason: a row whose logo URL is wrong
 // renders CompanyIcon's lettered tile, so failing the boot over it would trade a missing image for
@@ -4666,6 +4702,20 @@ cron.schedule("0 4 * * *", async () => {
   } catch(e) {
     console.error('[Cron] ATS cache refresh error:', e.message);
   }
+  // ── The term-weight SCHEDULE, which is what this system never had ────────────────────────────
+  //
+  // Weights are document frequencies over the board, so they drift as the board does — and the
+  // board just changed, two lines up. scripts/recomputeAtsTermWeights.js's header has always said
+  // this "belongs beside the enrichment pass"; nothing ever put it there.
+  //
+  // ⛔ THE ONLY MECHANISM THAT EXISTED WAS A REFUSAL. MAX_WEIGHT_AGE_DAYS (45) makes the scorer
+  // DROP weights it considers too old, which is a safety net and not a schedule: left alone, the
+  // system degrades to unweighted and calls that safe. REFRESH_WEIGHT_AGE_DAYS (14) rebuilds well
+  // before the cliff, so a single failed nightly run cannot reach it.
+  //
+  // Runs after the crawl rather than before, deliberately: weights computed from the corpus as it
+  // was an hour ago describe a board that no longer exists.
+  runTermWeightRefresh("cron");
   // Jobo feed sync — cron-only (never on boot/restart) so it never burns wallet credits just
   // because the server restarted. Runs after the ATS refresh, sequentially, in the same tick.
   try {
@@ -5914,6 +5964,39 @@ const activeScrapes = new Map();
  * unweighted", which is exactly v3 behaviour — degraded, never wrong.
  */
 const _atsWeightCache = new Map();
+
+/**
+ * ⛔ A RECOMPUTE THAT DOES NOT CLEAR THIS TAKES EFFECT ONLY AFTER A RESTART, which is
+ * indistinguishable from "the recompute did nothing". _atsWeightCache holds one entry per role
+ * family for the lifetime of the process — including the NULL entry meaning "unweighted" — so the
+ * nightly rebuild would write a perfectly good table that nothing read until the next deploy.
+ * CC3 hit the identical shape with the synonym cache; its note is the precedent.
+ */
+function invalidateAtsWeightCache() { _atsWeightCache.clear(); }
+
+/**
+ * Run the weight refresh and say what happened, in one line per outcome.
+ *
+ * Shared by the boot check and the nightly cron so the two cannot report the same event
+ * differently. Never throws: a scorer on 20-day-old weights beats a dead cron tick, and both beat
+ * a boot that fails over a ranking refinement.
+ */
+function runTermWeightRefresh(trigger) {
+  try {
+    const r = maybeRecomputeTermWeights(db, { onInvalidate: invalidateAtsWeightCache });
+    if (r.ran) {
+      const fams = (r.result?.families || []).map(f => `${f.family}:${f.weighted}`).join(" ");
+      console.log(`[ats-weights] (${trigger}) rebuilt — ${r.before.state} -> ${r.after.state}, `
+        + `${r.after.terms} terms over ${r.result?.corpusSize ?? "?"} enriched postings [${fams}]`);
+    } else if (r.reason.startsWith("refused") || r.reason.startsWith("failed")) {
+      console.error(`[ats-weights] (${trigger}) NOT rebuilt — ${r.reason}`);
+    }
+    return r;
+  } catch (e) {
+    console.error(`[ats-weights] (${trigger}) refresh threw: ${e.message}`);
+    return null;
+  }
+}
 /**
  * CC3 · THE SYNONYM MAP, ON THE SCORING PATH AT LAST.
  *
@@ -5968,8 +6051,17 @@ function atsTermWeightsForJob(job) {
   if (!_atsWeightCache.has(key)) {
     let loaded = null;
     try { loaded = loadTermWeights(db, family); } catch { loaded = null; }
-    if (loaded && loaded.stale && loaded.weights.size) {
-      console.warn(`[ats] term weights are stale (computed_at ${loaded.computedAt}); scoring unweighted. Run scripts/recomputeAtsTermWeights.js`);
+    // ⛔ THE OLD GUARD COULD NOT SEE THE STATE PRODUCTION WAS ACTUALLY IN. It read
+    // `loaded.stale && loaded.weights.size`, so it fired only for a table that EXISTS and is old.
+    // An EMPTY table has size 0, so it said nothing at all — and production's ats_term_weights had
+    // never been computed, which meant every score there was unweighted, forever, in silence.
+    // "Absent" and "stale" are different states and both mean "not scoring the way we think".
+    if (!loaded || !loaded.weights.size) {
+      console.warn(`[ats] NO term weights for ${key} — scoring UNWEIGHTED. `
+        + `The table has never been computed, or holds nothing for this family.`);
+    } else if (loaded.stale) {
+      console.warn(`[ats] term weights are STALE for ${key} (computed_at ${loaded.computedAt}); `
+        + `scoring unweighted. The nightly refresh should have prevented this.`);
     }
     _atsWeightCache.set(key, loaded && !loaded.stale && loaded.weights.size ? loaded.weights : null);
   }
@@ -10143,10 +10235,35 @@ app.get("/api/version", (_req, res) => {
     };
   } catch { /* reported as nulls rather than failing the endpoint */ }
 
+  // ⛔ "IS THE SCORER ACTUALLY WEIGHTED?" WAS NOT ANSWERABLE FROM OUTSIDE, and the answer in
+  // production was no. ats_term_weights was empty, the only warning in the codebase required a
+  // non-empty table to fire, and every score served was unweighted in silence. This endpoint
+  // already exists to answer "what is deployed" in one curl; the scorer's degraded mode belongs
+  // in the same breath, because a deployment that is scoring unweighted is not the deployment
+  // anyone thinks they shipped.
+  //
+  // Deliberately not behind auth: it carries no term, no weight and no posting — a state name, a
+  // count and an age, which is exactly what the rest of this response already is.
+  let atsWeights = { state: "unknown" };
+  try {
+    const w = atsWeightStatus(db);
+    atsWeights = {
+      state: w.state,                                   // fresh | stale | absent
+      weightedScoring: w.state === "fresh",             // the question, answered directly
+      terms: w.terms,
+      families: w.families,
+      ageDays: w.ageDays == null ? null : Number(w.ageDays.toFixed(1)),
+      corpusSize: w.corpusSize,
+      refreshAtDays: REFRESH_WEIGHT_AGE_DAYS,
+      refusedAtDays: MAX_WEIGHT_AGE_DAYS,
+    };
+  } catch (e) { atsWeights = { state: "unknown", error: e.message }; }
+
   res.json({
     ...BUILD_INFO,
     contract: CONTRACT_VERSION,
     migrations,
+    atsWeights,
     monetisationEnabled: monetisationEnabled(),
   });
 });

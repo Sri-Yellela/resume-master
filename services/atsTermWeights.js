@@ -228,3 +228,102 @@ export function weightsAreStale(computedAt, now = Math.floor(Date.now() / 1000))
   if (!Number.isFinite(computedAt) || computedAt <= 0) return true;
   return (now - computedAt) > MAX_WEIGHT_AGE_DAYS * 86400;
 }
+
+/**
+ * How old weights may get before the SCHEDULE rebuilds them.
+ *
+ * ⛔ THIS IS NOT MAX_WEIGHT_AGE_DAYS AND THE DIFFERENCE IS THE WHOLE POINT. That constant is a
+ * REFUSAL — the safety net that stops the scorer using weights from a corpus that no longer
+ * exists. scripts/recomputeAtsTermWeights.js's own header says so: "That refusal is the safety
+ * net, not the schedule." The schedule was the missing half. A system whose only weight-management
+ * mechanism is a refusal degrades to unweighted and calls it safety.
+ *
+ * 14 against a 45-day refusal leaves two further rebuild opportunities before the cliff, so a
+ * single failed nightly run cannot reach it.
+ */
+export const REFRESH_WEIGHT_AGE_DAYS = 14;
+
+/**
+ * What state is the weight table actually in? One function, because there are THREE states and the
+ * code only ever reported one of them.
+ *
+ * ⛔ "absent" IS A DISTINCT STATE FROM "stale", AND IT WAS THE INVISIBLE ONE. server.js warned only
+ * when `loaded.stale && loaded.weights.size` — so an EMPTY table produced no warning at all, and
+ * scoring ran unweighted in complete silence. Production was in exactly that state: 0 rows, never
+ * computed, no log line, no symptom. Measured cost of scoring unweighted there: 20.4% of board
+ * scores differ by up to 5 points and 2.8% land in a different band.
+ *
+ * @returns {{ state: "fresh"|"stale"|"absent", terms: number, families: string[],
+ *             computedAt: number|null, ageDays: number|null, corpusSize: number }}
+ */
+export function atsWeightStatus(db, { now = Math.floor(Date.now() / 1000) } = {}) {
+  const absent = { state: "absent", terms: 0, families: [], computedAt: null, ageDays: null, corpusSize: 0 };
+  let row, families;
+  try {
+    row = db.prepare(
+      "SELECT COUNT(*) terms, MAX(computed_at) computed_at, MAX(corpus_size) corpus_size FROM ats_term_weights"
+    ).get();
+    families = db.prepare(
+      "SELECT DISTINCT role_family FROM ats_term_weights ORDER BY role_family"
+    ).all().map(r => r.role_family);
+  } catch {
+    return absent; // table not created yet — indistinguishable from empty, and means the same thing
+  }
+  if (!row || !row.terms) return absent;
+  const computedAt = row.computed_at ?? null;
+  const ageDays = Number.isFinite(computedAt) && computedAt > 0 ? (now - computedAt) / 86400 : null;
+  return {
+    state: weightsAreStale(computedAt, now) ? "stale" : "fresh",
+    terms: row.terms,
+    families,
+    computedAt,
+    ageDays,
+    corpusSize: row.corpus_size ?? 0,
+  };
+}
+
+/** True when the schedule should rebuild: no table at all, or older than the refresh threshold. */
+export function weightsNeedRefresh(status, { now = Math.floor(Date.now() / 1000) } = {}) {
+  if (status.state === "absent") return true;
+  if (!Number.isFinite(status.computedAt) || status.computedAt <= 0) return true;
+  return (now - status.computedAt) > REFRESH_WEIGHT_AGE_DAYS * 86400;
+}
+
+/**
+ * Rebuild the weight table if it needs it. The scheduled half of the pair.
+ *
+ * Callers pass `onInvalidate` and MUST use it: server.js caches loaded weights per role family in
+ * a module-level Map, so a recompute that does not clear that cache takes effect only after a
+ * restart — which looks exactly like "the recompute did nothing". CC3 hit the identical shape with
+ * the synonym cache and its note is worth re-reading before changing this.
+ *
+ * Never throws. A scorer running unweighted is worse than one running on 20-day-old weights, and
+ * both are better than a crashed boot or a dead cron tick.
+ *
+ * @returns {{ ran: boolean, reason: string, before: object, after: object|null, result: object|null }}
+ */
+export function maybeRecomputeTermWeights(db, { force = false, now = Math.floor(Date.now() / 1000),
+                                                onInvalidate = null, log = console } = {}) {
+  const before = atsWeightStatus(db, { now });
+  if (!force && !weightsNeedRefresh(before, { now })) {
+    return { ran: false, reason: `weights are ${before.state} (${before.ageDays?.toFixed(1)}d old)`, before, after: null, result: null };
+  }
+  let result = null;
+  try {
+    result = computeTermWeights(db, { now });
+  } catch (e) {
+    log.error?.(`[ats-weights] recompute FAILED: ${e.message} — scoring continues unweighted`);
+    return { ran: false, reason: `failed: ${e.message}`, before, after: before, result: null };
+  }
+  // assessRebuildScope refuses to replace a good table from a suspiciously thin board. That is a
+  // REFUSAL to destroy data, not a failure, and it must be reported as such or the next person
+  // reads "0 terms written" as a broken recompute.
+  if (result?.skipped) {
+    log.warn?.(`[ats-weights] recompute REFUSED (board too thin): ${result.reason} — `
+      + `keeping the existing table (${before.terms} terms, ${before.state})`);
+    return { ran: false, reason: `refused: ${result.reason}`, before, after: before, result };
+  }
+  onInvalidate?.();
+  const after = atsWeightStatus(db, { now });
+  return { ran: true, reason: force ? "forced" : `was ${before.state}`, before, after, result };
+}
