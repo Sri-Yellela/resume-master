@@ -164,6 +164,43 @@ nearly doubled underneath it.
 
 ---
 
+## 6b · Production is weighted now — with ONE family, and that is a second finding
+
+The boot hook fired on production and computed weights for the first time in the product's history:
+
+```
+"atsWeights": { "state": "fresh", "weightedScoring": true, "terms": 493,
+                "families": ["__global__"], "ageDays": 0, "corpusSize": 1179 }
+```
+
+⛔ **Only `__global__`.** Locally the same code builds four families (engineering, data, pm,
+global). Production has 1,179 enriched postings and, by `job_role_map`, 245 engineering and 244
+sales among them — far above `MIN_FAMILY_POSTINGS = 60`. So a per-family table should exist and
+does not.
+
+The cause is that **the weight table buckets families with a different, narrower function than the
+board classifies roles with**:
+
+| | used by | "account executive" | "applied ai architect" | "software engineer" |
+|---|---|---|---|---|
+| `roleFamilyForTitle` | `computeTermWeights` | **null** | **null** | engineering |
+| `classifyJob` | ingest, `job_role_map` | sales | (a bucket) | engineering |
+
+Production's enriched corpus is dominated by titles the *narrow* mapper does not recognise —
+its top five enriched titles are `account executive` (38), `applied ai architect` (21),
+`enterprise account executive` (20), then two engineering titles at 18 each — so fewer than 60
+rows land in any single family bucket and only the global table is written.
+
+**This is not a failure of the schedule and it does not break scoring**: `loadTermWeights` falls
+back to the global table by design, which is why production is `weightedScoring: true`. It is a
+loss of *resolution* — the scorer weights a sales posting with the whole board's document
+frequencies rather than sales'.
+
+It is also the same shape as two other defects repaired this week: **two classifiers answering one
+question.** Fixing it means either widening `roleFamilyForTitle` or bucketing weights by
+`job_role_map.role_key`, and either is a measurement task of its own — the weights change, so rho
+has to be re-measured against the graded corpus before and after. Not attempted here.
+
 ## 7 · Not done
 
 - **The 45-day refusal is unchanged.** With a 14-day schedule it should now be unreachable; if it
@@ -171,6 +208,8 @@ nearly doubled underneath it.
   louder signal than this task builds.
 - **No alert.** Everything here is a log line or a field. Nothing pages anybody, and nothing
   watches `/api/version` on a timer — deliberately: that is monitoring, not scoring.
+- **Per-family weights on production** — see §6b. Global-only weighting works and is the designed
+  fallback; the resolution loss is real and the fix is its own measured task.
 - **`weightsAreStale` still judges by AGE only**, never by corpus drift. A table computed
   yesterday from a corpus half the size of today's board reads as perfectly fresh. §6 is the
   evidence that this case is real.
