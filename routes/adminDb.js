@@ -100,8 +100,16 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
   // "existing and looking fine" while three independent failures ran undetected. Every panel
   // here maps to a failure from docs/PIPELINE_DIAGNOSIS.md that was invisible at the time.
   // No writes, no LLM calls.
-  router.get("/pipeline-health", requireAdmin, (req, res) => {
-    try {
+  // ⛔ THE COMPUTATION IS A FUNCTION SO THE NIGHTLY ALERT DELIVERY CAN USE *THIS* ONE.
+  //
+  // These alerts caught an Anthropic credit outage, Jobo's 402 wallet and three stale companies,
+  // all correctly, and nobody saw any of it because this is a route nothing polls. The fix is a
+  // scheduled sender (services/jobs/alertDelivery.js) — and the one thing it must NOT do is
+  // re-derive the alert set. A second implementation of 'what is wrong with the pipeline' is the
+  // exact defect repaired three times this week (two ATS caches, two classifiers, two migration
+  // loops). So the body moves into a named function, the route serves it, and the cron calls the
+  // same one via `router.pipelineHealth`.
+  function pipelineHealth() {
       const now = Math.floor(Date.now() / 1000);
       const staleBefore = now - STALE_AFTER_HOURS * 3600;
       const hasRunLog = assertReadableTable("pipeline_runs");
@@ -476,7 +484,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       const SEVERITY_ORDER = { critical: 0, warn: 1 };
       alerts.sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9));
 
-      res.json({
+      return {
         generatedAt: now,
         staleAfterHours: STALE_AFTER_HOURS,
         hasRunLog,
@@ -497,8 +505,14 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
           `).get().n,
         },
         dedup: { multiSource: dedup.multi_source || 0, total: dedup.total || 0 },
-      });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+      };
+  }
+  // Exposed on the router so server.js can schedule delivery without importing this whole file's
+  // closure. The route and the cron therefore cannot disagree about what is wrong.
+  router.pipelineHealth = pipelineHealth;
+  router.get("/pipeline-health", requireAdmin, (_req, res) => {
+    try { res.json(pipelineHealth()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // ── Route 1: Scrape Monitor ───────────────────────────────────

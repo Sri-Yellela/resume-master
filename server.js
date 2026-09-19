@@ -132,6 +132,7 @@ import {
 import { deriveAutomationTier } from "./services/jobs/automationTier.js";
 import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
 import { backfillRoleMap } from "./services/jobs/backfillRoleMap.js";
+import { deliverPipelineAlerts } from "./services/jobs/alertDelivery.js";
 import { backfillCompanyLogos } from "./services/jobs/backfillCompanyLogos.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { suggest } from "./services/jobs/searchSuggestions.js";
@@ -4784,6 +4785,32 @@ cron.schedule("0 4 * * *", async () => {
   // Runs after the crawl rather than before, deliberately: weights computed from the corpus as it
   // was an hour ago describe a board that no longer exists.
   runTermWeightRefresh("cron");
+
+  // ── Deliver the pipeline alerts to somebody ──────────────────────────────────────────────────
+  //
+  // ⛔ EVERY FAILURE THIS PIPELINE HAS HAD WAS ALREADY DETECTED. On 2026-09-18 the health check was
+  // simultaneously and correctly reporting an Anthropic credit outage, Jobo's HTTP 402 wallet, two
+  // sources fetching rows and writing none, and three companies silent for 234 hours — including an
+  // alert that names its own history: "the last 2 enrichment runs wrote nothing — this is the shape
+  // that ran for three days undetected". Nobody saw any of it, because it lives behind an admin
+  // route that nothing polls. Detection without delivery is a diary.
+  //
+  // Runs LAST in the tick, after the crawl, the enrichment drain and the weight refresh, so it
+  // reports on the night that just happened rather than the one before it.
+  //
+  // Edge-triggered — see services/jobs/alertDelivery.js. Most of these are STANDING conditions and
+  // sending them nightly is the alarm nobody reads.
+  deliverPipelineAlerts(db, {
+    readHealth: () => adminDbRouter.pipelineHealth(),
+    // The in-app channel the product already has. Admins only: these name providers and spend, and
+    // a candidate has no use for "recruitee wrote 0 rows".
+    notify: (summary, message, payload) => {
+      for (const a of db.prepare("SELECT id FROM users WHERE is_admin = 1").all()) {
+        insertNotification(a.id, "pipeline_alert", `${summary}\n${message}`, payload);
+      }
+    },
+    webhookUrl: process.env.PIPELINE_ALERT_WEBHOOK || null,
+  }).catch(e => console.error("[alerts] delivery threw:", e.message));
   // Jobo feed sync — cron-only (never on boot/restart) so it never burns wallet credits just
   // because the server restarted. Runs after the ATS refresh, sequentially, in the same tick.
   try {
@@ -6996,7 +7023,10 @@ app.get("/api/admin/users/:id/applications", requireAdmin, (req, res) => {
 
 // Analytics admin routes (usage tracking, limits, timeseries)
 app.use("/api/admin/analytics", createAdminRouter(db));
-app.use("/api/admin/db", createAdminDbRouter(db, { dbPath: DB_PATH, scrapeJobs }));
+// Captured, not just mounted: the nightly alert delivery calls `adminDbRouter.pipelineHealth()` —
+// the SAME computation this route serves. See the note above that function in routes/adminDb.js.
+const adminDbRouter = createAdminDbRouter(db, { dbPath: DB_PATH, scrapeJobs });
+app.use("/api/admin/db", adminDbRouter);
 // U1/U2/U3/U4 — the manual enrichment path: dry-run trigger, JSONL export/import, and batch
 // provenance. Enrichment previously had three triggers and all three were automatic, which is how
 // 837 of ~1252 active production rows sat unenriched through the Groq 404 outage with no way to
