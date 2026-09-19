@@ -232,8 +232,17 @@ never emitted) and is worth re-reading first. Nothing fixed here, per the prompt
 | **Logo host path** (`/ip3/{domain}.ico`) | yes — path shape, not host | ⛔ no check; `backfillCompanyLogos` only repairs *known-retired* hosts |
 | **OAuth client ids** | yes | partial — boot logs `configured` / `missing` per provider |
 
+> ⛔ **CORRECTION, later the same day (`docs/ENRICHMENT_BACKLOG_2026-09-18.md` §4).** The
+> "no per-company signal" row above is **WRONG**. `GET /api/admin/db/pipeline-health` raises
+> per-company freshness alerts — `company/lever/wealthfront: no row seen in 234h (threshold 48h)`,
+> `company/lever/openx: 234h`, `company/ashby/linear: 66h`. It also records the exact HTTP 402 body
+> for jobo, so §3a's "worth one look at the deploy log" was already answered. The scrape monitor
+> this prompt calls "deferred roughly fifteen times" **was built, and it works.**
+>
+> The real gap is DELIVERY, not detection: the alerts sit behind an admin route nothing polls.
+
 The generalisable gap is unchanged from task X's observation: **host liveness is the easy check and
-the rare failure.** The two live holes are the Gemini id and per-company ATS slugs.
+the rare failure.** The live hole is the Gemini id; per-company slugs are covered after all.
 
 ---
 

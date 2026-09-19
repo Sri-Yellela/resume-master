@@ -800,7 +800,25 @@ async function drainEnrichment(db, anthropic, {
     // `ok` only when the loop reached a real terminal state. A refusal is not a run, and the AC
     // health check reads `written` rather than this anyway — both are recorded so neither has to
     // be inferred from the other.
-    status: stopReason === 'refused' ? 'skipped_unconfigured' : 'ok',
+    //
+    // ⛔ AND A RUN THAT WROTE NOTHING WHILE EVERY ROW FAILED IS NOT `ok`. It recorded `ok` for five
+    // days in production — 25 of 25 rows failing, zero tokens spent, `status: 'ok'` — because the
+    // only non-ok branch here was a refusal. The cause was billing ("Your credit balance is too low
+    // to access the Anthropic API"), which is exactly the class of outage a run log exists to make
+    // visible, and the log said everything was fine.
+    //
+    // The health check caught it downstream and said so precisely ("the last 2 enrichment runs
+    // wrote nothing — this is the shape that ran for three days undetected"). That does not excuse
+    // the row: `pipeline_runs.status` is read by things other than that check, and a status that
+    // contradicts its own `failed` column is a trap for the next reader.
+    //
+    // Deliberately narrow: `failed` only when NOTHING was written AND something actually failed. A
+    // partial run still says `ok` — 299 written and 9 failed is a working drain, and promoting that
+    // to `failed` would be the opposite error, an alarm nobody reads. An empty queue (0 written, 0
+    // failed) stays `ok` too, because that is a drained backlog, which is the goal state.
+    status: stopReason === 'refused' ? 'skipped_unconfigured'
+          : (enriched === 0 && failed > 0) ? 'failed'
+          : 'ok',
     startedAt,
     fetched: enriched + failed + empty,
     written: enriched,
