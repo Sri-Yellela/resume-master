@@ -3258,4 +3258,72 @@ export const MIGRATIONS = [
           ON ats_only_reports(user_id, domain_profile_id, job_id);
       `,
     },
+    {
+      // 109 — RESTORE THE SENIORITY ENRICHMENT STRIPPED OUT OF normalized_title.
+      //
+      // ccfef0f stopped enrichment overwriting this column. This repairs what it already did — but
+      // only the part of it that measurement can defend, which is NARROWER than the audit that
+      // prompted it first claimed.
+      //
+      // ⛔ THE OBVIOUS REPAIR IS WRONG AND WAS MEASURED BEFORE BEING REJECTED. 475 production rows
+      // had normalized_title rewritten and 469 were made SHORTER, which docs/PART1_RECONCILED
+      // -2026-09-18.md §4 read as systematic truncation. Looking at the largest losses says
+      // otherwise — several are the column doing its job:
+      //
+      //     "senior fullstack engineer (f/m/d) - berlin i germany | eu i remote"
+      //          -> "senior fullstack engineer"                        BETTER
+      //     "fraud analyst (revenue protection) - 12-month fixed-term"
+      //          -> "fraud analyst"                                    BETTER
+      //
+      // Restoring all 469 would push location, EEO and contract-duration noise back into a column
+      // whose entire purpose is to strip it. Length was a bad proxy for harm.
+      //
+      // WHAT IS DEFENSIBLE IS SENIORITY LOSS. Of the sampled rows that carried a seniority token,
+      // 27 LOST it against 10 that kept it, and those are unambiguous:
+      //
+      //     "senior / staff product engineer"                -> "product engineer"
+      //     "lead product marketing manager - verticals"      -> "product marketing manager"
+      //     "senior manager, account executive | mid-market"  -> "account executive manager"
+      //
+      // `detectSeniority` in services/jobs/classifyJob.js matches exactly these tokens on the title
+      // to decide a posting's level, and the ATS scorer prices seniority mismatch. There is no
+      // reading in which dropping "senior" makes a normalised title better. 54 rows on production.
+      //
+      // ⛔ THE EARLIEST BEFORE-IMAGE, NOT THE LATEST. 28 jobs appear in more than one enrichment
+      // batch, so the most recent before_json for those holds a value a PREVIOUS pass had already
+      // truncated. Restoring that would restore the damage. ROW_NUMBER() ordered by written_at
+      // picks the original ingested value. Verified against a fixture carrying exactly that shape.
+      //
+      // Naturally idempotent: after the restore the WHERE cannot match again, because the token it
+      // looks for is present. Re-running changes 0 rows.
+      //
+      // NOT PRESERVED, and stated rather than discovered: the truncated values are overwritten and
+      // not recorded anywhere. They are the damage; the authoritative value stays in
+      // enrichment_batch_rows.before_json, so the direction that matters remains recoverable.
+      id: "109_restore_stripped_seniority_titles",
+      sql: `
+        WITH earliest AS (
+          SELECT e.job_id,
+                 json_extract(e.before_json, '$.normalized_title') AS orig,
+                 ROW_NUMBER() OVER (PARTITION BY e.job_id ORDER BY e.written_at, e.batch_id) AS rn
+          FROM enrichment_batch_rows e
+          WHERE json_extract(e.before_json, '$.normalized_title') IS NOT NULL
+            AND TRIM(json_extract(e.before_json, '$.normalized_title')) <> ''
+        )
+        UPDATE scraped_jobs AS s
+        SET normalized_title = (SELECT x.orig FROM earliest x WHERE x.job_id = s.job_id AND x.rn = 1)
+        WHERE EXISTS (
+          SELECT 1 FROM earliest x
+          WHERE x.job_id = s.job_id AND x.rn = 1
+            AND s.normalized_title <> x.orig
+            AND (   (x.orig LIKE '%staff%'         AND s.normalized_title NOT LIKE '%staff%')
+                 OR (x.orig LIKE '%senior%'        AND s.normalized_title NOT LIKE '%senior%')
+                 OR (x.orig LIKE '%principal%'     AND s.normalized_title NOT LIKE '%principal%')
+                 OR (x.orig LIKE '%lead%'          AND s.normalized_title NOT LIKE '%lead%')
+                 OR (x.orig LIKE '%distinguished%' AND s.normalized_title NOT LIKE '%distinguished%')
+                 OR (x.orig LIKE '%director%'      AND s.normalized_title NOT LIKE '%director%')
+                 OR (x.orig LIKE '%head of%'       AND s.normalized_title NOT LIKE '%head of%'))
+        );
+      `,
+    },
   ];

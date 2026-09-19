@@ -170,6 +170,25 @@ Two distinct losses: the `staff+` → `staff` demotion (and once `staff+` → pl
 3. `roleFamilyForTitle` — which buckets the **term-weight table**, and which I found today is
    already failing to build per-family weights in production.
 
+> ⛔ **CORRECTION, 2026-09-18 (later the same day).** The framing above — "lossy", "systematic
+> truncation" — is **too strong, and I acted on it before checking it.** Length was a bad proxy for
+> harm. Looking at the largest losses:
+>
+> ```
+> "senior fullstack engineer (f/m/d) - berlin i germany | eu i remote" -> "senior fullstack engineer"
+> "fraud analyst (revenue protection) - 12-month fixed-term"           -> "fraud analyst"
+> ```
+>
+> Those are the column doing its job. Two further measurements:
+> **`roleFamilyForTitle` resolves a family on 36% of ingested titles and 32% of enriched ones** — so
+> enrichment's normalisation is mildly *worse* for weight bucketing, which supports the fix but by a
+> much smaller margin than claimed. And of the rows carrying a seniority token, **27 lost it against
+> 10 that kept it** — that is the real, unambiguous harm, and it is ~54 rows, not 469.
+>
+> The fix (enrichment no longer overwrites the column) stands. The *repair* was scoped down to
+> seniority loss only — migration 109 — because restoring all 469 would push location, EEO and
+> contract-duration noise back into a column built to strip it.
+
 **Recommendation — and it is the owner's call, not mine:** keep the `summary` rewrites, stop
 enrichment writing `normalized_title`. It is 100% covered from ingestion, so enrichment is not
 filling a gap there; it is overwriting a good value with a shorter one. That is a one-line change
