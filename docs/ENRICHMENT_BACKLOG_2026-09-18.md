@@ -120,11 +120,19 @@ small, and it would have turned five days of silent failure into one message.
 
 ## 6 · Not done
 
-- **Top up Anthropic and Jobo.** Owner action; no code can substitute.
-- **Deliver the alerts.** The monitor exists and is right; nothing carries its output anywhere.
-  Recommended next, ahead of anything else on the backlog, because it is what makes the rest
-  self-reporting.
+- ⛔ **Top up Anthropic and Jobo.** Owner action; no code can substitute. **Still outstanding on
+  2026-09-21**, re-probed with one `max_tokens: 1` Haiku call: `HTTP 400 · "Your credit balance is
+  too low"`, `req_011CfHKfbmcojNwhNTpwEFhe`. Four more nights of crawl on top of the 1,470.
+- ✅ **Deliver the alerts** — **DONE 2026-09-18, `2e4429e`.** Edge-triggered on
+  `severity|kind|subject`, admin notification plus an optional `PIPELINE_ALERT_WEBHOOK`, recovery
+  messages included, never throws, runs last in the 04:00 tick.
 - **The backlog itself** (1,470) needs no new engineering. At 300 rows/night the drain clears it in
   ~5 days net of inflow, which is what 09-15 and 09-16 demonstrated before the credit ran out.
-- **workable (23 fetched → 0 written) and recruitee (16 → 0)** are flagged critical by the same
-  monitor and are a separate defect from this one.
+- ~~**workable (23 fetched → 0 written) and recruitee (16 → 0)** are flagged critical by the same
+  monitor and are a separate defect from this one.~~
+  ⛔ **CLOSED 2026-09-21 — and the defect was the MONITOR.** Both sources were working. On the crawl
+  side `written` counts new-or-changed upserts only; a board that did not change overnight records
+  `written: 0` with its postings under `unchanged`, a column the health query did not read. This
+  section was right that it was a separate defect and wrong about which component had it — written
+  one paragraph after §4 corrected two other claims in the same direction, which is its own lesson
+  about auditing the auditor. `docs/SOURCE_HEALTH_FALSE_CRITICAL.md`.

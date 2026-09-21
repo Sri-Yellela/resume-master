@@ -333,7 +333,120 @@ test("a run that fetched rows and wrote NONE is not healthy, whatever its status
   const alert = alertFor(body, "source", "greenhouse");
   assert.ok(alert, "it must also be an ALERT, not merely a differently-coloured cell");
   assert.equal(alert.severity, "critical");
-  assert.match(alert.detail, /wrote 0 rows from 100 fetched/);
+  assert.match(alert.detail, /put none of its 100 fetched rows on the board/);
+  // The counters are IN the sentence because the old wording ("wrote 0 rows from 100 fetched")
+  // was equally true of two sources that were working perfectly — see the unchanged test below.
+  assert.match(alert.detail, /written 0, unchanged 0, merged 0/);
+});
+
+// ── THE FALSE CRITICAL ──────────────────────────────────────────────────────────────────────────
+//
+// `written` on the crawl side is `cached` — NEW-OR-CHANGED upserts only. Unchanged postings go
+// down cacheJobs' cheap path and are counted under `unchanged`. So a source whose board did not
+// change overnight records `written: 0`, and this route called that a total outage: on 2026-09-18
+// production raised CRITICAL for workable (0 of 23) and recruitee (0 of 16) while both were
+// working exactly as designed. `unchanged` was not even selected by the health query.
+//
+// This matters more now than when the route was written: `2e4429e` DELIVERS these alerts. A false
+// critical is no longer a wrong cell in a panel nobody opens, it is the standing alarm nobody
+// reads — the exact outcome that commit's own header warns about.
+
+test("a crawl that finds every posting unchanged wrote 0 rows and is HEALTHY", async () => {
+  // Production's workable run of 2026-09-18, verbatim: 23 fetched, 6 already on the board and
+  // unchanged, 15 unclassifiable, 2 blue-collar.
+  const db = makeDb();
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`INSERT INTO scraped_jobs (job_id,title,company,source,discovered_at,is_active,description)
+              VALUES ('w1','Eng','Deel','workable',?,1,'text')`).run(now);
+  recordPipelineRun(db, {
+    runKind: "source_sync", source: "workable", status: "ok", startedAt: now,
+    fetched: 23, written: 0, unchanged: 6, dropped: 15, ejected: 2,
+  });
+
+  const { body } = await getHealth(db);
+  assert.equal(sourceNamed(body, "workable").health, "ok",
+    "written 0 with unchanged 6 is a board that did not change, not a source that stopped working");
+  assert.equal(alertFor(body, "source", "workable"), undefined,
+    "this fired CRITICAL nightly at a working source — and it is now delivered to somebody");
+  // The touch count has to reach the payload too: `written: 0` alone cannot be read correctly,
+  // which is how both the classifier and the panel cell got it wrong.
+  assert.equal(sourceNamed(body, "workable").lastRun.unchanged, 6);
+});
+
+test("a posting folded into another source's canonical row is accounted for, not lost", async () => {
+  const db = makeDb();
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`INSERT INTO scraped_jobs (job_id,title,company,source,discovered_at,is_active,description)
+              VALUES ('l1','Eng','Spotify','lever',?,1,'text')`).run(now);
+  recordPipelineRun(db, {
+    runKind: "source_sync", source: "lever", status: "ok", startedAt: now,
+    fetched: 10, written: 0, merged: 10,
+  });
+
+  const { body } = await getHealth(db);
+  assert.equal(sourceNamed(body, "lever").health, "ok",
+    "cross-source dedup is the pipeline working; every merged row is on the board under a canonical id");
+});
+
+test("a source whose whole yield the classifier refuses gets its own state and its own severity", async () => {
+  // Nothing is broken in the fetch. The judgement to make is about the source's yield or about
+  // the classifier — a different action from 'the source is dead', so a different word.
+  const db = makeDb();
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`INSERT INTO scraped_jobs (job_id,title,company,source,discovered_at,is_active,description)
+              VALUES ('r1','Eng','Recruitee Co','recruitee',?,1,'text')`).run(now);
+  recordPipelineRun(db, {
+    runKind: "source_sync", source: "recruitee", status: "ok", startedAt: now,
+    fetched: 16, written: 0, unchanged: 0, dropped: 14, ejected: 2,
+  });
+
+  const { body } = await getHealth(db);
+  assert.equal(sourceNamed(body, "recruitee").health, "all_rejected");
+  const alert = alertFor(body, "source", "recruitee");
+  assert.ok(alert, "contributing nothing at all is still worth saying");
+  assert.equal(alert.severity, "warn",
+    "critical is for an outage; this is the pipeline doing what it was told");
+  assert.match(alert.detail, /refused every one of them \(14 unclassifiable, 2 blue-collar\)/);
+});
+
+test("refusals that do not add up to the fetch are an outage again, not a policy outcome", async () => {
+  // 23 fetched, 15 refused, and no account of the other 8. A run that cannot say where rows went
+  // is the 0de67c8 silent-discard shape, and it must not be downgraded to the benign word.
+  // ⛔ This one passes against the OLD classifier too, and that is the point: it guards the new
+  // `all_rejected` path from swallowing a case the old check got right. The three tests above are
+  // the ones proved to fail by injecting `written === 0` back in.
+  const db = makeDb();
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`INSERT INTO scraped_jobs (job_id,title,company,source,discovered_at,is_active,description)
+              VALUES ('w2','Eng','Deel','workable',?,1,'text')`).run(now);
+  recordPipelineRun(db, {
+    runKind: "source_sync", source: "workable", status: "ok", startedAt: now,
+    fetched: 23, written: 0, unchanged: 0, dropped: 15,
+  });
+
+  const { body } = await getHealth(db);
+  assert.equal(sourceNamed(body, "workable").health, "wrote_nothing");
+  assert.equal(alertFor(body, "source", "workable").severity, "critical");
+});
+
+test("the refused share is REPORTED and not alerted, because it is a standing condition", async () => {
+  // workable refuses 17 of 23 every night and boards the rest. That is real and worth a human's
+  // attention; it is not an alarm, for the same reason detailYield is a field and not one.
+  const db = makeDb();
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(`INSERT INTO scraped_jobs (job_id,title,company,source,discovered_at,is_active,description)
+              VALUES ('w3','Eng','Deel','workable',?,1,'text')`).run(now);
+  recordPipelineRun(db, {
+    runKind: "source_sync", source: "workable", status: "ok", startedAt: now,
+    fetched: 23, written: 6, unchanged: 0, dropped: 15, ejected: 2,
+  });
+
+  const { body } = await getHealth(db);
+  const s = sourceNamed(body, "workable");
+  assert.equal(s.health, "ok");
+  assert.equal(s.rejectedShare, 0.739, "17 of 23");
+  assert.equal(alertFor(body, "source", "workable"), undefined,
+    "a nightly warning that cannot be cleared is one nobody reads");
 });
 
 test("wrote_nothing outranks stale, so a source failing every run cannot hide behind quietness", async () => {

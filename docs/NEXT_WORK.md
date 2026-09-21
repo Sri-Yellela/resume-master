@@ -1,30 +1,61 @@
 # Next Work
 
-**Last reconciled:** 2026-09-17, after the ATS/curation audit. Closed findings are in
-**`docs/FINDINGS_ARCHIVE.md`**; every wrong claim this project has made, with what replaced it, is in
-**`docs/CORRECTIONS_REGISTER.md`**.
+**Last reconciled:** 2026-09-21. Closed findings are in **`docs/FINDINGS_ARCHIVE.md`**; every wrong
+claim this project has made, with what replaced it, is in **`docs/CORRECTIONS_REGISTER.md`**.
 
-**Baseline: 2443 passing, 0 failing.** Production is **`eecbe09`**, contract **v1.1.1**, migration
-high-water **106**, `monetisationEnabled: false` — confirmed by
-`GET https://resumemaster.one/api/version`, which is now the one-curl answer to "what is deployed".
-
-**The unpushed-commits banner below is HISTORICAL and resolved.** Those four commits shipped; the
-full merge deployed ten including the monetisation lever, anonymous spend controls, the version
-endpoint, migration 106 and task Y.
+**Baseline: 2596 passing, 0 failing.** Production is **`2e4429e`**, contract **v1.1.1**, migration
+high-water **109**, `monetisationEnabled: false` — read from
+`GET https://resumemaster.one/api/version`, which is the one-curl answer to "what is deployed" and
+now also answers "is the scorer weighted?": `atsWeights.state: fresh`, `weightedScoring: true`,
+493 terms, **`families: ["__global__"]` only** — see the open item on per-family resolution.
 
 > ⚠ **Re-derive state from the repo before starting anything.** This file has now been the stale
-> thing **seven** times — AK2 found three of five tasks already done, AL1 two of three, AM3 two
+> thing **eight** times — AK2 found three of five tasks already done, AL1 two of three, AM3 two
 > claims wrong, AM4 the central premise of its own task inverted, 09-15 found six landed commits
-> still listed as open, 09-16 its own headline banner wrong about production, and 09-17 the
-> `skills_json` figure it had carried for weeks **wrong by 2.7×**.
+> still listed as open, 09-16 its own headline banner wrong about production, 09-17 the
+> `skills_json` figure it had carried for weeks **wrong by 2.7×**, and this pass found **thirteen
+> landed commits** unrecorded and its own headline three numbers out of date on all three.
 >
 > `/api/version` turned "what is deployed" into one curl. **Nothing has done the same for "what is
 > true"** — which is why every brief now instructs measuring the premise first, and why three briefs
 > in a row had their central premise inverted by the first measurement taken.
+>
+> ⛔ **09-21: a monitor is not exempt from that rule either.** The two "sources fetching rows and
+> writing none" this file would have handed to the next session were **both working**; the defect
+> was in the check. `docs/SOURCE_HEALTH_FALSE_CRITICAL.md`.
 
 ---
 
-## ⭐ Current work — curation consolidation
+## ⭐ Current work — nothing is mid-flight
+
+**The curation consolidation is DONE and deployed. So is everything Part 2 of the 09-18 audit ranked
+1–4.** Thirteen commits landed 09-17 → 09-18 and this file recorded none of them. Read the state
+from the repo, not from the sections below, which are kept for the reasoning in them.
+
+| landed | what it was |
+|---|---|
+| `d3a79c3` `727f5dd` `03cedb6` `586b840` `a1fe3c7` `690bc1f` | **CC1–CC5 + CC1b, all five in order.** `docs/CURATION_CONSOLIDATION.md` carries the verdicts. The owner's board is **655** rows, not 405 and no longer 849; every graded-5 posting survives the narrowing. CC5 found the per-job `ats_score` cell wrong on **seven paths**, including the apply stamp writing a stranger's score into `job_applications` — every stored score is keyed `(user_id, domain_profile_id, job_id)` now |
+| `1a59296` `a110365` | **`job_role_map` backfill for the 277 rows nobody had classified**, and it runs at boot. `docs/ROLE_MAP_BACKFILL.md` |
+| `f45f983` `700e7c0` | **ATS term weights get a schedule** (`REFRESH_WEIGHT_AGE_DAYS` 14 against the 45-day refusal) and all three states become visible. ⛔ Production had **never computed a weight table** — every score it ever served was unweighted. It is weighted now. `docs/ATS_TERM_WEIGHTS_SCHEDULE.md` |
+| `87b2bfb` | A migration is one transaction, and its bookkeeping row is inside it |
+| `ccfef0f` `321f2a1` `2494629` | **Enrichment stops rewriting `normalized_title`**, plus migration 109 restoring the seniority tokens it stripped — and **only** those. The "200 of 200" in the first pass was a capped sample, corrected in the open rather than quietly |
+| `b65d813` | **An enrichment run that wrote nothing stops calling itself `ok`.** Five days of `written 0 / failed 25` recorded as `ok` |
+| `2e4429e` | **The pipeline alerts are DELIVERED**, edge-triggered on `severity\|kind\|subject`, with recovery messages. Detection was never the gap |
+| `docs/…` | `bd2004c` re-ran Part 1 read-only (`PART1_RECONCILED_2026-09-18.md`), `2eba152` read production, `9417e25` corrected a brief's own header |
+
+**The one item those left open is now closed too:** `docs/SOURCE_HEALTH_FALSE_CRITICAL.md` — the
+"workable 23 → 0 written, recruitee 16 → 0" criticals were **false**, and now that alerts are
+delivered, a standing false critical is the alarm nobody reads. `written` on the crawl side counts
+new-or-changed upserts only, and `unchanged` was not even read by the health query. See "Open" for
+the real finding it was sitting on.
+
+**⛔ Corrections this pass makes to figures still in circulation in this file:** `skills_json` is
+**43.7%** (1,140 / 2,610 active), not 99.8% and not 37% — the third value for this metric, and both
+earlier ones described boards that no longer exist. The board is **2,610 active in production**, not
+1,266. `ats_score` per job is **0 by design** — CC5 retired the column.
+
+<details>
+<summary>The curation-consolidation framing, kept for the reasoning — all five tasks are DONE</summary>
 
 The ATS/curation audit of 2026-09-17 found **three systems deciding one question**, and the one that
 actually decides the board had never been measured.
@@ -41,20 +72,26 @@ among them `Backend Engineer, Credit Decisions @ Stripe`, which the engine score
 second-highest**, excluded because the title lacks the literal word "software".
 
 **Plan and five sequential tasks: `docs/CURATION_CONSOLIDATION.md`.** CC1 runs alone and first.
+**All five landed 09-17/18.** CC3 wired G1's synonym table into the scorer and reported what it
+buys: **+0.0000**, for the reason CC2 §4 gives — the board's ordering is tie-dominated, so no
+matching-rule change can move ρ.
 
-**Two claims that audit retired:**
-- `skills_json` is **99.8%** covered (1,263/1,266), not 37%. The constraint is whole-value `LIKE`
-  against a 6,130-string vocabulary that is **70% singletons**, capped at 6 terms drawn from a
-  hardcoded list of 32.
+**Two claims that audit retired — and the first one has since been retired ITSELF:**
+- ⛔ `skills_json` is **43.7%** (1,140/2,610), measured 09-18. The 99.8% below was as wrong as the
+  37% it replaced; both described boards that no longer exist. The *constraint* it describes still
+  holds: whole-value `LIKE` against a 6,130-string vocabulary that is **70% singletons**, capped at
+  6 terms drawn from a hardcoded list of 32. ~~`skills_json` is **99.8%** covered (1,263/1,266).~~
 - G1's synonym table did not measure "+0.000" — **it has no effect path.** No server call site passes
-  `synonyms` to the scorer. The 196 proposals awaiting review are for a table nothing that scores
-  reads.
+  `synonyms` to the scorer. ✅ **CC3 wired it** (`586b840`); the 196 proposals are now for a table the
+  scorer reads, and the measured gain is still +0.0000.
+
+</details>
 
 ---
 
 ## ✓ RESOLVED — the section below is historical
 
-Those four commits shipped on 09-16/17; production is `eecbe09`. Kept only because the probe method
+Those four commits shipped on 09-16/17; production is `2e4429e`. Kept only because the probe method
 it records — `GET /api/config` answering **200 with the SPA shell** rather than the route — is the
 third time a catch-all 200 stood in for evidence, and the reason `/api/version` now exists.
 
@@ -72,9 +109,17 @@ third time a catch-all 200 stood in for evidence, and the reason `/api/version` 
 
 ## Open
 
+**Ranked, and the ranking is the 09-18 audit's Part 2 list with items 1–4 struck off as landed.**
+Everything in the first three rows is a MEASUREMENT task: the number needed to decide it does not
+exist yet, and in each case a premise is stated that has not been checked.
+
 | # | Task | Repo | Needs | State |
 |---|---|---|---|---|
-| **Y** | SmartRecruiters + Workday descriptions | desktop | — | **PHASE 1 PROBED + PHASE 2 BUILT 09-17.** The N+1 is real, nothing rate-limits, yield is 100%. Fetch moved crawl → enrichment. **The SOURCES are still off** — see below |
+| **1** | **Per-family term weights on production** | desktop | — | **open, and the best-evidenced item here.** Production is weighted with **one family** (`__global__`, 493 terms) where local builds four. Cause is named: the weight table buckets with `roleFamilyForTitle` (resolves **36%** of ingested titles) while the board classifies with `classifyJob` — **two classifiers answering one question**, the defect repaired three times already this month. Fixing it means widening the narrow mapper or bucketing by `job_role_map.role_key`; either changes the weights, so ρ must be re-measured against the graded corpus before and after. `docs/ATS_TERM_WEIGHTS_SCHEDULE.md` §6b |
+| **2** | **A quarter of every crawl is refused and nothing said so** | desktop | — | **NEW 09-21, measurement first.** `rejectedShare` is now on every source row: greenhouse **0.281** (602 of 2,142 postings a night dropped as `roleKey === null`), ashby 0.308, lever 0.281, workable 0.739, recruitee 0.750. Whether those refusals are right cannot be read off the classifier — it needs a judged sample of dropped titles. Same classifier, other side, as CC1b's 277 unclassified rows. ⛔ Do **not** answer it with a nightly alert; see `docs/SOURCE_HEALTH_FALSE_CRITICAL.md` §7 |
+| **3** | **`weightsAreStale` judges by AGE only, never corpus drift** | desktop | — | open, small. A table computed yesterday over a corpus half the size of today's board reads perfectly fresh. §6 of the weights doc is the evidence that the case is real: the old local table was built over 1,289 postings and the board had grown to 2,460 |
+| **4** | Board order tracking score · the two-extractors problem | desktop | — | open, unchanged in priority, and now downstream of the `normalized_title` fix. CC2 measured ρ(board, score) ≈ **0.18 and unmovable by matching rules** — the ordering is tie-dominated, so this is a ranking-design question, not a scorer question |
+| **Y** | SmartRecruiters + Workday descriptions | desktop | — | **PHASE 1 PROBED + PHASE 2 BUILT 09-17.** The N+1 is real, nothing rate-limits, yield is 100%. Fetch moved crawl → enrichment. **The SOURCES are still off** — see below. ⛔ `DETAIL_FETCH_ECONOMICS.md`'s numbers are stale in the same three ways the audit lists: 2,610 active, `skills_json` 43.7%, `ats_score` 0 |
 | **AB + AH** | Vestigial keys, small deferred items | desktop | — | **all but AB-1 closed** — AH-1/2/3/4 done or answered 09-16/17, see below. AB-1 is an owner action (remove `THEIRSTACK_API_KEY`) |
 | ~~**AF residual**~~ | A write path for `app_settings.apply_full_auto_disabled` | desktop | — | ✅ **DONE 09-17**, `1bb2a29`. GET/PUT/DELETE `/api/admin/full-auto`, three states, strict boolean. One definition in `services/appSettings.js` so the admin surface and the pipeline cannot disagree |
 | **AG** | Mobile corruption sweep | android | — | **partly done** — `f337767` repaired SYNC.md's encoding. The BOM/toolchain half and a verifying build remain |
@@ -245,10 +290,12 @@ Same shape as the three guards that shipped blind. It now rejects 401 explicitly
 
 | | |
 |---|---|
+| ⛔ **TOP UP THE ANTHROPIC ACCOUNT** | **The one thing blocking the pipeline, and it is still blocking it.** Re-probed **2026-09-21** with a single `max_tokens: 1` Haiku call — `HTTP 400 · "Your credit balance is too low to access the Anthropic API"`, `req_011CfHKfbmcojNwhNTpwEFhe`. Free: the request is refused before inference. Every enrichment call has failed since **09-17**; the backlog was 1,470 on 09-18 and has grown by the crawl every night since. No code can substitute — `docs/ENRICHMENT_BACKLOG_2026-09-18.md`. ⚠ The boot-time model-liveness check still passes, because the catalogue endpoint is free and a zero-balance key authenticates fine |
+| **Top up Jobo** | Same shape, independently: `HTTP 402 — "Insufficient credits… wallet balance is 0"`. This is also the answer to "why has jobo never written a row" |
 | **Extension submission** | **In flight.** The dashboard's Privacy practices tab was filled from `STORE_LISTING.md` on 2026-09-15 and verified against the shipped manifest and the deployed policy — no contradiction in permissions, data-use ticks or description. Two documentation contradictions found and **fixed 09-15** — ⚠ the `storage` justification must be **re-pasted** from the revised `STORE_LISTING.md`. Two items still open below. Still needs the Google login and the `CWS_*` credentials to upload |
 | **AF5** — 30 real applications, 10 per ATS | the only test of whether ρ = 0.746 predicts anything about **employers** rather than about your own judgement |
 | **Judge the ~1,422–2,000 in-place rewrites** | §4 of `PART1_RECONCILED.md` now gives you evidence rather than just a count |
-| **196 synonym proposals** | low value — G1 moved ρ by **+0.000**. Skim the obvious or leave the table dormant |
+| **196 synonym proposals** | low value, and the reason is now measured rather than guessed. CC3 **wired the table into the scorer** (`586b840`), so it is no longer dormant — and ρ still moved **+0.0000**, because CC2 found the board's ordering tie-dominated and unmovable by any matching rule. Skim the obvious or leave them |
 | **Jobo** | deferred to launch readiness, not pending |
 
 ### Extension submission — the two documentation contradictions are FIXED
@@ -298,7 +345,13 @@ checking the files that happened to be wrong; five guards, each proved to fail b
 
 ---
 
-## Enrichment — no longer a trickle
+## Enrichment — no longer a trickle, and currently stopped dead
+
+⛔ **NOTHING HAS BEEN ENRICHED SINCE 2026-09-17.** The account has no credit (re-confirmed 09-21,
+see Owner actions), so every call returns a 400 and the drain does 25 attempts and 0 writes in ten
+seconds. The design below is fine and was demonstrated on 09-15/16 — **300 and 299 rows written,
+$0.80, 14 passes**. It is a billing outage, not an engineering one. The backlog was **1,470** on
+09-18 and grows by the crawl nightly. `b65d813` at least stops such a run recording itself as `ok`.
 
 `ENRICH_DAILY_MAX_ROWS 300` bounds the day's work and the day's spend; the drain loops within that
 budget and self-limits, doing 28 and stopping when only 28 are queued. Measured: backlog cleared in
@@ -404,6 +457,18 @@ AJ2; the client half sat untouched for weeks *with a comment in the test describ
 **Health must be derived from what was WRITTEN, not from what was RECORDED.** Three consecutive days
 of `fetched 25 / written 0` were logged `ok`, and everything that looked at `status` agreed.
 
+**…and `written` is not the same counter on both sides.** The lesson above, applied to the crawl,
+produced two false criticals: there `written` counts new-or-changed upserts only, so a source whose
+board did not change overnight reads as a total outage. **Classify on everything the run ACCOUNTED
+for** — written + unchanged + merged, against dropped + ejected — and check what the counter you are
+about to key on actually counts. A monitor gets audited like anything else; it is the one thing
+nobody re-derives, because it is the thing that does the deriving.
+
+**Delivery turns a wrong cell into a wrong alarm.** These criticals were harmless for as long as the
+route sat unread. `2e4429e` made them arrive somewhere, and edge-triggering — the feature that keeps
+a standing alert quiet — is exactly what makes a standing FALSE alert permanent: delivered once,
+never cleared, sitting in the set beside the real ones.
+
 **Report coverage, not counts.** `enriched: 10` is true whether ten rows gained everything or
 nothing. An ATS source is only wired when its NORMALIZED rows carry the fields.
 
@@ -427,7 +492,12 @@ constant, never a hostname literal.
 
 ## Cross-references
 
-`docs/PART1_RECONCILED.md` (current state of record) · `docs/MONETISATION_AUDIT.md` (queued) ·
+⛔ **`docs/PART1_RECONCILED_2026-09-18.md` is the current state of record**, superseding
+`docs/PART1_RECONCILED.md` (2026-09-09), which several documents still cite as current.
+
+`docs/CURATION_CONSOLIDATION.md` (CC1–CC5, all done) · `docs/ATS_TERM_WEIGHTS_SCHEDULE.md` ·
+`docs/ENRICHMENT_BACKLOG_2026-09-18.md` · `docs/SOURCE_HEALTH_FALSE_CRITICAL.md` ·
+`docs/ROLE_MAP_BACKFILL.md` · `docs/MONETISATION_AUDIT.md` ·
 `docs/FINDINGS_ARCHIVE.md` · `docs/RECONCILE_AND_RESIDUAL.md` · `docs/CORRUPTION_SWEEP.md` ·
 `resume-master-android/ANDROID.md` · `resume-master-ios/IOS.md` · `docs/AUTOAPPLY_PROMPTS.md` ·
 `docs/GATED_HANDOFF_ARCHITECTURE.md` · `docs/PIPELINE_DIAGNOSIS.md` ·

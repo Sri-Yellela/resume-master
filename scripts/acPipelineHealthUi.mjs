@@ -75,6 +75,8 @@ const HEALTH = {
       detail: "the last 3 enrichment runs wrote nothing — this is the shape that ran for three days undetected" },
     { severity: "warn", kind: "source", subject: "ashby",
       detail: "no successful run in 72h (threshold 48h)" },
+    { severity: "warn", kind: "source", subject: "recruitee",
+      detail: "fetched 16 rows and the classifier refused every one of them (14 unclassifiable, 2 blue-collar) — the source works, its whole yield is off-board" },
     { severity: "warn", kind: "company", subject: "greenhouse/figma",
       detail: "Figma: no row seen in 61h (threshold 48h)" },
   ],
@@ -86,6 +88,12 @@ const HEALTH = {
     { name: "lever", configured: true, inCrawl: true, health: "no_results", companies: 7, total: 0, active: 0, noDescription: 0, enriched: 0, lastRowAt: null, lastActivityAt: null, staleHours: null, lastRun: { status: "no_results", at: now - H, fetched: 0, written: 0, merged: 0, dropped: 0, ejected: 0, failed: 0, error: null }, lastSuccessAt: null },
     { name: "workable", configured: true, inCrawl: true, health: "not_configured", companies: 3, total: 0, active: 0, noDescription: 0, enriched: 0, lastRowAt: null, lastActivityAt: null, staleHours: null, lastRun: { status: "skipped_unconfigured", at: now - H, fetched: 0, written: 0, merged: 0, dropped: 0, ejected: 0, failed: 0, error: "No companies configured for this source" }, lastSuccessAt: null },
     { name: "smartrecruiters", configured: true, inCrawl: true, health: "wrote_nothing", companies: 2, total: 0, active: 0, noDescription: 0, enriched: 0, lastRowAt: null, lastActivityAt: now - H, staleHours: 1, lastRun: { status: "ok", at: now - H, fetched: 282, written: 0, merged: 0, dropped: 0, ejected: 0, failed: 0, error: null }, lastSuccessAt: now - H },
+    // ALL REJECTED, and its counters are production's recruitee run of 2026-09-18. The state
+    // exists because `written: 0` used to mean "outage" and this row is what that cost: a source
+    // fetching, boarding nothing, and broken in no way at all. Here so the new amber pill is
+    // measured for wrap like every other one — ALL REJECTED is a two-word label in a column that
+    // has already broken on two of those.
+    { name: "recruitee", configured: true, inCrawl: true, health: "all_rejected", companies: 2, total: 4, active: 4, noDescription: 0, enriched: 2, lastRowAt: now - H, lastActivityAt: now - H, staleHours: 1, rejectedShare: 1, lastRun: { status: "ok", at: now - H, fetched: 16, written: 0, unchanged: 0, merged: 0, dropped: 14, ejected: 2, failed: 0, error: null }, lastSuccessAt: now - H },
     { name: "jobo", configured: true, inCrawl: true, health: "failed", companies: null, total: 0, active: 0, noDescription: 0, enriched: 0, lastRowAt: null, lastActivityAt: null, staleHours: 669, lastRun: { status: "failed", at: now - 4 * H, fetched: 0, written: 0, merged: 0, dropped: 0, ejected: 0, failed: 0, error: "connect ETIMEDOUT connect.jobo.world:443" }, lastSuccessAt: null },
   ],
   companies: [
@@ -189,7 +197,7 @@ try {
     "the run's own 'ok' is shown NEXT TO the derived FAILED — the contradiction is the finding");
 
   // Every state this residual added must be present AND distinguishable.
-  for (const label of ["WROTE NOTHING", "LIVE SEARCH ONLY", "AWAITING CRAWL",
+  for (const label of ["WROTE NOTHING", "ALL REJECTED", "LIVE SEARCH ONLY", "AWAITING CRAWL",
                        "NO DESCRIPTIONS", "NO ROWS"]) {
     check(t.includes(label), `the ${label} state renders`);
   }

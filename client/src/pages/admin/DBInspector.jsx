@@ -261,9 +261,15 @@ const HEALTH_STYLE = {
   // Deliberately red, not grey: an unconfigured provider reading as a benign "off" is exactly
   // how Jobo went unnoticed for its entire lifetime.
   not_configured:  { color:"#dc2626", label:"NOT CONFIGURED" },
-  // A run that reported success and wrote nothing. Red, and ABOVE stale in the route's ordering,
-  // because production logged three consecutive days of `status: 'ok'` with `written: 0`.
+  // A run that reported success and put NOTHING on the board. Red, and ABOVE stale in the route's
+  // ordering, because production logged three consecutive days of `status: 'ok'` with `written: 0`.
+  // ⛔ Not the same as `written: 0` — a crawl that finds every posting unchanged writes 0 rows and
+  // is healthy. That conflation raised two false criticals; the route classifies on
+  // written + unchanged + merged now.
   wrote_nothing:   { color:"#dc2626", label:"WROTE NOTHING" },
+  // Fetched rows, boarded none, and the classifier refused all of them. Amber, not red: the fetch
+  // works and the judgement to make is about the source's yield, not an outage.
+  all_rejected:    { color:"#d97706", label:"ALL REJECTED" },
   // An ACTIVE company slug at zero rows — a dead slug, or postings dropped before the write.
   no_rows_company: { color:"#dc2626", label:"NO ROWS" },
   // Rows exist but none has a description, so enrichJob skips every one of them forever.
@@ -475,6 +481,13 @@ function ScrapeMonitorTab({ theme }) {
                 <div style={{ color:theme.textMuted, fontSize:11 }}>
                   {s.lastRun
                     ? <span>{s.lastRun.status} · {fmt(s.lastRun.written)} written
+                        {/* "ok · 0 written" is what this cell said about two working sources, and
+                            it is the whole reason they were classified as outages. A crawl that
+                            finds its postings unchanged writes nothing and touches them instead,
+                            so the touch count belongs next to the write count, not behind it. */}
+                        {s.lastRun.unchanged > 0 && <> · {fmt(s.lastRun.unchanged)} unchanged</>}
+                        {(s.lastRun.dropped + s.lastRun.ejected) > 0 &&
+                          <> · {fmt(s.lastRun.dropped + s.lastRun.ejected)} refused</>}
                         {s.lastRun.error && <span style={{ color:"#dc2626" }}> · {truncate(s.lastRun.error, 60)}</span>}
                       </span>
                     : <span style={{ color:theme.textDim, fontStyle:"italic" }}>no run recorded yet</span>}

@@ -141,8 +141,8 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       const lastOk = new Map();
       if (hasRunLog) {
         for (const r of db.prepare(`
-          SELECT source, status, started_at, finished_at, fetched, written, merged, dropped,
-                 ejected, failed, expired, error_text, details_json
+          SELECT source, status, started_at, finished_at, fetched, written, unchanged, merged,
+                 dropped, ejected, failed, expired, error_text, details_json
           FROM pipeline_runs
           WHERE run_kind = 'source_sync' AND source IS NOT NULL
           ORDER BY started_at DESC
@@ -170,7 +170,46 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         // status-keyed check reads as healthy. The same hole exists on the crawl side: a
         // source_sync can succeed, fetch rows, and write none. A run that wrote nothing is not a
         // successful run, whatever it called itself.
-        const wroteNothing = lastRun != null && Number(lastRun.written || 0) === 0;
+        //
+        // ⛔ BUT `written` ALONE IS THE WRONG COUNTER, AND THIS ROUTE CRIED WOLF FOR IT. On the
+        // crawl side `written` is `cached` — NEW-OR-CHANGED upserts only. A posting whose
+        // fingerprint matches the last crawl is recorded under `unchanged` (touch-only, the cheap
+        // path in cacheJobs), and one folded into another source's canonical row under `merged`.
+        // So a source whose board simply did not change overnight records `written: 0` and was
+        // classified as a total outage: on 2026-09-18 production raised CRITICAL for
+        // `workable: wrote 0 rows from 23 fetched` and `recruitee: 0 from 16` on two sources that
+        // were working exactly as designed — 6 and 4 rows, unchanged since the night before.
+        // `unchanged` was not even SELECTed above, so the one counter that proves the rows were
+        // accounted for was invisible to the check that needed it. Now that 2e4429e DELIVERS these
+        // alerts, a false critical is not a cosmetic problem: it is the standing alarm nobody reads.
+        //
+        // So classify on what the run ACCOUNTED FOR. Two different zeros, and they are not the
+        // same failure:
+        //   accountedFor = written + unchanged + merged  — rows that are on the board because of
+        //                                                  this run, or confirmed still on it
+        //   rejected     = dropped + ejected             — rows the CLASSIFIER refused on purpose
+        //                                                  (unclassifiable role, blue-collar)
+        const fetchedRows  = Number(lastRun?.fetched   || 0);
+        const accountedFor = Number(lastRun?.written   || 0)
+                           + Number(lastRun?.unchanged || 0)
+                           + Number(lastRun?.merged    || 0);
+        const rejected     = Number(lastRun?.dropped   || 0)
+                           + Number(lastRun?.ejected   || 0);
+
+        // Fetched rows, boarded none, and the classifier refused all of them. Nothing is broken in
+        // the fetch; the source's entire yield is off-board. A different cause needs a different
+        // word, and `warn` rather than `critical` — kept as its own state instead of folded into
+        // `wrote_nothing` because "the source is dead" and "we throw away everything it sends" lead
+        // to opposite actions.
+        const allRejected = lastRun != null && fetchedRows > 0 && accountedFor === 0
+                          && rejected === fetchedRows;
+
+        // Fetched rows and put none of them anywhere. Still critical, and deliberately ALSO true
+        // when the rejections do not add up to the fetch: a run that fetched 23, refused 15 and
+        // cannot say what became of the other 8 has lost rows silently, which is the `0de67c8`
+        // shape and worse than a clean refusal, not better.
+        const wroteNothing = lastRun != null && fetchedRows > 0 && accountedFor === 0
+                          && !allRejected;
 
         // Ordered by severity — the first matching condition wins, so a misconfiguration is
         // never masked by a downstream symptom.
@@ -184,6 +223,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
         // Ahead of `stale`, because a source writing nothing on every run is a harder failure
         // than one that has merely gone quiet, and `stale` would mask it after 48h.
         else if (wroteNothing)                 health = "wrote_nothing";
+        else if (allRejected)                  health = "all_rejected";
         else if (lastActivityAt && lastActivityAt < staleBefore) health = "stale";
         else if (!rows?.active)                health = "no_rows";
         else                                   health = "ok";
@@ -201,9 +241,19 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
           lastActivityAt,
           staleHours:      lastActivityAt ? Math.floor((now - lastActivityAt) / 3600) : null,
           health,
+          // The share of the last fetch the classifier refused. REPORTED, NOT ALERTED — the same
+          // call task Y phase 2 made for `detailYield`: workable refuses 15 of 23 and recruitee 12
+          // of 16 every night, which is real and worth a human's attention, and is also a STANDING
+          // condition that would become an alarm nobody reads. `all_rejected` (all of them, so the
+          // source contributes nothing at all) is the part that earns an alert.
+          rejectedShare:   fetchedRows > 0 ? Number((rejected / fetchedRows).toFixed(3)) : null,
           lastRun:         lastRun && {
             status: lastRun.status, at: lastRun.started_at,
-            fetched: lastRun.fetched, written: lastRun.written, merged: lastRun.merged,
+            fetched: lastRun.fetched, written: lastRun.written,
+            // `unchanged` is on the payload for the same reason it is now in the classifier: it is
+            // the difference between "the board did not change" and "the source stopped working",
+            // and reading `written: 0` without it cannot tell them apart.
+            unchanged: lastRun.unchanged, merged: lastRun.merged,
             dropped: lastRun.dropped, ejected: lastRun.ejected, failed: lastRun.failed,
             error: lastRun.error_text,
           },
@@ -433,11 +483,22 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
           never_ran:      "in the daily crawl and has never produced a run or a row",
           failed:         `last run failed: ${s.lastRun?.error || "no error recorded"}`,
           no_results:     "ran and returned nothing — every configured slug came back empty",
-          wrote_nothing:  `last run reported '${s.lastRun?.status}' but wrote 0 rows from ${s.lastRun?.fetched ?? 0} fetched`,
+          // Names every counter, because the previous wording — "wrote 0 rows from N fetched" —
+          // was true of two sources that were working, and gave a reader nothing to check it with.
+          wrote_nothing:  `last run reported '${s.lastRun?.status}' and put none of its ` +
+                          `${s.lastRun?.fetched ?? 0} fetched rows on the board ` +
+                          `(written 0, unchanged 0, merged 0, refused ${(s.lastRun?.dropped ?? 0) + (s.lastRun?.ejected ?? 0)})`,
+          all_rejected:   `fetched ${s.lastRun?.fetched ?? 0} rows and the classifier refused ` +
+                          `every one of them (${s.lastRun?.dropped ?? 0} unclassifiable, ` +
+                          `${s.lastRun?.ejected ?? 0} blue-collar) — the source works, its whole ` +
+                          `yield is off-board`,
           stale:          `no successful run in ${s.staleHours}h (threshold ${STALE_AFTER_HOURS}h)`,
           no_rows:        "has run but holds no active rows",
         }[s.health] || s.health;
-        push(s.health === "stale" ? "warn" : "critical", "source", s.name, detail);
+        // `all_rejected` is a warn for the same reason `stale` is: the pipeline is doing what it
+        // was told, and the judgement to make is about the source or the classifier, not an outage.
+        push(s.health === "stale" || s.health === "all_rejected" ? "warn" : "critical",
+          "source", s.name, detail);
       }
 
       // Per-slug, and deliberately AFTER the source loop: a source can read `ok` while individual

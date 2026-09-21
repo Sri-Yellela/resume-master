@@ -4,7 +4,7 @@
 with what replaced it. Kept because several of these were repeated across multiple sessions before
 anyone measured them, and a wrong figure in a brief becomes a wrong premise in the work.
 
-**Last reconciled:** 2026-09-17, after the ATS/curation audit.
+**Last reconciled:** 2026-09-21.
 
 > **The pattern worth naming:** almost every entry below was corrected by an agent *measuring* a
 > premise it had been handed, not by anyone noticing the error. The standing instruction —
@@ -21,8 +21,9 @@ anyone measured them, and a wrong figure in a brief becomes a wrong premise in t
 | **`skills_json` coverage 99.8%** — the correction above | this register, `NEXT_WORK.md`, CC2 | **43.7%** in production (1,140 / 2,610 active), 2026-09-18 | THIRD value for one metric. 37% and 99.8% were both right about boards that no longer exist. The lesson is not the number: a coverage figure quoted without its board size has a shelf life of weeks |
 | **Enrichment backlog "790 candidates"** | `RECONCILE_AND_RESIDUAL.md` item 3d | **1,470** and growing — 1,373 `enrich_job` events in 30 days and still losing ground | The crawl outruns the drain. This is the binding constraint `DETAIL_FETCH_ECONOMICS.md` names |
 | **Enrichment "drains at 25 rows/day"** | `NEXT_WORK.md` lessons | Superseded by AE's bounded loop, now live | Would have justified a second batching mechanism |
-| **Migration high-water 068 → 090 → 095 → 101** | every prompt doc, repeatedly | **106** as of `eecbe09` | A new migration written at a stale id collides |
-| **Test baseline 45 → 600 → 1006 → 1858 → 2301** | every prompt doc | **2443** | Comparing against a stale baseline hides introduced failures |
+| **Migration high-water 068 → 090 → 095 → 101 → 106** | every prompt doc, repeatedly | **109** as of `2e4429e`, read from `/api/version` 2026-09-21 | A new migration written at a stale id collides |
+| **Test baseline 45 → 600 → 1006 → 1858 → 2301 → 2443** | every prompt doc | **2596** (2,591 at `2e4429e`) | Comparing against a stale baseline hides introduced failures |
+| ⛔ **"workable fetched 23 and wrote 0, recruitee 16 → 0"** — reported as two sources failing | `PART1_RECONCILED_2026-09-18.md` §3a, `ENRICHMENT_BACKLOG_2026-09-18.md` §6, and **delivered as two CRITICAL alerts** | **Both sources were working.** On the crawl side `written` counts new-or-changed upserts only; unchanged postings are counted under `unchanged`, which the health query did not even SELECT. 2026-09-21 | The first entry here whose wrong claim came from **the monitor**, not from a brief. It was harmless while nothing read the route and stopped being harmless four days earlier, when `2e4429e` began delivering it. `docs/SOURCE_HEALTH_FALSE_CRITICAL.md` |
 | **`ats_score` non-NULL on 4 of 1,296 rows** | the CC5 brief, the ATS/curation audit | **0 of 2,460.** The board restore left more rows and no scored ones; the 4 were `aj2fixture::*` seeds that no longer exist | Requirement 6's "stored 43 vs scores null" row cannot be reproduced. The requirement was implemented anyway |
 | **Scoring costs ~5.5ms/job, 279ms a page, 13.4s a board** | comments an earlier CC5 pass left in `server.js` and `jobCursor.js` | **6.67ms mean** (median 6.32, p95 9.99, n = 300 real postings, weights and synonyms warm) — 0.33s a page, **16.4s** for all 2,458 | ~20% optimistic. Conclusion unchanged and slightly stronger: the board must read a cache |
 | **`ran_at` column missing in production** | reported as prod/dev schema drift | **Typo.** The column is `run_at`, and `SELECT ran_at` fails identically locally. Migration `011_cleanup_log` is byte-identical in both dual paths | Invented a schema-divergence investigation |
@@ -189,8 +190,11 @@ fifteen times.
 
 ## Corrections to make in the docs
 
-- [ ] `NEXT_WORK.md` — replace every `skills_json` 37% reference with 99.8%
-- [ ] `NEXT_WORK.md` — baseline 2443, migration 106, production `eecbe09`
+- [x] `NEXT_WORK.md` — ~~replace every `skills_json` 37% reference with 99.8%~~ **with 43.7%**, per
+      the row above. Done 2026-09-21, with the superseded figure struck through in place rather than
+      deleted, because this metric has now had three values and the next reader needs to see that
+- [x] `NEXT_WORK.md` — baseline 2443, migration 106, production `eecbe09` → **2596 / 109 /
+      `2e4429e`**, read from `/api/version`. Done 2026-09-21
 - [ ] `NEXT_WORK.md` — delete the "25 rows/day" lesson; AE's loop supersedes it
 - [ ] `FINDINGS_ARCHIVE.md` — add the three new blind guards (`ak2BandSurfaces`, the cached lever, `ae5BoardUi`)
 - [ ] `shared/atsBands.js` — the accepted cost is **5 of 12** graded-5 missing Strong, not 4
