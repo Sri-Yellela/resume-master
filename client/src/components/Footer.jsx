@@ -1,6 +1,7 @@
 // client/src/components/Footer.jsx
 import { Link } from "react-router-dom";
 import { useMonetisationEnabled } from "../lib/monetisation.jsx";
+import { BRAND } from "../../../shared/brand.js";
 
 export function Footer() {
   const monetisationEnabled = useMonetisationEnabled();
@@ -15,13 +16,13 @@ export function Footer() {
           <div style={{ flex: "1 1 200px", minWidth: 180 }}>
             <div style={{ fontSize: 18, fontWeight: 900, color: "#f5f5f5",
                           letterSpacing: "-0.5px", marginBottom: 10 }}>
-              Resume Master
+              {BRAND}
             </div>
             <p style={{ fontSize: 13, color: "#9ca3af", lineHeight: 1.6, marginBottom: 16, maxWidth: 220 }}>
               AI-powered resumes for the modern job search.
             </p>
             <p style={{ fontSize: 11, color: "#6b7280" }}>
-              © 2025 Resume Master. All rights reserved.
+              © 2025 {BRAND}. All rights reserved.
             </p>
           </div>
 

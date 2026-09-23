@@ -4,7 +4,7 @@
  * ============================================================================================
  * A policy that is correct in the repo and stale on the server is the version a reviewer reads.
  * The two can differ by a whole deploy, and the failure is invisible from inside the repo: every
- * test passes, the file says the right thing, and resumemaster.one/privacy still describes the
+ * test passes, the file says the right thing, and the deployed /privacy still describes the
  * extension from three releases ago.
  *
  * So this checks the deployed page, not the source. Anonymously — no cookies, no session — because
@@ -13,7 +13,13 @@
  * It renders the page rather than curling it: the policy is client-rendered, so the raw HTML is an
  * empty shell and a text search against it would pass or fail for reasons unrelated to the prose.
  *
- * Usage:  node scripts/e4PolicyVerify.mjs
+ * ⛔ DURING THE DOMAIN MIGRATION, RUN THIS TWICE. Both origins serve the same application, but
+ * they are separate deploys as far as a reviewer is concerned, and the Web Store holds a URL on
+ * whichever one the shipped manifest names. Passing on the new origin says nothing about the old
+ * one, which is the only origin the reviewed extension knows about.
+ *
+ * Usage:  node scripts/e4PolicyVerify.mjs                 # the URL the shipped manifest declares
+ *         node scripts/e4PolicyVerify.mjs <origin>        # e.g. the other origin, mid-migration
  */
 
 import fs from 'node:fs';
@@ -21,8 +27,28 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
+import { CANONICAL_ORIGIN, PRIVACY_POLICY_PATH } from '../shared/brand.js';
 
-const URL_ = 'https://resumemaster.one/privacy';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * ⛔ THE DEFAULT ORIGIN COMES FROM THE MANIFEST, NOT FROM A CONSTANT.
+ *
+ * What this script is for is checking the page A REVIEWER WILL FETCH, and the URL a reviewer
+ * fetches is whatever extension/manifest.json declares — today the legacy origin, because the
+ * package is frozen under review, and the canonical one the moment P4 ships. Reading it from the
+ * manifest means this is correct on both sides of that change with nothing to remember to flip.
+ *
+ * Defaulting to CANONICAL_ORIGIN instead would have pointed this at a domain whose certificate has
+ * not issued yet, turning a green check red for a reason that has nothing to do with the policy.
+ */
+const manifestUrl = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'extension/manifest.json'), 'utf8'),
+).privacy_policy_url;
+const ORIGIN = (process.argv[2] || (manifestUrl ? new URL(manifestUrl).origin : CANONICAL_ORIGIN))
+  .replace(/\/$/, '');
+const URL_ = `${ORIGIN}${PRIVACY_POLICY_PATH}`;
+console.log(`target   ${URL_}${process.argv[2] ? ' (overridden)' : ' (from extension/manifest.json)'}`);
 
 // The effective date is read from the page that renders it, never written down twice. Hardcoding it
 // here meant the check failed on 2026-09-15 for the one reason it is not supposed to catch: the
@@ -30,7 +56,6 @@ const URL_ = 'https://resumemaster.one/privacy';
 // August 19. A copy of the date here tests whether somebody remembered to edit two files; reading
 // the constant tests what the docstring above actually promises — that the deploy has caught up
 // with the source.
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = path.join(ROOT, 'client/src/pages/marketing/PrivacyPage.jsx');
 const dateMatch = fs.readFileSync(SOURCE, 'utf8').match(/^const EFFECTIVE_DATE\s*=\s*'([^']+)'/m);
 if (!dateMatch) {

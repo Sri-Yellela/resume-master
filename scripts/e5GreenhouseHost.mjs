@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
 import { extractJobPayload } from '../extension/extractor.js';
+import { LEGACY_HOST } from '../shared/brand.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -89,7 +90,7 @@ async function main() {
     `${legacy.status} -> ${legacy.headers.get('location')}`);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'extension', 'manifest.json'), 'utf8'));
-  const siteHosts = manifest.host_permissions.filter(h => !h.includes('resumemaster.one'));
+  const siteHosts = manifest.host_permissions.filter(h => !h.includes(LEGACY_HOST));
   check('the manifest names NO job site at all', siteHosts.length === 0,
     siteHosts.length ? siteHosts.join(', ') : 'capture reaches pages through activeTab alone');
   check('and declares no content script', !manifest.content_scripts,

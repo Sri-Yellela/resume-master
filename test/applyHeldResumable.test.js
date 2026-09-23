@@ -357,7 +357,7 @@ test("the held card's action is the HANDOFF, not the review modal", () => {
   // The handoff lands the user on the REAL apply URL, in their own browser.
   assert.match(ctx, /window\.open\(packet\.applyUrl, "_blank", "noopener,noreferrer"\)/);
   // And says what happens next, because the fill happens in another tab by another process.
-  assert.match(ctx, /Click the Resume Master extension there/);
+  assert.match(ctx, /Click the \$\{BRAND\} extension there/);
   assert.match(panel, /handoffMsg/);
 });
 

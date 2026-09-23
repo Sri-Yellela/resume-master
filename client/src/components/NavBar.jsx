@@ -6,6 +6,7 @@ import { useLogoSize } from '../hooks/useLogoSize.js';
 import InlineLoginPopover from './InlineLoginPopover.jsx';
 import { useMonetisationEnabled } from '../lib/monetisation.jsx';
 import './NavBar.css';
+import { BRAND } from '../../../shared/brand.js';
 
 // The FOURTH nav carrying a Pricing link, and the one the 404 page renders — which is how it was
 // caught: with the lever off, /pricing correctly fell through to NotFoundPage, and the nav above
@@ -25,7 +26,7 @@ export default function NavBar({ user = null, onLogout, onLogin }) {
   const PUBLIC_LINKS = publicLinks(monetisationEnabled);
   const loc = useLocation();
   const [open, setOpen] = useState(false);
-  const isWide = useLogoSize(); // true when >=768px → show full "RESUME MASTER"
+  const isWide = useLogoSize(); // true when >=768px → show the full wordmark
 
   // Close drawer on route change
   useEffect(() => { setOpen(false); }, [loc.pathname]);
@@ -33,8 +34,8 @@ export default function NavBar({ user = null, onLogout, onLogin }) {
   return (
     <nav className="navbar" aria-label="Site navigation">
 
-      {/* Logo — full "RESUME MASTER" on wide, "RM" on narrow */}
-      <Link to="/" className="navbar__logo" aria-label="Resume Master home">
+      {/* Logo — the full wordmark on wide, its initial only on narrow */}
+      <Link to="/" className="navbar__logo" aria-label={`${BRAND} home`}>
         <StampLogo progress={isWide ? 0 : 1} />
       </Link>
 

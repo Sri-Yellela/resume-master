@@ -11,6 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { BRAND, LEGACY_BRAND, LEGACY_ORIGIN } from "../shared/brand.js";
 
 import {
   preflight, compareVersions, listingVersion, builtVersions,
@@ -22,13 +23,13 @@ const file = (name, text) => ({ name, bytes: Buffer.from(text, "utf8") });
 const base = () => {
   const files = [
     file("manifest.json", '{"version":"2.0.0"}'),
-    file("background.js", "const URL_ = 'https://resumemaster.one';\n"),
+    file("background.js", `const URL_ = '${LEGACY_ORIGIN}';\n`),
   ];
   return {
-    manifest: { version: "2.0.0", privacy_policy_url: "https://resumemaster.one/privacy" },
+    manifest: { version: "2.0.0", privacy_policy_url: `${LEGACY_ORIGIN}/privacy` },
     sourceFiles: files,
     zipEntries: files.map(f => ({ name: f.name, bytes: f.bytes })),
-    listingText: "# Chrome Web Store listing — Resume Master v2.0.0\n",
+    listingText: `# Chrome Web Store listing — ${LEGACY_BRAND} v2.0.0\n`,
     priorVersions: ["1.1.0", "1.2.0"],
   };
 };
@@ -41,7 +42,7 @@ test("a clean release passes preflight", () => {
 // ── The listing guard ────────────────────────────────────────────────────────
 
 test("A LISTING WRITTEN FOR THE PREVIOUS VERSION BLOCKS THE UPLOAD", () => {
-  const r = preflight({ ...base(), listingText: "# Chrome Web Store listing — Resume Master v1.2.0\n" });
+  const r = preflight({ ...base(), listingText: `# Chrome Web Store listing — ${LEGACY_BRAND} v1.2.0\n` });
   assert.equal(r.ok, false);
   assert.match(r.problems.join(" "), /written for v1\.2\.0 but this build is v2\.0\.0/);
   // The message has to say WHY it matters, or the next person just bumps the header.
@@ -55,7 +56,10 @@ test("a missing listing header blocks it too", () => {
 });
 
 test("listingVersion reads the header and nothing else", () => {
-  assert.equal(listingVersion("# Chrome Web Store listing — Resume Master v1.3.0\n"), "1.3.0");
+  assert.equal(listingVersion(`# Chrome Web Store listing — ${LEGACY_BRAND} v1.3.0\n`), "1.3.0");
+  // And the same heading under the new name, which is what P4 will write. Both are accepted for
+  // the length of the migration; see the note on listingVersion().
+  assert.equal(listingVersion(`# Chrome Web Store listing — ${BRAND} v1.3.0\n`), "1.3.0");
   assert.equal(listingVersion("irrelevant v9.9.9"), null);
 });
 
@@ -110,7 +114,7 @@ test("A FLIPPED DEV SWITCH BLOCKS THE UPLOAD", () => {
 test("a commented-out dev switch is fine", () => {
   const b = base();
   const ok = file("background.js",
-    "const RESUME_MASTER_URL = 'https://resumemaster.one';\n// const RESUME_MASTER_URL = 'http://localhost:3000';\n");
+    `const RESUME_MASTER_URL = '${LEGACY_ORIGIN}';\n// const RESUME_MASTER_URL = 'http://localhost:3000';\n`);
   b.sourceFiles = [b.sourceFiles[0], ok];
   b.zipEntries = b.sourceFiles.map(f => ({ name: f.name, bytes: f.bytes }));
   assert.equal(preflight(b).ok, true);

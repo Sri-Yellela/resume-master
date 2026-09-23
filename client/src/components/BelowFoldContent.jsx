@@ -1,5 +1,6 @@
 // Below-fold marketing content — extracted from LandingPage.jsx
 import { Link } from "react-router-dom";
+import { BRAND } from "../../../shared/brand.js";
 
 const FEATURES = [
   {
@@ -33,7 +34,7 @@ export default function BelowFoldContent() {
           Everything you need to land the job
         </div>
         <div style={{ fontSize: 14, color: "var(--color-text-muted)", marginTop: 8 }}>
-          From resume to offer — Resume Master has every step covered.
+          From resume to offer — {BRAND} has every step covered.
         </div>
       </div>
 

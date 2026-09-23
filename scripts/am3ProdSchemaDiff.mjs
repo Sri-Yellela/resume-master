@@ -42,9 +42,11 @@ for (const line of (fs.existsSync(path.join(ROOT, ".env"))
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^"(.*)"$/, "$1");
 }
 
+const { CANONICAL_ORIGIN } = await import("../shared/brand.js");
+
 const args = process.argv.slice(2);
 const urlArg = args.indexOf("--url");
-const BASE = (urlArg >= 0 ? args[urlArg + 1] : process.env.APP_BASE_URL || "https://resumemaster.one")
+const BASE = (urlArg >= 0 ? args[urlArg + 1] : process.env.APP_BASE_URL || CANONICAL_ORIGIN)
   .replace(/\/$/, "");
 const USER = process.env.ADMIN_USER;
 const PASS = process.env.ADMIN_PASSWORD;

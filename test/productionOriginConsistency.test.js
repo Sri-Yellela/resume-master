@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { CANONICAL_HOST, LEGACY_HOST, LEGACY_ORIGIN } from "../shared/brand.js";
 
 // The project's original Railway-generated hostname,
 // https://resume-master-production.up.railway.app, is no longer attached to the service — Railway's
@@ -14,7 +15,15 @@ import { execFileSync } from "node:child_process";
 // to instruct exactly that ("Update Chrome extension popup → change URL to Railway URL"), so the
 // trap was written down as a step. These tests keep it from coming back.
 
-const CANONICAL = "resumemaster.one";
+// ⛔ TWO HOSTS, AND THEY ARE NOT INTERCHANGEABLE WHILE THE MIGRATION IS IN FLIGHT.
+//
+// CANONICAL_HOST is where the app lives now. LEGACY_HOST is where the REVIEWED EXTENSION still
+// points, and will until its P4 update is live in the store. This test used to have one constant
+// called CANONICAL, hardcoded to the legacy host, and asserted the extension referenced it —
+// which meant that the moment the app moved, the test either failed for a correct state or, if
+// someone "fixed" it by repointing the constant, started demanding that the frozen extension be
+// edited mid-review. Both constants now come from shared/brand.js, so the extension is asserted
+// against the value it actually holds and P4 is a one-line change there rather than here.
 const DEAD_HOST = "resume-master-production.up.railway.app";
 
 /** Tracked files only — keeps node_modules and build output out of the scan, and stays fast. */
@@ -23,7 +32,8 @@ function trackedFiles(extensions) {
   return out.split(/\r?\n/).filter(f => f && extensions.some(e => f.endsWith(e)));
 }
 
-// This file has to contain the hostname in order to search for it, so it must exclude itself.
+// This file has to contain the dead hostname in order to search for it, so it must exclude
+// itself. (The live hosts are imported, not written out, so only DEAD_HOST forces this.)
 // It did not at first, and passed anyway — because it was still UNTRACKED when I ran it, so
 // `git ls-files` never returned it. Committing it turned a green test red, which is the useful
 // lesson: a guard whose result depends on whether it happens to be staged yet is not a guard.
@@ -46,20 +56,63 @@ test("no code or config points at the retired Railway hostname", () => {
     `these point at a hostname that returns 404: ${offenders.join(", ")}`);
 });
 
-test("the extension targets the canonical domain in every place it declares an origin", () => {
+test("the extension targets ONE live domain in every place it declares an origin", () => {
   // Three files, and all three have to agree: two runtime constants plus the manifest, whose
   // host_permissions is the one the Chrome Web Store reviews.
+  //
+  // The expected host is LEGACY_HOST and not CANONICAL_HOST on purpose. extension/ is frozen for
+  // P4 while the package is under review; repointing it now either resets the queue position or
+  // ships a manifest that contradicts the listing a reviewer is reading. When P4 lands, flip this
+  // one constant.
+  const EXPECTED = LEGACY_HOST;
+  const OTHER    = EXPECTED === LEGACY_HOST ? CANONICAL_HOST : LEGACY_HOST;
+
   for (const f of ["extension/background.js", "extension/config.js", "extension/manifest.json"]) {
     const text = fs.readFileSync(f, "utf8");
-    assert.ok(text.includes(CANONICAL), `${f} must reference ${CANONICAL}`);
+    assert.ok(text.includes(EXPECTED), `${f} must reference ${EXPECTED}`);
     assert.ok(!text.includes(DEAD_HOST), `${f} must not reference the retired hostname`);
+    // A HALF-MIGRATED EXTENSION IS WORSE THAN AN UNMIGRATED ONE: host_permissions is a match
+    // pattern, so a build that fetches one host while declaring the other fails CORS silently in
+    // production and passes every local test. Mixing the two is the failure this catches.
+    assert.ok(!text.includes(OTHER),
+      `${f} references ${OTHER} as well as ${EXPECTED} — the extension must name exactly one live ` +
+      `origin, and all three files must name the same one`);
   }
 
   const manifest = JSON.parse(fs.readFileSync("extension/manifest.json", "utf8"));
   assert.ok(
-    (manifest.host_permissions || []).some(p => p.includes(CANONICAL)),
-    "host_permissions must grant the canonical domain — this is the field Chrome re-reviews",
+    (manifest.host_permissions || []).some(p => p.includes(EXPECTED)),
+    "host_permissions must grant the live domain — this is the field Chrome re-reviews",
   );
+});
+
+test("the two copies of the extension's URL constant are byte-identical", () => {
+  // extension/config.js and extension/background.js hold DUPLICATE copies of the base URL BY
+  // DESIGN — a service worker cannot share plain-script globals — and both files say so. The
+  // duplication is fine; the DRIFT is not, and they have drifted before. A build whose popup
+  // talks to one origin and whose service worker talks to another fails only in production.
+  //
+  // Compared as exact text rather than by parsing a URL out of each, because the dev switch is
+  // the thing that actually drifts: someone uncomments line B in one file and ships it.
+  const declFor = (text) => {
+    // DECLARATION lines only. Matching every mention picks up the dozen `${RESUME_MASTER_URL}/api/…`
+    // template uses in each file, which are not the thing that drifts.
+    const m = text.match(/^(?:\/\/ )?const RESUME_MASTER_URL = .*$/gm);
+    assert.ok(m && m.length === 2,
+      `expected exactly two RESUME_MASTER_URL declarations (production + commented dev switch), got ${m ? m.length : 0}`);
+    return m;
+  };
+
+  const config     = declFor(fs.readFileSync("extension/config.js", "utf8"));
+  const background = declFor(fs.readFileSync("extension/background.js", "utf8"));
+  assert.deepEqual(config, background,
+    "extension/config.js and extension/background.js declare different base URLs — the pair is " +
+    "duplicated on purpose but must never disagree");
+
+  // And the LIVE one must be the production origin, not the commented-out dev switch. Compared by
+  // prefix because the line carries a trailing `// A: production` marker.
+  assert.ok(config[0].startsWith(`const RESUME_MASTER_URL = '${LEGACY_ORIGIN}';`),
+    `the uncommented constant must be the production origin, not localhost — got: ${config[0]}`);
 });
 
 test("the deploy docs do not tell you to repoint the extension at a Railway hostname", () => {

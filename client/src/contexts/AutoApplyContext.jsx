@@ -4,6 +4,7 @@ import { A_PLUS_TOOL, GENERATE_TOOL } from "../lib/applyTools.js";
 // AD1: the outcome partition, shared with routes/apply.js so the sub-tab a request asks for and the
 // group the server files a row under cannot disagree.
 import { OUTCOME } from "../../../shared/applyOutcomeGroups.js";
+import { BRAND } from "../../../shared/brand.js";
 
 // ============================================================
 // AutoApplyContext — the auto-apply pipeline's whole state, lifted out of JobsPanel
@@ -336,7 +337,7 @@ export function AutoApplyProvider({ user, canUseAPlusResume = false, children })
     try { host = new URL(packet.expectedOrigin).host; } catch {}
     window.open(packet.applyUrl, "_blank", "noopener,noreferrer");
     setHandoffMsg({ kind: "open", text:
-      `Opened ${host} in a new tab. Click the Resume Master extension there and the form fills with the ` +
+      `Opened ${host} in a new tab. Click the ${BRAND} extension there and the form fills with the ` +
       `${packet.answerCount} answer${packet.answerCount === 1 ? "" : "s"} we prepared, each labelled with where it came from. ` +
       `You review it and you submit it — we never submit on that page.` });
   }, []);

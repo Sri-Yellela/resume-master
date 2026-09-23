@@ -1,6 +1,6 @@
 // SCRAPING — SCHEDULED FOR REMOVAL AFTER MIGRATION
 // ============================================================
-// server.js — Resume Master v5
+// server.js — Draft v5
 // ============================================================
 import "dotenv/config";
 import express        from "express";
@@ -149,6 +149,7 @@ import { fetchDescription, persistDetailOutcome, hasDetailFetcher } from "./serv
 // 400 rather than a board that silently matches nothing. See shared/jobFilterOptions.js.
 import { FILTER_DIMENSIONS, invalidEntries, ageDaysMap } from "./shared/jobFilterOptions.js";
 import { logoUrlForDomain } from "./shared/companyLogos.js";
+import { BRAND } from "./shared/brand.js";
 import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
 import { assertResumeClaims, profileContradictionFindings } from "./services/resumeClaimGuard.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
@@ -9800,7 +9801,7 @@ app.delete("/api/applications/:jobId", requireAuth, (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 app.get("/api/export/excel", requireAuth, async (req, res) => {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Resume Master";
+  wb.creator = BRAND;
   const hdrFill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FF1E3A5F" } };
   const hdrFont = { bold:true, color:{ argb:"FFFFFFFF" } };
   const altFill = { type:"pattern", pattern:"solid", fgColor:{ argb:"FFF1F5F9" } };
@@ -10400,7 +10401,7 @@ app.get("*", (_req, res) => {
 
 console.log(`[boot] binding HTTP listener on :${PORT}`);
 app.listen(PORT, () => {
-  console.log(`[server] Resume Master v5 on :${PORT}`);
+  console.log(`[server] ${BRAND} v5 on :${PORT}`);
   // Warm up browser availability probe in background so /api/integrations/status
   // returns a cached result without delay on first user request.
   console.log("[boot] scheduling background browser probe");

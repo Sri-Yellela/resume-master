@@ -2,6 +2,7 @@
 import { Link } from "react-router-dom";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
+import { BRAND, CANONICAL_HOST, LEGACY_HOST, PRIVACY_CONTACT_EMAIL } from "../../../../shared/brand.js";
 
 // Effective date, not just "last touched". The Chrome Web Store rules that took effect on
 // 2026-08-01 require a policy to state when it takes effect and to commit to telling users about
@@ -12,8 +13,15 @@ import { Footer } from "../../components/Footer.jsx";
 // section now enumerates all four keys it writes rather than the two it used to claim. (2) Web
 // fonts were pulled off Google Fonts and self-hosted, retiring a recipient this policy had never
 // named. Leaving the date at August 19 would have been the inaccuracy, not the fix.
-const EFFECTIVE_DATE = 'September 15, 2026';
-const CONTACT_EMAIL  = 'privacy@resumemaster.one';
+// 2026-09-23: bumped for the rebrand and the domain migration. The operator is the same legal
+// person and the server is the same server, so nothing about data handling changed and the
+// advance-notice commitment is not triggered — but the name a user is asked to trust and the
+// host their data is sent to are both stated IN this policy, so leaving them stale would make
+// the policy wrong on its own face. BOTH hosts are named below on purpose: the reviewed
+// extension still posts to the legacy origin and will until its P4 update is LIVE, so naming
+// only the new one would describe software nobody is running yet.
+const EFFECTIVE_DATE = 'September 23, 2026';
+const CONTACT_EMAIL  = PRIVACY_CONTACT_EMAIL;
 
 function Section({ title, children }) {
   return (
@@ -109,9 +117,11 @@ export function PrivacyPage() {
         {/* Overview */}
         <Section title="Overview">
           <P>
-            Resume Master ("we", "us", "our") operates resumemaster.one and the Resume Master
-            browser extension. This policy explains what data we collect, how we use it, and
-            your rights over your information.
+            {BRAND} ("we", "us", "our") operates {CANONICAL_HOST} and the {BRAND} browser
+            extension. The service is also reachable at {LEGACY_HOST}, our former address, which
+            serves the same application from the same servers while we complete the move. This
+            policy explains what data we collect, how we use it, and your rights over your
+            information.
           </P>
           <P>
             <Strong>We do not sell your personal data.</Strong> We do not share it
@@ -179,7 +189,7 @@ export function PrivacyPage() {
             </LI>
             <LI>
               If you click <Strong>ATS Score Tool</Strong> in the extension's popup, it copies the
-              visible text of the page you are on and opens your Resume Master ATS Score page with
+              visible text of the page you are on and opens your {BRAND} ATS Score page with
               the text already filled in. That text travels in the address of the page it opens,
               which means it may appear in our ordinary server logs. Earlier versions also added an
               "ATS Score this job" button into job pages themselves; that button has been removed,
@@ -187,7 +197,8 @@ export function PrivacyPage() {
               confirmation message after a capture you asked for.
             </LI>
             <LI>
-              Data extracted by the extension is sent to resumemaster.one and associated with
+              Data extracted by the extension is sent to {LEGACY_HOST} or {CANONICAL_HOST} —
+              both are ours and both reach the same servers — and associated with
               your logged-in account using a browser session cookie — the same session used
               when you log into the website. Because it is attached to your account, captured job
               data is personal information, and we treat it as such. The extension never itself
@@ -277,7 +288,7 @@ export function PrivacyPage() {
               shortcut is what grants it access, to that one tab, at that moment.
             </LI>
             <LI>
-              It fetches from your Resume Master account the details you have already saved there
+              It fetches from your {BRAND} account the details you have already saved there
               — your name, email, phone, postal address, work-authorization answers and your
               resume — and enters them into that employer's form. This is{" "}
               <Strong>your own data, going to the employer you chose</Strong>, and it goes nowhere
@@ -466,7 +477,7 @@ export function PrivacyPage() {
         {/* Children */}
         <Section title="Children's Privacy">
           <P>
-            Resume Master is not directed at children under 13. We do not knowingly collect
+            {BRAND} is not directed at children under 13. We do not knowingly collect
             data from anyone under 13. If you believe a child has provided us data, contact
             us and we will delete it promptly.
           </P>
@@ -526,7 +537,7 @@ export function PrivacyPage() {
           <Link to="/" style={{ color: "var(--color-text-muted)", textDecoration: "none" }}
             onMouseEnter={e => e.currentTarget.style.color = "var(--color-primary)"}
             onMouseLeave={e => e.currentTarget.style.color = "var(--color-text-muted)"}>
-            ← Back to Resume Master
+            ← Back to {BRAND}
           </Link>
           <span>·</span>
           <Link to="/terms" style={{ color: "var(--color-text-muted)", textDecoration: "none" }}

@@ -39,6 +39,7 @@ import { reconcileFingerprint, upsertCanonicalJob, fingerprintJob, SOURCE_LABELS
 import { runEnrichment } from './enrichJob.js';
 import { mapJobRow } from './mapJobRow.js';
 import { MODEL_HAIKU } from '../../shared/anthropicModels.js';
+import { BRAND } from '../../shared/brand.js';
 import { DATA_CLASS } from '../../shared/modelProviders.js';
 import { callModel, SYSTEM_USER_ID } from '../modelCall.js';
 
@@ -285,7 +286,7 @@ async function fetchGenericPosting(url) {
     maxContentLength: 3 * 1024 * 1024, // 3MB cap
     maxRedirects: 5,
     responseType: 'text',
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResumeMasterImportBot/1.0)' },
+    headers: { 'User-Agent': `Mozilla/5.0 (compatible; ${BRAND}ImportBot/1.0)` },
   });
   return stripResumeHtml(String(response.data || ''));
 }
@@ -427,7 +428,7 @@ async function importJob({ url, text, html } = {}, { db, anthropic, userId = nul
     return {
       needsClientCapture: true,
       reason: 'login_walled',
-      message: 'Open this job and capture it with the Resume Master extension, or paste the job text.',
+      message: `Open this job and capture it with the ${BRAND} extension, or paste the job text.`,
     };
   }
 

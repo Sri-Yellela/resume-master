@@ -1,16 +1,32 @@
 // Shared stamp-badge logo.
-// progress: 0 = full "RESUME MASTER", 1 = collapsed to "RM" only.
+// progress: 0 = the full wordmark, 1 = collapsed to its initial only.
 // Uses var(--color-primary) for the accent shadow rect — no theme prop needed.
+//
+// ⚠ THIS COMPONENT USED TO SPELL THE OLD NAME STRUCTURALLY, and that is worth knowing before you
+// change it. It rendered four spans — "R" + "esume " + "M" + "aster" — so that collapsing the two
+// middle ones left "RM". A two-word mark with a two-letter collapse has no mechanical translation
+// to a one-word mark, so the rebrand could not be a string substitution here: the markup itself
+// had to change. It is now one fixed initial plus one collapsible tail, derived from BRAND, which
+// works for any single-word name. The stamp, the rotation, the italic and the collapse animation
+// are all unchanged — only what the letters spell.
+import { BRAND } from '../../../shared/brand.js';
+
+const INITIAL = BRAND.slice(0, 1);
+const TAIL    = BRAND.slice(1);
 
 export function StampLogo({ progress = 0, size = 'sm' }) {
   const pc = Math.min(Math.max(progress, 0), 1);
 
-  // Two collapsible spans: "esume " and "aster"
-  // At progress=1 both collapse → only "R" and "M" remain → "RM"
-  const esumeMaxW = size === 'lg' ? 88 : size === 'md' ? 74 : 64;
-  const asterMaxW = size === 'lg' ? 73 : size === 'md' ? 62 : 53;
-  const esumeW    = Math.round((1 - pc) * esumeMaxW);
-  const asterW    = Math.round((1 - pc) * asterMaxW);
+  // One collapsible span: the tail after the initial.
+  // At progress=1 it collapses → only the initial remains.
+  //
+  // Widths are per-character rather than per-word now. The old constants were hand-tuned to two
+  // specific strings (88/74/64 for a six-character "esume ", 73/62/53 for a five-character
+  // "aster"), which works out at a shade under 12.3px per character at 'md' and scales with the
+  // font size. Deriving from TAIL.length keeps the collapse tight if the name ever changes again.
+  const perChar  = size === 'lg' ? 14.7 : size === 'md' ? 12.3 : 10.7;
+  const tailMaxW = Math.round(perChar * TAIL.length);
+  const tailW    = Math.round((1 - pc) * tailMaxW);
   const textOpacity = Math.max(0, 1 - pc * 1.8);
 
   const fontSize = size === 'lg' ? 20 : size === 'md' ? 17 : 15;
@@ -55,10 +71,8 @@ export function StampLogo({ progress = 0, size = 'sm' }) {
         display: 'flex', alignItems: 'center',
         overflow: 'hidden',
       }}>
-        <span style={letterStyle}>R</span>
-        <span style={{ ...collapseStyle, maxWidth: esumeW + 'px' }}>esume </span>
-        <span style={letterStyle}>M</span>
-        <span style={{ ...collapseStyle, maxWidth: asterW + 'px' }}>aster</span>
+        <span style={letterStyle}>{INITIAL}</span>
+        <span style={{ ...collapseStyle, maxWidth: tailW + 'px' }}>{TAIL}</span>
       </div>
     </div>
   );

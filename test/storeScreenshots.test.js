@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs";
 import zlib from "node:zlib";
+import { CANONICAL_HOST, LEGACY_HOST } from "../shared/brand.js";
 import {
   readPngHeader, decodeToRgb, encodeRgbPng, toStorePng, compositeRgb,
 } from "../services/pngTruecolor.js";
@@ -184,7 +185,10 @@ test("trap captions and a real employer's brand are both forbidden in a capture"
 
 test("the capture points at localhost only — the A5 gate stands", () => {
   assert.match(harness, /const PORTAL = `http:\/\/localhost:\$\{ATS_PORT\}`;/);
-  assert.doesNotMatch(harness, /https:\/\/(?!resumemaster\.one)[a-z]/i,
+  // The harness may legitimately name our OWN origin; anything else is a real employer.
+  // Both live hosts are permitted while the migration is in flight.
+  const ours = [LEGACY_HOST, CANONICAL_HOST].map(h => h.replace(/\./g, "\\.")).join("|");
+  assert.doesNotMatch(harness, new RegExp(`https://(?!${ours})[a-z]`, "i"),
     "a screenshot run must never be pointed at a real employer");
   // The assertions run on the SAME page that is photographed, which is what makes it evidence.
   assert.match(harness, /const FORM_URL = `\$\{PORTAL\}\/gated\/form\$\{SHOTS \? '\?presentation=1' : ''\}`;/);

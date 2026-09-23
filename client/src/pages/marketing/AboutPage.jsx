@@ -1,15 +1,16 @@
 // client/src/pages/marketing/AboutPage.jsx
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
+import { BRAND } from "../../../../shared/brand.js";
 
 const SECTIONS = [
   {
     title: "The Problem",
-    body: "Applying for jobs is broken. You spend hours tailoring resumes, only to have them filtered out by an ATS before a human ever sees them. Resume Master fixes that.",
+    body: `Applying for jobs is broken. You spend hours tailoring resumes, only to have them filtered out by an ATS before a human ever sees them. ${BRAND} fixes that.`,
   },
   {
     title: "What We Built",
-    body: "Resume Master is an AI-powered job application platform that reads job descriptions the way recruiters do, rewrites your resume to match, and automates the application — so you can focus on preparing for the interview, not filling out forms.",
+    body: `${BRAND} is an AI-powered job application platform that reads job descriptions the way recruiters do, rewrites your resume to match, and automates the application — so you can focus on preparing for the interview, not filling out forms.`,
   },
   {
     title: "Our Approach",

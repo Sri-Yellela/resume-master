@@ -1,6 +1,7 @@
 // client/src/components/AdminLayout.jsx
 import { useTheme } from "../styles/theme.jsx";
 import { AdminPanel } from "../panels/AdminPanel.jsx";
+import { BRAND } from "../../../shared/brand.js";
 
 export default function AdminLayout({ user, onLogout, children }) {
   const { theme } = useTheme();
@@ -19,7 +20,7 @@ export default function AdminLayout({ user, onLogout, children }) {
         <span style={{ fontFamily:"'Barlow Condensed','DM Sans',sans-serif",
                        fontWeight:800, fontSize:17, letterSpacing:"0.06em",
                        textTransform:"uppercase", color:theme.text, fontStyle:"italic" }}>
-          Resume Master
+          {BRAND}
         </span>
         <span style={{ fontSize:11, color:theme.textMuted,
                        borderLeft:`1px solid ${theme.border}`, paddingLeft:16,

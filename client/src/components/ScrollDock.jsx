@@ -9,6 +9,7 @@ import { useTheme } from "../styles/theme.jsx";
 import { useViewport } from "../hooks/useViewport.js";
 import { useScrollCollapsed } from "../hooks/useScrollCollapsed.js";
 import { useMonetisationEnabled } from "../lib/monetisation.jsx";
+import { BRAND } from "../../../shared/brand.js";
 
 // ── Logo (nested-box Lucy brand mark) ────────────────────────
 function LucyLogo({ theme, mini = false }) {
@@ -42,7 +43,7 @@ function LucyLogo({ theme, mini = false }) {
         <span style={{ fontFamily: "'Barlow Condensed','DM Sans',system-ui,sans-serif",
                         fontWeight: 800, fontSize: 15, letterSpacing: "0.06em",
                         textTransform: "uppercase", color: "#0f0f0f", fontStyle: "italic",
-                        lineHeight: 1, whiteSpace: "nowrap" }}>Resume Master</span>
+                        lineHeight: 1, whiteSpace: "nowrap" }}>{BRAND}</span>
       </div>
     </div>
   );

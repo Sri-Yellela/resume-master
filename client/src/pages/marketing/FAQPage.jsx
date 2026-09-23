@@ -2,14 +2,15 @@
 import { useState } from "react";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
+import { BRAND } from "../../../../shared/brand.js";
 
 const FAQS = [
   { q: "Is my resume data private?", a: "Yes. Your resume and job data stay on your account and are never used to train AI models." },
-  { q: "Does the extension scrape my LinkedIn profile?", a: "No. The extension only reads the visible job description text on job listing pages, and only when you explicitly click 'Send to Resume Master'. It never accesses your LinkedIn profile or any private data." },
-  { q: "Does Resume Master auto-apply to jobs on my behalf?", a: "Not currently. You can queue jobs and track applications in Resume Master, but submissions go to the employer's official application page. You review and submit manually." },
+  { q: "Does the extension scrape my LinkedIn profile?", a: "No. The extension only reads the visible job description text on job listing pages, and only when you explicitly click 'Capture job'. It never accesses your LinkedIn profile or any private data." },
+  { q: `Does ${BRAND} auto-apply to jobs on my behalf?`, a: `Not currently. You can queue jobs and track applications in ${BRAND}, but submissions go to the employer's official application page. You review and submit manually.` },
   { q: "Where do job listings come from?", a: "Job listings are sourced from Adzuna and Indeed via their official publisher APIs. We do not scrape any job boards." },
-  { q: "What LinkedIn data does Resume Master access?", a: "Only your name and email address, and only when you explicitly click 'Import from LinkedIn' and approve the consent screen. We do not access your connections, work history, or any other LinkedIn data." },
-  { q: "Does this work for non-tech roles?", a: "Yes. Resume Master supports professional roles across engineering, product, finance, marketing, HR, healthcare, legal, and more." },
+  { q: `What LinkedIn data does ${BRAND} access?`, a: "Only your name and email address, and only when you explicitly click 'Import from LinkedIn' and approve the consent screen. We do not access your connections, work history, or any other LinkedIn data." },
+  { q: "Does this work for non-tech roles?", a: `Yes. ${BRAND} supports professional roles across engineering, product, finance, marketing, HR, healthcare, legal, and more.` },
   { q: "What is an ATS score?", a: "An ATS score estimates how well your resume matches a pasted job description based on keywords, skills, and language." },
   { q: "Can I use my own resume?", a: "Yes. You upload your base resume once. Generate and A+ Resume use it as the foundation for resume tools." },
 ];

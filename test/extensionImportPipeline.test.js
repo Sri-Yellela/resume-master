@@ -125,7 +125,7 @@ test("THE CAPTURE REQUEST IS MADE FROM THE SERVICE WORKER, NOT THE CONTENT SCRIP
   // development, where corsOrigin returns true for everything, which is why it was never noticed.
   //
   // A service-worker fetch is not subject to CORS for a host in host_permissions, and
-  // https://resumemaster.one/* is declared.
+  // the extension's own origin pattern is declared.
   assert.doesNotMatch(extractorSrc, /fetch\(/,
     "the injected extractor must not make network requests — it extracts and returns");
   assert.match(bgSrc, /fetch\(`\$\{RESUME_MASTER_URL\}\/api\/import\/job`/);

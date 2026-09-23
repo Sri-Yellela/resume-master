@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useTheme } from "../styles/theme.jsx";
+import { BRAND } from "../../../shared/brand.js";
 
 function StatusPill({ status, healthy, theme }) {
   const color = healthy ? "#16a34a" : status === "missing" || status === "not_connected" ? "#dc2626" : "#d97706";
@@ -190,7 +191,7 @@ export function IntegrationsPanel() {
             The copy states what is sent and what never is — a switch labelled only "form learning"
             would be asking for agreement to something the user cannot evaluate. */}
         <Section theme={theme} title="Form Learning"
-          subtitle="Help Resume Master recognise application forms it has seen before."
+          subtitle={`Help ${BRAND} recognise application forms it has seen before.`}
           status={capture === null
             ? { healthy:false, status: captureError ? "unavailable" : "loading" }
             : { healthy: capture, status: capture ? "on" : "off" }}>

@@ -24,6 +24,7 @@ import {
 } from "./mobileContract.js";
 import { MOBILE_ENDPOINTS, RETIRED_ENDPOINTS, ERROR_SHAPES, MOBILE_GAPS } from "./mobileEndpoints.js";
 import { RESPONSE_SCHEMAS } from "./mobileSchemas.js";
+import { BRAND, CANONICAL_ORIGIN } from "../../shared/brand.js";
 
 const sortedEntries = (obj) => Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 const sortedMap = (obj, fn) => Object.fromEntries(sortedEntries(obj).map(([k, v]) => [k, fn(v, k)]));
@@ -277,7 +278,7 @@ export function buildOpenApi() {
   return {
     openapi: "3.1.0",
     info: {
-      title: "Resume Master — Mobile API",
+      title: `${BRAND} — Mobile API`,
       version: CONTRACT_VERSION,
       description:
         "The contract between this repository and the two mobile repositories (iOS, Android), " +
@@ -290,7 +291,7 @@ export function buildOpenApi() {
         "absent on purpose and is not a promise — see x-retired for what a greenfield client must " +
         "not call, and x-mobile-gaps for what mobile needs that this API does not yet expose.",
     },
-    servers: [{ url: "https://resumemaster.one", description: "Production" }],
+    servers: [{ url: CANONICAL_ORIGIN, description: "Production" }],
     tags: [
       { name: "auth",    description: "Sign-in and the durable mobile credential." },
       { name: "feed",    description: "The profile-scoped job board a swipe feed pages through." },
@@ -377,7 +378,7 @@ export function buildOpenApi() {
 export function buildTypeScript() {
   const L = [];
   L.push("/**");
-  L.push(" * Resume Master — Mobile API types.");
+  L.push(` * ${BRAND} — Mobile API types.`);
   L.push(` * Contract version ${CONTRACT_VERSION}.`);
   L.push(" *");
   L.push(" * GENERATED — DO NOT EDIT. Regenerate with `node scripts/generateMobileContract.mjs`.");

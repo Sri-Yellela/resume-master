@@ -1,5 +1,5 @@
 /**
- * Resume Master — Mobile API types.
+ * Draft — Mobile API types.
  * Contract version 1.1.1.
  *
  * GENERATED — DO NOT EDIT. Regenerate with `node scripts/generateMobileContract.mjs`.

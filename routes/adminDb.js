@@ -4,6 +4,7 @@ import { Router } from "express";
 import fs from "fs";
 import { classifyTitle } from "../services/jobClassifier.js";
 import { getSourceStatus } from "../services/jobs/aggregator.js";
+import { BRAND } from "../shared/brand.js";
 import { DIRECT_ATS_SOURCES } from "../services/jobs/directApplyFilter.js";
 // Y2D — the attempt cap is read from the SAME parser the fetch pass uses. A literal here would
 // be a second copy of the threshold, so raising ENRICH_DETAIL_MAX_ATTEMPTS would silently make
@@ -811,7 +812,7 @@ export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
       const bar = "═".repeat(55);
       const lines = [
         bar,
-        "RESUME MASTER — FULL DB SCHEMA EXPORT",
+        `${BRAND.toUpperCase()} — FULL DB SCHEMA EXPORT`,
         `Generated: ${generatedAt}`,
         `DB Size: ${fmtBytes(dbSizeBytes)}`,
         bar,

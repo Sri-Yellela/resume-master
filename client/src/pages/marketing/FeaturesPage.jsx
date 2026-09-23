@@ -2,6 +2,7 @@
 import { Link } from "react-router-dom";
 import ScrollDock from "../../components/ScrollDock.jsx";
 import { Footer } from "../../components/Footer.jsx";
+import { BRAND } from "../../../../shared/brand.js";
 import { useMonetisationEnabled } from "../../lib/monetisation.jsx";
 
 // Two vocabularies for the same five features, chosen by the lever. The tier-named strings are
@@ -59,8 +60,8 @@ export function FeaturesPage() {
         </h1>
         <p style={{ fontSize: 16, color: "var(--color-text-muted)", lineHeight: 1.6, marginBottom: 56, maxWidth: 560 }}>
           {monetisationEnabled
-            ? "Resume Master starts with one jobs console. Upgrades add Generate and A+ Resume where you already review jobs."
-            : "Resume Master is one jobs console, with Generate and A+ Resume where you already review jobs."}
+            ? `${BRAND} starts with one jobs console. Upgrades add Generate and A+ Resume where you already review jobs.`
+            : `${BRAND} is one jobs console, with Generate and A+ Resume where you already review jobs.`}
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
           {features.map((f, i) => (

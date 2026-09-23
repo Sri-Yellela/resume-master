@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../lib/api.js";
+import { BRAND } from "../../../shared/brand.js";
 import { useTheme } from "../styles/theme.jsx";
 
 // ─── BYO-1 site-side front door ──────────────────────────────────────────────
@@ -47,7 +48,7 @@ export default function ImportJobModal({ onClose, onImported }) {
 
       if (d?.needsClientCapture) {
         setMode(MODES.TEXT);
-        setNotice(d.message || "Open this job and capture it with the Resume Master extension, or paste the job text below.");
+        setNotice(d.message || `Open this job and capture it with the ${BRAND} extension, or paste the job text below.`);
         return;
       }
 

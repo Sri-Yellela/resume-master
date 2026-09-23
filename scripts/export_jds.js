@@ -1,7 +1,7 @@
 /**
  * Export all scraped_jobs as JSON for MDE RAG bootstrap.
  *
- * Usage (from Resume Master root):
+ * Usage (from the repository root):
  *   node scripts/export_jds.js > ../mde-rag/data/jd_export.json
  */
 

@@ -1,10 +1,12 @@
+import { BRAND, SENDER_FROM } from "../shared/brand.js";
+
 export async function sendPasswordResetEmail({ to, resetUrl, otp, expiresAt }) {
   if (!to || !resetUrl || !otp) return { ok: false, skipped: true };
 
-  const subject = "Reset your Resume Master password";
+  const subject = `Reset your ${BRAND} password`;
   const expires = new Date(expiresAt * 1000).toLocaleString();
   const text = [
-    "Use this one-time link to reset your Resume Master password:",
+    `Use this one-time link to reset your ${BRAND} password:`,
     resetUrl,
     "",
     `OTP: ${otp}`,
@@ -19,7 +21,7 @@ export async function sendPasswordResetEmail({ to, resetUrl, otp, expiresAt }) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: process.env.PASSWORD_RESET_FROM || "Resume Master <noreply@resumemaster.app>",
+        from: process.env.PASSWORD_RESET_FROM || SENDER_FROM,
         to,
         subject,
         text,

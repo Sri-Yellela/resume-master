@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "fs";
 import { LOGO_HOST } from "../shared/companyLogos.js";
 import { at } from "../test-support/sourceAnchors.js";
+import { CANONICAL_HOST, LEGACY_HOST } from "../shared/brand.js";
 
 // TASK E4 — the manifest, the privacy policy and the store listing must not contradict each other.
 //
@@ -99,7 +100,11 @@ test("the policy's account of WHAT the extension can read matches the manifest",
   // job boards now, so that rule passes vacuously and would keep passing if a host crept back in.
   // The real invariant is the other way round: the policy claims access is per-invocation, and that
   // claim is only true while no site is declared.
-  const jobHosts = manifest.host_permissions.filter(h => !h.includes("resumemaster.one"));
+  // Our own origin, under either name. extension/ is frozen for P4 and still declares the legacy
+  // host; the app has already moved to the canonical one. Neither is a "job board", which is what
+  // this filter is looking for.
+  const ours = [LEGACY_HOST, CANONICAL_HOST];
+  const jobHosts = manifest.host_permissions.filter(h => !ours.some(o => h.includes(o)));
   assert.deepEqual(jobHosts, [],
     `the policy says the extension holds no standing permission for any site, but the manifest ` +
     `declares ${jobHosts.join(", ")} — narrow the code or widen the claim, and prefer the first`);
@@ -239,8 +244,12 @@ test("the manifest's privacy_policy_url is the page this repo actually serves", 
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
   assert.match(app, new RegExp(`path="${path}"`),
     `manifest points at ${url} but App.jsx has no route for ${path}`);
-  assert.match(url, /^https:\/\/resumemaster\.one\//,
-    "the policy must be on the production origin, not a dev subdomain");
+  // LEGACY_HOST, not CANONICAL_HOST: the manifest is frozen under review and the URL the Web Store
+  // holds points at the old origin, which still serves. P4 flips this to CANONICAL_HOST at the
+  // same time it flips the manifest — and ⛔ the policy must be live and correct on the new origin
+  // BEFORE that happens, because reviewers fetch it.
+  assert.equal(new URL(url).host, LEGACY_HOST,
+    "the policy must be on the origin the shipped manifest declares, not a dev subdomain");
 });
 
 test("third parties named in the policy are ones the code actually uses", () => {

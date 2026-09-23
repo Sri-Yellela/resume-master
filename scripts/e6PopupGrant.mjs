@@ -43,6 +43,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
+import { LEGACY_ORIGIN } from '../shared/brand.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC  = path.join(ROOT, 'extension');
@@ -161,7 +162,7 @@ function stage() {
 
   const m = JSON.parse(fs.readFileSync(path.join(ext, 'manifest.json'), 'utf8'));
   // The whole point: no host permission for anything but our own origin, and no content script.
-  m.host_permissions = ['https://resumemaster.one/*'];
+  m.host_permissions = [`${LEGACY_ORIGIN}/*`];
   delete m.content_scripts;
   m.action.default_popup = 'probe-popup.html';
   m.commands = { ...(m.commands || {}), _execute_action: { suggested_key: { default: 'Ctrl+Shift+U' } } };

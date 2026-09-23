@@ -266,7 +266,7 @@ const ALLOWLIST_OVERRIDE_PATTERNS = [
 
 /**
  * isResumeRelevant(title, description) → boolean
- * Returns true if the job should appear in Resume Master's feed.
+ * Returns true if the job should appear in the board's feed.
  */
 function isResumeRelevant(title, _description) {
   if (!title || typeof title !== 'string') return true;
