@@ -10,6 +10,28 @@ import { collectRequiredFiles } from "../scripts/buildExtension.mjs";
 // exists in the repo at all — the LinkedIn bulk saved-jobs scraper BYO-2 removed — while
 // missing the options page and capture shortcut the source had since gained. Nothing detected
 // it because the artifact was built by hand and there was nothing to diff it against.
+//
+// ⛔ TWO TESTS IN THIS FILE ARE CURRENTLY FAILING ON PURPOSE (decided 2026-09-24):
+//
+//     every file in the submission zip is byte-identical to extension/ source
+//     every file the manifest references is present in the zip        (auth.js is new)
+//
+// They are doing their job. `extension/` has moved ahead of the published v1.0.0 package: the
+// session-identity security fix added `extension/auth.js`, which moved the extension off the
+// ambient browser cookie and onto its own sessionLess token (docs/EXTENSION_DIAGNOSIS.md §6).
+//
+// DO NOT SILENCE THEM, and do not weaken the assertions to make the board green. The drift they
+// report is real and is the thing this file exists to catch — the previous incident was exactly
+// a shipped artifact nobody could diff.
+//
+// They clear on their own when the zip is rebuilt at P4, which repackages for the domain flip
+// anyway. Repackaging sooner needs a version bump, and docs/DOMAIN_MIGRATION.md warns that
+// touching the package while v1.0.0 is in Web Store review can reset the queue position. Waiting
+// is safe because the security fix is SERVER-side: scripts/dx2ExtensionIdentity.mjs §8 loads the
+// published v1.0.0 build against the fixed server, with a live admin cookie, and measures 0/7
+// admin routes reached. Existing installs are already protected without a store update.
+//
+// Full reasoning: docs/EXTENSION_DIAGNOSIS.md §6.6. Count is tracked in CLAUDE.md.
 
 const SRC = "extension";
 const manifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8"));
