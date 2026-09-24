@@ -121,6 +121,15 @@ function startApi() {
     next();
   });
   app.use((req, _res, next) => { req.user = { id: 1, planTier: 'PRO' }; next(); });
+
+  // The extension bootstraps its own sessionLess credential before it does anything else, so this
+  // stub has to honour the same contract the real server does — otherwise every assertion below
+  // fails on "not signed in" and reports a credential problem as a handoff problem.
+  // A fixed value is fine here: this harness is about the handoff, and dx2ExtensionIdentity.mjs is
+  // where the credential's real behaviour (issue, scope, revoke) is verified against server.js.
+  app.get('/api/auth/extension-token', (_req, res) => res.json({ token: 'g2-stub-extension-token' }));
+  app.get('/api/auth/me', (_req, res) =>
+    res.json({ authenticated: true, user: { username: 'ada', isAdmin: false } }));
   applyRoutes(app, db, (q, r, n) => n(), () => ({ field_map: {}, handler_map: {}, custom_answers: {} }),
     async () => ({ error: 'not_needed' }), async () => fs.readFileSync(RESUME_PDF), async () => ({}));
 

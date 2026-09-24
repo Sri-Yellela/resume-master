@@ -5,6 +5,7 @@ import fs from "fs";
 import { classifyTitle } from "../services/jobClassifier.js";
 import { getSourceStatus } from "../services/jobs/aggregator.js";
 import { BRAND } from "../shared/brand.js";
+import { mayActAsAdmin } from "../shared/authPolicy.js";
 import { DIRECT_ATS_SOURCES } from "../services/jobs/directApplyFilter.js";
 // Y2D — the attempt cap is read from the SAME parser the fetch pass uses. A literal here would
 // be a second copy of the threshold, so raising ENRICH_DETAIL_MAX_ATTEMPTS would silently make
@@ -37,8 +38,11 @@ const CRAWL_SOURCES = new Set([...DIRECT_ATS_SOURCES, "jobo"]);
 export function createAdminDbRouter(db, { dbPath, scrapeJobs } = {}) {
   const router = Router();
 
+  // mayActAsAdmin, not `req.user?.isAdmin`. This router is the DB inspector — the single most
+  // valuable thing behind an admin check — and it was reachable from the extension origin with
+  // real JSON. One predicate, shared with server.js and routes/admin.js; see shared/authPolicy.js.
   function requireAdmin(req, res, next) {
-    if (!req.user?.isAdmin) return res.status(403).json({ error: "Admin access required" });
+    if (!mayActAsAdmin(req)) return res.status(403).json({ error: "Admin access required" });
     next();
   }
 

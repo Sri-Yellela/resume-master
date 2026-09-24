@@ -71,6 +71,8 @@ const EXCLUDED = {
   ae1Diagnose:         "instrument, not a harness",
   ae1LiveVerify:       "points at a REAL EMPLOYER — never automated",
   g0ActiveTabSpike:    "spike; needs a manually loaded unpacked extension",
+  dx1CaptureDiagnosis: "diagnostic — reports what capture actually did (status, error text, timing) and asserts nothing, like a1TrapMatrix. It also depends on the Anthropic balance being EXHAUSTED to show its headline finding, so it would flip meaning the day credit is restored. dx2ExtensionIdentity is the asserting half and stays in the suite",
+  dx3ExtensionHeaders: "measurement, not a harness — prints the headers Chrome attaches to an extension fetch, which is how shared/authPolicy.js's Sec-Fetch discriminator was chosen after an Origin-based guess proved to be dead code. Asserts nothing; re-run it if Chrome's behaviour is ever in doubt",
   buildExtension:      "build tool",
   publishExtension:    "build tool",
   generateMobileContract: "build tool — writes contract/; its --check mode already runs on every `npm test` via test/mobileApiContract.test.js",

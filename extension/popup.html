@@ -52,6 +52,19 @@
     }
     #job-preview .job-title { font-weight: 600; color: #28251D; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #job-preview .job-company { color: #7A7974; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* WHO THE EXTENSION IS ACTING AS. Always rendered, never hidden behind a hover or a menu —
+       an identity a user has to go looking for is not a visible one. */
+    #identity {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+      font-size: 11px; color: #7A7974; margin: 0 0 8px; min-height: 14px;
+    }
+    #identity .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #identity .who strong { color: #28251D; font-weight: 600; }
+    #identity .not-admin { color: #7A7974; }
+    #btn-disconnect {
+      background: none; border: none; padding: 0; cursor: pointer;
+      color: #01696F; font-size: 11px; text-decoration: underline; flex: none;
+    }
   </style>
 </head>
 <body>
@@ -61,6 +74,11 @@
       <path d="M8 7h8M8 11h8M8 15h5" stroke="#01696F" stroke-width="1.5" stroke-linecap="round"/>
     </svg>
     <span class="header-title">Resume Master</span>
+  </div>
+
+  <div id="identity">
+    <span class="who" id="identity-who"></span>
+    <button id="btn-disconnect" style="display:none">Disconnect</button>
   </div>
 
   <div id="job-preview">

@@ -22,6 +22,7 @@ const serverSrc = fs.readFileSync("server.js", "utf8");
 const extractorSrc = fs.readFileSync("extension/extractor.js", "utf8");
 const popupSrc = fs.readFileSync("extension/popup.js", "utf8");
 const bgSrc = fs.readFileSync("extension/background.js", "utf8");
+const authSrc = fs.readFileSync("extension/auth.js", "utf8");
 
 // ── The retired endpoints stay retired ───────────────────────────────────────
 
@@ -128,15 +129,28 @@ test("THE CAPTURE REQUEST IS MADE FROM THE SERVICE WORKER, NOT THE CONTENT SCRIP
   // the extension's own origin pattern is declared.
   assert.doesNotMatch(extractorSrc, /fetch\(/,
     "the injected extractor must not make network requests — it extracts and returns");
-  assert.match(bgSrc, /fetch\(`\$\{RESUME_MASTER_URL\}\/api\/import\/job`/);
-  assert.match(bgSrc, /credentials: 'include'/);
+  assert.match(bgSrc, /authedFetch\(RESUME_MASTER_URL, '\/api\/import\/job'/,
+    "capture still posts from the service worker, now through the one credentialed path");
+
+  // ⛔ THE CREDENTIAL INVERTED HERE, AND THAT IS THE POINT.
+  // This used to assert `credentials: 'include'`. That WAS the defect: the extension acted as
+  // whatever session the browser held, and a probe from the extension origin reached 7 of 7 admin
+  // routes (docs/EXTENSION_DIAGNOSIS.md §6). The cookie must now never be sent, except by the one
+  // bootstrap call that trades a session for the extension's own token.
+  assert.doesNotMatch(bgSrc, /credentials: 'include'/,
+    "background.js must not send the ambient cookie — see extension/auth.js");
+  assert.match(authSrc, /credentials: 'omit'/);
+  assert.match(authSrc, /'X-RM-Auth-Context'/);
 });
 
 test("the popup's auth probe goes through the service worker for the same reason", () => {
   assert.doesNotMatch(popupSrc, /fetch\(/,
     "a popup fetch carries chrome-extension://, which corsOrigin refuses in production");
   assert.match(popupSrc, /type: 'PROBE_AUTH'/);
-  assert.match(bgSrc, /\/api\/auth\/me/);
+  // The probe now resolves through auth.js's getIdentity, still inside the service worker, so the
+  // popup learns WHO it is acting as rather than merely whether someone is.
+  assert.match(bgSrc, /getIdentity\(RESUME_MASTER_URL\)/);
+  assert.match(authSrc, /\/api\/auth\/me/);
 });
 
 test("the extracted text travels with the capture", () => {

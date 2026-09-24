@@ -13,9 +13,10 @@
  *    survive leaving the origin, or the portal opening a step in a new tab.
  *
  * 2. NOTHING PUSHES INWARD. `externally_connectable` is absent from the manifest and must stay
- *    absent. The extension PULLS the packet from our server with credentials:'include', the same way
- *    linkedin-content.js already talks to /api/import/job. No secret is embedded here; the user's own
- *    session is the authorisation.
+ *    absent. The extension PULLS the packet from our server, authenticated by its OWN sessionLess
+ *    token (extension/auth.js) — never by the ambient browser cookie, which is what let it act as
+ *    whoever happened to be signed in. The authorisation is a credential the extension deliberately
+ *    holds, and the popup names the identity it belongs to.
  *
  * 3. TARGET MATCH BEFORE RELEASE. The packet carries a home address and work-authorization answers.
  *    It is released only onto an origin the server nominated, with a form actually present, and the
@@ -27,6 +28,7 @@
  */
 
 import { orderForReview, readinessOf, renderOverlay } from './review-overlay.js';
+import { authedFetch } from './auth.js';
 
 /** Matches the server's token TTL. A packet outlives its grant (G0 §9), so it is cleared on purpose. */
 export const PACKET_TTL_MS = 10 * 60 * 1000;
@@ -355,11 +357,20 @@ export async function portalQueueFor(serverUrl, origin, excludePacketId = null) 
 
 // ── The handoff ──────────────────────────────────────────────────────────────
 
-const api = (serverUrl, path, init = {}) => fetch(`${serverUrl}${path}`, {
-  credentials: 'include',
-  headers: { 'Content-Type': 'application/json' },
-  ...init,
-});
+// Routed through authedFetch so the handoff uses the SAME deliberately-chosen credential as
+// everything else, and never the ambient browser cookie. `init` is spread first so a caller can
+// still override the method or body, but the credential is not a caller's to choose.
+//
+// Returns a Response-shaped refusal rather than null when there is no credential, so the existing
+// `res.status === 401` and `!res.ok` branches below keep working unchanged — a null here would
+// have turned "not signed in" into a TypeError inside the handoff.
+const api = async (serverUrl, path, init = {}) => {
+  const res = await authedFetch(serverUrl, path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  });
+  return res || new Response(null, { status: 401 });
+};
 
 /**
  * Run the handoff on the active tab. Returns a result object; never throws at the caller.
@@ -506,8 +517,8 @@ async function fillFromPacket({ tab, origin, released, serverUrl, reused }) {
   let resume = null;
   if (released.resumeUrl && serverUrl) {
     try {
-      const res = await fetch(`${serverUrl}${released.resumeUrl}`, { credentials: 'include' });
-      if (res.ok) {
+      const res = await authedFetch(serverUrl, released.resumeUrl);
+      if (res?.ok) {
         const buf = await res.arrayBuffer();
         let bin = '';
         const bytes = new Uint8Array(buf);

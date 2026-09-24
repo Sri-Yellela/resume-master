@@ -4,12 +4,16 @@ import { Router } from "express";
 import { getTrackingStats } from "../services/usageTracker.js";
 import { pendingCount as sinkPendingCount, sinkPath } from "../services/trackingFailureSink.js";
 import { getWebhookStats } from "../services/trackingFailureWebhook.js";
+import { mayActAsAdmin } from "../shared/authPolicy.js";
 
 export function createAdminRouter(db) {
   const router = Router();
 
+  // mayActAsAdmin, not `req.user?.isAdmin` — the extension's credential hydrates a full user and
+  // would otherwise pass this on an admin's account. One predicate, shared with server.js and
+  // routes/adminDb.js; see shared/authPolicy.js.
   function requireAdmin(req, res, next) {
-    if (!req.user?.isAdmin) return res.status(403).json({ error: "Admin access required" });
+    if (!mayActAsAdmin(req)) return res.status(403).json({ error: "Admin access required" });
     next();
   }
 

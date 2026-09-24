@@ -74,6 +74,9 @@
   "cc5PerProfileScores": {
     "pass": 16
   },
+  "dx2ExtensionIdentity": {
+    "pass": 21
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },

@@ -206,6 +206,12 @@ every model-backed path is down.**
 
 ## 6. DEFECT C — the extension acts as whoever is signed in ⛔ SECURITY
 
+> **✅ RESOLVED 2026-09-24.** The extension now holds its own sessionLess token and the server
+> refuses admin routes to it. Verified in a real browser by `scripts/dx2ExtensionIdentity.mjs`:
+> **7/7 reached → 0/7, all 403 by response body**, while the same admin account still reaches
+> 7/7 in a browser tab. The section below is kept as the record of what was measured and why;
+> §6.5 states what the fix turned out to require beyond the obvious.
+
 ### How it authenticates today
 
 Ambient cookie, and nothing else. `credentials:'include'` at all six call sites
@@ -289,6 +295,85 @@ app.get("/api/auth/extension-token", requireAuth, (req, res) => {
 `extension/popup.html` contains no "Signed in as" element — verified by grep. A user has no way to
 tell which identity the extension is acting as. Whatever credential is adopted, **this must become
 visible**, or the fix is unverifiable by the person it protects.
+
+---
+
+### 6.5 What the fix required beyond "use the token" — two measured corrections
+
+**The brief said: use `GET /api/auth/extension-token`. That was necessary and NOT sufficient.**
+Both of the following were found by a harness failing, not by reading code.
+
+**(1) A token does not remove the privilege.** With the extension moved onto its own sessionLess
+token, dx2 §2 still failed **7/7**. `bindAuthContext` hydrates the FULL user from the token's
+`user_id`, so an admin's extension token still satisfies `req.user.isAdmin`. The credential had
+changed; the privilege had not. The check has to be on the KIND of credential, so
+`bindAuthContext` now carries `auth_contexts.user_agent` forward as `req.authContextUserAgent`.
+
+**(2) There were THREE `requireAdmin` definitions, not one.** `server.js`, `routes/admin.js` and
+`routes/adminDb.js` each wrote their own, each checking `req.user?.isAdmin` and nothing else. A
+fix in one left the other two open — and `routes/adminDb.js` guards the DB inspector, the single
+most valuable thing behind an admin check. All three now consult `shared/authPolicy.js`.
+
+**(3) `Origin` is absent, so an origin check is dead code.** With the credential check in place,
+dx2 §2 STILL failed 7/7: a `credentials: 'include'` fetch issued from an extension *page* carries
+the browser cookie, because `host_permissions` lets the extension talk to our origin with cookies
+attached. The obvious guard — test `Origin` for `chrome-extension://` — **can never fire.**
+Measured off the wire (`scripts/dx3ExtensionHeaders.mjs`, a real Chrome):
+
+```
+                                        origin     referer    sec-fetch-site  sec-fetch-mode
+extension page,   credentials:'include'  (absent)  (absent)   none            cors
+extension page,   credentials:'omit'     (absent)  (absent)   none            cors
+service worker,   credentials:'include'  (absent)  (absent)   none            cors
+same-origin page fetch (admin console)   present   present    same-origin     cors
+typed URL / bookmark                     (absent)  (absent)   none            navigate
+curl / node / a harness                  (absent)  (absent)   (absent)        (absent)
+```
+
+So the discriminator is `sec-fetch-site: none` **and** `sec-fetch-mode: cors`. `none` alone is
+wrong — a typed URL is also `none`, but `navigate`. Equality against `"none"` leaves an ordinary
+API client, which sends neither header, untouched. `Sec-Fetch-*` are forbidden header names, so a
+page cannot forge them.
+
+⛔ **This is defence in depth, not the primary control.** The primary control is that the
+extension holds its own token and never sends the cookie — enforced by a test that counts
+`credentials: 'include'` in extension source and permits exactly one, the bootstrap. The header
+check is the backstop for the day someone adds a credentialed fetch back, and it can only ever
+REMOVE privilege, so a browser that omits the headers fails safe to the credential check.
+
+**Two guesses were wrong before the headers were read.** That is the lesson worth keeping: this
+file's own rule — judge by what the wire says, not by what the API ought to do — applies to
+request headers exactly as it does to response bodies.
+
+---
+
+### 6.6 Shipping state — existing users are already protected
+
+**The server-side half closes the escalation for everyone, with no store update.** dx2 §8 extracts
+the PUBLISHED `resume-master-extension-v1.0.0.zip` — the cookie-only build, no `auth.js` — loads
+it in a real browser with a live admin cookie in its jar, and measures:
+
+```
+the published build predates the fix (no auth.js, still cookie-only)   v1.0.0
+the ALREADY-PUBLISHED build reaches zero admin routes too              0/7 reached
+```
+
+That is the whole reason the extension side was not rushed into the store. The token, the popup
+identity and the disconnect control are an improvement to the identity MODEL; the privilege was
+removed the moment the server deployed.
+
+⛔ **TWO TESTS IN `test/extensionSubmission.test.js` FAIL ON PURPOSE**, decided 2026-09-24:
+
+```
+every file in the submission zip is byte-identical to extension/ source
+every file the manifest references is present in the zip          (auth.js is new)
+```
+
+`extension/` has moved ahead of the published v1.0.0 package, and those tests are correctly
+reporting it. They are NOT to be silenced. Resolving them means bumping the version and
+repackaging, and `docs/DOMAIN_MIGRATION.md` warns that touching the package while v1.0.0 is in
+Web Store review can reset the queue position. The zip is therefore rebuilt at **P4**, when the
+domain flip repackages it anyway — at which point both tests go green on their own.
 
 ---
 

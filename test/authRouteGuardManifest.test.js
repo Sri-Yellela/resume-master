@@ -393,8 +393,18 @@ test("the two internally-gated admin routers gate EVERY route with requireAdmin"
       .filter(m => (m[3] || "").replace(/[,\s]/g, "") !== "requireAdmin")
       .map(m => `${m[1].toUpperCase()} ${prefix}${m[2]}`);
     assert.deepEqual(ungated, [], `${file} has routes not gated by requireAdmin:\n  ` + ungated.join("\n  "));
-    // And the guard it uses must actually check isAdmin rather than merely existing.
-    assert.match(source, /function requireAdmin[\s\S]{0,300}?isAdmin/);
+    // And the guard it uses must actually DECIDE something rather than merely existing.
+    //
+    // It must decide it through shared/authPolicy.js, not by reading req.user.isAdmin itself.
+    // These two routers each wrote their own `!req.user?.isAdmin` check, and that is exactly how
+    // the extension reached the DB inspector: the credential was fixed in server.js and these two
+    // were left open. mayActAsAdmin is the one predicate that also refuses an extension
+    // credential — see docs/EXTENSION_DIAGNOSIS.md §6.5.
+    assert.match(source, /function requireAdmin[\s\S]{0,400}?mayActAsAdmin\(req\)/,
+      `${file}: requireAdmin must decide via shared/authPolicy.js`);
+    assert.doesNotMatch(source, /function requireAdmin[\s\S]{0,400}?!req\.user\?\.isAdmin/,
+      `${file}: requireAdmin must not decide from req.user.isAdmin alone — an extension credential ` +
+      `hydrates a full user and would pass`);
   }
 });
 

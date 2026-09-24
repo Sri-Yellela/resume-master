@@ -150,6 +150,7 @@ import { fetchDescription, persistDetailOutcome, hasDetailFetcher } from "./serv
 import { FILTER_DIMENSIONS, invalidEntries, ageDaysMap } from "./shared/jobFilterOptions.js";
 import { logoUrlForDomain } from "./shared/companyLogos.js";
 import { BRAND } from "./shared/brand.js";
+import { isExtensionRequest, mayActAsAdmin } from "./shared/authPolicy.js";
 import { validateResumeClaims, checkCandidateConsistency } from "./services/kb/failsafe.js";
 import { assertResumeClaims, profileContradictionFindings } from "./services/resumeClaimGuard.js";
 import { getCompanyProfile } from "./services/kb/companyProfile.js";
@@ -5432,7 +5433,7 @@ function bindAuthContext(req, _res, next) {
   try {
     const now = Math.floor(Date.now() / 1000);
     const row = db.prepare(`
-      SELECT ac.user_id, ac.created_at, ac.expires_at
+      SELECT ac.user_id, ac.created_at, ac.expires_at, ac.user_agent
       FROM auth_contexts ac
       WHERE ac.token_hash = ?
         AND ac.revoked_at IS NULL
@@ -5452,6 +5453,10 @@ function bindAuthContext(req, _res, next) {
     }
     req.user = user;
     req.authContextToken = token;
+    // WHICH KIND of credential this is, carried forward so an authorisation decision can depend on
+    // it. The column is already written by issueAuthContext; it was simply never read back, which
+    // is why requireAdmin could not tell an extension's token from a browser tab's.
+    req.authContextUserAgent = row.user_agent || null;
     // AJ1 6a — SLIDING RENEWAL, in the write that was already happening.
     //
     // The new expiry is the idle window from now, CLAMPED to the absolute window from issue. The
@@ -5499,8 +5504,19 @@ function requireAuth(req, res, next) {
   console.warn(`[auth] 401 ${req.method} ${req.path} | cookie:${hasCookie} token_sent:${hasToken} ip:${req.ip}`);
   res.status(401).json({ error:"Unauthorized." });
 }
+// Admission is decided by shared/authPolicy.js — the SAME predicate routes/admin.js and
+// routes/adminDb.js use. Three independent copies of this check are what let the extension reach
+// the DB inspector while a fix sat in one of them; see docs/EXTENSION_DIAGNOSIS.md §6.
+//
+// Refused on the KIND of credential rather than by omitting isAdmin from the hydrated user,
+// because req.user is shared with every other consumer and a half-populated user object reads as
+// a data bug three files away. This says no in one place, for one reason.
 function requireAdmin(req, res, next) {
-  if ((req.isAuthenticated() || req.authContextToken) && req.user?.isAdmin) return next();
+  if (isExtensionRequest(req)) {
+    console.warn(`[auth] admin route refused to the extension | ${req.method} ${req.path} | user:${req.user?.id}`);
+    return res.status(403).json({ error:"Forbidden." });
+  }
+  if ((req.isAuthenticated() || req.authContextToken) && mayActAsAdmin(req)) return next();
   res.status(403).json({ error:"Forbidden." });
 }
 

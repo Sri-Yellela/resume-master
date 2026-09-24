@@ -37,19 +37,52 @@ async function showLastCapture() {
 // Asked via the service worker, not fetched here. A popup's fetch carries chrome-extension:// as
 // its origin, which server.js's corsOrigin refuses in production — so this worked in development
 // and would have shown "Sign in" to every production user, hiding the capture button entirely.
+//
+// Now returns the whole identity, not just a boolean, because the popup has to NAME it.
 async function probeAuth() {
   try {
-    const res = await chrome.runtime.sendMessage({ type: 'PROBE_AUTH' });
-    return res?.authenticated === true;
+    return await chrome.runtime.sendMessage({ type: 'PROBE_AUTH' });
   } catch (_) {
-    return false;
+    return { authenticated: false };
   }
 }
 
-async function init() {
-  const isAuthed = await probeAuth();
+// ── WHO THE EXTENSION IS ACTING AS ─────────────────────────────────────────────────────────────
+// The extension used to act as whatever session the browser held, and said nothing about it — so
+// a user signed in as an admin had an extension with admin reach and no way to notice. It now
+// holds its own credential, and this line is how that becomes checkable rather than merely true.
+//
+// The admin note is shown rather than hidden: an admin should be able to see that their extension
+// is deliberately NOT one. The server enforces that regardless of what this says.
+function renderIdentity(identity) {
+  const who = document.getElementById('identity-who');
+  const btn = document.getElementById('btn-disconnect');
+  if (!who) return;
 
-  if (!isAuthed) {
+  if (!identity?.authenticated) {
+    who.textContent = 'Not signed in';
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+  who.innerHTML = '';
+  who.append('Signed in as ');
+  const name = document.createElement('strong');
+  name.textContent = identity.username || 'your account';   // textContent: never parse a username
+  who.append(name);
+  if (identity.accountIsAdmin) {
+    const note = document.createElement('span');
+    note.className = 'not-admin';
+    note.textContent = ' · not acting as admin';
+    who.append(note);
+  }
+  if (btn) btn.style.display = 'inline';
+}
+
+async function init() {
+  const identity = await probeAuth();
+  renderIdentity(identity);
+
+  if (!identity?.authenticated) {
     document.getElementById('btn-sign-in').style.display = 'flex';
     setStatus('Sign in to capture jobs');
     return;
@@ -112,6 +145,20 @@ document.getElementById('btn-capture-job').addEventListener('click', async () =>
     btn.disabled = false;
     setStatus('Could not reach the page — reload and try again', 3000);
   }
+});
+
+// Ending the extension's credential on purpose. Revokes server-side and clears it locally, so the
+// next invocation bootstraps a fresh one from whatever session is signed in THEN — which is how a
+// user switches the identity the extension holds.
+document.getElementById('btn-disconnect')?.addEventListener('click', async () => {
+  const btn = document.getElementById('btn-disconnect');
+  btn.disabled = true;
+  btn.textContent = 'Disconnecting…';
+  await chrome.runtime.sendMessage({ type: 'DISCONNECT' }).catch(() => {});
+  renderIdentity({ authenticated: false });
+  document.getElementById('btn-sign-in').style.display = 'flex';
+  document.getElementById('btn-capture-job').style.display = 'none';
+  setStatus('Disconnected. Sign in to reconnect.');
 });
 
 document.getElementById('btn-sign-in').addEventListener('click', () => {

@@ -3,6 +3,7 @@ import {
   loadBatchForTab, clearBatchForTab,
 } from './gated-handoff.js';
 import { extractJobPayload, showCaptureToast } from './extractor.js';
+import { authedFetch, getIdentity, cachedIdentity, disconnect } from './auth.js';
 
 // Keep in sync with config.js (service workers cannot share plain-script globals).
 // DEV SWITCH: comment line A, uncomment line B.
@@ -24,14 +25,17 @@ const RESUME_MASTER_URL = 'https://resumemaster.one'; // A: production
 // server's CORS to six job boards, which is the alternative and a far worse trade.
 async function importCapturedJob({ url, text }) {
   try {
-    const res = await fetch(`${RESUME_MASTER_URL}/api/import/job`, {
+    // authedFetch, not a bare credentialed fetch: the extension acts as its OWN token, never as
+    // whatever session the browser holds. See extension/auth.js.
+    const res = await authedFetch(RESUME_MASTER_URL, '/api/import/job', {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, text }),
     });
 
-    if (res.status === 401) {
+    // null means there is no credential to be had — no session to bootstrap from, so the remedy
+    // is signing in on the website, not retrying here.
+    if (!res || res.status === 401) {
       return { success: false, message: 'Sign in to Resume Master first' };
     }
     const json = await res.json().catch(() => ({}));
@@ -151,10 +155,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // The popup's auth probe, moved here for the same CORS reason: from the popup this request
   // carries chrome-extension://, which corsOrigin refuses in production.
   if (message.type === 'PROBE_AUTH') {
-    fetch(`${RESUME_MASTER_URL}/api/auth/me`, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => sendResponse({ authenticated: d?.authenticated === true }))
+    getIdentity(RESUME_MASTER_URL)
+      .then(id => sendResponse(id))
       .catch(() => sendResponse({ authenticated: false }));
+    return true;
+  }
+
+  // WHO THE EXTENSION IS ACTING AS. The popup must be able to name it — an extension that acts
+  // with an identity the user cannot see is the defect this whole change exists to remove.
+  // Answers from cache first so the popup can paint immediately, then the popup re-asks.
+  if (message.type === 'GET_IDENTITY') {
+    (message.fresh
+      ? getIdentity(RESUME_MASTER_URL)
+      : cachedIdentity().then(c => c || getIdentity(RESUME_MASTER_URL))
+    ).then(id => sendResponse(id || { authenticated: false }))
+     .catch(() => sendResponse({ authenticated: false }));
+    return true;
+  }
+
+  // Ending the extension's own credential, deliberately. Revokes server-side, then clears locally.
+  if (message.type === 'DISCONNECT') {
+    disconnect(RESUME_MASTER_URL)
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
     return true;
   }
 
@@ -268,9 +291,8 @@ async function recordGateReview(tabId, msg) {
   const runJobId = entry?.packet?.runJobId;
   if (!runJobId) return;
   try {
-    await fetch(`${RESUME_MASTER_URL}/api/apply/gate-review`, {
+    await authedFetch(RESUME_MASTER_URL, '/api/apply/gate-review', {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         runJobId,
@@ -294,9 +316,9 @@ async function advanceBatch(tabId) {
   // the cap entirely, and the filter below would find nothing. That reads as `batch_empty` and
   // stops a run that has work left, which is the worst way for a cap to fail: silently, and as a
   // completion.
-  const res = await fetch(
-    `${RESUME_MASTER_URL}/api/apply/gate-packets?origin=${encodeURIComponent(batch.origin)}`,
-    { credentials: 'include' })
+  const res = await authedFetch(
+    RESUME_MASTER_URL,
+    `/api/apply/gate-packets?origin=${encodeURIComponent(batch.origin)}`)
     .catch(() => null);
   if (!res?.ok) return { ok: false, reason: 'unreachable' };
   const body = await res.json();
